@@ -8772,14 +8772,14 @@ function addressFromSocket(socket) {
   return [socket.remoteAddress, socket.remotePort];
 }
 async function waitForListening(server, host, port) {
-  return await new Promise((resolve9, reject) => {
+  return await new Promise((resolve10, reject) => {
     const onError = (error62) => {
       server.off("listening", onListening);
       reject(error62);
     };
     const onListening = () => {
       server.off("error", onError);
-      resolve9();
+      resolve10();
     };
     server.once("error", onError);
     server.once("listening", onListening);
@@ -10109,18 +10109,18 @@ function normalizeCandidateUfrag(message) {
   return { ...init, usernameFragment: fromString };
 }
 function settledState(event, current, done) {
-  return new Promise((resolve9) => {
+  return new Promise((resolve10) => {
     if (done(current()) || event.ended) {
-      resolve9(current());
+      resolve10(current());
       return;
     }
     const { unSubscribe } = event.subscribe(
       (state2) => {
         if (!done(state2)) return;
         unSubscribe();
-        resolve9(state2);
+        resolve10(state2);
       },
-      () => resolve9(current())
+      () => resolve10(current())
     );
   });
 }
@@ -10635,7 +10635,7 @@ var init_lib = __esm({
           error62
         );
       };
-      watch = (cb, timeLimit) => new Promise((resolve9, reject) => {
+      watch = (cb, timeLimit) => new Promise((resolve10, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event watch timeout");
         }, timeLimit);
@@ -10644,22 +10644,22 @@ var init_lib = __esm({
           if (done) {
             if (timeout) clearTimeout(timeout);
             unSubscribe();
-            resolve9(args);
+            resolve10(args);
           }
         });
       });
-      asPromise = (timeLimit) => new Promise((resolve9, reject) => {
+      asPromise = (timeLimit) => new Promise((resolve10, reject) => {
         const timeout = timeLimit && setTimeout(() => {
           reject("Event asPromise timeout");
         }, timeLimit);
         this.once(
           (...args) => {
             if (timeout) clearTimeout(timeout);
-            resolve9(args);
+            resolve10(args);
           },
           () => {
             if (timeout) clearTimeout(timeout);
-            resolve9([]);
+            resolve10([]);
           },
           (err5) => {
             if (timeout) clearTimeout(timeout);
@@ -10961,7 +10961,7 @@ var init_lib = __esm({
         if (this.closed) {
           throw new Error("udp transport closed");
         }
-        await new Promise((resolve9, reject) => {
+        await new Promise((resolve10, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -10969,7 +10969,7 @@ var init_lib = __esm({
             this.socket.off("listening", onListening);
             this.socket.off("error", onBindError);
             this.socket.off("close", onClose);
-            error62 ? reject(error62) : resolve9();
+            error62 ? reject(error62) : resolve10();
           };
           const onListening = () => {
             this.listening = true;
@@ -11167,7 +11167,7 @@ var init_lib = __esm({
         }
         const client = this.createClient();
         this.client = client;
-        this.connecting = new Promise((resolve9, reject) => {
+        this.connecting = new Promise((resolve10, reject) => {
           let settled = false;
           const settle2 = (error62) => {
             if (settled) return;
@@ -11176,7 +11176,7 @@ var init_lib = __esm({
             client.off(this.connectEvent, onConnect);
             client.off("error", onConnectError);
             this.rejectConnecting = void 0;
-            error62 ? reject(error62) : resolve9();
+            error62 ? reject(error62) : resolve10();
           };
           const onConnect = () => {
             settle2();
@@ -11223,13 +11223,13 @@ var init_lib = __esm({
       send = async (data2, addr) => {
         void addr;
         await this.connecting;
-        await new Promise((resolve9, reject) => {
+        await new Promise((resolve10, reject) => {
           this.client.write(data2, (err5) => {
             if (err5) {
               reject(err5);
               return;
             }
-            resolve9();
+            resolve10();
           });
         });
       };
@@ -18480,10 +18480,10 @@ var init_lib = __esm({
       }
     };
     cancelable = (ex) => {
-      let resolve9;
+      let resolve10;
       let reject;
       const p = new Promise((r, f) => {
-        resolve9 = r;
+        resolve10 = r;
         reject = f;
       });
       p.then(() => {
@@ -18494,9 +18494,9 @@ var init_lib = __esm({
         onCancel.complete();
       });
       const onCancel = new Event2();
-      ex(resolve9, reject, onCancel).catch(() => {
+      ex(resolve10, reject, onCancel).catch(() => {
       });
-      return { awaitable: p, resolve: resolve9, reject };
+      return { awaitable: p, resolve: resolve10, reject };
     };
     COOKIE = 554869826;
     FINGERPRINT_LENGTH = 8;
@@ -18989,21 +18989,21 @@ var init_lib = __esm({
           clearTimeout(this.waitTimer);
           this.waitTimer = void 0;
         }
-        const resolve9 = this.waitResolve;
+        const resolve10 = this.waitResolve;
         this.waitResolve = void 0;
-        resolve9?.();
+        resolve10?.();
       }
       wait(ms) {
-        return new Promise((resolve9) => {
+        return new Promise((resolve10) => {
           if (this.ended || this.signal?.aborted) {
-            resolve9();
+            resolve10();
             return;
           }
-          this.waitResolve = resolve9;
+          this.waitResolve = resolve10;
           this.waitTimer = setTimeout(() => {
             this.waitTimer = void 0;
             this.waitResolve = void 0;
-            resolve9();
+            resolve10();
           }, ms);
         });
       }
@@ -19284,13 +19284,13 @@ var init_lib = __esm({
       async sendFrame(data2, addr) {
         const entry = await this.getSocket(addr);
         try {
-          await new Promise((resolve9, reject) => {
+          await new Promise((resolve10, reject) => {
             entry.socket.write(encodeTcpFrame(data2), (error62) => {
               if (error62) {
                 reject(error62);
                 return;
               }
-              resolve9();
+              resolve10();
             });
           });
         } catch (error62) {
@@ -19373,7 +19373,7 @@ var init_lib = __esm({
         if (pending) {
           return await pending;
         }
-        const connecting = new Promise((resolve9, reject) => {
+        const connecting = new Promise((resolve10, reject) => {
           const socket = connect3({
             host: addr[0],
             port: addr[1],
@@ -19386,7 +19386,7 @@ var init_lib = __esm({
           };
           const onConnect = () => {
             socket.off("error", onError);
-            resolve9(entry);
+            resolve10(entry);
           };
           socket.once("error", onError);
           socket.once("connect", onConnect);
@@ -19435,8 +19435,8 @@ var init_lib = __esm({
       }
       async close() {
         await super.close();
-        await new Promise((resolve9) => {
-          this.server.close(() => resolve9());
+        await new Promise((resolve10) => {
+          this.server.close(() => resolve10());
         });
       }
     };
@@ -20091,8 +20091,8 @@ var init_lib = __esm({
     Connection = class {
       constructor(_iceControlling, options) {
         this._iceControlling = _iceControlling;
-        this.closedSignal = new Promise((resolve9) => {
-          this.signalClosed = resolve9;
+        this.closedSignal = new Promise((resolve10) => {
+          this.signalClosed = resolve10;
         });
         this.options = {
           ...defaultOptions,
@@ -21058,8 +21058,8 @@ var init_lib = __esm({
               serverReflexiveCandidate(protocol, stunServer).catch(
                 () => void 0
               ),
-              new Promise((resolve9) => {
-                timer2 = setTimeout(() => resolve9(void 0), timeout * 1e3);
+              new Promise((resolve10) => {
+                timer2 = setTimeout(() => resolve10(void 0), timeout * 1e3);
               })
             ]);
             clearTimeout(timer2);
@@ -21325,14 +21325,14 @@ var init_lib = __esm({
         return this.consentFresh;
       }
       abortableDelay(ms, signal) {
-        return new Promise((resolve9, reject) => {
+        return new Promise((resolve10, reject) => {
           if (signal.aborted) {
             reject(new DOMException("The operation was aborted", "AbortError"));
             return;
           }
           const timer2 = setTimeout(() => {
             signal.removeEventListener("abort", onAbort);
-            resolve9();
+            resolve10();
           }, ms);
           const onAbort = () => {
             clearTimeout(timer2);
@@ -23359,8 +23359,8 @@ var init_lib = __esm({
           this.outboundStreamSeq[streamId] = uint16Add(streamSeqNum, 1);
         }
         const lastChunk = chunks[chunks.length - 1];
-        const sent = lastChunk && !this.isStopped ? new Promise((resolve9) => {
-          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve9 });
+        const sent = lastChunk && !this.isStopped ? new Promise((resolve10) => {
+          this.sendWaiters.push({ chunk: lastChunk, resolve: resolve10 });
         }) : void 0;
         await this.transmit();
         await sent;
@@ -29335,9 +29335,9 @@ var init_lib = __esm({
           this.settlePendingRtp(item);
         }
       }
-      enqueuePendingRtp(rtp, resolve9, reject) {
+      enqueuePendingRtp(rtp, resolve10, reject) {
         const packet = Buffer.isBuffer(rtp) ? RtpPacket.deSerialize(rtp) : rtp.clone();
-        this.pendingRtp.push({ packet, resolve: resolve9, reject });
+        this.pendingRtp.push({ packet, resolve: resolve10, reject });
         while (this.pendingRtp.length > this.pendingRtpMaxLength) {
           const dropped = this.pendingRtp.shift();
           if (dropped) {
@@ -29540,8 +29540,8 @@ var init_lib = __esm({
           await this.dispatchRtp(rtp);
           return;
         }
-        await new Promise((resolve9, reject) => {
-          this.enqueuePendingRtp(rtp, resolve9, reject);
+        await new Promise((resolve10, reject) => {
+          this.enqueuePendingRtp(rtp, resolve10, reject);
           void this.drainPendingRtp();
         });
       }
@@ -31851,7 +31851,7 @@ var init_lib = __esm({
       async close() {
         if (this.sctpTransport) {
           await this.sctpTransport.stop();
-          await new Promise((resolve9) => setImmediate(resolve9));
+          await new Promise((resolve10) => setImmediate(resolve10));
         }
         this.onDataChannel.allUnsubscribe();
       }
@@ -33818,11 +33818,11 @@ var init_lib = __esm({
         const previous = this.descriptionTail;
         let releaseDone;
         let releaseApplied;
-        const done = new Promise((resolve9) => {
-          releaseDone = resolve9;
+        const done = new Promise((resolve10) => {
+          releaseDone = resolve10;
         });
-        const applied = new Promise((resolve9) => {
-          releaseApplied = resolve9;
+        const applied = new Promise((resolve10) => {
+          releaseApplied = resolve10;
         });
         this.descriptionTail = afterApplied ? {
           done: Promise.all([previous.done, done]).then(() => void 0),
@@ -34394,7 +34394,7 @@ var init_lib = __esm({
             this.negotiationNeed.discardPendingOffer();
             this.negotiationNeed.recheck = true;
             this.setSignalingState("stable");
-            await new Promise((resolve9) => setImmediate(resolve9));
+            await new Promise((resolve10) => setImmediate(resolve10));
             this.assertOpenAfterYield();
           }
           if (remoteSdp.type === "offer" && this.signalingState === "have-remote-offer") {
@@ -44546,10 +44546,10 @@ var require_browser = __commonJS({
           text = canvas;
           canvas = void 0;
         }
-        return new Promise(function(resolve9, reject) {
+        return new Promise(function(resolve10, reject) {
           try {
             const data2 = QRCode.create(text, opts);
-            resolve9(renderFunc(data2, canvas, opts));
+            resolve10(renderFunc(data2, canvas, opts));
           } catch (e) {
             reject(e);
           }
@@ -44630,11 +44630,11 @@ var require_server = __commonJS({
     }
     function render(renderFunc, text, params) {
       if (!params.cb) {
-        return new Promise(function(resolve9, reject) {
+        return new Promise(function(resolve10, reject) {
           try {
             const data2 = QRCode.create(text, params.opts);
             return renderFunc(data2, params.opts, function(err5, data3) {
-              return err5 ? reject(err5) : resolve9(data3);
+              return err5 ? reject(err5) : resolve10(data3);
             });
           } catch (e) {
             reject(e);
@@ -49768,7 +49768,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve9) {
+function isRecursive(inst, stack, resolve10) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -49778,7 +49778,7 @@ function isRecursive(inst, stack, resolve9) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve9);
+      const answer = isRecursive(child, stack, resolve10);
       if (answer > result)
         result = answer;
     }
@@ -49789,7 +49789,7 @@ function isRecursive(inst, stack, resolve9) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve9) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve10) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -49853,7 +49853,7 @@ function isRecursive(inst, stack, resolve9) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve9 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
       merge3(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -64418,7 +64418,7 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// packages/protocol/dist/loopback.js
+// ../../../ds-harness-remote-askquestion/packages/protocol/dist/loopback.js
 var LOOPBACK_CHUNK_BYTES = 64 * 1024;
 var LOOPBACK_MAX_BODY_BYTES = 1024 * 1024;
 var LOOPBACK_MAX_WS_BYTES = 256 * 1024;
@@ -64440,7 +64440,7 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
-// packages/protocol/dist/wire-json.js
+// ../../../ds-harness-remote-askquestion/packages/protocol/dist/wire-json.js
 function parseWireJson(input4) {
   try {
     const text = typeof input4 === "string" ? input4 : new TextDecoder("utf-8", { fatal: true }).decode(input4);
@@ -64480,7 +64480,7 @@ function parseWireJson(input4) {
   }
 }
 
-// packages/protocol/dist/close-semantics.js
+// ../../../ds-harness-remote-askquestion/packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
 var HEARTBEAT_TIMEOUT_CLOSE_CODE = 4009;
@@ -64508,7 +64508,7 @@ function classifyControlClose(code, reason) {
   };
 }
 
-// packages/protocol/dist/index.js
+// ../../../ds-harness-remote-askquestion/packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
@@ -65171,7 +65171,7 @@ function cryptoRandomId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-// packages/client-core/dist/remote-gateway.js
+// ../../../ds-harness-remote-askquestion/packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id6, capability) {
   if (!capabilities.includes(capability))
@@ -65198,7 +65198,7 @@ function createRemoteId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// packages/client-core/dist/codex-client.js
+// ../../../ds-harness-remote-askquestion/packages/client-core/dist/codex-client.js
 var MAX_DISPLAY_ITEM_TEXT = 256 * 1024;
 var CODEX_IMAGE_MEDIA_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
@@ -65811,7 +65811,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/client-core/dist/acp-client.js
+// ../../../ds-harness-remote-askquestion/packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
@@ -66066,7 +66066,7 @@ function canonicalBase64ToBytes(value) {
   return bytes;
 }
 
-// packages/client-core/dist/index.js
+// ../../../ds-harness-remote-askquestion/packages/client-core/dist/index.js
 var RemoteClientError = class extends Error {
   code;
   constructor(code, message, options) {
@@ -66116,13 +66116,13 @@ var RemoteClientCore = class {
     }
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
     const request = createRpcRequest(method, params);
-    const result = new Promise((resolve9, reject) => {
+    const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const pending = {
         method,
-        resolve: resolve9,
+        resolve: resolve10,
         reject,
         timer: timer2
       };
@@ -66272,7 +66272,7 @@ function attachSharedInFlight(entry, signal) {
     return Promise.reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
   }
   entry.waiters += 1;
-  return new Promise((resolve9, reject) => {
+  return new Promise((resolve10, reject) => {
     let finished = false;
     const onAbort = () => {
       if (finished) return;
@@ -66289,7 +66289,7 @@ function attachSharedInFlight(entry, signal) {
         if (finished) return;
         finished = true;
         signal?.removeEventListener("abort", onAbort);
-        resolve9(cloneStructured(value));
+        resolve10(cloneStructured(value));
       },
       (error62) => {
         if (finished) return;
@@ -67105,7 +67105,7 @@ var AsyncValueQueue = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve9) => this.waiters.push(resolve9));
+      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
       if (next.done) return;
       yield next.value;
     }
@@ -67799,11 +67799,11 @@ var AcpSessionTitles = class {
   }
 };
 function waitForTitle(delay, signal) {
-  return new Promise((resolve9) => {
+  return new Promise((resolve10) => {
     const finish = () => {
       clearTimeout(timer2);
       signal.removeEventListener("abort", finish);
-      resolve9();
+      resolve10();
     };
     const timer2 = setTimeout(finish, delay);
     signal.addEventListener("abort", finish, { once: true });
@@ -68790,19 +68790,19 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
 };
 
-// packages/webrtc/dist/websocket-backpressure.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
   const started = Date.now();
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
     if (socket.readyState !== 1 || Date.now() - started > 1e4)
       throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve9) => setTimeout(resolve9, 10));
+    await new Promise((resolve10) => setTimeout(resolve10, 10));
   }
   if (socket.readyState !== 1)
     throw new Error("Relay transport closed");
 }
 
-// packages/webrtc/dist/transport.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/transport.js
 var BaseTransport = class {
   handlers = /* @__PURE__ */ new Set();
   closeHandlers = /* @__PURE__ */ new Set();
@@ -68824,7 +68824,7 @@ var BaseTransport = class {
   }
 };
 
-// packages/webrtc/dist/util.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/util.js
 function toBase64Url(bytes) {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
@@ -68838,7 +68838,7 @@ function fromBase64Url(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-// packages/webrtc/dist/rtc-adapter.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
@@ -69071,7 +69071,7 @@ function adaptDataChannel(raw) {
   };
 }
 
-// packages/webrtc/dist/rtc-chunking.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-chunking.js
 var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
 var RTC_CHUNK_HEADER_BYTES = 12;
 var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
@@ -69180,7 +69180,7 @@ function isChunk(frame) {
   return true;
 }
 
-// packages/webrtc/dist/rtc-data-channel.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-data-channel.js
 var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
 var SELECTED_PATH_RETRY_COUNT = 5;
 var SELECTED_PATH_RETRY_DELAY_MS = 50;
@@ -69264,8 +69264,8 @@ var RtcDataChannelTransport = class {
     if (this.connectPromise !== void 0)
       return this.connectPromise;
     this.armAbort(signal);
-    this.connectPromise = new Promise((resolve9, reject) => {
-      this.openResolve = resolve9;
+    this.connectPromise = new Promise((resolve10, reject) => {
+      this.openResolve = resolve10;
       this.openReject = reject;
       this.negotiateTimer = setTimeout(() => {
         void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
@@ -69490,14 +69490,14 @@ var RtcDataChannelTransport = class {
       if (this.closed || this.opened)
         return;
       this.opened = true;
-      const resolve9 = this.openResolve;
+      const resolve10 = this.openResolve;
       this.clearNegotiation();
       void this.resolveSelectedTransport().then(() => {
         if (this.closed)
           return;
         this.openResolve = void 0;
         this.openReject = void 0;
-        resolve9?.();
+        resolve10?.();
       });
     };
     channel.onmessage = (event) => {
@@ -69625,9 +69625,9 @@ var RtcDataChannelTransport = class {
     this.lastBufferedAmount = 0;
   }
   async refreshStatsDiagnostics() {
-    const stats = [...await new Promise((resolve9, reject) => {
+    const stats = [...await new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
-      Promise.resolve().then(() => this.pc.getStats()).then(resolve9, reject).finally(() => clearTimeout(timer2));
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve10, reject).finally(() => clearTimeout(timer2));
     })];
     if (this.closed)
       return {};
@@ -69896,10 +69896,10 @@ function asError(error62) {
   return error62 instanceof Error ? error62 : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
 }
 function sleep(ms) {
-  return new Promise((resolve9) => setTimeout(resolve9, ms));
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
-// packages/webrtc/dist/control-lease.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/control-lease.js
 var WEBRTC_LEASE_MS2 = 3e5;
 var ControlLease = class {
   connectionId;
@@ -69981,7 +69981,7 @@ var ControlLease = class {
   }
 };
 
-// packages/webrtc/dist/adaptive-transport.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/adaptive-transport.js
 var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
@@ -70040,8 +70040,8 @@ var AdaptiveTransport = class extends BaseTransport {
     this.socket = new WebSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
-    await new Promise((resolve9, reject) => {
-      this.readyResolve = resolve9;
+    await new Promise((resolve10, reject) => {
+      this.readyResolve = resolve10;
       this.readyReject = reject;
       const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
       this.options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -70511,7 +70511,7 @@ var AdaptiveTransport = class extends BaseTransport {
   async fetchIceServers(connectionId, signal) {
     if (this.options.fetchIceServers === void 0)
       return [];
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const request = new AbortController();
       let settled = false;
       const finish = (error62, servers = []) => {
@@ -70523,7 +70523,7 @@ var AdaptiveTransport = class extends BaseTransport {
         if (error62)
           reject(error62);
         else
-          resolve9(servers);
+          resolve10(servers);
       };
       const onAbort = () => {
         finish(new Error("ICE configuration request was aborted"));
@@ -70573,7 +70573,7 @@ var AdaptiveTransport = class extends BaseTransport {
     const socket = new WebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     this.dataSocket = socket;
-    await new Promise((resolve9, reject) => {
+    await new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         reject(new Error("Relay data attach timed out"));
         socket.close();
@@ -70595,7 +70595,7 @@ var AdaptiveTransport = class extends BaseTransport {
             }
             clearTimeout(timer2);
             this.dataReady = true;
-            resolve9();
+            resolve10();
             return;
           }
           void this.handleDataSocketFrame(data2.type, data2.payload).catch((error62) => {
@@ -70763,7 +70763,7 @@ function throwIfAborted(signal) {
     throw new Error("Adaptive connection was aborted");
 }
 
-// packages/webrtc/dist/serial-send.js
+// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/serial-send.js
 var SerialSend = class {
   tail = Promise.resolve();
   bytes = 0;
@@ -70856,7 +70856,7 @@ function shortId(value) {
 }
 async function waitForCodexFrames(stream, signal) {
   if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
-  await new Promise((resolve9, reject) => {
+  await new Promise((resolve10, reject) => {
     const previousWake = stream.wake;
     const timer2 = setTimeout(done, 25e3);
     const onAbort = () => {
@@ -70870,7 +70870,7 @@ async function waitForCodexFrames(stream, signal) {
     }
     function done() {
       cleanup();
-      resolve9();
+      resolve10();
     }
     stream.wake = () => {
       previousWake();
@@ -77950,7 +77950,7 @@ function noiseIk() {
   ]]);
 }
 
-// packages/crypto/dist/noise.js
+// ../../../ds-harness-remote-askquestion/packages/crypto/dist/noise.js
 var NOISE_IK_PROTOCOL = "Noise_IK_25519_ChaChaPoly_SHA256";
 var NoiseIkSession = class {
   handshake;
@@ -78085,7 +78085,7 @@ function constantTimeEqual(left, right) {
   return different === 0;
 }
 
-// packages/crypto/dist/index.js
+// ../../../ds-harness-remote-askquestion/packages/crypto/dist/index.js
 function generateKeyPair(privateKeyBytes) {
   const privateKey = privateKeyBytes ?? x25519.utils.randomPrivateKey();
   if (privateKey.byteLength !== 32)
@@ -78217,7 +78217,7 @@ var ClientSecureTransport = class {
   }
 };
 async function waitForResponder(inner, noise, signal) {
-  await new Promise((resolve9, reject) => {
+  await new Promise((resolve10, reject) => {
     let settled = false;
     let unsubscribe = () => {
     };
@@ -78232,7 +78232,7 @@ async function waitForResponder(inner, noise, signal) {
       unsubscribe();
       unsubscribeClose();
       signal.removeEventListener("abort", onAbort);
-      if (error62 === void 0) resolve9();
+      if (error62 === void 0) resolve10();
       else reject(error62);
     };
     unsubscribe = inner.onHandshake((step, data2) => {
@@ -78477,11 +78477,11 @@ var ClientReconnect = class {
   async run(connect4, pending) {
     while (!pending.signal.aborted) {
       const delay = Math.random() * this.config.maxDelayMs;
-      await new Promise((resolve9) => {
+      await new Promise((resolve10) => {
         const finish = () => {
           clearTimeout(timer2);
           pending.signal.removeEventListener("abort", finish);
-          resolve9();
+          resolve10();
         };
         const timer2 = setTimeout(finish, delay);
         pending.signal.addEventListener("abort", finish, { once: true });
@@ -78676,7 +78676,7 @@ var LoopbackHost = class {
         const response = handle.response;
         let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
         if (chunk === null && !response.readableEnded && !response.destroyed) {
-          await new Promise((resolve9, reject) => {
+          await new Promise((resolve10, reject) => {
             const timer2 = setTimeout(() => finish(new Error("timeout")), 2e4);
             const ready = () => finish();
             const fail6 = () => finish(new Error("closed"));
@@ -78686,7 +78686,7 @@ var LoopbackHost = class {
               response.off("end", ready);
               response.off("close", ready);
               response.off("error", fail6);
-              error62 === void 0 ? resolve9() : reject(error62);
+              error62 === void 0 ? resolve10() : reject(error62);
             };
             response.once("readable", ready);
             response.once("end", ready);
@@ -78717,22 +78717,22 @@ var LoopbackHost = class {
           this.close(value.id);
           throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
         }
-        await new Promise((resolve9, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve9()));
+        await new Promise((resolve10, reject) => handle.socket.send(data2, { binary: value.binary }, (error62) => error62 ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve10()));
         return { sent: true };
       }
       if (value.op === "ws.read") {
         if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
         handle.reading = true;
         try {
-          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve9) => {
+          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve10) => {
             const timer2 = setTimeout(() => {
               handle.wake = void 0;
-              resolve9();
+              resolve10();
             }, 2e4);
             handle.wake = () => {
               clearTimeout(timer2);
               handle.wake = void 0;
-              resolve9();
+              resolve10();
             };
           });
           let bytes = 0;
@@ -78779,7 +78779,7 @@ var LoopbackHost = class {
   openHttp(value) {
     const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
     if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const headers = Object.fromEntries(cleanHeaders(value.headers));
       let handle;
       const request = httpRequest({
@@ -78798,7 +78798,7 @@ var LoopbackHost = class {
         handle.response = response;
         response.on("error", () => void 0);
         clearTimeout(timer2);
-        resolve9({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
+        resolve10({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
       });
       const timer2 = setTimeout(() => {
         request.destroy();
@@ -78814,7 +78814,7 @@ var LoopbackHost = class {
     });
   }
   openWs(value) {
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const socket = new import_websocket.default(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
         headers: Object.fromEntries(cleanHeaders(value.headers)),
         followRedirects: false,
@@ -78824,7 +78824,7 @@ var LoopbackHost = class {
       });
       const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
       this.handles.set(value.id, handle);
-      socket.once("open", () => resolve9({ protocol: socket.protocol }));
+      socket.once("open", () => resolve10({ protocol: socket.protocol }));
       socket.on("message", (data2, binary) => {
         if (handle.closed) return;
         const message = { data: Buffer.from(data2).toString("base64"), binary };
@@ -78883,7 +78883,7 @@ var LoopbackPreview = class {
       for (const client of running.ws.clients) client.terminate();
       running.ws.close();
       running.server.closeAllConnections();
-      await new Promise((resolve9) => running.server.close(() => resolve9()));
+      await new Promise((resolve10) => running.server.close(() => resolve10()));
     }
     this.servers.clear();
   }
@@ -78938,11 +78938,11 @@ var LoopbackPreview = class {
         void this.release(id6);
       });
     });
-    await new Promise((resolve9, reject) => {
+    await new Promise((resolve10, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => {
         server.off("error", reject);
-        resolve9();
+        resolve10();
       });
     });
     const address2 = server.address();
@@ -79008,10 +79008,10 @@ var LoopbackPreview = class {
       while (!signal.aborted) {
         const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id6 }, signal);
         if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
-          await new Promise((resolve9, reject) => {
+          await new Promise((resolve10, reject) => {
             const ready = () => {
               cleanup();
-              resolve9();
+              resolve10();
             };
             const closed = () => {
               cleanup();
@@ -79071,7 +79071,7 @@ var LoopbackPreview = class {
           const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id6 }, signal);
           for (const message of result.messages) {
             if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
-            await new Promise((resolve9, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve9()));
+            await new Promise((resolve10, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve10()));
           }
           if (result.closed) break;
         }
@@ -80299,7 +80299,7 @@ var AsyncValueQueue2 = class {
         continue;
       }
       if (this.closed) return;
-      const next = await new Promise((resolve9) => this.waiters.push(resolve9));
+      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
       if (next.done) return;
       yield next.value;
     }
@@ -82245,13 +82245,13 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
 function awaitWithAbort(promise2, signal) {
   if (signal === void 0) return promise2;
   signal.throwIfAborted();
-  return new Promise((resolve9, reject) => {
+  return new Promise((resolve10, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     promise2.then(
       (value) => {
         signal.removeEventListener("abort", onAbort);
-        resolve9(value);
+        resolve10(value);
       },
       (error62) => {
         signal.removeEventListener("abort", onAbort);
@@ -82390,7 +82390,7 @@ function writeText(res, status2, body) {
 // packages/plugin/src/harness-version.ts
 import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 var HARNESS_PACKAGE_NAME = "@deepseek-ai/dsh";
 function normalizeHarnessVersion(value) {
   if (typeof value !== "string") return void 0;
@@ -82471,6 +82471,19 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1], cont
     if (isAbsolute(resolvedEntrypoint)) {
       addAncestors(dirname(resolvedEntrypoint));
       addResolved(resolvedEntrypoint);
+    }
+  }
+  const rawCoreDir = (context.env ?? process.env).DSHM_CORE_DIR?.trim() ?? "";
+  if (rawCoreDir.length > 0) {
+    const dshmCoreDir = isAbsolute(rawCoreDir) ? rawCoreDir : resolve(cwd2, rawCoreDir);
+    addManifest(join(dshmCoreDir, "node_modules", HARNESS_PACKAGE_NAME, "package.json"));
+    addManifest(join(dshmCoreDir, "package.json"));
+  }
+  const moduleScope = context.moduleScope === void 0 ? import.meta.url : context.moduleScope;
+  if (typeof moduleScope === "string" && moduleScope.length > 0) {
+    try {
+      addManifest(createRequire(moduleScope).resolve(`${HARNESS_PACKAGE_NAME}/package.json`));
+    } catch {
     }
   }
   if (isAbsolute(execPath)) {
@@ -83007,7 +83020,7 @@ var RemoteTypertGateway2 = class {
       if (signal.aborted) return;
       if (resyncRequired || isRecord9(error62) && error62.isDSHRemoteError === true) throw error62;
       if (this.deferStreamDisconnect) {
-        await new Promise((resolve9) => signal.addEventListener("abort", () => resolve9(), { once: true }));
+        await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
         return;
       }
       throw error62;
@@ -83021,7 +83034,7 @@ var RemoteTypertGateway2 = class {
     signal.throwIfAborted();
     yield snapshot2;
     if (this.deferStreamDisconnect && !signal.aborted) {
-      await new Promise((resolve9) => signal.addEventListener("abort", () => resolve9(), { once: true }));
+      await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
     }
   }
   async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal, disconnected, sessionId, fallbackSnapshot) {
@@ -83075,7 +83088,7 @@ var RemoteTypertGateway2 = class {
   async deferDisconnect(error62, disconnected, signal) {
     if (!this.deferStreamDisconnect || !disconnected || signal.aborted) return;
     if (isRecord9(error62) && error62.isDSHRemoteError === true) return;
-    await new Promise((resolve9) => signal.addEventListener("abort", () => resolve9(), { once: true }));
+    await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
   }
   async callTransferred(encoded, signal) {
     if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -83187,7 +83200,7 @@ var AsyncValueQueue4 = class {
         if (this.error !== void 0) throw this.error;
         return;
       }
-      const next = await new Promise((resolve9) => this.waiters.push(resolve9));
+      const next = await new Promise((resolve10) => this.waiters.push(resolve10));
       if (next.done) {
         if (this.error !== void 0) throw this.error;
         return;
@@ -83960,7 +83973,7 @@ async function withQueueLock(lock, operation) {
       const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
       if (!preceding) break;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-      await new Promise((resolve9) => setTimeout(resolve9, 50));
+      await new Promise((resolve10) => setTimeout(resolve10, 50));
     }
     return await operation();
   } finally {
@@ -83992,7 +84005,7 @@ async function ensureQueueMarker(lock, deadline) {
       if (!await isLockContention(error62, lock)) throw error62;
       if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-      await new Promise((resolve9) => setTimeout(resolve9, 50));
+      await new Promise((resolve10) => setTimeout(resolve10, 50));
     }
   }
 }
@@ -84580,10 +84593,10 @@ function validateVolatileSchema(schema, path = [], blocked = false, seen = /* @_
   if (schema.inner && (schema.type !== "lazy" || schema.inner[kSchema])) validateVolatileSchema(schema.inner, [...path, "*"], true, seen);
   if (schema.list) for (let index = 0; index < schema.list.length; index++) validateVolatileSchema(schema.list[index], [...path, String(index)], true, seen);
 }
-Schema.extend = function extend2(type, resolve9) {
-  resolvers[type] = resolve9;
+Schema.extend = function extend2(type, resolve10) {
+  resolvers[type] = resolve10;
 };
-Schema.resolve = function resolve(data2, schema, options = {}, strict = false) {
+Schema.resolve = function resolve2(data2, schema, options = {}, strict = false) {
   if (!schema) return [data2];
   if (!options[checkedVolatile]) {
     validateVolatileSchema(schema, options.path);
@@ -85907,8 +85920,8 @@ var Queue = class {
         this.bytes -= entry.bytes;
         yield entry.value;
       } else if (this.closed) break;
-      else await new Promise((resolve9) => {
-        this.wake = resolve9;
+      else await new Promise((resolve10) => {
+        this.wake = resolve10;
       });
     }
     if (this.error) throw this.error;
@@ -85981,8 +85994,8 @@ var TerminalCarrierCompat = class {
     const abort = () => entry.control.abort();
     signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve9, reject) => {
-        entry.pending.set(sequence2, { resolve: resolve9, reject });
+      await new Promise((resolve10, reject) => {
+        entry.pending.set(sequence2, { resolve: resolve10, reject });
         try {
           entry.queue.push(value);
         } catch (error62) {
@@ -86019,8 +86032,8 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
     throw error62;
   }
   let startInput;
-  const ready = new Promise((resolve9) => {
-    startInput = resolve9;
+  const ready = new Promise((resolve10) => {
+    startInput = resolve10;
   });
   lifetime.addEventListener("abort", startInput, { once: true });
   if (lifetime.aborted) startInput();
@@ -86523,8 +86536,8 @@ var ExternalNativePeerConnection = class {
   request(method, payload) {
     if (this.closed) return Promise.reject(new Error("native rtc helper is closed"));
     const id6 = this.nextRequestId++;
-    const promise2 = new Promise((resolve9, reject) => {
-      this.pending.set(id6, { resolve: resolve9, reject });
+    const promise2 = new Promise((resolve10, reject) => {
+      this.pending.set(id6, { resolve: resolve10, reject });
     });
     this.write({ id: id6, method, payload });
     return promise2;
@@ -87318,10 +87331,10 @@ function parseRouteTarget(value) {
 async function detectRouteHostIpv4(target3, timeoutMs) {
   const socket = createSocket4("udp4");
   try {
-    return await new Promise((resolve9, reject) => {
+    return await new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         cleanup();
-        resolve9(void 0);
+        resolve10(void 0);
       }, timeoutMs);
       const cleanup = () => {
         clearTimeout(timer2);
@@ -87335,7 +87348,7 @@ async function detectRouteHostIpv4(target3, timeoutMs) {
       socket.connect(target3.port, target3.host, () => {
         cleanup();
         const address2 = socket.address();
-        resolve9(typeof address2 === "string" ? void 0 : address2.address);
+        resolve10(typeof address2 === "string" ? void 0 : address2.address);
       });
     });
   } finally {
@@ -89139,7 +89152,7 @@ async function withIdentityLock(directory, operation) {
         "IDENTITY_LOCKED"
       );
     }
-    await new Promise((resolve9) => setTimeout(resolve9, delay));
+    await new Promise((resolve10) => setTimeout(resolve10, delay));
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
   }
   try {
@@ -89501,7 +89514,7 @@ import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir3, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename5, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve3 } from "node:path";
 
 // packages/plugin/src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -89574,15 +89587,15 @@ var CodexAppServerClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve9) => {
+    await new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve9();
+        resolve10();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve9();
+        resolve10();
       });
       child.kill("SIGTERM");
     });
@@ -89638,13 +89651,13 @@ var CodexAppServerClient = class {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve9, reject) => {
+    const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve9, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
       this.write({ id: id6, method, params });
@@ -91153,7 +91166,7 @@ var CodexRemoteDomain = class {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
     const paths = await this.listCodexWorkspacePaths();
-    const lexicalCandidate = resolve2(path);
+    const lexicalCandidate = resolve3(path);
     let candidate;
     try {
       candidate = await realpath(path);
@@ -91163,7 +91176,7 @@ var CodexRemoteDomain = class {
     }
     for (const root2 of paths.values()) {
       try {
-        if (!containsCodexPath(resolve2(root2), lexicalCandidate)) continue;
+        if (!containsCodexPath(resolve3(root2), lexicalCandidate)) continue;
         const canonicalRoot = await realpath(root2);
         if (containsCodexPath(canonicalRoot, candidate)) return lexicalCandidate;
       } catch {
@@ -91176,7 +91189,7 @@ var CodexRemoteDomain = class {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX project directory must be an existing absolute directory.");
     }
     try {
-      const canonical = await realpath(resolve2(path));
+      const canonical = await realpath(resolve3(path));
       if (!(await stat3(canonical)).isDirectory()) throw new Error("not a directory");
       return canonical;
     } catch {
@@ -91191,7 +91204,7 @@ var CodexRemoteDomain = class {
     }
     const entries = [];
     for (const row of rows) {
-      const child = resolve2(target3.path, row.name);
+      const child = resolve3(target3.path, row.name);
       let directory = row.isDirectory();
       if (!directory && row.isSymbolicLink()) {
         directory = await stat3(child).then((value) => value.isDirectory()).catch(() => false);
@@ -91224,7 +91237,7 @@ var CodexRemoteDomain = class {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
     const authority = await this.readWorkspaceAuthority();
-    const lexicalCandidate = resolve2(path);
+    const lexicalCandidate = resolve3(path);
     let canonicalCandidate;
     try {
       canonicalCandidate = await realpath(path);
@@ -91234,7 +91247,7 @@ var CodexRemoteDomain = class {
     }
     for (const root2 of authority.roots) {
       try {
-        const lexicalRoot = resolve2(root2);
+        const lexicalRoot = resolve3(root2);
         if (!containsCodexPath(lexicalRoot, lexicalCandidate)) continue;
         const canonicalRoot = await realpath(root2);
         if (containsCodexPath(canonicalRoot, canonicalCandidate)) {
@@ -91444,7 +91457,7 @@ function codexDirectoryCrumbs(root2, path) {
   if (remainder === "") return crumbs2;
   let current = root2;
   for (const segment of remainder.split(/[\\/]+/u).filter(Boolean)) {
-    current = resolve2(current, segment);
+    current = resolve3(current, segment);
     crumbs2.push({ name: segment, path: current, hidden: false });
   }
   return crumbs2;
@@ -91777,15 +91790,15 @@ var CursorAcpClient = class {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve9) => {
+    await new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve9();
+        resolve10();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve9();
+        resolve10();
       });
       child.kill("SIGTERM");
     });
@@ -91860,13 +91873,13 @@ var CursorAcpClient = class {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve9, reject) => {
+    const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve9, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id6, method, params });
@@ -92369,7 +92382,7 @@ var IsolatedAcpClient = class {
 
 // packages/plugin/src/workspace-bridge.ts
 import { realpath as realpath2, lstat as lstat2, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
-import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve4 } from "node:path";
 
 // packages/plugin/src/remote-terminal-controller.ts
 var import_headless = __toESM(require_xterm_headless(), 1);
@@ -92409,14 +92422,14 @@ async function discoverTerminalShells(provider, signal = new AbortController().s
     platform: process.platform === "win32" ? "windows" : "posix",
     defaultShell: process.platform === "win32" ? process.env.ComSpec : process.env.SHELL || userInfo().shell || void 0
   } : await provider.terminalEnvironment(signal);
-  const resolve9 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
+  const resolve10 = provider?.resolveExecutable?.bind(provider) ?? localExecutable;
   const preferred = profile(environment.defaultShell || (environment.platform === "windows" ? "cmd.exe" : "/bin/sh"));
-  preferred.path = await resolve9(preferred.path, void 0, signal);
+  preferred.path = await resolve10(preferred.path, void 0, signal);
   if (provider && !provider.terminalEnvironment) return [preferred];
   const candidates = ["zsh", "bash", "fish", "pwsh", "powershell", "cmd"];
   const found = await Promise.all(candidates.map(async (file2) => {
     try {
-      return { ...profile(file2), path: await resolve9(file2, void 0, signal) };
+      return { ...profile(file2), path: await resolve10(file2, void 0, signal) };
     } catch (error62) {
       if (error62 instanceof RpcError && error62.code === "TERMINAL_SHELL_UNAVAILABLE" || error62 instanceof Error && error62.name === "SubprocessExecutableNotFoundError") return void 0;
       throw error62;
@@ -92443,14 +92456,14 @@ function pipeTerminalSpawner() {
     output2.setEncoding("utf8");
     child.stdout.pipe(output2, { end: false });
     child.stderr.pipe(output2, { end: false });
-    const completed = new Promise((resolve9, reject) => {
+    const completed = new Promise((resolve10, reject) => {
       child.once("error", (error62) => {
         output2.destroy();
         reject(error62);
       });
       child.once("close", (exitCode) => {
         output2.end();
-        resolve9({ exitCode });
+        resolve10({ exitCode });
       });
     });
     void completed.catch(() => void 0);
@@ -92459,8 +92472,8 @@ function pipeTerminalSpawner() {
     };
     spec.signal.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve9, reject) => {
-        child.once("spawn", resolve9);
+      await new Promise((resolve10, reject) => {
+        child.once("spawn", resolve10);
         child.once("error", reject);
       });
       spec.signal.throwIfAborted();
@@ -92573,8 +92586,8 @@ var TerminalFollower = class {
           this.bytes -= next.bytes;
           yield next.value;
         } else if (this.finished) break;
-        else await new Promise((resolve9) => {
-          this.wake = resolve9;
+        else await new Promise((resolve10) => {
+          this.wake = resolve10;
         });
       }
       if (this.failure) throw this.failure;
@@ -92655,7 +92668,7 @@ var OwnedTerminal = class {
           start = end;
           await this.enqueue(async () => {
             if (this.disposed) return;
-            await new Promise((resolve9) => this.screen.write(data2, resolve9));
+            await new Promise((resolve10) => this.screen.write(data2, resolve10));
             this.sequence++;
             this.emit({ type: "output", sequence: this.sequence, data: data2 });
           });
@@ -92982,7 +92995,7 @@ var AsyncQueue = class {
     const value = this.values.shift();
     if (value !== void 0) return Promise.resolve({ done: false, value });
     if (this.ended) return Promise.resolve({ done: true, value: void 0 });
-    return new Promise((resolve9) => this.waiters.push(resolve9));
+    return new Promise((resolve10) => this.waiters.push(resolve10));
   }
   [Symbol.asyncIterator]() {
     return this;
@@ -93146,7 +93159,7 @@ var WorkspaceBridge = class {
     }
   }
   async safePath(root2, path, directory) {
-    const candidate = isAbsolute5(path) ? resolve3(path) : resolve3(root2, path);
+    const candidate = isAbsolute5(path) ? resolve4(path) : resolve4(root2, path);
     const rel = relative2(root2, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
@@ -93318,7 +93331,7 @@ var AcpWorkspaceTools = class {
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -94198,15 +94211,15 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve9) => {
+    await new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve9();
+        resolve10();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve9();
+        resolve10();
       });
       child.kill("SIGTERM");
     });
@@ -94231,7 +94244,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.stderrBytes = 0;
     let initResolved = false;
     let rejectInit;
-    const initPromise = new Promise((resolve9, reject) => {
+    const initPromise = new Promise((resolve10, reject) => {
       rejectInit = reject;
       const timer2 = setTimeout(() => {
         if (!initResolved) {
@@ -94249,7 +94262,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
               this.activeConversationId = conversationId;
               this.attachWatcher(conversationId);
             }
-            resolve9();
+            resolve10();
           }
         });
       };
@@ -94308,7 +94321,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const selected = this.selections.get(sessionId);
     if (selected) this.emitNotification("session/update", { sessionId, update: { sessionUpdate: "model_selection", selected } });
-    return new Promise((resolve9, reject) => {
+    return new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         if (this.currentPromptPending) {
           this.currentPromptPending = void 0;
@@ -94316,7 +94329,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         }
       }, timeoutMs);
       timer2.unref?.();
-      this.currentPromptPending = { sessionId, resolve: resolve9, reject, timer: timer2 };
+      this.currentPromptPending = { sessionId, resolve: resolve10, reject, timer: timer2 };
       const payload = {
         event: "user",
         message: { content: promptText }
@@ -94577,12 +94590,12 @@ var OpencodeNativeApi = class {
 };
 async function opencodeLoopbackPort() {
   const server = createServer3();
-  await new Promise((resolve9, reject) => {
+  await new Promise((resolve10, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve9());
+    server.listen(0, "127.0.0.1", () => resolve10());
   });
   const address2 = server.address();
-  await new Promise((resolve9, reject) => server.close((error62) => error62 ? reject(error62) : resolve9()));
+  await new Promise((resolve10, reject) => server.close((error62) => error62 ? reject(error62) : resolve10()));
   if (!address2 || typeof address2 === "string") throw unavailable();
   return address2.port;
 }
@@ -94840,15 +94853,15 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       await history;
       return;
     }
-    await Promise.all([history, new Promise((resolve9) => {
+    await Promise.all([history, new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
-        resolve9();
+        resolve10();
       }, 2e3);
       timer2.unref?.();
       child.once("exit", () => {
         clearTimeout(timer2);
-        resolve9();
+        resolve10();
       });
       child.kill("SIGTERM");
     })]);
@@ -94927,13 +94940,13 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   request(method, params, timeoutMs) {
     const id6 = this.nextId++;
-    const result = new Promise((resolve9, reject) => {
+    const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
         reject(new OpencodeAcpError("OPENCODE_REQUEST_TIMEOUT", "OpenCode ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve9, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
       this.write({ jsonrpc: "2.0", id: id6, method, params });
@@ -95153,7 +95166,7 @@ function isSessionMutation(method) {
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep as sep2 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve5, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir5 } from "node:os";
 import { createRequire as createRequire2 } from "node:module";
@@ -95364,7 +95377,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   }
 }
 async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
-  const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve4(workspacePath);
+  const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve5(workspacePath);
   try {
     await fs3.stat(dbPath);
     const rows = await querySqliteJson(
@@ -95439,7 +95452,7 @@ function workspaceMatches(rawUris, requestedWorkspace) {
     return Array.isArray(uris) && uris.some((uri) => {
       if (typeof uri !== "string") return false;
       try {
-        return resolve4(fileURLToPath2(uri)) === requestedWorkspace;
+        return resolve5(fileURLToPath2(uri)) === requestedWorkspace;
       } catch {
         return false;
       }
@@ -96406,8 +96419,8 @@ var AcpRemoteGateway = class {
     const readEpoch = ++this.historyEpoch;
     const previous = this.backendHistoryChains.get(backend) ?? Promise.resolve();
     let releaseQueue;
-    const currentTurn = new Promise((resolve9) => {
-      releaseQueue = resolve9;
+    const currentTurn = new Promise((resolve10) => {
+      releaseQueue = resolve10;
     });
     const nextChain = previous.then(() => currentTurn, () => currentTurn);
     this.backendHistoryChains.set(backend, nextChain);
@@ -97040,7 +97053,7 @@ var AcpRemoteGateway = class {
   async listDirectory(path) {
     const home = homedir6();
     const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
-    const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve5(target3));
+    const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve6(target3));
     const names = await readdir5(canonical);
     const entries = [];
     let truncated = false;
@@ -97146,7 +97159,7 @@ function buildCrumbs(path, home) {
       path: current,
       hidden: false
     });
-    const parent = resolve5(current, "..");
+    const parent = resolve6(current, "..");
     if (parent === current) break;
     if (home !== "" && relative4(home, current) === "" && current !== home) break;
     current = parent;
@@ -99392,7 +99405,7 @@ var HostServerConnection = class {
     let invalidControl = false;
     let socketError;
     let messageQueue = Promise.resolve();
-    await new Promise((resolve9, reject) => {
+    await new Promise((resolve10, reject) => {
       let settled = false;
       let closing = false;
       let upgradeTimer;
@@ -99434,7 +99447,7 @@ var HostServerConnection = class {
         }
         const preserve = this.config.reconnect.enabled && !this.stopped && !this.reconnectRequested && (error62 === void 0 ? retainOnClose : isRetryable(error62)) && !invalidControl && !TERMINAL_AUTH_ERRORS.has(this.terminalError ?? "") && [...this.tunnels.values()].some((tunnel) => tunnel.lease?.canDetach());
         const cleanup = preserve ? Promise.all([...this.tunnels.values()].filter((tunnel) => !tunnel.lease?.canDetach()).map((tunnel) => this.dropTunnel(tunnel.connectionId))) : this.dropTunnels();
-        void cleanup.catch(() => void 0).finally(() => error62 === void 0 ? resolve9() : reject(error62));
+        void cleanup.catch(() => void 0).finally(() => error62 === void 0 ? resolve10() : reject(error62));
       };
       let forceDrainWake;
       const handleClose = (event, forced = false) => {
@@ -99455,9 +99468,9 @@ var HostServerConnection = class {
             let drainTimer;
             await Promise.race([
               messageQueue.catch(() => void 0),
-              new Promise((resolve10) => {
-                forceDrainWake = resolve10;
-                drainTimer = setTimeout(resolve10, 50);
+              new Promise((resolve11) => {
+                forceDrainWake = resolve11;
+                drainTimer = setTimeout(resolve11, 50);
               })
             ]);
             if (drainTimer !== void 0) clearTimeout(drainTimer);
@@ -100197,14 +100210,14 @@ var HostServerConnection = class {
     const socket = this.createWebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     tunnel.dataSocket = socket;
-    await new Promise((resolve9, reject) => {
+    await new Promise((resolve10, reject) => {
       let settled = false;
       const timer2 = setTimeout(() => finish(new Error("Relay data attach timed out")), 15e3);
       const finish = (error62) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer2);
-        if (error62 === void 0) resolve9();
+        if (error62 === void 0) resolve10();
         else reject(error62);
       };
       socket.onopen = () => {
@@ -100320,14 +100333,14 @@ var HostServerConnection = class {
   }
   waitBeforeRetry() {
     const delay = Math.round(Math.random() * this.config.reconnect.maxDelayMs);
-    return new Promise((resolve9) => {
+    return new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         this.retryWake = void 0;
-        resolve9();
+        resolve10();
       }, delay);
       this.retryWake = () => {
         clearTimeout(timer2);
-        resolve9();
+        resolve10();
       };
     });
   }
@@ -100551,29 +100564,29 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep3 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir6, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename8, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename8, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
-  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
+  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve8(path) === parse3(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
   await mkdir4(path, { recursive: true });
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve7(homedir8());
-  const target3 = path === void 0 || path.trim() === "" ? home : resolve7(path);
+  const home = resolve8(homedir8());
+  const target3 = path === void 0 || path.trim() === "" ? home : resolve8(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir6(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
-    const child = resolve7(target3, row.name);
+    const child = resolve8(target3, row.name);
     let directory = row.isDirectory();
     if (!directory && row.isSymbolicLink()) directory = await stat7(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
@@ -100598,7 +100611,7 @@ function crumbs(path) {
     current = dirname6(current);
   }
   for (const segment of segments) {
-    current = resolve7(current, segment);
+    current = resolve8(current, segment);
     result.push({ name: segment, path: current, hidden: false });
   }
   return result;
@@ -101178,8 +101191,8 @@ var HarnessRemoteBridge = class {
     const transferId = randomUUID17();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
-    const completed = new Promise((resolve9, reject) => {
-      finish = (error62) => error62 === void 0 ? resolve9() : reject(error62);
+    const completed = new Promise((resolve10, reject) => {
+      finish = (error62) => error62 === void 0 ? resolve10() : reject(error62);
     });
     void completed.catch(() => void 0);
     const transfer = { bytes, totalChunks, nextIndex: 0, touchedAt: Date.now(), finish };
@@ -101244,9 +101257,9 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint);
-      const baseCandidate = resolve8(sessionWorkspace.root, safeBaseRel);
+      const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
       const baseDir = dirname7(baseCandidate);
-      const targetCandidate = resolve8(baseDir, path);
+      const targetCandidate = resolve9(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint);
     } else {
       const path = typeof args.path === "string" ? args.path : ".";
@@ -101303,7 +101316,7 @@ var HarnessRemoteBridge = class {
     }
   }
   async verifyWorkspacePathContainment(root2, cwd2, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve8(path) : resolve8(cwd2, path);
+    const candidate = isAbsolute10(path) ? resolve9(path) : resolve9(cwd2, path);
     if (process.platform === "win32") {
       const rootDrive = parse4(root2).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
@@ -101360,7 +101373,7 @@ var HarnessRemoteBridge = class {
         throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       }
       const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
-      const dispatchedCandidate = resolve8(root2, safeRel);
+      const dispatchedCandidate = resolve9(root2, safeRel);
       const dispatchedCanonical = await realpath7(dispatchedCandidate);
       const dispatchedRel = relative5(root2, dispatchedCanonical);
       if (isPathOutside(dispatchedRel)) {
@@ -102326,11 +102339,11 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
   };
 }
 function withSignal(pending, signal) {
-  return new Promise((resolve9, reject) => {
+  return new Promise((resolve10, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
-    void pending.then(resolve9, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    void pending.then(resolve10, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
 }
 
@@ -102350,7 +102363,7 @@ var workspaceSchema = object4(
   { backend: string8, workspaceId: string8, path: string8, title: string8 },
   ["backend", "workspaceId", "path", "title"]
 );
-function remoteDiscoveryTools(resolve9) {
+function remoteDiscoveryTools(resolve10) {
   const output2 = (schema) => ({
     schema,
     render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }]
@@ -102358,12 +102371,12 @@ function remoteDiscoveryTools(resolve9) {
   const run = async (signal, query) => {
     const lifetime = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
     lifetime.throwIfAborted();
-    const client = resolve9();
+    const client = resolve10();
     if (client === void 0) throw new Error("REMOTE_UNAVAILABLE: Configure Remote and sign in through the local Remote panel first.");
     try {
       const result = await query(client, lifetime);
       lifetime.throwIfAborted();
-      if (resolve9() !== client) throw new Error("Remote runtime changed.");
+      if (resolve10() !== client) throw new Error("Remote runtime changed.");
       return result;
     } catch {
       lifetime.throwIfAborted();
@@ -102403,7 +102416,7 @@ function remoteDiscoveryTools(resolve9) {
     }
   ];
 }
-function remoteSessionTools(resolve9) {
+function remoteSessionTools(resolve10) {
   const target3 = {
     hostId: { ...string8, description: "Exact hostId from remote_list_hosts." },
     backend: { type: "string", enum: ["harness"], description: "Session operations currently support native Harness only." },
@@ -102464,11 +102477,11 @@ function remoteSessionTools(resolve9) {
       sessionToolInputs[name2].parse(args);
       const signal = AbortSignal.any([exec2.signal, AbortSignal.timeout(name2 === "remote_upload_file" ? 60 * 6e4 : 12e4)]);
       signal.throwIfAborted();
-      const client = resolve9();
+      const client = resolve10();
       if (!client) throw new Error("REMOTE_UNAVAILABLE: Sign in through the local Remote panel.");
       try {
         const result = await client.runSessionTool(name2, args, signal);
-        if (resolve9() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
+        if (resolve10() !== client) throw new RemoteSessionToolError("REMOTE_AUTHORITY_CHANGED: Inspect remote state; do not replay mutations.");
         return result;
       } catch (error62) {
         if (error62 instanceof RemoteSessionToolError) throw error62;
@@ -102477,10 +102490,10 @@ function remoteSessionTools(resolve9) {
     }
   }));
 }
-function installRemoteDiscoveryTools(ctx, resolve9) {
+function installRemoteDiscoveryTools(ctx, resolve10) {
   ctx.inject(["tools"], (toolContext) => {
     const tools = toolContext.get("tools");
-    for (const definition of [...remoteDiscoveryTools(resolve9), ...remoteSessionTools(resolve9)]) {
+    for (const definition of [...remoteDiscoveryTools(resolve10), ...remoteSessionTools(resolve10)]) {
       toolContext.effect(() => tools.register(definition));
     }
   });
@@ -102491,15 +102504,15 @@ var PUMP_KEY = Symbol.for("ds-harness-remote.hmr-safe-settings-pump");
 function createPump() {
   const queue = [];
   let wake;
-  let sleeping = new Promise((resolve9) => {
-    wake = resolve9;
+  let sleeping = new Promise((resolve10) => {
+    wake = resolve10;
   });
   void (async () => {
     for (; ; ) {
       if (queue.length === 0) {
         await sleeping;
-        sleeping = new Promise((resolve9) => {
-          wake = resolve9;
+        sleeping = new Promise((resolve10) => {
+          wake = resolve10;
         });
       }
       const job = queue.shift();
@@ -102513,8 +102526,8 @@ function createPump() {
   })();
   return {
     enqueue(run) {
-      return new Promise((resolve9, reject) => {
-        queue.push({ run, resolve: resolve9, reject });
+      return new Promise((resolve10, reject) => {
+        queue.push({ run, resolve: resolve10, reject });
         wake();
       });
     }
@@ -102590,18 +102603,18 @@ var PluginUpdateChecker = class {
    * before the mirror is consulted.
    */
   fetchLatestVersion() {
-    return new Promise((resolve9) => {
+    return new Promise((resolve10) => {
       let pending = DIST_TAG_URLS.length;
       let settled = false;
       const settle2 = (latest) => {
         if (settled) return;
         if (latest !== void 0) {
           settled = true;
-          resolve9(latest);
+          resolve10(latest);
           return;
         }
         pending -= 1;
-        if (pending === 0) resolve9(void 0);
+        if (pending === 0) resolve10(void 0);
       };
       if (pending === 0) {
         settle2(void 0);
@@ -102975,7 +102988,7 @@ function resolveDependencies(input4) {
     stdout: input4.stdout ?? process.stdout,
     stderr: input4.stderr ?? process.stderr,
     now: input4.now ?? Date.now,
-    wait: input4.wait ?? ((milliseconds) => new Promise((resolve9) => setTimeout(resolve9, milliseconds))),
+    wait: input4.wait ?? ((milliseconds) => new Promise((resolve10) => setTimeout(resolve10, milliseconds))),
     renderQr: input4.renderQr ?? renderTerminalQr,
     createIdentityStore: input4.createIdentityStore ?? ((options) => new IdentityStore(options)),
     createHostApi: input4.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
