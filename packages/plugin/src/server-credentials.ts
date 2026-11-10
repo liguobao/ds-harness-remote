@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process'
 import { chmod, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
-import { promisify } from 'node:util'
+import { basename, dirname, join, sep } from 'node:path'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
 
@@ -29,30 +27,9 @@ export class ServerCredentialStore {
 
   /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
-    const lock = `${this.path}.refresh-lock`
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    const deadline = Date.now() + 15_000
-    await ensureQueueMarker(lock, deadline)
-    const id = `${process.pid}-${uuidV7()}`
-    const holder = `${lock}.holder-${id}`
-    // Publish intent first. A later contender must see this record before it chooses a ticket.
-    await publishExclusive(holder, `${id} choosing\n`)
-    try {
-      const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0)
-      if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError()
-      await atomicWritePrivate(holder, `${id} ${ticket}\n`)
-      for (;;) {
-        const entries = await participants(lock)
-        const preceding = entries.some(entry => entry.id !== id && (entry.ticket === undefined
-          || entry.ticket < ticket || (entry.ticket === ticket && entry.id < id)))
-        if (!preceding) break
-        if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
-        await new Promise(resolve => setTimeout(resolve, 50))
-      }
-      return await operation()
-    } finally {
-      await rm(holder, { force: true })
-    }
+    const gate = defaultMigrationGate(dirname(this.path))
+    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation)
+    return gate === undefined ? run() : withQueueLock(gate, run)
   }
 
   async pairingHostOnly(): Promise<boolean> {
@@ -89,6 +66,66 @@ export class ServerCredentialStore {
   }
 }
 
+function defaultMigrationGate(directory: string): string | undefined {
+  const parts = directory.split(sep)
+  let rootIndex = -1
+  for (let index = parts.length - 1; index >= 0; index--) {
+    if ((parts[index] === 'remote' || parts[index] === 'ds-harness-remote')
+      && (index === parts.length - 1 || parts[index + 1] === 'servers')) {
+      rootIndex = index
+      break
+    }
+  }
+  if (rootIndex < 1) return undefined
+  const suffix = parts.slice(rootIndex + 1)
+  if (suffix.length !== 0 && (suffix.length !== 3 || suffix[0] !== 'servers'
+    || !/^[a-f0-9]{24}$/.test(suffix[1]!) || !['host', 'client'].includes(suffix[2]!))) return undefined
+  return join(parts.slice(0, rootIndex).join(sep) || sep, '.ds-harness-remote-migration', 'credential-refresh-gate')
+}
+
+export function withDefaultCredentialMigrationGate<T>(home: string, operation: () => Promise<T>): Promise<T> {
+  return withQueueLock(join(home, '.ds-harness-remote-migration', 'credential-refresh-gate'), operation)
+}
+
+export async function assertRefreshQueueIdle(directory: string): Promise<void> {
+  const lock = join(directory, 'server-credentials.json.refresh-lock')
+  const marker = await readQueueMarker(lock)
+  if (marker === undefined) {
+    if ((await readdir(directory)).some(name => name.startsWith(`${basename(lock)}.holder-`) && !name.endsWith('.tmp'))) {
+      throw new ServerCredentialsBusyError()
+    }
+    return
+  }
+  if (marker !== SERVER_CREDENTIALS_QUEUE_MARKER) throw new ServerCredentialsBusyError()
+  if ((await participants(lock)).length > 0) throw new ServerCredentialsBusyError()
+}
+
+async function withQueueLock<T>(lock: string, operation: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(lock), { recursive: true, mode: 0o700 })
+  const deadline = Date.now() + 15_000
+  await ensureQueueMarker(lock, deadline)
+  const id = `${process.pid}-${uuidV7()}`
+  const holder = `${lock}.holder-${id}`
+  // Publish intent first. A later contender must see this record before it chooses a ticket.
+  await publishExclusive(holder, `${id} choosing\n`)
+  try {
+    const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0)
+    if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError()
+    await atomicWritePrivate(holder, `${id} ${ticket}\n`)
+    for (;;) {
+      const entries = await participants(lock)
+      const preceding = entries.some(entry => entry.id !== id && (entry.ticket === undefined
+        || entry.ticket < ticket || (entry.ticket === ticket && entry.id < id)))
+      if (!preceding) break
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    return await operation()
+  } finally {
+    await rm(holder, { force: true })
+  }
+}
+
 export class ServerCredentialsInvalidError extends Error {
   readonly code = 'SERVER_CREDENTIALS_INVALID'
 }
@@ -97,6 +134,13 @@ export class ServerCredentialsBusyError extends Error {
   readonly code = 'SERVER_CREDENTIALS_BUSY'
   constructor() {
     super('Credential refresh is busy. Stop other instances. Remove a legacy refresh lock only after every instance stops.')
+  }
+}
+
+export class ServerCredentialsLockUnsupportedError extends Error {
+  readonly code = 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED'
+  constructor() {
+    super('Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.')
   }
 }
 
@@ -149,7 +193,15 @@ async function participants(lock: string): Promise<QueueParticipant[]> {
 async function publishExclusive(path: string, record: string): Promise<void> {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
   await writeFile(temporary, record, { mode: 0o600, flag: 'wx' })
-  try { await link(temporary, path) } finally { await rm(temporary, { force: true }) }
+  try {
+    try { await link(temporary, path) } catch (error) {
+      if (error instanceof Error && 'code' in error
+        && ['EXDEV', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS', 'EPERM', 'EACCES'].includes(String(error.code))) {
+        throw new ServerCredentialsLockUnsupportedError()
+      }
+      throw error
+    }
+  } finally { await rm(temporary, { force: true }) }
 }
 
 async function isLockContention(error: unknown, path: string): Promise<boolean> {
@@ -176,19 +228,8 @@ async function readQueueMarker(lock: string): Promise<string | undefined> {
 async function ownerExited(pid: number): Promise<boolean> {
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false
   try { process.kill(pid, 0); return false } catch (error) {
-    if (process.platform === 'win32') return windowsOwnerExited(pid)
     return error instanceof Error && 'code' in error && error.code === 'ESRCH'
   }
-}
-
-async function windowsOwnerExited(pid: number): Promise<boolean> {
-  const command = `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -eq $p) { 'ABSENT' } else { 'EXISTS' }`
-  try {
-    const { stdout } = await promisify(execFile)('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command', command,
-    ], { timeout: 5_000, windowsHide: true })
-    return stdout.trim() === 'ABSENT'
-  } catch { return false }
 }
 
 export async function atomicWritePrivate(path: string, contents: string): Promise<void> {

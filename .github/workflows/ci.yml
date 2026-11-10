@@ -107,6 +107,38 @@ jobs:
       - name: Verify packed Host WebRTC fallback and installation closure
         run: node scripts/verify-packed-webrtc.mjs
 
+  xfs-refresh:
+    name: Test credential locks on XFS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.9.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter './packages/**' -r build
+      - name: Mount local XFS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xfsprogs
+          truncate -s 512M "$RUNNER_TEMP/refresh-xfs.img"
+          sudo mkfs.xfs -f "$RUNNER_TEMP/refresh-xfs.img"
+          mkdir "$RUNNER_TEMP/refresh-xfs"
+          sudo mount -o loop "$RUNNER_TEMP/refresh-xfs.img" "$RUNNER_TEMP/refresh-xfs"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/refresh-xfs"
+          findmnt -T "$RUNNER_TEMP/refresh-xfs" -o FSTYPE
+          touch "$RUNNER_TEMP/refresh-xfs/source"
+          ln "$RUNNER_TEMP/refresh-xfs/source" "$RUNNER_TEMP/refresh-xfs/linked"
+      - name: Run refresh and migration tests on XFS
+        run: pnpm --dir packages/plugin exec vitest run tests/server-credentials.test.ts tests/identity-store.test.ts
+        env:
+          TMPDIR: ${{ runner.temp }}/refresh-xfs
+
   plugin-package:
     name: Package npm plugin
     needs: quality

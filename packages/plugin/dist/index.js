@@ -6443,7 +6443,7 @@ import {
   generateKeyPair as generateKeyPair2,
   X509Certificate
 } from "node:crypto";
-import { promisify as promisify2 } from "node:util";
+import { promisify } from "node:util";
 import { randomBytes as randomBytes32, sign } from "node:crypto";
 import { randomBytes as randomBytes42 } from "crypto";
 import { createHash as createHash22, randomUUID as randomUUID22 } from "crypto";
@@ -17187,7 +17187,7 @@ var init_lib = __esm({
       CN: "2.5.4.3"
     };
     ({ encode: encode17, types: types17 } = binaryData_exports);
-    generateKeyPairAsync = promisify2(generateKeyPair2);
+    generateKeyPairAsync = promisify(generateKeyPair2);
     CipherContext = class {
       constructor(sessionType, certPem, keyPem, signatureHashAlgorithm) {
         this.sessionType = sessionType;
@@ -82942,10 +82942,8 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
-import { execFile } from "node:child_process";
 import { chmod, link, mkdir as mkdir2, readFile as readFile2, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
-import { basename as basename3, dirname as dirname2, join as join3 } from "node:path";
-import { promisify } from "node:util";
+import { basename as basename3, dirname as dirname2, join as join3, sep } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -82967,30 +82965,9 @@ var ServerCredentialStore = class {
   }
   /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock(operation) {
-    const lock = `${this.path}.refresh-lock`;
-    await mkdir2(dirname2(this.path), { recursive: true, mode: 448 });
-    const deadline = Date.now() + 15e3;
-    await ensureQueueMarker(lock, deadline);
-    const id6 = `${process.pid}-${uuidV7()}`;
-    const holder = `${lock}.holder-${id6}`;
-    await publishExclusive(holder, `${id6} choosing
-`);
-    try {
-      const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0);
-      if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
-      await atomicWritePrivate(holder, `${id6} ${ticket}
-`);
-      for (; ; ) {
-        const entries = await participants(lock);
-        const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
-        if (!preceding) break;
-        if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-        await new Promise((resolve9) => setTimeout(resolve9, 50));
-      }
-      return await operation();
-    } finally {
-      await rm2(holder, { force: true });
-    }
+    const gate = defaultMigrationGate(dirname2(this.path));
+    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation);
+    return gate === void 0 ? run() : withQueueLock(gate, run);
   }
   async pairingHostOnly() {
     const policy = await readPrivateJson(join3(dirname2(this.path), "pairing-host-only.json"));
@@ -83022,6 +82999,60 @@ var ServerCredentialStore = class {
     await rm2(this.path, { force: true });
   }
 };
+function defaultMigrationGate(directory) {
+  const parts = directory.split(sep);
+  let rootIndex = -1;
+  for (let index = parts.length - 1; index >= 0; index--) {
+    if ((parts[index] === "remote" || parts[index] === "ds-harness-remote") && (index === parts.length - 1 || parts[index + 1] === "servers")) {
+      rootIndex = index;
+      break;
+    }
+  }
+  if (rootIndex < 1) return void 0;
+  const suffix = parts.slice(rootIndex + 1);
+  if (suffix.length !== 0 && (suffix.length !== 3 || suffix[0] !== "servers" || !/^[a-f0-9]{24}$/.test(suffix[1]) || !["host", "client"].includes(suffix[2]))) return void 0;
+  return join3(parts.slice(0, rootIndex).join(sep) || sep, ".ds-harness-remote-migration", "credential-refresh-gate");
+}
+function withDefaultCredentialMigrationGate(home, operation) {
+  return withQueueLock(join3(home, ".ds-harness-remote-migration", "credential-refresh-gate"), operation);
+}
+async function assertRefreshQueueIdle(directory) {
+  const lock = join3(directory, "server-credentials.json.refresh-lock");
+  const marker = await readQueueMarker(lock);
+  if (marker === void 0) {
+    if ((await readdir(directory)).some((name2) => name2.startsWith(`${basename3(lock)}.holder-`) && !name2.endsWith(".tmp"))) {
+      throw new ServerCredentialsBusyError();
+    }
+    return;
+  }
+  if (marker !== SERVER_CREDENTIALS_QUEUE_MARKER) throw new ServerCredentialsBusyError();
+  if ((await participants(lock)).length > 0) throw new ServerCredentialsBusyError();
+}
+async function withQueueLock(lock, operation) {
+  await mkdir2(dirname2(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + 15e3;
+  await ensureQueueMarker(lock, deadline);
+  const id6 = `${process.pid}-${uuidV7()}`;
+  const holder = `${lock}.holder-${id6}`;
+  await publishExclusive(holder, `${id6} choosing
+`);
+  try {
+    const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0);
+    if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
+    await atomicWritePrivate(holder, `${id6} ${ticket}
+`);
+    for (; ; ) {
+      const entries = await participants(lock);
+      const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
+      if (!preceding) break;
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      await new Promise((resolve9) => setTimeout(resolve9, 50));
+    }
+    return await operation();
+  } finally {
+    await rm2(holder, { force: true });
+  }
+}
 var ServerCredentialsInvalidError = class extends Error {
   code = "SERVER_CREDENTIALS_INVALID";
 };
@@ -83029,6 +83060,12 @@ var ServerCredentialsBusyError = class extends Error {
   code = "SERVER_CREDENTIALS_BUSY";
   constructor() {
     super("Credential refresh is busy. Stop other instances. Remove a legacy refresh lock only after every instance stops.");
+  }
+};
+var ServerCredentialsLockUnsupportedError = class extends Error {
+  code = "SERVER_CREDENTIALS_LOCK_UNSUPPORTED";
+  constructor() {
+    super("Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.");
   }
 };
 var SERVER_CREDENTIALS_QUEUE_MARKER = "DSH_REFRESH_LOCK_V2\n";
@@ -83074,7 +83111,14 @@ async function publishExclusive(path, record11) {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
   await writeFile(temporary, record11, { mode: 384, flag: "wx" });
   try {
-    await link(temporary, path);
+    try {
+      await link(temporary, path);
+    } catch (error62) {
+      if (error62 instanceof Error && "code" in error62 && ["EXDEV", "EOPNOTSUPP", "ENOTSUP", "ENOSYS", "EPERM", "EACCES"].includes(String(error62.code))) {
+        throw new ServerCredentialsLockUnsupportedError();
+      }
+      throw error62;
+    }
   } finally {
     await rm2(temporary, { force: true });
   }
@@ -83107,22 +83151,7 @@ async function ownerExited(pid) {
     process.kill(pid, 0);
     return false;
   } catch (error62) {
-    if (process.platform === "win32") return windowsOwnerExited(pid);
     return error62 instanceof Error && "code" in error62 && error62.code === "ESRCH";
-  }
-}
-async function windowsOwnerExited(pid) {
-  const command = `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -eq $p) { 'ABSENT' } else { 'EXISTS' }`;
-  try {
-    const { stdout } = await promisify(execFile)("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      command
-    ], { timeout: 5e3, windowsHide: true });
-    return stdout.trim() === "ABSENT";
-  } catch {
-    return false;
   }
 }
 async function atomicWritePrivate(path, contents) {
@@ -84470,6 +84499,9 @@ var HostServerApi = class {
     } catch (error62) {
       if (error62 instanceof ServerCredentialsBusyError) {
         throw new ServerApiError(error62.code, error62.message, true);
+      }
+      if (error62 instanceof ServerCredentialsLockUnsupportedError) {
+        throw new ServerApiError(error62.code, error62.message, false);
       }
       throw error62;
     }
@@ -87559,7 +87591,7 @@ async function prepareDefaultIdentityDirectory(options = {}) {
   const lockDirectory = join5(home, ".ds-harness-remote-migration");
   await storageDirectoryStat(lockDirectory);
   await ensureDirectory(lockDirectory);
-  return withIdentityLock(lockDirectory, async () => {
+  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home, async () => {
     const old = await storageDirectoryStat(source);
     const current = await storageDirectoryStat(target3);
     const pinPath = join5(lockDirectory, "legacy-root.json");
@@ -87611,7 +87643,7 @@ async function prepareDefaultIdentityDirectory(options = {}) {
       await assertOwnedRemoteStorage(target3);
     }
     return target3;
-  });
+  }));
 }
 async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options = {}) {
   const createStore = options.createIdentityStore ?? ((storeOptions) => new IdentityStore(storeOptions));
@@ -87672,7 +87704,7 @@ async function assertOwnedRemoteStorage(root2) {
   const checkIdentity = async (directory, scope2, role2) => {
     const entries = (await readdir2(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
-      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
+      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
@@ -87741,7 +87773,7 @@ async function assertOwnedRemoteStorage(root2) {
     const entries = await readdir2(root2, { withFileTypes: true });
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
-      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
+      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name) && !isRefreshQueueArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
       await checkIdentity(root2);
     }
     const servers = entries.find((entry) => entry.name === "servers");
@@ -87793,8 +87825,15 @@ async function storageDirectoryStat(path) {
   }
 }
 async function assertStorageIdle(directory) {
+  try {
+    await assertRefreshQueueIdle(directory);
+  } catch (error62) {
+    if (!(error62 instanceof ServerCredentialsBusyError)) throw error62;
+    throw new IdentityInvalidError("Remote storage has an active credential refresh; stop it before migration.", "IDENTITY_LOCKED");
+  }
   for (const entry of await readdir2(directory, { withFileTypes: true })) {
     if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile3(join5(directory, entry.name), "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
+    if (entry.isFile() && isRefreshQueueArtifact(entry.name)) continue;
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
       throw new IdentityInvalidError(
         "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
@@ -87803,6 +87842,9 @@ async function assertStorageIdle(directory) {
     }
     if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
   }
+}
+function isRefreshQueueArtifact(name2) {
+  return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name2) || /^server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?\.\d+\.[0-9a-f-]{36}\.tmp$/.test(name2);
 }
 function serverStorageDirectory(root2, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
@@ -92217,9 +92259,9 @@ var PiAcpClient = class extends IsolatedAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/antigravity/models.ts
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
-var exec = promisify3(execFile2);
+import { execFile } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+var exec = promisify2(execFile);
 function cachedAgyModels(load) {
   let catalog;
   let pending;
@@ -93122,10 +93164,10 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify4, stripVTControlCharacters } from "node:util";
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify3, stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
-var execFileAsync = promisify4(execFile3);
+var execFileAsync = promisify3(execFile2);
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
     const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), "--help"], {
@@ -93785,7 +93827,7 @@ function isSessionMutation(method) {
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep } from "node:path";
+import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir5 } from "node:os";
 import { createRequire as createRequire2 } from "node:module";
@@ -93918,9 +93960,9 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile5 } = await import("node:child_process");
-    const { promisify: promisify6 } = await import("node:util");
-    const execFileAsync3 = promisify6(execFile5);
+    const { execFile: execFile4 } = await import("node:child_process");
+    const { promisify: promisify5 } = await import("node:util");
+    const execFileAsync3 = promisify5(execFile4);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
@@ -93952,7 +93994,7 @@ async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemin
             try {
               const p = fileURLToPath2(u);
               const imageRelative = relative3(AGY_IMAGE_ROOT, p);
-              const imageCache = imageRelative === "" || !isAbsolute6(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
+              const imageCache = imageRelative === "" || !isAbsolute6(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep2}`);
               if (!imageCache) paths.add(p);
             } catch {
             }
@@ -95754,12 +95796,12 @@ function isRecord18(value) {
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile4, execFileSync } from "node:child_process";
+import { execFile as execFile3, execFileSync } from "node:child_process";
 import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
-import { promisify as promisify5 } from "node:util";
-var execFileAsync2 = promisify5(execFile4);
+import { promisify as promisify4 } from "node:util";
+var execFileAsync2 = promisify4(execFile3);
 var BUILTIN_ACP_SPECS = Object.freeze({
   codex: Object.freeze({
     id: "codex",
@@ -99108,7 +99150,7 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir6, stat as stat7 } from "node:fs/promises";
@@ -99880,7 +99922,7 @@ var HarnessRemoteBridge = class {
       }
       const base = !isPathOutside(relCwd) ? cwd2 : root2;
       const rel = relative5(base, candidate);
-      const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
+      const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
         currentPath = join16(currentPath, parts[i]);

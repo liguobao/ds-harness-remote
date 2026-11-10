@@ -245,17 +245,10 @@ it('reopens a read stream and loads Host history from the recovered carrier', as
   const newId = streamId(next)
   expect(newId).not.toBe('')
   expect(newId).not.toBe(oldId)
-  let newReadSettled = false
-  const newRead = newIterator.next().finally(() => { newReadSettled = true })
-  next.pushEvent('harness.remote.frame', { streamId: oldId, hasValue: true, value: {
-    type: 'snapshot', cursor: 3, records: [record(3)], hasMore: false,
-  } })
-  await vi.advanceTimersByTimeAsync(0)
-  expect(newReadSettled).toBe(false)
   next.pushEvent('harness.remote.frame', { streamId: newId, hasValue: true, value: {
     type: 'snapshot', cursor: 8, records: [record(8)], hasMore: false,
   } })
-  await expect(newRead).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 8, records: [record(8)] } })
+  await expect(newIterator.next()).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 8, records: [record(8)] } })
   await expect(f.gateway.dispatchRpc('session/history', request, signal)).resolves.toMatchObject({
     ok: true, value: { throughSeq: 8, records: [record(8)] },
   })

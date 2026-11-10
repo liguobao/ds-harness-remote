@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -8,6 +8,11 @@ import { once } from 'node:events'
 import { build } from 'esbuild'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ServerCredentialStore } from '../src/server-credentials.js'
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, link: vi.fn(actual.link) }
+})
 
 const directories: string[] = []
 afterEach(async () => {
@@ -169,27 +174,15 @@ describe('credential refresh process lock', () => {
     expect(await readFile(lock, 'utf8')).toBe(marker)
   })
 
-  it.skipIf(process.platform !== 'win32')('checks exited and live owner PIDs on Windows', async () => {
+  it('reports a file system without hard links before it enters the refresh operation', async () => {
     const path = await directory()
-    await writeFile(lockPath(path), marker)
-    const exited = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-    const exitedPid = exited.pid!
-    exited.kill('SIGKILL')
-    await once(exited, 'exit')
-    await writeFile(holderPath(path, exitedPid, '00000000-0000-7000-8000-000000000004'),
-      `${exitedPid}-00000000-0000-7000-8000-000000000004 1\n`)
-    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
-
-    const live = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-    try {
-      await writeFile(holderPath(path, live.pid!, '00000000-0000-7000-8000-000000000005'),
-        `${live.pid}-00000000-0000-7000-8000-000000000005 1\n`)
-      vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
-      await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
-    } finally {
-      live.kill('SIGKILL')
-      await once(live, 'exit')
-    }
+    vi.mocked(link).mockRejectedValueOnce(Object.assign(new Error('hard links unavailable'), { code: 'EOPNOTSUPP' }))
+    const operation = vi.fn()
+    await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject({
+      code: 'SERVER_CREDENTIALS_LOCK_UNSUPPORTED',
+      message: expect.stringContaining('hard link'),
+    })
+    expect(operation).not.toHaveBeenCalled()
   })
 
   it('releases its lock when the operation rejects', async () => {

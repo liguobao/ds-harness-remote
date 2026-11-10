@@ -1,5 +1,13 @@
 # Repository Guide for Agents
 
+## Credential refresh lock and migration scope (PR #384, 2026-11-10)
+
+Plugin 使用 V2 Marker 和独立 Holder 文件串行刷新。默认目录迁移与刷新共用目录外闸门。
+迁移清理确认死亡的 Holder，接受已识别的队列 `.tmp` 文件，拒绝活跃 Holder。
+Linux 单机本地 ext4 和 XFS 为目标支持范围。WSL2 ext4.vhdx 用于开发测试。
+NFS、SMB 共享凭据目录和跨主机锁不在范围内。Windows Host 尚未完成验收。
+升级或降级前必须停止所有 Harness 进程。0.6.3 降级步骤见 `docs/plugin-integration.md`。
+
 ## Interrupted trust-file migration recovery (2026-11-09)
 
 迁移归属检查接受 atomic writer 生成的 `trusted-peers.json.<pid>.<UUIDv7>.tmp`，覆盖旧根目录及 Server Host/Client 目录；仍执行普通文件、链接数、大小与身份/凭据一致性校验。迁移只读保留残留，身份成功加载后清理，不用残留覆盖正式信任记录。未知或格式错误的临时文件仍拒绝迁移。

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
-import { SERVER_CREDENTIALS_QUEUE_MARKER, ServerCredentialStore } from './server-credentials.js'
+import { SERVER_CREDENTIALS_QUEUE_MARKER, ServerCredentialStore, ServerCredentialsBusyError, assertRefreshQueueIdle, withDefaultCredentialMigrationGate } from './server-credentials.js'
 
 const identitySchema = z.object({
   schemaVersion: z.literal(1),
@@ -318,7 +318,7 @@ export async function prepareDefaultIdentityDirectory(
   const lockDirectory = join(home, '.ds-harness-remote-migration')
   await storageDirectoryStat(lockDirectory)
   await ensureDirectory(lockDirectory)
-  return withIdentityLock(lockDirectory, async () => {
+  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home, async () => {
     const old = await storageDirectoryStat(source)
     const current = await storageDirectoryStat(target)
     const pinPath = join(lockDirectory, 'legacy-root.json')
@@ -377,7 +377,7 @@ export async function prepareDefaultIdentityDirectory(
       await assertOwnedRemoteStorage(target)
     }
     return target
-  })
+  }))
 }
 
 /**
@@ -458,7 +458,8 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
     for (const entry of entries) {
-      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
+      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name)
+        || isRefreshQueueArtifact(entry.name) || (role === 'client' && isIdentityTempArtifact(entry.name))
       if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
       const metadata = await lstat(join(directory, entry.name))
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
@@ -530,7 +531,8 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
-      if (flat.some(entry => !entry.isFile() || (!identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name)))) throw rejected('STORAGE_CONFLICT')
+      if (flat.some(entry => !entry.isFile() || (!identityFiles.has(entry.name)
+        && !isPeerTempArtifact(entry.name) && !isRefreshQueueArtifact(entry.name)))) throw rejected('STORAGE_CONFLICT')
       await checkIdentity(root)
     }
     const servers = entries.find(entry => entry.name === 'servers')
@@ -586,9 +588,14 @@ async function storageDirectoryStat(path: string): Promise<BigIntStats | undefin
 }
 
 async function assertStorageIdle(directory: string): Promise<void> {
+  try { await assertRefreshQueueIdle(directory) } catch (error) {
+    if (!(error instanceof ServerCredentialsBusyError)) throw error
+    throw new IdentityInvalidError('Remote storage has an active credential refresh; stop it before migration.', 'IDENTITY_LOCKED')
+  }
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.name === 'server-credentials.json.refresh-lock' && entry.isFile()
       && await readFile(join(directory, entry.name), 'utf8') === SERVER_CREDENTIALS_QUEUE_MARKER) continue
+    if (entry.isFile() && isRefreshQueueArtifact(entry.name)) continue
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes('.refresh-lock') || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
       throw new IdentityInvalidError(
         'Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.',
@@ -597,6 +604,11 @@ async function assertStorageIdle(directory: string): Promise<void> {
     }
     if (entry.isDirectory()) await assertStorageIdle(join(directory, entry.name))
   }
+}
+
+function isRefreshQueueArtifact(name: string): boolean {
+  return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name)
+    || /^server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?\.\d+\.[0-9a-f-]{36}\.tmp$/.test(name)
 }
 
 export function serverStorageDirectory(root: string, serverUrl: string, role: RemoteDeviceRole): string {
