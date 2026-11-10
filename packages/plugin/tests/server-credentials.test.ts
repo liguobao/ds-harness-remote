@@ -1,6 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -21,6 +20,10 @@ async function directory(): Promise<string> {
   directories.push(path)
   return path
 }
+
+const marker = 'DSH_REFRESH_LOCK_V2\n'
+const lockPath = (directory: string) => join(directory, 'server-credentials.json.refresh-lock')
+const holderPath = (directory: string, pid: number, suffix: string) => `${lockPath(directory)}.holder-${pid}-${suffix}`
 
 describe('credential refresh process lock', () => {
   it('allows only one process to consume the same expired credential', async () => {
@@ -52,18 +55,20 @@ describe('credential refresh process lock', () => {
     const run = promisify(execFile)
     const results = await Promise.all([run(process.execPath, [worker, path]), run(process.execPath, [worker, path])])
     expect(results.map(result => result.stdout).sort()).toEqual(['cached', 'refreshed'])
-    await expect(stat(join(path, 'server-credentials.json.refresh-lock'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(lockPath(path), 'utf8')).toBe(marker)
+    expect((await readdir(path)).filter(name => name.includes('.refresh-lock.holder-'))).toEqual([])
   })
 
-  it('does not steal a lock after the wait deadline', async () => {
+  it.each(['directory', 'file'] as const)('does not take over a legacy %s lock', async kind => {
     const path = await directory()
     const lock = join(path, 'server-credentials.json.refresh-lock')
-    await mkdir(lock)
+    if (kind === 'directory') await mkdir(lock)
+    else await writeFile(lock, '123 00000000-0000-7000-8000-000000000000\n')
     vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
     const operation = vi.fn()
     await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
     expect(operation).not.toHaveBeenCalled()
-    expect((await stat(lock)).isDirectory()).toBe(true)
+    expect((await stat(lock)).isDirectory()).toBe(kind === 'directory')
   })
 
   it('recovers a lock after its owner process exits during refresh', async () => {
@@ -84,57 +89,44 @@ describe('credential refresh process lock', () => {
     const child = spawn(process.execPath, [worker, path], { stdio: ['ignore', 'pipe', 'pipe'] })
     try {
       await once(child.stdout!, 'data')
-      const lock = join(path, 'server-credentials.json.refresh-lock')
-      expect((await stat(lock)).isFile()).toBe(true)
+      const lock = lockPath(path)
+      expect(await readFile(lock, 'utf8')).toBe(marker)
+      expect((await readdir(path)).filter(name => name.includes('.refresh-lock.holder-'))).toHaveLength(1)
       child.kill('SIGKILL')
       await once(child, 'exit')
       await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
-      await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(lock, 'utf8')).toBe(marker)
     } finally {
       if (child.exitCode === null) child.kill('SIGKILL')
     }
   })
 
-  it('does not reclaim a live owner or an unreadable owner record', async () => {
+  it.each(['choosing', '1'] as const)('does not pass a live %s owner or invalid record', async state => {
     const path = await directory()
-    const lock = join(path, 'server-credentials.json.refresh-lock')
-    await writeFile(lock, `${process.pid} 00000000-0000-7000-8000-000000000000\n`)
+    await writeFile(lockPath(path), marker)
+    const holder = holderPath(path, process.pid, '00000000-0000-7000-8000-000000000000')
+    await writeFile(holder, `${process.pid}-00000000-0000-7000-8000-000000000000 ${state}\n`)
     vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
     await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
-    await writeFile(lock, 'invalid')
+    await writeFile(holder, 'invalid')
     vi.mocked(Date.now).mockReturnValueOnce(0)
     await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
   })
 
-  it('recovers when a takeover process dies before removing the original lock', async () => {
+  it('ignores a dead process that exits before it publishes a ticket', async () => {
     const path = await directory()
-    const lock = join(path, 'server-credentials.json.refresh-lock')
+    await writeFile(lockPath(path), marker)
     const owner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
     const ownerPid = owner.pid!
     owner.kill('SIGKILL')
     await once(owner, 'exit')
-    const record = `${ownerPid} 00000000-0000-7000-8000-000000000001\n`
-    await writeFile(lock, record)
-    const claim = `${lock}.takeover-${createHash('sha256').update(record).digest('hex').slice(0, 16)}`
-    const reaper = spawn(process.execPath, ['-e', `
-      const fs = require('node:fs');
-      fs.writeFileSync(process.argv[1], process.pid + '\\n');
-      process.stdout.write('claimed');
-      setInterval(() => {}, 1000);
-    `, claim], { stdio: ['ignore', 'pipe', 'pipe'] })
-    try {
-      await once(reaper.stdout!, 'data')
-      reaper.kill('SIGKILL')
-      await once(reaper, 'exit')
-      await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
-      await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
-      await expect(stat(claim)).rejects.toMatchObject({ code: 'ENOENT' })
-    } finally {
-      if (reaper.exitCode === null) reaper.kill('SIGKILL')
-    }
+    const holder = holderPath(path, ownerPid, '00000000-0000-7000-8000-000000000001')
+    await writeFile(holder, `${ownerPid}-00000000-0000-7000-8000-000000000001 choosing\n`)
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
+    await expect(stat(holder)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('serializes two processes that recover the same dead lock', async () => {
+  it('serializes two processes despite the same dead holder and takeover claim', async () => {
     const path = await directory()
     const entry = join(path, 'store.mjs')
     await build({
@@ -145,8 +137,11 @@ describe('credential refresh process lock', () => {
     const ownerPid = owner.pid!
     owner.kill('SIGKILL')
     await once(owner, 'exit')
-    const lock = join(path, 'server-credentials.json.refresh-lock')
-    await writeFile(lock, `${ownerPid} 00000000-0000-7000-8000-000000000003\n`)
+    await writeFile(lockPath(path), marker)
+    const holder = holderPath(path, ownerPid, '00000000-0000-7000-8000-000000000003')
+    await writeFile(holder, `${ownerPid}-00000000-0000-7000-8000-000000000003 1\n`)
+    const oldClaim = `${lockPath(path)}.takeover-dead`
+    await writeFile(oldClaim, `${ownerPid}\n`)
     const worker = join(path, 'recover-worker.mjs')
     await writeFile(worker, `
       import { appendFile } from 'node:fs/promises';
@@ -161,31 +156,34 @@ describe('credential refresh process lock', () => {
     const run = promisify(execFile)
     await Promise.all([run(process.execPath, [worker, path, events]), run(process.execPath, [worker, path, events])])
     expect(await readFile(events, 'utf8')).toBe('start\ndone\nstart\ndone\n')
-    await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(holder)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(oldClaim, 'utf8')).toBe(`${ownerPid}\n`)
   })
 
   it('ignores a complete but unpublished lock record after its writer dies', async () => {
     const path = await directory()
     const lock = join(path, 'server-credentials.json.refresh-lock')
-    const unpublished = `${lock}.123.00000000-0000-7000-8000-000000000002.tmp`
-    await writeFile(unpublished, '123 00000000-0000-7000-8000-000000000002\n')
+    const unpublished = `${lock}.holder-123-00000000-0000-7000-8000-000000000002.123.00000000-0000-7000-8000-000000000002.tmp`
+    await writeFile(unpublished, '123-00000000-0000-7000-8000-000000000002 choosing\n')
     await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'acquired')).resolves.toBe('acquired')
-    await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(lock, 'utf8')).toBe(marker)
   })
 
   it.skipIf(process.platform !== 'win32')('checks exited and live owner PIDs on Windows', async () => {
     const path = await directory()
-    const lock = join(path, 'server-credentials.json.refresh-lock')
+    await writeFile(lockPath(path), marker)
     const exited = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
     const exitedPid = exited.pid!
     exited.kill('SIGKILL')
     await once(exited, 'exit')
-    await writeFile(lock, `${exitedPid} 00000000-0000-7000-8000-000000000004\n`)
+    await writeFile(holderPath(path, exitedPid, '00000000-0000-7000-8000-000000000004'),
+      `${exitedPid}-00000000-0000-7000-8000-000000000004 1\n`)
     await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
 
     const live = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
     try {
-      await writeFile(lock, `${live.pid} 00000000-0000-7000-8000-000000000005\n`)
+      await writeFile(holderPath(path, live.pid!, '00000000-0000-7000-8000-000000000005'),
+        `${live.pid}-00000000-0000-7000-8000-000000000005 1\n`)
       vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
       await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
     } finally {

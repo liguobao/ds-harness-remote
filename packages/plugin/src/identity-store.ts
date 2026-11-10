@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fromBase64Url, generateKeyPair } from '@dsh-remote/crypto'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
-import { ServerCredentialStore } from './server-credentials.js'
+import { SERVER_CREDENTIALS_QUEUE_MARKER, ServerCredentialStore } from './server-credentials.js'
 
 const identitySchema = z.object({
   schemaVersion: z.literal(1),
@@ -450,6 +450,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     'device.key',
     'trusted-peers.json',
     'server-credentials.json',
+    'server-credentials.json.refresh-lock',
     'host-pairing.json',
     'pairing-host-only.json',
   ])
@@ -465,6 +466,10 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
       }
     }
     const names = new Set(entries.map(entry => entry.name))
+    if (names.has('server-credentials.json.refresh-lock')
+      && await readFile(join(directory, 'server-credentials.json.refresh-lock'), 'utf8') !== SERVER_CREDENTIALS_QUEUE_MARKER) {
+      throw rejected('STORAGE_CONFLICT')
+    }
     if (!names.has('device.json') && !names.has('device.key')) throw rejected('STORAGE_CONFLICT')
     failureCode = 'IDENTITY_INVALID'
     if (!names.has('device.json') || !names.has('device.key')) {
@@ -582,6 +587,8 @@ async function storageDirectoryStat(path: string): Promise<BigIntStats | undefin
 
 async function assertStorageIdle(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.name === 'server-credentials.json.refresh-lock' && entry.isFile()
+      && await readFile(join(directory, entry.name), 'utf8') === SERVER_CREDENTIALS_QUEUE_MARKER) continue
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes('.refresh-lock') || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
       throw new IdentityInvalidError(
         'Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.',

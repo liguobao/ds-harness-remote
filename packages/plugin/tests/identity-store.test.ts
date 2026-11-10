@@ -106,6 +106,22 @@ describe('IdentityStore', () => {
     expect(await prepareDefaultIdentityDirectory({ directory })).toBe(directory)
   })
 
+  it('moves an idle refresh queue marker and rejects an active queue holder', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    await new IdentityStore({ directory: source }).loadOrCreate('Host')
+    await new ServerCredentialStore(source).withRefreshLock(async () => undefined)
+    const marker = join(source, 'server-credentials.json.refresh-lock')
+    expect(await readFile(marker, 'utf8')).toBe('DSH_REFRESH_LOCK_V2\n')
+    const holder = `${marker}.holder-${process.pid}-00000000-0000-7000-8000-000000000000`
+    await writeFile(holder, `${process.pid}-00000000-0000-7000-8000-000000000000 1\n`)
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+    await rm(holder)
+    expect(await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).toBe(join(home, 'ds-harness-remote'))
+    expect(await readFile(join(home, 'ds-harness-remote', 'server-credentials.json.refresh-lock'), 'utf8'))
+      .toBe('DSH_REFRESH_LOCK_V2\n')
+  })
+
   it('keeps using verified legacy identities, trust and authorization when the directory move fails', async () => {
     for (const code of ['EACCES', 'EPERM', 'EBUSY', 'EXDEV', 'EROFS', 'ENOSPC', 'EDQUOT']) {
       const home = await temporaryDirectory()

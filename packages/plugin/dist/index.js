@@ -6420,7 +6420,7 @@ import { randomBytes as randomBytes22 } from "crypto";
 import { setTimeout as setTimeout2 } from "timers/promises";
 import { createCipheriv, createDecipheriv } from "crypto";
 import {
-  createHash as createHash3,
+  createHash as createHash2,
   createHmac,
   createPrivateKey,
   createPublicKey,
@@ -6462,7 +6462,7 @@ import { connect as connect3, createServer as createServer2 } from "node:net";
 import { isIP as isIP3 } from "node:net";
 import * as tls2 from "node:tls";
 import { setTimeout as setTimeout42 } from "timers/promises";
-import { createHash as createHash32 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 import * as os from "node:os";
 import { createHmac as createHmac5, randomBytes as randomBytes82 } from "crypto";
 import { randomBytes as randomBytes10 } from "crypto";
@@ -7206,7 +7206,7 @@ function exportKeyingMaterial(label, length, masterSecret, localRandom, remoteRa
   return prfPHash(masterSecret, seed, length);
 }
 function hash2(algorithm, data2) {
-  return createHash3(algorithm).update(data2).digest();
+  return createHash2(algorithm).update(data2).digest();
 }
 function prfVerifyData(masterSecret, handshakes, label, size2 = 12) {
   const bytes = hash2("sha256", handshakes);
@@ -8791,7 +8791,7 @@ async function waitForListening(server, host, port) {
   });
 }
 function makeTurnIntegrityKey(username, realm, password) {
-  return createHash32("md5").update(Buffer.from([username, realm, password].join(":"))).digest();
+  return createHash3("md5").update(Buffer.from([username, realm, password].join(":"))).digest();
 }
 function isChannelData(data2) {
   return data2.length >= 4 && (data2[0] & 192) === 64;
@@ -77963,7 +77963,7 @@ function safeStartupError(error62) {
   if (code === "SERVER_CREDENTIALS_BUSY") {
     return {
       code,
-      message: "Credential refresh is busy. The Host will retry. If the lock has no valid owner, stop all instances before removing server-credentials.json.refresh-lock."
+      message: "Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops."
     };
   }
   if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
@@ -82942,10 +82942,9 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
-import { createHash as createHash2 } from "node:crypto";
 import { execFile } from "node:child_process";
-import { chmod, link, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { chmod, link, mkdir as mkdir2, readFile as readFile2, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
+import { basename as basename3, dirname as dirname2, join as join3 } from "node:path";
 import { promisify } from "node:util";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
@@ -82966,28 +82965,31 @@ var ServerCredentialStore = class {
   constructor(directory) {
     this.path = join3(directory, "server-credentials.json");
   }
-  /** Publish a complete owner record before the one-use refresh transaction starts. */
+  /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock(operation) {
     const lock = `${this.path}.refresh-lock`;
     await mkdir2(dirname2(this.path), { recursive: true, mode: 448 });
     const deadline = Date.now() + 15e3;
-    const owner = `${process.pid} ${uuidV7()}
-`;
-    for (; ; ) {
-      try {
-        await publishExclusive(lock, owner);
-        break;
-      } catch (error62) {
-        if (!await isLockContention(error62, lock)) throw error62;
-        if (await reclaimExitedRefreshOwner(lock)) continue;
+    await ensureQueueMarker(lock, deadline);
+    const id6 = `${process.pid}-${uuidV7()}`;
+    const holder = `${lock}.holder-${id6}`;
+    await publishExclusive(holder, `${id6} choosing
+`);
+    try {
+      const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0);
+      if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
+      await atomicWritePrivate(holder, `${id6} ${ticket}
+`);
+      for (; ; ) {
+        const entries = await participants(lock);
+        const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
+        if (!preceding) break;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
         await new Promise((resolve9) => setTimeout(resolve9, 50));
       }
-    }
-    try {
       return await operation();
     } finally {
-      await rm2(lock);
+      await rm2(holder, { force: true });
     }
   }
   async pairingHostOnly() {
@@ -83026,31 +83028,47 @@ var ServerCredentialsInvalidError = class extends Error {
 var ServerCredentialsBusyError = class extends Error {
   code = "SERVER_CREDENTIALS_BUSY";
   constructor() {
-    super("Credential refresh is locked. Stop other instances. If the lock has no valid owner, remove server-credentials.json.refresh-lock after all instances stop.");
+    super("Credential refresh is busy. Stop other instances. Remove a legacy refresh lock only after every instance stops.");
   }
 };
-async function reclaimExitedRefreshOwner(lock) {
-  const record11 = await readLockRecord(lock);
-  if (record11 === void 0 || !await ownerExited(record11)) return false;
-  const claim2 = `${lock}.takeover-${createHash2("sha256").update(record11).digest("hex").slice(0, 16)}`;
-  try {
-    await publishExclusive(claim2, `${process.pid} ${uuidV7()}
-`);
-  } catch (error62) {
-    if (!await isLockContention(error62, claim2)) throw error62;
-    const claimant = await readLockRecord(claim2);
-    if (claimant === void 0 || !await ownerExited(claimant)) return false;
-    if (await readLockRecord(claim2) !== claimant) return false;
-    await rm2(claim2, { force: true });
-    return false;
+var SERVER_CREDENTIALS_QUEUE_MARKER = "DSH_REFRESH_LOCK_V2\n";
+async function ensureQueueMarker(lock, deadline) {
+  for (; ; ) {
+    try {
+      await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER);
+      return;
+    } catch (error62) {
+      if (!await isLockContention(error62, lock)) throw error62;
+      if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      await new Promise((resolve9) => setTimeout(resolve9, 50));
+    }
   }
-  try {
-    if (await readLockRecord(lock) !== record11 || !await ownerExited(record11)) return false;
-    await rm2(lock, { force: true });
-    return true;
-  } finally {
-    await rm2(claim2, { force: true });
+}
+async function participants(lock) {
+  const prefix = `${basename3(lock)}.holder-`;
+  const entries = await readdir(dirname2(lock));
+  const result = [];
+  for (const name2 of entries) {
+    if (!name2.startsWith(prefix)) continue;
+    if (name2.endsWith(".tmp")) continue;
+    const id6 = name2.slice(prefix.length);
+    if (!/^\d+-[0-9a-f-]{36}$/.test(id6)) throw new ServerCredentialsBusyError();
+    const path = join3(dirname2(lock), name2);
+    const record11 = await readLockRecord(path);
+    if (record11 === void 0) continue;
+    const match = new RegExp(`^${id6} (choosing|[1-9]\\d*)\\n$`).exec(record11);
+    if (match === null) throw new ServerCredentialsBusyError();
+    const pid = Number(id6.slice(0, id6.indexOf("-")));
+    if (await ownerExited(pid)) {
+      await rm2(path, { force: true });
+      continue;
+    }
+    const ticket = match[1] === "choosing" ? void 0 : Number(match[1]);
+    if (ticket !== void 0 && !Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
+    result.push({ id: id6, ...ticket === void 0 ? {} : { ticket } });
   }
+  return result;
 }
 async function publishExclusive(path, record11) {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
@@ -83070,14 +83088,20 @@ async function isLockContention(error62, path) {
 async function readLockRecord(path) {
   try {
     return await readFile2(path, "utf8");
-  } catch {
-    return void 0;
+  } catch (error62) {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return void 0;
+    throw error62;
   }
 }
-async function ownerExited(record11) {
-  const match = /^(\d+)(?: [0-9a-f-]{36})?\n$/.exec(record11);
-  if (match === null) return false;
-  const pid = Number(match[1]);
+async function readQueueMarker(lock) {
+  try {
+    return await readLockRecord(lock);
+  } catch (error62) {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "EISDIR") return void 0;
+    throw error62;
+  }
+}
+async function ownerExited(pid) {
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false;
   try {
     process.kill(pid, 0);
@@ -87301,7 +87325,7 @@ var savedPairingSchema = external_exports.object({
 
 // packages/plugin/src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -87640,12 +87664,13 @@ async function assertOwnedRemoteStorage(root2) {
     "device.key",
     "trusted-peers.json",
     "server-credentials.json",
+    "server-credentials.json.refresh-lock",
     "host-pairing.json",
     "pairing-host-only.json"
   ]);
   let identities = 0;
   const checkIdentity = async (directory, scope2, role2) => {
-    const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
+    const entries = (await readdir2(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
       const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
@@ -87655,6 +87680,9 @@ async function assertOwnedRemoteStorage(root2) {
       }
     }
     const names = new Set(entries.map((entry) => entry.name));
+    if (names.has("server-credentials.json.refresh-lock") && await readFile3(join5(directory, "server-credentials.json.refresh-lock"), "utf8") !== SERVER_CREDENTIALS_QUEUE_MARKER) {
+      throw rejected("STORAGE_CONFLICT");
+    }
     if (!names.has("device.json") && !names.has("device.key")) throw rejected("STORAGE_CONFLICT");
     failureCode = "IDENTITY_INVALID";
     if (!names.has("device.json") || !names.has("device.key")) {
@@ -87710,7 +87738,7 @@ async function assertOwnedRemoteStorage(root2) {
     identities++;
   };
   try {
-    const entries = await readdir(root2, { withFileTypes: true });
+    const entries = await readdir2(root2, { withFileTypes: true });
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
       if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
@@ -87719,9 +87747,9 @@ async function assertOwnedRemoteStorage(root2) {
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
       if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
-      for (const scope2 of await readdir(join5(root2, "servers"), { withFileTypes: true })) {
+      for (const scope2 of await readdir2(join5(root2, "servers"), { withFileTypes: true })) {
         if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
-        for (const role2 of await readdir(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
+        for (const role2 of await readdir2(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
           if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
           await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
         }
@@ -87765,7 +87793,8 @@ async function storageDirectoryStat(path) {
   }
 }
 async function assertStorageIdle(directory) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  for (const entry of await readdir2(directory, { withFileTypes: true })) {
+    if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile3(join5(directory, entry.name), "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
     if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
       throw new IdentityInvalidError(
         "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
@@ -87899,7 +87928,7 @@ function isScopedClientDirectory(directory) {
 }
 async function canAutoHealClientIdentity(directory) {
   try {
-    const entries = await readdir(directory, { withFileTypes: true });
+    const entries = await readdir2(directory, { withFileTypes: true });
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);
@@ -87927,7 +87956,7 @@ async function ensureDirectory(directory) {
 async function removeIdentityRecords(directory) {
   let entries;
   try {
-    entries = await readdir(directory);
+    entries = await readdir2(directory);
   } catch {
     return;
   }
@@ -87949,7 +87978,7 @@ function isOwnedIdentityRecord(name2) {
 async function removeStaleTemporaries(directory) {
   let entries;
   try {
-    entries = await readdir(directory);
+    entries = await readdir2(directory);
   } catch {
     return;
   }
@@ -88102,9 +88131,9 @@ var ControlStatusStream = class {
 // packages/plugin/src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
-import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
+import { readdir as readdir3, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // packages/plugin/src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -89788,7 +89817,7 @@ var CodexRemoteDomain = class {
   }
   async listCodexDirectory(path) {
     const target3 = await this.resolveCodexDirectory(path);
-    const rows = await readdir2(target3.path, { withFileTypes: true }).catch(() => void 0);
+    const rows = await readdir3(target3.path, { withFileTypes: true }).catch(() => void 0);
     if (rows === void 0) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
@@ -90042,7 +90071,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root2, path) {
-  const crumbs2 = [{ name: basename3(root2) || root2, path: root2, hidden: false }];
+  const crumbs2 = [{ name: basename4(root2) || root2, path: root2, hidden: false }];
   const remainder = relative(root2, path);
   if (remainder === "") return crumbs2;
   let current = root2;
@@ -90971,7 +91000,7 @@ var IsolatedAcpClient = class {
 };
 
 // packages/plugin/src/workspace-bridge.ts
-import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat2, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // packages/plugin/src/remote-terminal-controller.ts
@@ -91650,7 +91679,7 @@ var WorkspaceBridge = class {
     const target3 = await this.safePath(root2, path, endpoint === "workspaceFiles/list");
     try {
       if (endpoint === "workspaceFiles/list") {
-        const entries = await readdir3(target3, { withFileTypes: true });
+        const entries = await readdir4(target3, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
@@ -91919,9 +91948,9 @@ var AcpWorkspaceTools = class {
 
 // packages/plugin/src/acp/gateway.ts
 import { randomUUID as randomUUID15 } from "node:crypto";
-import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
+import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename6, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -92248,7 +92277,7 @@ function agySelectionArgs(catalog, modelId, effort) {
 // packages/plugin/src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants4 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join9, basename as basename4 } from "node:path";
+import { join as join9, basename as basename5 } from "node:path";
 import { createHash as createHash6, randomUUID as randomUUID14 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
@@ -92325,7 +92354,7 @@ function agyImageReferences(text) {
   }
 }
 async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
-  const name2 = basename4(path);
+  const name2 = basename5(path);
   if (!IMAGE_NAME.test(name2) || path !== join9(root2, sessionFolder(sessionId), name2)) return void 0;
   try {
     await privateDirectory(root2);
@@ -94664,7 +94693,7 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename6(path) || "workspace" }));
         if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
         const defaultCandidates = /* @__PURE__ */ new Set();
         const cwd3 = process.cwd();
@@ -94676,7 +94705,7 @@ var AcpRemoteGateway = class {
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        return [...defaultCandidates].map((path) => ({ path, title: basename6(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -94709,7 +94738,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename5(p) || "workspace",
+          title: basename6(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -95571,7 +95600,7 @@ var AcpRemoteGateway = class {
     const home = homedir6();
     const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve5(target3));
-    const names = await readdir4(canonical);
+    const names = await readdir5(canonical);
     const entries = [];
     let truncated = false;
     for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
@@ -95672,7 +95701,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename5(current) || current,
+      name: current === home ? "~" : basename6(current) || current,
       path: current,
       hidden: false
     });
@@ -99082,9 +99111,9 @@ import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/p
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
+import { mkdir as mkdir4, readdir as readdir6, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename7, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
@@ -99097,7 +99126,7 @@ async function listRemoteDirectory(path, signal) {
   const home = resolve7(homedir8());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve7(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir5(target3, { withFileTypes: true });
+  const rows = await readdir6(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
@@ -99122,7 +99151,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root2) {
-    segments.unshift(basename6(current));
+    segments.unshift(basename7(current));
     current = dirname6(current);
   }
   for (const segment of segments) {

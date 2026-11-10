@@ -760,9 +760,7 @@ describe('HostServerApi', () => {
               retryable: false,
             })
             expect(fetchMock).toHaveBeenCalledTimes(1)
-            await expect(stat(join(directory, 'server-credentials.json.refresh-lock'))).rejects.toMatchObject({
-              code: 'ENOENT',
-            })
+            expect(await readFile(join(directory, 'server-credentials.json.refresh-lock'), 'utf8')).toBe('DSH_REFRESH_LOCK_V2\n')
           },
         },
       ],

@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { chmod, link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { chmod, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
@@ -28,27 +27,31 @@ export class ServerCredentialStore {
 
   constructor(directory: string) { this.path = join(directory, 'server-credentials.json') }
 
-  /** Publish a complete owner record before the one-use refresh transaction starts. */
+  /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
     const lock = `${this.path}.refresh-lock`
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     const deadline = Date.now() + 15_000
-    const owner = `${process.pid} ${uuidV7()}\n`
-    for (;;) {
-      try {
-        await publishExclusive(lock, owner)
-        break
-      } catch (error) {
-        if (!(await isLockContention(error, lock))) throw error
-        if (await reclaimExitedRefreshOwner(lock)) continue
+    await ensureQueueMarker(lock, deadline)
+    const id = `${process.pid}-${uuidV7()}`
+    const holder = `${lock}.holder-${id}`
+    // Publish intent first. A later contender must see this record before it chooses a ticket.
+    await publishExclusive(holder, `${id} choosing\n`)
+    try {
+      const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0)
+      if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError()
+      await atomicWritePrivate(holder, `${id} ${ticket}\n`)
+      for (;;) {
+        const entries = await participants(lock)
+        const preceding = entries.some(entry => entry.id !== id && (entry.ticket === undefined
+          || entry.ticket < ticket || (entry.ticket === ticket && entry.id < id)))
+        if (!preceding) break
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
         await new Promise(resolve => setTimeout(resolve, 50))
       }
-    }
-    try {
       return await operation()
     } finally {
-      await rm(lock)
+      await rm(holder, { force: true })
     }
   }
 
@@ -93,31 +96,54 @@ export class ServerCredentialsInvalidError extends Error {
 export class ServerCredentialsBusyError extends Error {
   readonly code = 'SERVER_CREDENTIALS_BUSY'
   constructor() {
-    super('Credential refresh is locked. Stop other instances. If the lock has no valid owner, remove server-credentials.json.refresh-lock after all instances stop.')
+    super('Credential refresh is busy. Stop other instances. Remove a legacy refresh lock only after every instance stops.')
   }
 }
 
-async function reclaimExitedRefreshOwner(lock: string): Promise<boolean> {
-  const record = await readLockRecord(lock)
-  if (record === undefined || !await ownerExited(record)) return false
-  const claim = `${lock}.takeover-${createHash('sha256').update(record).digest('hex').slice(0, 16)}`
-  try {
-    await publishExclusive(claim, `${process.pid} ${uuidV7()}\n`)
-  } catch (error) {
-    if (!(await isLockContention(error, claim))) throw error
-    const claimant = await readLockRecord(claim)
-    if (claimant === undefined || !await ownerExited(claimant)) return false
-    if (await readLockRecord(claim) !== claimant) return false
-    await rm(claim, { force: true })
-    return false
+export const SERVER_CREDENTIALS_QUEUE_MARKER = 'DSH_REFRESH_LOCK_V2\n'
+
+async function ensureQueueMarker(lock: string, deadline: number): Promise<void> {
+  // Old versions use this path as their lock. Keep them outside the new queue.
+  for (;;) {
+    try {
+      await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER)
+      return
+    } catch (error) {
+      if (!(await isLockContention(error, lock))) throw error
+      if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
   }
-  try {
-    if (await readLockRecord(lock) !== record || !await ownerExited(record)) return false
-    await rm(lock, { force: true })
-    return true
-  } finally {
-    await rm(claim, { force: true })
+}
+
+interface QueueParticipant { id: string; ticket?: number }
+
+async function participants(lock: string): Promise<QueueParticipant[]> {
+  const prefix = `${basename(lock)}.holder-`
+  const entries = await readdir(dirname(lock))
+  const result: QueueParticipant[] = []
+  for (const name of entries) {
+    if (!name.startsWith(prefix)) continue
+    if (name.endsWith('.tmp')) continue
+    const id = name.slice(prefix.length)
+    if (!/^\d+-[0-9a-f-]{36}$/.test(id)) throw new ServerCredentialsBusyError()
+    const path = join(dirname(lock), name)
+    const record = await readLockRecord(path)
+    if (record === undefined) continue
+    const match = new RegExp(`^${id} (choosing|[1-9]\\d*)\\n$`).exec(record)
+    if (match === null) throw new ServerCredentialsBusyError()
+    const pid = Number(id.slice(0, id.indexOf('-')))
+    // A unique path cannot become a new owner's record. Dead records can leave the queue.
+    if (await ownerExited(pid)) {
+      await rm(path, { force: true })
+      continue
+    }
+    const ticket = match[1] === 'choosing' ? undefined : Number(match[1])
+    if (ticket !== undefined && !Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError()
+    result.push({ id, ...(ticket === undefined ? {} : { ticket }) })
   }
+  return result
 }
 
 async function publishExclusive(path: string, record: string): Promise<void> {
@@ -134,13 +160,20 @@ async function isLockContention(error: unknown, path: string): Promise<boolean> 
 }
 
 async function readLockRecord(path: string): Promise<string | undefined> {
-  try { return await readFile(path, 'utf8') } catch { return undefined }
+  try { return await readFile(path, 'utf8') } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
+  }
 }
 
-async function ownerExited(record: string): Promise<boolean> {
-  const match = /^(\d+)(?: [0-9a-f-]{36})?\n$/.exec(record)
-  if (match === null) return false
-  const pid = Number(match[1])
+async function readQueueMarker(lock: string): Promise<string | undefined> {
+  try { return await readLockRecord(lock) } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EISDIR') return undefined
+    throw error
+  }
+}
+
+async function ownerExited(pid: number): Promise<boolean> {
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false
   try { process.kill(pid, 0); return false } catch (error) {
     if (process.platform === 'win32') return windowsOwnerExited(pid)
