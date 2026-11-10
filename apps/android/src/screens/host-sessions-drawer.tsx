@@ -310,39 +310,14 @@ export function HostSessionsDrawer({
       return
     }
 
-    if (target === backend && selected && (selected.backend ?? 'harness') === target) {
-      closeDrawer()
-      return
+    // Switching categories only browses the target catalogue. It must not
+    // depend on cached sessions or create a thread in a fallback directory.
+    setBackend(target)
+    setVisibleCounts({})
+    if (deviceId !== undefined) {
+      void saveWorkspaceBackend(deviceId, target)
     }
-
-    let success = false
-    const targetSessions = sessions.filter(s => (s.backend ?? 'harness') === target && !archivedIds.includes(s.sessionId))
-    if (targetSessions.length > 0) {
-      const latest = [...targetSessions].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      if (latest) {
-        await onSelect(latest)
-        success = true
-      }
-    } else {
-      const targetWs = workspaces.find(w => (w.backend ?? 'harness') === target)?.workspaceId
-      success = await createSession(targetWs, target)
-    }
-
-    if (success) {
-      setBackend(target)
-      if (deviceId !== undefined) {
-        void saveWorkspaceBackend(deviceId, target)
-      }
-      if (connected) {
-        void refreshWorkspaces(target)
-      }
-      closeDrawer()
-    } else {
-      Alert.alert(
-        strings.common.unavailable ?? '切换失败',
-        `无法切换到 ${harnessDisplayName(target)} 对话，请稍后重试。`,
-      )
-    }
+    // The backend effect loads the catalogue without changing the open chat.
   }
 
   const [refreshing, setRefreshing] = useState(false)
