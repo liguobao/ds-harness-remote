@@ -7,6 +7,8 @@ Plugin 使用 V2 Marker 和独立 Holder 文件串行刷新。默认目录迁移
 Linux 单机本地 ext4 和 XFS 为目标支持范围。WSL2 ext4.vhdx 用于开发测试。
 NFS、SMB 共享凭据目录和跨主机锁不在范围内。Windows Host 尚未完成验收。
 升级或降级前必须停止所有 Harness 进程。0.6.3 降级步骤见 `docs/plugin-integration.md`。
+本地 ext4 Plugin 全套 594 tests、类型检查、构建和 bundle 校验通过。
+CI 在 XFS 挂载上完成硬链接检查、凭据锁测试和迁移测试。
 
 ## Interrupted trust-file migration recovery (2026-11-09)
 

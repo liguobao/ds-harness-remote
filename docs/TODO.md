@@ -5,7 +5,7 @@
 - [x] 默认目录迁移与刷新共用闸门。迁移清理死亡 Holder，识别队列 `.tmp`。
 - [x] 文档说明 V2 Marker、0.6.3 降级步骤和平台范围。
 - [x] Linux 测试覆盖多进程刷新、强杀 Holder、死亡 Holder 迁移和硬链接失败。
-- [ ] 在 XFS 上运行硬链接与刷新测试，并记录结果。
+- [x] CI 在本地 XFS 挂载上验证硬链接，并通过凭据锁与迁移测试。
 - [ ] Windows Harness Host 在实际 Electron 44.7.0 / Node 24.21.0 环境验收。
 
 更新日期：2026-11-05。当前源码版本为 `0.6.3`，Android `versionCode 71`，Expo iOS `buildNumber 71`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
