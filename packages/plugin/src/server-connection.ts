@@ -212,9 +212,7 @@ export class HostServerConnection {
         if (TERMINAL_AUTH_ERRORS.has(code)) {
           this.logger.warn(code === 'CONNECTION_REPLACED'
             ? 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused.'
-            : code === 'SERVER_CREDENTIALS_BUSY'
-              ? 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.'
-              : 'Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.')
+            : 'Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.')
         }
         if (code === 'DEVICE_REVOKED') {
           try {
@@ -1344,7 +1342,6 @@ export class HostServerConnection {
 
 const TERMINAL_AUTH_ERRORS = new Set([
   'CONNECTION_REPLACED',
-  'SERVER_CREDENTIALS_BUSY',
   'ACCOUNT_AUTH_REQUIRED',
   'AUTH_INVALID',
   'DEVICE_OWNERSHIP_REQUIRED',

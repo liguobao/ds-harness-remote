@@ -6420,7 +6420,7 @@ import { randomBytes as randomBytes22 } from "crypto";
 import { setTimeout as setTimeout2 } from "timers/promises";
 import { createCipheriv, createDecipheriv } from "crypto";
 import {
-  createHash as createHash2,
+  createHash as createHash3,
   createHmac,
   createPrivateKey,
   createPublicKey,
@@ -6462,7 +6462,7 @@ import { connect as connect3, createServer as createServer2 } from "node:net";
 import { isIP as isIP3 } from "node:net";
 import * as tls2 from "node:tls";
 import { setTimeout as setTimeout42 } from "timers/promises";
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash32 } from "crypto";
 import * as os from "node:os";
 import { createHmac as createHmac5, randomBytes as randomBytes82 } from "crypto";
 import { randomBytes as randomBytes10 } from "crypto";
@@ -7206,7 +7206,7 @@ function exportKeyingMaterial(label, length, masterSecret, localRandom, remoteRa
   return prfPHash(masterSecret, seed, length);
 }
 function hash2(algorithm, data2) {
-  return createHash2(algorithm).update(data2).digest();
+  return createHash3(algorithm).update(data2).digest();
 }
 function prfVerifyData(masterSecret, handshakes, label, size2 = 12) {
   const bytes = hash2("sha256", handshakes);
@@ -8791,7 +8791,7 @@ async function waitForListening(server, host, port) {
   });
 }
 function makeTurnIntegrityKey(username, realm, password) {
-  return createHash3("md5").update(Buffer.from([username, realm, password].join(":"))).digest();
+  return createHash32("md5").update(Buffer.from([username, realm, password].join(":"))).digest();
 }
 function isChannelData(data2) {
   return data2.length >= 4 && (data2[0] & 192) === 64;
@@ -77963,7 +77963,7 @@ function safeStartupError(error62) {
   if (code === "SERVER_CREDENTIALS_BUSY") {
     return {
       code,
-      message: "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again."
+      message: "Credential refresh is busy. The Host will retry. If the lock has no valid owner, stop all instances before removing server-credentials.json.refresh-lock."
     };
   }
   if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
@@ -82942,6 +82942,7 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
+import { createHash as createHash2 } from "node:crypto";
 import { chmod, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
 import { dirname as dirname2, join as join3 } from "node:path";
 var credentialSchema = external_exports.object({
@@ -82963,10 +82964,7 @@ var ServerCredentialStore = class {
   constructor(directory) {
     this.path = join3(directory, "server-credentials.json");
   }
-  /** Serialize the complete read/refresh/write transaction across processes.
-   * Never steal an old lock: a suspended owner may still consume a one-use token.
-   * After a crash, stop all instances before removing the orphaned lock.
-   */
+  /** Keep a live owner until its refresh transaction ends. Reclaim only a dead owner. */
   async withRefreshLock(operation) {
     const lock = `${this.path}.refresh-lock`;
     await mkdir2(dirname2(this.path), { recursive: true, mode: 448 });
@@ -82974,9 +82972,17 @@ var ServerCredentialStore = class {
     for (; ; ) {
       try {
         await mkdir2(lock, { mode: 448 });
+        try {
+          await writeFile(join3(lock, "owner"), `${process.pid}
+`, { mode: 384, flag: "wx" });
+        } catch (error62) {
+          await rm2(lock, { recursive: true, force: true });
+          throw error62;
+        }
         break;
       } catch (error62) {
         if (!(error62 instanceof Error) || !("code" in error62) || error62.code !== "EEXIST") throw error62;
+        if (await reclaimExitedRefreshOwner(lock)) continue;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
         await new Promise((resolve9) => setTimeout(resolve9, 50));
       }
@@ -83023,9 +83029,46 @@ var ServerCredentialsInvalidError = class extends Error {
 var ServerCredentialsBusyError = class extends Error {
   code = "SERVER_CREDENTIALS_BUSY";
   constructor() {
-    super("Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.");
+    super("Credential refresh is locked. Stop other instances. If the lock has no valid owner, remove server-credentials.json.refresh-lock after all instances stop.");
   }
 };
+async function reclaimExitedRefreshOwner(lock) {
+  const record11 = await readRefreshOwner(lock);
+  if (record11 === void 0 || !refreshOwnerExited(record11)) return false;
+  const claim2 = `${lock}.takeover-${createHash2("sha256").update(record11).digest("hex").slice(0, 16)}`;
+  try {
+    await writeFile(claim2, `${process.pid}
+`, { mode: 384, flag: "wx" });
+  } catch (error62) {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "EEXIST") return false;
+    throw error62;
+  }
+  try {
+    if (await readRefreshOwner(lock) !== record11 || !refreshOwnerExited(record11)) return false;
+    await rm2(lock, { recursive: true, force: true });
+    return true;
+  } finally {
+    await rm2(claim2, { force: true });
+  }
+}
+async function readRefreshOwner(lock) {
+  try {
+    return await readFile2(join3(lock, "owner"), "utf8");
+  } catch {
+    return void 0;
+  }
+}
+function refreshOwnerExited(record11) {
+  if (!/^\d+\n$/.test(record11)) return false;
+  const pid = Number(record11.trim());
+  if (pid < 1 || pid > 2147483647 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error62) {
+    return error62 instanceof Error && "code" in error62 && error62.code === "ESRCH";
+  }
+}
 async function atomicWritePrivate(path, contents) {
   await mkdir2(dirname2(path), { recursive: true, mode: 448 });
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
@@ -84370,7 +84413,7 @@ var HostServerApi = class {
       return await this.store.withRefreshLock(operation);
     } catch (error62) {
       if (error62 instanceof ServerCredentialsBusyError) {
-        throw new ServerApiError(error62.code, error62.message, false);
+        throw new ServerApiError(error62.code, error62.message, true);
       }
       throw error62;
     }
@@ -97803,7 +97846,7 @@ var HostServerConnection = class {
           this.logger.warn("Server does not support the Remote protocol version; automatic reconnect is paused.");
         }
         if (TERMINAL_AUTH_ERRORS.has(code)) {
-          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.");
+          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : "Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.");
         }
         if (code === "DEVICE_REVOKED") {
           try {
@@ -98787,7 +98830,6 @@ var HostServerConnection = class {
 };
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "CONNECTION_REPLACED",
-  "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
   "AUTH_INVALID",
   "DEVICE_OWNERSHIP_REQUIRED",

@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { once } from 'node:events'
 import { build } from 'esbuild'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ServerCredentialStore } from '../src/server-credentials.js'
@@ -62,6 +63,47 @@ describe('credential refresh process lock', () => {
     await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
     expect(operation).not.toHaveBeenCalled()
     expect((await stat(lock)).isDirectory()).toBe(true)
+  })
+
+  it('recovers a lock after its owner process exits during refresh', async () => {
+    const path = await directory()
+    const entry = join(path, 'store.mjs')
+    await build({
+      entryPoints: [fileURLToPath(new URL('../src/server-credentials.ts', import.meta.url))],
+      outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
+    })
+    const worker = join(path, 'crash-worker.mjs')
+    await writeFile(worker, `
+      import { ServerCredentialStore } from ${JSON.stringify(pathToFileURL(entry).href)};
+      await new ServerCredentialStore(process.argv[2]).withRefreshLock(async () => {
+        process.stdout.write('locked');
+        await new Promise(() => {});
+      });
+    `)
+    const child = spawn(process.execPath, [worker, path], { stdio: ['ignore', 'pipe', 'pipe'] })
+    try {
+      await once(child.stdout!, 'data')
+      const lock = join(path, 'server-credentials.json.refresh-lock')
+      expect((await stat(lock)).isDirectory()).toBe(true)
+      child.kill('SIGKILL')
+      await once(child, 'exit')
+      await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
+      await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL')
+    }
+  })
+
+  it('does not reclaim a live owner or an unreadable owner record', async () => {
+    const path = await directory()
+    const lock = join(path, 'server-credentials.json.refresh-lock')
+    await mkdir(lock)
+    await writeFile(join(lock, 'owner'), `${process.pid}\n`)
+    vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
+    await writeFile(join(lock, 'owner'), 'invalid')
+    vi.mocked(Date.now).mockReturnValueOnce(0)
+    await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'stolen')).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
   })
 
   it('releases its lock when the operation rejects', async () => {

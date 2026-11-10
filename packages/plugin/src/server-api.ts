@@ -374,7 +374,7 @@ export class HostServerApi {
       return await this.store.withRefreshLock(operation)
     } catch (error) {
       if (error instanceof ServerCredentialsBusyError) {
-        throw new ServerApiError(error.code, error.message, false)
+        throw new ServerApiError(error.code, error.message, true)
       }
       throw error
     }
