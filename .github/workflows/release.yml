@@ -34,8 +34,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
@@ -72,7 +72,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -80,7 +80,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           # npm trusted publishing requires the npm version bundled with Node 24.
           node-version: 24
@@ -251,7 +251,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -259,7 +259,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.9.0
           cache: pnpm
@@ -280,7 +280,7 @@ jobs:
         run: pnpm --filter './packages/**' -r build
 
       - name: Check out Intelligent UI renderer source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: dreamfarer-space/deepseek-harness-intelligent-ui
           # Pinned upstream PR #82 merge commit; update only after auditing the new artifact.

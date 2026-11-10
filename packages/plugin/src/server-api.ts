@@ -4,7 +4,7 @@ import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { HostIdentity } from './identity-store.js'
-import { ServerCredentialsBusyError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
+import { ServerCredentialsBusyError, ServerCredentialsLockUnsupportedError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
 import { normalizeServerUrl } from './config.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -374,6 +374,9 @@ export class HostServerApi {
       return await this.store.withRefreshLock(operation)
     } catch (error) {
       if (error instanceof ServerCredentialsBusyError) {
+        throw new ServerApiError(error.code, error.message, true)
+      }
+      if (error instanceof ServerCredentialsLockUnsupportedError) {
         throw new ServerApiError(error.code, error.message, false)
       }
       throw error

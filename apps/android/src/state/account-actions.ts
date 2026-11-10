@@ -31,6 +31,7 @@ import {
   loadServerConfig,
   loadThemePreference,
   loadTypographyDensity,
+  loadActivityDockMode,
   loadStatusBarVisible,
   loadTransportPreference,
   loadTrustedHosts,
@@ -42,6 +43,7 @@ import {
   saveServerConfig,
   saveThemePreference,
   saveTypographyDensity,
+  saveActivityDockMode,
   saveStatusBarVisible,
   trustHost,
 } from '../services/storage'
@@ -107,13 +109,14 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, activityDockMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
           loadLanguagePreference(),
           loadThemePreference(),
           loadTypographyDensity(),
+          loadActivityDockMode(),
           loadStatusBarVisible(),
           loadFavoriteWorkspaces(),
           loadRecentWorkspaces(),
@@ -131,6 +134,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           language,
           themePreference,
           typographyDensity,
+          activityDockMode,
           statusBarVisible,
           compactHistory,
           defaultPermissionPreset,
@@ -527,6 +531,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         language,
         themePreference: 'system',
         typographyDensity: 'compact',
+        activityDockMode: 'compact',
         statusBarVisible: true,
         compactHistory: false,
         defaultPermissionPreset: 'default',
@@ -538,7 +543,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, typographyDensity, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
+      const { config, identity, languagePreference, themePreference, typographyDensity, activityDockMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       await clearBrowseMemory()
       if (config !== undefined && identity !== undefined) {
@@ -553,6 +558,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveLanguagePreference(languagePreference)
       await saveThemePreference(themePreference)
       await saveTypographyDensity(typographyDensity)
+      await saveActivityDockMode(activityDockMode)
       await saveStatusBarVisible(statusBarVisible)
       await saveCompactHistory(compactHistory)
       await saveDefaultPermissionPreset(defaultPermissionPreset)

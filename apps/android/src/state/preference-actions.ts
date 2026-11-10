@@ -1,5 +1,6 @@
 import { applyLanguagePreference, updateSystemLocales } from '../locales/i18n'
 import {
+  saveActivityDockMode,
   saveDefaultPermissionPreset,
   saveCompactHistory,
   saveLanguagePreference,
@@ -12,11 +13,15 @@ import type { AppState } from './store-state'
 import type { SessionAccess } from './session-runtime'
 
 export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setActivityDockMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
       set({ compactHistory })
+    },
+    async setActivityDockMode(activityDockMode) {
+      await saveActivityDockMode(activityDockMode)
+      set({ activityDockMode })
     },
     async setTransportPreference(preference) {
       await saveTransportPreference(preference)

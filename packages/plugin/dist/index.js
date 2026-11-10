@@ -78573,7 +78573,7 @@ function safeStartupError(error62) {
   if (code === "SERVER_CREDENTIALS_BUSY") {
     return {
       code,
-      message: "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again."
+      message: "Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops."
     };
   }
   if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
@@ -83855,8 +83855,8 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
-import { chmod, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
-import { dirname as dirname2, join as join3 } from "node:path";
+import { chmod, link, mkdir as mkdir2, readFile as readFile2, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
+import { basename as basename3, dirname as dirname2, join as join3, sep } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -83876,29 +83876,11 @@ var ServerCredentialStore = class {
   constructor(directory) {
     this.path = join3(directory, "server-credentials.json");
   }
-  /** Serialize the complete read/refresh/write transaction across processes.
-   * Never steal an old lock: a suspended owner may still consume a one-use token.
-   * After a crash, stop all instances before removing the orphaned lock.
-   */
+  /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock(operation) {
-    const lock = `${this.path}.refresh-lock`;
-    await mkdir2(dirname2(this.path), { recursive: true, mode: 448 });
-    const deadline = Date.now() + 15e3;
-    for (; ; ) {
-      try {
-        await mkdir2(lock, { mode: 448 });
-        break;
-      } catch (error62) {
-        if (!(error62 instanceof Error) || !("code" in error62) || error62.code !== "EEXIST") throw error62;
-        if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
-        await new Promise((resolve9) => setTimeout(resolve9, 50));
-      }
-    }
-    try {
-      return await operation();
-    } finally {
-      await rm2(lock, { recursive: true });
-    }
+    const gate = defaultMigrationGate(dirname2(this.path));
+    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation);
+    return gate === void 0 ? run() : withQueueLock(gate, run);
   }
   async pairingHostOnly() {
     const policy = await readPrivateJson(join3(dirname2(this.path), "pairing-host-only.json"));
@@ -83930,15 +83912,161 @@ var ServerCredentialStore = class {
     await rm2(this.path, { force: true });
   }
 };
+function defaultMigrationGate(directory) {
+  const parts = directory.split(sep);
+  let rootIndex = -1;
+  for (let index = parts.length - 1; index >= 0; index--) {
+    if ((parts[index] === "remote" || parts[index] === "ds-harness-remote") && (index === parts.length - 1 || parts[index + 1] === "servers")) {
+      rootIndex = index;
+      break;
+    }
+  }
+  if (rootIndex < 1) return void 0;
+  const suffix = parts.slice(rootIndex + 1);
+  if (suffix.length !== 0 && (suffix.length !== 3 || suffix[0] !== "servers" || !/^[a-f0-9]{24}$/.test(suffix[1]) || !["host", "client"].includes(suffix[2]))) return void 0;
+  return join3(parts.slice(0, rootIndex).join(sep) || sep, ".ds-harness-remote-migration", "credential-refresh-gate");
+}
+function withDefaultCredentialMigrationGate(home, operation) {
+  return withQueueLock(join3(home, ".ds-harness-remote-migration", "credential-refresh-gate"), operation);
+}
+async function assertRefreshQueueIdle(directory) {
+  const lock = join3(directory, "server-credentials.json.refresh-lock");
+  const marker = await readQueueMarker(lock);
+  if (marker === void 0) {
+    if ((await readdir(directory)).some((name2) => name2.startsWith(`${basename3(lock)}.holder-`) && !name2.endsWith(".tmp"))) {
+      throw new ServerCredentialsBusyError();
+    }
+    return;
+  }
+  if (marker !== SERVER_CREDENTIALS_QUEUE_MARKER) throw new ServerCredentialsBusyError();
+  if ((await participants(lock)).length > 0) throw new ServerCredentialsBusyError();
+}
+async function withQueueLock(lock, operation) {
+  await mkdir2(dirname2(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + 15e3;
+  await ensureQueueMarker(lock, deadline);
+  const id6 = `${process.pid}-${uuidV7()}`;
+  const holder = `${lock}.holder-${id6}`;
+  await publishExclusive(holder, `${id6} choosing
+`);
+  try {
+    const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0);
+    if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
+    await atomicWritePrivate(holder, `${id6} ${ticket}
+`);
+    for (; ; ) {
+      const entries = await participants(lock);
+      const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
+      if (!preceding) break;
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      await new Promise((resolve9) => setTimeout(resolve9, 50));
+    }
+    return await operation();
+  } finally {
+    await rm2(holder, { force: true });
+  }
+}
 var ServerCredentialsInvalidError = class extends Error {
   code = "SERVER_CREDENTIALS_INVALID";
 };
 var ServerCredentialsBusyError = class extends Error {
   code = "SERVER_CREDENTIALS_BUSY";
   constructor() {
-    super("Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.");
+    super("Credential refresh is busy. Stop other instances. Remove a legacy refresh lock only after every instance stops.");
   }
 };
+var ServerCredentialsLockUnsupportedError = class extends Error {
+  code = "SERVER_CREDENTIALS_LOCK_UNSUPPORTED";
+  constructor() {
+    super("Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.");
+  }
+};
+var SERVER_CREDENTIALS_QUEUE_MARKER = "DSH_REFRESH_LOCK_V2\n";
+async function ensureQueueMarker(lock, deadline) {
+  for (; ; ) {
+    try {
+      await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER);
+      return;
+    } catch (error62) {
+      if (!await isLockContention(error62, lock)) throw error62;
+      if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
+      if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
+      await new Promise((resolve9) => setTimeout(resolve9, 50));
+    }
+  }
+}
+async function participants(lock) {
+  const prefix = `${basename3(lock)}.holder-`;
+  const entries = await readdir(dirname2(lock));
+  const result = [];
+  for (const name2 of entries) {
+    if (!name2.startsWith(prefix)) continue;
+    if (name2.endsWith(".tmp")) continue;
+    const id6 = name2.slice(prefix.length);
+    if (!/^\d+-[0-9a-f-]{36}$/.test(id6)) throw new ServerCredentialsBusyError();
+    const path = join3(dirname2(lock), name2);
+    const record11 = await readLockRecord(path);
+    if (record11 === void 0) continue;
+    const match = new RegExp(`^${id6} (choosing|[1-9]\\d*)\\n$`).exec(record11);
+    if (match === null) throw new ServerCredentialsBusyError();
+    const pid = Number(id6.slice(0, id6.indexOf("-")));
+    if (await ownerExited(pid)) {
+      await rm2(path, { force: true });
+      continue;
+    }
+    const ticket = match[1] === "choosing" ? void 0 : Number(match[1]);
+    if (ticket !== void 0 && !Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
+    result.push({ id: id6, ...ticket === void 0 ? {} : { ticket } });
+  }
+  return result;
+}
+async function publishExclusive(path, record11) {
+  const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
+  await writeFile(temporary, record11, { mode: 384, flag: "wx" });
+  try {
+    try {
+      await link(temporary, path);
+    } catch (error62) {
+      if (error62 instanceof Error && "code" in error62 && ["EXDEV", "EOPNOTSUPP", "ENOTSUP", "ENOSYS", "EPERM", "EACCES"].includes(String(error62.code))) {
+        throw new ServerCredentialsLockUnsupportedError();
+      }
+      throw error62;
+    }
+  } finally {
+    await rm2(temporary, { force: true });
+  }
+}
+async function isLockContention(error62, path) {
+  if (!(error62 instanceof Error) || !("code" in error62)) return false;
+  if (error62.code === "EEXIST") return true;
+  if (process.platform !== "win32" || error62.code !== "EPERM") return false;
+  return exists(path);
+}
+async function readLockRecord(path) {
+  try {
+    return await readFile2(path, "utf8");
+  } catch (error62) {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return void 0;
+    throw error62;
+  }
+}
+async function readQueueMarker(lock) {
+  try {
+    return await readLockRecord(lock);
+  } catch (error62) {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "EISDIR") return void 0;
+    throw error62;
+  }
+}
+async function ownerExited(pid) {
+  if (pid < 1 || pid > 2147483647 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error62) {
+    return error62 instanceof Error && "code" in error62 && error62.code === "ESRCH";
+  }
+}
 async function atomicWritePrivate(path, contents) {
   await mkdir2(dirname2(path), { recursive: true, mode: 448 });
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
@@ -85283,6 +85411,9 @@ var HostServerApi = class {
       return await this.store.withRefreshLock(operation);
     } catch (error62) {
       if (error62 instanceof ServerCredentialsBusyError) {
+        throw new ServerApiError(error62.code, error62.message, true);
+      }
+      if (error62 instanceof ServerCredentialsLockUnsupportedError) {
         throw new ServerApiError(error62.code, error62.message, false);
       }
       throw error62;
@@ -88235,9 +88366,9 @@ var savedPairingSchema = external_exports.object({
 
 // packages/plugin/src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename3, dirname as dirname4, join as join5 } from "node:path";
+import { basename as basename4, dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -88463,6 +88594,9 @@ function serializeStatId(value) {
 }
 async function prepareDefaultIdentityDirectory(options = {}) {
   if (options.directory !== void 0) return options.directory;
+  return withDefaultStorageTransaction(options, prepareDefaultIdentityDirectoryLocked);
+}
+async function withDefaultStorageTransaction(options, operation) {
   const env = options.env ?? process.env;
   const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
   const source = join5(home, "remote");
@@ -88471,59 +88605,63 @@ async function prepareDefaultIdentityDirectory(options = {}) {
   const lockDirectory = join5(home, ".ds-harness-remote-migration");
   await storageDirectoryStat(lockDirectory);
   await ensureDirectory(lockDirectory);
-  return withIdentityLock(lockDirectory, async () => {
-    const old = await storageDirectoryStat(source);
-    const current = await storageDirectoryStat(target3);
-    const pinPath = join5(lockDirectory, "legacy-root.json");
-    const pinMetadata = await lstat(pinPath).catch((error62) => {
-      if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
-      throw error62;
-    });
-    let pin;
-    if (pinMetadata !== void 0) {
-      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
-        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
-      }
-      await assertPrivateMode2(pinPath);
-      try {
-        pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
-      } catch {
-        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
-      }
+  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(
+    home,
+    () => operation({ source, target: target3, lockDirectory })
+  ));
+}
+async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, lockDirectory }) {
+  const old = await storageDirectoryStat(source);
+  const current = await storageDirectoryStat(target3);
+  const pinPath = join5(lockDirectory, "legacy-root.json");
+  const pinMetadata = await lstat(pinPath).catch((error62) => {
+    if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+    throw error62;
+  });
+  let pin;
+  if (pinMetadata !== void 0) {
+    if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+      throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
     }
-    if (old !== void 0) {
-      if (current !== void 0) {
-        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
+    await assertPrivateMode2(pinPath);
+    try {
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+    } catch {
+      throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
+    }
+  }
+  if (old !== void 0) {
+    if (current !== void 0) {
+      throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
+    }
+    await assertOwnedRemoteStorage(source);
+    await assertStorageIdle(source);
+    if (pin !== void 0) {
+      if (pin.dev !== old.dev || pin.ino !== old.ino) {
+        throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
       }
+      return source;
+    }
+    try {
+      await rename2(source, target3);
+    } catch (error62) {
+      if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
+      const remaining = await storageDirectoryStat(source);
+      if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
       await assertOwnedRemoteStorage(source);
       await assertStorageIdle(source);
-      if (pin !== void 0) {
-        if (pin.dev !== old.dev || pin.ino !== old.ino) {
-          throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
-        }
-        return source;
-      }
-      try {
-        await rename2(source, target3);
-      } catch (error62) {
-        if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
-        const remaining = await storageDirectoryStat(source);
-        if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
-        await assertOwnedRemoteStorage(source);
-        await assertStorageIdle(source);
-        await atomicJsonWrite(pinPath, {
-          schemaVersion: 1,
-          dev: serializeStatId(old.dev),
-          ino: serializeStatId(old.ino)
-        }, 384);
-        return source;
-      }
-    } else if (pin !== void 0) {
-      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
-      await assertOwnedRemoteStorage(target3);
+      await atomicJsonWrite(pinPath, {
+        schemaVersion: 1,
+        dev: serializeStatId(old.dev),
+        ino: serializeStatId(old.ino)
+      }, 384);
+      return source;
     }
-    return target3;
-  });
+  } else if (pin !== void 0) {
+    if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
+    await assertOwnedRemoteStorage(target3);
+  }
+  return target3;
 }
 async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options = {}) {
   const createStore = options.createIdentityStore ?? ((storeOptions) => new IdentityStore(storeOptions));
@@ -88546,24 +88684,20 @@ async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options =
     await resetRolesInRoot(options.directory);
     return options.directory;
   }
-  try {
-    const root2 = await prepareDefaultIdentityDirectory(options);
-    await resetRolesInRoot(root2);
-    return root2;
-  } catch (error62) {
-    if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") {
-      throw error62;
+  return withDefaultStorageTransaction(options, async (paths) => {
+    try {
+      const root2 = await prepareDefaultIdentityDirectoryLocked(paths);
+      await resetRolesInRoot(root2);
+      return root2;
+    } catch (error62) {
+      if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") throw error62;
+      const [old, current] = await Promise.all([storageDirectoryStat(paths.source), storageDirectoryStat(paths.target)]);
+      if (old === void 0 || current !== void 0) throw error62;
+      await assertStorageIdle(paths.source);
+      await resetRolesInRoot(paths.source);
+      return prepareDefaultIdentityDirectoryLocked(paths);
     }
-    const env = options.env ?? process.env;
-    const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    const source = join5(home, "remote");
-    const target3 = join5(home, "ds-harness-remote");
-    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target3)]);
-    if (old === void 0 || current !== void 0) throw error62;
-    await assertStorageIdle(source);
-    await resetRolesInRoot(source);
-    return prepareDefaultIdentityDirectory(options);
-  }
+  });
 }
 async function assertOwnedRemoteStorage(root2) {
   let failureCode = "STORAGE_CONFLICT";
@@ -88576,6 +88710,7 @@ async function assertOwnedRemoteStorage(root2) {
     "device.key",
     "trusted-peers.json",
     "server-credentials.json",
+    "server-credentials.json.refresh-lock",
     "host-pairing.json",
     "pairing-host-only.json"
   ]);
@@ -88585,7 +88720,7 @@ async function assertOwnedRemoteStorage(root2) {
     const canAutoHeal = role2 === "client" || directory === root2 && verifiedScopedIdentities > 0;
     const entries = (await readStorageEntries(directory)).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
-      if (entry.name.includes(".refresh-lock")) {
+      if (entry.name.includes(".refresh-lock") && entry.name !== "server-credentials.json.refresh-lock" && !isRefreshQueueArtifact(entry.name)) {
         if (entry.isSymbolicLink()) throw rejected("STORAGE_CONFLICT");
         throw new IdentityInvalidError(
           "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
@@ -88606,14 +88741,17 @@ async function assertOwnedRemoteStorage(root2) {
         }
         continue;
       }
-      const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
+      const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024 || metadata.nlink !== 1 && !await isVerifiedRefreshHardlink(directory, entry.name, entries.map((item) => item.name))) {
         throw rejected("STORAGE_CONFLICT");
       }
     }
     const names = new Set(entries.map((entry) => entry.name).filter((name2) => !isLockArtifact(name2)));
+    if (names.has("server-credentials.json.refresh-lock") && await readFile3(join5(directory, "server-credentials.json.refresh-lock"), "utf8") !== SERVER_CREDENTIALS_QUEUE_MARKER) {
+      throw rejected("STORAGE_CONFLICT");
+    }
     if (!names.has("device.json") && !names.has("device.key")) {
       if (canAutoHeal && await isRepairableLegacyClientDirectory(directory, names)) {
         if (names.size > 0) identities++;
@@ -88699,7 +88837,7 @@ async function assertOwnedRemoteStorage(root2) {
       if (flat.some((entry) => {
         if (entry.name.includes(".refresh-lock")) return entry.isSymbolicLink();
         if (!entry.isFile()) return true;
-        return !identityFiles.has(entry.name) && !isOwnedTempArtifact(entry.name) && !isLockArtifact(entry.name) && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name));
+        return !identityFiles.has(entry.name) && !isOwnedTempArtifact(entry.name) && !isRefreshQueueArtifact(entry.name) && !isLockArtifact(entry.name) && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name));
       })) {
         throw rejected("STORAGE_CONFLICT");
       }
@@ -88744,8 +88882,27 @@ async function assertStorageIdle(directory) {
   const takeoverPaths = [];
   const lockPaths = [];
   const scan = async (currentDirectory) => {
-    for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
+    const before = await readdir2(currentDirectory, { withFileTypes: true });
+    const names = before.map((entry) => entry.name);
+    const linkedTemps = [];
+    for (const entry of before) {
+      if (!isRefreshQueueTemp(entry.name)) continue;
+      const metadata = await lstat(join5(currentDirectory, entry.name));
+      if (metadata.nlink === 2 && await isVerifiedRefreshHardlink(currentDirectory, entry.name, names)) {
+        linkedTemps.push(join5(currentDirectory, entry.name));
+      }
+    }
+    try {
+      await assertRefreshQueueIdle(currentDirectory);
+    } catch (error62) {
+      if (!(error62 instanceof ServerCredentialsBusyError)) throw error62;
+      throw new IdentityInvalidError("Remote storage has an active credential refresh; stop it before migration.", "IDENTITY_LOCKED");
+    }
+    for (const temporary of linkedTemps) await unlink(temporary);
+    for (const entry of await readdir2(currentDirectory, { withFileTypes: true })) {
       const entryPath = join5(currentDirectory, entry.name);
+      if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile3(entryPath, "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
+      if (entry.isFile() && isRefreshQueueArtifact(entry.name)) continue;
       if (entry.isSymbolicLink()) {
         throw new IdentityInvalidError(
           "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
@@ -88807,6 +88964,25 @@ async function assertStorageIdle(directory) {
     }
   }
 }
+var REFRESH_QUEUE_TEMP_PATTERN = /^(server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?)\.([1-9]\d*)\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
+function isRefreshQueueTemp(name2) {
+  return REFRESH_QUEUE_TEMP_PATTERN.test(name2);
+}
+async function isVerifiedRefreshHardlink(directory, name2, names) {
+  const temporary = REFRESH_QUEUE_TEMP_PATTERN.exec(name2) === null ? names.filter((candidate) => REFRESH_QUEUE_TEMP_PATTERN.exec(candidate)?.[1] === name2) : [name2];
+  if (temporary.length !== 1) return false;
+  const match = REFRESH_QUEUE_TEMP_PATTERN.exec(temporary[0]);
+  if (match === null || !names.includes(match[1]) || !ownerExited2(`${match[2]}
+`)) return false;
+  const [source, published] = await Promise.all([
+    lstat(join5(directory, temporary[0]), { bigint: true }),
+    lstat(join5(directory, match[1]), { bigint: true })
+  ]);
+  return source.isFile() && published.isFile() && source.nlink === 2n && published.nlink === 2n && source.dev === published.dev && source.ino === published.ino;
+}
+function isRefreshQueueArtifact(name2) {
+  return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name2) || isRefreshQueueTemp(name2);
+}
 function serverStorageDirectory(root2, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
   const scope2 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
@@ -88864,7 +89040,7 @@ async function withIdentityLock(directory, operation) {
 `, { encoding: "utf8", mode: 384, flag: "wx" });
       break;
     } catch (error62) {
-      if (!await isLockContention(error62, lockPath)) throw error62;
+      if (!await isLockContention2(error62, lockPath)) throw error62;
       if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
     if (Date.now() >= deadline) {
@@ -88882,7 +89058,7 @@ async function withIdentityLock(directory, operation) {
     await rm3(lockPath, { force: true });
   }
 }
-async function isLockContention(error62, lockPath) {
+async function isLockContention2(error62, lockPath) {
   if (!isNodeError(error62)) return false;
   if (error62.code === "EEXIST") return true;
   if (error62.code !== "EPERM" || process.platform !== "win32") return false;
@@ -88891,9 +89067,9 @@ async function isLockContention(error62, lockPath) {
 var MAX_LOCK_TAKEOVER_DEPTH = 8;
 async function takeOverLockOfExitedOwner(lockPath, depth = 0, reclaimed) {
   if (depth >= MAX_LOCK_TAKEOVER_DEPTH) return false;
-  const record11 = await readLockRecord(lockPath);
-  if (record11 === void 0 || !ownerExited(record11)) return false;
-  const lockName = basename3(lockPath);
+  const record11 = await readLockRecord2(lockPath);
+  if (record11 === void 0 || !ownerExited2(record11)) return false;
+  const lockName = basename4(lockPath);
   const claimInput = lockName === LOCK_FILE_NAME ? record11 : `${lockName}
 ${record11}`;
   const claimPath = join5(
@@ -88903,7 +89079,7 @@ ${record11}`;
   if (claimPath === lockPath) return false;
   if (!await acquireTakeoverClaim(claimPath, depth, reclaimed)) return false;
   try {
-    if (await readLockRecord(lockPath) !== record11 || !ownerExited(record11)) return false;
+    if (await readLockRecord2(lockPath) !== record11 || !ownerExited2(record11)) return false;
     await rm3(lockPath, { force: true });
     reclaimed?.add(lockPath);
     return true;
@@ -88918,20 +89094,20 @@ async function acquireTakeoverClaim(claimPath, depth, reclaimed) {
 `, { encoding: "utf8", mode: 384, flag: "wx" });
       return true;
     } catch (error62) {
-      if (!await isLockContention(error62, claimPath)) throw error62;
+      if (!await isLockContention2(error62, claimPath)) throw error62;
       if (attempt > 0 || !await takeOverLockOfExitedOwner(claimPath, depth + 1, reclaimed)) return false;
     }
   }
   return false;
 }
-async function readLockRecord(lockPath) {
+async function readLockRecord2(lockPath) {
   try {
     return await readFile3(lockPath, "utf8");
   } catch {
     return void 0;
   }
 }
-function ownerExited(record11) {
+function ownerExited2(record11) {
   if (!/^\d+\n$/.test(record11)) return false;
   const pid = Number(record11.trim());
   if (pid === 0 || pid > 2147483647) return false;
@@ -88951,9 +89127,9 @@ async function hasVerifiedScopedIdentity(directory) {
     const serversPath = join5(directory, "servers");
     const metadata = await lstat(serversPath);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
-    for (const scope2 of await readdir(serversPath, { withFileTypes: true })) {
+    for (const scope2 of await readdir2(serversPath, { withFileTypes: true })) {
       if (!scope2.isDirectory() || scope2.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope2.name)) continue;
-      for (const role2 of await readdir(join5(serversPath, scope2.name), { withFileTypes: true })) {
+      for (const role2 of await readdir2(join5(serversPath, scope2.name), { withFileTypes: true })) {
         if (!role2.isDirectory() || role2.isSymbolicLink() || role2.name !== "host" && role2.name !== "client") continue;
         const roleDir = join5(serversPath, scope2.name, role2.name);
         try {
@@ -89009,7 +89185,7 @@ async function ensureDirectory(directory) {
 async function removeIdentityRecords(directory) {
   let entries;
   try {
-    entries = await readdir(directory);
+    entries = await readdir2(directory);
   } catch {
     return;
   }
@@ -89026,7 +89202,7 @@ function isStorageMetadataArtifact(name2) {
   return STORAGE_METADATA_ARTIFACTS.has(name2.toLowerCase());
 }
 async function readStorageEntries(directory) {
-  const entries = await readdir(directory, { withFileTypes: true });
+  const entries = await readdir2(directory, { withFileTypes: true });
   const result = [];
   for (const entry of entries) {
     if (isStorageMetadataArtifact(entry.name) && entry.isFile()) {
@@ -89038,8 +89214,8 @@ async function readStorageEntries(directory) {
   return result;
 }
 async function isExitedLockArtifact(path) {
-  const record11 = await readLockRecord(path);
-  return record11 !== void 0 && ownerExited(record11);
+  const record11 = await readLockRecord2(path);
+  return record11 !== void 0 && ownerExited2(record11);
 }
 function isPeerTempArtifact(name2) {
   return /^trusted-peers\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name2);
@@ -89051,7 +89227,7 @@ function isOwnedTempArtifact(name2) {
 function isStaleOwnedTempArtifact(name2) {
   const match = OWNED_TEMP_ARTIFACT_PATTERN.exec(name2);
   if (match === null) return false;
-  return ownerExited(`${match[1]}
+  return ownerExited2(`${match[1]}
 `);
 }
 function isIdentityTempArtifact(name2) {
@@ -89064,7 +89240,7 @@ function isOwnedIdentityRecord(name2) {
 async function removeStaleTemporaries(directory) {
   let entries;
   try {
-    entries = await readdir(directory);
+    entries = await readdir2(directory);
   } catch {
     return;
   }
@@ -89226,9 +89402,9 @@ var ControlStatusStream = class {
 // packages/plugin/src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
-import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
+import { readdir as readdir3, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename4, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename5, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // packages/plugin/src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -90912,7 +91088,7 @@ var CodexRemoteDomain = class {
   }
   async listCodexDirectory(path) {
     const target3 = await this.resolveCodexDirectory(path);
-    const rows = await readdir2(target3.path, { withFileTypes: true }).catch(() => void 0);
+    const rows = await readdir3(target3.path, { withFileTypes: true }).catch(() => void 0);
     if (rows === void 0) {
       throw new RpcError("CODEX_PATH_NOT_ALLOWED", "The CodeX working directory is not available as a Workspace.");
     }
@@ -91166,7 +91342,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root2, path) {
-  const crumbs2 = [{ name: basename4(root2) || root2, path: root2, hidden: false }];
+  const crumbs2 = [{ name: basename5(root2) || root2, path: root2, hidden: false }];
   const remainder = relative(root2, path);
   if (remainder === "") return crumbs2;
   let current = root2;
@@ -92095,7 +92271,7 @@ var IsolatedAcpClient = class {
 };
 
 // packages/plugin/src/workspace-bridge.ts
-import { realpath as realpath2, lstat as lstat2, readdir as readdir3, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat2, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve3 } from "node:path";
 
 // packages/plugin/src/remote-terminal-controller.ts
@@ -92774,7 +92950,7 @@ var WorkspaceBridge = class {
     const target3 = await this.safePath(root2, path, endpoint === "workspaceFiles/list");
     try {
       if (endpoint === "workspaceFiles/list") {
-        const entries = await readdir3(target3, { withFileTypes: true });
+        const entries = await readdir4(target3, { withFileTypes: true });
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
@@ -93043,9 +93219,9 @@ var AcpWorkspaceTools = class {
 
 // packages/plugin/src/acp/gateway.ts
 import { randomUUID as randomUUID15 } from "node:crypto";
-import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
+import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename6, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -93372,7 +93548,7 @@ function agySelectionArgs(catalog, modelId, effort) {
 // packages/plugin/src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants4 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join9, basename as basename5 } from "node:path";
+import { join as join9, basename as basename6 } from "node:path";
 import { createHash as createHash6, randomUUID as randomUUID14 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
@@ -93449,7 +93625,7 @@ function agyImageReferences(text) {
   }
 }
 async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
-  const name2 = basename5(path);
+  const name2 = basename6(path);
   if (!IMAGE_NAME.test(name2) || path !== join9(root2, sessionFolder(sessionId), name2)) return void 0;
   try {
     await privateDirectory(root2);
@@ -94880,7 +95056,7 @@ function isSessionMutation(method) {
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
 import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep } from "node:path";
+import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve4, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir5 } from "node:os";
 import { createRequire as createRequire2 } from "node:module";
@@ -95047,7 +95223,7 @@ async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemin
             try {
               const p = fileURLToPath2(u);
               const imageRelative = relative3(AGY_IMAGE_ROOT, p);
-              const imageCache = imageRelative === "" || !isAbsolute6(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep}`);
+              const imageCache = imageRelative === "" || !isAbsolute6(imageRelative) && imageRelative !== ".." && !imageRelative.startsWith(`..${sep2}`);
               if (!imageCache) paths.add(p);
             } catch {
             }
@@ -95794,7 +95970,7 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename6(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename7(path) || "workspace" }));
         if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
         const defaultCandidates = /* @__PURE__ */ new Set();
         const cwd3 = process.cwd();
@@ -95806,7 +95982,7 @@ var AcpRemoteGateway = class {
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename6(path) || "workspace" }));
+        return [...defaultCandidates].map((path) => ({ path, title: basename7(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -95839,7 +96015,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename6(p) || "workspace",
+          title: basename7(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -96768,7 +96944,7 @@ var AcpRemoteGateway = class {
     const home = homedir6();
     const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve5(target3));
-    const names = await readdir4(canonical);
+    const names = await readdir5(canonical);
     const entries = [];
     let truncated = false;
     for (const name2 of names.sort((a, b) => a.localeCompare(b))) {
@@ -96869,7 +97045,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename6(current) || current,
+      name: current === home ? "~" : basename7(current) || current,
       path: current,
       hidden: false
     });
@@ -98150,7 +98326,7 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link as link2, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -98274,7 +98450,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link(upload.temp, join15(upload.root, name2));
+        await link2(upload.temp, join15(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -99075,7 +99251,7 @@ var HostServerConnection = class {
           this.logger.warn("Server does not support the Remote protocol version; automatic reconnect is paused.");
         }
         if (TERMINAL_AUTH_ERRORS.has(code)) {
-          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : code === "SERVER_CREDENTIALS_BUSY" ? "Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again." : "Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.");
+          this.logger.warn(code === "CONNECTION_REPLACED" ? "Another instance is using this Host identity. Stop it or use a separate DSH_HOME; automatic reconnect is paused." : "Host authorization failed. Authorize this Host again from a Remote client or in Remote settings.");
         }
         if (code === "DEVICE_REVOKED") {
           try {
@@ -100059,7 +100235,6 @@ var HostServerConnection = class {
 };
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "CONNECTION_REPLACED",
-  "SERVER_CREDENTIALS_BUSY",
   "ACCOUNT_AUTH_REQUIRED",
   "AUTH_INVALID",
   "DEVICE_OWNERSHIP_REQUIRED",
@@ -100277,12 +100452,12 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep2 } from "node:path";
+import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve8, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
+import { mkdir as mkdir4, readdir as readdir6, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename7, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename8, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
@@ -100295,7 +100470,7 @@ async function listRemoteDirectory(path, signal) {
   const home = resolve7(homedir8());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve7(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
-  const rows = await readdir5(target3, { withFileTypes: true });
+  const rows = await readdir6(target3, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
@@ -100320,7 +100495,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root2) {
-    segments.unshift(basename7(current));
+    segments.unshift(basename8(current));
     current = dirname6(current);
   }
   for (const segment of segments) {
@@ -101049,7 +101224,7 @@ var HarnessRemoteBridge = class {
       }
       const base = !isPathOutside(relCwd) ? cwd2 : root2;
       const rel = relative5(base, candidate);
-      const parts = rel.split(sep2).filter((p) => p.length > 0 && p !== ".");
+      const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = base;
       for (let i = 0; i < parts.length - 1; i++) {
         currentPath = join16(currentPath, parts[i]);

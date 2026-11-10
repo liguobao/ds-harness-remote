@@ -41,7 +41,7 @@ export function safeStartupError(error: unknown): { code: string; message: strin
   if (code === 'SERVER_CREDENTIALS_BUSY') {
     return {
       code,
-      message: 'Credential refresh is locked. Stop other instances; after a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.',
+      message: 'Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops.',
     }
   }
   if (code === 'IDENTITY_INVALID' || code === 'IDENTITY_LOCKED' || code === 'STORAGE_CONFLICT') {

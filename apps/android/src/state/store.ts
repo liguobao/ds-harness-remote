@@ -90,6 +90,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   compactHistory: false,
   themePreference: 'system',
   typographyDensity: 'compact',
+  activityDockMode: 'compact',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',

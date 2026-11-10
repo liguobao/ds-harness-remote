@@ -137,7 +137,7 @@ export const en = {
   reconnectStarted: 'Reconnect requested.',
   connectionAuthorizationExpired: 'Authorization expired. Sign out and authorize this Host again.',
   connectionReplaced: 'Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting.',
-  connectionCredentialsBusy: 'Credential refresh is locked. Stop other instances. After a crash, stop all instances before removing server-credentials.json.refresh-lock and authorizing again.',
+  connectionCredentialsBusy: 'Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops.',
   connectionDeviceRevoked: 'This Host was revoked on the Server. Sign out and authorize it again.',
   connectionOwnershipRequired: 'The Server no longer recognizes this Host as an owned device.',
   connectionRateLimited: 'The Server is receiving too many requests. Automatic retry will continue.',
@@ -487,7 +487,7 @@ export const zh: Record<keyof typeof en, string> = {
   reconnectStarted: '已发起重连。',
   connectionAuthorizationExpired: '授权已失效，请退出授权后重新连接此 Host。',
   connectionReplaced: '另一实例正在使用此 Host 身份。请停止该实例，或使用独立的 DSH_HOME 后重新连接。',
-  connectionCredentialsBusy: '凭据刷新被锁定，请停止其他实例。若此前异常退出，请停止所有实例后移除 server-credentials.json.refresh-lock 并重新授权。',
+  connectionCredentialsBusy: '凭据刷新正忙，主机将重试。只有停止所有实例后，才能移除旧版残留的刷新锁。',
   connectionDeviceRevoked: '此 Host 已在 Server 上被撤销，请退出授权后重新连接。',
   connectionOwnershipRequired: 'Server 已不再将此 Host 识别为当前账号的设备。',
   connectionRateLimited: 'Server 请求过多，插件将继续自动重试。',
@@ -707,4 +707,3 @@ export interface LocalizedMessage {
   key: LocaleKey
   params?: Record<string, string | number>
 }
-

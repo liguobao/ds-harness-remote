@@ -9,7 +9,7 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
@@ -30,7 +30,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, ThemePreference, TypographyDensity } from '../ui/theme'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
@@ -644,6 +644,15 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   const [densitySaving, setDensitySaving] = useState(false)
   const [densityPickerOpen, setDensityPickerOpen] = useState(false)
   const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
+  const activityDockMode = useAppStore(state => state.activityDockMode)
+  const setActivityDockMode = useAppStore(state => state.setActivityDockMode)
+  const [activityDockSaving, setActivityDockSaving] = useState(false)
+  const [activityDockPickerOpen, setActivityDockPickerOpen] = useState(false)
+  const currentActivityDockLabel = activityDockMode === 'cards'
+    ? zhCN.settings.activityDockCards
+    : activityDockMode === 'hidden'
+      ? zhCN.settings.activityDockHidden
+      : zhCN.settings.activityDockCompact
   const compactHistory = useAppStore(state => state.compactHistory)
   const setCompactHistory = useAppStore(state => state.setCompactHistory)
   const [compactSaving, setCompactSaving] = useState(false)
@@ -690,6 +699,14 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     try { await setTypographyDensity(value) }
     catch { Alert.alert(zhCN.settings.typographyDensitySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setDensitySaving(false) }
+  }
+
+  const toggleActivityDockMode = async (value: ActivityDockMode) => {
+    if (activityDockSaving || value === activityDockMode) return
+    setActivityDockSaving(true)
+    try { await setActivityDockMode(value) }
+    catch { Alert.alert(zhCN.settings.activityDockModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setActivityDockSaving(false) }
   }
 
   const toggleStatusBar = async (visible: boolean) => {
@@ -778,6 +795,13 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 value={currentDensityLabel}
                 chevron
                 onPress={() => setDensityPickerOpen(true)}
+              />
+              <GroupRow
+                icon={Layers}
+                label={zhCN.settings.activityDockMode}
+                value={currentActivityDockLabel}
+                chevron
+                onPress={() => setActivityDockPickerOpen(true)}
               />
               <GroupRow
                 icon={PanelTop}
@@ -1046,6 +1070,42 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                       onPress={() => {
                         setDensityPickerOpen(false)
                         void toggleTypographyDensity(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={activityDockPickerOpen} transparent animationType="fade" onRequestClose={() => setActivityDockPickerOpen(false)} statusBarTranslucent>
+        <View style={styles.languageBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setActivityDockPickerOpen(false)} />
+          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.activityDockMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setActivityDockPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'compact' as const, name: zhCN.settings.activityDockCompact },
+                  { value: 'cards' as const, name: zhCN.settings.activityDockCards },
+                  { value: 'hidden' as const, name: zhCN.settings.activityDockHidden },
+                ]).map((option, index) => {
+                  const chosen = option.value === activityDockMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setActivityDockPickerOpen(false)
+                        void toggleActivityDockMode(option.value)
                       }}
                     />
                   )

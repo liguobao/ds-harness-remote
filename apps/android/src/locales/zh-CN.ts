@@ -352,6 +352,8 @@ const zhCN = {
     compactHistory: '会话精简模式', compactHistoryNote: '缩减历史工具详情，保留正文和状态。需 Host 支持；切换后重新打开会话生效。',
     typographyDensity: '排版密度', typographyDensityNote: '调整正文行距、段间距与气泡紧凑度',
     densityStandard: '标准', densityCompact: '紧凑', typographyDensitySaveFailed: '无法保存排版密度设置',
+    activityDockMode: '活动组件展示', activityDockModeNote: '控制对话输入框上方后台任务、子任务与智能体团队的展示方式',
+    activityDockCompact: '紧凑胶囊栏', activityDockCards: '独立折叠卡片', activityDockHidden: '始终隐藏', activityDockModeSaveFailed: '无法保存活动组件展示设置',
     statusBar: '显示状态栏', statusBarNote: '显示屏幕顶部的时间、电量和网络状态。关闭后隐藏系统状态栏。', statusBarSaveFailed: '无法保存状态栏设置', statusBarSaveFailedBody: '本地存储写入失败，请重试。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',
