@@ -87228,7 +87228,7 @@ var savedPairingSchema = external_exports.object({
 import { createHash as createHash5 } from "node:crypto";
 import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { dirname as dirname4, join as join5 } from "node:path";
+import { basename as basename3, dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   deviceId: external_exports.string().uuid(),
@@ -87309,9 +87309,11 @@ var IdentityStore = class {
     const devicePath = join5(this.directory, "device.json");
     const keyPath = join5(this.directory, "device.key");
     const [hasDevice, hasKey] = await Promise.all([exists2(devicePath), exists2(keyPath)]);
-    const isClientRole = this.role === "client" || this.role === void 0 && isScopedClientDirectory(this.directory);
+    const isScopedOrExplicitClient = this.role === "client" || this.role === void 0 && isScopedClientDirectory(this.directory);
+    const isFlatRootWithScopedIdentity = !isScopedOrExplicitClient && this.role === void 0 && await hasVerifiedScopedIdentity(this.directory);
+    const isClientRole = isScopedOrExplicitClient || isFlatRootWithScopedIdentity;
     if (hasDevice !== hasKey) {
-      if (isClientRole && await canAutoHealClientIdentity(this.directory)) {
+      if (isClientRole && await canAutoHealClientIdentity(this.directory, isFlatRootWithScopedIdentity)) {
         await removeIdentityRecords(this.directory);
         return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
       }
@@ -87324,7 +87326,7 @@ var IdentityStore = class {
     try {
       identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
     } catch (error62) {
-      if (error62 instanceof IdentityInvalidError && isClientRole && await canAutoHealClientIdentity(this.directory)) {
+      if (error62 instanceof IdentityInvalidError && isClientRole && await canAutoHealClientIdentity(this.directory, isFlatRootWithScopedIdentity)) {
         await removeIdentityRecords(this.directory);
         return this.createAndReadIdentityLocked(devicePath, keyPath, deviceName);
       }
@@ -87569,31 +87571,65 @@ async function assertOwnedRemoteStorage(root2) {
     "pairing-host-only.json"
   ]);
   let identities = 0;
+  let verifiedScopedIdentities = 0;
   const checkIdentity = async (directory, scope2, role2) => {
+    const canAutoHeal = role2 === "client" || directory === root2 && verifiedScopedIdentities > 0;
     const entries = (await readdir(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
-      const allowedFile = identityFiles.has(entry.name) || isPeerTempArtifact(entry.name) || role2 === "client" && isIdentityTempArtifact(entry.name);
+      if (entry.name.includes(".refresh-lock")) {
+        if (entry.isSymbolicLink()) throw rejected("STORAGE_CONFLICT");
+        throw new IdentityInvalidError(
+          "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+          "IDENTITY_LOCKED"
+        );
+      }
+      if (isLockArtifact(entry.name)) {
+        const lockPath = join5(directory, entry.name);
+        const metadata2 = await lstat(lockPath);
+        if (!entry.isFile() || !metadata2.isFile() || metadata2.isSymbolicLink() || metadata2.nlink !== 1 || metadata2.size > 16 * 1024 * 1024) {
+          throw rejected("STORAGE_CONFLICT");
+        }
+        if (!await isExitedLockArtifact(lockPath)) {
+          throw new IdentityInvalidError(
+            "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+            "IDENTITY_LOCKED"
+          );
+        }
+        continue;
+      }
+      const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
         throw rejected("STORAGE_CONFLICT");
       }
     }
-    const names = new Set(entries.map((entry) => entry.name));
-    if (!names.has("device.json") && !names.has("device.key")) throw rejected("STORAGE_CONFLICT");
+    const names = new Set(entries.map((entry) => entry.name).filter((name2) => !isLockArtifact(name2)));
+    if (!names.has("device.json") && !names.has("device.key")) {
+      if (canAutoHeal && await isRepairableLegacyClientDirectory(directory, names)) {
+        if (names.size > 0) identities++;
+        return;
+      }
+      throw rejected("STORAGE_CONFLICT");
+    }
     failureCode = "IDENTITY_INVALID";
     if (!names.has("device.json") || !names.has("device.key")) {
-      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+      if (canAutoHeal && await isRepairableLegacyClientDirectory(directory, names)) {
         identities++;
         return;
       }
       throw rejected("IDENTITY_INVALID");
     }
     await assertPrivateMode2(join5(directory, "device.key"));
-    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
-    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
-    if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
-      if (role2 === "client" && await isRepairableLegacyClientDirectory(directory, names)) {
+    let record11;
+    try {
+      record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
+      const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+      if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
+        throw new IdentityInvalidError("device public and private keys do not match");
+      }
+    } catch {
+      if (canAutoHeal && await isRepairableLegacyClientDirectory(directory, names)) {
         identities++;
         return;
       }
@@ -87610,7 +87646,8 @@ async function assertOwnedRemoteStorage(root2) {
     if (names.has("server-credentials.json")) {
       const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
       if (typeof raw.serverUrl !== "string") throw rejected("IDENTITY_INVALID");
-      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, record11.deviceId);
+      const expectedDeviceId = role2 === "client" && typeof raw.deviceId === "string" && external_exports.string().uuid().safeParse(raw.deviceId).success ? raw.deviceId : record11.deviceId;
+      const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, expectedDeviceId);
       if (credentials === void 0) throw rejected("IDENTITY_INVALID");
       const origin = new URL(credentials.serverUrl);
       if (!["http:", "https:"].includes(origin.protocol)) throw rejected("IDENTITY_INVALID");
@@ -87633,14 +87670,10 @@ async function assertOwnedRemoteStorage(root2) {
       }
     }
     identities++;
+    if (scope2 !== void 0) verifiedScopedIdentities++;
   };
   try {
     const entries = await readdir(root2, { withFileTypes: true });
-    const flat = entries.filter((entry) => entry.name !== "servers");
-    if (flat.length > 0) {
-      if (flat.some((entry) => !entry.isFile() || !identityFiles.has(entry.name) && !isPeerTempArtifact(entry.name))) throw rejected("STORAGE_CONFLICT");
-      await checkIdentity(root2);
-    }
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
       if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
@@ -87652,28 +87685,37 @@ async function assertOwnedRemoteStorage(root2) {
         }
       }
     }
+    const flat = entries.filter((entry) => entry.name !== "servers");
+    if (flat.length > 0) {
+      if (flat.some((entry) => {
+        if (entry.name.includes(".refresh-lock")) return entry.isSymbolicLink();
+        if (!entry.isFile()) return true;
+        return !identityFiles.has(entry.name) && !isOwnedTempArtifact(entry.name) && !isLockArtifact(entry.name) && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name));
+      })) {
+        throw rejected("STORAGE_CONFLICT");
+      }
+      await checkIdentity(root2);
+    }
     if (identities === 0) throw rejected(failureCode);
   } catch (error62) {
-    if (error62 instanceof IdentityInvalidError && error62.message === "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.") {
+    if (error62 instanceof IdentityInvalidError && (error62.message === "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." || error62.code === "IDENTITY_LOCKED")) {
       throw error62;
     }
     throw rejected(failureCode);
   }
 }
 async function isRepairableLegacyClientDirectory(directory, names) {
-  if (names.has("server-credentials.json") || names.has("host-pairing.json") || names.has("pairing-host-only.json")) return false;
+  for (const name2 of names) {
+    if (name2 === "server-credentials.json" || name2 === "host-pairing.json" || name2 === "pairing-host-only.json" || name2.startsWith("server-credentials.json.") || name2.startsWith("host-pairing.json.") || name2.startsWith("pairing-host-only.json.")) {
+      return false;
+    }
+  }
   if (names.has("trusted-peers.json")) {
     const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
     if (peers.length > 0) return false;
   }
-  if (names.has("device.json")) {
-    const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
-    if (fromBase64Url2(record11.publicKey).byteLength !== 32) return false;
-  }
   if (names.has("device.key")) {
     await assertPrivateMode2(join5(directory, "device.key"));
-    const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
-    generateKeyPair(fromBase64Url2(key));
   }
   return true;
 }
@@ -87690,14 +87732,70 @@ async function storageDirectoryStat(path) {
   }
 }
 async function assertStorageIdle(directory) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isSymbolicLink() || entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+  const takeoverPaths = [];
+  const lockPaths = [];
+  const scan = async (currentDirectory) => {
+    for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
+      const entryPath = join5(currentDirectory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new IdentityInvalidError(
+          "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+          "STORAGE_CONFLICT"
+        );
+      }
+      if (entry.name === LOCK_FILE_NAME && entry.isFile()) {
+        if (!await isExitedLockArtifact(entryPath)) {
+          throw new IdentityInvalidError(
+            "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+            "IDENTITY_LOCKED"
+          );
+        }
+        lockPaths.push(entryPath);
+        continue;
+      }
+      if (isTakeoverLockArtifact(entry.name) && entry.isFile()) {
+        if (!await isExitedLockArtifact(entryPath)) {
+          throw new IdentityInvalidError(
+            "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+            "IDENTITY_LOCKED"
+          );
+        }
+        takeoverPaths.push(entryPath);
+        continue;
+      }
+      if (isOwnedTempArtifact(entry.name) && entry.isFile() && !isStaleOwnedTempArtifact(entry.name)) {
+        throw new IdentityInvalidError(
+          "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+          "IDENTITY_LOCKED"
+        );
+      }
+      if (entry.name === LOCK_FILE_NAME || entry.name.includes(".refresh-lock") || entry.name.startsWith(`${LOCK_FILE_NAME}.takeover-`)) {
+        throw new IdentityInvalidError(
+          "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+          "IDENTITY_LOCKED"
+        );
+      }
+      if (entry.isDirectory()) await scan(entryPath);
+    }
+  };
+  await scan(directory);
+  const reclaimed = /* @__PURE__ */ new Set();
+  for (const takeoverPath of takeoverPaths) {
+    if (reclaimed.has(takeoverPath)) continue;
+    if (!await takeOverLockOfExitedOwner(takeoverPath, 0, reclaimed)) {
       throw new IdentityInvalidError(
         "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
-        entry.isSymbolicLink() ? "STORAGE_CONFLICT" : "IDENTITY_LOCKED"
+        "IDENTITY_LOCKED"
       );
     }
-    if (entry.isDirectory()) await assertStorageIdle(join5(directory, entry.name));
+  }
+  for (const lockPath of lockPaths) {
+    if (!await takeOverLockOfExitedOwner(lockPath, 0, reclaimed)) {
+      throw new IdentityInvalidError(
+        "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.",
+        "IDENTITY_LOCKED"
+      );
+    }
   }
 }
 function serverStorageDirectory(root2, serverUrl, role2) {
@@ -87781,24 +87879,41 @@ async function isLockContention(error62, lockPath) {
   if (error62.code !== "EPERM" || process.platform !== "win32") return false;
   return exists2(lockPath);
 }
-async function takeOverLockOfExitedOwner(lockPath) {
+var MAX_LOCK_TAKEOVER_DEPTH = 8;
+async function takeOverLockOfExitedOwner(lockPath, depth = 0, reclaimed) {
+  if (depth >= MAX_LOCK_TAKEOVER_DEPTH) return false;
   const record11 = await readLockRecord(lockPath);
   if (record11 === void 0 || !ownerExited(record11)) return false;
-  const claimPath = `${lockPath}.takeover-${createHash5("sha256").update(record11).digest("hex").slice(0, 16)}`;
-  try {
-    await writeFile2(claimPath, `${process.pid}
-`, { encoding: "utf8", mode: 384, flag: "wx" });
-  } catch (error62) {
-    if (await isLockContention(error62, claimPath)) return false;
-    throw error62;
-  }
+  const lockName = basename3(lockPath);
+  const claimInput = lockName === LOCK_FILE_NAME ? record11 : `${lockName}
+${record11}`;
+  const claimPath = join5(
+    dirname4(lockPath),
+    `${LOCK_FILE_NAME}.takeover-${createHash5("sha256").update(claimInput).digest("hex").slice(0, 16)}`
+  );
+  if (claimPath === lockPath) return false;
+  if (!await acquireTakeoverClaim(claimPath, depth, reclaimed)) return false;
   try {
     if (await readLockRecord(lockPath) !== record11 || !ownerExited(record11)) return false;
     await rm3(lockPath, { force: true });
+    reclaimed?.add(lockPath);
     return true;
   } finally {
     await rm3(claimPath, { force: true }).catch(() => void 0);
   }
+}
+async function acquireTakeoverClaim(claimPath, depth, reclaimed) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await writeFile2(claimPath, `${process.pid}
+`, { encoding: "utf8", mode: 384, flag: "wx" });
+      return true;
+    } catch (error62) {
+      if (!await isLockContention(error62, claimPath)) throw error62;
+      if (attempt > 0 || !await takeOverLockOfExitedOwner(claimPath, depth + 1, reclaimed)) return false;
+    }
+  }
+  return false;
 }
 async function readLockRecord(lockPath) {
   try {
@@ -87822,15 +87937,48 @@ function ownerExited(record11) {
 function isScopedClientDirectory(directory) {
   return /[\\/]servers[\\/][a-f0-9]{24}[\\/]client$/.test(directory);
 }
-async function canAutoHealClientIdentity(directory) {
+async function hasVerifiedScopedIdentity(directory) {
+  try {
+    const serversPath = join5(directory, "servers");
+    const metadata = await lstat(serversPath);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
+    for (const scope2 of await readdir(serversPath, { withFileTypes: true })) {
+      if (!scope2.isDirectory() || scope2.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope2.name)) continue;
+      for (const role2 of await readdir(join5(serversPath, scope2.name), { withFileTypes: true })) {
+        if (!role2.isDirectory() || role2.isSymbolicLink() || role2.name !== "host" && role2.name !== "client") continue;
+        const roleDir = join5(serversPath, scope2.name, role2.name);
+        try {
+          for (const fileName of ["device.json", "device.key"]) {
+            const fileStat = await lstat(join5(roleDir, fileName));
+            if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.nlink !== 1 || fileStat.size > 16 * 1024 * 1024) {
+              throw new Error("invalid identity file metadata");
+            }
+          }
+          await assertPrivateMode2(join5(roleDir, "device.key"));
+          const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(roleDir, "device.json"), "utf8")));
+          const key = (await readFile3(join5(roleDir, "device.key"), "utf8")).trim();
+          if (generateKeyPair(fromBase64Url2(key)).publicKey === record11.publicKey) return true;
+        } catch {
+          continue;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+async function canAutoHealClientIdentity(directory, allowServersDirectory = false) {
   try {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);
       const metadata = await lstat(entryPath);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
-      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name)) {
+      if (metadata.isSymbolicLink()) return false;
+      if (allowServersDirectory && entry.name === "servers" && metadata.isDirectory()) continue;
+      if (!metadata.isFile()) return false;
+      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name) || isPeerTempArtifact(entry.name)) {
         continue;
       }
       if (entry.name === "trusted-peers.json") {
@@ -87858,11 +88006,28 @@ async function removeIdentityRecords(directory) {
   }
   await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
 }
+function isTakeoverLockArtifact(name2) {
+  return /^device\.lock\.takeover-[0-9a-f]{16}$/.test(name2);
+}
 function isLockArtifact(name2) {
-  return name2 === LOCK_FILE_NAME || name2.startsWith(`${LOCK_FILE_NAME}.takeover-`);
+  return name2 === LOCK_FILE_NAME || isTakeoverLockArtifact(name2);
+}
+async function isExitedLockArtifact(path) {
+  const record11 = await readLockRecord(path);
+  return record11 !== void 0 && ownerExited(record11);
 }
 function isPeerTempArtifact(name2) {
   return /^trusted-peers\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name2);
+}
+var OWNED_TEMP_ARTIFACT_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)\.([1-9]\d*)\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
+function isOwnedTempArtifact(name2) {
+  return OWNED_TEMP_ARTIFACT_PATTERN.test(name2);
+}
+function isStaleOwnedTempArtifact(name2) {
+  const match = OWNED_TEMP_ARTIFACT_PATTERN.exec(name2);
+  if (match === null) return false;
+  return ownerExited(`${match[1]}
+`);
 }
 function isIdentityTempArtifact(name2) {
   return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
@@ -87878,7 +88043,16 @@ async function removeStaleTemporaries(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => isIdentityTempArtifact(name2) || isPeerTempArtifact(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  await Promise.all(entries.map(async (name2) => {
+    const entryPath = join5(directory, name2);
+    if (isIdentityTempArtifact(name2) || isStaleOwnedTempArtifact(name2)) {
+      await unlink(entryPath).catch(() => void 0);
+      return;
+    }
+    if (isTakeoverLockArtifact(name2)) {
+      await takeOverLockOfExitedOwner(entryPath).catch(() => void 0);
+    }
+  }));
 }
 
 // packages/plugin/src/control-stream.ts
@@ -88029,7 +88203,7 @@ import { randomUUID as randomUUID13 } from "node:crypto";
 import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
 import { readdir as readdir2, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
+import { basename as basename4, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve2 } from "node:path";
 
 // packages/plugin/src/codex/app-server.ts
 import { spawn as spawn2 } from "node:child_process";
@@ -89967,7 +90141,7 @@ function normalizeCodexPathForCompare(path) {
   return path.replace(/[\\/]+$/u, "") || path;
 }
 function codexDirectoryCrumbs(root2, path) {
-  const crumbs2 = [{ name: basename3(root2) || root2, path: root2, hidden: false }];
+  const crumbs2 = [{ name: basename4(root2) || root2, path: root2, hidden: false }];
   const remainder = relative(root2, path);
   if (remainder === "") return crumbs2;
   let current = root2;
@@ -91846,7 +92020,7 @@ var AcpWorkspaceTools = class {
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir4, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename5, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
+import { basename as basename6, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve5 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -92173,7 +92347,7 @@ function agySelectionArgs(catalog, modelId, effort) {
 // packages/plugin/src/acp/adapters/antigravity/image-store.ts
 import { promises as fs, realpathSync as realpathSync2, constants as constants4 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join9, basename as basename4 } from "node:path";
+import { join as join9, basename as basename5 } from "node:path";
 import { createHash as createHash6, randomUUID as randomUUID14 } from "node:crypto";
 var EXTENSIONS = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 var IMAGE_NAME = /^[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
@@ -92250,7 +92424,7 @@ function agyImageReferences(text) {
   }
 }
 async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
-  const name2 = basename4(path);
+  const name2 = basename5(path);
   if (!IMAGE_NAME.test(name2) || path !== join9(root2, sessionFolder(sessionId), name2)) return void 0;
   try {
     await privateDirectory(root2);
@@ -94589,7 +94763,7 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename6(path) || "workspace" }));
         if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
         const defaultCandidates = /* @__PURE__ */ new Set();
         const cwd3 = process.cwd();
@@ -94601,7 +94775,7 @@ var AcpRemoteGateway = class {
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename5(path) || "workspace" }));
+        return [...defaultCandidates].map((path) => ({ path, title: basename6(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -94634,7 +94808,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename5(p) || "workspace",
+          title: basename6(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -95597,7 +95771,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename5(current) || current,
+      name: current === home ? "~" : basename6(current) || current,
       path: current,
       hidden: false
     });
@@ -99010,7 +99184,7 @@ import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir4, readdir as readdir5, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename6, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
+import { basename as basename7, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve7 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve7(path) === parse3(path).root) {
@@ -99048,7 +99222,7 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root2) {
-    segments.unshift(basename6(current));
+    segments.unshift(basename7(current));
     current = dirname6(current);
   }
   for (const segment of segments) {
