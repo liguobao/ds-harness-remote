@@ -35,7 +35,7 @@ import { browseKey, browseScope, getCachedSessionMessages, saveSessionMessagesSn
 import type { RemoteSession } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
-import { inboxRpcIds, mergeHistoryAndLive, oldestSeq, prependHistory, reconcileDeliveryStates } from './message-helpers'
+import { inboxRpcIds, mergeHistoryAndLive, oldestSeq, prependHistory, reconcileDeliveryStates, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { applyFeedback, latestHistoryLifecycle, record, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
@@ -167,8 +167,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const browseLive = (items: import('../types').ChatItem[], existing: import('../types').ChatItem[]) => {
         contiguousCache = items.some(item => cachedIds.has(item.id))
         // When the tail no longer overlaps, pagination starts from the new tail.
-        // Retain live/optimistic rows, not a misleading gap in cached history.
-        return contiguousCache ? existing : existing.filter(item => !cachedIds.has(item.id) || item.id.startsWith('local:'))
+        // Retain live/optimistic rows and pending approvals/questions, not a misleading gap in cached history.
+        return contiguousCache ? existing : existing.filter(item => !cachedIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
       }
       runtime.sessionReadAbort?.abort()
       const readAbort = new AbortController()
@@ -322,7 +322,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           const items = foldAcpHistory(history, session.sessionId)
           set(state => {
             const currentMessages = state.messages[session.sessionId] ?? []
-            const liveDeltas = currentMessages.filter(item => !initialAcpIds.has(item.id) || item.id.startsWith('local:'))
+            const liveDeltas = currentMessages.filter(item => !initialAcpIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
             const merged = hasHistory
               ? mergeAcpHistoryAndLive(items, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
@@ -378,6 +378,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // reconciliation marks, never deletes: a late `user/message` echo still
           // replaces the row by requestRpcId, so a misjudgment self-heals.
           const inboxSnapshot = latest.projections?.values?.inbox
+          const userQuestionsSnapshot = latest.projections?.values?.userQuestions
           const merged = applyFeedback(mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []), history.throughSeq), ratings)
           const reconciled = inboxSnapshot === undefined ? merged : reconcileDeliveryStates(
             merged,
@@ -385,8 +386,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
             runtime.connectionStartedAt,
           )
-          const restored = nextSession.running === false ? settleTurnItems(reconciled)
-            : authoritativeLifecycle?.turn === undefined ? reconciled : settleTurnItems(reconciled, undefined, authoritativeLifecycle.turn)
+          const withQuestions = userQuestionsSnapshot === undefined
+            ? reconciled
+            : reconcileUserQuestionsProjection(reconciled, session.sessionId, userQuestionsSnapshot, inboxSnapshot)
+          const hasRunningAskUserTool = items.some(item => item.kind === 'tool' && item.state === 'running' && (item.toolKey ?? item.toolName) === 'ask_user_question')
+          const effectivelyRunning = nextSession.running || (authoritativeLifecycle === undefined && hasRunningAskUserTool)
+          const activeTurn = authoritativeLifecycle?.turn
+            ?? (effectivelyRunning ? [...items].reverse().find(item => item.turn !== undefined && item.turnEnd === undefined)?.turn : undefined)
+          const restored = effectivelyRunning === false ? settleTurnItems(withQuestions)
+            : activeTurn === undefined ? withQuestions : settleTurnItems(withQuestions, undefined, activeTurn)
           if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, restored)
           return {
             selectedSession: nextSession,
