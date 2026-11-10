@@ -354,6 +354,8 @@ const jaJP = {
     compactHistory: "会話履歴を簡略化", compactHistoryNote: "ツール履歴を短縮し、テキストとステータスを保持します。ホストのサポートが必要です。これを変更した後、会話を再開してください。",
     typographyDensity: "レイアウト密度", typographyDensityNote: "行間、段落余白、メッセージの余白を調整します",
     densityStandard: "標準", densityCompact: "コンパクト", typographyDensitySaveFailed: "レイアウト密度設定を保存できませんでした",
+    activityDockMode: "アクティビティ ウィジェット", activityDockModeNote: "入力欄の上部に表示されるバックグラウンドタスク、サブエージェント、エージェントチームの表示方法を制御します",
+    activityDockCompact: "コンパクト ピルバー", activityDockCards: "スタック カード", activityDockHidden: "常に非表示", activityDockModeSaveFailed: "アクティビティ ウィジェットの設定を保存できませんでした",
     statusBar: "ステータスバーを表示する", statusBarNote: "画面上部に時刻、バッテリー、ネットワークのステータスを表示します。オフにすると、システム ステータス バーが非表示になります。", statusBarSaveFailed: "ステータスバーの設定を保存できませんでした", statusBarSaveFailedBody: "ローカルストレージに書き込めませんでした。もう一度試してください。",
     theme: "ダークモード", themeLight: "ライト", themeDark: "ダーク", themeSystem: "システム設定に従う",
     chat: "チャット",

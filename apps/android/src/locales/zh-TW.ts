@@ -352,6 +352,8 @@ const zhTW = {
     compactHistory: '會話精簡模式', compactHistoryNote: '縮減歷史工具詳情，保留正文和狀態。需 Host 支援；切換後重新開啟會話生效。',
     typographyDensity: '排版密度', typographyDensityNote: '調整正文行距、段落間距與氣泡邊距',
     densityStandard: '標準', densityCompact: '緊湊', typographyDensitySaveFailed: '無法儲存排版密度設定',
+    activityDockMode: '活動組件展示', activityDockModeNote: '控制對話輸入框上方背景工作、子任務與智能體團隊的展示方式',
+    activityDockCompact: '緊湊膠囊列', activityDockCards: '獨立摺疊卡片', activityDockHidden: '始終隱藏', activityDockModeSaveFailed: '無法儲存活動組件展示設定',
     statusBar: '顯示狀態列', statusBarNote: '顯示螢幕頂部的時間、電量和網路狀態。關閉後隱藏系統狀態列。', statusBarSaveFailed: '無法儲存狀態列設定', statusBarSaveFailedBody: '本地儲存寫入失敗，請重試。',
     theme: '深色模式', themeLight: '淺色', themeDark: '深色', themeSystem: '跟隨系統',
     chat: '對話',

@@ -4,8 +4,14 @@ export type ThemePreference = 'system' | ColorScheme
 
 export type TypographyDensity = 'standard' | 'compact'
 
+export type ActivityDockMode = 'compact' | 'cards' | 'hidden'
+
 export function isTypographyDensity(value: unknown): value is TypographyDensity {
   return value === 'standard' || value === 'compact'
+}
+
+export function isActivityDockMode(value: unknown): value is ActivityDockMode {
+  return value === 'compact' || value === 'cards' || value === 'hidden'
 }
 
 export function isThemePreference(value: unknown): value is ThemePreference {
