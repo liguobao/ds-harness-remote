@@ -354,6 +354,8 @@ const deDE = {
     compactHistory: "Kompakte Gespräche", compactHistoryNote: "Verkürzt den Werkzeugverlauf und behält Text und Status bei. Erfordert Hostunterstützung. Öffnen Sie die Konversation erneut, nachdem Sie dies geändert haben.",
     typographyDensity: "Layout-Dichte", typographyDensityNote: "Zeilenhöhe, Absatzabstand und Nachrichten-Padding anpassen",
     densityStandard: "Standard", densityCompact: "Kompakt", typographyDensitySaveFailed: "Die Einstellung der Layout-Dichte konnte nicht gespeichert werden",
+    activityDockMode: "Aktivitäts-Widgets", activityDockModeNote: "Steuern Sie, wie Hintergrundaufgaben, Subagenten und das Agenten-Team über dem Eingabefeld angezeigt werden",
+    activityDockCompact: "Kompakte Pillenleiste", activityDockCards: "Gestapelte Karten", activityDockHidden: "Immer ausgeblendet", activityDockModeSaveFailed: "Die Einstellung der Aktivitäts-Widgets konnte nicht gespeichert werden",
     statusBar: "Statusleiste anzeigen", statusBarNote: "Zeigt die Uhrzeit, den Akku- und Netzwerkstatus oben auf dem Bildschirm an. Schalten Sie diese Option aus, um die Systemstatusleiste auszublenden.", statusBarSaveFailed: "Die Einstellung der Statusleiste konnte nicht gespeichert werden", statusBarSaveFailedBody: "Es konnte nicht in den lokalen Speicher geschrieben werden. Bitte versuchen Sie es erneut.",
     theme: "Dunkelmodus", themeLight: "Hell", themeDark: "Dunkel", themeSystem: "System",
     chat: "Chatten",

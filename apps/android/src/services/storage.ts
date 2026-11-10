@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isThemePreference, isTypographyDensity, type ThemePreference, type TypographyDensity } from '../ui/theme'
+import { isActivityDockMode, isThemePreference, isTypographyDensity, type ActivityDockMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 const KEYS = {
@@ -20,6 +20,7 @@ const KEYS = {
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
   typographyDensity: 'dshremote.typography-density.v1',
+  activityDockMode: 'dshremote.activity-dock-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
@@ -448,4 +449,13 @@ export async function loadTypographyDensity(): Promise<TypographyDensity> {
 
 export async function saveTypographyDensity(value: TypographyDensity): Promise<void> {
   await writeJson(KEYS.typographyDensity, { value })
+}
+
+export async function loadActivityDockMode(): Promise<ActivityDockMode> {
+  const stored = await readJson<{ value: unknown }>(KEYS.activityDockMode)
+  return isActivityDockMode(stored?.value) ? stored.value : 'compact'
+}
+
+export async function saveActivityDockMode(value: ActivityDockMode): Promise<void> {
+  await writeJson(KEYS.activityDockMode, { value })
 }

@@ -354,6 +354,8 @@ const frFR = {
     compactHistory: "Conversations compactes", compactHistoryNote: "Raccourcit l'historique de l'outil, en conservant le texte et l'état. Nécessite le support de l'hôte. Rouvrez la conversation après avoir modifié cela.",
     typographyDensity: "Densité de lecture", typographyDensityNote: "Ajuster l'interligne, l'espacement des paragraphes et le rembourrage des bulles",
     densityStandard: "Standard", densityCompact: "Compact", typographyDensitySaveFailed: "Impossible d'enregistrer le paramètre de densité de lecture",
+    activityDockMode: "Widgets d'activité", activityDockModeNote: "Contrôle la manière dont les tâches en arrière-plan, les sous-agents et l'équipe d'agents apparaissent au-dessus de la zone de saisie",
+    activityDockCompact: "Barre de pilules compacte", activityDockCards: "Cartes empilées", activityDockHidden: "Toujours masqué", activityDockModeSaveFailed: "Impossible d'enregistrer le paramètre des widgets d'activité",
     statusBar: "Afficher la barre d'état", statusBarNote: "Affichez l'heure, la batterie et l'état du réseau en haut de l'écran. Désactivez-la pour masquer la barre d'état du système.", statusBarSaveFailed: "Impossible d'enregistrer les paramètres de la barre d'état", statusBarSaveFailedBody: "Impossible d'écrire sur le stockage local. Veuillez réessayer.",
     theme: "Mode sombre", themeLight: "Clair", themeDark: "Sombre", themeSystem: "Système",
     chat: "Chat",
