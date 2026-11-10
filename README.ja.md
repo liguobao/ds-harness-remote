@@ -295,6 +295,16 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
  </picture>
 </a>
 
+## コントリビューター
+
+<p align="center">
+  <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=liguobao/ds-harness-remote&max=30" alt="コントリビューター" />
+  </a>
+</p>
+
+Issue、Pull Request、ドキュメント、翻訳など、あらゆる形の貢献を歓迎します。
+
 ## プロジェクトの位置づけと商標
 
 本プロジェクトは独立したコミュニティプロジェクトであり、DeepSeek の公式製品ではありません。
