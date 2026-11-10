@@ -1,6 +1,7 @@
 import { savedPairingSchema } from './pairing-contract.js'
 import { createHash } from 'node:crypto'
 import type { BigIntStats } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -474,7 +475,7 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   let verifiedScopedIdentities = 0
   const checkIdentity = async (directory: string, scope?: string, role?: RemoteDeviceRole): Promise<void> => {
     const canAutoHeal = role === 'client' || (directory === root && verifiedScopedIdentities > 0)
-    const entries = (await readdir(directory, { withFileTypes: true })).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
+    const entries = (await readStorageEntries(directory)).filter(entry => !(directory === root && entry.name === 'servers' && entry.isDirectory()))
     for (const entry of entries) {
       if (entry.name.includes('.refresh-lock')
         && entry.name !== 'server-credentials.json.refresh-lock'
@@ -584,13 +585,13 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     if (scope !== undefined) verifiedScopedIdentities++
   }
   try {
-    const entries = await readdir(root, { withFileTypes: true })
+    const entries = await readStorageEntries(root)
     const servers = entries.find(entry => entry.name === 'servers')
     if (servers !== undefined) {
       if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT')
-      for (const scope of await readdir(join(root, 'servers'), { withFileTypes: true })) {
+      for (const scope of await readStorageEntries(join(root, 'servers'))) {
         if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT')
-        for (const role of await readdir(join(root, 'servers', scope.name), { withFileTypes: true })) {
+        for (const role of await readStorageEntries(join(root, 'servers', scope.name))) {
           if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT')
           await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name, role.name)
         }
@@ -992,7 +993,7 @@ async function hasVerifiedScopedIdentity(directory: string): Promise<boolean> {
  */
 async function canAutoHealClientIdentity(directory: string, allowServersDirectory = false): Promise<boolean> {
   try {
-    const entries = await readdir(directory, { withFileTypes: true })
+    const entries = await readStorageEntries(directory)
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue
       const entryPath = join(directory, entry.name)
@@ -1040,6 +1041,30 @@ function isTakeoverLockArtifact(name: string): boolean {
 
 function isLockArtifact(name: string): boolean {
   return name === LOCK_FILE_NAME || isTakeoverLockArtifact(name)
+}
+
+// Operating systems write their own index or metadata files into user
+// directories. They carry no Remote identity, so they are skipped instead of
+// being read as an unknown scope, role or identity file. The set is closed:
+// every other unexpected entry still fails the ownership check, and a
+// metadata name is only skipped when it is a plain file with a single link.
+const STORAGE_METADATA_ARTIFACTS = new Set(['.ds_store', 'desktop.ini', 'thumbs.db'])
+
+function isStorageMetadataArtifact(name: string): boolean {
+  return STORAGE_METADATA_ARTIFACTS.has(name.toLowerCase())
+}
+
+async function readStorageEntries(directory: string): Promise<Dirent[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const result: Dirent[] = []
+  for (const entry of entries) {
+    if (isStorageMetadataArtifact(entry.name) && entry.isFile()) {
+      const metadata = await lstat(join(directory, entry.name))
+      if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue
+    }
+    result.push(entry)
+  }
+  return result
 }
 
 async function isExitedLockArtifact(path: string): Promise<boolean> {

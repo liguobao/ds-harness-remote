@@ -88718,7 +88718,7 @@ async function assertOwnedRemoteStorage(root2) {
   let verifiedScopedIdentities = 0;
   const checkIdentity = async (directory, scope2, role2) => {
     const canAutoHeal = role2 === "client" || directory === root2 && verifiedScopedIdentities > 0;
-    const entries = (await readdir2(directory, { withFileTypes: true })).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
+    const entries = (await readStorageEntries(directory)).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
       if (entry.name.includes(".refresh-lock") && entry.name !== "server-credentials.json.refresh-lock" && !isRefreshQueueArtifact(entry.name)) {
         if (entry.isSymbolicLink()) throw rejected("STORAGE_CONFLICT");
@@ -88820,13 +88820,13 @@ async function assertOwnedRemoteStorage(root2) {
     if (scope2 !== void 0) verifiedScopedIdentities++;
   };
   try {
-    const entries = await readdir2(root2, { withFileTypes: true });
+    const entries = await readStorageEntries(root2);
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
       if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
-      for (const scope2 of await readdir2(join5(root2, "servers"), { withFileTypes: true })) {
+      for (const scope2 of await readStorageEntries(join5(root2, "servers"))) {
         if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
-        for (const role2 of await readdir2(join5(root2, "servers", scope2.name), { withFileTypes: true })) {
+        for (const role2 of await readStorageEntries(join5(root2, "servers", scope2.name))) {
           if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
           await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
         }
@@ -89155,7 +89155,7 @@ async function hasVerifiedScopedIdentity(directory) {
 }
 async function canAutoHealClientIdentity(directory, allowServersDirectory = false) {
   try {
-    const entries = await readdir2(directory, { withFileTypes: true });
+    const entries = await readStorageEntries(directory);
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);
@@ -89196,6 +89196,22 @@ function isTakeoverLockArtifact(name2) {
 }
 function isLockArtifact(name2) {
   return name2 === LOCK_FILE_NAME || isTakeoverLockArtifact(name2);
+}
+var STORAGE_METADATA_ARTIFACTS = /* @__PURE__ */ new Set([".ds_store", "desktop.ini", "thumbs.db"]);
+function isStorageMetadataArtifact(name2) {
+  return STORAGE_METADATA_ARTIFACTS.has(name2.toLowerCase());
+}
+async function readStorageEntries(directory) {
+  const entries = await readdir2(directory, { withFileTypes: true });
+  const result = [];
+  for (const entry of entries) {
+    if (isStorageMetadataArtifact(entry.name) && entry.isFile()) {
+      const metadata = await lstat(join5(directory, entry.name));
+      if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue;
+    }
+    result.push(entry);
+  }
+  return result;
 }
 async function isExitedLockArtifact(path) {
   const record11 = await readLockRecord2(path);
