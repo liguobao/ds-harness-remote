@@ -88594,6 +88594,9 @@ function serializeStatId(value) {
 }
 async function prepareDefaultIdentityDirectory(options = {}) {
   if (options.directory !== void 0) return options.directory;
+  return withDefaultStorageTransaction(options, prepareDefaultIdentityDirectoryLocked);
+}
+async function withDefaultStorageTransaction(options, operation) {
   const env = options.env ?? process.env;
   const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
   const source = join5(home, "remote");
@@ -88602,59 +88605,63 @@ async function prepareDefaultIdentityDirectory(options = {}) {
   const lockDirectory = join5(home, ".ds-harness-remote-migration");
   await storageDirectoryStat(lockDirectory);
   await ensureDirectory(lockDirectory);
-  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home, async () => {
-    const old = await storageDirectoryStat(source);
-    const current = await storageDirectoryStat(target3);
-    const pinPath = join5(lockDirectory, "legacy-root.json");
-    const pinMetadata = await lstat(pinPath).catch((error62) => {
-      if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
-      throw error62;
-    });
-    let pin;
-    if (pinMetadata !== void 0) {
-      if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
-        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
-      }
-      await assertPrivateMode2(pinPath);
-      try {
-        pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
-      } catch {
-        throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
-      }
+  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(
+    home,
+    () => operation({ source, target: target3, lockDirectory })
+  ));
+}
+async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, lockDirectory }) {
+  const old = await storageDirectoryStat(source);
+  const current = await storageDirectoryStat(target3);
+  const pinPath = join5(lockDirectory, "legacy-root.json");
+  const pinMetadata = await lstat(pinPath).catch((error62) => {
+    if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
+    throw error62;
+  });
+  let pin;
+  if (pinMetadata !== void 0) {
+    if (!pinMetadata.isFile() || pinMetadata.isSymbolicLink() || pinMetadata.nlink !== 1 || pinMetadata.size > 4096) {
+      throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
     }
-    if (old !== void 0) {
-      if (current !== void 0) {
-        throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
+    await assertPrivateMode2(pinPath);
+    try {
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+    } catch {
+      throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
+    }
+  }
+  if (old !== void 0) {
+    if (current !== void 0) {
+      throw new IdentityInvalidError("Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.", "STORAGE_CONFLICT");
+    }
+    await assertOwnedRemoteStorage(source);
+    await assertStorageIdle(source);
+    if (pin !== void 0) {
+      if (pin.dev !== old.dev || pin.ino !== old.ino) {
+        throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
       }
+      return source;
+    }
+    try {
+      await rename2(source, target3);
+    } catch (error62) {
+      if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
+      const remaining = await storageDirectoryStat(source);
+      if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
       await assertOwnedRemoteStorage(source);
       await assertStorageIdle(source);
-      if (pin !== void 0) {
-        if (pin.dev !== old.dev || pin.ino !== old.ino) {
-          throw new IdentityInvalidError("Legacy Remote storage changed after fallback; inspect it before reconnecting.", "STORAGE_CONFLICT");
-        }
-        return source;
-      }
-      try {
-        await rename2(source, target3);
-      } catch (error62) {
-        if (!isNodeError(error62) || !["EACCES", "EPERM", "EBUSY", "EXDEV", "EROFS", "EEXIST", "ENOTEMPTY", "ENOSPC", "EDQUOT"].includes(error62.code ?? "")) throw error62;
-        const remaining = await storageDirectoryStat(source);
-        if (remaining === void 0 || remaining.dev !== old.dev || remaining.ino !== old.ino || await storageDirectoryStat(target3) !== void 0) throw error62;
-        await assertOwnedRemoteStorage(source);
-        await assertStorageIdle(source);
-        await atomicJsonWrite(pinPath, {
-          schemaVersion: 1,
-          dev: serializeStatId(old.dev),
-          ino: serializeStatId(old.ino)
-        }, 384);
-        return source;
-      }
-    } else if (pin !== void 0) {
-      if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
-      await assertOwnedRemoteStorage(target3);
+      await atomicJsonWrite(pinPath, {
+        schemaVersion: 1,
+        dev: serializeStatId(old.dev),
+        ino: serializeStatId(old.ino)
+      }, 384);
+      return source;
     }
-    return target3;
-  }));
+  } else if (pin !== void 0) {
+    if (current === void 0) throw new IdentityInvalidError("Pinned Remote storage is missing; no replacement identity was created.", "STORAGE_CONFLICT");
+    await assertOwnedRemoteStorage(target3);
+  }
+  return target3;
 }
 async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options = {}) {
   const createStore = options.createIdentityStore ?? ((storeOptions) => new IdentityStore(storeOptions));
@@ -88677,24 +88684,20 @@ async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options =
     await resetRolesInRoot(options.directory);
     return options.directory;
   }
-  try {
-    const root2 = await prepareDefaultIdentityDirectory(options);
-    await resetRolesInRoot(root2);
-    return root2;
-  } catch (error62) {
-    if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") {
-      throw error62;
+  return withDefaultStorageTransaction(options, async (paths) => {
+    try {
+      const root2 = await prepareDefaultIdentityDirectoryLocked(paths);
+      await resetRolesInRoot(root2);
+      return root2;
+    } catch (error62) {
+      if (!(error62 instanceof IdentityInvalidError) || error62.code !== "IDENTITY_INVALID") throw error62;
+      const [old, current] = await Promise.all([storageDirectoryStat(paths.source), storageDirectoryStat(paths.target)]);
+      if (old === void 0 || current !== void 0) throw error62;
+      await assertStorageIdle(paths.source);
+      await resetRolesInRoot(paths.source);
+      return prepareDefaultIdentityDirectoryLocked(paths);
     }
-    const env = options.env ?? process.env;
-    const home = env.DSH_HOME || join5(options.homeDirectory ?? homedir2(), ".dsh");
-    const source = join5(home, "remote");
-    const target3 = join5(home, "ds-harness-remote");
-    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target3)]);
-    if (old === void 0 || current !== void 0) throw error62;
-    await assertStorageIdle(source);
-    await resetRolesInRoot(source);
-    return prepareDefaultIdentityDirectory(options);
-  }
+  });
 }
 async function assertOwnedRemoteStorage(root2) {
   let failureCode = "STORAGE_CONFLICT";
@@ -88741,7 +88744,7 @@ async function assertOwnedRemoteStorage(root2) {
       const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
       const metadata = await lstat(join5(directory, entry.name));
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024 || metadata.nlink !== 1 && !await isVerifiedRefreshHardlink(directory, entry.name, entries.map((item) => item.name))) {
         throw rejected("STORAGE_CONFLICT");
       }
     }
@@ -88879,12 +88882,23 @@ async function assertStorageIdle(directory) {
   const takeoverPaths = [];
   const lockPaths = [];
   const scan = async (currentDirectory) => {
+    const before = await readdir2(currentDirectory, { withFileTypes: true });
+    const names = before.map((entry) => entry.name);
+    const linkedTemps = [];
+    for (const entry of before) {
+      if (!isRefreshQueueTemp(entry.name)) continue;
+      const metadata = await lstat(join5(currentDirectory, entry.name));
+      if (metadata.nlink === 2 && await isVerifiedRefreshHardlink(currentDirectory, entry.name, names)) {
+        linkedTemps.push(join5(currentDirectory, entry.name));
+      }
+    }
     try {
       await assertRefreshQueueIdle(currentDirectory);
     } catch (error62) {
       if (!(error62 instanceof ServerCredentialsBusyError)) throw error62;
       throw new IdentityInvalidError("Remote storage has an active credential refresh; stop it before migration.", "IDENTITY_LOCKED");
     }
+    for (const temporary of linkedTemps) await unlink(temporary);
     for (const entry of await readdir2(currentDirectory, { withFileTypes: true })) {
       const entryPath = join5(currentDirectory, entry.name);
       if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile3(entryPath, "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
@@ -88950,8 +88964,24 @@ async function assertStorageIdle(directory) {
     }
   }
 }
+var REFRESH_QUEUE_TEMP_PATTERN = /^(server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?)\.([1-9]\d*)\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
+function isRefreshQueueTemp(name2) {
+  return REFRESH_QUEUE_TEMP_PATTERN.test(name2);
+}
+async function isVerifiedRefreshHardlink(directory, name2, names) {
+  const temporary = REFRESH_QUEUE_TEMP_PATTERN.exec(name2) === null ? names.filter((candidate) => REFRESH_QUEUE_TEMP_PATTERN.exec(candidate)?.[1] === name2) : [name2];
+  if (temporary.length !== 1) return false;
+  const match = REFRESH_QUEUE_TEMP_PATTERN.exec(temporary[0]);
+  if (match === null || !names.includes(match[1]) || !ownerExited2(`${match[2]}
+`)) return false;
+  const [source, published] = await Promise.all([
+    lstat(join5(directory, temporary[0]), { bigint: true }),
+    lstat(join5(directory, match[1]), { bigint: true })
+  ]);
+  return source.isFile() && published.isFile() && source.nlink === 2n && published.nlink === 2n && source.dev === published.dev && source.ino === published.ino;
+}
 function isRefreshQueueArtifact(name2) {
-  return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name2) || /^server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?\.\d+\.[0-9a-f-]{36}\.tmp$/.test(name2);
+  return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name2) || isRefreshQueueTemp(name2);
 }
 function serverStorageDirectory(root2, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;

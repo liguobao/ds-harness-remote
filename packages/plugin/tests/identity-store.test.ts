@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
-import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory, serverStorageDirectory } from '../src/identity-store.js'
+import { IdentityInvalidError, IdentityStore, prepareDefaultIdentityDirectory, resetDefaultIdentityRoles, serverStorageDirectory } from '../src/identity-store.js'
 
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
@@ -439,6 +439,47 @@ describe('IdentityStore', () => {
     expect(await readFile(join(target, temporary.slice(source.length + 1)), 'utf8')).toBe('partial')
   })
 
+  it.skipIf(process.platform !== 'linux')('removes verified hardlink remnants from an interrupted refresh lock publication', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    await new IdentityStore({ directory: source }).loadOrCreate('Host')
+    const dead = await deadPid()
+    const marker = join(source, 'server-credentials.json.refresh-lock')
+    await writeFile(marker, 'DSH_REFRESH_LOCK_V2\n', { mode: 0o600 })
+    const markerTemp = `${marker}.${dead}.00000000-0000-7000-8000-000000000001.tmp`
+    await link(marker, markerTemp)
+    const id = `${dead}-00000000-0000-7000-8000-000000000002`
+    const holder = `${marker}.holder-${id}`
+    await writeFile(holder, `${id} 1\n`, { mode: 0o600 })
+    const holderTemp = `${holder}.${dead}.00000000-0000-7000-8000-000000000003.tmp`
+    await link(holder, holderTemp)
+    expect((await stat(marker)).nlink).toBe(2)
+    expect((await stat(holder)).nlink).toBe(2)
+
+    const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+    expect(target).toBe(join(home, 'ds-harness-remote'))
+    expect(await readdir(target)).not.toContain(markerTemp.slice(source.length + 1))
+    expect(await readdir(target)).not.toContain(holderTemp.slice(source.length + 1))
+    expect(await readdir(target)).not.toContain(holder.slice(source.length + 1))
+    expect((await stat(join(target, 'server-credentials.json.refresh-lock'))).nlink).toBe(1)
+  })
+
+  it.skipIf(process.platform !== 'linux')('rejects a queue temp that does not link to its matching published file', async () => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    await new IdentityStore({ directory: source }).loadOrCreate('Host')
+    const dead = await deadPid()
+    const marker = join(source, 'server-credentials.json.refresh-lock')
+    await writeFile(marker, 'DSH_REFRESH_LOCK_V2\n', { mode: 0o600 })
+    await link(marker, join(home, 'foreign-link'))
+    const markerTemp = `${marker}.${dead}.00000000-0000-7000-8000-000000000004.tmp`
+    await writeFile(markerTemp, 'DSH_REFRESH_LOCK_V2\n', { mode: 0o600 })
+
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+    expect((await stat(marker)).nlink).toBe(2)
+    expect(await readFile(markerTemp, 'utf8')).toBe('DSH_REFRESH_LOCK_V2\n')
+  })
+
   it('waits for an active refresh before it moves the storage directory', async () => {
     const home = await temporaryDirectory()
     const source = join(home, 'remote')
@@ -458,6 +499,38 @@ describe('IdentityStore', () => {
     release()
     await refresh
     expect(await moving).toBe(join(home, 'ds-harness-remote'))
+  })
+
+  it('holds the migration gate while a default identity reset clears credentials', async () => {
+    const home = await temporaryDirectory()
+    const target = join(home, 'ds-harness-remote')
+    await new IdentityStore({ directory: target }).loadOrCreate('Host')
+    let enteredClear!: () => void
+    let releaseClear!: () => void
+    const clearing = new Promise<void>(resolve => { enteredClear = resolve })
+    const finishClear = new Promise<void>(resolve => { releaseClear = resolve })
+    const originalClear = ServerCredentialStore.prototype.clear
+    const clear = vi.spyOn(ServerCredentialStore.prototype, 'clear')
+    clear.mockImplementation(async function (this: ServerCredentialStore) {
+      enteredClear()
+      await finishClear
+      return originalClear.call(this)
+    })
+    try {
+      const reset = resetDefaultIdentityRoles(['host'], undefined, 'New Host', { env: { DSH_HOME: home } })
+      await clearing
+      let enteredRefresh = false
+      const refresh = new ServerCredentialStore(target).withRefreshLock(async () => { enteredRefresh = true })
+      await new Promise(resolve => setTimeout(resolve, 100))
+      expect(enteredRefresh).toBe(false)
+      releaseClear()
+      expect(await reset).toBe(target)
+      await refresh
+      expect(enteredRefresh).toBe(true)
+    } finally {
+      releaseClear()
+      clear.mockRestore()
+    }
   })
 
   it('keeps using verified legacy identities, trust and authorization when the directory move fails', async () => {

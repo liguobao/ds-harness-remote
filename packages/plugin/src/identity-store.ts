@@ -313,6 +313,19 @@ export async function prepareDefaultIdentityDirectory(
   options: IdentityStoreOptions = {},
 ): Promise<string> {
   if (options.directory !== undefined) return options.directory
+  return withDefaultStorageTransaction(options, prepareDefaultIdentityDirectoryLocked)
+}
+
+interface DefaultStoragePaths {
+  source: string
+  target: string
+  lockDirectory: string
+}
+
+async function withDefaultStorageTransaction<T>(
+  options: IdentityStoreOptions,
+  operation: (paths: DefaultStoragePaths) => Promise<T>,
+): Promise<T> {
   const env = options.env ?? process.env
   const home = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
   const source = join(home, 'remote')
@@ -322,7 +335,11 @@ export async function prepareDefaultIdentityDirectory(
   const lockDirectory = join(home, '.ds-harness-remote-migration')
   await storageDirectoryStat(lockDirectory)
   await ensureDirectory(lockDirectory)
-  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home, async () => {
+  return withIdentityLock(lockDirectory, () => withDefaultCredentialMigrationGate(home,
+    () => operation({ source, target, lockDirectory })))
+}
+
+async function prepareDefaultIdentityDirectoryLocked({ source, target, lockDirectory }: DefaultStoragePaths): Promise<string> {
     const old = await storageDirectoryStat(source)
     const current = await storageDirectoryStat(target)
     const pinPath = join(lockDirectory, 'legacy-root.json')
@@ -381,7 +398,6 @@ export async function prepareDefaultIdentityDirectory(
       await assertOwnedRemoteStorage(target)
     }
     return target
-  }))
 }
 
 /**
@@ -419,24 +435,20 @@ export async function resetDefaultIdentityRoles(
     return options.directory
   }
 
-  try {
-    const root = await prepareDefaultIdentityDirectory(options)
-    await resetRolesInRoot(root)
-    return root
-  } catch (error) {
-    if (!(error instanceof IdentityInvalidError) || error.code !== 'IDENTITY_INVALID') {
-      throw error
+  return withDefaultStorageTransaction(options, async paths => {
+    try {
+      const root = await prepareDefaultIdentityDirectoryLocked(paths)
+      await resetRolesInRoot(root)
+      return root
+    } catch (error) {
+      if (!(error instanceof IdentityInvalidError) || error.code !== 'IDENTITY_INVALID') throw error
+      const [old, current] = await Promise.all([storageDirectoryStat(paths.source), storageDirectoryStat(paths.target)])
+      if (old === undefined || current !== undefined) throw error
+      await assertStorageIdle(paths.source)
+      await resetRolesInRoot(paths.source)
+      return prepareDefaultIdentityDirectoryLocked(paths)
     }
-    const env = options.env ?? process.env
-    const home = env.DSH_HOME || join(options.homeDirectory ?? homedir(), '.dsh')
-    const source = join(home, 'remote')
-    const target = join(home, 'ds-harness-remote')
-    const [old, current] = await Promise.all([storageDirectoryStat(source), storageDirectoryStat(target)])
-    if (old === undefined || current !== undefined) throw error
-    await assertStorageIdle(source)
-    await resetRolesInRoot(source)
-    return prepareDefaultIdentityDirectory(options)
-  }
+  })
 }
 
 /** Legacy storage has no owner marker. Require its complete known layout and
@@ -491,7 +503,8 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
         || isRefreshQueueArtifact(entry.name) || (canAutoHeal && isIdentityTempArtifact(entry.name))
       if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
       const metadata = await lstat(join(directory, entry.name))
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.size > 16 * 1024 * 1024) {
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024
+        || (metadata.nlink !== 1 && !(await isVerifiedRefreshHardlink(directory, entry.name, entries.map(item => item.name))))) {
         throw rejected('STORAGE_CONFLICT')
       }
     }
@@ -653,10 +666,21 @@ async function assertStorageIdle(directory: string): Promise<void> {
   const lockPaths: string[] = []
 
   const scan = async (currentDirectory: string): Promise<void> => {
+    const before = await readdir(currentDirectory, { withFileTypes: true })
+    const names = before.map(entry => entry.name)
+    const linkedTemps: string[] = []
+    for (const entry of before) {
+      if (!isRefreshQueueTemp(entry.name)) continue
+      const metadata = await lstat(join(currentDirectory, entry.name))
+      if (metadata.nlink === 2 && await isVerifiedRefreshHardlink(currentDirectory, entry.name, names)) {
+        linkedTemps.push(join(currentDirectory, entry.name))
+      }
+    }
     try { await assertRefreshQueueIdle(currentDirectory) } catch (error) {
       if (!(error instanceof ServerCredentialsBusyError)) throw error
       throw new IdentityInvalidError('Remote storage has an active credential refresh; stop it before migration.', 'IDENTITY_LOCKED')
     }
+    for (const temporary of linkedTemps) await unlink(temporary)
     for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
       const entryPath = join(currentDirectory, entry.name)
       if (entry.name === 'server-credentials.json.refresh-lock' && entry.isFile()
@@ -728,9 +752,30 @@ async function assertStorageIdle(directory: string): Promise<void> {
   }
 }
 
+const REFRESH_QUEUE_TEMP_PATTERN = /^(server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?)\.([1-9]\d*)\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/
+
+function isRefreshQueueTemp(name: string): boolean {
+  return REFRESH_QUEUE_TEMP_PATTERN.test(name)
+}
+
+async function isVerifiedRefreshHardlink(directory: string, name: string, names: readonly string[]): Promise<boolean> {
+  const temporary = REFRESH_QUEUE_TEMP_PATTERN.exec(name) === null
+    ? names.filter(candidate => REFRESH_QUEUE_TEMP_PATTERN.exec(candidate)?.[1] === name)
+    : [name]
+  if (temporary.length !== 1) return false
+  const match = REFRESH_QUEUE_TEMP_PATTERN.exec(temporary[0]!)
+  if (match === null || !names.includes(match[1]!) || !ownerExited(`${match[2]}\n`)) return false
+  const [source, published] = await Promise.all([
+    lstat(join(directory, temporary[0]!), { bigint: true }),
+    lstat(join(directory, match[1]!), { bigint: true }),
+  ])
+  return source.isFile() && published.isFile() && source.nlink === 2n && published.nlink === 2n
+    && source.dev === published.dev && source.ino === published.ino
+}
+
 function isRefreshQueueArtifact(name: string): boolean {
   return /^server-credentials\.json\.refresh-lock\.holder-\d+-[0-9a-f-]{36}$/.test(name)
-    || /^server-credentials\.json\.refresh-lock(?:\.holder-\d+-[0-9a-f-]{36})?\.\d+\.[0-9a-f-]{36}\.tmp$/.test(name)
+    || isRefreshQueueTemp(name)
 }
 
 export function serverStorageDirectory(root: string, serverUrl: string, role: RemoteDeviceRole): string {
