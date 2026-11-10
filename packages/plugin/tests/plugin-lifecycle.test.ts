@@ -209,6 +209,98 @@ describe('Cordis plugin lifecycle', () => {
     await ctx.fiber.dispose()
   })
 
+  it('migrates legacy storage with interrupted credential temp files and dead lock, then refreshes expired Host accessToken on startup', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-367-upgrade-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+
+    const serverUrl = 'https://dsh.r2049.cn'
+    const legacyRoot = join(dshHome, 'remote')
+    const hostDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'host')
+    const clientDir = remotePlugin.serverStorageDirectory(legacyRoot, serverUrl, 'client')
+    const hostStore = new remotePlugin.IdentityStore({ directory: hostDir, role: 'host' })
+    const hostIdentity = await hostStore.loadOrCreate('Host')
+    const clientIdentity = await new remotePlugin.IdentityStore({ directory: clientDir, role: 'client' }).loadOrCreate('Client')
+    const trustedPeer = await hostStore.trustPeer({
+      deviceId: clientIdentity.deviceId,
+      name: 'Client',
+      platform: 'linux',
+      publicKey: clientIdentity.publicKey,
+    })
+    const now = Date.now()
+    await new remotePlugin.ServerCredentialStore(hostDir).save({
+      serverUrl,
+      deviceId: hostIdentity.deviceId,
+      authorizationMethod: 'account',
+      account: 'host@example.com',
+      accessToken: 'expired-access-token-0000',
+      accessTokenExpiresAt: now - 345_000,
+      refreshToken: 'valid-refresh-token-0000',
+      refreshTokenExpiresAt: now + 86_400_000,
+    })
+    const { readFile, writeFile } = await import('node:fs/promises')
+    const { createHash } = await import('node:crypto')
+    const { spawn } = await import('node:child_process')
+    const firstChild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], { stdio: 'ignore' })
+    const secondChild = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
+    await Promise.all([
+      new Promise<void>(resolve => firstChild.once('exit', () => resolve())),
+      new Promise<void>(resolve => secondChild.once('exit', () => resolve())),
+    ])
+    const exitedOwnerPid = firstChild.pid!
+    const exitedTakeoverPid = secondChild.pid!
+    const lockRecord = `${exitedOwnerPid}\n`
+    const takeoverName = `device.lock.takeover-${createHash('sha256').update(lockRecord).digest('hex').slice(0, 16)}`
+    const hostDeviceBytes = await readFile(join(hostDir, 'device.json'))
+    const hostKeyBytes = await readFile(join(hostDir, 'device.key'))
+    const hostPeersBytes = await readFile(join(hostDir, 'trusted-peers.json'))
+    await writeFile(join(hostDir, `server-credentials.json.${exitedOwnerPid}.01a1b6d8-e8b5-7000-8000-000000000002.tmp`), '{partial', { mode: 0o600 })
+    await writeFile(join(hostDir, 'device.lock'), lockRecord, { mode: 0o600 })
+    await writeFile(join(hostDir, takeoverName), `${exitedTakeoverPid}\n`, { mode: 0o600 })
+
+    const refreshedAccessToken = 'refreshed-access-token-1111'
+    const refreshedExpiresAt = now + 597_000
+    const refreshCalls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      refreshCalls.push(url)
+      if (url.endsWith('/api/v1/auth/refresh')) {
+        return Response.json({
+          accessToken: refreshedAccessToken,
+          accessTokenExpiresAt: refreshedExpiresAt,
+          refreshToken: 'valid-refresh-token-1111',
+          refreshTokenExpiresAt: now + 86_400_000,
+        })
+      }
+      return Response.json({ items: [] })
+    }))
+
+    const ctx = new Context()
+    ctx.provide('settings', settings({ deviceName: 'Host', serverUrl }))
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', connection())
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Host', serverUrl })
+    try {
+      const migratedHostDir = remotePlugin.serverStorageDirectory(join(dshHome, 'ds-harness-remote'), serverUrl, 'host')
+      await vi.waitFor(async () => {
+        expect(refreshCalls.some(url => url.endsWith('/api/v1/auth/refresh'))).toBe(true)
+        const updated = await new remotePlugin.ServerCredentialStore(migratedHostDir).load(serverUrl, hostIdentity.deviceId)
+        expect(updated?.accessToken).toBe(refreshedAccessToken)
+        expect(updated?.accessTokenExpiresAt).toBe(refreshedExpiresAt)
+      }, { timeout: 5_000 })
+      expect(ctx.dshRemote.currentIdentity()).toEqual(hostIdentity)
+      expect(await readFile(join(migratedHostDir, 'device.json'))).toEqual(hostDeviceBytes)
+      expect(await readFile(join(migratedHostDir, 'device.key'))).toEqual(hostKeyBytes)
+      expect(await readFile(join(migratedHostDir, 'trusted-peers.json'))).toEqual(hostPeersBytes)
+      const reloadedStore = new remotePlugin.IdentityStore({ directory: migratedHostDir, role: 'host' })
+      await reloadedStore.loadOrCreate('Host')
+      expect(reloadedStore.listTrustedPeers()).toEqual([trustedPeer])
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('waits for Desktop connection before activating even when Typert is ready', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-late-connection-'))
     directories.push(dshHome)

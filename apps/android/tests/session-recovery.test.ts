@@ -842,8 +842,10 @@ describe('session restore state machine', () => {
     await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
       ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
         const selected = { ...session, backend, sessionId: `${backend}:old`, nativeId: 'old' }
-        useAppStore.setState({ messages: { [selected.sessionId]: [{ kind: 'message', id: 'cursor-assistant-live',
-          sessionId: selected.sessionId, role: 'assistant', text: 'stale cache', createdAt: 1, streaming: true }] } })
+        useAppStore.setState({ messages: { [selected.sessionId]: [
+          { kind: 'message', id: 'cursor-assistant-live', sessionId: selected.sessionId, role: 'assistant', text: 'stale cache', createdAt: 1, streaming: true },
+          { kind: 'approval', id: 'cursor-approval:pre-open', sessionId: selected.sessionId, approvalId: 'pre-open', toolName: 'Ask Question', frameRpcId: 'pre-open', createdAt: 2 },
+        ] } })
         let finish!: (value: { events: HistoryEntry[] }) => void
         let fail!: (error: Error) => void
         acp.transferCall.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
@@ -884,6 +886,7 @@ describe('session restore state machine', () => {
         expect(items).toEqual(expect.arrayContaining([
           expect.objectContaining({ kind: 'tool', state: 'finished', resultDetail: { text: 'tail output', format: 'code' } }),
           expect.objectContaining({ kind: 'message', text: 'tail answer', streaming: mode !== 'completed' }),
+          expect.objectContaining({ kind: 'approval', approvalId: 'pre-open' }),
           expect.objectContaining({ kind: 'approval', approvalId: 'current-approval' }),
         ]))
         if (mode === 'completed') expect(useAppStore.getState().selectedSession?.running).toBe(false)
@@ -1448,6 +1451,105 @@ describe('authoritative permission projection', () => {
           expect(calls.some(c => c.endpoint === 'set-main' && c.payload?.id === 'helper' && c.payload?.replace === 'chief')).toBe(true)
           expect(calls.some(c => c.endpoint === 'delete-bot' && c.payload?.id === 'chief')).toBe(true)
           expect(useBotTeamStore.getState().state?.bots.map(b => b.id)).toEqual(['helper'])
+        },
+      },
+      {
+        name: 'retains background ask_user_question and approval cards across notification openSession and re-entry',
+        run: async () => {
+          const askCall = entry('tool/call', 10, {
+            turn: 2,
+            callId: 'call-ask-1',
+            name: 'ask_user_question',
+            arguments: JSON.stringify({ questions: [{ id: 'q1', question: 'Deploy target?' }] }),
+          })
+          // Background state: session s1 only received the mux question/approval frames (no cached native history overlap).
+          useAppStore.getState().handleMuxFrame({
+            rpcId: 'evt-question-1',
+            payload: {
+              type: 'question/requested',
+              sessionId: 's1',
+              questions: [{ id: 'q1', question: 'Deploy target?', options: [{ label: 'Staging' }, { label: 'Prod' }] }],
+            },
+          })
+          useAppStore.getState().handleMuxFrame({
+            rpcId: 'evt-approval-1',
+            payload: {
+              type: 'approval/requested',
+              sessionId: 's1',
+              approvalId: 'evt-approval-1',
+              toolName: 'bash',
+              callId: 'call-ask-1',
+            },
+          })
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'question', id: 'question:evt-question-1' },
+            { kind: 'approval', id: 'approval:evt-approval-1' },
+          ])
+
+          // Notification tap opens s1; history tail has no overlap with cachedIds (`contiguousCache === false`)
+          // and `session.running` may even be stale false while `ask_user_question` tool/call is still running.
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession({ ...session, running: false })).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-ask-1', state: 'running', turn: '2' },
+            { kind: 'question', id: 'question:evt-question-1', turn: '2' },
+            { kind: 'approval', id: 'approval:evt-approval-1', turn: '2' },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+
+          // Re-entering the session preserves the active question and approval cards.
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession({ ...session, running: true })).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-ask-1', state: 'running', turn: '2' },
+            { kind: 'question', id: 'question:evt-question-1', turn: '2' },
+            { kind: 'approval', id: 'approval:evt-approval-1', turn: '2' },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+        },
+      },
+      {
+        name: 'restores timed userQuestions projection on openSession even when no prior mux frame was cached',
+        run: async () => {
+          const askCall = entry('tool/call', 10, {
+            turn: 2,
+            callId: 'call-timed-1',
+            name: 'ask_user_question',
+            arguments: JSON.stringify({ questions: [{ id: 'q1', question: 'Pick mode?' }] }),
+          })
+          const targetWithProjection = {
+            ...session,
+            running: true,
+            projections: {
+              asOfSeq: 10,
+              values: {
+                userQuestions: {
+                  active: [{
+                    callId: 'call-timed-1',
+                    state: 'open',
+                    questions: [{ id: 'q1', question: 'Pick mode?', options: [{ label: 'Fast' }] }],
+                  }],
+                  settled: [],
+                },
+              },
+            },
+          }
+          useAppStore.setState({ sessions: [targetWithProjection], messages: {} })
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession(targetWithProjection)).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-timed-1', turn: '2' },
+            {
+              kind: 'question',
+              id: 'question:timed-question:["s1","call-timed-1"]',
+              callId: 'call-timed-1',
+              questionState: 'open',
+              turn: '2',
+            },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
         },
       },
     ], async () => {

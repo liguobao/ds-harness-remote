@@ -129,6 +129,36 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
   const historyIds = new Set(history.map(item => item.id))
   const boundary = throughSeq ?? Math.max(-1, ...history.map(item => item.nativeSeq ?? item.nativeOrderSeq ?? -1))
   const requests = new Set(history.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
+  const closedTurns = new Set(history.flatMap(item => {
+    if (item.turnEnd === undefined) return []
+    const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+    return owner === undefined ? [] : [owner]
+  }))
+  const activeHistoryTurn = (() => {
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const item = history[index]!
+      if (item.turnEnd !== undefined) return undefined
+      const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+      if (owner !== undefined) return owner
+      if (item.kind === 'message' && item.role === 'user' && !item.context) return undefined
+    }
+    return undefined
+  })()
+  const resolveInteractionTurn = (item: Extract<ChatItem, { kind: 'approval' | 'question' }>): string | undefined => {
+    if (item.callId !== undefined) {
+      const matched = history.find(row => row.kind === 'tool' && row.id === item.callId)
+      if (matched?.turn !== undefined) return matched.turn
+    }
+    if (item.outcome === undefined) {
+      const runningTool = [...history].reverse().find(row => row.kind === 'tool' && row.state === 'running'
+        && (item.kind === 'approval' || (row.toolKey ?? row.toolName) === 'ask_user_question'))
+      if (runningTool?.turn !== undefined) return runningTool.turn
+      if (activeHistoryTurn !== undefined && (item.turn === undefined || closedTurns.has(item.turn))) {
+        return activeHistoryTurn
+      }
+    }
+    return item.turn
+  }
   const result = [
     ...history.map(item => {
       const cached = liveById.get(item.id)
@@ -147,6 +177,10 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
       // A follow snapshot replaces transient chunks already covered by its cursor.
       if (item.kind === 'message' && item.streaming && (item.nativeRevisionSeq ?? item.nativeSeq ?? item.nativeOrderSeq ?? Infinity) <= boundary) return false
       return true
+    }).map(item => {
+      if (item.kind !== 'approval' && item.kind !== 'question') return item
+      const turn = resolveInteractionTurn(item)
+      return turn === item.turn ? item : { ...item, ...(turn === undefined ? {} : { turn }) }
     }),
   ]
   return result.sort((a, b) => {
@@ -157,6 +191,119 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
     if (right === undefined) return -1
     return left - right
   })
+}
+
+/** Reconcile durable `userQuestions` projection rows into the session's chat items. */
+export function reconcileUserQuestionsProjection(
+  items: ChatItem[],
+  sessionId: string,
+  userQuestions: unknown,
+  inbox?: unknown,
+): ChatItem[] {
+  if (typeof userQuestions !== 'object' || userQuestions === null || Array.isArray(userQuestions)) return items
+  const view = userQuestions as Record<string, unknown>
+  if (!Array.isArray(view.active) || !Array.isArray(view.settled)) return items
+  const queuedReplyCallIds = new Set<string>()
+  if (typeof inbox === 'object' && inbox !== null && !Array.isArray(inbox)) {
+    const inboxRecord = inbox as Record<string, unknown>
+    for (const row of [
+      ...(Array.isArray(inboxRecord['next-step']) ? inboxRecord['next-step'] : []),
+      ...(Array.isArray(inboxRecord['next-turn']) ? inboxRecord['next-turn'] : []),
+    ]) {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue
+      const source = (row as Record<string, unknown>).source
+      if (typeof source !== 'object' || source === null || Array.isArray(source)) continue
+      const sourceRecord = source as Record<string, unknown>
+      if (sourceRecord.kind === 'user-question-reply' && typeof sourceRecord.callId === 'string') {
+        queuedReplyCallIds.add(sourceRecord.callId)
+      }
+    }
+  }
+  const settledCallIds = new Set<string>()
+  for (const row of view.settled) {
+    if (typeof row === 'object' && row !== null && typeof (row as Record<string, unknown>).callId === 'string') {
+      settledCallIds.add((row as Record<string, unknown>).callId as string)
+    }
+  }
+  const activeRows = view.active.flatMap(row => {
+    if (typeof row !== 'object' || row === null || Array.isArray(row)) return []
+    const item = row as Record<string, unknown>
+    if (typeof item.callId !== 'string' || !Array.isArray(item.questions) || item.questions.length === 0
+      || (item.state !== 'open' && item.state !== 'continued')) return []
+    return [{
+      callId: item.callId,
+      questions: item.questions as import('../types').AskUserQuestionItem[],
+      state: item.state as 'open' | 'continued',
+    }]
+  })
+  const activeByCallId = new Map(activeRows.map(row => [row.callId, row]))
+  const activeTurn = (() => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index]!
+      if (item.turnEnd !== undefined) return undefined
+      const owner = item.turn ?? (item.kind === 'message' ? item.replyGroup : undefined)
+      if (owner !== undefined) return owner
+      if (item.kind === 'message' && item.role === 'user' && !item.context) return undefined
+    }
+    return undefined
+  })()
+  const seenCallIds = new Set<string>()
+  let changed = false
+  const updated = items.map((item): ChatItem => {
+    if (item.kind !== 'question' || item.callId === undefined) return item
+    seenCallIds.add(item.callId)
+    if (settledCallIds.has(item.callId)) {
+      if (item.outcome === 'answered') return item
+      changed = true
+      return { ...item, outcome: 'answered' as const }
+    }
+    const active = activeByCallId.get(item.callId)
+    if (active === undefined) {
+      if (item.outcome !== undefined) return item
+      changed = true
+      return { ...item, outcome: 'cancelled' as const }
+    }
+    const rpcId = `timed-question:${JSON.stringify([sessionId, active.callId])}`
+    const matchedTool = items.find(row => row.kind === 'tool' && row.id === active.callId)
+    const turn = matchedTool?.turn ?? item.turn ?? activeTurn
+    const nextOutcome = active.state === 'continued' && queuedReplyCallIds.has(active.callId)
+      ? 'queued' as const
+      : item.outcome === 'answered' || item.outcome === 'queued'
+        ? item.outcome
+        : undefined
+    if (item.frameRpcId === rpcId && item.questionState === active.state && item.outcome === nextOutcome && item.turn === turn && item.questions === active.questions) {
+      return item
+    }
+    changed = true
+    return {
+      ...item,
+      frameRpcId: item.frameRpcId ?? rpcId,
+      questions: active.questions,
+      questionState: active.state,
+      ...(turn === undefined ? {} : { turn }),
+      outcome: nextOutcome,
+    }
+  })
+  const appended: ChatItem[] = []
+  for (const active of activeRows) {
+    if (seenCallIds.has(active.callId)) continue
+    if (active.state === 'continued' && queuedReplyCallIds.has(active.callId)) continue
+    const rpcId = `timed-question:${JSON.stringify([sessionId, active.callId])}`
+    const matchedTool = items.find(row => row.kind === 'tool' && row.id === active.callId)
+    const turn = matchedTool?.turn ?? activeTurn
+    appended.push({
+      kind: 'question',
+      id: `question:${rpcId}`,
+      sessionId,
+      callId: active.callId,
+      questionState: active.state,
+      frameRpcId: rpcId,
+      questions: active.questions,
+      ...(turn === undefined ? {} : { turn }),
+      createdAt: Date.now(),
+    })
+  }
+  return !changed && appended.length === 0 ? items : [...updated, ...appended]
 }
 
 export type ChatSection =
