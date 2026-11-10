@@ -6443,7 +6443,7 @@ import {
   generateKeyPair as generateKeyPair2,
   X509Certificate
 } from "node:crypto";
-import { promisify } from "node:util";
+import { promisify as promisify2 } from "node:util";
 import { randomBytes as randomBytes32, sign } from "node:crypto";
 import { randomBytes as randomBytes42 } from "crypto";
 import { createHash as createHash22, randomUUID as randomUUID22 } from "crypto";
@@ -17187,7 +17187,7 @@ var init_lib = __esm({
       CN: "2.5.4.3"
     };
     ({ encode: encode17, types: types17 } = binaryData_exports);
-    generateKeyPairAsync = promisify(generateKeyPair2);
+    generateKeyPairAsync = promisify2(generateKeyPair2);
     CipherContext = class {
       constructor(sessionType, certPem, keyPem, signatureHashAlgorithm) {
         this.sessionType = sessionType;
@@ -82943,8 +82943,10 @@ import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
 import { createHash as createHash2 } from "node:crypto";
-import { chmod, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, link, mkdir as mkdir2, readFile as readFile2, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
 import { dirname as dirname2, join as join3 } from "node:path";
+import { promisify } from "node:util";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
   serverUrl: external_exports.string().url(),
@@ -82964,24 +82966,19 @@ var ServerCredentialStore = class {
   constructor(directory) {
     this.path = join3(directory, "server-credentials.json");
   }
-  /** Keep a live owner until its refresh transaction ends. Reclaim only a dead owner. */
+  /** Publish a complete owner record before the one-use refresh transaction starts. */
   async withRefreshLock(operation) {
     const lock = `${this.path}.refresh-lock`;
     await mkdir2(dirname2(this.path), { recursive: true, mode: 448 });
     const deadline = Date.now() + 15e3;
+    const owner = `${process.pid} ${uuidV7()}
+`;
     for (; ; ) {
       try {
-        await mkdir2(lock, { mode: 448 });
-        try {
-          await writeFile(join3(lock, "owner"), `${process.pid}
-`, { mode: 384, flag: "wx" });
-        } catch (error62) {
-          await rm2(lock, { recursive: true, force: true });
-          throw error62;
-        }
+        await publishExclusive(lock, owner);
         break;
       } catch (error62) {
-        if (!(error62 instanceof Error) || !("code" in error62) || error62.code !== "EEXIST") throw error62;
+        if (!await isLockContention(error62, lock)) throw error62;
         if (await reclaimExitedRefreshOwner(lock)) continue;
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
         await new Promise((resolve9) => setTimeout(resolve9, 50));
@@ -82990,7 +82987,7 @@ var ServerCredentialStore = class {
     try {
       return await operation();
     } finally {
-      await rm2(lock, { recursive: true });
+      await rm2(lock);
     }
   }
   async pairingHostOnly() {
@@ -83033,40 +83030,75 @@ var ServerCredentialsBusyError = class extends Error {
   }
 };
 async function reclaimExitedRefreshOwner(lock) {
-  const record11 = await readRefreshOwner(lock);
-  if (record11 === void 0 || !refreshOwnerExited(record11)) return false;
+  const record11 = await readLockRecord(lock);
+  if (record11 === void 0 || !await ownerExited(record11)) return false;
   const claim2 = `${lock}.takeover-${createHash2("sha256").update(record11).digest("hex").slice(0, 16)}`;
   try {
-    await writeFile(claim2, `${process.pid}
-`, { mode: 384, flag: "wx" });
+    await publishExclusive(claim2, `${process.pid} ${uuidV7()}
+`);
   } catch (error62) {
-    if (error62 instanceof Error && "code" in error62 && error62.code === "EEXIST") return false;
-    throw error62;
+    if (!await isLockContention(error62, claim2)) throw error62;
+    const claimant = await readLockRecord(claim2);
+    if (claimant === void 0 || !await ownerExited(claimant)) return false;
+    if (await readLockRecord(claim2) !== claimant) return false;
+    await rm2(claim2, { force: true });
+    return false;
   }
   try {
-    if (await readRefreshOwner(lock) !== record11 || !refreshOwnerExited(record11)) return false;
-    await rm2(lock, { recursive: true, force: true });
+    if (await readLockRecord(lock) !== record11 || !await ownerExited(record11)) return false;
+    await rm2(lock, { force: true });
     return true;
   } finally {
     await rm2(claim2, { force: true });
   }
 }
-async function readRefreshOwner(lock) {
+async function publishExclusive(path, record11) {
+  const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
+  await writeFile(temporary, record11, { mode: 384, flag: "wx" });
   try {
-    return await readFile2(join3(lock, "owner"), "utf8");
+    await link(temporary, path);
+  } finally {
+    await rm2(temporary, { force: true });
+  }
+}
+async function isLockContention(error62, path) {
+  if (!(error62 instanceof Error) || !("code" in error62)) return false;
+  if (error62.code === "EEXIST") return true;
+  if (process.platform !== "win32" || error62.code !== "EPERM") return false;
+  return exists(path);
+}
+async function readLockRecord(path) {
+  try {
+    return await readFile2(path, "utf8");
   } catch {
     return void 0;
   }
 }
-function refreshOwnerExited(record11) {
-  if (!/^\d+\n$/.test(record11)) return false;
-  const pid = Number(record11.trim());
+async function ownerExited(record11) {
+  const match = /^(\d+)(?: [0-9a-f-]{36})?\n$/.exec(record11);
+  if (match === null) return false;
+  const pid = Number(match[1]);
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false;
   try {
     process.kill(pid, 0);
     return false;
   } catch (error62) {
+    if (process.platform === "win32") return windowsOwnerExited(pid);
     return error62 instanceof Error && "code" in error62 && error62.code === "ESRCH";
+  }
+}
+async function windowsOwnerExited(pid) {
+  const command = `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -eq $p) { 'ABSENT' } else { 'EXISTS' }`;
+  try {
+    const { stdout } = await promisify(execFile)("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      command
+    ], { timeout: 5e3, windowsHide: true });
+    return stdout.trim() === "ABSENT";
+  } catch {
+    return false;
   }
 }
 async function atomicWritePrivate(path, contents) {
@@ -87800,7 +87832,7 @@ async function withIdentityLock(directory, operation) {
 `, { encoding: "utf8", mode: 384, flag: "wx" });
       break;
     } catch (error62) {
-      if (!await isLockContention(error62, lockPath)) throw error62;
+      if (!await isLockContention2(error62, lockPath)) throw error62;
       if (await takeOverLockOfExitedOwner(lockPath)) continue;
     }
     if (Date.now() >= deadline) {
@@ -87818,39 +87850,39 @@ async function withIdentityLock(directory, operation) {
     await rm3(lockPath, { force: true });
   }
 }
-async function isLockContention(error62, lockPath) {
+async function isLockContention2(error62, lockPath) {
   if (!isNodeError(error62)) return false;
   if (error62.code === "EEXIST") return true;
   if (error62.code !== "EPERM" || process.platform !== "win32") return false;
   return exists2(lockPath);
 }
 async function takeOverLockOfExitedOwner(lockPath) {
-  const record11 = await readLockRecord(lockPath);
-  if (record11 === void 0 || !ownerExited(record11)) return false;
+  const record11 = await readLockRecord2(lockPath);
+  if (record11 === void 0 || !ownerExited2(record11)) return false;
   const claimPath = `${lockPath}.takeover-${createHash5("sha256").update(record11).digest("hex").slice(0, 16)}`;
   try {
     await writeFile2(claimPath, `${process.pid}
 `, { encoding: "utf8", mode: 384, flag: "wx" });
   } catch (error62) {
-    if (await isLockContention(error62, claimPath)) return false;
+    if (await isLockContention2(error62, claimPath)) return false;
     throw error62;
   }
   try {
-    if (await readLockRecord(lockPath) !== record11 || !ownerExited(record11)) return false;
+    if (await readLockRecord2(lockPath) !== record11 || !ownerExited2(record11)) return false;
     await rm3(lockPath, { force: true });
     return true;
   } finally {
     await rm3(claimPath, { force: true }).catch(() => void 0);
   }
 }
-async function readLockRecord(lockPath) {
+async function readLockRecord2(lockPath) {
   try {
     return await readFile3(lockPath, "utf8");
   } catch {
     return void 0;
   }
 }
-function ownerExited(record11) {
+function ownerExited2(record11) {
   if (!/^\d+\n$/.test(record11)) return false;
   const pid = Number(record11.trim());
   if (pid === 0 || pid > 2147483647) return false;
@@ -92156,9 +92188,9 @@ var PiAcpClient = class extends IsolatedAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/antigravity/models.ts
-import { execFile } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
-var exec = promisify2(execFile);
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+var exec = promisify3(execFile2);
 function cachedAgyModels(load) {
   let catalog;
   let pending;
@@ -93061,10 +93093,10 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify3, stripVTControlCharacters } from "node:util";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify4, stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
-var execFileAsync = promisify3(execFile2);
+var execFileAsync = promisify4(execFile3);
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
     const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), "--help"], {
@@ -93857,9 +93889,9 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile4 } = await import("node:child_process");
-    const { promisify: promisify5 } = await import("node:util");
-    const execFileAsync3 = promisify5(execFile4);
+    const { execFile: execFile5 } = await import("node:child_process");
+    const { promisify: promisify6 } = await import("node:util");
+    const execFileAsync3 = promisify6(execFile5);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
@@ -95693,12 +95725,12 @@ function isRecord18(value) {
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile3, execFileSync } from "node:child_process";
+import { execFile as execFile4, execFileSync } from "node:child_process";
 import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
-import { promisify as promisify4 } from "node:util";
-var execFileAsync2 = promisify4(execFile3);
+import { promisify as promisify5 } from "node:util";
+var execFileAsync2 = promisify5(execFile4);
 var BUILTIN_ACP_SPECS = Object.freeze({
   codex: Object.freeze({
     id: "codex",
@@ -96921,7 +96953,7 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link as link2, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -97045,7 +97077,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link(upload.temp, join15(upload.root, name2));
+        await link2(upload.temp, join15(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;

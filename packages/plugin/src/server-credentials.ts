@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { chmod, link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
 
@@ -26,23 +28,18 @@ export class ServerCredentialStore {
 
   constructor(directory: string) { this.path = join(directory, 'server-credentials.json') }
 
-  /** Keep a live owner until its refresh transaction ends. Reclaim only a dead owner. */
+  /** Publish a complete owner record before the one-use refresh transaction starts. */
   async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
     const lock = `${this.path}.refresh-lock`
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     const deadline = Date.now() + 15_000
+    const owner = `${process.pid} ${uuidV7()}\n`
     for (;;) {
       try {
-        await mkdir(lock, { mode: 0o700 })
-        try {
-          await writeFile(join(lock, 'owner'), `${process.pid}\n`, { mode: 0o600, flag: 'wx' })
-        } catch (error) {
-          await rm(lock, { recursive: true, force: true })
-          throw error
-        }
+        await publishExclusive(lock, owner)
         break
       } catch (error) {
-        if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error
+        if (!(await isLockContention(error, lock))) throw error
         if (await reclaimExitedRefreshOwner(lock)) continue
         if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
         await new Promise(resolve => setTimeout(resolve, 50))
@@ -51,7 +48,7 @@ export class ServerCredentialStore {
     try {
       return await operation()
     } finally {
-      await rm(lock, { recursive: true })
+      await rm(lock)
     }
   }
 
@@ -101,35 +98,64 @@ export class ServerCredentialsBusyError extends Error {
 }
 
 async function reclaimExitedRefreshOwner(lock: string): Promise<boolean> {
-  const record = await readRefreshOwner(lock)
-  if (record === undefined || !refreshOwnerExited(record)) return false
+  const record = await readLockRecord(lock)
+  if (record === undefined || !await ownerExited(record)) return false
   const claim = `${lock}.takeover-${createHash('sha256').update(record).digest('hex').slice(0, 16)}`
   try {
-    await writeFile(claim, `${process.pid}\n`, { mode: 0o600, flag: 'wx' })
+    await publishExclusive(claim, `${process.pid} ${uuidV7()}\n`)
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') return false
-    throw error
+    if (!(await isLockContention(error, claim))) throw error
+    const claimant = await readLockRecord(claim)
+    if (claimant === undefined || !await ownerExited(claimant)) return false
+    if (await readLockRecord(claim) !== claimant) return false
+    await rm(claim, { force: true })
+    return false
   }
   try {
-    if (await readRefreshOwner(lock) !== record || !refreshOwnerExited(record)) return false
-    await rm(lock, { recursive: true, force: true })
+    if (await readLockRecord(lock) !== record || !await ownerExited(record)) return false
+    await rm(lock, { force: true })
     return true
   } finally {
     await rm(claim, { force: true })
   }
 }
 
-async function readRefreshOwner(lock: string): Promise<string | undefined> {
-  try { return await readFile(join(lock, 'owner'), 'utf8') } catch { return undefined }
+async function publishExclusive(path: string, record: string): Promise<void> {
+  const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
+  await writeFile(temporary, record, { mode: 0o600, flag: 'wx' })
+  try { await link(temporary, path) } finally { await rm(temporary, { force: true }) }
 }
 
-function refreshOwnerExited(record: string): boolean {
-  if (!/^\d+\n$/.test(record)) return false
-  const pid = Number(record.trim())
+async function isLockContention(error: unknown, path: string): Promise<boolean> {
+  if (!(error instanceof Error) || !('code' in error)) return false
+  if (error.code === 'EEXIST') return true
+  if (process.platform !== 'win32' || error.code !== 'EPERM') return false
+  return exists(path)
+}
+
+async function readLockRecord(path: string): Promise<string | undefined> {
+  try { return await readFile(path, 'utf8') } catch { return undefined }
+}
+
+async function ownerExited(record: string): Promise<boolean> {
+  const match = /^(\d+)(?: [0-9a-f-]{36})?\n$/.exec(record)
+  if (match === null) return false
+  const pid = Number(match[1])
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false
   try { process.kill(pid, 0); return false } catch (error) {
+    if (process.platform === 'win32') return windowsOwnerExited(pid)
     return error instanceof Error && 'code' in error && error.code === 'ESRCH'
   }
+}
+
+async function windowsOwnerExited(pid: number): Promise<boolean> {
+  const command = `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -eq $p) { 'ABSENT' } else { 'EXISTS' }`
+  try {
+    const { stdout } = await promisify(execFile)('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command', command,
+    ], { timeout: 5_000, windowsHide: true })
+    return stdout.trim() === 'ABSENT'
+  } catch { return false }
 }
 
 export async function atomicWritePrivate(path: string, contents: string): Promise<void> {
