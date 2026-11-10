@@ -229,7 +229,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     </View>}
     {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-      onLayout={() => { if (running) body.current?.scrollToEnd({ animated: false }) }}
+      onLayout={() => { if (running || pending) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
       {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text) && !item.images?.length
         ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>

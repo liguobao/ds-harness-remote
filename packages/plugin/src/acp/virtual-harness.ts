@@ -1,6 +1,7 @@
 import { AgentAcpClient } from '@dsh-remote/client-core'
 import type { AcpSessionModels } from '@dsh-remote/protocol'
 import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS } from '@dsh-remote/protocol'
+import { AcpSessionHistoryCache, type CachedAcpSessionHistory } from '../session-history-cache.js'
 import type { RemoteTypertGatewayTarget, TypertGatewayRequest, TypertRpcResult } from '../typert-gateway-contract.js'
 import type { AcpImage } from './image-content.js'
 import { acpImageContent, acpImageLimits, parseAcpImage } from './image-content.js'
@@ -62,6 +63,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly pendingApprovals = new Map<string, PendingApproval>()
   private readonly pendingHistory = new Map<string, Promise<void>>()
   private selectedWorkspaceId?: string
+  private lastOpenedSessionId?: string
+  private readonly openedWorkspaceSessions = new Map<string, string>()
   private readonly selectedModels = new Map<string, AcpModelSelection>()
   private readonly selectedPermissions = new Map<string, AcpPermissionPreset>()
   private commandSeq = 0
@@ -82,6 +85,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
      * see `method-not-found` for every global surface and can fail its render.
      */
     private readonly hostCarrier?: RemoteTypertGatewayTarget,
+    private readonly historyCache: AcpSessionHistoryCache = new AcpSessionHistoryCache(),
   ) {
     const owner = this
     this.live = new AcpLiveProjection({
@@ -105,6 +109,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       modelSelection: (...args) => owner.modelSelection(...args),
       permissionsProjection: (...args) => owner.permissionsProjection(...args),
       permissionSelection: (...args) => owner.permissionSelection(...args),
+      rememberOpenedSession: sessionId => owner.rememberOpenedSession(sessionId),
+      syncSessionCache: session => owner.syncSessionCache(session),
     })
     this.events = new AcpEventCarrier({
       get archivedSessionIds() { return owner.archivedSessionIds },
@@ -135,8 +141,30 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     backend: AcpCatalogBackend = "cursor",
     capabilities: readonly string[] = [],
     hostCarrier?: RemoteTypertGatewayTarget,
+    historyCache?: AcpSessionHistoryCache,
   ): AcpVirtualHarness {
-    return new AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier)
+    return new AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier, historyCache)
+  }
+
+  get openedSessionId(): string | undefined {
+    return this.lastOpenedSessionId
+  }
+
+  get openedSessions(): ReadonlyMap<string, string> {
+    return new Map(this.openedWorkspaceSessions)
+  }
+
+  private rememberOpenedSession(sessionId: string): void {
+    if (this.closed) return
+    this.lastOpenedSessionId = sessionId
+    for (const workspace of this.workspaceById.values()) {
+      if (!workspace.sessionIds.includes(sessionId)) continue
+      this.openedWorkspaceSessions.delete(workspace.workspaceId)
+      this.openedWorkspaceSessions.set(workspace.workspaceId, sessionId)
+      if (this.openedWorkspaceSessions.size > 64) {
+        this.openedWorkspaceSessions.delete(this.openedWorkspaceSessions.keys().next().value!)
+      }
+    }
   }
 
   async workspaces(): Promise<AcpVirtualWorkspaceView[]> {
@@ -176,11 +204,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     return this.workspaceById.get(workspace.workspaceId) ?? workspace
   }
 
-  async preferredSessionId(): Promise<string | undefined> {
+  async preferredSessionId(
+    preferredSessionId = this.openedWorkspaceSessions.get(this.selectedWorkspaceId ?? ''),
+  ): Promise<string | undefined> {
     const selected = this.selectedWorkspaceId === undefined
       ? undefined
       : this.workspaceById.get(this.selectedWorkspaceId)
     const sessionIds = selected?.sessionIds ?? []
+    if (preferredSessionId !== undefined && sessionIds.includes(preferredSessionId) && !this.archivedSessionIds.has(preferredSessionId)) {
+      return preferredSessionId
+    }
     let bestSessionId: string | undefined
     let bestUpdatedAt = -1
     for (const sessionId of sessionIds) {
@@ -318,6 +351,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    for (const session of this.sessions.values()) {
+      if (session.hydrated || session.events.length > 0) {
+        this.syncSessionCache(session)
+      }
+    }
     this.titles.close()
     this.unsubscribeArchived?.()
     for (const stream of this.workspaceStreams) stream.close()
@@ -388,6 +426,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private applyArchived(sessionId: string): void {
     this.archivedSessionIds.add(sessionId)
+    this.historyCache.delete(sessionId)
     for (const [workspaceId, workspace] of this.workspaceById) {
       if (!workspace.sessionIds.includes(sessionId)) continue
       const sessionIds = workspace.sessionIds.filter(id => id !== sessionId)
@@ -483,8 +522,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     this.titles.applyPrompt(session, text)
     session.blank = false
+    session.hydrated = true
     session.running = true
     session.updatedAt = Date.now()
+    this.syncSessionCache(session)
     this.events.emitRemoteEvent('api-session/status', [sessionId, true])
     this.publishWorkspaceBaseline()
     await this.client.prompt(session.acpSessionId, text ?? '', signal, images, this.backend)
@@ -502,6 +543,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         this.live.closeFollowAfterRemoteStreamClosed(follow, { kind: 'aborted', reason: { kind: 'user' } })
       }
     }
+    this.syncSessionCache(session)
     this.events.emitRemoteEvent('api-session/status', [sessionId, false])
     return success({ accepted: true })
   }
@@ -515,6 +557,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     session.title = title
     session.titleOverridden = true
     session.updatedAt = Date.now()
+    this.syncSessionCache(session)
     this.events.publishProjection(sessionId, 'title', title)
     return success({ sessionId })
   }
@@ -542,8 +585,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hydrateSession(session: AcpSessionState): Promise<void> {
-    if (this.backend === 'cursor' || session.blank || session.events.length > 0) return
-    if (this.backend !== 'pi') return this.hydrateSessionOnce(session)
+    if (this.backend === 'cursor' || session.blank || (session.events.length > 0 && !session.staleHistory)) return
+    const cached = this.historyCache.getFresh(session.sessionId)
+    if (cached !== undefined && (!Number.isFinite(session.updatedAt) || session.updatedAt === cached.hostUpdatedAt)) {
+      this.restoreCachedSession(session, cached, false)
+      return
+    }
     const pending = this.pendingHistory.get(session.sessionId)
     if (pending) return pending
     const read = this.hydrateSessionOnce(session)
@@ -557,6 +604,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend)
       } catch (error) {
+        const stale = this.historyCache.getStale(session.sessionId)
+        if (stale !== undefined && stale.events.length > 0) {
+          this.restoreCachedSession(session, stale, true)
+          return
+        }
         // A failed history read is not a successful empty baseline; do not continue
         // a restored conversation until its authoritative history is available.
         if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode' || this.backend === 'hermes') throw error
@@ -564,12 +616,59 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       }
     }
     if (events.length > 0) {
+      session.hydrated = true
+      session.staleHistory = false
       session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
       const firstUser = session.events.find(entry => entry.event.type === 'user/message')
       this.titles.applyPrompt(session, extractPromptText(array(record(firstUser?.event.data).content)))
       session.blank = false
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
+      this.syncSessionCache(session)
     }
+  }
+
+  private restoreCachedSession(session: AcpSessionState, cached: CachedAcpSessionHistory, staleFallback: boolean): void {
+    session.events = cached.events
+    session.hydrated = !staleFallback && !cached.stale && !cached.truncated
+    session.staleHistory = staleFallback || Boolean(cached.stale) || Boolean(cached.truncated)
+    session.blank = cached.blank
+    if (cached.title !== undefined && (!session.titleOverridden || cached.titleOverridden)) {
+      session.title = cached.title
+      session.titleOverridden = cached.titleOverridden
+      session.titleFromPrompt = cached.titleFromPrompt
+    }
+    if (cached.selectedModel !== undefined && !this.selectedModels.has(session.sessionId)) {
+      this.selectedModels.set(session.sessionId, cached.selectedModel)
+    }
+    if (cached.permissionPreset !== undefined && !this.selectedPermissions.has(session.sessionId)) {
+      this.selectedPermissions.set(session.sessionId, cached.permissionPreset)
+    }
+    for (const event of session.events) {
+      this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
+    }
+  }
+
+  private syncSessionCache(session: AcpSessionState): void {
+    if (this.backend === 'cursor') return
+    const existing = this.historyCache.getStale(session.sessionId)
+    const isStale = Boolean(session.running || session.staleHistory)
+    const hostUpdatedAt = session.staleHistory && existing !== undefined
+      ? existing.hostUpdatedAt
+      : session.updatedAt
+    const selectedModel = this.selectedModels.get(session.sessionId)
+    const permissionPreset = this.selectedPermissions.get(session.sessionId)
+    this.historyCache.set(session.sessionId, {
+      events: session.events,
+      blank: session.blank && session.events.length === 0,
+      hydrated: Boolean((session.hydrated || session.events.length > 0) && !session.staleHistory),
+      stale: isStale,
+      ...(session.title === undefined ? {} : { title: session.title }),
+      ...(session.titleOverridden === undefined ? {} : { titleOverridden: session.titleOverridden }),
+      ...(session.titleFromPrompt === undefined ? {} : { titleFromPrompt: session.titleFromPrompt }),
+      hostUpdatedAt,
+      ...(selectedModel === undefined ? {} : { selectedModel }),
+      ...(permissionPreset === undefined ? {} : { permissionPreset }),
+    })
   }
 
   private async sessionHistory(request: JsonRecord): Promise<unknown> {
@@ -577,8 +676,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.hydrateSession(session)
+    const beforeSeq = optionalInteger(request.beforeSeq)
+    if (beforeSeq === undefined) {
+      this.rememberOpenedSession(session.sessionId)
+    }
     const page = this.historyPage(session, {
-      beforeSeq: optionalInteger(request.beforeSeq),
+      beforeSeq,
       limit: optionalPositiveInteger(request.maxMessages) ?? 50,
     })
     return success({
@@ -855,6 +958,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (resolved !== sessionId) {
       this.events.publishProjection(sessionId, 'permissions', this.permissionsProjection(resolved), seq)
     }
+    const session = this.sessions.get(resolved)
+    if (session !== undefined) this.syncSessionCache(session)
     if (this.client.selectPermission) {
       void this.client.selectPermission(nativeAcpId(resolved, this.backend), this.backend, preset ?? 'workspace-write').catch(() => undefined)
     }
@@ -940,6 +1045,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
     this.selectedModels.set(sessionId, confirmed)
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed)
+    const session = this.sessions.get(sessionId)
+    if (session !== undefined) this.syncSessionCache(session)
     const seq = this.nextProjectionSeq()
     this.events.publishProjection(sessionId, 'modelSelection', this.modelSelectionProjection(sessionId), seq)
     if (rawSessionId && rawSessionId !== sessionId) {

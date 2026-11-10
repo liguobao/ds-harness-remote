@@ -49,6 +49,8 @@ export interface AcpLiveProjectionContext {
   readonly modelSelection: (sessionId: string) => AcpModelSelection
   readonly permissionsProjection: (sessionId: string) => unknown
   readonly permissionSelection: (sessionId: string) => AcpPermissionPreset | undefined
+  readonly rememberOpenedSession?: (sessionId: string) => void
+  readonly syncSessionCache?: (session: AcpSessionState) => void
 }
 
 export class AcpLiveProjection {
@@ -59,6 +61,7 @@ export class AcpLiveProjection {
     const session = this.context.ensureSessionRegistered(sessionId) ?? this.context.sessions.get(sessionId)
     if (session === undefined) throw new Error('The Session was not found.')
     await this.context.hydrateSession(session)
+    this.context.rememberOpenedSession?.(session.sessionId)
     const history = this.context.historyPage(session, {
       limit: optionalPositiveInteger(request.maxMessages) ?? 50,
     })
@@ -470,6 +473,8 @@ export class AcpLiveProjection {
   }
 
   closeFollowAfterRemoteStreamClosed(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
+    const session = this.context.sessions.get(follow.sessionId)
+    if (session !== undefined) session.running = false
     if (this.context.backend === 'pi') {
       this.finishPiAssistant(follow, outcome)
       if (follow.stepOpen) {
@@ -482,6 +487,7 @@ export class AcpLiveProjection {
       follow.piToolOutputs.clear()
       follow.piToolCalls.clear()
       follow.activeToolCalls.clear()
+      if (session !== undefined) this.context.syncSessionCache?.(session)
       return
     }
     if (follow.streamActive) {
@@ -537,6 +543,7 @@ export class AcpLiveProjection {
     follow.accumulatedText = ''
     follow.piToolOutputs.clear()
     follow.piToolCalls.clear()
+    if (session !== undefined) this.context.syncSessionCache?.(session)
   }
 
   pushEvent(follow: FollowState, type: string, data: unknown): number {
@@ -551,6 +558,7 @@ export class AcpLiveProjection {
     }
     if (session !== undefined) {
       session.events.push({ type: 'event', event })
+      this.context.syncSessionCache?.(session)
     }
     for (const f of this.context.follows) {
       if (f.sessionId === follow.sessionId) {

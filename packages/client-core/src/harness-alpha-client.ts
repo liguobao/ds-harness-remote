@@ -255,6 +255,7 @@ interface PendingRemoteEvent {
   event: RemoteEventKind
   eventId: string
   sessionId: string
+  frame: HarnessClientFrame
 }
 
 type StreamHandle = {
@@ -528,6 +529,7 @@ export class HarnessAlphaClient {
     if (cursor !== undefined) this.followCursors.set(sessionId, cursor)
     if (this.host.sessionFormat === 3) handle.assistant = assistantStreamBaseline(snapshot.assistantStream)
     this.applyProjectionBaseline(sessionId, snapshot.projections)
+    this.republishPendingSessionInteractions(sessionId, isRecord(snapshot.projections) && isRecord(snapshot.projections.values) && snapshot.projections.values.userQuestions !== undefined)
     void this.pumpSessionFollow(handle, iterator).catch(error => this.emitStreamFailure(handle, this.sessionFollow, error))
     return {
       events: historyEntriesFromRecords(Array.isArray(snapshot.records) ? snapshot.records : []),
@@ -928,8 +930,7 @@ export class HarnessAlphaClient {
 
   private routeWaterfall(event: unknown, eventId: string, sessionId: string, request: Record<string, unknown>): void {
     if (event === 'approval/request') {
-      this.pendingEvents.set(eventId, { event, eventId, sessionId })
-      this.emitFrame({
+      const frame: HarnessClientFrame = {
         rpcId: eventId,
         payload: {
           type: 'approval/requested',
@@ -939,20 +940,30 @@ export class HarnessAlphaClient {
           ...(typeof request.callId === 'string' ? { callId: request.callId } : {}),
           ...(typeof request.reason === 'string' ? { reason: request.reason } : {}),
         },
-      })
+      }
+      this.pendingEvents.set(eventId, { event, eventId, sessionId, frame })
+      this.emitFrame(frame)
       return
     }
     if (event === 'user-questions/request') {
       if (this.questions.request(sessionId, eventId, request)) return
-      this.pendingEvents.set(eventId, { event, eventId, sessionId })
-      this.emitFrame({
+      const frame: HarnessClientFrame = {
         rpcId: eventId,
         payload: {
           type: 'question/requested',
           sessionId,
           questions: Array.isArray(request.questions) ? request.questions : [],
         },
-      })
+      }
+      this.pendingEvents.set(eventId, { event, eventId, sessionId, frame })
+      this.emitFrame(frame)
+    }
+  }
+
+  private republishPendingSessionInteractions(sessionId: string, hasUserQuestionsProjection: boolean): void {
+    if (!hasUserQuestionsProjection) this.questions.republish(sessionId)
+    for (const pending of this.pendingEvents.values()) {
+      if (pending.sessionId === sessionId) this.emitFrame(pending.frame)
     }
   }
 

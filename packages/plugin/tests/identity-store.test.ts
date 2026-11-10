@@ -1,4 +1,6 @@
-import { link, truncate, chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -52,6 +54,7 @@ describe('IdentityStore', () => {
   })
 
   it('migrates interrupted peer writes for flat, host and client storage and cleans only known temporaries', async () => {
+    const dead = await deadPid()
     for (const role of ['flat', 'host', 'client'] as const) {
       const home = await temporaryDirectory()
       const source = join(home, 'remote')
@@ -60,16 +63,299 @@ describe('IdentityStore', () => {
       const identity = await store.loadOrCreate('Host')
       await store.trustPeer({ deviceId: identity.deviceId, name: 'Peer', platform: 'linux', publicKey: identity.publicKey })
       const peers = await readFile(join(directory, 'trusted-peers.json'))
-      const temp = 'trusted-peers.json.33208.01a1b6d8-e8b5-7000-8000-000000000001.tmp'
-      await writeFile(join(directory, temp), '{partial')
+      const temps = [
+        `trusted-peers.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000001.tmp`,
+        `server-credentials.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000002.tmp`,
+        `device.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000003.tmp`,
+        `device.key.${dead}.01a1b6d8-e8b5-7000-8000-000000000004.tmp`,
+        `host-pairing.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000005.tmp`,
+        `pairing-host-only.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000006.tmp`,
+      ]
+      for (const temp of temps) {
+        await writeFile(join(directory, temp), '{partial', { mode: 0o600 })
+      }
       const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
       const moved = directory.replace(source, target)
-      expect(await readFile(join(moved, temp), 'utf8')).toBe('{partial')
+      for (const temp of temps) {
+        expect(await readFile(join(moved, temp), 'utf8')).toBe('{partial')
+      }
       const reopened = new IdentityStore({ directory: moved })
       expect(await reopened.loadOrCreate('Host')).toEqual(identity)
       expect(await readFile(join(moved, 'trusted-peers.json'))).toEqual(peers)
-      expect(await readdir(moved)).not.toContain(temp)
+      const remaining = await readdir(moved)
+      for (const temp of temps) {
+        expect(remaining).not.toContain(temp)
+      }
     }
+  })
+
+  it('preserves in-flight credential and peer temporary files owned by a live process until rename completes', async () => {
+    const directory = await temporaryDirectory()
+    const store = new IdentityStore({ directory })
+    const identity = await store.loadOrCreate('Host')
+    const inFlightCredTemp = `server-credentials.json.${process.pid}.01a1b6d8-e8b5-7000-8000-000000000002.tmp`
+    const inFlightPeerTemp = `trusted-peers.json.${process.pid}.01a1b6d8-e8b5-7000-8000-000000000001.tmp`
+    const dead = await deadPid()
+    const staleCredTemp = `server-credentials.json.${dead}.01a1b6d8-e8b5-7000-8000-000000000003.tmp`
+    await writeFile(join(directory, inFlightCredTemp), '{"schemaVersion":1}\n', { mode: 0o600 })
+    await writeFile(join(directory, inFlightPeerTemp), '{"schemaVersion":1,"peers":[]}\n', { mode: 0o600 })
+    await writeFile(join(directory, staleCredTemp), '{partial', { mode: 0o600 })
+
+    // Concurrent loadOrCreate runs removeStaleTemporaries; live PID temps must survive so rename succeeds.
+    expect(await new IdentityStore({ directory }).loadOrCreate('Host')).toEqual(identity)
+    const afterLoad = await readdir(directory)
+    expect(afterLoad).toContain(inFlightCredTemp)
+    expect(afterLoad).toContain(inFlightPeerTemp)
+    expect(afterLoad).not.toContain(staleCredTemp)
+    await rename(join(directory, inFlightPeerTemp), join(directory, 'trusted-peers.json'))
+    await rename(join(directory, inFlightCredTemp), join(directory, 'server-credentials.json'))
+
+    // Migration must also refuse to move legacy storage while a live process has an unrenamed temp file.
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const hostIdentity = await new IdentityStore({ directory: source }).loadOrCreate('Host')
+    const liveMigrationTemp = join(source, inFlightCredTemp)
+    const validCredPayload = JSON.stringify({
+      schemaVersion: 1,
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: hostIdentity.deviceId,
+      authorizationMethod: 'account',
+      account: 'host@example.com',
+      accessToken: 'fixture-access-token',
+      accessTokenExpiresAt: 1,
+      refreshToken: 'fixture-refresh-token',
+      refreshTokenExpiresAt: 2,
+    })
+    await writeFile(liveMigrationTemp, `${validCredPayload}\n`, { mode: 0o600 })
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).rejects.toMatchObject({
+      code: 'IDENTITY_LOCKED',
+    })
+    await rename(liveMigrationTemp, join(source, 'server-credentials.json'))
+    await chmod(join(source, 'server-credentials.json'), 0o600)
+    expect(await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })).toBe(join(home, 'ds-harness-remote'))
+  })
+
+  it('reclaims exited-owner identity and interrupted real-hash takeover locks during migration and runtime load while preserving live lock and concurrent takeover protection', async () => {
+    const [deadOwner, deadContender, deadSecondContender] = await deadPids()
+    expect(new Set([deadOwner, deadContender, deadSecondContender]).size).toBe(3)
+    const lockRecord = `${deadOwner}\n`
+    const takeoverRecord = `${deadContender}\n`
+    const realTakeover = `device.lock.takeover-${createHash('sha256').update(lockRecord).digest('hex').slice(0, 16)}`
+    const secondTakeover = `device.lock.takeover-${createHash('sha256').update(`${realTakeover}\n${takeoverRecord}`).digest('hex').slice(0, 16)}`
+    const serverUrl = 'https://example.com'
+
+    for (const role of ['flat', 'host', 'client'] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const directory = role === 'flat' ? source : serverStorageDirectory(source, serverUrl, role)
+      const store = new IdentityStore({ directory, role: role === 'flat' ? undefined : role })
+      const identity = await store.loadOrCreate('Host')
+      await store.trustPeer({ deviceId: identity.deviceId, name: 'Peer', platform: 'linux', publicKey: identity.publicKey })
+      const credentials = await new ServerCredentialStore(directory).save({
+        serverUrl,
+        deviceId: identity.deviceId,
+        authorizationMethod: 'owned_device',
+        accessToken: 'fixture-access-token',
+        accessTokenExpiresAt: 1,
+        refreshToken: 'fixture-refresh-token',
+        refreshTokenExpiresAt: 2,
+      })
+      const deviceJsonBytes = await readFile(join(directory, 'device.json'))
+      const deviceKeyBytes = await readFile(join(directory, 'device.key'))
+      const peersBytes = await readFile(join(directory, 'trusted-peers.json'))
+      const credentialBytes = await readFile(join(directory, 'server-credentials.json'))
+
+      await writeFile(join(directory, 'device.lock'), lockRecord, { mode: 0o600 })
+      await writeFile(join(directory, realTakeover), takeoverRecord, { mode: 0o600 })
+      await writeFile(join(directory, secondTakeover), `${deadSecondContender}\n`, { mode: 0o600 })
+
+      const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      expect(target).toBe(join(home, 'ds-harness-remote'))
+      const moved = directory.replace(source, target)
+      expect(await readdir(moved)).not.toContain('device.lock')
+      expect(await readdir(moved)).not.toContain(realTakeover)
+      expect(await readdir(moved)).not.toContain(secondTakeover)
+      expect(await readFile(join(moved, 'device.json'))).toEqual(deviceJsonBytes)
+      expect(await readFile(join(moved, 'device.key'))).toEqual(deviceKeyBytes)
+      expect(await readFile(join(moved, 'trusted-peers.json'))).toEqual(peersBytes)
+      expect(await readFile(join(moved, 'server-credentials.json'))).toEqual(credentialBytes)
+
+      // Also verify direct runtime withIdentityLock recovery when device.lock and chained real-hash takeover files remain.
+      await writeFile(join(moved, 'device.lock'), lockRecord, { mode: 0o600 })
+      await writeFile(join(moved, realTakeover), takeoverRecord, { mode: 0o600 })
+      await writeFile(join(moved, secondTakeover), `${deadSecondContender}\n`, { mode: 0o600 })
+      const reopened = new IdentityStore({ directory: moved, role: role === 'flat' ? undefined : role })
+      expect(await reopened.loadOrCreate('Host')).toEqual(identity)
+      expect(reopened.listTrustedPeers()).toEqual(store.listTrustedPeers())
+      expect(await new ServerCredentialStore(moved).load(serverUrl, identity.deviceId)).toEqual(credentials)
+      expect(await readdir(moved)).not.toContain('device.lock')
+      expect(await readdir(moved)).not.toContain(realTakeover)
+      expect(await readdir(moved)).not.toContain(secondTakeover)
+      expect(await readFile(join(moved, 'device.json'))).toEqual(deviceJsonBytes)
+      expect(await readFile(join(moved, 'device.key'))).toEqual(deviceKeyBytes)
+      expect(await readFile(join(moved, 'trusted-peers.json'))).toEqual(peersBytes)
+      expect(await readFile(join(moved, 'server-credentials.json'))).toEqual(credentialBytes)
+    }
+
+    // Live lock owner or live concurrent takeover contender must reject with IDENTITY_LOCKED without altering any file.
+    for (const liveScenario of ['live-lock-with-dead-takeover', 'dead-lock-with-live-takeover'] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const hostDir = serverStorageDirectory(source, serverUrl, 'host')
+      const store = new IdentityStore({ directory: hostDir, role: 'host' })
+      const identity = await store.loadOrCreate('Host')
+      await store.trustPeer({ deviceId: identity.deviceId, name: 'Peer', platform: 'linux', publicKey: identity.publicKey })
+      await new ServerCredentialStore(hostDir).save({
+        serverUrl,
+        deviceId: identity.deviceId,
+        authorizationMethod: 'owned_device',
+        accessToken: 'fixture-access-token',
+        accessTokenExpiresAt: 1,
+        refreshToken: 'fixture-refresh-token',
+        refreshTokenExpiresAt: 2,
+      })
+      const activeLockRecord = liveScenario === 'live-lock-with-dead-takeover' ? `${process.pid}\n` : lockRecord
+      const activeTakeoverName = `device.lock.takeover-${createHash('sha256').update(activeLockRecord).digest('hex').slice(0, 16)}`
+      const activeTakeoverRecord = liveScenario === 'live-lock-with-dead-takeover' ? `${deadContender}\n` : `${process.pid}\n`
+      await writeFile(join(hostDir, 'device.lock'), activeLockRecord, { mode: 0o600 })
+      await writeFile(join(hostDir, activeTakeoverName), activeTakeoverRecord, { mode: 0o600 })
+      const beforeEntries = (await readdir(hostDir)).sort()
+      const beforeBytes = new Map(await Promise.all(
+        beforeEntries.map(async name => [name, await readFile(join(hostDir, name))] as const),
+      ))
+
+      await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), liveScenario).rejects.toMatchObject({
+        code: 'IDENTITY_LOCKED',
+      })
+      expect((await readdir(hostDir)).sort(), liveScenario).toEqual(beforeEntries)
+      for (const [name, bytes] of beforeBytes) {
+        expect(await readFile(join(hostDir, name)), `${liveScenario}:${name}`).toEqual(bytes)
+      }
+      await expect(stat(join(home, 'ds-harness-remote'))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('migrates valid host storage alongside an empty client directory, rotated client credential or uncredentialed broken flat root', async () => {
+    const serverUrl = 'https://dsh.r2049.cn'
+    for (const scenario of [
+      'empty-client',
+      'rotated-client-credential',
+      'broken-flat-root',
+      'corrupt-flat-json',
+      'invalid-flat-schema',
+      'corrupt-flat-key',
+    ] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const hostDir = serverStorageDirectory(source, serverUrl, 'host')
+      const clientDir = serverStorageDirectory(source, serverUrl, 'client')
+      const hostIdentity = await new IdentityStore({ directory: hostDir, role: 'host' }).loadOrCreate('Host')
+      await new ServerCredentialStore(hostDir).save({
+        serverUrl,
+        deviceId: hostIdentity.deviceId,
+        authorizationMethod: 'account',
+        account: 'host@example.com',
+        accessToken: 'fixture-access-token',
+        accessTokenExpiresAt: 1,
+        refreshToken: 'fixture-refresh-token',
+        refreshTokenExpiresAt: 2,
+      })
+      const hostCredentialBytes = await readFile(join(hostDir, 'server-credentials.json'))
+
+      if (scenario === 'empty-client') {
+        await mkdir(clientDir, { recursive: true })
+      }
+      if (scenario === 'rotated-client-credential') {
+        const oldClient = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Old Client')
+        await new IdentityStore({ directory: clientDir, role: 'client' }).loadOrCreate('Client')
+        await new ServerCredentialStore(clientDir).save({
+          serverUrl,
+          deviceId: oldClient.deviceId,
+          authorizationMethod: 'account',
+          account: 'host@example.com',
+          accessToken: 'stale-client-access-token',
+          accessTokenExpiresAt: 1,
+          refreshToken: 'stale-client-refresh-token',
+          refreshTokenExpiresAt: 2,
+        })
+      }
+      if (scenario === 'broken-flat-root') {
+        const other = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Other')
+        await new IdentityStore({ directory: source }).loadOrCreate('Flat')
+        await writeFile(join(source, 'device.key'), `${other.privateKey}\n`, { mode: 0o600 })
+      }
+      if (scenario === 'corrupt-flat-json') {
+        await new IdentityStore({ directory: source }).loadOrCreate('Flat')
+        await writeFile(join(source, 'device.json'), '{corrupt-json', { mode: 0o600 })
+      }
+      if (scenario === 'invalid-flat-schema') {
+        await new IdentityStore({ directory: source }).loadOrCreate('Flat')
+        await writeFile(join(source, 'device.json'), '{"schemaVersion":99}', { mode: 0o600 })
+      }
+      if (scenario === 'corrupt-flat-key') {
+        await new IdentityStore({ directory: source }).loadOrCreate('Flat')
+        await writeFile(join(source, 'device.key'), 'not-a-32-byte-private-key\n', { mode: 0o600 })
+      }
+
+      const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      expect(target, scenario).toBe(join(home, 'ds-harness-remote'))
+      const movedHostDir = serverStorageDirectory(target, serverUrl, 'host')
+      expect(await new IdentityStore({ directory: movedHostDir, role: 'host' }).loadOrCreate('Host'), scenario).toEqual(hostIdentity)
+      expect(await readFile(join(movedHostDir, 'server-credentials.json')), scenario).toEqual(hostCredentialBytes)
+      if (scenario.includes('flat')) {
+        const healedFlat = await new IdentityStore({ directory: target }).loadOrCreate('Flat')
+        expect(healedFlat.publicKey, scenario).toBeDefined()
+        expect(await new IdentityStore({ directory: movedHostDir, role: 'host' }).loadOrCreate('Host'), scenario).toEqual(hostIdentity)
+      }
+    }
+
+    // Broken flat root without a verified scoped identity must still be rejected.
+    const unverifiedHome = await temporaryDirectory()
+    const unverifiedSource = join(unverifiedHome, 'remote')
+    const unverifiedClientDir = serverStorageDirectory(unverifiedSource, serverUrl, 'client')
+    const other = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Other')
+    await new IdentityStore({ directory: unverifiedSource }).loadOrCreate('Flat')
+    await writeFile(join(unverifiedSource, 'device.key'), `${other.privateKey}\n`, { mode: 0o600 })
+    await mkdir(unverifiedClientDir, { recursive: true })
+    await writeFile(join(unverifiedClientDir, 'device.json'), '{corrupt-client-json', { mode: 0o600 })
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: unverifiedHome } })).rejects.toMatchObject({
+      code: 'IDENTITY_INVALID',
+    })
+    await expect(new IdentityStore({ directory: unverifiedSource }).loadOrCreate('Flat')).rejects.toThrow(IdentityInvalidError)
+
+    // Flat root credential with mismatched deviceId must still be rejected even when a valid scoped host exists.
+    const mismatchHome = await temporaryDirectory()
+    const mismatchSource = join(mismatchHome, 'remote')
+    const mismatchHostDir = serverStorageDirectory(mismatchSource, serverUrl, 'host')
+    const validHost = await new IdentityStore({ directory: mismatchHostDir, role: 'host' }).loadOrCreate('Host')
+    await new IdentityStore({ directory: mismatchSource }).loadOrCreate('Flat')
+    await new ServerCredentialStore(mismatchSource).save({
+      serverUrl,
+      deviceId: validHost.deviceId,
+      authorizationMethod: 'account',
+      account: 'host@example.com',
+      accessToken: 'fixture-access-token',
+      accessTokenExpiresAt: 1,
+      refreshToken: 'fixture-refresh-token',
+      refreshTokenExpiresAt: 2,
+    })
+    await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: mismatchHome } })).rejects.toMatchObject({
+      code: 'IDENTITY_INVALID',
+    })
+
+    // Symlinked device.json in scoped host must not authorize flat root self-heal.
+    const symlinkScopedRoot = await temporaryDirectory()
+    const externalDir = await temporaryDirectory()
+    const externalIdentity = await new IdentityStore({ directory: externalDir }).loadOrCreate('External')
+    const symlinkHostDir = serverStorageDirectory(symlinkScopedRoot, serverUrl, 'host')
+    await mkdir(symlinkHostDir, { recursive: true })
+    await writeFile(join(symlinkHostDir, 'device.key'), `${externalIdentity.privateKey}\n`, { mode: 0o600 })
+    await symlink(join(externalDir, 'device.json'), join(symlinkHostDir, 'device.json'))
+    await new IdentityStore({ directory: symlinkScopedRoot }).loadOrCreate('Flat')
+    const brokenFlatKey = `${other.privateKey}\n`
+    await writeFile(join(symlinkScopedRoot, 'device.key'), brokenFlatKey, { mode: 0o600 })
+    await expect(new IdentityStore({ directory: symlinkScopedRoot }).loadOrCreate('Flat')).rejects.toThrow(IdentityInvalidError)
+    expect(await readFile(join(symlinkScopedRoot, 'device.key'), 'utf8')).toBe(brokenFlatKey)
   })
 
   it('rejects unknown or malformed peer temporary names without deleting them', async () => {
@@ -419,7 +705,7 @@ describe('IdentityStore', () => {
     const first = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Device 1')
     const second = await new IdentityStore({ directory: await temporaryDirectory() }).loadOrCreate('Device 2')
 
-    for (const scenario of ['credentials', 'trusted-peers', 'corrupt-peers', 'unknown-file', 'host-role'] as const) {
+    for (const scenario of ['credentials', 'trusted-peers', 'corrupt-peers', 'unknown-file', 'unexpected-servers-dir', 'host-role'] as const) {
       const directory = await temporaryDirectory()
       await writeFile(join(directory, 'device.json'), JSON.stringify({
         schemaVersion: 1,
@@ -458,10 +744,15 @@ describe('IdentityStore', () => {
       if (scenario === 'unknown-file') {
         await writeFile(join(directory, 'server-credentials.json.bak'), 'keep-me')
       }
+      if (scenario === 'unexpected-servers-dir') {
+        await mkdir(join(directory, 'servers'), { recursive: true })
+      }
 
       const beforeEntries = (await readdir(directory)).sort()
       const beforeBytes = new Map(await Promise.all(
-        beforeEntries.map(async name => [name, await readFile(join(directory, name))] as const),
+        beforeEntries
+          .filter(name => name !== 'servers')
+          .map(async name => [name, await readFile(join(directory, name))] as const),
       ))
 
       const role = scenario === 'host-role' ? 'host' : 'client'
@@ -475,23 +766,30 @@ describe('IdentityStore', () => {
       }
     }
   })
-  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db', 'DESKTOP.INI', 'THUMBS.DB'])('保留各层普通元文件 %s 并原样迁移身份', async name => {
-    const home = await temporaryDirectory()
-    const source = join(home, 'remote')
-    const host = serverStorageDirectory(source, 'https://example.com', 'host')
-    const client = serverStorageDirectory(source, 'https://example.com', 'client')
-    const first = await new IdentityStore({ directory: host }).loadOrCreate('Host')
-    const second = await new IdentityStore({ directory: client, role: 'client' }).loadOrCreate('Client')
-    const levels = [source, join(source, 'servers'), dirname(host), host, client]
-    for (const level of levels) await writeFile(join(level, name), 'metadata')
-    const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
-    expect(target).toBe(join(home, 'ds-harness-remote'))
-    for (const level of levels) expect(await readFile(join(level.replace(source, target), name), 'utf8')).toBe('metadata')
-    expect(await new IdentityStore({ directory: host.replace(source, target) }).loadOrCreate('Host')).toEqual(first)
-    expect(await new IdentityStore({ directory: client.replace(source, target), role: 'client' }).loadOrCreate('Client')).toEqual(second)
-  })
 
-  it('普通元文件兼容历史平铺身份及未配对客户端自愈', async () => {
+  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db', 'DESKTOP.INI', 'THUMBS.DB'])(
+    'keeps plain OS metadata %s at every level and migrates identities unchanged',
+    async name => {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const host = serverStorageDirectory(source, 'https://example.com', 'host')
+      const client = serverStorageDirectory(source, 'https://example.com', 'client')
+      const first = await new IdentityStore({ directory: host }).loadOrCreate('Host')
+      const second = await new IdentityStore({ directory: client, role: 'client' }).loadOrCreate('Client')
+      const levels = [source, join(source, 'servers'), dirname(host), host, client]
+      for (const level of levels) await writeFile(join(level, name), 'metadata')
+
+      const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+      expect(target).toBe(join(home, 'ds-harness-remote'))
+      for (const level of levels) {
+        expect(await readFile(join(level.replace(source, target), name), 'utf8')).toBe('metadata')
+      }
+      expect(await new IdentityStore({ directory: host.replace(source, target) }).loadOrCreate('Host')).toEqual(first)
+      expect(await new IdentityStore({ directory: client.replace(source, target), role: 'client' }).loadOrCreate('Client')).toEqual(second)
+    },
+  )
+
+  it('keeps plain OS metadata compatible with a flat legacy identity and client self-heal', async () => {
     for (const role of ['flat', 'client'] as const) {
       const home = await temporaryDirectory()
       const source = join(home, 'remote')
@@ -500,33 +798,37 @@ describe('IdentityStore', () => {
       await writeFile(join(directory, '.DS_Store'), 'metadata')
       if (role === 'client') await rm(join(directory, 'device.key'))
       const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
-      await expect(new IdentityStore({ directory: directory.replace(source, target), role: role === 'flat' ? 'host' : role }).loadOrCreate('Device')).resolves.toHaveProperty('deviceId')
+      await expect(new IdentityStore({ directory: directory.replace(source, target), role: role === 'flat' ? 'host' : role }).loadOrCreate('Device'))
+        .resolves.toHaveProperty('deviceId')
     }
   })
 
-  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db'])('客户端自愈仅容忍普通元文件 %s，异常内容保留原身份', async name => {
-    for (const kind of ['file', 'directory', 'hardlink', 'oversized'] as const) {
-      const directory = await temporaryDirectory()
-      await new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
-      const original = await readFile(join(directory, 'device.json'))
-      await rm(join(directory, 'device.key'))
-      const artifact = join(directory, name)
-      if (kind === 'directory') await mkdir(artifact)
-      else if (kind === 'hardlink') await link(join(directory, 'device.json'), artifact)
-      else {
-        await writeFile(artifact, 'metadata')
-        if (kind === 'oversized') await truncate(artifact, 16 * 1024 * 1024 + 1)
+  it.each(['.DS_Store', 'desktop.ini', 'Thumbs.db'])(
+    'client self-heal only tolerates plain metadata %s and keeps stored bytes otherwise',
+    async name => {
+      for (const kind of ['file', 'directory', 'hardlink', 'oversized'] as const) {
+        const directory = await temporaryDirectory()
+        await new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+        const original = await readFile(join(directory, 'device.json'))
+        await rm(join(directory, 'device.key'))
+        const artifact = join(directory, name)
+        if (kind === 'directory') await mkdir(artifact)
+        else if (kind === 'hardlink') await link(join(directory, 'device.json'), artifact)
+        else {
+          await writeFile(artifact, 'metadata')
+          if (kind === 'oversized') await truncate(artifact, 16 * 1024 * 1024 + 1)
+        }
+        const loaded = new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+        if (kind === 'file') await expect(loaded).resolves.toHaveProperty('deviceId')
+        else {
+          await expect(loaded).rejects.toMatchObject({ code: 'IDENTITY_INVALID' })
+          expect(await readFile(join(directory, 'device.json'))).toEqual(original)
+        }
       }
-      const loaded = new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
-      if (kind === 'file') await expect(loaded).resolves.toHaveProperty('deviceId')
-      else {
-        await expect(loaded).rejects.toMatchObject({ code: 'IDENTITY_INVALID' })
-        expect(await readFile(join(directory, 'device.json'))).toEqual(original)
-      }
-    }
-  })
+    },
+  )
 
-  it('元文件名称仍拦截目录、符号链接、硬链接、超大文件及未知内容', async () => {
+  it('still rejects metadata names used by directories, links, oversized files and unknown content', async () => {
     for (const level of ['root', 'servers', 'scope', 'role'] as const) {
       for (const kind of ['directory', 'symlink', 'hardlink', 'oversized', 'unknown', 'appledouble'] as const) {
         const home = await temporaryDirectory()
@@ -542,16 +844,38 @@ describe('IdentityStore', () => {
           await writeFile(artifact, 'keep')
           if (kind === 'oversized') await truncate(artifact, 16 * 1024 * 1024 + 1)
         }
-        await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), `${level}:${kind}`).rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+        await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), `${level}:${kind}`)
+          .rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
         await expect(stat(source)).resolves.toBeDefined()
       }
     }
   })
-
 })
 
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-plugin-'))
   directories.push(directory)
   return directory
+}
+
+let cachedDeadPids: Promise<[number, number, number]> | undefined
+
+async function deadPids(): Promise<[number, number, number]> {
+  cachedDeadPids ??= (async () => {
+    const first = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], { stdio: 'ignore' })
+    const second = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], { stdio: 'ignore' })
+    const third = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
+    await Promise.all([
+      new Promise<void>(resolve => first.once('exit', () => resolve())),
+      new Promise<void>(resolve => second.once('exit', () => resolve())),
+      new Promise<void>(resolve => third.once('exit', () => resolve())),
+    ])
+    return [first.pid!, second.pid!, third.pid!]
+  })()
+  return cachedDeadPids
+}
+
+async function deadPid(): Promise<number> {
+  const [first] = await deadPids()
+  return first
 }
