@@ -883,7 +883,7 @@ describe('IdentityStore', () => {
         await writeFile(join(directory, 'trusted-peers.json'), '{corrupt-peers-json')
       }
       if (scenario === 'unknown-file') {
-        await writeFile(join(directory, 'server-credentials.json.bak'), 'keep-me')
+        await writeFile(join(directory, 'foreign.bak'), 'keep-me')
       }
       if (scenario === 'unexpected-servers-dir') {
         await mkdir(join(directory, 'servers'), { recursive: true })
@@ -990,6 +990,59 @@ describe('IdentityStore', () => {
         await expect(stat(source)).resolves.toBeDefined()
       }
     }
+  })
+
+  it.each([
+    'server-credentials.json.bak',
+    'server-credentials.json.bak-1793870140999',
+    'server-credentials.json.old',
+    'server-credentials.json.orig',
+    'server-credentials.json~',
+    'server-credentials.json.swp',
+  ])('preserves known credential backups during migration: %s', async name => {
+    const home = await temporaryDirectory()
+    const source = join(home, 'remote')
+    const directory = serverStorageDirectory(source, 'https://example.com', 'host')
+    const identity = await new IdentityStore({ directory }).loadOrCreate('Host')
+    await writeFile(join(directory, name), 'backup-bytes')
+
+    const target = await prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } })
+    const migrated = directory.replace(source, target)
+    expect(await readFile(join(migrated, name), 'utf8')).toBe('backup-bytes')
+    expect(await new IdentityStore({ directory: migrated }).loadOrCreate('Host')).toEqual(identity)
+  })
+
+  it('rejects unsafe known backup artifacts during migration', async () => {
+    for (const kind of ['directory', 'symlink', 'hardlink', 'oversized'] as const) {
+      const home = await temporaryDirectory()
+      const source = join(home, 'remote')
+      const directory = serverStorageDirectory(source, 'https://example.com', 'host')
+      await new IdentityStore({ directory }).loadOrCreate('Host')
+      const artifact = join(directory, 'server-credentials.json.bak')
+      if (kind === 'directory') await mkdir(artifact)
+      else if (kind === 'symlink') await symlink(home, artifact, process.platform === 'win32' ? 'junction' : 'dir')
+      else if (kind === 'hardlink') await link(join(directory, 'device.json'), artifact)
+      else {
+        await writeFile(artifact, 'oversized')
+        await truncate(artifact, 16 * 1024 * 1024 + 1)
+      }
+
+      await expect(prepareDefaultIdentityDirectory({ env: { DSH_HOME: home } }), kind)
+        .rejects.toMatchObject({ code: 'STORAGE_CONFLICT' })
+      await expect(stat(source)).resolves.toBeDefined()
+    }
+  })
+
+  it('allows known backups while healing an unpaired client identity', async () => {
+    const directory = await temporaryDirectory()
+    const store = new IdentityStore({ directory, role: 'client' })
+    const original = await store.loadOrCreate('Client')
+    await rm(join(directory, 'device.key'))
+    await writeFile(join(directory, 'device.json.bak-1793870140999'), 'backup-bytes')
+
+    const healed = await new IdentityStore({ directory, role: 'client' }).loadOrCreate('Client')
+    expect(healed.deviceId).not.toBe(original.deviceId)
+    expect(await readFile(join(directory, 'device.json.bak-1793870140999'), 'utf8')).toBe('backup-bytes')
   })
 })
 

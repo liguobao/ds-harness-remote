@@ -78565,6 +78565,7 @@ var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
   "Remote storage must be a real directory; symbolic links are not migrated.",
   "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration."
 ]);
+var SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/;
 function safeStartupError(error62) {
   const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && SAFE_STARTUP_CODES.has(error62.code) ? error62.code : safeErrorCode(error62);
   if (code === "SERVER_CREDENTIALS_INVALID") {
@@ -78578,7 +78579,7 @@ function safeStartupError(error62) {
   }
   if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
     const rawMessage = error62 instanceof Error ? error62.message : "";
-    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
+    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE.test(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
       return { code, message: rawMessage };
     }
     if (rawMessage.startsWith("device identity is invalid")) {
@@ -88389,6 +88390,8 @@ var trustedPeersSchema = external_exports.object({
   // Discovery can persist multiple pages; reading must accept every record we write.
   peers: external_exports.array(trustedPeerSchema)
 }).strict();
+var STORAGE_CONFLICT_MESSAGE = "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.";
+var STORAGE_CONFLICT_ENTRY_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)(?:\.bak(?:-[0-9]+)?|\.old|\.orig|~|\.swp)$/;
 var IdentityInvalidError = class extends Error {
   constructor(message, code = "IDENTITY_INVALID") {
     super(message);
@@ -88701,8 +88704,8 @@ async function resetDefaultIdentityRoles(roles, serverUrl, deviceName, options =
 }
 async function assertOwnedRemoteStorage(root2) {
   let failureCode = "STORAGE_CONFLICT";
-  const rejected = (code = failureCode) => new IdentityInvalidError(
-    "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+  const rejected = (code = failureCode, entryName) => new IdentityInvalidError(
+    entryName === void 0 ? STORAGE_CONFLICT_MESSAGE : `${STORAGE_CONFLICT_MESSAGE} Unexpected entry "${safeStorageEntryName(entryName)}" was found.`,
     code
   );
   const identityFiles = /* @__PURE__ */ new Set([
@@ -88741,11 +88744,11 @@ async function assertOwnedRemoteStorage(root2) {
         }
         continue;
       }
-      const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
-      if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT");
+      const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || isBackupArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
+      if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT", entry.name);
       const metadata = await lstat(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024 || metadata.nlink !== 1 && !await isVerifiedRefreshHardlink(directory, entry.name, entries.map((item) => item.name))) {
-        throw rejected("STORAGE_CONFLICT");
+        throw rejected("STORAGE_CONFLICT", entry.name);
       }
     }
     const names = new Set(entries.map((entry) => entry.name).filter((name2) => !isLockArtifact(name2)));
@@ -88823,29 +88826,28 @@ async function assertOwnedRemoteStorage(root2) {
     const entries = await readStorageEntries(root2);
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
-      if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT");
+      if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT", servers.name);
       for (const scope2 of await readStorageEntries(join5(root2, "servers"))) {
-        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT");
+        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT", scope2.name);
         for (const role2 of await readStorageEntries(join5(root2, "servers", scope2.name))) {
-          if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT");
+          if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT", role2.name);
           await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
         }
       }
     }
     const flat = entries.filter((entry) => entry.name !== "servers");
     if (flat.length > 0) {
-      if (flat.some((entry) => {
+      const unexpected = flat.find((entry) => {
         if (entry.name.includes(".refresh-lock")) return entry.isSymbolicLink();
         if (!entry.isFile()) return true;
-        return !identityFiles.has(entry.name) && !isOwnedTempArtifact(entry.name) && !isRefreshQueueArtifact(entry.name) && !isLockArtifact(entry.name) && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name));
-      })) {
-        throw rejected("STORAGE_CONFLICT");
-      }
+        return !identityFiles.has(entry.name) && !isOwnedTempArtifact(entry.name) && !isRefreshQueueArtifact(entry.name) && !isLockArtifact(entry.name) && !isBackupArtifact(entry.name) && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name));
+      });
+      if (unexpected !== void 0) throw rejected("STORAGE_CONFLICT", unexpected.name);
       await checkIdentity(root2);
     }
     if (identities === 0) throw rejected(failureCode);
   } catch (error62) {
-    if (error62 instanceof IdentityInvalidError && (error62.message === "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." || error62.code === "IDENTITY_LOCKED")) {
+    if (error62 instanceof IdentityInvalidError && (error62.code === "STORAGE_CONFLICT" || error62.code === "IDENTITY_LOCKED")) {
       throw error62;
     }
     throw rejected(failureCode);
@@ -89163,7 +89165,7 @@ async function canAutoHealClientIdentity(directory, allowServersDirectory = fals
       if (metadata.isSymbolicLink()) return false;
       if (allowServersDirectory && entry.name === "servers" && metadata.isDirectory()) continue;
       if (!metadata.isFile()) return false;
-      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name) || isPeerTempArtifact(entry.name)) {
+      if (entry.name === "device.json" || entry.name === "device.key" || isIdentityTempArtifact(entry.name) || isPeerTempArtifact(entry.name) || isBackupArtifact(entry.name)) {
         continue;
       }
       if (entry.name === "trusted-peers.json") {
@@ -89200,6 +89202,13 @@ function isLockArtifact(name2) {
 var STORAGE_METADATA_ARTIFACTS = /* @__PURE__ */ new Set([".ds_store", "desktop.ini", "thumbs.db"]);
 function isStorageMetadataArtifact(name2) {
   return STORAGE_METADATA_ARTIFACTS.has(name2.toLowerCase());
+}
+function isBackupArtifact(name2) {
+  return STORAGE_CONFLICT_ENTRY_PATTERN.test(name2);
+}
+function safeStorageEntryName(name2) {
+  const safe = name2.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 160);
+  return safe === "" ? "unnamed" : safe;
 }
 async function readStorageEntries(directory) {
   const entries = await readdir2(directory, { withFileTypes: true });
