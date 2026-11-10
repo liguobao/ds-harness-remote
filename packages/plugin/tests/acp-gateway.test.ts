@@ -783,6 +783,52 @@ describe('AcpRemoteGateway', () => {
     } finally { await gateway.close() }
   })
 
+  it('serializes concurrent catalog history reads on the same backend and reuses cached history until prompt mutation', async () => {
+    const cwd = await realpath(process.cwd())
+    const acp = readyAcp() as CursorAcpLike & { history?: ReturnType<typeof vi.fn> }
+    let activeHistoryReads = 0
+    let maxConcurrentHistoryReads = 0
+    acp.call = vi.fn(async (method) => {
+      if (method === 'session/list') {
+        return {
+          sessions: [
+            { sessionId: 's1', cwd, title: 'One', createdAt: 1, updatedAt: 2 },
+            { sessionId: 's2', cwd, title: 'Two', createdAt: 3, updatedAt: 4 },
+          ],
+          nextCursor: null,
+        }
+      }
+      return {}
+    })
+    const history = vi.fn(async (sessionId: string) => {
+      activeHistoryReads += 1
+      maxConcurrentHistoryReads = Math.max(maxConcurrentHistoryReads, activeHistoryReads)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      activeHistoryReads -= 1
+      return [{ method: 'session/update', params: { sessionId } }]
+    })
+    acp.history = history
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'claude', enabled: true, command: 'claude', args: [] }] },
+      silentLogger(),
+      () => acp,
+    )
+    await gateway.start()
+    try {
+      const [first, second, duplicateFirst] = await Promise.all([
+        gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:s1' } }),
+        gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:s2' } }),
+        gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:s1' } }),
+      ])
+      expect(maxConcurrentHistoryReads).toBe(1)
+      expect(first).toEqual(duplicateFirst)
+      expect(second).toEqual({ events: [{ method: 'session/update', params: { sessionId: 's2' } }] })
+      expect(history).toHaveBeenCalledTimes(2)
+    } finally {
+      await gateway.close()
+    }
+  })
+
   it('allows image prompts on a Hermes-owned session and reports image prompt capabilities', async () => {
     const acp = readyAcp()
     acp.call = vi.fn(async (method) => {
