@@ -82,8 +82,9 @@ export class HostServerApi {
     private readonly store: ServerCredentialStore,
     private readonly fetchImplementation: FetchImplementation = fetch,
     private readonly role: 'host' | 'client' = 'host',
+    httpServerAllowlist: readonly string[] = [],
   ) {
-    this.baseUrl = normalizeServerUrl(serverUrl)
+    this.baseUrl = normalizeServerUrl(serverUrl, httpServerAllowlist)
   }
 
   bindIdentity(identity: HostIdentity): void { this.identity = identity }
@@ -640,8 +641,8 @@ function normalizeOAuthScanUrl(value: unknown, baseUrl: string): string | undefi
 }
 
 export class ClientServerApi extends HostServerApi {
-  constructor(serverUrl: string, store: ServerCredentialStore, fetchImplementation: FetchImplementation = fetch) {
-    super(serverUrl, store, fetchImplementation, 'client')
+  constructor(serverUrl: string, store: ServerCredentialStore, fetchImplementation: FetchImplementation = fetch, httpServerAllowlist: readonly string[] = []) {
+    super(serverUrl, store, fetchImplementation, 'client', httpServerAllowlist)
   }
 }
 

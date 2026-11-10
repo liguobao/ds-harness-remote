@@ -81,6 +81,21 @@ describe('plugin config', () => {
     expect(resolveConfig({ serverUrl: 'http://[fd00:1234::1]:8080' }).serverUrl).toBe('http://[fd00:1234::1]:8080')
     expect(resolveConfig({ serverUrl: 'http://[fe80::1]:8080' }).serverUrl).toBe('http://[fe80::1]:8080')
     expect(() => resolveConfig({ serverUrl: 'http://[2001:4860:4860::8888]:8080' })).toThrow(/HTTPS/)
+    expect(resolveConfig({ serverUrl: 'http://11.23.4.5:8080', httpServerAllowlist: ['11.0.0.0/8'] })).toMatchObject({
+      serverUrl: 'http://11.23.4.5:8080',
+      httpServerAllowlist: ['11.0.0.0/8'],
+    })
+    expect(resolveConfig({ serverUrl: 'http://[2001:db8::5]:8080', httpServerAllowlist: ['2001:db8::/32'] }).serverUrl)
+      .toBe('http://[2001:db8::5]:8080')
+    expect(resolveConfig({}, {
+      DSH_REMOTE_SERVER: 'http://11.23.4.5:8080',
+      DSH_REMOTE_HTTP_SERVER_ALLOWLIST: '11.0.0.0/8, 2001:db8::/32',
+    })).toMatchObject({
+      serverUrl: 'http://11.23.4.5:8080',
+      httpServerAllowlist: ['11.0.0.0/8', '2001:db8::/32'],
+    })
+    expect(() => resolveConfig({ serverUrl: 'http://11.23.4.5:8080', httpServerAllowlist: ['11.0.0.0/33'] })).toThrow(/invalid host or CIDR/)
+    expect(() => resolveConfig({ serverUrl: 'http://11.23.4.5:8080', httpServerAllowlist: ['11.0.0.0/8'] })).not.toThrow()
     expect(normalizeServerUrl('https://REMOTE.example.com/')).toBe('https://remote.example.com')
   })
 

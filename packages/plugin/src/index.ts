@@ -319,7 +319,7 @@ async function activate(
       clientRuntime = new ClientModeRuntime(
         config,
         clientIdentities,
-        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, config.httpServerAllowlist),
         nativeTypertGateway,
         logger,
         runtime,

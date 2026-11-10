@@ -162,7 +162,7 @@ export class HostPluginRuntime {
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
-      this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory))
+      this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory), fetch, 'host', config.httpServerAllowlist)
     }
   }
 
@@ -257,7 +257,7 @@ export class HostPluginRuntime {
       deviceId: this.identity.deviceId, name: this.identity.name, role: 'host', platform: process.platform,
       identityKey: this.identity.publicKey,
       ...(this.harnessVersion === undefined ? {} : { harnessVersion: this.harnessVersion }),
-    }, async result => { await this.serverApi!.adoptPairing(result); if (!this.closed) this.serverConnection?.reconnect() })
+    }, async result => { await this.serverApi!.adoptPairing(result); if (!this.closed) this.serverConnection?.reconnect() }, fetch, this.config.httpServerAllowlist)
   }
 
   async pairingControl(action: 'start' | 'status' | 'confirm' | 'cancel', input: { sessionId?: string; verificationCode?: string }): Promise<HostPairingView | undefined> {

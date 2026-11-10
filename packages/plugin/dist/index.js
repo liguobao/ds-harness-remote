@@ -84974,6 +84974,7 @@ var entryConfigSchema = Schema.object({
   enabled: Schema.boolean(),
   role: Schema.union(["host", "client", "both"]),
   serverUrl: Schema.string(),
+  httpServerAllowlist: Schema.array(Schema.string()),
   deviceName: Schema.string(),
   terminal: Schema.object({ enabled: Schema.boolean() }),
   remoteTools: Schema.object({ enabled: Schema.boolean() }),
@@ -85018,6 +85019,7 @@ var configSchema = external_exports.object({
   enabled: external_exports.boolean().optional(),
   role: external_exports.enum(["host", "client", "both"]).optional(),
   serverUrl: external_exports.string().url().optional(),
+  httpServerAllowlist: external_exports.array(external_exports.string().trim().min(1).max(128)).max(64).optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   remoteTools: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
@@ -85048,7 +85050,10 @@ function resolveConfig(input4 = {}, env = process.env) {
   const acpEnabled = parsed.acp?.enabled ?? true;
   const reconnect = typeof parsed.reconnect === "object" ? parsed.reconnect : {};
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER;
-  const serverUrl = configuredServerUrl === void 0 ? void 0 : normalizeServerUrl(configuredServerUrl);
+  const httpServerAllowlist = normalizeHttpServerAllowlist(
+    parsed.httpServerAllowlist ?? parseHttpServerAllowlistEnv(env.DSH_REMOTE_HTTP_SERVER_ALLOWLIST)
+  );
+  const serverUrl = configuredServerUrl === void 0 ? void 0 : normalizeServerUrl(configuredServerUrl, httpServerAllowlist);
   const initialDelayMs = reconnect.initialDelayMs ?? 4e3;
   const maxDelayMs = reconnect.maxDelayMs ?? 3e4;
   if (maxDelayMs < initialDelayMs) {
@@ -85058,6 +85063,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? "host",
     ...serverUrl === void 0 ? {} : { serverUrl },
+    httpServerAllowlist,
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname3(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
@@ -85117,9 +85123,9 @@ function isPrivateNetworkHostname(hostname6) {
   const [a, b] = octets;
   return a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 169 && b === 254 || a === 100 && b >= 64 && b <= 127;
 }
-function normalizeServerUrl(value) {
+function normalizeServerUrl(value, httpServerAllowlist = []) {
   const url2 = new URL(value);
-  const privateHttp = url2.protocol === "http:" && isPrivateNetworkHostname(url2.hostname);
+  const privateHttp = url2.protocol === "http:" && (isPrivateNetworkHostname(url2.hostname) || matchesHttpServerAllowlist(url2.hostname, httpServerAllowlist));
   if (url2.protocol !== "https:" && !privateHttp) {
     throw new TypeError("serverUrl must use HTTPS (HTTP is allowed only for localhost or private-network addresses)");
   }
@@ -85134,6 +85140,88 @@ function normalizeServerUrl(value) {
   }
   return url2.origin;
 }
+function parseHttpServerAllowlistEnv(value) {
+  if (value === void 0) return void 0;
+  return value.split(",").map((item) => item.trim()).filter((item) => item !== "");
+}
+function normalizeHttpServerAllowlist(values) {
+  if (values === void 0) return [];
+  const normalized = [...new Set(values.map((value) => value.trim()).filter((value) => value !== ""))];
+  for (const value of normalized) {
+    if (!isValidHttpServerAllowlistEntry(value)) {
+      throw new TypeError(`httpServerAllowlist contains an invalid host or CIDR: ${value}`);
+    }
+  }
+  return normalized;
+}
+function isValidHttpServerAllowlistEntry(value) {
+  const slash = value.indexOf("/");
+  if (slash === -1) return parseIpAddress(value) !== void 0 || isAllowlistedHostname(value);
+  if (slash !== value.lastIndexOf("/")) return false;
+  const address2 = parseIpAddress(value.slice(0, slash));
+  const prefix = Number(value.slice(slash + 1));
+  return address2 !== void 0 && Number.isInteger(prefix) && prefix >= 0 && prefix <= (address2.version === 4 ? 32 : 128);
+}
+function isAllowlistedHostname(value) {
+  return value.length <= 253 && !value.startsWith(".") && !value.endsWith(".") && /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value);
+}
+function matchesHttpServerAllowlist(hostname6, allowlist) {
+  const host = hostname6.startsWith("[") && hostname6.endsWith("]") ? hostname6.slice(1, -1) : hostname6;
+  const address2 = parseIpAddress(host);
+  const normalizedHost = host.toLowerCase();
+  return allowlist.some((entry) => {
+    const slash = entry.indexOf("/");
+    if (slash === -1) {
+      const exact = parseIpAddress(entry);
+      return exact === void 0 ? entry.toLowerCase() === normalizedHost : address2 !== void 0 && exact.version === address2.version && exact.value === address2.value;
+    }
+    if (address2 === void 0) return false;
+    const network = parseIpAddress(entry.slice(0, slash));
+    const prefix = Number(entry.slice(slash + 1));
+    if (network === void 0 || network.version !== address2.version) return false;
+    const bits = network.version === 4 ? 32n : 128n;
+    const mask = prefix === 0 ? 0n : (1n << BigInt(prefix)) - 1n << bits - BigInt(prefix);
+    return (network.value & mask) === (address2.value & mask);
+  });
+}
+function parseIpAddress(value) {
+  const normalized = value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value;
+  return parseIpv4(normalized) ?? parseIpv6(normalized);
+}
+function parseIpv4(value) {
+  const parts = value.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return void 0;
+  const octets = parts.map(Number);
+  if (octets.some((octet) => octet > 255)) return void 0;
+  return { version: 4, value: octets.reduce((result, octet) => result << 8n | BigInt(octet), 0n) };
+}
+function parseIpv6(value) {
+  const normalized = value.toLowerCase();
+  if (!normalized.includes(":") || normalized.includes("%")) return void 0;
+  const sections = normalized.split("::");
+  if (sections.length > 2) return void 0;
+  const expand = (section) => {
+    if (section === "") return [];
+    const parts = section.split(":");
+    const result = [];
+    for (const part of parts) {
+      if (part.includes(".")) {
+        const ipv43 = parseIpv4(part);
+        if (ipv43 === void 0) return void 0;
+        result.push(Number(ipv43.value >> 16n & 0xffffn), Number(ipv43.value & 0xffffn));
+      } else if (/^[0-9a-f]{1,4}$/.test(part)) {
+        result.push(Number.parseInt(part, 16));
+      } else return void 0;
+    }
+    return result;
+  };
+  const left = expand(sections[0]);
+  const right = expand(sections.length === 2 ? sections[1] : "");
+  if (left === void 0 || right === void 0) return void 0;
+  const hextets = sections.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill(0), ...right] : left;
+  if (hextets.length !== 8) return void 0;
+  return { version: 6, value: hextets.reduce((result, hextet) => result << 16n | BigInt(hextet), 0n) };
+}
 
 // packages/plugin/src/version.ts
 var PLUGIN_VERSION = "0.6.4";
@@ -85141,11 +85229,11 @@ var PLUGIN_VERSION = "0.6.4";
 // packages/plugin/src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 var HostServerApi = class {
-  constructor(serverUrl, store, fetchImplementation = fetch, role2 = "host") {
+  constructor(serverUrl, store, fetchImplementation = fetch, role2 = "host", httpServerAllowlist = []) {
     this.store = store;
     this.fetchImplementation = fetchImplementation;
     this.role = role2;
-    this.baseUrl = normalizeServerUrl(serverUrl);
+    this.baseUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
   }
   baseUrl;
   hostOnly = false;
@@ -85634,8 +85722,8 @@ function normalizeOAuthScanUrl(value, baseUrl) {
   }
 }
 var ClientServerApi = class extends HostServerApi {
-  constructor(serverUrl, store, fetchImplementation = fetch) {
-    super(serverUrl, store, fetchImplementation, "client");
+  constructor(serverUrl, store, fetchImplementation = fetch, httpServerAllowlist = []) {
+    super(serverUrl, store, fetchImplementation, "client", httpServerAllowlist);
   }
 };
 var ServerApiError = class extends Error {
@@ -97606,7 +97694,7 @@ var PluginControlRuntime = class {
       role: value.role
     });
     let identity3 = await identities.loadOrCreate(hostname4());
-    const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
+    const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory), fetch, "host", next.httpServerAllowlist) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory), fetch, next.httpServerAllowlist);
     let authorization;
     if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
       authorization = await api.authorizeHostWithCode(identity3, value.registrationCode);
@@ -97894,18 +97982,19 @@ var PluginControlRuntime = class {
     if (!this.storageAvailable && this.startupFailure instanceof Error) {
       throw this.startupFailure;
     }
+    const current = resolveConfig(this.settings?.get() ?? {});
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole);
     const sourceIdentity = await new IdentityStore({ directory: sourceDirectory, role: sourceRole }).loadOrCreate(hostname4());
     const sourceStore = new ServerCredentialStore(sourceDirectory);
     if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === void 0) return;
-    const sourceApi = sourceRole === "host" ? new HostServerApi(serverUrl, sourceStore) : new ClientServerApi(serverUrl, sourceStore);
+    const sourceApi = sourceRole === "host" ? new HostServerApi(serverUrl, sourceStore, fetch, "host", current.httpServerAllowlist) : new ClientServerApi(serverUrl, sourceStore, fetch, current.httpServerAllowlist);
     sourceApi.bindIdentity(sourceIdentity);
     await sourceApi.loadStoredPolicy();
     if (sourceApi.pairingHostOnly()) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "Paired Host cannot create a Client identity.");
     const sourceCredentials = await sourceApi.authenticate(sourceIdentity);
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole);
     const targetIdentity = await new IdentityStore({ directory: targetDirectory, role: targetRole }).loadOrCreate(hostname4());
-    const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory)) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory));
+    const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory), fetch, "host", current.httpServerAllowlist) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory), fetch, current.httpServerAllowlist);
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account);
   }
   logout() {
@@ -98020,6 +98109,7 @@ function editableConfig(config2) {
     enabled: config2.enabled,
     role: config2.role,
     ...config2.serverUrl === void 0 ? {} : { serverUrl: config2.serverUrl },
+    httpServerAllowlist: config2.httpServerAllowlist,
     terminal: config2.terminal,
     remoteTools: config2.remoteTools,
     sidebar: config2.sidebar,
@@ -98132,12 +98222,12 @@ ${createHash7("sha256").update(raw).digest("hex")}`).digest("base64url");
 }
 var fullFingerprint = (key) => createHash7("sha256").update(rawKey(key)).digest("hex");
 var HostPairing = class {
-  constructor(serverUrl, directory, identity3, descriptor, adopt, fetcher = fetch) {
+  constructor(serverUrl, directory, identity3, descriptor, adopt, fetcher = fetch, httpServerAllowlist = []) {
     this.identity = identity3;
     this.descriptor = descriptor;
     this.adopt = adopt;
     this.fetcher = fetcher;
-    this.serverUrl = normalizeServerUrl(serverUrl);
+    this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
     this.path = join14(directory, "host-pairing.json");
   }
   path;
@@ -101749,7 +101839,7 @@ var HostPluginRuntime = class {
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
-      this.serverApi = new HostServerApi(config2.serverUrl, new ServerCredentialStore(identities.directory));
+      this.serverApi = new HostServerApi(config2.serverUrl, new ServerCredentialStore(identities.directory), fetch, "host", config2.httpServerAllowlist);
     }
   }
   connections;
@@ -101859,7 +101949,7 @@ var HostPluginRuntime = class {
     }, async (result) => {
       await this.serverApi.adoptPairing(result);
       if (!this.closed) this.serverConnection?.reconnect();
-    });
+    }, fetch, this.config.httpServerAllowlist);
   }
   async pairingControl(action, input4) {
     if (this.pairing === void 0 || this.closed) throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure and save the Server URL before pairing.", false);
@@ -103177,7 +103267,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       clientRuntime2 = new ClientModeRuntime(
         config3,
         clientIdentities,
-        new ClientServerApi(config3.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+        new ClientServerApi(config3.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, config3.httpServerAllowlist),
         nativeTypertGateway,
         logger2,
         runtime2

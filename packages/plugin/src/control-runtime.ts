@@ -250,8 +250,8 @@ export class PluginControlRuntime {
     })
     let identity = await identities.loadOrCreate(hostname())
     const api = value.role === 'host'
-      ? new HostServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
-      : new ClientServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory))
+      ? new HostServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory), fetch, 'host', next.httpServerAllowlist)
+      : new ClientServerApi(next.serverUrl!, new ServerCredentialStore(identities.directory), fetch, next.httpServerAllowlist)
     let authorization
     if (value.role === 'host' && typeof value.registrationCode === 'string' && value.registrationCode.trim() !== '') {
       authorization = await api.authorizeHostWithCode(identity, value.registrationCode)
@@ -560,13 +560,14 @@ export class PluginControlRuntime {
     if (!this.storageAvailable && this.startupFailure instanceof Error) {
       throw this.startupFailure
     }
+    const current = resolveConfig(this.settings?.get() ?? {})
     const sourceDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, sourceRole)
     const sourceIdentity = await new IdentityStore({ directory: sourceDirectory, role: sourceRole }).loadOrCreate(hostname())
     const sourceStore = new ServerCredentialStore(sourceDirectory)
     if (await sourceStore.load(serverUrl, sourceIdentity.deviceId) === undefined) return
     const sourceApi = sourceRole === 'host'
-      ? new HostServerApi(serverUrl, sourceStore)
-      : new ClientServerApi(serverUrl, sourceStore)
+      ? new HostServerApi(serverUrl, sourceStore, fetch, 'host', current.httpServerAllowlist)
+      : new ClientServerApi(serverUrl, sourceStore, fetch, current.httpServerAllowlist)
     sourceApi.bindIdentity(sourceIdentity)
     await sourceApi.loadStoredPolicy()
     if (sourceApi.pairingHostOnly()) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'Paired Host cannot create a Client identity.')
@@ -575,8 +576,8 @@ export class PluginControlRuntime {
     const targetDirectory = serverStorageDirectory(this.identityDirectory, serverUrl, targetRole)
     const targetIdentity = await new IdentityStore({ directory: targetDirectory, role: targetRole }).loadOrCreate(hostname())
     const targetApi = targetRole === 'host'
-      ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
-      : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory))
+      ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory), fetch, 'host', current.httpServerAllowlist)
+      : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory), fetch, current.httpServerAllowlist)
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account)
   }
 
@@ -703,6 +704,7 @@ function editableConfig(config: ResolvedConfig): Config {
     enabled: config.enabled,
     role: config.role,
     ...(config.serverUrl === undefined ? {} : { serverUrl: config.serverUrl }),
+    httpServerAllowlist: config.httpServerAllowlist,
     terminal: config.terminal,
     remoteTools: config.remoteTools,
     sidebar: config.sidebar,

@@ -37,8 +37,8 @@ export class HostPairing {
     private readonly serverUrl: string;
     private readonly lifetime = new AbortController();
     private queue: Promise<unknown> = Promise.resolve();
-    constructor(serverUrl: string, directory: string, private readonly identity: HostIdentity, private readonly descriptor: Record<string, unknown>, private readonly adopt: (value: PairingCredentials) => Promise<void>, private readonly fetcher: FetchImplementation = fetch) {
-        this.serverUrl = normalizeServerUrl(serverUrl);
+    constructor(serverUrl: string, directory: string, private readonly identity: HostIdentity, private readonly descriptor: Record<string, unknown>, private readonly adopt: (value: PairingCredentials) => Promise<void>, private readonly fetcher: FetchImplementation = fetch, httpServerAllowlist: readonly string[] = []) {
+        this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
         this.path = join(directory, 'host-pairing.json');
     }
     close(): void { this.lifetime.abort(); }

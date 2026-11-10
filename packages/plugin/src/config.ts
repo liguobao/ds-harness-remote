@@ -9,6 +9,8 @@ export interface Config {
   enabled?: boolean
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
+  /** Additional hosts or CIDR ranges that may use HTTP for a self-hosted Server. */
+  httpServerAllowlist?: string[]
   deviceName?: string
   terminal?: { enabled?: boolean }
   remoteTools?: { enabled?: boolean }
@@ -70,6 +72,7 @@ export interface ResolvedConfig {
   enabled: boolean
   role: 'host' | 'client' | 'both'
   serverUrl?: string
+  httpServerAllowlist: string[]
   deviceName: string
   forceRelay: boolean
   rotatePinnedPeerKey: boolean
@@ -108,6 +111,7 @@ export const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
+  httpServerAllowlist: s.array(s.string()),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
   remoteTools: s.object({ enabled: s.boolean() }),
@@ -164,6 +168,7 @@ const configSchema = z.object({
   enabled: z.boolean().optional(),
   role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
+  httpServerAllowlist: z.array(z.string().trim().min(1).max(128)).max(64).optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   remoteTools: z.object({ enabled: z.boolean().optional() }).strict().optional(),
@@ -198,7 +203,10 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   const acpEnabled = parsed.acp?.enabled ?? true
   const reconnect = typeof parsed.reconnect === 'object' ? parsed.reconnect : {}
   const configuredServerUrl = parsed.serverUrl ?? env.DSH_REMOTE_SERVER
-  const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl)
+  const httpServerAllowlist = normalizeHttpServerAllowlist(
+    parsed.httpServerAllowlist ?? parseHttpServerAllowlistEnv(env.DSH_REMOTE_HTTP_SERVER_ALLOWLIST),
+  )
+  const serverUrl = configuredServerUrl === undefined ? undefined : normalizeServerUrl(configuredServerUrl, httpServerAllowlist)
   const initialDelayMs = reconnect.initialDelayMs ?? 4_000
   const maxDelayMs = reconnect.maxDelayMs ?? 30_000
   if (maxDelayMs < initialDelayMs) {
@@ -208,6 +216,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
+    httpServerAllowlist,
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },
@@ -285,9 +294,10 @@ function isPrivateNetworkHostname(hostname: string): boolean {
   )
 }
 
-export function normalizeServerUrl(value: string): string {
+export function normalizeServerUrl(value: string, httpServerAllowlist: readonly string[] = []): string {
   const url = new URL(value)
-  const privateHttp = url.protocol === 'http:' && isPrivateNetworkHostname(url.hostname)
+  const privateHttp = url.protocol === 'http:'
+    && (isPrivateNetworkHostname(url.hostname) || matchesHttpServerAllowlist(url.hostname, httpServerAllowlist))
   if (url.protocol !== 'https:' && !privateHttp) {
     throw new TypeError('serverUrl must use HTTPS (HTTP is allowed only for localhost or private-network addresses)')
   }
@@ -301,4 +311,102 @@ export function normalizeServerUrl(value: string): string {
     throw new TypeError('serverUrl must be an origin without a path')
   }
   return url.origin
+}
+
+interface ParsedIpAddress {
+  version: 4 | 6
+  value: bigint
+}
+
+function parseHttpServerAllowlistEnv(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined
+  return value.split(',').map(item => item.trim()).filter(item => item !== '')
+}
+
+function normalizeHttpServerAllowlist(values: readonly string[] | undefined): string[] {
+  if (values === undefined) return []
+  const normalized = [...new Set(values.map(value => value.trim()).filter(value => value !== ''))]
+  for (const value of normalized) {
+    if (!isValidHttpServerAllowlistEntry(value)) {
+      throw new TypeError(`httpServerAllowlist contains an invalid host or CIDR: ${value}`)
+    }
+  }
+  return normalized
+}
+
+function isValidHttpServerAllowlistEntry(value: string): boolean {
+  const slash = value.indexOf('/')
+  if (slash === -1) return parseIpAddress(value) !== undefined || isAllowlistedHostname(value)
+  if (slash !== value.lastIndexOf('/')) return false
+  const address = parseIpAddress(value.slice(0, slash))
+  const prefix = Number(value.slice(slash + 1))
+  return address !== undefined && Number.isInteger(prefix) && prefix >= 0 && prefix <= (address.version === 4 ? 32 : 128)
+}
+
+function isAllowlistedHostname(value: string): boolean {
+  return value.length <= 253
+    && !value.startsWith('.')
+    && !value.endsWith('.')
+    && /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value)
+}
+
+function matchesHttpServerAllowlist(hostname: string, allowlist: readonly string[]): boolean {
+  const host = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname
+  const address = parseIpAddress(host)
+  const normalizedHost = host.toLowerCase()
+  return allowlist.some(entry => {
+    const slash = entry.indexOf('/')
+    if (slash === -1) {
+      const exact = parseIpAddress(entry)
+      return exact === undefined ? entry.toLowerCase() === normalizedHost : address !== undefined && exact.version === address.version && exact.value === address.value
+    }
+    if (address === undefined) return false
+    const network = parseIpAddress(entry.slice(0, slash))
+    const prefix = Number(entry.slice(slash + 1))
+    if (network === undefined || network.version !== address.version) return false
+    const bits = network.version === 4 ? 32n : 128n
+    const mask = prefix === 0 ? 0n : ((1n << BigInt(prefix)) - 1n) << (bits - BigInt(prefix))
+    return (network.value & mask) === (address.value & mask)
+  })
+}
+
+function parseIpAddress(value: string): ParsedIpAddress | undefined {
+  const normalized = value.startsWith('[') && value.endsWith(']') ? value.slice(1, -1) : value
+  return parseIpv4(normalized) ?? parseIpv6(normalized)
+}
+
+function parseIpv4(value: string): ParsedIpAddress | undefined {
+  const parts = value.split('.')
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return undefined
+  const octets = parts.map(Number)
+  if (octets.some(octet => octet > 255)) return undefined
+  return { version: 4, value: octets.reduce((result, octet) => (result << 8n) | BigInt(octet), 0n) }
+}
+
+function parseIpv6(value: string): ParsedIpAddress | undefined {
+  const normalized = value.toLowerCase()
+  if (!normalized.includes(':') || normalized.includes('%')) return undefined
+  const sections = normalized.split('::')
+  if (sections.length > 2) return undefined
+  const expand = (section: string): number[] | undefined => {
+    if (section === '') return []
+    const parts = section.split(':')
+    const result: number[] = []
+    for (const part of parts) {
+      if (part.includes('.')) {
+        const ipv4 = parseIpv4(part)
+        if (ipv4 === undefined) return undefined
+        result.push(Number((ipv4.value >> 16n) & 0xffffn), Number(ipv4.value & 0xffffn))
+      } else if (/^[0-9a-f]{1,4}$/.test(part)) {
+        result.push(Number.parseInt(part, 16))
+      } else return undefined
+    }
+    return result
+  }
+  const left = expand(sections[0]!)
+  const right = expand(sections.length === 2 ? sections[1]! : '')
+  if (left === undefined || right === undefined) return undefined
+  const hextets = sections.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill(0), ...right] : left
+  if (hextets.length !== 8) return undefined
+  return { version: 6, value: hextets.reduce((result, hextet) => (result << 16n) | BigInt(hextet), 0n) }
 }
