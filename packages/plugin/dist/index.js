@@ -64418,7 +64418,7 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// ../../../ds-harness-remote-askquestion/packages/protocol/dist/loopback.js
+// packages/protocol/dist/loopback.js
 var LOOPBACK_CHUNK_BYTES = 64 * 1024;
 var LOOPBACK_MAX_BODY_BYTES = 1024 * 1024;
 var LOOPBACK_MAX_WS_BYTES = 256 * 1024;
@@ -64440,7 +64440,7 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
-// ../../../ds-harness-remote-askquestion/packages/protocol/dist/wire-json.js
+// packages/protocol/dist/wire-json.js
 function parseWireJson(input4) {
   try {
     const text = typeof input4 === "string" ? input4 : new TextDecoder("utf-8", { fatal: true }).decode(input4);
@@ -64480,7 +64480,7 @@ function parseWireJson(input4) {
   }
 }
 
-// ../../../ds-harness-remote-askquestion/packages/protocol/dist/close-semantics.js
+// packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
 var HEARTBEAT_TIMEOUT_CLOSE_CODE = 4009;
@@ -64508,7 +64508,7 @@ function classifyControlClose(code, reason) {
   };
 }
 
-// ../../../ds-harness-remote-askquestion/packages/protocol/dist/index.js
+// packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
@@ -65171,7 +65171,7 @@ function cryptoRandomId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-// ../../../ds-harness-remote-askquestion/packages/client-core/dist/remote-gateway.js
+// packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id6, capability) {
   if (!capabilities.includes(capability))
@@ -65198,7 +65198,7 @@ function createRemoteId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// ../../../ds-harness-remote-askquestion/packages/client-core/dist/codex-client.js
+// packages/client-core/dist/codex-client.js
 var MAX_DISPLAY_ITEM_TEXT = 256 * 1024;
 var CODEX_IMAGE_MEDIA_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
@@ -65811,7 +65811,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// ../../../ds-harness-remote-askquestion/packages/client-core/dist/acp-client.js
+// packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
@@ -66066,7 +66066,7 @@ function canonicalBase64ToBytes(value) {
   return bytes;
 }
 
-// ../../../ds-harness-remote-askquestion/packages/client-core/dist/index.js
+// packages/client-core/dist/index.js
 var RemoteClientError = class extends Error {
   code;
   constructor(code, message, options) {
@@ -68790,7 +68790,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
 };
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/websocket-backpressure.js
+// packages/webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
   const started = Date.now();
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
@@ -68802,7 +68802,7 @@ async function waitForRelayCapacity(socket) {
     throw new Error("Relay transport closed");
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/transport.js
+// packages/webrtc/dist/transport.js
 var BaseTransport = class {
   handlers = /* @__PURE__ */ new Set();
   closeHandlers = /* @__PURE__ */ new Set();
@@ -68824,7 +68824,7 @@ var BaseTransport = class {
   }
 };
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/util.js
+// packages/webrtc/dist/util.js
 function toBase64Url(bytes) {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
@@ -68838,7 +68838,7 @@ function fromBase64Url(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-adapter.js
+// packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory() {
@@ -69071,7 +69071,7 @@ function adaptDataChannel(raw) {
   };
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-chunking.js
+// packages/webrtc/dist/rtc-chunking.js
 var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
 var RTC_CHUNK_HEADER_BYTES = 12;
 var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
@@ -69180,7 +69180,7 @@ function isChunk(frame) {
   return true;
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/rtc-data-channel.js
+// packages/webrtc/dist/rtc-data-channel.js
 var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
 var SELECTED_PATH_RETRY_COUNT = 5;
 var SELECTED_PATH_RETRY_DELAY_MS = 50;
@@ -69899,7 +69899,7 @@ function sleep(ms) {
   return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/control-lease.js
+// packages/webrtc/dist/control-lease.js
 var WEBRTC_LEASE_MS2 = 3e5;
 var ControlLease = class {
   connectionId;
@@ -69981,7 +69981,7 @@ var ControlLease = class {
   }
 };
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/adaptive-transport.js
+// packages/webrtc/dist/adaptive-transport.js
 var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
@@ -70763,7 +70763,7 @@ function throwIfAborted(signal) {
     throw new Error("Adaptive connection was aborted");
 }
 
-// ../../../ds-harness-remote-askquestion/packages/webrtc/dist/serial-send.js
+// packages/webrtc/dist/serial-send.js
 var SerialSend = class {
   tail = Promise.resolve();
   bytes = 0;
@@ -77950,7 +77950,7 @@ function noiseIk() {
   ]]);
 }
 
-// ../../../ds-harness-remote-askquestion/packages/crypto/dist/noise.js
+// packages/crypto/dist/noise.js
 var NOISE_IK_PROTOCOL = "Noise_IK_25519_ChaChaPoly_SHA256";
 var NoiseIkSession = class {
   handshake;
@@ -78085,7 +78085,7 @@ function constantTimeEqual(left, right) {
   return different === 0;
 }
 
-// ../../../ds-harness-remote-askquestion/packages/crypto/dist/index.js
+// packages/crypto/dist/index.js
 function generateKeyPair(privateKeyBytes) {
   const privateKey = privateKeyBytes ?? x25519.utils.randomPrivateKey();
   if (privateKey.byteLength !== 32)
