@@ -31,6 +31,8 @@ const SAFE_STATIC_STARTUP_MESSAGES = new Set([
   'Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration.',
 ])
 
+const SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/
+
 export function safeStartupError(error: unknown): { code: string; message: string } {
   const code = error instanceof Error && 'code' in error && typeof error.code === 'string' && SAFE_STARTUP_CODES.has(error.code)
     ? error.code
@@ -46,7 +48,9 @@ export function safeStartupError(error: unknown): { code: string; message: strin
   }
   if (code === 'IDENTITY_INVALID' || code === 'IDENTITY_LOCKED' || code === 'STORAGE_CONFLICT') {
     const rawMessage = error instanceof Error ? error.message : ''
-    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
+    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage)
+      || SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE.test(rawMessage)
+      || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
       return { code, message: rawMessage }
     }
     if (rawMessage.startsWith('device identity is invalid')) {

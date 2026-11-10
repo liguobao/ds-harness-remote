@@ -32,6 +32,13 @@ describe('safeErrorCode', () => {
       code: 'IDENTITY_LOCKED',
       message: 'device identity is locked by another process; stop other DSH instances and retry',
     })
+    expect(safeStartupError(new IdentityInvalidError(
+      'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. Unexpected entry "server-credentials.json.bak-1793870140999" was found.',
+      'STORAGE_CONFLICT',
+    ))).toEqual({
+      code: 'STORAGE_CONFLICT',
+      message: 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. Unexpected entry "server-credentials.json.bak-1793870140999" was found.',
+    })
     expect(safeStartupError(new ServerCredentialsInvalidError('server credentials are invalid: access-token-secret'))).toEqual({
       code: 'SERVER_CREDENTIALS_INVALID',
       message: 'Local Remote server credentials are invalid.',

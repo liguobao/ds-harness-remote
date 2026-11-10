@@ -66,6 +66,9 @@ export interface ResetIdentityOptions extends IdentityStoreOptions {
 export type RemoteDeviceRole = 'host' | 'client'
 export type IdentityErrorCode = 'IDENTITY_INVALID' | 'IDENTITY_LOCKED' | 'STORAGE_CONFLICT'
 
+const STORAGE_CONFLICT_MESSAGE = 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.'
+const STORAGE_CONFLICT_ENTRY_PATTERN = /^(?:device\.json|device\.key|trusted-peers\.json|server-credentials\.json|host-pairing\.json|pairing-host-only\.json)(?:\.bak(?:-[0-9]+)?|\.old|\.orig|~|\.swp)$/
+
 export class IdentityInvalidError extends Error {
   constructor(
     message: string,
@@ -458,8 +461,10 @@ export async function resetDefaultIdentityRoles(
  */
 export async function assertOwnedRemoteStorage(root: string): Promise<void> {
   let failureCode: IdentityErrorCode = 'STORAGE_CONFLICT'
-  const rejected = (code: IdentityErrorCode = failureCode) => new IdentityInvalidError(
-    'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.',
+  const rejected = (code: IdentityErrorCode = failureCode, entryName?: string) => new IdentityInvalidError(
+    entryName === undefined
+      ? STORAGE_CONFLICT_MESSAGE
+      : `${STORAGE_CONFLICT_MESSAGE} Unexpected entry "${safeStorageEntryName(entryName)}" was found.`,
     code,
   )
   const identityFiles = new Set([
@@ -501,12 +506,13 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
         continue
       }
       const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name)
-        || isRefreshQueueArtifact(entry.name) || (canAutoHeal && isIdentityTempArtifact(entry.name))
-      if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT')
+        || isRefreshQueueArtifact(entry.name) || isBackupArtifact(entry.name)
+        || (canAutoHeal && isIdentityTempArtifact(entry.name))
+      if (!entry.isFile() || !allowedFile) throw rejected('STORAGE_CONFLICT', entry.name)
       const metadata = await lstat(join(directory, entry.name))
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024
         || (metadata.nlink !== 1 && !(await isVerifiedRefreshHardlink(directory, entry.name, entries.map(item => item.name))))) {
-        throw rejected('STORAGE_CONFLICT')
+        throw rejected('STORAGE_CONFLICT', entry.name)
       }
     }
     const names = new Set(entries.map(entry => entry.name).filter(name => !isLockArtifact(name)))
@@ -588,11 +594,11 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const entries = await readStorageEntries(root)
     const servers = entries.find(entry => entry.name === 'servers')
     if (servers !== undefined) {
-      if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT')
+      if (!servers.isDirectory()) throw rejected('STORAGE_CONFLICT', servers.name)
       for (const scope of await readStorageEntries(join(root, 'servers'))) {
-        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT')
+        if (!scope.isDirectory() || !/^[a-f0-9]{24}$/.test(scope.name)) throw rejected('STORAGE_CONFLICT', scope.name)
         for (const role of await readStorageEntries(join(root, 'servers', scope.name))) {
-          if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT')
+          if (!role.isDirectory() || (role.name !== 'host' && role.name !== 'client')) throw rejected('STORAGE_CONFLICT', role.name)
           await checkIdentity(join(root, 'servers', scope.name, role.name), scope.name, role.name)
         }
       }
@@ -600,23 +606,23 @@ export async function assertOwnedRemoteStorage(root: string): Promise<void> {
     const flat = entries.filter(entry => entry.name !== 'servers')
     if (flat.length > 0) {
       // Validate a historical unscoped identity without including the servers container.
-      if (flat.some(entry => {
+      const unexpected = flat.find(entry => {
         if (entry.name.includes('.refresh-lock')) return entry.isSymbolicLink()
         if (!entry.isFile()) return true
         return !identityFiles.has(entry.name)
           && !isOwnedTempArtifact(entry.name)
           && !isRefreshQueueArtifact(entry.name)
           && !isLockArtifact(entry.name)
+          && !isBackupArtifact(entry.name)
           && !(verifiedScopedIdentities > 0 && isIdentityTempArtifact(entry.name))
-      })) {
-        throw rejected('STORAGE_CONFLICT')
-      }
+      })
+      if (unexpected !== undefined) throw rejected('STORAGE_CONFLICT', unexpected.name)
       await checkIdentity(root)
     }
     if (identities === 0) throw rejected(failureCode)
   } catch (error) {
     if (error instanceof IdentityInvalidError && (
-      error.message === 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.'
+      error.code === 'STORAGE_CONFLICT'
       || error.code === 'IDENTITY_LOCKED'
     )) {
       throw error
@@ -1001,7 +1007,8 @@ async function canAutoHealClientIdentity(directory: string, allowServersDirector
       if (metadata.isSymbolicLink()) return false
       if (allowServersDirectory && entry.name === 'servers' && metadata.isDirectory()) continue
       if (!metadata.isFile()) return false
-      if (entry.name === 'device.json' || entry.name === 'device.key' || isIdentityTempArtifact(entry.name) || isPeerTempArtifact(entry.name)) {
+      if (entry.name === 'device.json' || entry.name === 'device.key' || isIdentityTempArtifact(entry.name)
+        || isPeerTempArtifact(entry.name) || isBackupArtifact(entry.name)) {
         continue
       }
       if (entry.name === 'trusted-peers.json') {
@@ -1052,6 +1059,15 @@ const STORAGE_METADATA_ARTIFACTS = new Set(['.ds_store', 'desktop.ini', 'thumbs.
 
 function isStorageMetadataArtifact(name: string): boolean {
   return STORAGE_METADATA_ARTIFACTS.has(name.toLowerCase())
+}
+
+function isBackupArtifact(name: string): boolean {
+  return STORAGE_CONFLICT_ENTRY_PATTERN.test(name)
+}
+
+function safeStorageEntryName(name: string): string {
+  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 160)
+  return safe === '' ? 'unnamed' : safe
 }
 
 async function readStorageEntries(directory: string): Promise<Dirent[]> {
