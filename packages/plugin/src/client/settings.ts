@@ -71,6 +71,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [debugBusy, setDebugBusy] = React.useState(false)
     const [debugLogging, setDebugLogging] = React.useState(false)
     const [resetBusy, setResetBusy] = React.useState(false)
+    const [retryStartupBusy, setRetryStartupBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
@@ -609,6 +610,28 @@ export function createRemotePluginOptions(React: ClientReact) {
     const resetDisabledByStartupState = settingsView?.startupError?.code === 'STORAGE_CONFLICT'
       || settingsView?.startupError?.code === 'IDENTITY_LOCKED'
 
+    const retryStartup = async (): Promise<void> => {
+      if (retryStartupBusy) return
+      const run = ++associationReadRun.current
+      setRetryStartupBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.startup.retry', {})
+        const status = await props.control<RemoteStatus>('status').catch(() => undefined)
+        applyView(view, run === associationReadRun.current)
+        setHostStatus(status?.host)
+        setHostName(status?.deviceName ?? '')
+        setHostDeviceId(status?.host?.deviceId ?? '')
+        setNotice({ key: 'retryStartupSuccess' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+        void load().catch(() => undefined)
+      } finally {
+        setRetryStartupBusy(false)
+      }
+    }
+
     const resetIdentitySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
       React.createElement('div', null,
         React.createElement('strong', null, t('resetIdentity')),
@@ -622,8 +645,14 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     const startupErrorBanner = settingsView?.startupError !== undefined
-      ? React.createElement('p', { className: 'dshRemoteError', role: 'alert' },
-          startupErrorMessage(settingsView.startupError, t))
+      ? React.createElement('div', { className: 'dshRemoteError', role: 'alert' },
+          React.createElement('p', null, startupErrorMessage(settingsView.startupError, t)),
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDiscard',
+            disabled: busy || resetBusy || retryStartupBusy,
+            onClick: () => void retryStartup(),
+          }, t('retryStartup')))
       : null
 
     // switches instead of inside the Host-facing settings block.

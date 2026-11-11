@@ -476,6 +476,37 @@ describe('PluginControlRuntime settings setup', () => {
     })
   })
 
+  it('retries startup after storage repair without changing settings', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const replace = vi.spyOn(settings, 'replace')
+    let repaired = false
+    const switchServer = vi.fn(async () => {
+      if (!repaired) throw new IdentityInvalidError('Storage still conflicts', 'STORAGE_CONFLICT')
+      return { client: undefined, host: {
+        hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+        reconnectHost: vi.fn(),
+      } as unknown as HostAuthorizationControl }
+    })
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined, switchServer)
+    const handler = register(control)
+    control.setStartupFailure(new IdentityInvalidError('Storage conflicts', 'STORAGE_CONFLICT'))
+
+    await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({
+      ok: false, error: { details: { remoteCode: 'STORAGE_CONFLICT' } },
+    })
+    expect((await handler('status', {}, signal()) as any).value?.startupError?.code).toBe('STORAGE_CONFLICT')
+
+    repaired = true
+    await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({ ok: true })
+    const status = await handler('status', {}, signal())
+    expect((status as any).value?.startupError).toBeUndefined()
+    expect((status as any).value?.host?.online).toBe(true)
+    expect(switchServer).toHaveBeenCalledTimes(2)
+    expect(replace).not.toHaveBeenCalled()
+    expect(settings.get().serverUrl).toBe('https://dsh.r2049.cn')
+  })
+
   it('resets identity, validates role payload, and preserves startupError if restart still fails', async () => {
     const root = await temporaryDirectory()
     const serverUrl = 'https://dsh.r2049.cn'
