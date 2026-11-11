@@ -2,8 +2,20 @@ import { CONTROL_RPC_PREFIX } from './control-route.js'
 
 type Fetch = typeof globalThis.fetch
 
+const DEFAULT_ROUTE_LIFETIME_MS = 45_000
+/** Hard cap for the preflight `control('status')` probe; independent of the route lifetime. */
+const CONTROL_STATUS_TIMEOUT_MS = 10_000
+const ERROR_DETAIL_MESSAGE_LIMIT = 200
+
 class PluginRouteFailure extends Error {
-  constructor(readonly code: string, message: string) { super(message) }
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message)
+    this.name = 'PluginRouteFailure'
+  }
 }
 
 export interface PluginRouteClientOptions {
@@ -54,10 +66,23 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
     if (method.toUpperCase() !== 'POST' || requestUrl.href !== routeUrl.href) return original(input, init)
     const signal = init?.signal !== undefined ? init.signal ?? undefined : input instanceof Request ? input.signal : undefined
-    const lifetime = signal ?? AbortSignal.timeout(45_000)
+    const lifetime = signal ?? AbortSignal.timeout(DEFAULT_ROUTE_LIFETIME_MS)
     try {
       lifetime.throwIfAborted()
-      const status = await control('status', {}, AbortSignal.any([lifetime, AbortSignal.timeout(10_000)]))
+      let status: unknown
+      try {
+        status = await control('status', {}, AbortSignal.any([lifetime, AbortSignal.timeout(CONTROL_STATUS_TIMEOUT_MS)]))
+      } catch (error) {
+        lifetime.throwIfAborted()
+        if (isTimeoutError(error)) {
+          throw new PluginRouteFailure(
+            'remote-plugin/control-timeout',
+            'The Remote control status probe timed out. The Host may be busy; retry shortly.',
+            { phase: 'status', timeoutMs: CONTROL_STATUS_TIMEOUT_MS },
+          )
+        }
+        throw error
+      }
       lifetime.throwIfAborted()
       if (!isRecord(status)) throw new PluginRouteFailure('remote-plugin/authority-unavailable', 'The Remote plugin route authority is unavailable.')
       if (status.mode === 'local') return original(input, init)
@@ -75,7 +100,7 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
       const result = await control('plugin.route', { route: 'api/bot', body }, lifetime)
       if (!isRecord(result) || !Number.isInteger(result.status)
         || (result.status as number) < 200 || (result.status as number) > 599) {
-        throw new Error('The plugin route response is invalid.')
+        throw new PluginRouteFailure('remote-plugin/route-response-invalid', 'The plugin route response is invalid.')
       }
       const statusCode = result.status as number
       if (statusCode === 404) throw new PluginRouteFailure('remote-plugin/bot-not-loaded', 'The Host has no DS Bot route. Enable ds-bot in the same DSH instance/profile as the connected Host.')
@@ -99,11 +124,7 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
       // hides every refusal behind "HTTP 502" before it can read the reason.
       return new Response(JSON.stringify({
         ok: false,
-        error: {
-          code: error instanceof PluginRouteFailure ? error.code : 'remote-plugin/unavailable',
-          message: error instanceof PluginRouteFailure ? error.message : 'The Remote plugin route is unavailable.',
-          details: {},
-        },
+        error: pluginRouteErrorEnvelope(error),
       }), { status: 200, headers: { 'content-type': 'application/json' } })
     }
   }
@@ -139,6 +160,48 @@ export function createPluginRouteCatalogGuard(
     signal.throwIfAborted()
     if (!containsSessions()) throw new Error('The Remote Session catalog does not contain the published Sessions.')
   }
+}
+
+function pluginRouteErrorEnvelope(error: unknown): {
+  code: string
+  message: string
+  details: Record<string, unknown>
+} {
+  if (error instanceof PluginRouteFailure) {
+    return { code: error.code, message: error.message, details: error.details }
+  }
+  if (isTimeoutError(error)) {
+    return {
+      code: 'remote-plugin/control-timeout',
+      message: 'The Remote plugin route timed out.',
+      details: sanitizeErrorDetails(error),
+    }
+  }
+  return {
+    code: 'remote-plugin/unavailable',
+    message: 'The Remote plugin route is unavailable.',
+    details: sanitizeErrorDetails(error),
+  }
+}
+
+function sanitizeErrorDetails(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) {
+    return { name: typeof error }
+  }
+  const message = error.message.trim()
+  const truncated = message.length > ERROR_DETAIL_MESSAGE_LIMIT
+    ? `${message.slice(0, ERROR_DETAIL_MESSAGE_LIMIT)}…`
+    : message
+  return {
+    name: error.name || 'Error',
+    ...(truncated === '' ? {} : { message: truncated }),
+  }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'TimeoutError') return true
+  return typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'TimeoutError'
 }
 
 function botSessionIds(endpoint: unknown, value: Record<string, unknown>): Set<string> {
