@@ -507,6 +507,38 @@ describe('PluginControlRuntime settings setup', () => {
     expect(settings.get().serverUrl).toBe('https://dsh.r2049.cn')
   })
 
+  it('rejects a second startup retry while the first Server switch is in progress', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const ready = new Promise<void>(resolve => { started = resolve })
+    const switchServer = vi.fn(async () => {
+      started()
+      await gate
+      return { client: undefined, host: {
+        hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+      } as unknown as HostAuthorizationControl }
+    })
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined, switchServer)
+    const handler = register(control)
+    control.setStartupFailure(new IdentityInvalidError('Storage conflicts', 'STORAGE_CONFLICT'))
+
+    const first = handler('settings.startup.retry', {}, signal())
+    await ready
+    try {
+      await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({
+        ok: false, error: { details: { remoteCode: 'SERVER_SWITCH_BUSY' } },
+      })
+      expect(switchServer).toHaveBeenCalledOnce()
+    } finally {
+      release()
+    }
+    await expect(first).resolves.toMatchObject({ ok: true })
+    expect(switchServer).toHaveBeenCalledOnce()
+  })
+
   it('resets identity, validates role payload, and preserves startupError if restart still fails', async () => {
     const root = await temporaryDirectory()
     const serverUrl = 'https://dsh.r2049.cn'
