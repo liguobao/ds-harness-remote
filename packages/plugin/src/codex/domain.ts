@@ -28,11 +28,14 @@ import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual
 
 const APPROVAL_TTL_MS = 5 * 60_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
+/** Fail closed when App Server goes silent mid-turn (e.g. HTTP 503 without turn/completed). */
+const DEFAULT_TURN_SILENCE_TIMEOUT_MS = 10 * 60_000
 const CODEX_PAGE_LIMIT = 100
 const MAX_CODEX_PAGES = 32
 const CODEX_HISTORY_PAGE_LIMIT = 25
 const MAX_CODEX_HISTORY_PAGES = 64
 const CODEX_DIRECTORY_ENTRY_LIMIT = 500
+const TURN_SILENCE_MESSAGE = 'CodeX turn timed out waiting for the App Server. The model provider may be unavailable or rate-limited. Please try again later.'
 
 interface PendingApproval {
   upstreamId: string | number
@@ -81,6 +84,7 @@ export class CodexRemoteDomain {
   private readonly peers = new Map<string, CodexPeerBridge>()
   private readonly peerDeviceIds = new Map<string, string>()
   private readonly turnOwners = new Map<string, ActiveTurnOwner>()
+  private readonly turnWatchdogs = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly permissionPresets = new Map<string, CodexPermissionPreset>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
@@ -111,6 +115,7 @@ export class CodexRemoteDomain {
     private readonly logger: SafeLogger,
     private readonly createAppServer: AppServerFactory = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger),
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
+    private readonly turnSilenceTimeoutMs: number = DEFAULT_TURN_SILENCE_TIMEOUT_MS,
   ) {}
 
   private startPromise?: Promise<void>
@@ -369,6 +374,7 @@ export class CodexRemoteDomain {
       }
       if (call.method === 'turn/start' && threadId !== undefined) {
         this.rememberTurnId(threadId, connectionId, extractTurnId(result))
+        this.armTurnWatchdog(threadId)
         if (call.params.permissionPreset !== undefined) {
           await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd))
         }
@@ -378,6 +384,7 @@ export class CodexRemoteDomain {
       if (claimed && threadId !== undefined && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === undefined) this.turnOwners.delete(threadId)
         else this.turnOwners.set(threadId, previousOwner)
+        if (previousOwner === undefined) this.clearTurnWatchdog(threadId)
       }
       throw mapAppServerError(error)
     }
@@ -401,7 +408,9 @@ export class CodexRemoteDomain {
     if (bridge !== undefined) this.peers.delete(connectionId)
     this.peerDeviceIds.delete(connectionId)
     for (const [threadId, owner] of this.turnOwners) {
-      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId)
+      if (owner.connectionId !== connectionId) continue
+      this.turnOwners.delete(threadId)
+      this.clearTurnWatchdog(threadId)
     }
     const appServer = this.appServer
     const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId)
@@ -422,6 +431,7 @@ export class CodexRemoteDomain {
     await this.startPromise?.catch(() => undefined)
     this.available = false
     await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
+    this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
     this.knownThreadPromises.clear()
@@ -445,6 +455,7 @@ export class CodexRemoteDomain {
     for (const bridge of [...this.peers.values()]) await bridge.closeAll()
     this.peers.clear()
     this.peerDeviceIds.clear()
+    this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
@@ -512,6 +523,7 @@ export class CodexRemoteDomain {
     this.available = false
     this.state = 'restarting'
     this.unavailableCode = code
+    this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
     this.approvals.clear()
@@ -577,7 +589,10 @@ export class CodexRemoteDomain {
       this.rememberPermission(threadId, message.params)
     }
     if (message.method === 'thread/closed' && threadId !== undefined) this.permissionPresets.delete(threadId)
-    if (message.method === 'turn/completed' && threadId !== undefined) this.turnOwners.delete(threadId)
+    if (message.method === 'turn/completed' && threadId !== undefined) {
+      this.turnOwners.delete(threadId)
+      this.clearTurnWatchdog(threadId)
+    }
     if (message.method === 'thread/status/changed' && threadId !== undefined
       && isTerminalThreadStatus(message.params)) {
       // Some App Server failure/interruption paths publish only the terminal
@@ -585,6 +600,7 @@ export class CodexRemoteDomain {
       // lease as soon as the authoritative status is no longer active, or a
       // later Prompt can be rejected as owned by a dead connection.
       this.turnOwners.delete(threadId)
+      this.clearTurnWatchdog(threadId)
       for (const [handle, approval] of this.approvals) {
         if (approval.threadId !== threadId) continue
         this.approvals.delete(handle)
@@ -598,9 +614,11 @@ export class CodexRemoteDomain {
       if (owner !== undefined) {
         this.turnOwners.set(threadId, { ...owner, ...(turnId === undefined ? {} : { turnId }) })
       }
+      this.armTurnWatchdog(threadId)
     }
     if (message.method === 'serverRequest/resolved') this.resolveUpstreamApproval(message.params)
     if (threadId === undefined) return
+    if (this.turnOwners.has(threadId)) this.armTurnWatchdog(threadId)
     await Promise.all([...this.peers.values()].map(peer => peer.publishInbound(threadId, {
       method: message.method,
       params: message.params,
@@ -969,6 +987,63 @@ export class CodexRemoteDomain {
       })
     }, Math.max(0, nextExpiry - Date.now()))
     this.approvalExpiryTimer.unref?.()
+  }
+
+  private armTurnWatchdog(threadId: string): void {
+    if (this.closed || this.turnSilenceTimeoutMs <= 0 || !this.turnOwners.has(threadId)) return
+    this.clearTurnWatchdog(threadId)
+    const timer = setTimeout(() => {
+      this.turnWatchdogs.delete(threadId)
+      void this.failSilentTurn(threadId).catch(error => {
+        this.logger.warn('Codex turn silence watchdog failed', { code: errorCode(error) })
+      })
+    }, this.turnSilenceTimeoutMs)
+    timer.unref?.()
+    this.turnWatchdogs.set(threadId, timer)
+  }
+
+  private clearTurnWatchdog(threadId: string): void {
+    const timer = this.turnWatchdogs.get(threadId)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    this.turnWatchdogs.delete(threadId)
+  }
+
+  private clearAllTurnWatchdogs(): void {
+    for (const timer of this.turnWatchdogs.values()) clearTimeout(timer)
+    this.turnWatchdogs.clear()
+  }
+
+  /**
+   * App Server can drop a turn without `turn/completed` (observed on HTTP 503).
+   * Release the writer lease and project a failed turn/end so Remote clients
+   * leave the forever-"thinking" state.
+   */
+  private async failSilentTurn(threadId: string): Promise<void> {
+    const owner = this.turnOwners.get(threadId)
+    this.clearTurnWatchdog(threadId)
+    if (owner === undefined || this.closed) return
+    this.turnOwners.delete(threadId)
+    for (const [handle, approval] of this.approvals) {
+      if (approval.threadId !== threadId) continue
+      this.approvals.delete(handle)
+      void this.appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
+    }
+    this.scheduleApprovalExpiry()
+    const turn = {
+      id: owner.turnId ?? `silence:${threadId}`,
+      status: 'failed',
+      error: {
+        message: TURN_SILENCE_MESSAGE,
+        codex_error_info: 'remote_turn_silence',
+      },
+      items: [],
+    }
+    this.logger.warn('Codex turn silence watchdog fired', { code: 'remote_turn_silence' })
+    await Promise.all([...this.peers.values()].map(peer => peer.publishInbound(threadId, {
+      method: 'turn/completed',
+      params: { threadId, turn },
+    })))
   }
 
   private requireAppServer(): CodexAppServerLike {

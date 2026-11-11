@@ -27,6 +27,7 @@ import {
   toolResultContentReplacement,
   toolResultEvent,
 } from './virtual-history.js'
+import { turnEndReason } from './turn-end-reason.js'
 import type { CodexClientLike, JsonRecord } from './virtual-values.js'
 import { array, integer, nativeThreadId, optionalPositiveInteger, record, string } from './virtual-values.js'
 
@@ -600,14 +601,4 @@ export class CodexLiveProjection {
     follow.queue.close()
     this.context.emitRemoteEvent('api-session/status', [follow.sessionId, false])
   }
-}
-
-function turnEndReason(turn: JsonRecord): JsonRecord {
-  if (turn.status === 'failed' || turn.error !== undefined && turn.error !== null) {
-    return { kind: 'error', error: { message: 'CodeX turn failed.', code: 'codex-turn-failed' } }
-  }
-  if (turn.status === 'interrupted' || turn.status === 'cancelled' || turn.status === 'canceled' || turn.status === 'aborted') {
-    return { kind: 'interrupted' }
-  }
-  return { kind: 'completed' }
 }
