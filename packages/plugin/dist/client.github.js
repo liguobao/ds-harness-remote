@@ -5486,21 +5486,66 @@ If a code was sent, recover the original submission without changing it.`,
 
   // packages/plugin/src/plugin-route-client.ts
   var PluginRouteFailure = class extends Error {
-    constructor(code, message) {
+    constructor(code, message, details = {}) {
       super(message);
       this.code = code;
+      this.details = details;
     }
-  };
+  }, KNOWN_ERROR_NAMES = /* @__PURE__ */ new Set([
+    "TimeoutError",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+    "ReferenceError",
+    "URIError",
+    "EvalError",
+    "Error",
+    "AbortError",
+    "DOMException"
+  ]);
+  function sanitizeErrorName(error) {
+    if (typeof error == "object" && error !== null && "name" in error) {
+      let name = error.name;
+      if (typeof name == "string" && KNOWN_ERROR_NAMES.has(name)) return name;
+    }
+    return "Error";
+  }
+  function isTimeoutError(error) {
+    for (let current = error, depth = 0; current != null && depth < 4; depth++) {
+      if (typeof current != "object") return !1;
+      let candidate = current;
+      if (candidate.name === "TimeoutError" || candidate.code === "UND_ERR_CONNECT_TIMEOUT" || candidate.code === "ETIMEDOUT") return !0;
+      current = candidate.cause;
+    }
+    return !1;
+  }
+  function isAbortFailure(error, signal) {
+    return signal?.aborted === !0 ? !0 : typeof error == "object" && error !== null && error.name === "AbortError";
+  }
   function createPluginRouteFetch(original, baseUrl, options = {}) {
     let routeUrl = new URL("api/bot", baseUrl), nextRpcId = 0, control = async (method, payload, signal) => {
-      let rpcId = `plugin-route-${++nextRpcId}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
-        signal
-      });
-      if (!response.ok) throw new PluginRouteFailure("remote-plugin/control-unavailable", `The local Remote control request failed (HTTP ${response.status}). Reload the Remote plugin.`);
+      let rpcId = `plugin-route-${++nextRpcId}`, response;
+      try {
+        response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
+          signal
+        });
+      } catch (error) {
+        throw isAbortFailure(error, signal) || isTimeoutError(error) ? error : new PluginRouteFailure("remote-plugin/control-unavailable", "The local Remote control request failed. Reload the Remote plugin.", {
+          stage: "transport",
+          method,
+          errorName: sanitizeErrorName(error)
+        });
+      }
+      if (!response.ok)
+        throw new PluginRouteFailure("remote-plugin/control-unavailable", `The local Remote control request failed (HTTP ${response.status}). Reload the Remote plugin.`, {
+          stage: "transport",
+          method,
+          httpStatus: response.status
+        });
       let envelope = await response.json();
       if (!isRecord(envelope) || envelope.type !== "server-response" || envelope.rpcId !== rpcId || !isRecord(envelope.result))
         throw new PluginRouteFailure("remote-plugin/control-invalid", "The local Remote control response is invalid. Reload the Remote plugin.");
@@ -5516,18 +5561,37 @@ If a code was sent, recover the original submission without changing it.`,
       let lifetime = (init?.signal !== void 0 ? init.signal ?? void 0 : input instanceof Request ? input.signal : void 0) ?? AbortSignal.timeout(45e3);
       try {
         lifetime.throwIfAborted();
-        let status = await control("status", {}, AbortSignal.any([lifetime, AbortSignal.timeout(1e4)]));
+        let status, probeTimeout = AbortSignal.timeout(1e4), probeSignal = AbortSignal.any([lifetime, probeTimeout]);
+        try {
+          status = await control("status", {}, probeSignal);
+        } catch (error) {
+          throw error instanceof PluginRouteFailure ? error : (lifetime.throwIfAborted(), probeTimeout.aborted ? new PluginRouteFailure("remote-plugin/control-timeout", "The local Remote control probe timed out. Reload the Remote plugin.", {
+            stage: "status",
+            timeoutMs: 1e4,
+            errorName: sanitizeErrorName(error)
+          }) : isTimeoutError(error) ? new PluginRouteFailure("remote-plugin/control-timeout", "The local Remote control request timed out. Reload the Remote plugin.", {
+            stage: "transport",
+            method: "status",
+            errorName: sanitizeErrorName(error)
+          }) : error);
+        }
         if (lifetime.throwIfAborted(), !isRecord(status)) throw new PluginRouteFailure("remote-plugin/authority-unavailable", "The Remote plugin route authority is unavailable.");
         if (status.mode === "local") return original(input, init);
         if (status.mode !== "remote") throw new PluginRouteFailure("remote-plugin/authority-unavailable", "The Remote plugin route authority is unavailable.");
         if (status.connected !== !0) throw new PluginRouteFailure("remote-plugin/disconnected", "The Remote Host is disconnected. Reconnect to load DS Bot.");
         if (!isRecord(status.remoteFeatures) || status.remoteFeatures.pluginRoute !== !0) throw new PluginRouteFailure("remote-plugin/host-unsupported", "The selected Host does not support plugin route forwarding. Update and reload Remote on the Host, then reconnect.");
         if (status.backend !== void 0 && status.backend !== "harness") throw new PluginRouteFailure("remote-plugin/backend-unsupported", "DS Bot requires the Remote Harness catalog. Select a Harness workspace on this Host.");
-        let body = await (input instanceof Request ? new Request(input, init) : new Request(requestUrl, init)).clone().json();
-        if (!isRecord(body)) throw new Error("The plugin route body must be a JSON object.");
+        let body = await (input instanceof Request ? new Request(input, init) : new Request(requestUrl, init)).clone().json().catch((error) => {
+          throw new PluginRouteFailure("remote-plugin/route-request-invalid", "The plugin route body must be a JSON object.", {
+            stage: "request-body",
+            errorName: sanitizeErrorName(error)
+          });
+        });
+        if (!isRecord(body))
+          throw new PluginRouteFailure("remote-plugin/route-request-invalid", "The plugin route body must be a JSON object.", { stage: "request-body" });
         let result = await control("plugin.route", { route: "api/bot", body }, lifetime);
         if (!isRecord(result) || !Number.isInteger(result.status) || result.status < 200 || result.status > 599)
-          throw new Error("The plugin route response is invalid.");
+          throw new PluginRouteFailure("remote-plugin/route-response-invalid", "The plugin route response is invalid.", { stage: "response-structure" });
         let statusCode = result.status;
         if (statusCode === 404) throw new PluginRouteFailure("remote-plugin/bot-not-loaded", "The Host has no DS Bot route. Enable ds-bot in the same DSH instance/profile as the connected Host.");
         if (statusCode === 503) throw new PluginRouteFailure("remote-plugin/host-carrier-unavailable", "The Host plugin route carrier is unavailable. Update and reload Remote on the Host.");
@@ -5542,12 +5606,19 @@ If a code was sent, recover the original submission without changing it.`,
           headers: { "content-type": "application/json" }
         });
       } catch (error) {
-        return lifetime.throwIfAborted(), new Response(JSON.stringify({
+        lifetime.throwIfAborted();
+        let failure = error instanceof PluginRouteFailure ? error : isTimeoutError(error) ? new PluginRouteFailure("remote-plugin/control-timeout", "The Remote plugin route request timed out. Reload the Remote plugin.", {
+          stage: "route",
+          errorName: sanitizeErrorName(error)
+        }) : new PluginRouteFailure("remote-plugin/unavailable", "The Remote plugin route is unavailable.", {
+          errorName: sanitizeErrorName(error)
+        });
+        return new Response(JSON.stringify({
           ok: !1,
           error: {
-            code: error instanceof PluginRouteFailure ? error.code : "remote-plugin/unavailable",
-            message: error instanceof PluginRouteFailure ? error.message : "The Remote plugin route is unavailable.",
-            details: {}
+            code: failure.code,
+            message: failure.message,
+            details: failure.details
           }
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
