@@ -564,9 +564,11 @@ window.__ModuleLoader__.load({
                   }
                 })
             },
-            onPick: (pick: { candidate: { label?: string; name: string } }) => {
-              const label = pick.candidate.label ?? pick.candidate.name
-              return { text: `@${label} ` }
+            onPick: (pick: { candidate: { label?: string; name: string; value: string } }) => {
+              // Use the selected candidate's identity, never the name-keyed UI
+              // cache: multiple Hosts can have the same display name.
+              const host = JSON.parse(pick.candidate.value) as { deviceId: string; label: string }
+              return { text: `@${host.label} (Remote hostId=${JSON.stringify(host.deviceId)}) ` }
             },
           }
           const stopHostFileOpen = (event: Event): void => {

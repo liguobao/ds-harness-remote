@@ -6094,7 +6094,10 @@ If a code was sent, recover the original submission without changing it.`,
                   value: JSON.stringify({ deviceId: device.deviceId, label: device.name, platform: device.platform })
                 }));
               },
-              onPick: (pick) => ({ text: `@${pick.candidate.label ?? pick.candidate.name} ` })
+              onPick: (pick) => {
+                let host = JSON.parse(pick.candidate.value);
+                return { text: `@${host.label} (Remote hostId=${JSON.stringify(host.deviceId)}) ` };
+              }
             }, stopHostFileOpen = (event) => {
               let target = event.target instanceof Element ? event.target.closest('button,[role="button"],a') ?? event.target : void 0;
               if (!(target instanceof Element)) return;
