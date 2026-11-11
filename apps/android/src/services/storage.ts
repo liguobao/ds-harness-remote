@@ -214,6 +214,34 @@ export function saveCollapsedWorkspaceIds(deviceId: string, workspaceIds: readon
 // operation rejects its caller, but must not poison later reads or writes.
 let hostSessionsDrawerWrite = Promise.resolve()
 
+export type SessionGroupBy = 'workspace' | 'workspace-tree' | 'list'
+export type SessionOrderBy = 'manual' | 'updated'
+export type SessionFilterMode = 'hideArchived' | 'all' | 'archivedOnly'
+
+export interface HostSessionsDrawerPreferences {
+  groupBy?: SessionGroupBy
+  orderBy?: SessionOrderBy
+  filterMode?: SessionFilterMode
+  manualOrders?: Record<string, string[]>
+}
+
+export function isSessionGroupBy(value: unknown): value is SessionGroupBy {
+  return value === 'workspace' || value === 'workspace-tree' || value === 'list'
+}
+
+export function isSessionOrderBy(value: unknown): value is SessionOrderBy {
+  return value === 'manual' || value === 'updated'
+}
+
+export function isSessionFilterMode(value: unknown): value is SessionFilterMode {
+  return value === 'hideArchived' || value === 'all' || value === 'archivedOnly'
+}
+
+function isManualOrders(value: unknown): value is Record<string, string[]> {
+  if (!isRecord(value)) return false
+  return Object.values(value).every(arr => Array.isArray(arr) && arr.every(item => typeof item === 'string'))
+}
+
 export async function loadHostSessionsDrawerGroups(deviceId: string): Promise<Record<string, boolean>> {
   await hostSessionsDrawerWrite
   const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
@@ -227,10 +255,82 @@ export async function loadHostSessionsDrawerGroups(deviceId: string): Promise<Re
 export function saveHostSessionsDrawerGroup(deviceId: string, groupKey: string, expanded: boolean): Promise<void> {
   const nextWrite = hostSessionsDrawerWrite.then(async () => {
     const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
-    const byDevice = isRecord(stored) && isRecord(stored.byDevice) ? stored.byDevice : {}
+    const current = isRecord(stored) ? stored : {}
+    const byDevice = isRecord(current.byDevice) ? current.byDevice : {}
     const groups = isRecord(byDevice[deviceId]) ? byDevice[deviceId] : {}
     await writeJson(KEYS.hostSessionsDrawer, {
+      ...current,
       byDevice: { ...byDevice, [deviceId]: { ...groups, [groupKey]: expanded } },
+    })
+  })
+  hostSessionsDrawerWrite = nextWrite.catch(() => undefined)
+  return nextWrite
+}
+
+export async function loadHostSessionsDrawerPreferences(deviceId?: string): Promise<HostSessionsDrawerPreferences> {
+  await hostSessionsDrawerWrite
+  const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+  if (!isRecord(stored)) return {}
+  const prefsByDevice = isRecord(stored.preferencesByDevice) ? stored.preferencesByDevice : {}
+  const devicePrefs = deviceId && isRecord(prefsByDevice[deviceId]) ? prefsByDevice[deviceId] : {}
+  const globalPrefs = isRecord(stored.globalPreferences) ? stored.globalPreferences : {}
+
+  const groupBy = isSessionGroupBy(devicePrefs.groupBy)
+    ? devicePrefs.groupBy
+    : (isSessionGroupBy(globalPrefs.groupBy) ? globalPrefs.groupBy : undefined)
+
+  const orderBy = isSessionOrderBy(devicePrefs.orderBy)
+    ? devicePrefs.orderBy
+    : (isSessionOrderBy(globalPrefs.orderBy) ? globalPrefs.orderBy : undefined)
+
+  const filterMode = isSessionFilterMode(devicePrefs.filterMode)
+    ? devicePrefs.filterMode
+    : (isSessionFilterMode(globalPrefs.filterMode) ? globalPrefs.filterMode : undefined)
+
+  const manualOrders = isManualOrders(devicePrefs.manualOrders)
+    ? devicePrefs.manualOrders
+    : undefined
+
+  return {
+    ...(groupBy !== undefined ? { groupBy } : {}),
+    ...(orderBy !== undefined ? { orderBy } : {}),
+    ...(filterMode !== undefined ? { filterMode } : {}),
+    ...(manualOrders !== undefined ? { manualOrders } : {}),
+  }
+}
+
+export function saveHostSessionsDrawerPreferences(
+  deviceId: string | undefined,
+  patch: Partial<HostSessionsDrawerPreferences>,
+): Promise<void> {
+  const nextWrite = hostSessionsDrawerWrite.then(async () => {
+    const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+    const current = isRecord(stored) ? stored : {}
+    const prefsByDevice = isRecord(current.preferencesByDevice) ? { ...current.preferencesByDevice } : {}
+    const globalPrefs = isRecord(current.globalPreferences) ? { ...current.globalPreferences } : {}
+
+    const nextGlobal: Record<string, unknown> = { ...globalPrefs }
+    if (patch.groupBy !== undefined) nextGlobal.groupBy = patch.groupBy
+    if (patch.orderBy !== undefined) nextGlobal.orderBy = patch.orderBy
+    if (patch.filterMode !== undefined) nextGlobal.filterMode = patch.filterMode
+
+    let nextPrefsByDevice = prefsByDevice
+    if (deviceId) {
+      const currentDevice = isRecord(prefsByDevice[deviceId]) ? { ...prefsByDevice[deviceId] } : {}
+      if (patch.groupBy !== undefined) currentDevice.groupBy = patch.groupBy
+      if (patch.orderBy !== undefined) currentDevice.orderBy = patch.orderBy
+      if (patch.filterMode !== undefined) currentDevice.filterMode = patch.filterMode
+      if (patch.manualOrders !== undefined) currentDevice.manualOrders = patch.manualOrders
+      nextPrefsByDevice = {
+        ...prefsByDevice,
+        [deviceId]: currentDevice,
+      }
+    }
+
+    await writeJson(KEYS.hostSessionsDrawer, {
+      ...current,
+      globalPreferences: nextGlobal,
+      preferencesByDevice: nextPrefsByDevice,
     })
   })
   hostSessionsDrawerWrite = nextWrite.catch(() => undefined)
