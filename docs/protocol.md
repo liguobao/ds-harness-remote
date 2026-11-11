@@ -95,8 +95,9 @@ REST、Control frame 和解密后的 Remote message 使用 UTF-8 JSON。发送�
 - 对未识别的必需 enum 值 fail closed。
 - 不把原始 parser 错误直接展示给用户。
 
-共享 Control 和解密消息解码器拒绝同一对象内的重复字段。转义后相同的字段名也视为重复。
-原始字节必须是有效 UTF-8。REST 入口尚未接入此检查。
+共享 Control、Relay 和解密消息解码器拒绝同一对象内的重复字段。
+自部署 Server 的 REST 入口执行相同检查。转义后相同的字段名也视为重复。
+这些入口拒绝无效 UTF-8。REST 入口返回 `INVALID_MESSAGE`，不返回原始请求内容。
 
 ### 4.2 标识符
 

@@ -8,6 +8,7 @@ import {
   deviceRegistrationRequestSchema,
   deviceTokenPairSchema,
   decodeControlFrame,
+  decodeRelayDataFrame,
   encodeControlFrame,
   hostRegistrationCodeRequestSchema,
   parseControlFrame,
@@ -74,6 +75,9 @@ function executeFixture(testCase: ProtocolFixtureCase): unknown {
   if (testCase.operation === 'decodeControlFrameWithLimits') {
     const input = fixtureInput(testCase)
     return decodeControlFrame(requiredString(input.data, 'data'), controlFrameLimits(input))
+  }
+  if (testCase.operation === 'decodeRelayDataFrameWithLimits') {
+    return decodeRelayDataFrame(requiredString(input.data, 'data'), controlFrameLimits(input))
   }
   if (testCase.operation === 'selectProtocolVersion') {
     return selectProtocolVersion(numberList(input.offered, 'offered'), numberList(input.supported, 'supported'))

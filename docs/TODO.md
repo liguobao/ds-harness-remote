@@ -248,8 +248,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 本地集成验证不替代真实跨设备验收。
 
 - [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
-- [ ] 拒绝原始 JSON 中重复的安全字段。分别核对 Control 与 REST 入口。
-- [ ] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。
+- [x] 拒绝原始 JSON 中重复的安全字段。Control、Relay 和自部署 Server REST 入口均拒绝转义后重复的字段名。
+- [x] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。共享 schema 和 conformance fixtures 覆盖无 padding 与尾部闲置位。
 - [ ] 明确握手 step、heartbeat 数值与标识符范围。同步 schema 和共享 fixtures。
 - [ ] 清理协议第 22 节的 `connection.ping` 冲突说明。区分 replay/rekey 目标与实现状态。
 - [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
@@ -258,10 +258,10 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [ ] 完成 Noise 实现的独立安全审查。
 - [ ] 定义并实现长期连接 rekey 与连接最大生命周期。
 - [ ] 核对断线密钥清理。补齐清理策略与核心测试。
-- [ ] 增加剩余协议 golden vectors
+- [ ] 增加剩余协议 golden vectors。Control 全部帧类型、Relay data envelope 和 Noise IK 已覆盖；Typert、CodeX 与 ACP tunnel 仍需逐项补齐。
 - [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
-- [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证
+- [x] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证。Server/WebSocket、Noise IK 和生产 ClientSecureTransport 集成测试覆盖这些路径。
 - [x] WSL 本地 Server/WebSocket 验证密文篡改与提高 counter 后的重放拒绝。
 - [x] WSL 本地 Relay 验证错误静态公钥与连接 prologue 的 Noise 握手拒绝。
 
