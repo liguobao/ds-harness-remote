@@ -40,7 +40,7 @@ import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-
 import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { parseBotReplies } from '../bot/replies'
+import { parseBotReplyPayload } from '../bot/replies'
 import { BotReplies } from '../bot/reply-view'
 import type { BotObject } from '../../services/bot-catalog'
 import type { ProcessActivity, ProcessSegment } from '../chat-process'
@@ -73,16 +73,17 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     const result: (ProcessSegment | { kind: 'botReplies'; key: string; rows: BotObject[]; groupRelay: boolean })[] = []
     let pending: ChatItem[] = []
     for (const item of segment.items) {
-      const replies = item.kind === 'tool' && item.state === 'finished'
-        ? parseBotReplies(item.resultDetail?.text) : undefined
-      if (!replies?.length) { pending.push(item); continue }
+      const payload = item.kind === 'tool' && item.state === 'finished'
+        ? parseBotReplyPayload(item.resultDetail?.text) : undefined
+      if (!payload?.rows.length) { pending.push(item); continue }
       const groupRelay = item.kind === 'tool' && (item.toolKey ?? item.toolName) === 'group_relay'
-      // A completed group relay is conversation content, not a visible tool step.
-      // Unrecognized/failed results and all other tools retain their diagnostics.
-      if (!groupRelay) pending.push(item)
+      // A whole group relay is conversation content, not a visible tool step.
+      // A partially recovered or Host-truncated round keeps its expandable tool
+      // diagnostics: the visible replies are only a prefix of that round.
+      if (!groupRelay || !payload.complete || payload.truncated) pending.push(item)
       if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
       pending = []
-      result.push({ kind: 'botReplies', key: `bot-replies:${item.id}`, rows: replies, groupRelay })
+      result.push({ kind: 'botReplies', key: `bot-replies:${item.id}`, rows: payload.rows, groupRelay })
     }
     if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
     return result

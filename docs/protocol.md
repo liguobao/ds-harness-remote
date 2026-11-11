@@ -928,6 +928,14 @@ seq/cursor/throughSeq/hasMore、轮次生命周期及工具关联/错误状态�
 关闭模式后重新打开会话加载完整历史；CodeX 已有的详情句柄与按需读取继续有效。
 此能力只减少 Host → Client 历史载荷，不保证减少后端读取历史成本。
 
+普通工具正文的默认摘要在 512 字符截断；但已识别的 DS Bot 群聊轮次载荷
+（`{"replies":[...],"passed":N}`）属于会话正文而非工具诊断，改为**有界结构化保留**：
+只保留 `replies` 条目的原语字段、原始顺序、每条正文上限、条目上限与单条投影上限，
+发生裁剪时在顶层追加 `"truncated":true`。输出仍是合法 `{"replies":[...]}`，未升级的
+Client 仍可解析；整个投影另有文档级预算，保证 `session/follow` snapshot（无 transfer 兜底）
+远低于安全帧上限。无法解析、空 `replies` 或非该形状的正文继续走 512 字符摘要。
+精简投影是只读的，不修改原始记录，也不改变错误状态。
+
 ACP 的 `agent.acp.v1` / `agent.acp.transfer.v1` 及 `agent.acp.<backend>.v1` 声明表示
 Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 后台初始化不阻塞 Harness Remote
 上线；初始化中或启动失败时，`workspaceTypes` 对应项的 `available` 必须为 `false`，数据面调用
