@@ -206,6 +206,91 @@ describe('browser plugin route authority', () => {
     ], cleanup)
   })
 
+  it('preserves distinguishable plugin-route failure identities instead of collapsing to unavailable', async () => {
+    await runScenarios([
+      {
+        name: 'status probe timeout',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async (_input, init) => {
+            const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { method?: string } : undefined
+            if (body?.method === 'status') {
+              await new Promise<never>((_resolve, reject) => {
+                const onAbort = () => {
+                  reject(init.signal?.reason ?? new DOMException('The operation was aborted due to timeout.', 'TimeoutError'))
+                }
+                if (init?.signal?.aborted) {
+                  onAbort()
+                  return
+                }
+                init?.signal?.addEventListener('abort', onAbort, { once: true })
+              })
+            }
+            throw new Error(`unexpected control method ${body?.method}`)
+          })
+          const wrapped = createPluginRouteFetch(original, 'http://127.0.0.1/')
+          const response = await wrapped('api/bot', { method: 'POST', body: '{}' })
+          expect(response.status).toBe(200)
+          expect(await response.json()).toMatchObject({
+            ok: false,
+            error: {
+              code: 'remote-plugin/control-timeout',
+              details: { phase: 'status', timeoutMs: 10_000 },
+            },
+          })
+        },
+      },
+      {
+        name: 'control transport TypeError',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async () => {
+            throw new TypeError('Failed to fetch')
+          })
+          const wrapped = createPluginRouteFetch(original, 'http://127.0.0.1/')
+          const response = await wrapped('api/bot', { method: 'POST', body: '{}' })
+          expect(response.status).toBe(200)
+          expect(await response.json()).toEqual({
+            ok: false,
+            error: {
+              code: 'remote-plugin/unavailable',
+              message: 'The Remote plugin route is unavailable.',
+              details: { name: 'TypeError', message: 'Failed to fetch' },
+            },
+          })
+        },
+      },
+      {
+        name: 'invalid plugin.route payload shape',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async (_input, init) => {
+            const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { rpcId: string; method?: string } : undefined
+            if (body?.method === 'status') {
+              return new Response(JSON.stringify({
+                type: 'server-response',
+                rpcId: body.rpcId,
+                result: { ok: true, value: remoteStatus() },
+              }))
+            }
+            return new Response(JSON.stringify({
+              type: 'server-response',
+              rpcId: body?.rpcId,
+              result: { ok: true, value: 'not-an-object' },
+            }))
+          })
+          const wrapped = createPluginRouteFetch(original, 'http://127.0.0.1/')
+          const response = await wrapped('api/bot', { method: 'POST', body: '{}' })
+          expect(response.status).toBe(200)
+          expect(await response.json()).toMatchObject({
+            ok: false,
+            error: {
+              code: 'remote-plugin/route-response-invalid',
+              message: 'The plugin route response is invalid.',
+            },
+          })
+        },
+      },
+    ], cleanup)
+  }, 20_000)
+
   it('reports Host route and control refusals in the DS Bot error envelope without exposing upstream data', async () => {
     await runScenarios([
       { name: 'missing ds-bot route', status: 404, code: 'remote-plugin/bot-not-loaded' },
