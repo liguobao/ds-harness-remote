@@ -216,7 +216,7 @@ describe('browser plugin route authority', () => {
             if (body?.method === 'status') {
               await new Promise<never>((_resolve, reject) => {
                 const onAbort = () => {
-                  reject(init.signal?.reason ?? new DOMException('The operation was aborted due to timeout.', 'TimeoutError'))
+                  reject(init?.signal?.reason ?? new DOMException('The operation was aborted due to timeout.', 'TimeoutError'))
                 }
                 if (init?.signal?.aborted) {
                   onAbort()
