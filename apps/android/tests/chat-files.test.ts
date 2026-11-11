@@ -253,6 +253,23 @@ describe('chat-files utilities', () => {
       expect(files[1]!.remotePath).toBeDefined()
     })
 
+    it('stops mid-transfer, aborts the upload once and never commits', async () => {
+      const controller = new AbortController()
+      const methods: string[] = []
+      const rpc = vi.fn(async (method: string) => {
+        methods.push(method)
+        if (method === 'workspace.upload.open') return { uploadId: 'up-cancel', chunkBytes: 4 }
+        if (method === 'workspace.upload.chunk') { controller.abort(); return { uploadId: 'up-cancel', receivedBytes: 4 } }
+        if (method === 'workspace.upload.abort') return { aborted: true }
+        return {}
+      })
+      const file: StagedFile = { id: 'cancel', name: 'a.txt', size: 8, uri: 'file:///a', content: 'abcdefgh' }
+      await expect(uploadStagedFileToWorkspace(rpc, sessionId, file, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' })
+      expect(methods.filter(method => method === 'workspace.upload.abort')).toHaveLength(1)
+      expect(methods).not.toContain('workspace.upload.commit')
+    })
+
     it('rejects when commit does not return a valid path', async () => {
       const rpc = vi.fn(async (method: string) => {
         if (method === 'workspace.upload.open') return { uploadId: 'up-nopath', chunkBytes: 64 * 1024 }

@@ -258,6 +258,9 @@ export function ChatScreen({
     }
   }, [setQuotes, composerInputRef])
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const uploadingRef = useRef(false)
+  const uploadControllerRef = useRef<AbortController | undefined>(undefined)
   const sessionGenerationRef = useRef(0)
   useLayoutEffect(() => {
     let lastSessionId = useAppStore.getState().selectedSession?.sessionId
@@ -266,10 +269,15 @@ export function ChatScreen({
       if (currentId !== lastSessionId) {
         lastSessionId = currentId
         sessionGenerationRef.current += 1
+        uploadControllerRef.current?.abort()
         setStagedFiles([])
       }
     })
   }, [])
+  useEffect(() => () => { uploadControllerRef.current?.abort() }, [])
+  useEffect(() => {
+    if (connection.phase !== 'connected') uploadControllerRef.current?.abort()
+  }, [connection.phase])
   const { canAttachImages, attachmentPicking, pickImages, takePhoto, pickFiles } = useChatAttachments({
     session, memoryKey, images, setImages, stagedFiles, setStagedFiles, sessionGenerationRef,
   })
@@ -698,7 +706,7 @@ export function ChatScreen({
   }
 
   const submit = async () => {
-    if (!sendReady || permissionSelecting || session === undefined) return
+    if (!sendReady || permissionSelecting || session === undefined || uploadingRef.current) return
     // Read the live ref: the render-closure `draft` can lag the last keystrokes
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
@@ -716,18 +724,43 @@ export function ChatScreen({
       promptWithQuotes = text.length > 0 ? `${formattedQuotes}\n\n${text}` : formattedQuotes
     }
     let promptText = promptWithQuotes
+    const targetSessionId = session.sessionId
+    const sendSessionGen = sessionGenerationRef.current
     if (submittedFiles.length > 0) {
+      const controller = new AbortController()
+      uploadControllerRef.current?.abort()
+      uploadControllerRef.current = controller
+      uploadingRef.current = true
+      setUploadingFiles(true)
       try {
         const rpc = requireConnectionRpc()
-        const uploaded = await uploadStagedFilesToWorkspace(rpc, session.sessionId, submittedFiles)
+        const uploaded = await uploadStagedFilesToWorkspace(rpc, session.sessionId, submittedFiles, controller.signal)
+        // A navigation, session switch, reconnection or unmount during a long
+        // upload must never leak the prompt into another conversation.
+        if (controller.signal.aborted) return
+        if (sessionGenerationRef.current !== sendSessionGen
+          || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
+        if (useAppStore.getState().connection.phase !== 'connected') {
+          Alert.alert(strings.messageActions.failed, strings.messageActions.unavailable)
+          return
+        }
         promptText = formatUploadedFilesReferencePrompt(promptWithQuotes, uploaded)
       } catch (uploadError) {
+        // Aborted uploads already restored (or discarded) their composer state;
+        // do not surface a cancellation as a failure.
+        if (controller.signal.aborted || (uploadError as Error | undefined)?.name === 'AbortError') return
         const isUnsupported = (uploadError as { code?: string })?.code === 'FEATURE_NOT_SUPPORTED'
         const errorMsg = isUnsupported
           ? strings.chat.uploadUnavailable
           : strings.chat.uploadFileFailed(submittedFiles[0]?.name ?? '', (uploadError as Error).message)
         Alert.alert(strings.messageActions.failed, errorMsg)
         return
+      } finally {
+        if (uploadControllerRef.current === controller) {
+          uploadControllerRef.current = undefined
+          uploadingRef.current = false
+          setUploadingFiles(false)
+        }
       }
     }
     if (promptText.length > LONG_DRAFT_MAX) {
@@ -741,8 +774,6 @@ export function ChatScreen({
     setStagedReferences([])
     setMentionType(null)
     resetSelection()
-    const targetSessionId = session.sessionId
-    const sendSessionGen = sessionGenerationRef.current
     const restoreScrollAfterRejectedSend = beginSendScroll()
     const outcome = await sendMessage(promptText, submittedImages)
     if (outcome === 'rejected') {
@@ -844,8 +875,8 @@ export function ChatScreen({
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
   const compactRunning = replyActive && !hasComposerContent && !composingDuringRun
   const stopping = busy === 'stop-session'
-  const composerDisabled = !connected || permissionSelecting
-  const sendDisabled = !sendReady || permissionSelecting || !hasComposerContent
+  const composerDisabled = !connected || permissionSelecting || uploadingFiles
+  const sendDisabled = !sendReady || permissionSelecting || !hasComposerContent || uploadingFiles
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
   const currentPermission = permissions?.options.find(option => option.value === permissions.currentValue)
@@ -1148,6 +1179,11 @@ export function ChatScreen({
               </View>
             ))}
           </ScrollView>
+        )}
+        {uploadingFiles && (
+          <Text style={[styles.fileCardSize, { paddingHorizontal: spacing.md, paddingBottom: spacing.xs }]}>
+            {strings.chat.uploadingFile(stagedFiles[0]?.name ?? '')}
+          </Text>
         )}
         <ReferencedChatPills
           items={stagedReferences}

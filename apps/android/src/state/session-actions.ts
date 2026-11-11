@@ -386,9 +386,24 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
             runtime.connectionStartedAt,
           )
+          // A prompt acknowledged on this connection can still be missing from
+          // both history and the inbox (lost event after commit). Once the Host
+          // proves the session is idle and neither source knows the requestId,
+          // settle the optimistic row as unconfirmed instead of leaving the
+          // composer stuck on "sending" forever. Late echoes still replace it.
+          const historyRpcIds = new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
+          const runningNow = nextSession.running === true || authoritativeLifecycle?.running === true
+          const unsettled = inboxSnapshot === undefined || runningNow ? reconciled : (() => {
+            const queuedRpcIds = inboxRpcIds(inboxSnapshot)
+            return reconciled.map(item => item.kind === 'message' && item.id.startsWith('local:')
+              && item.sendState === undefined && item.requestRpcId !== undefined
+              && !queuedRpcIds.has(item.requestRpcId) && !historyRpcIds.has(item.requestRpcId)
+              ? { ...item, sendState: 'unconfirmed' as const }
+              : item)
+          })()
           const withQuestions = userQuestionsSnapshot === undefined
-            ? reconciled
-            : reconcileUserQuestionsProjection(reconciled, session.sessionId, userQuestionsSnapshot, inboxSnapshot)
+            ? unsettled
+            : reconcileUserQuestionsProjection(unsettled, session.sessionId, userQuestionsSnapshot, inboxSnapshot)
           const hasRunningAskUserTool = items.some(item => item.kind === 'tool' && item.state === 'running' && (item.toolKey ?? item.toolName) === 'ask_user_question')
           const effectivelyRunning = nextSession.running || (authoritativeLifecycle === undefined && hasRunningAskUserTool)
           const activeTurn = authoritativeLifecycle?.turn

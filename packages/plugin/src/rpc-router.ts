@@ -14,7 +14,7 @@ import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { SafeLogger } from './logging.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
-import { RpcError, safeErrorCode } from './safe-error.js'
+import { RpcError, safeErrorCode, workspaceFileFailureReason } from './safe-error.js'
 import type { WorkspaceUploadHost } from './workspace-upload.js'
 import type { PluginRouteBridge } from './plugin-route-bridge.js'
 
@@ -131,12 +131,14 @@ export class RpcRouter {
         && typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
         ? String((request.payload.params as Record<string, unknown>).endpoint)
         : undefined
+      const reason = workspaceFileFailureReason(error)
       this.logger?.warn('host rpc failed', {
         method: request.payload.method,
         ...(failedEndpoint ? { endpoint: failedEndpoint } : {}),
         durationMs: Math.round(performance.now() - startedAt),
         code: response.payload.code,
         retryable: response.payload.retryable,
+        ...(reason === undefined ? {} : { reason }),
       })
       return response
     } finally {
