@@ -80380,6 +80380,35 @@ var CodexEventCarrier = class {
   }
 };
 
+// packages/plugin/src/codex/turn-end-reason.ts
+function turnEndReason(turn) {
+  if (turn.status === "failed" || turn.error !== void 0 && turn.error !== null) {
+    return { kind: "error", error: projectTurnError(turn.error) };
+  }
+  if (turn.status === "interrupted" || turn.status === "cancelled" || turn.status === "canceled" || turn.status === "aborted") {
+    return { kind: "interrupted" };
+  }
+  return { kind: "completed" };
+}
+function projectTurnError(error62) {
+  if (typeof error62 === "string") {
+    const message2 = error62.trim();
+    return {
+      message: message2 === "" ? "CodeX turn failed." : message2,
+      code: "codex-turn-failed"
+    };
+  }
+  const value = record5(error62);
+  const message = string5(value.message)?.trim();
+  const codexInfo = string5(value.codex_error_info)?.trim();
+  const code = (codexInfo && codexInfo !== "" ? codexInfo : void 0) ?? string5(value.code)?.trim() ?? "codex-turn-failed";
+  return {
+    message: message && message !== "" ? message : "CodeX turn failed.",
+    code: code === "" ? "codex-turn-failed" : code,
+    ...codexInfo && codexInfo !== "" ? { codex_error_info: codexInfo } : {}
+  };
+}
+
 // packages/plugin/src/codex/virtual-history.ts
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
 var DEFAULT_HISTORY_MESSAGES = 50;
@@ -80474,15 +80503,6 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
     nextTurn: turnNumber,
     ...active2 === void 0 ? {} : { activeTurnId: active2 }
   };
-}
-function turnEndReason(turn) {
-  if (turn.status === "failed" || turn.error !== void 0 && turn.error !== null) {
-    return { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } };
-  }
-  if (turn.status === "interrupted" || turn.status === "cancelled" || turn.status === "canceled" || turn.status === "aborted") {
-    return { kind: "interrupted" };
-  }
-  return { kind: "completed" };
 }
 function paginateCodexNativeHistory(history, request) {
   const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq);
@@ -81105,7 +81125,7 @@ var CodexLiveProjection = class {
       }
       this.pushEvent(follow, "turn/end", {
         turn: follow.turn,
-        reason: turnEndReason2(turn)
+        reason: turnEndReason(turn)
       });
       this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
       this.context.emitRemoteEvent("api-session/activity", [follow.sessionId, Date.now()]);
@@ -81363,15 +81383,6 @@ var CodexLiveProjection = class {
     this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
   }
 };
-function turnEndReason2(turn) {
-  if (turn.status === "failed" || turn.error !== void 0 && turn.error !== null) {
-    return { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } };
-  }
-  if (turn.status === "interrupted" || turn.status === "cancelled" || turn.status === "canceled" || turn.status === "aborted") {
-    return { kind: "interrupted" };
-  }
-  return { kind: "completed" };
-}
 
 // packages/plugin/src/codex/virtual-harness.ts
 var CODEX_CATALOG_CACHE_MS = 2e3;
@@ -90280,17 +90291,20 @@ function concatChunks(chunks, totalBytes) {
 // packages/plugin/src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
+var DEFAULT_TURN_SILENCE_TIMEOUT_MS = 10 * 6e4;
 var CODEX_PAGE_LIMIT2 = 100;
 var MAX_CODEX_PAGES2 = 32;
 var CODEX_HISTORY_PAGE_LIMIT = 25;
 var MAX_CODEX_HISTORY_PAGES = 64;
 var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
+var TURN_SILENCE_MESSAGE = "CodeX turn timed out waiting for the App Server. The model provider may be unavailable or rate-limited. Please try again later.";
 var CodexRemoteDomain = class {
-  constructor(config2, logger2, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS) {
+  constructor(config2, logger2, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS, turnSilenceTimeoutMs = DEFAULT_TURN_SILENCE_TIMEOUT_MS) {
     this.config = config2;
     this.logger = logger2;
     this.createAppServer = createAppServer;
     this.restartDelaysMs = restartDelaysMs;
+    this.turnSilenceTimeoutMs = turnSilenceTimeoutMs;
   }
   appServer;
   unsubscribeInbound;
@@ -90298,6 +90312,7 @@ var CodexRemoteDomain = class {
   peers = /* @__PURE__ */ new Map();
   peerDeviceIds = /* @__PURE__ */ new Map();
   turnOwners = /* @__PURE__ */ new Map();
+  turnWatchdogs = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
@@ -90541,6 +90556,7 @@ var CodexRemoteDomain = class {
       }
       if (call.method === "turn/start" && threadId !== void 0) {
         this.rememberTurnId(threadId, connectionId, extractTurnId(result));
+        this.armTurnWatchdog(threadId);
         if (call.params.permissionPreset !== void 0) {
           await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
         }
@@ -90550,6 +90566,7 @@ var CodexRemoteDomain = class {
       if (claimed && threadId !== void 0 && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === void 0) this.turnOwners.delete(threadId);
         else this.turnOwners.set(threadId, previousOwner);
+        if (previousOwner === void 0) this.clearTurnWatchdog(threadId);
       }
       throw mapAppServerError(error62);
     }
@@ -90571,7 +90588,9 @@ var CodexRemoteDomain = class {
     if (bridge !== void 0) this.peers.delete(connectionId);
     this.peerDeviceIds.delete(connectionId);
     for (const [threadId, owner] of this.turnOwners) {
-      if (owner.connectionId === connectionId) this.turnOwners.delete(threadId);
+      if (owner.connectionId !== connectionId) continue;
+      this.turnOwners.delete(threadId);
+      this.clearTurnWatchdog(threadId);
     }
     const appServer = this.appServer;
     const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
@@ -90591,6 +90610,7 @@ var CodexRemoteDomain = class {
     await this.startPromise?.catch(() => void 0);
     this.available = false;
     await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
+    this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
     this.knownThreadPromises.clear();
@@ -90613,6 +90633,7 @@ var CodexRemoteDomain = class {
     for (const bridge of [...this.peers.values()]) await bridge.closeAll();
     this.peers.clear();
     this.peerDeviceIds.clear();
+    this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
@@ -90677,6 +90698,7 @@ var CodexRemoteDomain = class {
     this.available = false;
     this.state = "restarting";
     this.unavailableCode = code;
+    this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
     this.approvals.clear();
@@ -90738,9 +90760,13 @@ var CodexRemoteDomain = class {
       this.rememberPermission(threadId, message.params);
     }
     if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
-    if (message.method === "turn/completed" && threadId !== void 0) this.turnOwners.delete(threadId);
+    if (message.method === "turn/completed" && threadId !== void 0) {
+      this.turnOwners.delete(threadId);
+      this.clearTurnWatchdog(threadId);
+    }
     if (message.method === "thread/status/changed" && threadId !== void 0 && isTerminalThreadStatus(message.params)) {
       this.turnOwners.delete(threadId);
+      this.clearTurnWatchdog(threadId);
       for (const [handle, approval] of this.approvals) {
         if (approval.threadId !== threadId) continue;
         this.approvals.delete(handle);
@@ -90754,9 +90780,11 @@ var CodexRemoteDomain = class {
       if (owner !== void 0) {
         this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
       }
+      this.armTurnWatchdog(threadId);
     }
     if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
     if (threadId === void 0) return;
+    if (this.turnOwners.has(threadId)) this.armTurnWatchdog(threadId);
     await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
       method: message.method,
       params: message.params
@@ -91064,6 +91092,59 @@ var CodexRemoteDomain = class {
       });
     }, Math.max(0, nextExpiry - Date.now()));
     this.approvalExpiryTimer.unref?.();
+  }
+  armTurnWatchdog(threadId) {
+    if (this.closed || this.turnSilenceTimeoutMs <= 0 || !this.turnOwners.has(threadId)) return;
+    this.clearTurnWatchdog(threadId);
+    const timer2 = setTimeout(() => {
+      this.turnWatchdogs.delete(threadId);
+      void this.failSilentTurn(threadId).catch((error62) => {
+        this.logger.warn("Codex turn silence watchdog failed", { code: errorCode2(error62) });
+      });
+    }, this.turnSilenceTimeoutMs);
+    timer2.unref?.();
+    this.turnWatchdogs.set(threadId, timer2);
+  }
+  clearTurnWatchdog(threadId) {
+    const timer2 = this.turnWatchdogs.get(threadId);
+    if (timer2 === void 0) return;
+    clearTimeout(timer2);
+    this.turnWatchdogs.delete(threadId);
+  }
+  clearAllTurnWatchdogs() {
+    for (const timer2 of this.turnWatchdogs.values()) clearTimeout(timer2);
+    this.turnWatchdogs.clear();
+  }
+  /**
+   * App Server can drop a turn without `turn/completed` (observed on HTTP 503).
+   * Release the writer lease and project a failed turn/end so Remote clients
+   * leave the forever-"thinking" state.
+   */
+  async failSilentTurn(threadId) {
+    const owner = this.turnOwners.get(threadId);
+    this.clearTurnWatchdog(threadId);
+    if (owner === void 0 || this.closed) return;
+    this.turnOwners.delete(threadId);
+    for (const [handle, approval] of this.approvals) {
+      if (approval.threadId !== threadId) continue;
+      this.approvals.delete(handle);
+      void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    this.scheduleApprovalExpiry();
+    const turn = {
+      id: owner.turnId ?? `silence:${threadId}`,
+      status: "failed",
+      error: {
+        message: TURN_SILENCE_MESSAGE,
+        codex_error_info: "remote_turn_silence"
+      },
+      items: []
+    };
+    this.logger.warn("Codex turn silence watchdog fired", { code: "remote_turn_silence" });
+    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
+      method: "turn/completed",
+      params: { threadId, turn }
+    })));
   }
   requireAppServer() {
     if (!this.config.enabled || !this.isAvailable() || this.appServer === void 0) {

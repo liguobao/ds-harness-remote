@@ -940,6 +940,63 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('fails silent turns after the watchdog timeout and releases the writer lease', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain(
+      { enabled: true, binary: 'codex' },
+      logger(),
+      () => app,
+      [1_000],
+      50,
+    )
+    await domain.start()
+    const frames: Array<{ event: string; data: unknown }> = []
+    const owner = domain.createPeer(
+      { connectionId: 'connection-1', peerDeviceId: 'peer-1' },
+      async (event, data) => { frames.push({ event, data }) },
+    )!
+    const waiter = domain.createPeer(
+      { connectionId: 'connection-2', peerDeviceId: 'peer-2' },
+      async () => undefined,
+    )!
+    await owner.openStream({ streamId: 'stream-1', threadId: 'allowed-thread' })
+    await owner.call({
+      method: 'turn/start',
+      params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Hello' }] },
+    })
+    await expect(waiter.call({
+      method: 'turn/start',
+      params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Compete' }] },
+    })).rejects.toMatchObject({ code: 'CODEX_TURN_OWNED' })
+
+    await vi.waitFor(() => {
+      const completed = frames.find(frame => frame.event === 'codex.app.frame'
+        && isRecord(frame.data)
+        && isRecord(frame.data.frame)
+        && frame.data.frame.method === 'turn/completed')
+      expect(completed).toBeDefined()
+      const turn = isRecord(completed?.data)
+        && isRecord(completed.data.frame)
+        && isRecord(completed.data.frame.params)
+        ? completed.data.frame.params.turn
+        : undefined
+      expect(turn).toMatchObject({
+        status: 'failed',
+        error: {
+          message: expect.stringContaining('timed out waiting for the App Server'),
+          codex_error_info: 'remote_turn_silence',
+        },
+      })
+    })
+
+    await expect(waiter.call({
+      method: 'turn/start',
+      params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Retry after silence' }] },
+    })).resolves.toMatchObject({ turn: { id: 'turn-1' } })
+    await domain.close()
+  })
+
   it('isolates streams and approval handles to the active turn owner', async () => {
     const { root, outside } = await directories()
     const app = new FakeAppServer(root, outside)
