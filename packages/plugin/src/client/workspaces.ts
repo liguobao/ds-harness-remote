@@ -1421,6 +1421,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 React.createElement('div', { className: 'dshRemoteSectionHeading' },
                   React.createElement('div', { className: 'dshRemoteSectionTitle' },
                     React.createElement('strong', null, t(status?.host?.pairingHostOnly ? 'thisMachineHost' : 'chooseHost')),
+                    status?.serverUrl !== undefined && !status.host?.pairingHostOnly ? React.createElement('a', {
+                      className: 'dshRemoteManageHosts',
+                      href: `${status.serverUrl}/app/hosts`,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      title: t('manageHosts'),
+                    }, t('manageHosts')) : null,
                     status?.hostAuthorizationAvailable ? React.createElement('div', { className: 'dshRemoteHostControlToggle' },
                       React.createElement('span', null, t('allowControlDevice')),
                       React.createElement('input', {
