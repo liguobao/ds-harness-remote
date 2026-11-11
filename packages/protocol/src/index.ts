@@ -1,5 +1,6 @@
 export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
+export { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
@@ -1325,7 +1326,7 @@ export function encodeRelayDataFrame(
   frame: RelayDataFrame,
   limits: ControlFrameByteLimits = {},
 ): string {
-  const parsed = relayDataFrameSchema.parse(frame)
+  const parsed = parseRelayDataFrame(frame)
   const encoded = JSON.stringify(parsed)
   assertControlFrameSize(new TextEncoder().encode(encoded).byteLength, 'relay', limits)
   return encoded
@@ -1338,10 +1339,17 @@ export function decodeRelayDataFrame(
   const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
   assertControlFrameSize(encoded.byteLength, 'relay', limits)
   try {
-    return relayDataFrameSchema.parse(parseWireJson(data))
+    return parseRelayDataFrame(parseWireJson(data))
   } catch {
     throw new Error('Invalid Relay data frame.')
   }
+}
+
+function parseRelayDataFrame(input: unknown): RelayDataFrame {
+  const frame = relayDataFrameSchema.parse(input)
+  if (frame.type === 'relay') return { ...frame, payload: relayPayloadSchema.parse(frame.payload) }
+  if (frame.type === 'secure.handshake') return { ...frame, payload: secureHandshakePayloadSchema.parse(frame.payload) }
+  return frame
 }
 
 export function encodeMessage(message: RemoteMessage): Uint8Array {

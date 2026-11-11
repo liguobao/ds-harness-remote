@@ -65047,7 +65047,7 @@ function decodeControlFrame(data2, limits = {}) {
   return frame;
 }
 function encodeRelayDataFrame(frame, limits = {}) {
-  const parsed = relayDataFrameSchema.parse(frame);
+  const parsed = parseRelayDataFrame(frame);
   const encoded = JSON.stringify(parsed);
   assertControlFrameSize(new TextEncoder().encode(encoded).byteLength, "relay", limits);
   return encoded;
@@ -65056,10 +65056,18 @@ function decodeRelayDataFrame(data2, limits = {}) {
   const encoded = typeof data2 === "string" ? new TextEncoder().encode(data2) : data2;
   assertControlFrameSize(encoded.byteLength, "relay", limits);
   try {
-    return relayDataFrameSchema.parse(parseWireJson(data2));
+    return parseRelayDataFrame(parseWireJson(data2));
   } catch {
     throw new Error("Invalid Relay data frame.");
   }
+}
+function parseRelayDataFrame(input4) {
+  const frame = relayDataFrameSchema.parse(input4);
+  if (frame.type === "relay")
+    return { ...frame, payload: relayPayloadSchema.parse(frame.payload) };
+  if (frame.type === "secure.handshake")
+    return { ...frame, payload: secureHandshakePayloadSchema.parse(frame.payload) };
+  return frame;
 }
 function encodeMessage(message) {
   return new TextEncoder().encode(JSON.stringify(message));

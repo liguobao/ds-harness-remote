@@ -45,6 +45,14 @@ async function request(path: string, method = 'GET', body?: unknown, token?: str
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
 }
+async function rawJsonRequest(path: string, body: string | Uint8Array, token?: string) {
+  const response = await fetch(`${base}/api/v1${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body,
+  })
+  return { status: response.status, data: await response.json() }
+}
 async function start(pass = password, trustedProxyIps: readonly string[] = [], configOverrides: Partial<Config> = {}) {
   app = createRemoteServer({ account, password: pass, dataFile: join(dir, 'state.json'), publicUrl: 'http://localhost:8080', trustedProxyIps, ...configOverrides })
   app.server.listen(0, '127.0.0.1'); await once(app.server, 'listening')
@@ -181,6 +189,39 @@ const cleanupScenario2 = async () => {
 afterEach(cleanupScenario2)
 
 describe('account and device authorization', () => {
+  it('rejects duplicate REST fields before authentication or state changes', async () => {
+    const d = await device()
+    const registration = JSON.stringify({ v: 1, device: {
+      deviceId: randomUUID(), identityKey: generateKeyPair().publicKey,
+      name: 'new-device', role: 'client', platform: 'linux', clientVersion: '0.6.4',
+    } })
+    const cases = [
+      { path: '/auth/login', body: JSON.stringify({ email: account, password }).replace('"password":', '"password":"wrong","password":') },
+      { path: '/auth/login', body: JSON.stringify({ email: account, password }).replace('"password":', '"pass\\u0077ord":"wrong","password":') },
+      { path: '/devices/register', body: registration.replace('"identityKey":', '"identityKey":"wrong","identityKey":'), token: accountToken },
+      { path: '/auth/refresh', body: JSON.stringify({ deviceId: d.deviceId, refreshToken: d.refreshToken }).replace('"refreshToken":', '"refreshToken":"wrong","refreshToken":') },
+      { path: `/devices/${d.deviceId}/name`, body: '{"name":"first","name":"second"}', token: accountToken },
+      { path: '/auth/login', body: Uint8Array.from([0xc0, 0xaf]) },
+    ]
+    for (const entry of cases) {
+      const result = await rawJsonRequest(entry.path, entry.body, entry.token)
+      expect(result.status).toBe(400)
+      expect(result.data.error.code).toBe('INVALID_MESSAGE')
+    }
+    const devices = await request('/account/devices', 'GET', undefined, accountToken)
+    expect(devices.data.items).toHaveLength(1)
+    expect(devices.data.items[0].name).toBe('test-device')
+  })
+  it('rejects a noncanonical registered X25519 public key', async () => {
+    const keys = generateKeyPair()
+    const descriptor = {
+      deviceId: randomUUID(), identityKey: `${keys.publicKey.slice(0, -1)}B`,
+      name: 'invalid-key', role: 'client', platform: 'linux', clientVersion: '0.6.4',
+    }
+    const result = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(result.status).toBe(400)
+    expect(result.data.error.code).toBe('INVALID_MESSAGE')
+  })
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {
     expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' })).status).toBe(401)
     expect((await request('/auth/login', 'POST', { email: account, password }, undefined, { Origin: 'https://attacker.example' })).status).toBe(403)
@@ -283,18 +324,24 @@ describe('account and device authorization', () => {
 })
 describe('control authorization and encrypted relay', () => {
   it('rejects invalid Control messages at the WebSocket boundary', async () => {
-    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type'].map(reason => ({
+    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type', 'duplicate-payload-field', 'noncanonical-handshake'].map(reason => ({
       name: reason,
       run: async () => {
         const wire = await socket(await device())
         await wire.next('hello.ack')
         const closed = once(wire.ws, 'close')
         const frame = {
-          ...createControlFrame('ping', { nonce: reason === 'oversized-control' ? 'a'.repeat(MAX_CONTROL_FRAME_BYTES) : 'test' }),
+          ...createControlFrame(reason === 'noncanonical-handshake' ? 'secure.handshake' : 'ping',
+            reason === 'noncanonical-handshake'
+              ? { connectionId: randomUUID(), targetDeviceId: randomUUID(), step: 1, data: 'AQIDBB' }
+              : { nonce: reason === 'oversized-control' ? 'a'.repeat(MAX_CONTROL_FRAME_BYTES) : 'test' }),
           ...(reason === 'unsupported-version' ? { v: 2 } : {}),
           ...(reason === 'unknown-frame-type' ? { type: 'unknown' } : {}),
         }
-        wire.ws.send(JSON.stringify(frame), { binary: reason === 'binary-control' })
+        const encoded = JSON.stringify(frame)
+        wire.ws.send(reason === 'duplicate-payload-field'
+          ? encoded.replace('"nonce":', '"nonce":"other","nonce":')
+          : encoded, { binary: reason === 'binary-control' })
         expect((await wire.next('error')).code).toBe(reason === 'unsupported-version' ? 'UNSUPPORTED_VERSION' : 'INVALID_MESSAGE')
         expect((await closed)[0]).toBe(4001)
       },
