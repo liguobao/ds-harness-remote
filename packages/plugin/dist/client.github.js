@@ -1736,6 +1736,8 @@ If a code was sent, recover the original submission without changing it.`,
     identityLocked: "Local Remote identity is locked by another process. Stop other DSH instances and retry.",
     storageConflict: "Conflicting or unverified legacy Remote storage found. Stop all DSH instances and inspect it manually.",
     storageConflictEntry: 'Conflicting or unverified legacy Remote storage found. Unexpected entry "{name}" was found. Stop all DSH instances and inspect it manually.',
+    retryStartup: "Retry Remote startup",
+    retryStartupSuccess: "Remote startup completed.",
     resetIdentity: "Reset Remote Identity",
     resetIdentityHint: "Recreate local device key pairs if they are corrupted. You will need to sign in again.",
     resetIdentityConfirm: "Are you sure you want to reset the local Remote identity? You will need to sign in again.",
@@ -2087,6 +2089,8 @@ If a code was sent, recover the original submission without changing it.`,
     identityLocked: "\u672C\u673A Remote \u8EAB\u4EFD\u6B63\u88AB\u5176\u4ED6\u8FDB\u7A0B\u5360\u7528\uFF0C\u8BF7\u5B8C\u5168\u9000\u51FA\u5176\u4ED6 DSH \u5B9E\u4F8B\u540E\u91CD\u8BD5\u3002",
     storageConflict: "\u68C0\u6D4B\u5230\u51B2\u7A81\u6216\u65E0\u6CD5\u786E\u8BA4\u5F52\u5C5E\u7684\u65E7\u7248 Remote \u5B58\u50A8\u76EE\u5F55\uFF0C\u8BF7\u505C\u6B62\u6240\u6709 DSH \u5B9E\u4F8B\u540E\u624B\u52A8\u68C0\u67E5\u5904\u7406\u3002",
     storageConflictEntry: "\u68C0\u6D4B\u5230\u51B2\u7A81\u6216\u65E0\u6CD5\u786E\u8BA4\u5F52\u5C5E\u7684\u65E7\u7248 Remote \u5B58\u50A8\u76EE\u5F55\uFF0C\u53D1\u73B0\u5F02\u5E38\u6587\u4EF6\u201C{name}\u201D\u3002\u8BF7\u505C\u6B62\u6240\u6709 DSH \u5B9E\u4F8B\u540E\u624B\u52A8\u68C0\u67E5\u5904\u7406\u3002",
+    retryStartup: "\u91CD\u8BD5\u542F\u52A8 Remote",
+    retryStartupSuccess: "Remote \u5DF2\u6210\u529F\u542F\u52A8\u3002",
     resetIdentity: "\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD",
     resetIdentityHint: "\u5F53\u672C\u673A\u8EAB\u4EFD\u5BC6\u94A5\u5BF9\u635F\u574F\u65F6\u91CD\u5EFA\u8EAB\u4EFD\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
     resetIdentityConfirm: "\u786E\u5B9A\u8981\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD\u5417\uFF1F\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u3002",
@@ -2972,7 +2976,7 @@ If a code was sent, recover the original submission without changing it.`,
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [resetBusy, setResetBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
       React.useEffect(() => {
         association !== void 0 && setSignInOpen(!1);
       }, [association]);
@@ -3298,7 +3302,21 @@ If a code was sent, recover the original submission without changing it.`,
         } finally {
           setResetBusy(!1);
         }
-      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", resetIdentitySetting = React.createElement(
+      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", retryStartup = async () => {
+        if (retryStartupBusy) return;
+        let run = ++associationReadRun.current;
+        setRetryStartupBusy(!0), setError(void 0), setNotice(void 0);
+        try {
+          let view = await props.control("settings.startup.retry", {}), status = await props.control("status").catch(() => {
+          });
+          applyView(view, run === associationReadRun.current), setHostStatus(status?.host), setHostName(status?.deviceName ?? ""), setHostDeviceId(status?.host?.deviceId ?? ""), setNotice({ key: "retryStartupSuccess" });
+        } catch (reason) {
+          setError(messageOf(reason, t)), load().catch(() => {
+          });
+        } finally {
+          setRetryStartupBusy(!1);
+        }
+      }, resetIdentitySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },
         React.createElement(
@@ -3314,9 +3332,15 @@ If a code was sent, recover the original submission without changing it.`,
           onClick: () => void resetIdentity()
         }, t(resetBusy ? "resettingAction" : "resetIdentity"))
       ), startupErrorBanner = settingsView?.startupError !== void 0 ? React.createElement(
-        "p",
+        "div",
         { className: "dshRemoteError", role: "alert" },
-        startupErrorMessage(settingsView.startupError, t)
+        React.createElement("p", null, startupErrorMessage(settingsView.startupError, t)),
+        React.createElement("button", {
+          type: "button",
+          className: "dshRemoteDiscard",
+          disabled: busy || resetBusy || retryStartupBusy,
+          onClick: () => void retryStartup()
+        }, t("retryStartup"))
       ) : null, sidebarEntrySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },

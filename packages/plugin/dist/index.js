@@ -97598,7 +97598,7 @@ var PluginControlRuntime = class {
   }
   async handle(endpoint, payload, signal) {
     try {
-      if (endpoint !== "settings.server.set" && endpoint !== "settings.identity.reset") await this.serverSwitchFlight;
+      if (endpoint !== "settings.server.set" && endpoint !== "settings.identity.reset" && endpoint !== "settings.startup.retry") await this.serverSwitchFlight;
       if (endpoint.startsWith("host.pairing.")) {
         if (this.host?.pairingControl === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "Host device pairing is unavailable.");
         const action = endpoint.slice("host.pairing.".length);
@@ -97615,6 +97615,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.get") return ok3(await this.settingsView());
       if (endpoint === "settings.configure") return ok3(await this.configure(payload));
       if (endpoint === "settings.server.set") return ok3(await this.setServer(payload));
+      if (endpoint === "settings.startup.retry") return ok3(await this.retryStartup());
       if (endpoint === "settings.role.set") return ok3(await this.setRole(payload));
       if (endpoint === "settings.codex.set") return ok3(await this.setCodex(payload));
       if (endpoint === "settings.cursor.set") return ok3(await this.setCursor(payload));
@@ -97736,6 +97737,35 @@ var PluginControlRuntime = class {
       throw new ClientModeError("SERVER_SWITCH_BUSY", "A Server switch is already in progress.");
     }
     const flight = this.applyServer(payload);
+    this.serverSwitchFlight = flight;
+    try {
+      return await flight;
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = void 0;
+    }
+  }
+  async retryStartup() {
+    if (this.serverSwitchFlight !== void 0) {
+      throw new ClientModeError("SERVER_SWITCH_BUSY", "A Server switch is already in progress.");
+    }
+    if (this.startupFailure === void 0) return this.settingsView();
+    const switchServer = this.switchServer;
+    if (switchServer === void 0) {
+      throw new ClientModeError("SETTINGS_UNAVAILABLE", "Remote startup retry is unavailable in this profile.");
+    }
+    const flight = (async () => {
+      await this.logoutFlight;
+      try {
+        const runtimes = await switchServer(this.config);
+        this.client = runtimes.client;
+        this.host = runtimes.host;
+        this.clearStartupFailure();
+      } catch (error62) {
+        this.setStartupFailure(error62);
+        throw error62;
+      }
+      return this.settingsView();
+    })();
     this.serverSwitchFlight = flight;
     try {
       return await flight;
