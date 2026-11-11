@@ -63,8 +63,13 @@ import { browseStatus } from '../lib/backend-groups'
 import { browseScope, saveHostMode, useBrowseMemory } from '../services/browse-memory'
 import {
   loadHostSessionsDrawerGroups,
+  loadHostSessionsDrawerPreferences,
   saveHostSessionsDrawerGroup,
+  saveHostSessionsDrawerPreferences,
   saveWorkspaceBackend,
+  type SessionFilterMode,
+  type SessionGroupBy,
+  type SessionOrderBy,
 } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
@@ -82,6 +87,30 @@ const POPOVER_RIGHT_INSET = spacing.md
 
 /** 内存缓存每台设备的工作区展开状态，关闭/重开侧边栏或切换模式时保持上次离开状态 */
 const memoryGroupsByDevice: Record<string, Record<string, boolean>> = {}
+
+interface DrawerPreferencesMemory {
+  groupBy: SessionGroupBy
+  orderBy: SessionOrderBy
+  filterMode: SessionFilterMode
+  manualOrders: Record<string, string[]>
+}
+
+/** 内存缓存全局与每台设备的侧边栏偏好（分组方式、排序方式、筛选条件、手动排序顺序），关闭/重开抽屉或进入回话再返回时保持上次离开状态 */
+const memoryPreferencesByDevice: Record<string, Partial<DrawerPreferencesMemory>> = {}
+const memoryGlobalPreferences: Omit<DrawerPreferencesMemory, 'manualOrders'> = {
+  groupBy: 'workspace',
+  orderBy: 'updated',
+  filterMode: 'hideArchived',
+}
+
+export function resetDrawerPreferencesMemoryForTesting(): void {
+  for (const k of Object.keys(memoryPreferencesByDevice)) {
+    delete memoryPreferencesByDevice[k]
+  }
+  memoryGlobalPreferences.groupBy = 'workspace'
+  memoryGlobalPreferences.orderBy = 'updated'
+  memoryGlobalPreferences.filterMode = 'hideArchived'
+}
 
 function formatRelativeTime(timestamp?: number | string): string {
   if (!timestamp) return ''
@@ -325,9 +354,18 @@ export function HostSessionsDrawer({
   const [searchQuery, setSearchQuery] = useState('')
   const [showConfigModal, setShowConfigModal] = useState(false)
   const [appMenuOpen, setAppMenuOpen] = useState(false)
-  const [groupBy, setGroupBy] = useState<'workspace' | 'workspace-tree' | 'list'>('workspace')
-  const [orderBy, setOrderBy] = useState<'manual' | 'updated'>('updated')
-  const [manualOrders, setManualOrders] = useState<Record<string, string[]>>({})
+  const [groupBy, setGroupBy] = useState<SessionGroupBy>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.groupBy ?? memoryGlobalPreferences.groupBy
+  })
+  const [orderBy, setOrderBy] = useState<SessionOrderBy>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.orderBy ?? memoryGlobalPreferences.orderBy
+  })
+  const [manualOrders, setManualOrders] = useState<Record<string, string[]>>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.manualOrders ?? {}
+  })
   const [dragState, setDragState] = useState<{
     sessionId: string
     sectionId: string
@@ -339,7 +377,120 @@ export function HostSessionsDrawer({
   const touchStartY = useRef(0)
   const dragActiveRef = useRef(false)
   const justDraggedRef = useRef(false)
-  const [filterMode, setFilterMode] = useState<'hideArchived' | 'all' | 'archivedOnly'>('hideArchived')
+  const [filterMode, setFilterMode] = useState<SessionFilterMode>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.filterMode ?? memoryGlobalPreferences.filterMode
+  })
+
+  const updateGroupBy = (nextGroupBy: SessionGroupBy) => {
+    setGroupBy(nextGroupBy)
+    memoryGlobalPreferences.groupBy = nextGroupBy
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        groupBy: nextGroupBy,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { groupBy: nextGroupBy }).catch(() => undefined)
+  }
+
+  const updateOrderBy = (nextOrderBy: SessionOrderBy) => {
+    setOrderBy(nextOrderBy)
+    memoryGlobalPreferences.orderBy = nextOrderBy
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        orderBy: nextOrderBy,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { orderBy: nextOrderBy }).catch(() => undefined)
+  }
+
+  const updateFilterMode = (nextFilter: SessionFilterMode) => {
+    setFilterMode(nextFilter)
+    memoryGlobalPreferences.filterMode = nextFilter
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        filterMode: nextFilter,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { filterMode: nextFilter }).catch(() => undefined)
+  }
+
+  const updateManualOrders = (accountKey: string, nextIds: string[], alsoSetManualOrder: boolean) => {
+    setManualOrders(prev => {
+      const nextManualOrders = { ...prev, [accountKey]: nextIds }
+      if (deviceId) {
+        memoryPreferencesByDevice[deviceId] = {
+          ...memoryPreferencesByDevice[deviceId],
+          manualOrders: nextManualOrders,
+          ...(alsoSetManualOrder ? { orderBy: 'manual' } : {}),
+        }
+      }
+      void saveHostSessionsDrawerPreferences(deviceId, {
+        manualOrders: nextManualOrders,
+        ...(alsoSetManualOrder ? { orderBy: 'manual' } : {}),
+      }).catch(() => undefined)
+      return nextManualOrders
+    })
+    if (alsoSetManualOrder) {
+      setOrderBy('manual')
+      memoryGlobalPreferences.orderBy = 'manual'
+    }
+  }
+
+  useEffect(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    if (devPrefs) {
+      if (devPrefs.groupBy !== undefined) setGroupBy(devPrefs.groupBy)
+      if (devPrefs.orderBy !== undefined) setOrderBy(devPrefs.orderBy)
+      if (devPrefs.filterMode !== undefined) setFilterMode(devPrefs.filterMode)
+      if (devPrefs.manualOrders !== undefined) setManualOrders(devPrefs.manualOrders)
+    }
+
+    let cancelled = false
+    void loadHostSessionsDrawerPreferences(deviceId).then(saved => {
+      if (cancelled) return
+      if (saved.groupBy !== undefined) {
+        memoryGlobalPreferences.groupBy = saved.groupBy
+        setGroupBy(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.groupBy : undefined
+          return activeMem ?? saved.groupBy!
+        })
+      }
+      if (saved.orderBy !== undefined) {
+        memoryGlobalPreferences.orderBy = saved.orderBy
+        setOrderBy(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.orderBy : undefined
+          return activeMem ?? saved.orderBy!
+        })
+      }
+      if (saved.filterMode !== undefined) {
+        memoryGlobalPreferences.filterMode = saved.filterMode
+        setFilterMode(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.filterMode : undefined
+          return activeMem ?? saved.filterMode!
+        })
+      }
+      if (saved.manualOrders !== undefined) {
+        setManualOrders(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.manualOrders : undefined
+          return activeMem ?? saved.manualOrders!
+        })
+      }
+      if (deviceId) {
+        memoryPreferencesByDevice[deviceId] = {
+          ...(saved.groupBy !== undefined ? { groupBy: saved.groupBy } : {}),
+          ...(saved.orderBy !== undefined ? { orderBy: saved.orderBy } : {}),
+          ...(saved.filterMode !== undefined ? { filterMode: saved.filterMode } : {}),
+          ...(saved.manualOrders !== undefined ? { manualOrders: saved.manualOrders } : {}),
+          ...memoryPreferencesByDevice[deviceId],
+        }
+      }
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [deviceId])
   const groupScopeKey = deviceId ? `${hostScope}:${deviceId}` : undefined
   const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>(() => ({ ...memoryGroupsByDevice }))
   const [loadedDeviceId, setLoadedDeviceId] = useState<string | undefined>(() => (groupScopeKey && memoryGroupsByDevice[groupScopeKey] ? deviceId : undefined))
@@ -755,15 +906,15 @@ export function HostSessionsDrawer({
       ]}
     >
       <Text style={styles.modalSectionLabel}>{strings.sessions.groupBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspace}</Text>
         {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace-tree'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace-tree'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspaceTree}</Text>
         {groupBy === 'workspace-tree' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('list'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('list'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByList}</Text>
         {groupBy === 'list' && <Check size={14} color={colors.ink} />}
       </Pressable>
@@ -771,11 +922,11 @@ export function HostSessionsDrawer({
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.orderBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('manual'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('manual'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderManual}</Text>
         {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('updated'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('updated'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderUpdated}</Text>
         {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
       </Pressable>
@@ -783,15 +934,15 @@ export function HostSessionsDrawer({
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.filterSessions}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('hideArchived'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('hideArchived'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterHideArchived}</Text>
         {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('all'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('all'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterAll}</Text>
         {filterMode === 'all' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('archivedOnly'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('archivedOnly'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterArchivedOnly}</Text>
         {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
       </Pressable>
@@ -1287,10 +1438,7 @@ export function HostSessionsDrawer({
                       const fullIds = baselineSessions.map(s => s.sessionId)
                       const direction = fromIndex < overIndex ? 'after' : 'before'
                       const next = reorderSessionIds(fullIds, item.sessionId, targetSession.sessionId, direction)
-                      setManualOrders(prev => ({ ...prev, [currentAccountKey]: next }))
-                      if (orderBy === 'updated') {
-                        setOrderBy('manual')
-                      }
+                      updateManualOrders(currentAccountKey, next, orderBy === 'updated')
                       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
                     }
                   }
