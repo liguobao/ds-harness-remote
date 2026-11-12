@@ -49,6 +49,7 @@ import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.
 import type { SafeLogger } from './logging.js'
 import type { AuthorizedPeerDevice, HostServerApi } from './server-api.js'
 import { ServerApiError } from './server-api.js'
+import { createNodeWebSocket } from './node-websocket.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -116,7 +117,7 @@ export class HostServerConnection {
     private readonly api: HostServerApi,
     private readonly connections: ConnectionController,
     private readonly logger: SafeLogger,
-    private readonly createWebSocket: WebSocketFactory = url => new WebSocket(url) as unknown as WebSocketLike,
+    private readonly createWebSocket: WebSocketFactory = url => createNodeWebSocket(url) as unknown as WebSocketLike,
     private readonly rtcFactoryProvider?: () => Promise<RtcPeerConnectionFactory | undefined>,
     private readonly hostCapabilities: () => readonly string[] = () => [],
     private readonly harnessVersion?: string,

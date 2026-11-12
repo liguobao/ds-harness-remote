@@ -32,6 +32,8 @@ export interface RelayTransportOptions {
   capabilities?: string[]
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   handshakeTimeoutMs?: number
+  /** See AdaptiveTransportOptions.createWebSocket. */
+  createWebSocket?: (url: string) => WebSocket
 }
 
 type RelayAssignment = Pick<ConnectAcceptedPayload, 'relayEndpoint' | 'relayTicket' | 'relayNodeId' | 'relayEpoch'>
@@ -59,9 +61,13 @@ export class RelayTransport extends BaseTransport {
     super()
   }
 
+  private openSocket(url: string): WebSocket {
+    return (this.options.createWebSocket ?? ((endpoint: string) => new WebSocket(endpoint)))(url)
+  }
+
   async connect(): Promise<void> {
     if (this.socket !== undefined) return
-    this.socket = new WebSocket(this.url)
+    this.socket = this.openSocket(this.url)
     this.controlFrameLimits = {}
     this.socket.binaryType = 'arraybuffer'
     await new Promise<void>((resolve, reject) => {
@@ -238,7 +244,7 @@ export class RelayTransport extends BaseTransport {
 
   private async openDataSocket(assignment: RelayAssignment): Promise<void> {
     if (this.connectionId === undefined || this.dataSocket !== undefined) return
-    const socket = new WebSocket(assignment.relayEndpoint!)
+    const socket = this.openSocket(assignment.relayEndpoint!)
     socket.binaryType = 'arraybuffer'
     this.dataSocket = socket
     await new Promise<void>((resolve, reject) => {

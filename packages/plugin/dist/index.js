@@ -65047,7 +65047,7 @@ function decodeControlFrame(data2, limits = {}) {
   return frame;
 }
 function encodeRelayDataFrame(frame, limits = {}) {
-  const parsed = parseRelayDataFrame(frame);
+  const parsed = relayDataFrameSchema.parse(frame);
   const encoded = JSON.stringify(parsed);
   assertControlFrameSize(new TextEncoder().encode(encoded).byteLength, "relay", limits);
   return encoded;
@@ -65056,18 +65056,10 @@ function decodeRelayDataFrame(data2, limits = {}) {
   const encoded = typeof data2 === "string" ? new TextEncoder().encode(data2) : data2;
   assertControlFrameSize(encoded.byteLength, "relay", limits);
   try {
-    return parseRelayDataFrame(parseWireJson(data2));
+    return relayDataFrameSchema.parse(parseWireJson(data2));
   } catch {
     throw new Error("Invalid Relay data frame.");
   }
-}
-function parseRelayDataFrame(input4) {
-  const frame = relayDataFrameSchema.parse(input4);
-  if (frame.type === "relay")
-    return { ...frame, payload: relayPayloadSchema.parse(frame.payload) };
-  if (frame.type === "secure.handshake")
-    return { ...frame, payload: secureHandshakePayloadSchema.parse(frame.payload) };
-  return frame;
 }
 function encodeMessage(message) {
   return new TextEncoder().encode(JSON.stringify(message));
@@ -70045,7 +70037,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.selected = void 0;
     this.connectedAt = void 0;
     this.relayCounter = 0;
-    this.socket = new WebSocket(this.url);
+    this.socket = this.openSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
     await new Promise((resolve10, reject) => {
@@ -70477,7 +70469,7 @@ var AdaptiveTransport = class extends BaseTransport {
       const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken;
       if (this.lifetime !== lifetime || !this.lease?.canDetach())
         return;
-      const socket = new WebSocket(this.url);
+      const socket = this.openSocket(this.url);
       this.socket = socket;
       socket.binaryType = "arraybuffer";
       this.recoveryOpeningTimer = setTimeout(() => {
@@ -70575,10 +70567,13 @@ var AdaptiveTransport = class extends BaseTransport {
       });
     }
   }
+  openSocket(url2) {
+    return (this.options.createWebSocket ?? ((endpoint) => new WebSocket(endpoint)))(url2);
+  }
   async openDataSocket(assignment) {
     if (this.connectionId === void 0 || this.dataSocket !== void 0)
       return;
-    const socket = new WebSocket(assignment.relayEndpoint);
+    const socket = this.openSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     this.dataSocket = socket;
     await new Promise((resolve10, reject) => {
@@ -78267,6 +78262,22 @@ async function waitForResponder(inner, noise, signal) {
   });
 }
 
+// node_modules/ws/wrapper.mjs
+var import_stream = __toESM(require_stream(), 1);
+var import_extension = __toESM(require_extension(), 1);
+var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
+var import_receiver = __toESM(require_receiver(), 1);
+var import_sender = __toESM(require_sender(), 1);
+var import_subprotocol = __toESM(require_subprotocol(), 1);
+var import_websocket = __toESM(require_websocket(), 1);
+var import_websocket_server = __toESM(require_websocket_server(), 1);
+var wrapper_default = import_websocket.default;
+
+// packages/plugin/src/node-websocket.ts
+function createNodeWebSocket(url2) {
+  return new wrapper_default(url2, { perMessageDeflate: false });
+}
+
 // packages/plugin/src/client-connection.ts
 var ClientConnection = class {
   constructor(context) {
@@ -78319,6 +78330,8 @@ var ClientConnection = class {
           forceRelay: this.context.config.forceRelay || attempt === "relay",
           preferredTransports: preferredTransportsForAttempt(attempt),
           negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
+          // dsh web's global WebSocket injects Origin; self-hosted Servers reject it (#353).
+          createWebSocket: (url2) => createNodeWebSocket(url2),
           ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
           fetchIceServers: async (connectionId) => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
           onWebRtcFallback: (error62, diagnostics) => {
@@ -78526,16 +78539,6 @@ function canReconnect(error62) {
 // packages/plugin/src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-
-// node_modules/ws/wrapper.mjs
-var import_stream = __toESM(require_stream(), 1);
-var import_extension = __toESM(require_extension(), 1);
-var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
-var import_receiver = __toESM(require_receiver(), 1);
-var import_sender = __toESM(require_sender(), 1);
-var import_subprotocol = __toESM(require_subprotocol(), 1);
-var import_websocket = __toESM(require_websocket(), 1);
-var import_websocket_server = __toESM(require_websocket_server(), 1);
 
 // packages/plugin/src/loopback-host.ts
 import { request as httpRequest } from "node:http";
@@ -99498,7 +99501,7 @@ function isOversizedListing(value) {
 // packages/plugin/src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var HostServerConnection = class {
-  constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => new WebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
+  constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
     this.config = config2;
     this.identity = identity3;
     this.identities = identities;
