@@ -841,7 +841,9 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 返回 `{ ok: false, error: { code: "bot/not-found", message: "Unknown endpoint group-rows" } }`。
 Android 对两种拒绝都退回既有的 `room-progress`，不再匹配版本相关的错误文案；`room-progress`
 只返回仍在进行的轮次（Host 在轮次结束时删除该条目），因此降级路径只能在轮次进行中补齐行，
-已结束轮次继续依赖历史详情与本机缓存。
+已结束轮次继续依赖历史详情与本机缓存。`group-rows` 另带 `active`，表示群聊此刻是否在工作：
+最新一轮在下一条消息产生下一个锚点前始终 `open: true`，客户端据 `active: false` 停止轮询，
+旧 DS Bot 不返回该字段时仍只看 `open`。
 
 `view-reply` 转发 DS Bot 0.2.0 / 0.2.1 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
 用于选择、确认、表单及 0.2.1 的 `submit` 提交；公式输入通过 `values.inputs` 传递。
