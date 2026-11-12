@@ -109,12 +109,14 @@ function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: s
   return files
 }
 
-export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
-  const { colors } = useTheme()
+export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palette }: { text: string; colors?: ThemeColors }) {
+  const theme = useTheme()
+  // A caller can paint one block on a dark surface (a user bubble) without touching the theme.
+  const colors = palette ?? theme.colors
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
-  const styles = useThemedStyles(createStyles)
+  const styles = useMemo(() => createStyles(colors), [colors])
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
   const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, "\n")), [source])

@@ -27,7 +27,7 @@ import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
-import { BotAvatar } from './bot/avatar'
+import { BotAvatar, RoomAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
@@ -336,6 +336,8 @@ export function BotModeScreen({
       >
         {bot ? (
           <BotAvatar bot={bot} size={26} />
+        ) : room && room.members.length > 0 ? (
+          <RoomAvatar members={room.members} bots={state?.bots ?? []} size={26} />
         ) : roomLeadBot ? (
           <BotAvatar bot={roomLeadBot} size={26} />
         ) : (

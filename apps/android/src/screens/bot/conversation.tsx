@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'r
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
-import { pollRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
+import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
@@ -22,7 +22,7 @@ import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
 import { BotAvatar } from './avatar'
 import { BotQuestion, BotSettledCard, BotViewCard } from './cards'
 import { parseBotReplyPayload, parseRelayRange } from './replies'
-import { BotReplies, BotViaPill } from './reply-view'
+import { BotReplies, BotViaPill, type BotMentionContext } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
 import { BotPlusMenuModal, ReferenceChatModal, ReferencedChatPills } from './reference-chat-modal'
@@ -45,6 +45,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   busy: boolean; active: boolean; perform: BotPerform; onSelectBot: (id: string) => void
 }) {
   const transformText = useCallback((value: string) => linkBotMentions(value, state.bots, bot?.id), [state.bots, bot?.id])
+  const botById = useCallback((id: string) => state.bots.find(entry => entry.id === id), [state.bots])
+  const mentions = useMemo(() => ({ bots: state.bots, selfId: bot?.id, onPress: (id: string) => onSelectBot(id) }), [state.bots, bot?.id, onSelectBot])
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
   const messages = useAppStore(store => store.messages[session.sessionId] ?? EMPTY)
@@ -497,14 +499,14 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     }
     if (item.kind === 'tool' && item.state === 'finished') {
       const range = parseRelayRange(item.resultDetail?.text)
-      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} fallback={null} />
+      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} botOf={botById} mentions={mentions} adminId={text(room?.admin)} fallback={null} />
       const payload = parseBotReplyPayload(item.resultDetail?.text)
       if (payload !== undefined && payload.rows.length > 0) {
-        return <BotReplies rows={payload.rows} />
+        return <BotReplies rows={payload.rows} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />
       }
     }
     if (item.kind === 'tool') return null
-    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
+    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
   }
   return <BotMessageActionsContext.Provider value={true}><MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
     <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => (
@@ -552,7 +554,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         )}
       </View>}
       ListFooterComponent={<View style={styles.section}>
-        {room && progress.length > 0 && <BotReplies rows={progress} />}
+        {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />}
         {room && speaking.map(id => <View key={id} style={styles.row}><ActivityIndicator size="small" /><Text style={styles.muted}>{state.bots.find(bot => bot.id === id)?.name ?? id} · {s.bots.relayTyping}</Text></View>)}
         {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
         {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, id: card.id })} />)}
@@ -659,8 +661,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   </View></MarkdownLinkProvider></BotMessageActionsContext.Provider>
 }
 
-function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
-  client: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }; fallback: React.ReactNode
+function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, adminId, fallback }: {
+  client: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }
+  botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; adminId?: string; fallback: React.ReactNode
 }) {
   const scope = useAppStore(browseScope)
   const canCache = useAppStore(state => Boolean(state.config?.baseUrl && state.selectedDevice?.identityKey))
@@ -668,6 +671,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
   const liveRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[`call:${callId}`] : undefined)
   const [loadError, setLoadError] = useState<string>()
   const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? [] : [])
+  const shown = preferredRoomRows(liveRows, rows)
   useEffect(() => {
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -702,7 +706,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
     return () => { control.abort(); if (timer) clearTimeout(timer) }
   }, [client, sessionId, callId, scope, canCache, round])
   return <View>
-    {(liveRows ?? rows)?.length ? <BotReplies rows={liveRows ?? rows} /> : fallback}
+    {shown.length ? <BotReplies rows={shown} botOf={botOf} mentions={mentions} adminId={adminId} /> : fallback}
     {loadError && <Text accessibilityRole="alert">{loadError}</Text>}
   </View>
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pollRoomRows, type RoomRowsCall, type RoomRowsRequest } from '../src/services/bot-room-rows'
+import { pollRoomRows, preferredRoomRows, type RoomRowsCall, type RoomRowsRequest } from '../src/services/bot-room-rows'
 
 const request: RoomRowsRequest = { roomId: 'room-1', callId: 'call-1', range: { from: 4 } }
 const reply = { botId: 'session-1', name: 'Chief', text: '结论：通道常驻', time: 1 }
@@ -93,5 +93,18 @@ describe('group round rows transport', () => {
   it('treats a malformed group-rows payload as unsupported instead of rendering it', async () => {
     const { call } = transport({ 'group-rows': ['not an object'], 'room-progress': [[]] })
     await expect(pollRoomRows(call, request)).resolves.toEqual({ open: true, legacy: true, answered: true })
+  })
+})
+
+describe('which rows a ledger line draws', () => {
+  it('prefers a live snapshot that already holds replies', async () => {
+    expect(preferredRoomRows([{ text: 'live' }], [{ text: 'fetched' }])).toEqual([{ text: 'live' }])
+  })
+
+  it('falls back to the fetched rows when the live snapshot is empty', async () => {
+    // A poll that caught the round before anyone spoke stored []; it must not hide the
+    // rows the Host returns for the same round (the reply the web already shows).
+    expect(preferredRoomRows([], [{ text: '2+2 is 4.' }])).toEqual([{ text: '2+2 is 4.' }])
+    expect(preferredRoomRows(undefined, [{ text: '2+2 is 4.' }])).toEqual([{ text: '2+2 is 4.' }])
   })
 })

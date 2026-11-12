@@ -65,6 +65,15 @@ export const ROOM_ROWS_LEGACY_INTERVAL_MS = 2000
 /** Consecutive empty legacy polls before a settled round stops being polled. */
 export const ROOM_ROWS_LEGACY_MISSES = 2
 
+/**
+ * Which rows a ledger line draws. The live snapshot wins only while it holds replies:
+ * a list captured just as the round opened is empty and knows nothing the rows fetched
+ * for the settled round do not, so letting it win hid the members' replies.
+ */
+export function preferredRoomRows(live: BotObject[] | undefined, fetched: BotObject[]): BotObject[] {
+  return live !== undefined && live.length > 0 ? live : fetched
+}
+
 function isObject(value: unknown): value is BotObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
