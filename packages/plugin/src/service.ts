@@ -548,9 +548,19 @@ export class HostPluginRuntime {
   private async transportCapabilities(gateway?: LocalTypertGateway): Promise<string[]> {
     const capabilities = this.hostCapabilities()
     if (gateway?.supportsCarrier !== true) return capabilities
-    const result = await gateway.dispatch('session/list', { args: {} }, AbortSignal.timeout(5_000)).catch(() => undefined)
-    const code = result?.ok === false ? result.error.code : undefined
-    if (code !== 'gateway/invocation-unavailable' && code !== 'gateway/service-unavailable') return capabilities
+    let result: Awaited<ReturnType<LocalTypertGateway['dispatch']>>
+    try {
+      result = await gateway.dispatch('session/list', { args: { _request: {} } }, AbortSignal.timeout(5_000))
+    } catch {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
+    if (result.ok) return capabilities
+    if (result.error.code === 'gateway/service-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'The Host Session API is not ready.', undefined, true)
+    }
+    if (result.error.code !== 'gateway/invocation-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
     if (!this.warnedMissingHostApi) {
       this.warnedMissingHostApi = true
       this.logger.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')

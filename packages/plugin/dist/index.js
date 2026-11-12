@@ -101366,9 +101366,9 @@ var HarnessRemoteBridge = class {
   }
   async canUseIdleRemoteEvents(error62, signal) {
     if (signal.aborted || this.gateway.failure(error62).code !== "gateway/service-unavailable") return false;
-    const sessions = await this.gateway.dispatch("session/list", { args: {} }, signal).catch(() => void 0);
+    const sessions = await this.gateway.dispatch("session/list", { args: { _request: {} } }, signal).catch(() => void 0);
     if (sessions?.ok !== true) {
-      this.warnMissingRemoteEvents("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+      this.warnMissingRemoteEvents(sessions?.ok === false && sessions.error.code === "gateway/invocation-unavailable" ? "Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages." : "Cannot verify the Host Session API. Remote events cannot start.");
       return false;
     }
     this.warnMissingRemoteEvents("Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.");
@@ -102529,9 +102529,19 @@ var HostPluginRuntime = class {
   async transportCapabilities(gateway) {
     const capabilities = this.hostCapabilities();
     if (gateway?.supportsCarrier !== true) return capabilities;
-    const result = await gateway.dispatch("session/list", { args: {} }, AbortSignal.timeout(5e3)).catch(() => void 0);
-    const code = result?.ok === false ? result.error.code : void 0;
-    if (code !== "gateway/invocation-unavailable" && code !== "gateway/service-unavailable") return capabilities;
+    let result;
+    try {
+      result = await gateway.dispatch("session/list", { args: { _request: {} } }, AbortSignal.timeout(5e3));
+    } catch {
+      throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
+    }
+    if (result.ok) return capabilities;
+    if (result.error.code === "gateway/service-unavailable") {
+      throw new RpcError("CONNECTION_FAILED", "The Host Session API is not ready.", void 0, true);
+    }
+    if (result.error.code !== "gateway/invocation-unavailable") {
+      throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
+    }
     if (!this.warnedMissingHostApi) {
       this.warnedMissingHostApi = true;
       this.logger.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");

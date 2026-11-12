@@ -612,9 +612,11 @@ export class HarnessRemoteBridge {
   private async canUseIdleRemoteEvents(error: unknown, signal: AbortSignal): Promise<boolean> {
     if (signal.aborted || this.gateway.failure(error).code !== 'gateway/service-unavailable') return false
     // Do not report a connected generation when the Host Session API is absent.
-    const sessions = await this.gateway.dispatch('session/list', { args: {} }, signal).catch(() => undefined)
+    const sessions = await this.gateway.dispatch('session/list', { args: { _request: {} } }, signal).catch(() => undefined)
     if (sessions?.ok !== true) {
-      this.warnMissingRemoteEvents('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
+      this.warnMissingRemoteEvents(sessions?.ok === false && sessions.error.code === 'gateway/invocation-unavailable'
+        ? 'Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.'
+        : 'Cannot verify the Host Session API. Remote events cannot start.')
       return false
     }
     this.warnMissingRemoteEvents('Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.')
