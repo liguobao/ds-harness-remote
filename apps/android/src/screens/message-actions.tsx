@@ -144,7 +144,7 @@ export function TurnUsageModal({
 /** Mutating icons only change after the official Host write has been read back. */
 export const BotMessageActionsContext = createContext(false)
 
-export function MessageActions({ item }: { item: ChatMessage }) {
+export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime?: boolean }) {
   const { colors } = useTheme()
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const busy = useAppStore(state => state.busyAction !== undefined)
@@ -210,7 +210,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   if (user) {
     return (
       <View style={[styles.row, styles.userRow]}>
-        {time !== undefined && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
+        {time !== undefined && !hideTime && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
         <Animated.View style={{ opacity: copyOpacity }}>
           <Pressable
             accessibilityRole="button"

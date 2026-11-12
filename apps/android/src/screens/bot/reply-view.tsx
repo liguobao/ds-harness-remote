@@ -12,7 +12,7 @@ import { stackBotReplies } from './replies'
 import { botMentionSpans } from './mentions'
 import type { BotEntry } from '../../services/bot-catalog'
 import { BotAvatar } from './avatar'
-import { messageClock } from '../message-actions'
+import { botMessageClock } from './clock'
 import { createBotStyles } from './styles'
 
 function formatRelayEvent(reply: BotObject, speakerName: string): { isEvent: boolean; isError?: boolean; body: string } {
@@ -90,10 +90,10 @@ export function BotReplies({ rows, botOf, mentions, adminId }: {
                 <Text style={styles.heading}>{speakerName}</Text>
                 {role !== '' && <View style={localStyles.roleBadge}><Text style={localStyles.roleBadgeText}>{role}</Text></View>}
                 <View style={localStyles.headerSpacer} />
+                {typeof reply.time === 'number' && <Text style={styles.muted}>{botMessageClock(reply.time)}</Text>}
                 {typeof reply.duration === 'number' && reply.duration > 0 && (
                   <Text style={styles.muted}>{Math.max(1, Math.round(reply.duration / 1000))}s</Text>
                 )}
-                {typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
                 {via !== '' && <BotViaPill platform={via} />}
               </View>}
               <View style={reply.kind === 'user' ? undefined : localStyles.memberBubble}>
@@ -102,7 +102,6 @@ export function BotReplies({ rows, botOf, mentions, adminId }: {
               <View style={localStyles.footerRow}>
                 <ReplyCopy text={texts.join('\n\n')} />
                 {reply.kind === 'user' && via !== '' && <BotViaPill platform={via} />}
-                {reply.kind === 'user' && typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
               </View>
             </View>
           </View>

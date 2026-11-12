@@ -402,7 +402,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
         : undelivered
           ? <UserRowResend item={item} status={status} />
-          : <MessageActions item={item} />}
+          : <MessageActions item={item} hideTime={userBubble} />}
       {/* Failed rows keep their actions: losing copy would be a regression. */}
       {undelivered && item.sendState !== 'canceled' && <MessageActions item={item} />}
     </View>
