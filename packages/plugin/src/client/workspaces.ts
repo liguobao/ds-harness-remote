@@ -1,3 +1,4 @@
+import { mountAccountEntry } from './account-entry.js'
 import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import { renderBodyPortal } from './portal.js'
@@ -36,9 +37,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
 
   /**
    * Renders the Compact entry at the end of the host account row. The host
-   * exposes no slot there, so the button is portalled into the settings row; the
-   * Standard entry stays in place until that row exists, so nothing is lost when
-   * the sidebar is collapsed.
+   * exposes no slot there, so the button is portalled into the account row
+   * (the native `triggerRow`, or DS-Bot's `.bt-settings-row` when it owns the
+   * settings seat). The Standard entry stays in place until that row exists,
+   * and remains usable when no compatible row can be found.
    */
   function RemoteAccountEntry(props: {
     portal: PortalRenderer | undefined
@@ -47,40 +49,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
   }): unknown {
     const [container, setContainer] = React.useState<Element | null>(null)
     const { portal } = props
-    React.useEffect(() => {
-      if (portal === undefined) return undefined
-      let attempt = 0
-      let timer: number | undefined
-      let host: HTMLElement | undefined
-      let observer: MutationObserver | undefined
-      const attach = (): void => {
-        const row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]')
-        if (row === null) {
-          // The row mounts with the footer area; give the host a moment before
-          // settling for the Standard entry.
-          if (attempt < 40) {
-            attempt += 1
-            timer = window.setTimeout(attach, 50)
-          }
-          return
-        }
-        host = document.createElement('span')
-        // The host re-renders its row without React knowing about this node, so
-        // put it back whenever it is dropped.
-        observer = new MutationObserver(() => {
-          if (host !== undefined && !host.isConnected) row.append(host)
-        })
-        observer.observe(row, { childList: true })
-        row.append(host)
-        setContainer(host)
-      }
-      attach()
-      return () => {
-        if (timer !== undefined) window.clearTimeout(timer)
-        observer?.disconnect()
-        host?.remove()
-      }
-    }, [portal])
+    React.useEffect(
+      () => (portal === undefined ? undefined : mountAccountEntry(setContainer)),
+      [portal],
+    )
     if (typeof portal !== 'function' || container === null) return props.fallback
     // The Compact entry is portalled into a host-owned row, so a stale or
     // detached container must not blank the sidebar; fall back in place.
