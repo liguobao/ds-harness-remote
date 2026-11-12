@@ -776,7 +776,9 @@ export function createRemotePluginOptions(React: ClientReact) {
           },
             qrCompleted
               ? React.createElement('div', { className: 'dshRemoteInlineSignInQrState' },
-                React.createElement('p', null, t('loadingSettings')),
+                React.createElement('div', { className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite' },
+                  React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+                  t('loginLoadingSettings')),
                 React.createElement('button', {
                   type: 'button', className: 'dshRemoteReconnect', disabled: busy,
                   onClick: () => {
@@ -824,7 +826,11 @@ export function createRemotePluginOptions(React: ClientReact) {
                       React.createElement('span', null, t('openInBrowser'), ' ↗'))
                     : null,
             React.createElement('strong', null, scanLabel),
-            React.createElement('p', null, t('scanLoginHint')))
+            React.createElement('p', null, t('scanLoginHint')),
+            !qrCompleted && !qrFailed && !qrExpired && (qrBusy || qrSession !== undefined)
+              ? React.createElement('div', { className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite' },
+                React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+                t('loginWaitingAuthorization')) : null)
           : null,
       ),
               React.createElement('div', { className: 'dshRemoteServiceAddress' },

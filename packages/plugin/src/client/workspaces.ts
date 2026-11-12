@@ -1356,6 +1356,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         : null,
                     React.createElement('strong', null, scanLabel),
                     React.createElement('p', null, t('scanLoginHint')),
+                    !qrExpired && (busy || qrSession !== undefined) ? React.createElement('div', {
+                      className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite',
+                    }, React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+                    t(busy && qrSession !== undefined ? 'loginLoadingDevices' : 'loginWaitingAuthorization')) : null,
                     qrExpired ? React.createElement('button', {
                       type: 'button', disabled: busy, onClick: () => setQrExpired(false),
                     }, t('refreshQrCode')) : null)
