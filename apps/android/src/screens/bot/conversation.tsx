@@ -499,14 +499,14 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     }
     if (item.kind === 'tool' && item.state === 'finished') {
       const range = parseRelayRange(item.resultDetail?.text)
-      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} botOf={botById} mentions={mentions} fallback={null} />
+      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} botOf={botById} mentions={mentions} adminId={text(room?.admin)} fallback={null} />
       const payload = parseBotReplyPayload(item.resultDetail?.text)
       if (payload !== undefined && payload.rows.length > 0) {
-        return <BotReplies rows={payload.rows} botOf={botById} mentions={mentions} />
+        return <BotReplies rows={payload.rows} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />
       }
     }
     if (item.kind === 'tool') return null
-    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
+    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
   }
   return <BotMessageActionsContext.Provider value={true}><MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
     <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => (
@@ -554,7 +554,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         )}
       </View>}
       ListFooterComponent={<View style={styles.section}>
-        {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} />}
+        {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />}
         {room && speaking.map(id => <View key={id} style={styles.row}><ActivityIndicator size="small" /><Text style={styles.muted}>{state.bots.find(bot => bot.id === id)?.name ?? id} · {s.bots.relayTyping}</Text></View>)}
         {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
         {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, id: card.id })} />)}
@@ -661,9 +661,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   </View></MarkdownLinkProvider></BotMessageActionsContext.Provider>
 }
 
-function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, fallback }: {
+function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, adminId, fallback }: {
   client: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }
-  botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; fallback: React.ReactNode
+  botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; adminId?: string; fallback: React.ReactNode
 }) {
   const scope = useAppStore(browseScope)
   const canCache = useAppStore(state => Boolean(state.config?.baseUrl && state.selectedDevice?.identityKey))
@@ -706,7 +706,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, f
     return () => { control.abort(); if (timer) clearTimeout(timer) }
   }, [client, sessionId, callId, scope, canCache, round])
   return <View>
-    {shown.length ? <BotReplies rows={shown} botOf={botOf} mentions={mentions} /> : fallback}
+    {shown.length ? <BotReplies rows={shown} botOf={botOf} mentions={mentions} adminId={adminId} /> : fallback}
     {loadError && <Text accessibilityRole="alert">{loadError}</Text>}
   </View>
 }

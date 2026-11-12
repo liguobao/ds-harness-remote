@@ -43,13 +43,15 @@ export function BotViaPill({ platform }: { platform?: string }) {
   )
 }
 
-type AvatarBot = { id: string; avatar?: { shape?: string; image?: string }; color?: string; engine?: string; model?: string; appliedModel?: string }
+type AvatarBot = { id: string; avatar?: { shape?: string; image?: string }; color?: string; engine?: string; model?: string; appliedModel?: string; role?: string }
 
 /** What a mention needs: the roster to resolve names against and where a tap goes. */
 export interface BotMentionContext { bots: BotEntry[]; selfId?: string; onPress: (botId: string) => void }
 
-export function BotReplies({ rows, botOf, mentions }: {
+export function BotReplies({ rows, botOf, mentions, adminId }: {
   rows: BotObject[]; botOf?: (botId: string) => AvatarBot | undefined; mentions?: BotMentionContext
+  /** The room's admin, badged as on the Host's own chat. */
+  adminId?: string
 }) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createReplyStyles)
@@ -58,6 +60,9 @@ export function BotReplies({ rows, botOf, mentions }: {
       {stackBotReplies(rows).map(({ reply, texts }, i) => {
         const speakerName = text(reply.name) || (reply.kind === 'user' ? s.bots.yourAnswer : s.bots.title)
         const via = text(reply.via)
+        const speakerId = text(reply.botId)
+        const role = reply.kind === 'user' || speakerId === '' ? ''
+          : speakerId === adminId ? 'Admin' : (botOf?.(speakerId)?.role ?? '')
         const formatted = formatRelayEvent(reply, speakerName)
         if (formatted.isEvent) {
           if (!formatted.body) return null
@@ -83,6 +88,11 @@ export function BotReplies({ rows, botOf, mentions }: {
             <View style={reply.kind === 'user' ? localStyles.userBubble : localStyles.memberBody}>
               {reply.kind !== 'user' && <View style={localStyles.headerRow}>
                 <Text style={styles.heading}>{speakerName}</Text>
+                {role !== '' && <View style={localStyles.roleBadge}><Text style={localStyles.roleBadgeText}>{role}</Text></View>}
+                <View style={localStyles.headerSpacer} />
+                {typeof reply.duration === 'number' && reply.duration > 0 && (
+                  <Text style={styles.muted}>{Math.max(1, Math.round(reply.duration / 1000))}s</Text>
+                )}
                 {typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
                 {via !== '' && <BotViaPill platform={via} />}
               </View>}
@@ -155,9 +165,14 @@ const createReplyStyles = (colors: ThemeColors) =>
     headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       gap: spacing.xs,
     },
+    headerSpacer: { flexGrow: 1 },
+    roleBadge: {
+      paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm,
+      backgroundColor: colors.surfaceStrong,
+    },
+    roleBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
     viaPill: {
       paddingHorizontal: 7,
       paddingVertical: 2,

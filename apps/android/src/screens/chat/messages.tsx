@@ -239,10 +239,12 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt, userBubble }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
+  /** Paint the user's own message as a bubble on the inverse surface (group chats). */
+  userBubble?: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
   artifacts?: UiArtifact[]
@@ -256,7 +258,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
     && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} />
+  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -327,9 +329,10 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
-function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt }: {
+function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
+  userBubble?: boolean
   artifacts?: UiArtifact[]
   editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
   onFilePress?: (path: string) => void
@@ -373,8 +376,9 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
     const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
+    const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
     return <View style={styles.userBlock}>
-      <View style={styles.userContent}>
+      <View style={[styles.userContent, userBubble && styles.userBubble]}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
         {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
@@ -387,11 +391,11 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
               </View>
             ))}
             {hasVisibleMessageText(body) && (
-              <Text selectable style={styles.userMessageInlineText}>{body}</Text>
+              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }]}>{body}</Text>
             )}
           </View>
         ) : (
-          hasVisibleMessageText(body) && <NativeMarkdown text={body} />
+          hasVisibleMessageText(body) && <NativeMarkdown text={body} colors={userBubble ? bubblePalette : undefined} />
         )}
       </View>
       {item.sendState === 'canceled'

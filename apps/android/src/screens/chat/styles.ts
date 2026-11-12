@@ -75,6 +75,7 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     assistantText: { paddingHorizontal: 0 },
     userBlock: { alignSelf: 'flex-end', maxWidth: '88%', marginVertical: isCompact ? 4 : spacing.sm },
     userContent: { paddingHorizontal: isCompact ? 12 : spacing.md, paddingVertical: isCompact ? 6 : spacing.xs },
+    userBubble: { backgroundColor: colors.inverse, borderRadius: radius.lg, maxWidth: '100%' },
     userMessageInlineWrap: {
       flexDirection: 'row',
       alignItems: 'center',
