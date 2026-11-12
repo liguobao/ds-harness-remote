@@ -1,6 +1,6 @@
 import { ArrowUp, CircleStop } from 'lucide-react-native'
-import { useMemo } from 'react'
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import { useEffect, useMemo, useRef } from 'react'
+import { ActivityIndicator, Animated, Easing, Pressable, Text, TextInput, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { CollapseCornerIcon } from '../../ui/composer-expand-icons'
@@ -9,6 +9,8 @@ import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
+import { easingCurve, resolveMotion } from '../../ui/motion'
+import { useReduceMotion } from '../../ui/use-reduce-motion'
 import { createStyles } from './styles'
 import type { useChatMentions } from './use-chat-mentions'
 
@@ -62,6 +64,22 @@ export function ExpandedComposer({
   const { selection, onChangeText, onSelectionChange } = input
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
+  const reduceMotion = useReduceMotion()
+  // The composer expands in place; it is the same surface growing, not a new
+  // screen arriving from an edge.
+  const entrance = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (!visible) return
+    entrance.setValue(0)
+    const animation = Animated.timing(entrance, {
+      toValue: 1,
+      duration: resolveMotion('fullscreen', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [visible, entrance, reduceMotion])
 
   if (!visible) {
     return null
@@ -75,7 +93,12 @@ export function ExpandedComposer({
         onPress={onClose}
         style={styles.expandedComposerBackdrop}
       />
-      <View style={styles.expandedComposerCard}>
+      <Animated.View
+        style={[styles.expandedComposerCard, {
+          opacity: entrance,
+          transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+        }]}
+      >
         <View style={styles.expandedComposerHeader}>
           <Pressable
             accessibilityRole="button"
@@ -163,7 +186,7 @@ export function ExpandedComposer({
             </Pressable>
           )}
         </View>
-      </View>
+      </Animated.View>
     </View>
   )
 }

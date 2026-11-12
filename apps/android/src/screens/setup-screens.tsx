@@ -7,7 +7,7 @@ import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
 import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
@@ -29,6 +29,9 @@ import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, resolveMotion } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
+import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ActivityDockMode, ThemePreference, TypographyDensity } from '../ui/theme'
 
@@ -1011,10 +1014,11 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
           </View>
         </Screen>
       </BlurHeaderFrame>
-      <Modal visible={languagePickerOpen} transparent animationType="fade" onRequestClose={() => setLanguagePickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setLanguagePickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={languagePickerOpen}
+        onClose={() => setLanguagePickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.language}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setLanguagePickerOpen(false)} />
@@ -1040,14 +1044,13 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
       <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
-      <Modal visible={densityPickerOpen} transparent animationType="fade" onRequestClose={() => setDensityPickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setDensityPickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={densityPickerOpen}
+        onClose={() => setDensityPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.typographyDensity}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setDensityPickerOpen(false)} />
@@ -1076,13 +1079,12 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-      <Modal visible={activityDockPickerOpen} transparent animationType="fade" onRequestClose={() => setActivityDockPickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setActivityDockPickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      </SheetModal>
+      <SheetModal
+        visible={activityDockPickerOpen}
+        onClose={() => setActivityDockPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.activityDockMode}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setActivityDockPickerOpen(false)} />
@@ -1112,9 +1114,7 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
     </View>
   )
 }
@@ -1170,6 +1170,22 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
   const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
+  const reduceMotion = useReduceMotion()
+  // The menu is anchored under the toolbar chip; growing from that corner
+  // avoids a card that pops in from nowhere.
+  const entrance = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (!visible) return
+    entrance.setValue(0)
+    const animation = Animated.timing(entrance, {
+      toValue: 1,
+      duration: resolveMotion('micro', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [visible, entrance, reduceMotion])
 
   if (!visible) return null
 
@@ -1188,7 +1204,19 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: menuTop, maxHeight: menuMaxHeight }]} pointerEvents="box-none">
+      <Animated.View
+        accessibilityRole="menu"
+        pointerEvents="box-none"
+        style={[styles.homeMenuCard, {
+          top: menuTop,
+          maxHeight: menuMaxHeight,
+          opacity: entrance,
+          transform: [
+            { scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+            { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) },
+          ],
+        }]}
+      >
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
@@ -1212,7 +1240,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
             last
           />
         </ScrollView>
-      </View>
+      </Animated.View>
     </View>
   )
 }

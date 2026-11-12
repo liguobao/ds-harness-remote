@@ -153,7 +153,7 @@ Agent 后端统一列表展示 CodeX / Cursor / AGY，命令可发现不等于�
 
 状态变化显示文字和具体恢复动作；错误不以 undefined 或内部异常作为主要文案。
 图标按钮提供名称、selected/disabled/expanded 状态与必要的辅助提示；无障碍结果以实际检查为准。
-动画遵循现有 Modal/组件实现，不宣称全局已有固定 150–220ms 动效或完整 reduced-motion 验收。
+动效令牌集中在 `apps/android/src/ui/motion.ts`：手机端全屏 480ms、Sheet 380ms（退出 260ms）、指示器 420ms、同屏微位移 160ms，展开/收起统一 `cubic-bezier(.32,.72,0,1)`，交错 25ms；只补间 `transform` 与 `opacity`，不补间 `width/height/top/margin`。
 
 界面文案、布局和样式不单独增加自动化测试。类型检查、必要人工烟测和真实设备验证承担展示质量检查；
 终端输入权、事件顺序、权限与恢复等核心边界由契约测试保护。未完成验收见[TODO](../TODO.md)。
