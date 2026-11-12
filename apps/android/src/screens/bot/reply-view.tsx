@@ -9,6 +9,8 @@ import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { stackBotReplies } from './replies'
+import { botMentionSpans } from './mentions'
+import type { BotEntry } from '../../services/bot-catalog'
 import { BotAvatar } from './avatar'
 import { messageClock } from '../message-actions'
 import { createBotStyles } from './styles'
@@ -43,7 +45,12 @@ export function BotViaPill({ platform }: { platform?: string }) {
 
 type AvatarBot = { id: string; avatar?: { shape?: string; image?: string }; color?: string; engine?: string; model?: string; appliedModel?: string }
 
-export function BotReplies({ rows, botOf }: { rows: BotObject[]; botOf?: (botId: string) => AvatarBot | undefined }) {
+/** What a mention needs: the roster to resolve names against and where a tap goes. */
+export interface BotMentionContext { bots: BotEntry[]; selfId?: string; onPress: (botId: string) => void }
+
+export function BotReplies({ rows, botOf, mentions }: {
+  rows: BotObject[]; botOf?: (botId: string) => AvatarBot | undefined; mentions?: BotMentionContext
+}) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createReplyStyles)
   return (
@@ -80,7 +87,7 @@ export function BotReplies({ rows, botOf }: { rows: BotObject[]; botOf?: (botId:
                 {via !== '' && <BotViaPill platform={via} />}
               </View>}
               <View style={reply.kind === 'user' ? undefined : localStyles.memberBubble}>
-                {texts.map((body, index) => <NativeMarkdown key={index} text={body} />)}
+                {texts.map((body, index) => <MentionBody key={index} body={body} mentions={mentions} />)}
               </View>
               <View style={localStyles.footerRow}>
                 <ReplyCopy text={texts.join('\n\n')} />
@@ -95,6 +102,38 @@ export function BotReplies({ rows, botOf }: { rows: BotObject[]; botOf?: (botId:
   )
 }
 
+/**
+ * A member's line, with each `@Name` drawn like the web chat: the mentioned member's
+ * character followed by their name, inline with the sentence.
+ */
+function MentionBody({ body, mentions }: { body: string; mentions?: BotMentionContext }) {
+  const styles = useThemedStyles(createBotStyles)
+  const localStyles = useThemedStyles(createReplyStyles)
+  const spans = mentions ? botMentionSpans(body, mentions.bots, mentions.selfId) : []
+  if (mentions === undefined || spans.length === 0) return <NativeMarkdown text={body} />
+  const runs: React.ReactNode[] = []
+  let cursor = 0
+  spans.forEach((span, index) => {
+    if (span.start > cursor) runs.push(<Text key={`t${index}`} style={styles.body}>{body.slice(cursor, span.start)}</Text>)
+    runs.push(
+      <Pressable
+        key={`m${index}`}
+        onPress={() => mentions.onPress(span.bot.id)}
+        accessibilityRole="link"
+        accessibilityLabel={`@${span.bot.name}`}
+      >
+        <View style={localStyles.mention}>
+          <BotAvatar bot={span.bot} size={16} />
+          <Text style={[styles.body, localStyles.mentionName]}>{span.bot.name}</Text>
+        </View>
+      </Pressable>,
+    )
+    cursor = span.end
+  })
+  if (cursor < body.length) runs.push(<Text key="tail" style={styles.body}>{body.slice(cursor)}</Text>)
+  return <View style={localStyles.mentionFlow}>{runs}</View>
+}
+
 const createReplyStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     userBubble: {
@@ -103,6 +142,9 @@ const createReplyStyles = (colors: ThemeColors) =>
     },
     memberRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
     memberAvatar: { width: 26, height: 26, flexShrink: 0 },
+    mentionFlow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 2, rowGap: 2 },
+    mention: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 1 },
+    mentionName: { color: colors.warning, fontWeight: '600' },
     memberBody: { flexShrink: 1, flexGrow: 1, gap: spacing.xs },
     memberBubble: {
       paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
