@@ -829,11 +829,19 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
 按 `endpoint` 执行以下编译期固定操作白名单，新增上游操作默认拒绝：
 
-- 查询：`state`、`models`、`efforts`、`exchange`、`exchange-text`、`file-text`、`earlier`、`chat`、`run-stats`、`thinking`、`usage`、`room-progress`、`schedules`。
+- 查询：`state`、`models`、`efforts`、`exchange`、`exchange-text`、`file-text`、`earlier`、`chat`、`run-stats`、`thinking`、`usage`、`room-progress`、`group-rows`、`schedules`。
 - Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`、`resume`、`bot-new-part`、`bot-open-part`。
 - 群聊管理：`create-room`、`update-room`、`delete-room`、`stop-room-work`、`goal-draft`、`goal-control`、`room-continue`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
 - 会话交互：`send`、`btw`、`btw-cancel`、`btw-delete`、`side-new`、`side-ask`、`side-cancel`、`side-close`、`answer-question`、`dismiss-question`、`dismiss-view`、`view-reply`、`approval-answer`、`stop-member-work`。
+
+`group-rows { roomId, from, to?, anchor? }` 读取群聊账簿中某轮的行，`open` 表示该轮仍在增长；
+它也是轮次结束后仍能显示成员回复正文的唯一读取入口。该 operation 于 0.6.4 加入白名单：
+更早的 Remote Host 在进入本机 carrier 前即以 `INVALID_MESSAGE` 拒绝，`ds-bot` 0.3.1 及更早则
+返回 `{ ok: false, error: { code: "bot/not-found", message: "Unknown endpoint group-rows" } }`。
+Android 对两种拒绝都退回既有的 `room-progress`，不再匹配版本相关的错误文案；`room-progress`
+只返回仍在进行的轮次（Host 在轮次结束时删除该条目），因此降级路径只能在轮次进行中补齐行，
+已结束轮次继续依赖历史详情与本机缓存。
 
 `view-reply` 转发 DS Bot 0.2.0 / 0.2.1 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
 用于选择、确认、表单及 0.2.1 的 `submit` 提交；公式输入通过 `values.inputs` 传递。
