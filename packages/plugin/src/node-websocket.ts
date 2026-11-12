@@ -1,12 +1,17 @@
 import WebSocket from 'ws'
 
 /**
- * Node Host / Client sockets for the Server control and Relay data planes.
+ * Host control / Relay data sockets for the Plugin Host process (#353).
  *
- * Do not use the process-global `WebSocket` inside `dsh web`: that implementation
- * attaches an `Origin` header from the Harness page. Self-hosted Servers compare
- * Origin to `DSH_SERVER_PUBLIC_URL` and reject the mismatch (`origin_mismatch`).
- * The bundled `ws` client omits Origin unless `origin` is set explicitly (#353).
+ * Scope: `HostServerConnection` only. `dsh web` replaces the process-global
+ * `WebSocket` with an implementation that attaches `Origin` from the Harness
+ * page. Self-hosted Servers compare that header to `DSH_SERVER_PUBLIC_URL` and
+ * reject mismatches (`origin_mismatch` → Host stays offline).
+ *
+ * The bundled `ws` client omits `Origin` unless `origin` is set. Browser Remote
+ * clients and AdaptiveTransport / RelayTransport keep the global `WebSocket`
+ * (browsers must send Origin). Plugin Client mode in `dsh web` is out of scope
+ * for this fix and needs its own justification and coverage if required later.
  */
 export function createNodeWebSocket(url: string): WebSocket {
   return new WebSocket(url, { perMessageDeflate: false })

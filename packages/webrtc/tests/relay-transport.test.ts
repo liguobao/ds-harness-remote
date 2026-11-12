@@ -57,22 +57,6 @@ const cleanupScenario1 = () => {
 }
 afterEach(cleanupScenario1)
 
-describe('createWebSocket injection', () => {
-  it('uses the injected factory for AdaptiveTransport control sockets instead of the global WebSocket', async () => {
-    const createWebSocket = vi.fn((url: string) => new FakeWebSocket(url) as unknown as WebSocket)
-    const GlobalWebSocket = vi.fn(function GlobalWebSocket(this: FakeWebSocket, url: string) {
-      return new FakeWebSocket(url)
-    })
-    vi.stubGlobal('WebSocket', Object.assign(GlobalWebSocket, { OPEN: 1, CONNECTING: 0, CLOSING: 2, CLOSED: 3 }))
-    const transport = createAdaptiveTransport({ forceRelay: true, createWebSocket })
-    const connecting = transport.connect()
-    expect(createWebSocket).toHaveBeenCalledWith('wss://remote.example/ws/v1/connect')
-    expect(GlobalWebSocket).not.toHaveBeenCalled()
-    await transport.close()
-    await expect(connecting).rejects.toThrow()
-  })
-})
-
 describe('RelayTransport control handshake', () => {
   it('attaches an independent data socket when the Server assigns one', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)

@@ -55,12 +55,6 @@ export interface AdaptiveTransportOptions {
   iceServersTimeoutMs?: number
   signal?: AbortSignal
   rtcFactory?: RtcPeerConnectionFactory
-  /**
-   * Override socket construction. Node Host/Client processes that inherit a
-   * browser-like global WebSocket (for example `dsh web`) should pass a factory
-   * that omits `Origin`; browsers keep the default global WebSocket.
-   */
-  createWebSocket?: (url: string) => WebSocket
   fetchIceServers?: (connectionId: string, signal?: AbortSignal) => Promise<RtcIceServer[]>
   onWebRtcFallback?: (error: Error, diagnostics?: RtcConnectionDiagnostics) => void
   onWebRtcDiagnostic?: (event: RtcDiagnosticEvent) => void
@@ -158,7 +152,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.selected = undefined
     this.connectedAt = undefined
     this.relayCounter = 0
-    this.socket = this.openSocket(this.url)
+    this.socket = new WebSocket(this.url)
     this.controlFrameLimits = {}
     this.socket.binaryType = 'arraybuffer'
     await new Promise<void>((resolve, reject) => {
@@ -354,7 +348,7 @@ export class AdaptiveTransport extends BaseTransport {
         const code = errorCodeSchema.safeParse(payload.code)
         this.failConnection(failure, {
           reason: payload.retryable === true ? 'control-error' : 'invalid-control-frame',
-          ...(code.success ? { errorCode: code.data as ErrorCode } : {}),
+          ...(code.success ? { errorCode: code.data } : {}),
         })
         return
       }
@@ -396,7 +390,7 @@ export class AdaptiveTransport extends BaseTransport {
       const failure = error instanceof Error ? error : new Error('Invalid adaptive control frame')
       if (!('code' in failure)) Object.assign(failure, { code: 'INVALID_MESSAGE' })
       const code = errorCodeSchema.safeParse((failure as Error & { code?: unknown }).code)
-      this.failConnection(failure, { reason: 'invalid-control-frame', ...(code.success ? { errorCode: code.data as ErrorCode } : {}) })
+      this.failConnection(failure, { reason: 'invalid-control-frame', ...(code.success ? { errorCode: code.data } : {}) })
     }
   }
 
@@ -592,7 +586,7 @@ export class AdaptiveTransport extends BaseTransport {
     try {
       const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken
       if (this.lifetime !== lifetime || !this.lease?.canDetach()) return
-      const socket = this.openSocket(this.url)
+      const socket = new WebSocket(this.url)
       this.socket = socket
       socket.binaryType = 'arraybuffer'
       this.recoveryOpeningTimer = setTimeout(() => {
@@ -677,13 +671,9 @@ export class AdaptiveTransport extends BaseTransport {
     }
   }
 
-  private openSocket(url: string): WebSocket {
-    return (this.options.createWebSocket ?? ((endpoint: string) => new WebSocket(endpoint)))(url)
-  }
-
   private async openDataSocket(assignment: RelayAssignment): Promise<void> {
     if (this.connectionId === undefined || this.dataSocket !== undefined) return
-    const socket = this.openSocket(assignment.relayEndpoint!)
+    const socket = new WebSocket(assignment.relayEndpoint!)
     socket.binaryType = 'arraybuffer'
     this.dataSocket = socket
     await new Promise<void>((resolve, reject) => {

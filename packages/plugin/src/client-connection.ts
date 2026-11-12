@@ -24,7 +24,6 @@ import { ClientSecureTransport } from './client-secure-transport.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
 import type { SafeLogger } from './logging.js'
-import { createNodeWebSocket } from './node-websocket.js'
 import type { ServerHostDevice } from './server-api.js'
 import { ClientServerApi } from './server-api.js'
 import type { WeriftFactoryOptions } from './werift-rtc.js'
@@ -93,8 +92,6 @@ export class ClientConnection {
           forceRelay: this.context.config.forceRelay || attempt === 'relay',
           preferredTransports: preferredTransportsForAttempt(attempt),
           negotiateTimeoutMs: attempt === 'direct' ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : undefined,
-          // dsh web's global WebSocket injects Origin; self-hosted Servers reject it (#353).
-          createWebSocket: url => createNodeWebSocket(url) as unknown as WebSocket,
           ...(rtcFactory === undefined || attempt === 'relay' ? {} : { rtcFactory }),
           fetchIceServers: async connectionId => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
           onWebRtcFallback: (error, diagnostics) => {

@@ -24,12 +24,6 @@ import { IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import type { ClientServerApi } from '../src/server-api.js'
 
-// ClientModeRuntime injects createNodeWebSocket (#353). Honor the stubbed global
-// WebSocket used by connection scenarios instead of opening a real `ws` socket.
-vi.mock('../src/node-websocket.js', () => ({
-  createNodeWebSocket: (url: string) => new globalThis.WebSocket(url),
-}))
-
 const directories: string[] = []
 
 const cleanupScenario1 = async () => {
