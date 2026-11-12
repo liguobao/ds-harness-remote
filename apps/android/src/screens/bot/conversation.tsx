@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'r
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import { pollRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
@@ -670,53 +671,32 @@ function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
   useEffect(() => {
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
+    let misses = 0
     setLoadError(undefined)
     setRows(canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
-    const tickLegacy = async () => {
-      try {
-        const progress = objects(await client.call('room-progress', { roomId: sessionId }, control.signal))
-        if (control.signal.aborted) return
-        const entry = progress.find(entry => entry.callId === callId)
-        if (!entry) return
-        const next = objects(entry.replies)
-        setRows(next)
-        if (canCache) saveGroupRound(scope, sessionId, round, next)
-      } catch { if (control.signal.aborted) return }
-      timer = setTimeout(() => void tickLegacy(), 2000)
-    }
     const tick = async () => {
+      let poll: RoomRowsPoll
       try {
-        const value = object(await client.call('group-rows', { roomId: sessionId, ...range }, control.signal))
-        if (control.signal.aborted) return
-        setLoadError(undefined)
-        if (Array.isArray(value.rows)) {
-          const next = objects(value.rows)
-          setRows(next)
-          if (canCache) saveGroupRound(scope, sessionId, round, next)
-        }
-        if (value.open !== true) return
+        poll = await pollRoomRows((endpoint, payload, signal) => client.call(endpoint, payload, signal),
+          { roomId: sessionId, callId, range }, control.signal)
       } catch (error) {
         if (control.signal.aborted) return
-        const message = error instanceof Error ? error.message : s.bots.unavailable
-        if (message.includes('The plugin route call is invalid for the remote channel')) {
-          // Older Remote Hosts reject the new read route before reaching DS-Bot.
-          // Live rows use the existing route and remain available after settlement.
-          try {
-            const progress = objects(await client.call('room-progress', { roomId: sessionId }, control.signal))
-            if (control.signal.aborted) return
-            const entry = progress.find(entry => entry.callId === callId)
-            if (entry) {
-              const next = objects(entry.replies)
-              setRows(next)
-              if (canCache) saveGroupRound(scope, sessionId, round, next)
-              timer = setTimeout(() => void tickLegacy(), 2000)
-            }
-          } catch { /* Retain the encrypted snapshot while disconnected. */ }
-          return
-        }
-        setLoadError(message)
+        setLoadError(error instanceof Error ? error.message : s.bots.unavailable)
+        return
       }
-      timer = setTimeout(() => void tick(), 1000)
+      if (control.signal.aborted) return
+      if (poll.rows !== undefined) {
+        misses = 0
+        setRows(poll.rows)
+        if (canCache) saveGroupRound(scope, sessionId, round, poll.rows)
+      } else if (poll.legacy) {
+        // An older Host only knows the rounds still running; a settled one is gone.
+        // A Host that did not answer at all gets retried instead of counted.
+        if (poll.answered) misses += 1
+      }
+      if (!poll.open) return
+      if (poll.legacy && misses >= ROOM_ROWS_LEGACY_MISSES) return
+      timer = setTimeout(() => void tick(), poll.legacy ? ROOM_ROWS_LEGACY_INTERVAL_MS : ROOM_ROWS_INTERVAL_MS)
     }
     void tick()
     return () => { control.abort(); if (timer) clearTimeout(timer) }
