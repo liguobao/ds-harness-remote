@@ -46,6 +46,8 @@ type Props = {
   compactRunning: boolean
   hasComposerContent: boolean
   connected: boolean
+  /** Text editing is local, so a dropped carrier must not lock this field. */
+  editable: boolean
   composerDisabled: boolean
   sendDisabled: boolean
   compactComposer: boolean
@@ -61,7 +63,7 @@ type Props = {
 }
 
 export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning,
-  hasComposerContent, connected, composerDisabled, sendDisabled, compactComposer,
+  hasComposerContent, connected, editable, composerDisabled, sendDisabled, compactComposer,
   composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -144,7 +146,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             placeholder={strings.chat[backendTextKeys.placeholder]}
             placeholderTextColor={colors.muted}
             multiline
-            editable={!composerDisabled}
+            editable={editable}
             selectionColor={colors.accent}
             cursorColor={colors.accent}
           >
@@ -229,6 +231,11 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
     </View>
     {draft.length > LONG_DRAFT_HINT && (
       <Text style={styles.composerHint}>{strings.chat.draftLong(draft.length)}</Text>
+    )}
+    {/* The draft survives a carrier drop; say so instead of silently
+        swallowing an offline send tap (the primary action stays disabled). */}
+    {!connected && draft.length > 0 && (
+      <Text accessibilityLiveRegion="polite" style={styles.composerHint}>{strings.chat.offlineSendBlocked}</Text>
     )}
     {/* Landscape phones leave almost no space above the IME once the
         composer is visible; keep the privacy note for roomier windows. */}

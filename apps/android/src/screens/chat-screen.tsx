@@ -60,6 +60,7 @@ import {
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
 import { ChatComposer } from './chat/composer'
+import { composerEditable, submitIntent } from './chat/composer-gate'
 import { ExpandedComposer } from './chat/expanded-composer'
 import {
   ChatImages,
@@ -311,7 +312,10 @@ export function ChatScreen({
       .finally(() => { if (!controller.signal.aborted) setPermissionLoading(false) })
     return () => controller.abort()
   }, [session?.sessionId, session?.backend, inlinePermissionOptions, connection.phase, permissionPickerOpen, permissionRevision])
-  useEffect(() => { setToolsMode(undefined); setComposerExpanded(false) }, [session?.sessionId, connection.phase])
+  // A carrier drop must not close the full-screen editor: the draft stays
+  // editable offline, so only a conversation change collapses it.
+  useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
+  useEffect(() => { setComposerExpanded(false) }, [session?.sessionId])
   // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
   useEffect(() => {
     if (connection.phase !== 'connected' || session?.backend === 'codex') return
@@ -706,7 +710,7 @@ export function ChatScreen({
   }
 
   const submit = async () => {
-    if (!sendReady || permissionSelecting || session === undefined || uploadingRef.current) return
+    if (session === undefined) return
     // Read the live ref: the render-closure `draft` can lag the last keystrokes
     // typed right before the tap, silently dropping the tail of the message.
     const submittedDraft = draftRef.current
@@ -717,7 +721,14 @@ export function ChatScreen({
     const submittedQuotes = quotes
     const submittedImages = images
     const submittedFiles = stagedFiles
-    if (text.length === 0 && submittedQuotes.length === 0 && images.length === 0 && stagedFiles.length === 0) return
+    // Everything below this gate clears the composer, so an offline tap has to
+    // stop here: the draft stays, no optimistic row is created and the manual
+    // send after reconnection is the only submission path.
+    const intent = submitIntent({
+      connected, sendReady, permissionSelecting, uploading: uploadingRef.current,
+      hasContent: text.length > 0 || submittedQuotes.length > 0 || images.length > 0 || stagedFiles.length > 0,
+    })
+    if (intent !== 'submit') return
     let promptWithQuotes = text
     if (submittedQuotes.length > 0) {
       const formattedQuotes = submittedQuotes.map(formatQuoteText).join('\n\n')
@@ -875,6 +886,10 @@ export function ChatScreen({
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
   const compactRunning = replyActive && !hasComposerContent && !composingDuringRun
   const stopping = busy === 'stop-session'
+  // Action entries (attachments, tools, prompts) still need the channel, but the
+  // text field itself only blocks on composer-local states so an offline draft
+  // can be typed, edited and kept for the manual send after reconnection.
+  const inputEditable = composerEditable({ permissionSelecting, uploading: uploadingFiles })
   const composerDisabled = !connected || permissionSelecting || uploadingFiles
   const sendDisabled = !sendReady || permissionSelecting || !hasComposerContent || uploadingFiles
   const projectedPermissions = sessionPermissions(session)
@@ -1193,7 +1208,7 @@ export function ChatScreen({
           backend={session.backend} draft={draft} input={mentionInput}
           quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
           replyActive={replyActive} stopping={stopping} compactRunning={compactRunning}
-          hasComposerContent={hasComposerContent} connected={connected}
+          hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
           compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
           model={{ available: sessionModels !== undefined, label: currentModelLabel, selecting: modelSelecting, onOpen: () => setModelPickerOpen(true) }}

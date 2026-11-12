@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import { composerEditable, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
 import { formatQuoteDraftSnippet, formatQuoteText, formatTokens } from '../src/ui/quote-helpers'
 
 describe('Quote snippet formatting (Figure 3 alignment)', () => {
@@ -90,6 +92,39 @@ describe('Chat Action Menu cards boundary', () => {
   })
 })
 
+
+describe('Composer availability while the Host is unreachable', () => {
+  const ready: SubmitGateInput = {
+    connected: true, sendReady: true, permissionSelecting: false, uploading: false, hasContent: true,
+  }
+
+  it('only submits once the channel is authenticated and ready', () => {
+    for (const connected of [true, false]) for (const sendReady of [true, false]) for (const hasContent of [true, false]) {
+      const intent = submitIntent({ ...ready, connected, sendReady, hasContent })
+      expect(intent === 'submit', `connected=${connected} sendReady=${sendReady} hasContent=${hasContent}`)
+        .toBe(connected && sendReady && hasContent)
+    }
+  })
+
+  it('routes an offline tap away from the submit path that clears the draft', async () => {
+    await runScenarios([
+      { name: 'connected and ready', input: ready, expected: 'submit' },
+      { name: 'offline with a draft', input: { ...ready, connected: false, sendReady: false }, expected: 'offline' },
+      { name: 'offline with an empty composer', input: { ...ready, connected: false, sendReady: false, hasContent: false }, expected: 'ignore' },
+      { name: 'offline while a permission switch is in flight', input: { ...ready, connected: false, sendReady: false, permissionSelecting: true }, expected: 'offline' },
+      { name: 'upload already running', input: { ...ready, uploading: true }, expected: 'ignore' },
+      { name: 'history sync window after reconnection', input: { ...ready, sendReady: false }, expected: 'ignore' },
+      { name: 'permission switch while connected', input: { ...ready, permissionSelecting: true }, expected: 'ignore' },
+    ].map(({ name, input, expected }) => ({ name, run: () => { expect(submitIntent(input), name).toBe(expected) } })))
+  })
+
+  it('keeps the text field editable while the Host is unreachable', () => {
+    // Editable is composer-local only: a dropped carrier never locks the field.
+    expect(composerEditable({ permissionSelecting: false, uploading: false })).toBe(true)
+    expect(composerEditable({ permissionSelecting: true, uploading: false })).toBe(false)
+    expect(composerEditable({ permissionSelecting: false, uploading: true })).toBe(false)
+  })
+})
 
 describe('Composer expand state and back handler priority', () => {
   it('defines expandComposer and collapseComposer across all locales', async () => {

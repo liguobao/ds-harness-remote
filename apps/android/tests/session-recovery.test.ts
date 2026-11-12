@@ -340,6 +340,31 @@ describe('ordered history recovery', () => {
     } })), prepareScenario1)
   })
 
+  it('rejects an offline prompt before creating an optimistic row for every backend', async () => {
+    // A tap that cannot reach the Host must not leave a `local:` row or a queued
+    // acknowledgement: the composer keeps the draft and the user sends manually
+    // after reconnection. Both send paths fail closed before the optimistic row.
+    await runScenarios((['harness', 'codex', 'claude'] as const).map(backend => ({ name: backend, run: async () => {
+      const target: RemoteSession = { ...session, sessionId: `offline-${backend}`, backend }
+      useAppStore.setState({
+        ...useAppStore.getInitialState(),
+        selectedSession: target,
+        selectedDevice: { deviceId: 'host' } as never,
+        sessions: [target],
+        connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false } },
+      })
+      proxy.sessionPrompt.mockClear()
+      acp.prompt.mockClear()
+      codex.request.mockClear()
+      expect(await useAppStore.getState().sendMessage('draft typed offline')).toBe('rejected')
+      expect(proxy.sessionPrompt).not.toHaveBeenCalled()
+      expect(acp.prompt).not.toHaveBeenCalled()
+      expect(codex.request).not.toHaveBeenCalled()
+      expect(useAppStore.getState().messages[target.sessionId] ?? []).toHaveLength(0)
+      expect(useAppStore.getState().busyAction).toBeUndefined()
+    } })), prepareScenario1)
+  })
+
   it('reconciles local delivery states by marking, never by deleting', async () => {
     const row = (id: string, requestRpcId: string, sendState: 'queued' | 'failed' | 'unconfirmed', createdAt = 1): ChatItem => ({
       kind: 'message', id, sessionId: 's1', role: 'user', text: 'hello', createdAt, requestRpcId, sendState,
