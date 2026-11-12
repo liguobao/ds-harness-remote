@@ -26,6 +26,18 @@ describe('group round rows transport', () => {
     expect(calls).toEqual(['group-rows'])
   })
 
+  it('stops polling a settled newest round even though no later anchor exists', async () => {
+    // DS-Bot keeps `open` true for the newest anchor until the next message; `active`
+    // ends the poll once the group stops working.
+    const { call } = transport({ 'group-rows': [{ rows: [reply], open: true, active: false, speaking: [] }] })
+    await expect(pollRoomRows(call, request)).resolves.toEqual({ rows: [reply], open: false, legacy: false, answered: true })
+  })
+
+  it('keeps polling while the group reports itself active', async () => {
+    const { call } = transport({ 'group-rows': [{ rows: [reply], open: true, active: true, speaking: ['session-1'] }] })
+    await expect(pollRoomRows(call, request)).resolves.toEqual({ rows: [reply], open: true, legacy: false, answered: true })
+  })
+
   it('stops polling once the round is settled', async () => {
     const { call } = transport({ 'group-rows': [{ rows: [], open: false }] })
     await expect(pollRoomRows(call, request)).resolves.toEqual({ rows: [], open: false, legacy: false, answered: true })
