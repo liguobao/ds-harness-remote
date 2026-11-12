@@ -8,6 +8,12 @@ import type { IdentityStore } from '../src/identity-store.js'
 import type { ClientServerApi } from '../src/server-api.js'
 import type { SafeLogger } from '../src/logging.js'
 
+// ClientModeRuntime injects createNodeWebSocket (#353). Honor the stubbed global
+// WebSocket used by these scenarios instead of opening a real `ws` socket.
+vi.mock('../src/node-websocket.js', () => ({
+  createNodeWebSocket: (url: string) => new globalThis.WebSocket(url),
+}))
+
 it('rechecks membership and pinned keys with a fresh Noise channel after relay loss, stopping on takeover or revocation', async () => {
   await runScenarios(['recover', 'sleep', 'long-outage', 'replaced', 'revoked', 'key-changed', 'replaced-during-discovery'].map(action => ({ name: action, run: async () => {
     const clientKeys = generateKeyPair(new Uint8Array(32).fill(41))
