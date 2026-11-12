@@ -1,5 +1,30 @@
 # Repository Guide for Agents
 
+## Android coherent transitions (Issue #8, 2026-11-12)
+
+Android 把“状态突变”改为同一界面的连续过渡，未改路由架构、协议、Host 或持久化。
+新增 `apps/android/src/ui/motion.ts`：动效令牌（全屏 480ms、Sheet 380/260ms、指示器 420ms、
+微位移 160ms、stagger 25ms、`cubic-bezier(.32,.72,0,1)`）、`resolveMotion` 的 reduced-motion
+降级（≤150ms、位移/缩放归零）、Sheet 相位机 `nextSheetPhase`、锚点/共享矩形/分段指示器几何。
+`ui/use-reduce-motion.ts` 抽出原先在 `connection-hero` 与聊天回复点中各自复制的系统设置订阅。
+
+新增 `ui/sheet.tsx` 的 `SheetModal`：`animationType="none"`、遮罩淡入、面板只做 `translateY`
+（保持不透明），关闭时先播完退出动画再卸载，退出期间沿用最后一次 children 快照。
+`chat/pickers.tsx`、`chat/session-info.tsx`、`chat/action-menu.tsx`、`workspace-modals.tsx`、
+`host-switcher-sheet.tsx`、设置页语言/字号/活动坞选择器改用该组件；“+”菜单按 composer 的
+`measureInWindow` 锚点决定升起方向。`chat/modal.tsx` 的 `ModalSurface` 保持原签名，改为挂载时
+播放同一入场曲线（Bot 等仍自带外层 Modal 的调用点沿用原生淡入）。
+
+抽屉新增单一分段指示器（`indicatorGeometry` + 平移/拉伸，无 elevation 以免盖住标签文字）、
+搜索行展开与排序浮窗入场；轨迹视图、全屏输入框、首页菜单与图片灯箱改为短位移+淡入。
+未改 `browse-memory`、手势阈值、`workspace-tree` 纯函数、`composer-gate`、i18n 文案与
+`packages/plugin`（dist 未重建）。
+
+验证：新增纯函数回归 `tests/motion.test.ts`、`tests/sheet-transition.test.ts`；Android 65 文件 /
+605 tests、`pnpm --filter @dsh-remote/android check`、`/opt/dsh-autopilot/run-gate.sh`（含全仓
+build/check/bundle/664 Plugin tests）退出码 0。未构建 APK，未做真机、TalkBack、大字体、
+横竖屏往返与真实跨设备人工验收。
+
 ## Android offline composer drafts (Issue #7 / upstream #409, 2026-11-12)
 
 Android 聊天输入框不再随连接状态禁用。新增 `apps/android/src/screens/chat/composer-gate.ts`

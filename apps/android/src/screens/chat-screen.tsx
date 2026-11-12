@@ -5,7 +5,9 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  Animated,
   DeviceEventEmitter,
+  Easing,
   FlatList,
   Image,
   Keyboard,
@@ -47,6 +49,8 @@ import { useResponsiveLayout } from '../ui/responsive'
 import { spacing } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, resolveMotion, type Rect } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
 import { AutomationTasksModal } from './automation-tasks-modal'
 import { ChatErrorBoundary } from './chat-error-boundary'
 import {
@@ -140,6 +144,7 @@ export function ChatScreen({
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (id?: string) => void
 }) {
+  const reduceMotion = useReduceMotion()
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
   const session = useAppStore(state => state.selectedSession)
@@ -179,12 +184,40 @@ export function ChatScreen({
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const previewImageUri = useAppStore(state => state.previewImageUri)
   const setPreviewImageUri = useAppStore(state => state.setPreviewImageUri)
+  // Lightbox grows from the tap instead of a whole-screen cross fade.
+  const lightboxMotion = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    if (previewImageUri === undefined) return
+    lightboxMotion.setValue(0)
+    const animation = Animated.timing(lightboxMotion, {
+      toValue: 1,
+      duration: resolveMotion('fullscreen', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [previewImageUri, lightboxMotion, reduceMotion])
   const memoryScope = browseScope(useAppStore.getState())
   const memoryKey = browseKey(memoryScope, session?.sessionId ?? '')
   const draft = useBrowseMemory(state => state.entries[memoryKey]?.draft ?? '')
   const memoryError = useBrowseMemory(state => state.error)
   const setDraft = (value: string) => updateBrowseEntry(memoryScope, session?.sessionId ?? '', {draft: value})
   const [trajectory, setTrajectory] = useState(false)
+  // Enter-only motion for the transcript <-> trajectory swap. Both views keep
+  // their own scroll state; only the incoming view moves.
+  const trajectoryMotion = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    trajectoryMotion.setValue(0)
+    const animation = Animated.timing(trajectoryMotion, {
+      toValue: 1,
+      duration: resolveMotion('fullscreen', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [trajectory, trajectoryMotion, reduceMotion])
   const [composingDuringRun, setComposingDuringRun] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(true)
@@ -283,6 +316,8 @@ export function ChatScreen({
     session, memoryKey, images, setImages, stagedFiles, setStagedFiles, sessionGenerationRef,
   })
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [sheetAnchor, setSheetAnchor] = useState<Rect>()
+  const composerAnchorRef = useRef<View>(null)
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
   const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
   const [modePickerOpen, setModePickerOpen] = useState(false)
@@ -827,7 +862,19 @@ export function ChatScreen({
     // keeps its sheet (including the close target) out of the keyboard's touch
     // region on Android.
     Keyboard.dismiss()
-    setPlusMenuOpen(true)
+    const node = composerAnchorRef.current
+    if (node === null) {
+      setSheetAnchor(undefined)
+      setPlusMenuOpen(true)
+      return
+    }
+    // One frame of measurement so the sheet can grow out of the composer
+    // instead of the screen edge; a missing measurement falls back to a
+    // bottom rise inside SheetModal.
+    node.measureInWindow((x, y, width, height) => {
+      setSheetAnchor(width > 0 && height > 0 ? { x, y, width, height } : undefined)
+      setPlusMenuOpen(true)
+    })
   }
 
   const closePlusMenu = () => {
@@ -1069,7 +1116,7 @@ export function ChatScreen({
         )}
         <View style={styles.splitMain} {...swipeRightTouchProps}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
           ref={listRef}
           key={session.sessionId}
@@ -1131,7 +1178,7 @@ export function ChatScreen({
             </View>
           </View>
         )}
-      </>}</ChatErrorBoundary>}</BlurHeaderFrame>
+      </>}</Animated.View></ChatErrorBoundary>}</BlurHeaderFrame>
 
 
       {mentionType !== null && (
@@ -1142,7 +1189,7 @@ export function ChatScreen({
           accessibilityLabel={strings.common.close}
         />
       )}
-      <View style={styles.composerWrap}>
+      <View ref={composerAnchorRef} collapsable={false} style={styles.composerWrap}>
         <View style={[styles.composerInner, readableColumn]}>
         {connected && (session.backend === undefined || session.backend === 'harness' || Boolean(session.projections?.values?.todos) || Boolean(session.projections?.values?.goal) || childSessions.length > 0 || (teamState !== undefined && teamState.members.length > 0)) && (
           <SessionActivityDock
@@ -1237,7 +1284,7 @@ export function ChatScreen({
       </View>
 
       <ChatActionMenu
-        visible={plusMenuOpen} onClose={closePlusMenu}
+        visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
         canAttachImages={canAttachImages} attachmentPicking={attachmentPicking}
         takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
         workspaceLabel={workspaceLabel} modeLabel={modeLabel}
@@ -1282,8 +1329,9 @@ export function ChatScreen({
       )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
-      {sessionInfoOpen && <SessionInfo
+      <SessionInfo
         key={`${hostId}:${session.sessionId}`}
+        visible={sessionInfoOpen}
         session={session}
         workspace={currentWorkspace}
         onClose={() => setSessionInfoOpen(false)}
@@ -1292,7 +1340,7 @@ export function ChatScreen({
           if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
           else openSessionsDrawer()
         }}
-      />}
+      />
       {sessionsOpen && !tabletSplit && drawerElement(false)}
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); openSessionsDrawer() }} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
@@ -1329,16 +1377,19 @@ export function ChatScreen({
       <Modal
         visible={previewImageUri !== undefined}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setPreviewImageUri(undefined)}
         statusBarTranslucent
       >
         <View style={styles.lightboxBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setPreviewImageUri(undefined)} />
           {previewImageUri !== undefined && (
-            <Image
+            <Animated.Image
               source={{ uri: previewImageUri }}
-              style={styles.lightboxImage}
+              style={[styles.lightboxImage, {
+                opacity: lightboxMotion,
+                transform: [{ scale: lightboxMotion.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+              }]}
               resizeMode="contain"
             />
           )}

@@ -1,5 +1,5 @@
 import { X } from 'lucide-react-native'
-import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
 import { useAppStore } from '../../state/store'
@@ -9,10 +9,12 @@ import { spacing, type } from '../../ui/theme'
 import type { ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DeviceConnectionInfo } from '../device-screens'
-import { ModalSurface, usePickerListMaxHeight } from './modal'
+import { usePickerListMaxHeight } from './modal'
+import { SheetModal } from '../../ui/sheet'
 import { sessionTitle } from './presentation'
 
-export function SessionInfo({ session, workspace, onClose, onOpenWorkspace }: {
+export function SessionInfo({ visible, session, workspace, onClose, onOpenWorkspace }: {
+  visible: boolean
   session: RemoteSession
   workspace?: WorkspaceView
   onClose: () => void
@@ -24,8 +26,7 @@ export function SessionInfo({ session, workspace, onClose, onOpenWorkspace }: {
   const maxHeight = usePickerListMaxHeight()
   const backend = workspace?.backend ?? session.backend ?? 'harness'
 
-  return <Modal transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-    <ModalSurface onClose={onClose}>
+  return <SheetModal visible={visible} onClose={onClose}>
       <View style={styles.header}>
         <Text accessibilityRole="header" style={styles.title}>{strings.sessionInfo.title}</Text>
         <IconButton label={strings.common.close} icon={X} onPress={onClose} />
@@ -41,8 +42,7 @@ export function SessionInfo({ session, workspace, onClose, onOpenWorkspace }: {
         {workspace !== undefined && <KeyValue label={strings.devices.conversations} value={workspace.sessionIds.length.toLocaleString()} />}
         <DeviceConnectionInfo deviceId={device?.deviceId} />
       </ScrollView>
-    </ModalSurface>
-  </Modal>
+  </SheetModal>
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({

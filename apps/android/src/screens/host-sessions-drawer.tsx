@@ -3,6 +3,7 @@ import {
   Alert,
   ActivityIndicator,
   Animated,
+  Easing,
   Keyboard,
   KeyboardAvoidingView,
   PanResponder,
@@ -57,6 +58,8 @@ import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../u
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { browseStatus } from '../lib/backend-groups'
@@ -79,6 +82,8 @@ import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } fro
 
 const SESSION_PAGE_SIZE = 3
 const DRAWER_WIDTH_RATIO = 1
+/** Padding inside the Agent / DS-Bot segmented track. */
+const MODE_SWITCHER_INSET = 3
 
 /** 浮窗相对工具栏底部的间距 */
 const POPOVER_OFFSET = 4
@@ -256,6 +261,23 @@ export function HostSessionsDrawer({
   const persistedBotMode = useBrowseMemory(state => state.hostModes[hostScope] === 'bot')
   const activeBotMode = botMode ?? persistedBotMode
   const [drawerMode, setDrawerMode] = useState<'agent' | 'bot'>(activeBotMode ? 'bot' : 'agent')
+  const reduceMotion = useReduceMotion()
+  // One indicator travels between the two equal-width segments; it starts
+  // hidden until the track has measured so it cannot flash at x=0.
+  const [modeTrackWidth, setModeTrackWidth] = useState(0)
+  const modeIndicator = useRef(new Animated.Value(activeBotMode ? 1 : 0)).current
+  const modeStart = indicatorGeometry(0, modeTrackWidth, MODE_SWITCHER_INSET)
+  const modeEnd = indicatorGeometry(1, modeTrackWidth, MODE_SWITCHER_INSET)
+  useEffect(() => {
+    const animation = Animated.timing(modeIndicator, {
+      toValue: drawerMode === 'bot' ? 1 : 0,
+      duration: resolveMotion('indicator', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [drawerMode, modeIndicator, reduceMotion])
 
   useEffect(() => {
     setDrawerMode(activeBotMode ? 'bot' : 'agent')
@@ -352,7 +374,10 @@ export function HostSessionsDrawer({
   const [refreshing, setRefreshing] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchMounted, setSearchMounted] = useState(false)
+  const searchMotion = useRef(new Animated.Value(0)).current
   const [showConfigModal, setShowConfigModal] = useState(false)
+  const configMotion = useRef(new Animated.Value(0)).current
   const [appMenuOpen, setAppMenuOpen] = useState(false)
   const [groupBy, setGroupBy] = useState<SessionGroupBy>(() => {
     const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
@@ -786,6 +811,33 @@ export function HostSessionsDrawer({
     dismissibleRef.current = dismissible
   }, [dismissible])
 
+  useEffect(() => {
+    if (showSearch) setSearchMounted(true)
+    const animation = Animated.timing(searchMotion, {
+      toValue: showSearch ? 1 : 0,
+      duration: reduceMotion ? motionTokens.duration.reduced : motionTokens.duration.sheetExit,
+      easing: Easing.bezier(...easingCurve(showSearch ? 'expand' : 'retreat')),
+      useNativeDriver: true,
+    })
+    animation.start(({ finished }) => {
+      if (finished && !showSearch) setSearchMounted(false)
+    })
+    return () => animation.stop()
+  }, [showSearch, searchMotion, reduceMotion])
+
+  useEffect(() => {
+    if (!showConfigModal) return
+    configMotion.setValue(0)
+    const animation = Animated.timing(configMotion, {
+      toValue: 1,
+      duration: resolveMotion('micro', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [showConfigModal, configMotion, reduceMotion])
+
   const smoothClose = (withHaptic = true) => {
     if (closingRef.current) return
     // A cold start parks the user in this drawer without a chosen page; only an
@@ -899,10 +951,14 @@ export function HostSessionsDrawer({
 
   /** 排序配置浮窗（在覆盖层内部渲染，供点击命中） */
   const configPopover = (
-    <View
+    <Animated.View
       style={[
         styles.configPopover,
         { top: popoverTop, right: POPOVER_RIGHT_INSET },
+        {
+          opacity: configMotion,
+          transform: [{ translateY: configMotion.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }],
+        },
       ]}
     >
       <Text style={styles.modalSectionLabel}>{strings.sessions.groupBy}</Text>
@@ -946,7 +1002,7 @@ export function HostSessionsDrawer({
         <Text style={styles.modalItemText}>{strings.sessions.filterArchivedOnly}</Text>
         {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 
   const hostStatusDotColor = connectionPhase === 'connected'
@@ -1049,7 +1105,29 @@ export function HostSessionsDrawer({
       )}
 
       {/* 顶部模式切换分段胶囊：智能体 / DS-Bot */}
-      <View style={styles.modeSwitcherWrap}>
+      <View
+        style={styles.modeSwitcherWrap}
+        onLayout={event => setModeTrackWidth(event.nativeEvent.layout.width)}
+      >
+        {modeStart.width > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.modeSwitcherIndicator,
+              {
+                width: modeStart.width,
+                transform: [
+                  { translateX: modeIndicator.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [modeStart.x - MODE_SWITCHER_INSET, modeEnd.x - MODE_SWITCHER_INSET],
+                  }) },
+                  { scaleX: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.04, 1] }) },
+                  { scaleY: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.92, 1] }) },
+                ],
+              },
+            ]}
+          />
+        )}
         <Pressable
           accessibilityRole="tab"
           accessibilityState={{ selected: drawerMode === 'agent' }}
@@ -1057,7 +1135,6 @@ export function HostSessionsDrawer({
           onPress={() => handleSwitchMode('agent')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
-            drawerMode === 'agent' && styles.modeSwitcherTabActive,
             pressed && styles.pressedFade,
           ]}
         >
@@ -1073,7 +1150,6 @@ export function HostSessionsDrawer({
           onPress={() => handleSwitchMode('bot')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
-            drawerMode === 'bot' && styles.modeSwitcherTabActive,
             pressed && styles.pressedFade,
           ]}
         >
@@ -1173,8 +1249,13 @@ export function HostSessionsDrawer({
           </View>
 
           {/* 搜索框 */}
-          {showSearch && (
-            <View style={styles.searchContainer}>
+          {searchMounted && (
+            <Animated.View
+              style={[styles.searchContainer, {
+                opacity: searchMotion,
+                transform: [{ translateY: searchMotion.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+              }]}
+            >
               <Search size={16} color={colors.muted} />
               <TextInput
                 value={searchQuery}
@@ -1184,7 +1265,7 @@ export function HostSessionsDrawer({
                 style={styles.searchInput}
                 autoFocus
               />
-            </View>
+            </Animated.View>
           )}
 
           {groupStorageError && <Text accessibilityRole="alert" style={{ color: colors.muted, paddingHorizontal: spacing.md }}>{groupStorageError}</Text>}
@@ -2041,6 +2122,18 @@ const createStyles = (colors: ThemeColors) =>
     modeSwitcherTabActive: {
       backgroundColor: colors.surface,
       ...floatingShadow(colors),
+    },
+    // Deliberately no elevation: the indicator is painted before the tab
+    // Pressables, and an elevated sibling would cover their labels on Android.
+    modeSwitcherIndicator: {
+      position: 'absolute',
+      top: MODE_SWITCHER_INSET,
+      bottom: MODE_SWITCHER_INSET,
+      left: MODE_SWITCHER_INSET,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
     },
     modeSwitcherText: {
       ...type.smallStrong,
