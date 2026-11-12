@@ -100682,6 +100682,7 @@ function closeCode(code) {
 
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
+import { homedir as homedir9 } from "node:os";
 import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
@@ -100946,6 +100947,7 @@ var HarnessRemoteBridge = class {
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
+  warnedMissingRemoteEvents = false;
   terminalCarrier;
   async call(input4) {
     const params = callSchema3.parse(input4);
@@ -101196,8 +101198,50 @@ var HarnessRemoteBridge = class {
       controller.abort();
       throw error62;
     }
+    if (params.endpoint === "$events") source = this.remoteEventsWithFallback(source, controller.signal);
     void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow", params.transferFrames);
     return { opened: true, streamId: params.streamId };
+  }
+  async *remoteEventsWithFallback(source, signal) {
+    const iterator = source[Symbol.asyncIterator]();
+    let fallback = false;
+    try {
+      let first2;
+      try {
+        first2 = await iterator.next();
+      } catch (error62) {
+        if (signal.aborted || this.gateway.failure(error62).code !== "gateway/service-unavailable") throw error62;
+        const sessions = await this.gateway.dispatch("session/list", { args: {} }, signal).catch(() => void 0);
+        if (sessions?.ok !== true) {
+          if (!this.warnedMissingRemoteEvents) {
+            this.warnedMissingRemoteEvents = true;
+            this.logger?.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+          }
+          throw error62;
+        }
+        fallback = true;
+        if (!this.warnedMissingRemoteEvents) {
+          this.warnedMissingRemoteEvents = true;
+          this.logger?.warn("Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.");
+        }
+        yield { type: "ready", clientId: randomUUID17(), host: { home: homedir9() } };
+        await new Promise((resolve10) => {
+          if (signal.aborted) {
+            resolve10();
+            return;
+          }
+          signal.addEventListener("abort", () => resolve10(), { once: true });
+        });
+        return;
+      }
+      if (!first2.done) yield first2.value;
+      while (!first2.done) {
+        first2 = await iterator.next();
+        if (!first2.done) yield first2.value;
+      }
+    } finally {
+      if (!fallback) await iterator.return?.();
+    }
   }
   closeStream(input4) {
     const params = streamCloseSchema3.parse(input4);

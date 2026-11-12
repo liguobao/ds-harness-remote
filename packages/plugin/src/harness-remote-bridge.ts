@@ -1,5 +1,6 @@
 import { compactHistory } from './compact-history.js'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
@@ -289,6 +290,7 @@ export class HarnessRemoteBridge {
   private readonly streams = new Map<string, ActiveRemoteStream>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
+  private warnedMissingRemoteEvents = false
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
 
@@ -578,8 +580,50 @@ export class HarnessRemoteBridge {
       controller.abort()
       throw error
     }
+    if (params.endpoint === '$events') source = this.remoteEventsWithFallback(source, controller.signal)
     void this.pump(params.streamId, source, controller.signal, params.endpoint === 'session/follow', params.transferFrames)
     return { opened: true, streamId: params.streamId }
+  }
+
+  private async *remoteEventsWithFallback(source: AsyncIterable<unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
+    const iterator = source[Symbol.asyncIterator]()
+    let fallback = false
+    try {
+      let first: IteratorResult<unknown>
+      try {
+        first = await iterator.next()
+      } catch (error) {
+        if (signal.aborted || this.gateway.failure(error).code !== 'gateway/service-unavailable') throw error
+        // The event source can be absent from an otherwise usable Host.
+        // Do not report a connected generation when its Session API is absent.
+        const sessions = await this.gateway.dispatch('session/list', { args: {} }, signal).catch(() => undefined)
+        if (sessions?.ok !== true) {
+          if (!this.warnedMissingRemoteEvents) {
+            this.warnedMissingRemoteEvents = true
+            this.logger?.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
+          }
+          throw error
+        }
+        fallback = true
+        if (!this.warnedMissingRemoteEvents) {
+          this.warnedMissingRemoteEvents = true
+          this.logger?.warn('Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.')
+        }
+        yield { type: 'ready', clientId: randomUUID(), host: { home: homedir() } }
+        await new Promise<void>(resolve => {
+          if (signal.aborted) { resolve(); return }
+          signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return
+      }
+      if (!first.done) yield first.value
+      while (!first.done) {
+        first = await iterator.next()
+        if (!first.done) yield first.value
+      }
+    } finally {
+      if (!fallback) await iterator.return?.()
+    }
   }
 
   closeStream(input: unknown): { closed: boolean; streamId: string } {
