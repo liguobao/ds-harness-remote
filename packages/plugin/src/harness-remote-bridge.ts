@@ -1215,7 +1215,7 @@ function requiresWorkspaceChangePath(version: string | undefined): boolean {
     && ((Number(match[2]) === 1 && Number(match[3]) >= 7) || Number(match[2]) === 2)
 }
 
-async function dispatchCommandForHost(
+export async function dispatchCommandForHost(
   gateway: LocalTypertGateway,
   payload: unknown,
   signal: AbortSignal,

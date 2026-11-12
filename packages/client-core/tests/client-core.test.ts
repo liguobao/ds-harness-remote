@@ -1,6 +1,6 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createEvent, createRpcError, createRpcResponse, encodeMessage } from '@dsh-remote/protocol'
+import { createEvent, createRpcError, createRpcResponse, encodeMessage, REMOTE_COMPACTION_CAPABILITY } from '@dsh-remote/protocol'
 import { BaseTransport } from '@dsh-remote/webrtc'
 import {
   CodexRemoteClient,
@@ -1310,5 +1310,74 @@ describe('HarnessAlphaClient.sessionAttachment', () => {
     const result = await client.sessionAttachment('s1', reference)
     expect(result.data).toBe(data)
     expect(requestOf(core)).toEqual({ sessionId: 's1', attachmentId: 'att-1', attachment: reference })
+  })
+})
+
+describe('HarnessAlphaClient async compaction', () => {
+  function recordingCore(handle: (method: string, params: any) => unknown) {
+    const methods: string[] = []
+    const core = {
+      rpc: vi.fn(async (method: string, params: any) => {
+        methods.push(method)
+        return handle(method, params)
+      }),
+    } as unknown as RemoteClientCore
+    return { core, methods }
+  }
+
+  it('runs /compact as a tracked Host operation instead of one long RPC', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-1', state: 'accepted' }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-1', sessionId: 's1', state: 'succeeded', message: 'Compacted.' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+
+    await expect(client.sessionExecuteCommand('s1', '/compact')).resolves.toEqual({ kind: 'success', text: 'Compacted.' })
+    expect(methods).toEqual([
+      'harness.remote.compaction.submit',
+      'harness.remote.compaction.status',
+    ])
+    expect(methods).not.toContain('harness.remote.call')
+  })
+
+  it('polls until a running operation settles', async () => {
+    let polls = 0
+    const { core, methods } = recordingCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-2', state: 'accepted' }
+      polls += 1
+      return {
+        operationId: 'op-2',
+        sessionId: 's1',
+        state: polls < 3 ? 'running' : 'succeeded',
+      }
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+    const status = await client.compactSession('s1', { pollIntervalMs: 1 })
+    expect(status.state).toBe('succeeded')
+    expect(methods.filter(method => method === 'harness.remote.compaction.status')).toHaveLength(3)
+  })
+
+  it('resumes observation without submitting a second compaction', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method !== 'harness.remote.compaction.status') throw new Error(`unexpected ${method}`)
+      return { operationId: 'op-3', sessionId: 's1', state: 'succeeded' }
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+    await expect(client.compactSession('s1', { operationId: 'op-3', pollIntervalMs: 1 }))
+      .resolves.toMatchObject({ state: 'succeeded' })
+    expect(methods).toEqual(['harness.remote.compaction.status'])
+  })
+
+  it('keeps the legacy command path for Hosts without the capability', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method !== 'harness.remote.call') throw new Error(`unexpected ${method}`)
+      return { ok: true, value: { result: { kind: 'success', text: 'legacy' } } }
+    })
+    const client = new HarnessAlphaClient(core, {})
+    await expect(client.sessionExecuteCommand('s1', '/compact')).resolves.toEqual({ kind: 'success', text: 'legacy' })
+    expect(methods).toEqual(['harness.remote.call'])
   })
 })

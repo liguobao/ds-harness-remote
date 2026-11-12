@@ -1,11 +1,32 @@
 import { HarnessQuestions } from './harness-questions.js'
 import { RemoteGatewayError, RemoteTypertGateway, createRemoteId, type RemoteGatewayResult, type RemoteGatewayStream } from './remote-gateway.js'
 import type { RemoteClientCore } from './index.js'
+import {
+  REMOTE_COMPACTION_CAPABILITY,
+  type RemoteCompactionState,
+  type RemoteCompactionStatusResult,
+  type RemoteCompactionSubmitResult,
+} from '@dsh-remote/protocol'
 
 export interface HarnessAlphaHostInfo {
   clientVersion?: string
   harnessVersion?: string
   sessionFormat?: 3
+  /** Capabilities negotiated by `probeRemoteHostFeatures`. */
+  capabilities?: readonly string[]
+}
+
+/** Options for {@link HarnessAlphaClient.compactSession}. */
+export interface RemoteCompactionRunOptions {
+  /** Resume polling an operation submitted earlier instead of submitting again. */
+  operationId?: string
+  /** Idempotency key for a fresh submission; retries with the same id dedupe. */
+  requestId?: string
+  /** Host-side budget for the compaction task itself. */
+  budgetMs?: number
+  pollIntervalMs?: number
+  signal?: AbortSignal
+  onStatus?: (status: RemoteCompactionStatusResult) => void
 }
 
 export interface HarnessClientFrame {
@@ -418,12 +439,100 @@ export class HarnessAlphaClient {
   }
 
   async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    // `/compact` inside the official UI is a blocking command by design, but the
+    // underlying summarization can outlive any single RPC deadline. When the
+    // Host advertises the async contract, run it as a tracked Host operation so
+    // only the short submit/status calls cross the wire.
+    if (this.supportsAsyncCompaction && line.trim() === '/compact') {
+      const status = await this.compactSession(sessionId)
+      if (status.state === 'succeeded') {
+        return { kind: 'success', ...(status.message === undefined ? {} : { text: status.message }) }
+      }
+      return { kind: 'error', text: status.message ?? `Compaction ${status.state}.` }
+    }
     const execution = await this.callValue<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands/execute', {
       agentId: sessionId, line, ...(this.host.sessionFormat === 3 ? { submittedAttachments: [] } : { images: [] }),
     })
     if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'Unknown or unavailable Host command.')
     if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid command result.')
     return execution.result
+  }
+
+  /** True when the Host advertises the Remote-owned asynchronous compaction contract. */
+  get supportsAsyncCompaction(): boolean {
+    return this.host.capabilities?.includes(REMOTE_COMPACTION_CAPABILITY) === true
+  }
+
+  /** Submit `/compact` without holding one RPC open for the whole run. */
+  async submitCompaction(
+    sessionId: string,
+    options: { requestId?: string; budgetMs?: number; signal?: AbortSignal } = {},
+  ): Promise<RemoteCompactionSubmitResult> {
+    return await this.gateway.submitCompaction({
+      sessionId,
+      requestId: options.requestId ?? createRemoteId(),
+      ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+    }, options.signal)
+  }
+
+  async compactionStatus(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+  }
+
+  async cancelCompaction(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.cancelCompaction({ sessionId, operationId }, signal)
+  }
+
+  /**
+   * Submit (or resume) one compaction and poll until it settles.
+   *
+   * Polling is observation only. Closing this client, a page or a connection
+   * does not abort the Host run: resume by passing the operation id again.
+   */
+  async compactSession(
+    sessionId: string,
+    options: RemoteCompactionRunOptions = {},
+  ): Promise<RemoteCompactionStatusResult> {
+    const signal = options.signal
+    let operationId = options.operationId
+    if (operationId === undefined) {
+      const submitted = await this.gateway.submitCompaction({
+        sessionId,
+        requestId: options.requestId ?? createRemoteId(),
+        ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+      }, signal)
+      operationId = submitted.operationId
+      options.onStatus?.({ operationId, sessionId, state: submitted.state })
+    }
+    const interval = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS
+    let consecutiveFailures = 0
+    for (;;) {
+      throwIfAborted(signal)
+      let status: RemoteCompactionStatusResult
+      try {
+        status = await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+        consecutiveFailures = 0
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted === true) throw error
+        consecutiveFailures += 1
+        // A lost poll is not a lost operation: back off and ask again, but do
+        // not retry a permanent rejection (wrong owner, unknown method, ...).
+        if (isTerminalCompactionError(error) || consecutiveFailures >= COMPACTION_POLL_RETRIES) throw error
+        await waitFor(interval * consecutiveFailures, signal)
+        continue
+      }
+      options.onStatus?.(status)
+      if (COMPACTION_TERMINAL_STATES.has(status.state)) return status
+      await waitFor(interval, signal)
+    }
   }
 
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
@@ -1088,6 +1197,57 @@ export class HarnessAlphaClient {
     }
     handle.controller.abort()
   }
+}
+
+const COMPACTION_TERMINAL_STATES = new Set<RemoteCompactionState>(['succeeded', 'failed', 'cancelled', 'interrupted'])
+const COMPACTION_POLL_INTERVAL_MS = 2_000
+const COMPACTION_POLL_RETRIES = 3
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.')
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as { code?: unknown }).code
+  return error.name === 'AbortError' || code === 'RPC_ABORTED' || code === 'CANCELLED'
+}
+
+function isTerminalCompactionError(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && [
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_FOUND',
+    'PERMISSION_DENIED',
+    'INVALID_MESSAGE',
+    'SESSION_NOT_FOUND',
+  ].includes(code)
+}
+
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(signal?.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function normalizeSession(value: unknown): HarnessRemoteSession | undefined {

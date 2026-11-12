@@ -909,6 +909,7 @@ Host handshake 的 capability 例子：
   "harness.remote.v1",
   "harness.remote.transfer.v1",
   "harness.remote.stream.transfer.v1",
+  "remote.compaction.async.v1",
   "fileviewer.read.v1",
   "workspace.upload.v1",
   "codex.appserver.v1",
@@ -1245,6 +1246,29 @@ Client 的 256 项/4 MiB 等待队列只存小描述，同一 stream 同时只�
 `$events` 是官方 alpha Gateway 的 Host-to-Client Cordis event stream。Client 对 waterfall
 事件的结果必须经 allowlisted `$events/result` unary endpoint 返回原 Host；Plugin 不创造
 permission id、decision enum 或额外响应状态机。
+
+#### `harness.remote.compaction.*`（异步压缩）
+
+`remote.compaction.async.v1` 是 Remote 自有契约，不改变 Harness `commands/execute` 的语义：
+官方 `/compact` handler 会等待 `compactNow()` 完成，本地慢后端（例如 prefill 约 1k tok/s、
+上下文 500K）单次压缩需要数分钟，任何单条 RPC deadline 都不应成为压缩的实际期限。
+
+- `harness.remote.compaction.submit`，Params `{ sessionId, requestId, budgetMs? }`，Result
+  `{ operationId, state }`。Host 登记后立即返回 `accepted`；相同 `requestId` 在
+  `(deviceId, sessionId)` 范围内幂等去重，响应丢失后重试不会重复执行。Host 后台继续调用
+  固定命令 `/compact`。
+- `harness.remote.compaction.status`，Params `{ sessionId, operationId }`，Result
+  `{ operationId, sessionId, state, acceptedAt?, startedAt?, finishedAt?, message? }`，
+  `state` 为 `accepted|running|cancelling|succeeded|failed|cancelled|interrupted`。
+- `harness.remote.compaction.cancel`，Params 与 status 相同；Host 在底层调用实际收尾后才
+  返回终态，未收尾时返回 `cancelling`，Client 继续轮询。
+- 执行归属 Host runtime，不随提交连接关闭而中止；断线只停止观察，重连后可用同一
+  `operationId` 继续查询。Host 重启后未知 id 返回 `interrupted`，不自动重放，也不伪造成功。
+- `budgetMs` 是压缩任务自身预算（默认 30 分钟，钳制到 1–120 分钟），与提交/查询 RPC 的
+  超时分离。终态以 Host 后台 `commands/execute` 的结算为准；仅看到 `compaction/end`
+  不能判定成功，后续保存失败必须报告为 `failed`。
+- 本契约只覆盖 `/compact`。其他命令、插件清单校验、提醒创建等继续使用现有 RPC 超时策略；
+  Host 不开放任意后台命令。未声明该能力的旧 Host 保持原 `commands/execute` 行为。
 
 #### `harness.remote.transfer.*`
 

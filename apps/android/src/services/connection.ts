@@ -183,6 +183,7 @@ export class AndroidRemoteConnection {
           {
             clientVersion: host.clientVersion,
             harnessVersion: host.harnessVersion,
+            capabilities: features.capabilities,
             ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
           },
           frame => emitFrame(frame as unknown as MuxStreamFrame),

@@ -1,5 +1,26 @@
 # Repository Guide for Agents
 
+## Remote async compaction (Issue #416 / PR #420, 2026-11-12)
+
+Remote 转发 `commands/execute` 的 60s deadline 会中止合法的长压缩（本地 prefill 约 1k tok/s，
+500K 上下文单次压缩需数分钟）。本改动不统一拉长 RPC 超时，而是新增 Remote 自有异步契约：
+capability `remote.compaction.async.v1` 与
+`harness.remote.compaction.submit|status|cancel`（见 `docs/protocol.md` §17 与
+`harness.remote.compaction.*`）。
+
+Host：`packages/plugin/src/remote-compaction-operations.ts` 的 `RemoteCompactionOperations` 挂在
+`HostPluginRuntime`（不是连接）。后台用独立 owner Peer 执行固定 `/compact`，`requestId` 在
+`(deviceId, sessionId)` 内幂等去重；预算默认 30 分钟且与 RPC 超时分离；显式取消要等底层调用
+收尾；断线只停止观察；Host 重启或丢失的 operationId 返回 `interrupted`，不重放、不伪造成功。
+Client：`client-core` 的 `HarnessAlphaClient.compactSession()` 负责提交+轮询，
+`sessionExecuteCommand('/compact')` 在能力可用时改走该路径；Android 把协商到的 capabilities
+传入 alpha client。未声明能力的旧 Host 完全保持原 `commands/execute` 行为，普通查询、插件
+清单校验、提醒创建等仍用 60s RPC 超时。
+
+验证：`remote-compaction-operations.test.ts`（提交/结算、非成功不伪造成功、requestId 去重、
+跨设备拒绝、取消收尾、预算超时、重启 interrupted、shutdown）；client-core 新增 4 个
+async compaction 测试；protocol capability 全集测试同步。未做真实跨设备长压缩验收。
+
 ## Android coherent transitions (Issue #8, 2026-11-12)
 
 Android 把“状态突变”改为同一界面的连续过渡，未改路由架构、协议、Host 或持久化。

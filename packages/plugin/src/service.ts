@@ -26,7 +26,8 @@ import {
 } from './server-api.js'
 import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
-import { HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
+import { dispatchCommandForHost, HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
+import { RemoteCompactionOperations } from './remote-compaction-operations.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
@@ -79,6 +80,11 @@ export class HostPluginRuntime {
   private readonly codex: CodexRemoteDomain
   private readonly acp: AcpRemoteGateway
   private readonly codexWorkspaceState = new CodexWorkspaceState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
+  /**
+   * Host-wide async compaction registry. It deliberately lives on the runtime,
+   * not on a connection: disconnecting a client must not abort a compaction.
+   */
+  private readonly compactionOperations: RemoteCompactionOperations
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
   private localAcpPeer?: AcpPeerBridge
@@ -101,6 +107,22 @@ export class HostPluginRuntime {
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
+    // Each operation runs on its own owner Peer minted from the Host gateway,
+    // so its lifetime is independent of the client connection that submitted it.
+    this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
+      const gateway = this.localGateway?.createPeer?.() ?? this.localGateway
+      if (gateway === undefined) throw new RpcError('HARNESS_UNAVAILABLE', 'The Host Harness gateway is unavailable.')
+      try {
+        return await dispatchCommandForHost(
+          gateway,
+          { args: { agentId: sessionId, line: '/compact' } },
+          signal,
+          this.harnessVersion,
+        )
+      } finally {
+        await gateway.dispose?.()
+      }
+    }, logger)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
       const harnessRemote = peerGateway?.supportsCarrier === true
@@ -160,6 +182,10 @@ export class HostPluginRuntime {
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         ), undefined, context.transportMode),
+        {
+          operations: this.compactionOperations,
+          owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId },
+        },
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -466,6 +492,7 @@ export class HostPluginRuntime {
     this.pairing?.close()
     this.serverApi?.close()
     await this.serverConnection?.stop()
+    this.compactionOperations.closeAll()
     await this.connections.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined

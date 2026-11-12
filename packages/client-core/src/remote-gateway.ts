@@ -10,6 +10,10 @@ import {
   type HarnessApiTransferCommitResult,
   type HarnessApiTransferReadResult,
   type RemoteWorkspaceTypeDescription,
+  type RemoteCompactionStatusParams,
+  type RemoteCompactionStatusResult,
+  type RemoteCompactionSubmitParams,
+  type RemoteCompactionSubmitResult,
 } from '@dsh-remote/protocol'
 import type { RemoteClientCore, RemoteRpcOptions } from './index.js'
 
@@ -157,6 +161,34 @@ export class RemoteTypertGateway {
     )
     if (result.ok) return result.value
     throw remoteFailure(result.error)
+  }
+
+  /**
+   * Register an asynchronous Host compaction. Resolves as soon as the Host
+   * accepts the operation; the compaction itself keeps running on the Host even
+   * if this client disconnects.
+   */
+  async submitCompaction(
+    params: RemoteCompactionSubmitParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionSubmitResult> {
+    return await this.client.rpc<RemoteCompactionSubmitResult>('harness.remote.compaction.submit', params, signal)
+  }
+
+  /** Read the settled or in-flight state of one compaction operation. */
+  async compactionStatus(
+    params: RemoteCompactionStatusParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.client.rpc<RemoteCompactionStatusResult>('harness.remote.compaction.status', params, signal)
+  }
+
+  /** Ask the Host to cancel; the Host answers only after the command settles. */
+  async cancelCompaction(
+    params: RemoteCompactionStatusParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.client.rpc<RemoteCompactionStatusResult>('harness.remote.compaction.cancel', params, signal)
   }
 
   async call<T = unknown>(
