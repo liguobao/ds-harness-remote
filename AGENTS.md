@@ -1,5 +1,30 @@
 # Repository Guide for Agents
 
+## Compact history keeps DS-Bot group rounds (Issue #4, 2026-11-11)
+
+`remote.history.compact.v1` 之前把工具正文统一截成 512 字符，导致 DS-Bot 群聊轮次
+`{"replies":[...]}` 在首条回复跨过截断点时整段消失，客户端 `parseBotReplies` 的整段解析
+与完整条目摘取都返回空，会话只剩「已完成 · N 次工具调用」。
+
+Host 新增 `packages/plugin/src/compact-bot-round.ts`：识别该形状后只保留 `replies` 条目的
+原语字段、原始顺序，限制每条正文 2048、标识字段 256、条目 32、单条投影 8 KiB，发生裁剪时
+追加顶层 `truncated: true`；无法解析、空数组、非该形状或超出扫描上限继续走 512 字符摘要。
+`compact-history.ts` 另加 128 Ki 字符的文档级预算，并让被两个预览块上限挡住的群聊载荷仍可保留，
+保证 `session/follow` snapshot（Android 不发 `transferFrames`，4 MiB 帧上限无兜底）不被推高。
+输出仍是合法 `{"replies":[...]}`，旧客户端无需改动；日志、原始记录、错误状态与 RPC 边界不变。
+
+Android 侧把回复提取扩展为 `parseBotReplyPayload`（`complete`/`truncated`），`parseBotReplies`
+保留为薄封装；仅当整段解析且未被 Host 裁剪时才把 `group_relay` 工具行从活动组移除，
+否则同时显示已恢复正文与可展开的工具诊断（普通 Harness 会话与 Bot 模式一致）。未新增文案，
+未改 locales。
+
+验证：Plugin 新增 `compact-bot-round.test.ts` 与 `compact-history.test.ts` 群聊场景（页/snapshot、
+失败结果、预览块越界、预算上限、空回复、幂等、`__proto__`），Android `bot-replies.test.ts`
+覆盖 whole/Host 裁剪/摘取前缀/空回复与跨包一致 fixture；`pnpm --filter './packages/**' -r build`、
+Plugin check/test、Android check、`/opt/dsh-autopilot/run-gate.sh` 通过，Plugin bundle 已重建。
+未新增 iOS/DSH-Go 验证（该客户端不在本仓库），未做真机跨设备回归；运行时原始
+`group_relay` 结果是否为空仍需日志确认，若为空则应转查 DS-Bot 生产端。
+
 ## Credential refresh lock and migration scope (PR #384, 2026-11-10)
 
 Plugin 使用 V2 Marker 和独立 Holder 文件串行刷新。默认目录迁移与刷新共用目录外闸门。

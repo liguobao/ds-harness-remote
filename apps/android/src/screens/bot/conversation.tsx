@@ -20,7 +20,7 @@ import type { UiArtifact } from '../../state/ui-artifacts'
 import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
 import { BotAvatar } from './avatar'
 import { BotQuestion, BotSettledCard, BotViewCard } from './cards'
-import { parseBotReplies } from './replies'
+import { parseBotReplyPayload } from './replies'
 import { BotReplies, BotViaPill } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
@@ -373,7 +373,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (item.toolKey === 'show_view') return true
     if (item.toolKey === 'ask_user' && text(closedCards[item.id]) !== '') return true
     // A single Bot can relay a group round too; the payload determines presentation.
-    if (item.state === 'finished') return (parseBotReplies(item.resultDetail?.text)?.length ?? 0) > 0
+    // A partial or Host-truncated round still shows its recovered replies next to
+    // the expandable tool diagnostics instead of hiding either one.
+    if (item.state === 'finished') return (parseBotReplyPayload(item.resultDetail?.text)?.rows.length ?? 0) > 0
     return false
   }
   const rows: BotChatRow[] = visibleSections.flatMap((section): BotChatRow[] => {
@@ -495,8 +497,16 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       } catch { /* Retain the native tool row if its args are unavailable. */ }
     }
     if (item.kind === 'tool' && item.state === 'finished') {
-      const rows = parseBotReplies(item.resultDetail?.text)
-      if (rows !== undefined && rows.length > 0) return <BotReplies rows={rows} />
+      const payload = parseBotReplyPayload(item.resultDetail?.text)
+      if (payload !== undefined && payload.rows.length > 0) {
+        // A whole round is conversation content; a partially recovered or
+        // Host-truncated one keeps its expandable tool diagnostics beside it.
+        if (payload.complete && !payload.truncated) return <BotReplies rows={payload.rows} />
+        return <View style={styles.section}>
+          <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
+          <BotReplies rows={payload.rows} />
+        </View>
+      }
     }
     return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
   }
