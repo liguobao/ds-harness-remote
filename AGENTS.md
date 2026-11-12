@@ -1,5 +1,20 @@
 # Repository Guide for Agents
 
+## Android offline composer drafts (Issue #7 / upstream #409, 2026-11-12)
+
+Android 聊天输入框不再随连接状态禁用。新增 `apps/android/src/screens/chat/composer-gate.ts`
+（`composerEditable` / `submitIntent`）把「可编辑」与 `connected` 解耦：只有权限切换与
+上传中才锁定输入。离线时 `submit()` 在 `applyDraft('')` 之前返回，草稿留在既有按会话
+加密保存的 `browse-memory` 条目中；发送按钮保持禁用，并在输入框下方显示新增的
+`chat.offlineSendBlocked`（七种语言）。`sendMessage` 在插入 `local:` 乐观行之前对非
+`connected` 状态失败关闭并返回 `'rejected'`，避免离线调用留下幽灵行，或让调用方把结果
+当成禁止回填草稿的 `'kept'`。全屏输入框只在会话切换时收起，不再因 carrier 掉线重置。
+未改 Host、协议、allowlist、Bot 模式（其草稿仍是组件本地状态、不落盘），未重打 Plugin
+bundle dist。
+
+验证：Android check（renderer 生成 + 工作区数据面校验 + `tsc --noEmit`）、62 文件 /
+581 tests 与 `git diff --check` 通过。未构建 APK，未做真机、后台/Doze、TalkBack 或跨设备验收。
+
 ## Compact history keeps DS-Bot group rounds (Issue #4, 2026-11-11)
 
 `remote.history.compact.v1` 之前把工具正文统一截成 512 字符，导致 DS-Bot 群聊轮次

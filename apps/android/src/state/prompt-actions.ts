@@ -26,8 +26,12 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       const session = get().selectedSession
       const text = input.trim()
       if (session === undefined || (text.length === 0 && images.length === 0)) return 'rejected'
-      if (session.backend === 'codex' && (get().connection.phase !== 'connected'
-        || get().codexReadySessionId !== session.sessionId || runtime.activeCodexStream === undefined
+      // Fail closed before the optimistic row is inserted. Without this guard an
+      // offline prompt becomes a `local:` row marked failed/unconfirmed and the
+      // call returns 'kept', which forbids the caller from restoring the draft.
+      if (get().connection.phase !== 'connected') return 'rejected'
+      if (session.backend === 'codex' && (get().codexReadySessionId !== session.sessionId
+        || runtime.activeCodexStream === undefined
         || runtime.activeCodexTimeline?.session.nativeId !== codexThreadId(session))) return 'rejected'
       if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
         set({ busyAction: 'command', error: undefined })

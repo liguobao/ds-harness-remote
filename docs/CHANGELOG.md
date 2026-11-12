@@ -1201,6 +1201,7 @@ Android build 71.
 ### English
 
 - Add DS Bot 0.3.0 conversations, groups, agent badges, settings subpages, schedules and desktop installation guidance.
+- Android: keep the chat input editable and preserve each conversation's local draft while the Host is unreachable; sending still requires a reconnected, user-triggered send.
 - Add offline session instant-open, cached reading while hosts are offline, direct workspace creation, host switching and connection diagnostics.
 - Improve pairing and sign-in with DSH-Go pairing, compact QR, editable server address, clearer account labels and responsive login layouts.
 - Fix session catalogue handling for oversized shared lists, corrupt identity recovery, reconnect behavior and delayed packets on destroyed links.
@@ -1210,6 +1211,7 @@ Android build 71.
 ### 中文
 
 - 新增 DS Bot 0.3.0 多会话、群聊、本地 Agent 标识、设置二级页、日程联动和电脑端安装指引。
+- Android：主机断线期间聊天输入框仍可编辑，并按会话保留本地草稿；恢复连接后仍需用户手动发送。
 - 新增离线会话秒开、主机离线缓存阅读、侧栏直接创建工作区、主机切换和连接诊断。
 - 改进 DSH-Go 配对、紧凑二维码、可编辑服务地址、设备账号标签和响应式登录布局。
 - 修复超大共享会话目录、损坏身份恢复、重连行为和已销毁链路延迟包处理问题。
