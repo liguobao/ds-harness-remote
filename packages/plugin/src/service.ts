@@ -83,6 +83,7 @@ export class HostPluginRuntime {
   private localCodexPublish: PublishCodexFrame = async () => undefined
   private localAcpPeer?: AcpPeerBridge
   private localAcpPublish: PublishAcpFrame = async () => undefined
+  private warnedMissingHostApi = false
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -146,7 +147,7 @@ export class HostPluginRuntime {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.hostCapabilities(),
+        () => this.transportCapabilities(peerGateway),
         codex,
         cursor,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -542,6 +543,29 @@ export class HostPluginRuntime {
       }
     }
     return capabilities
+  }
+
+  private async transportCapabilities(gateway?: LocalTypertGateway): Promise<string[]> {
+    const capabilities = this.hostCapabilities()
+    if (gateway?.supportsCarrier !== true) return capabilities
+    let result: Awaited<ReturnType<LocalTypertGateway['dispatch']>>
+    try {
+      result = await gateway.dispatch('session/list', { args: { _request: {} } }, AbortSignal.timeout(5_000))
+    } catch {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
+    if (result.ok) return capabilities
+    if (result.error.code === 'gateway/service-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'The Host Session API is not ready.', undefined, true)
+    }
+    if (result.error.code !== 'gateway/invocation-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
+    if (!this.warnedMissingHostApi) {
+      this.warnedMissingHostApi = true
+      this.logger.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
+    }
+    return capabilities.filter(value => !value.startsWith('harness.remote.') && value !== 'harness.terminal.v1')
   }
 
   private hostWorkspaceTypes(): RemoteWorkspaceTypeDescription[] {

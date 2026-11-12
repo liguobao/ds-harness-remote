@@ -99237,14 +99237,16 @@ var RpcRouter = class {
       this.active -= 1;
     }
   }
-  invoke(method, params) {
+  async invoke(method, params) {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
+        const hostCapabilities = await this.capabilities();
+        const remoteAvailable = hostCapabilities.includes("harness.remote.v1") || hostCapabilities.includes("harness.remote.v3");
         const capabilities = [.../* @__PURE__ */ new Set([
-          ...this.capabilities(),
+          ...hostCapabilities,
           "remote.history.compact.v1",
-          ...this.harnessRemote === void 0 ? [] : ["harness.remote.stream.transfer.v1"]
+          ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -101365,9 +101367,9 @@ var HarnessRemoteBridge = class {
   }
   async canUseIdleRemoteEvents(error62, signal) {
     if (signal.aborted || this.gateway.failure(error62).code !== "gateway/service-unavailable") return false;
-    const sessions = await this.gateway.dispatch("session/list", { args: {} }, signal).catch(() => void 0);
+    const sessions = await this.gateway.dispatch("session/list", { args: { _request: {} } }, signal).catch(() => void 0);
     if (sessions?.ok !== true) {
-      this.warnMissingRemoteEvents("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+      this.warnMissingRemoteEvents(sessions?.ok === false && sessions.error.code === "gateway/invocation-unavailable" ? "Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages." : "Cannot verify the Host Session API. Remote events cannot start.");
       return false;
     }
     this.warnMissingRemoteEvents("Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.");
@@ -102143,7 +102145,7 @@ var HostPluginRuntime = class {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.hostCapabilities(),
+        () => this.transportCapabilities(peerGateway),
         codex,
         cursor3,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -102180,6 +102182,7 @@ var HostPluginRuntime = class {
   localCodexPublish = async () => void 0;
   localAcpPeer;
   localAcpPublish = async () => void 0;
+  warnedMissingHostApi = false;
   setTerminalEnabled(enabled) {
     this.terminalEnabled = enabled;
   }
@@ -102523,6 +102526,28 @@ var HostPluginRuntime = class {
       }
     }
     return capabilities;
+  }
+  async transportCapabilities(gateway) {
+    const capabilities = this.hostCapabilities();
+    if (gateway?.supportsCarrier !== true) return capabilities;
+    let result;
+    try {
+      result = await gateway.dispatch("session/list", { args: { _request: {} } }, AbortSignal.timeout(5e3));
+    } catch {
+      throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
+    }
+    if (result.ok) return capabilities;
+    if (result.error.code === "gateway/service-unavailable") {
+      throw new RpcError("CONNECTION_FAILED", "The Host Session API is not ready.", void 0, true);
+    }
+    if (result.error.code !== "gateway/invocation-unavailable") {
+      throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
+    }
+    if (!this.warnedMissingHostApi) {
+      this.warnedMissingHostApi = true;
+      this.logger.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+    }
+    return capabilities.filter((value) => !value.startsWith("harness.remote.") && value !== "harness.terminal.v1");
   }
   hostWorkspaceTypes() {
     const types22 = [];

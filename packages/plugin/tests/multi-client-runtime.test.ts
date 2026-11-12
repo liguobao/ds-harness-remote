@@ -9,6 +9,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
+import { probeRemoteHostFeatures } from '../src/client-capabilities.js'
 import { HostServerConnection } from '../src/server-connection.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
@@ -184,6 +185,82 @@ describe('HostPluginRuntime multi-Client routing', () => {
       await pending
     }
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('withholds Harness transport when the Host Session API is absent', async () => {
+    const gateway = localGateway()
+    const dispatch = vi.mocked(gateway.dispatch)
+    dispatch.mockResolvedValueOnce({ ok: false, error: {
+      code: 'gateway/invocation-unavailable', message: 'Unavailable', details: {},
+    } })
+    const log = logger()
+    const runtime = new HostPluginRuntime(config(), identities(), log, gateway)
+    const channel = fakeChannel('missing-host-api', 'client-phone')
+    try {
+      await runtime.start()
+      await runtime.acceptAuthenticatedPeer(channel)
+      const describe = async (): Promise<string[]> => {
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = channel.sent().find(message => message.type === 'rpc.response'
+            && (message.payload as RpcResponsePayload).requestId === request.id)
+          expect(response).toBeDefined()
+        })
+        return ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+      }
+      const missing = await describe()
+      expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
+      expect(missing.some(value => value.startsWith('harness.remote.'))).toBe(false)
+      expect(missing).not.toContain('harness.remote.stream.transfer.v1')
+      await expect(probeRemoteHostFeatures({ rpc: async () => ({ capabilities: missing }) } as never))
+        .rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      expect(log.warn).toHaveBeenCalledOnce()
+      const recovered = await describe()
+      expect(recovered.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+      expect(recovered).toContain('harness.remote.stream.transfer.v1')
+    } finally { await runtime.close() }
+  })
+
+  it('reports an unready or unverified Session API as a retryable discovery failure', async () => {
+    await runScenarios([
+      { name: 'service unavailable', answer: { ok: false as const, error: {
+        code: 'gateway/service-unavailable', message: 'Service unavailable', details: {},
+      } }, message: 'The Host Session API is not ready.' },
+      { name: 'invalid arguments', answer: { ok: false as const, error: {
+        code: 'gateway/arguments-invalid', message: 'Invalid arguments', details: {},
+      } }, message: 'Cannot verify the Host Session API.' },
+      { name: 'timeout', answer: new DOMException('Timed out', 'TimeoutError'), message: 'Cannot verify the Host Session API.' },
+    ].map(({ name, answer, message }) => ({ name, run: async () => {
+      const gateway = localGateway()
+      const dispatch = vi.mocked(gateway.dispatch)
+      if (answer instanceof Error) dispatch.mockRejectedValueOnce(answer)
+      else dispatch.mockResolvedValueOnce(answer)
+      const log = logger()
+      const runtime = new HostPluginRuntime(config(), identities(), log, gateway)
+      const channel = fakeChannel(`unverified-${name}`, 'client-phone')
+      try {
+        await runtime.start()
+        await runtime.acceptAuthenticatedPeer(channel)
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        await vi.waitFor(() => expect(channel.sent().find(row => row.type === 'rpc.error'
+          && (row.payload as RpcErrorPayload).requestId === request.id)).toBeDefined())
+        const response = channel.sent().find(row => row.type === 'rpc.error'
+          && (row.payload as RpcErrorPayload).requestId === request.id)!
+        expect(response.payload).toMatchObject({ code: 'CONNECTION_FAILED', message, retryable: true })
+        expect(log.warn).not.toHaveBeenCalledWith(expect.stringContaining('Install @deepseek-ai/dsh-api-remotes'))
+        const recovered = createRpcRequest('harness.transport.describe', {})
+        channel.push(recovered)
+        await vi.waitFor(() => expect(channel.sent().find(row => row.type === 'rpc.response'
+          && (row.payload as RpcResponsePayload).requestId === recovered.id)).toBeDefined())
+        const restored = channel.sent().find(row => row.type === 'rpc.response'
+          && (row.payload as RpcResponsePayload).requestId === recovered.id)!
+        const capabilities = ((restored.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+        expect(capabilities.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+      } finally { await runtime.close() }
+    } })))
   })
 
   it('advertises ApiProxy alongside compatible Session V3 versions', async () => {

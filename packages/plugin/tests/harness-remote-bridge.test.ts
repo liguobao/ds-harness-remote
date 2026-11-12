@@ -809,8 +809,10 @@ describe('HarnessRemoteBridge', () => {
     const warn = vi.fn()
     const missing = Object.assign(new Error('source unavailable'), { code: 'gateway/service-unavailable' })
     const open = vi.fn(async () => (async function* () { throw missing })())
+    const dispatch = vi.fn(async () => ({ ok: true as const }))
     const bridge = new HarnessRemoteBridge(gateway({
       open,
+      dispatch,
       failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
     }), publish, { warn } as never)
 
@@ -821,6 +823,7 @@ describe('HarnessRemoteBridge', () => {
     }))
     expect(publish).not.toHaveBeenCalledWith('harness.remote.stream.closed', expect.anything())
     expect(warn).toHaveBeenCalledOnce()
+    expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
     await bridge.openStream({ streamId: 'events-2', endpoint: '$events', payload: { args: {} } })
     await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.frame', expect.objectContaining({ streamId: 'events-2' })))
     expect(warn).toHaveBeenCalledOnce()
@@ -862,6 +865,7 @@ describe('HarnessRemoteBridge', () => {
     }))
     expect(publish).not.toHaveBeenCalledWith('harness.remote.frame', expect.anything())
     expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith('Cannot verify the Host Session API. Remote events cannot start.')
   })
 
   it('routes CodeX terminal calls to the CodeX carrier and keeps device ownership', async () => {
