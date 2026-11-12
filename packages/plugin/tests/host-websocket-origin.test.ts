@@ -366,7 +366,8 @@ async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolea
   const controlSockets: NodeWebSocket[] = []
   const dataSockets: NodeWebSocket[] = []
   const hostFrames: Array<{ type: string }> = []
-  const held: Array<{ socket: import('node:net').Socket }> = []
+  // Node types `upgrade` sockets as Duplex; we only need destroy/end for cleanup.
+  const held: Array<{ destroy(): void }> = []
   const http: Server = createServer((_req, res) => {
     res.writeHead(404)
     res.end()
@@ -381,7 +382,7 @@ async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolea
       return
     }
     if (options.holdUpgrade) {
-      held.push({ socket })
+      held.push(socket)
       return
     }
     wss.handleUpgrade(req, socket, head, ws => {
@@ -446,12 +447,12 @@ async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolea
     },
     releaseHeld() {
       for (const entry of held.splice(0)) {
-        try { entry.socket.destroy() } catch { /* ignore */ }
+        try { entry.destroy() } catch { /* ignore */ }
       }
     },
     async close() {
       for (const entry of held.splice(0)) {
-        try { entry.socket.destroy() } catch { /* ignore */ }
+        try { entry.destroy() } catch { /* ignore */ }
       }
       for (const socket of [...controlSockets, ...dataSockets]) {
         try { socket.terminate() } catch { /* ignore */ }
