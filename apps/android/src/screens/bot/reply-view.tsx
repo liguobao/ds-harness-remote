@@ -9,6 +9,7 @@ import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { stackBotReplies } from './replies'
+import { BotAvatar } from './avatar'
 import { messageClock } from '../message-actions'
 import { createBotStyles } from './styles'
 
@@ -40,7 +41,9 @@ export function BotViaPill({ platform }: { platform?: string }) {
   )
 }
 
-export function BotReplies({ rows }: { rows: BotObject[] }) {
+type AvatarBot = { id: string; avatar?: { shape?: string; image?: string }; color?: string; engine?: string; model?: string; appliedModel?: string }
+
+export function BotReplies({ rows, botOf }: { rows: BotObject[]; botOf?: (botId: string) => AvatarBot | undefined }) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createReplyStyles)
   return (
@@ -64,16 +67,26 @@ export function BotReplies({ rows }: { rows: BotObject[] }) {
           )
         }
         return (
-          <View key={i} style={reply.kind === 'user' ? localStyles.userBubble : localStyles.memberMessage}>
-            {reply.kind !== 'user' && <View style={localStyles.headerRow}>
-              <Text style={styles.heading}>{speakerName}</Text>
-              {via !== '' && <BotViaPill platform={via} />}
-            </View>}
-            {texts.map((body, index) => <NativeMarkdown key={index} text={body} />)}
-            <View style={localStyles.footerRow}>
-              <ReplyCopy text={texts.join('\n\n')} />
-              {reply.kind === 'user' && via !== '' && <BotViaPill platform={via} />}
-              {typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
+          <View key={i} style={reply.kind === 'user' ? localStyles.userRow : localStyles.memberRow}>
+            {reply.kind !== 'user' && (
+              <View style={localStyles.memberAvatar}>
+                <BotAvatar bot={botOf?.(text(reply.botId)) ?? { id: text(reply.botId) || speakerName, color: text(reply.color) || undefined }} size={26} />
+              </View>
+            )}
+            <View style={reply.kind === 'user' ? localStyles.userBubble : localStyles.memberBody}>
+              {reply.kind !== 'user' && <View style={localStyles.headerRow}>
+                <Text style={styles.heading}>{speakerName}</Text>
+                {typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
+                {via !== '' && <BotViaPill platform={via} />}
+              </View>}
+              <View style={reply.kind === 'user' ? undefined : localStyles.memberBubble}>
+                {texts.map((body, index) => <NativeMarkdown key={index} text={body} />)}
+              </View>
+              <View style={localStyles.footerRow}>
+                <ReplyCopy text={texts.join('\n\n')} />
+                {reply.kind === 'user' && via !== '' && <BotViaPill platform={via} />}
+                {reply.kind === 'user' && typeof reply.time === 'number' && <Text style={styles.muted}>{messageClock(reply.time)}</Text>}
+              </View>
             </View>
           </View>
         )
@@ -88,7 +101,14 @@ const createReplyStyles = (colors: ThemeColors) =>
       alignSelf: 'flex-end', maxWidth: '90%', padding: spacing.md,
       borderRadius: radius.lg, backgroundColor: colors.surfaceStrong,
     },
-    memberMessage: { paddingVertical: spacing.sm, gap: spacing.xs },
+    memberRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+    memberAvatar: { width: 26, height: 26, flexShrink: 0 },
+    memberBody: { flexShrink: 1, flexGrow: 1, gap: spacing.xs },
+    memberBubble: {
+      paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+      borderRadius: radius.lg, backgroundColor: colors.surfaceStrong,
+    },
+    userRow: { alignItems: 'flex-end' },
     footerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.xs },
     headerRow: {
       flexDirection: 'row',
