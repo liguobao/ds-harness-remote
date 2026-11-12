@@ -24,6 +24,7 @@ import { Button, ErrorBanner } from './src/ui/components'
 import { spacing, type } from './src/ui/theme'
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/theme-context'
 import { MermaidRendererHost } from './src/ui/mermaid/mermaid-renderer'
+import { AlertHost } from './src/ui/alert'
 import { useThemedStyles } from './src/ui/use-themed-styles'
 import { strings as zhCN } from './src/locales/i18n'
 import { sessionBackendFromId } from './src/lib/session-backend'
@@ -56,6 +57,7 @@ export default function App() {
       <SafeAreaProvider>
         <AppShell />
         <MermaidRendererHost />
+        <AlertHost />
       </SafeAreaProvider>
     </ThemeProvider>
   )

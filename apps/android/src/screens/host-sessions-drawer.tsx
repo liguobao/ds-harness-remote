@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert,
   ActivityIndicator,
   Animated,
   Easing,
@@ -19,6 +18,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native'
+import { Alert } from '../ui/alert'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
@@ -654,8 +654,18 @@ export function HostSessionsDrawer({
       strings.workspaces.deleteBody,
       [
         { text: strings.common.cancel, style: 'cancel' },
-        { text: strings.workspaces.delete, style: 'destructive', onPress: () => void deleteWorkspace(target.workspaceId) },
+        {
+          text: strings.workspaces.delete,
+          style: 'destructive',
+          onPress: () => {
+            setWorkspaceActionTarget(undefined)
+            void deleteWorkspace(target.workspaceId)
+          },
+        },
       ],
+      // Keep the actions sheet mounted while the confirmation is open: closing
+      // one Modal window while another fades in flickers on Android.
+      { onDismiss: () => setWorkspaceActionTarget(undefined) },
     )
   }
 
@@ -1997,7 +2007,6 @@ export function HostSessionsDrawer({
         }}
         onDelete={() => {
           const target = workspaceActionTarget
-          setWorkspaceActionTarget(undefined)
           if (target !== undefined) confirmDeleteWorkspace(target)
         }}
       />

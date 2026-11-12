@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, TextInput } from 'react-native'
+import { TextInput } from 'react-native'
+import { Alert } from '../../ui/alert'
 import { strings } from '../../locales/i18n'
 import type { SkillEntry } from '../../services/session-tools'
 import { requireSessionTools } from '../../state/store'

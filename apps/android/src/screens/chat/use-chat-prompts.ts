@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert } from 'react-native'
+import { Alert } from '../../ui/alert'
 import { strings } from '../../locales/i18n'
 import { BUILT_IN_PROMPTS, loadCustomPrompts, saveCustomPrompts, type CustomPrompt } from '../../services/storage'
 

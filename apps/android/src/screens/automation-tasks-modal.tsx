@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
   ActivityIndicator,
   Dimensions,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { Alert } from '../ui/alert'
 import {
   AlertCircle,
   ArrowLeft,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
-import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { shouldPollSessionStatus } from '../state/session-catalog-commands'

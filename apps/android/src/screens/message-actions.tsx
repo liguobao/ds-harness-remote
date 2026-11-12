@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { AccessibilityInfo, Alert, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AccessibilityInfo, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import type { ChatItemBase, ChatMessage, RemoteSession } from '../types'
 import { useAppStore } from '../state/store'

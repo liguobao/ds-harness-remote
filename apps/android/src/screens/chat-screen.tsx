@@ -4,7 +4,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Alert,
   Animated,
   DeviceEventEmitter,
   Easing,
@@ -20,6 +19,7 @@ import {
   Text,
   View
 } from 'react-native'
+import { Alert } from '../ui/alert'
 import { shouldConfirmSwipeRightOpen, shouldStartSwipeRightToOpen } from '../lib/gesture-swipe-rules'
 import { isSubagentSession } from '../lib/session-kind'
 import { workspaceStableKey } from '../lib/workspace-key'

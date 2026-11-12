@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, FlatList, Image, NativeModules, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
+import { ActivityIndicator, FlatList, Image, NativeModules, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
+import { Alert } from '../ui/alert'
 import * as FileSystem from 'expo-file-system/legacy'
 import { File as LocalFile, FileMode, Paths } from 'expo-file-system'
 import { randomUUID } from 'expo-crypto'
