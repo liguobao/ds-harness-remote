@@ -78554,6 +78554,28 @@ function safeErrorCode(error62) {
   if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
   return "INTERNAL_ERROR";
 }
+var WORKSPACE_FILE_FAILURE_REASONS = [
+  "scope-missing",
+  "authority-unavailable",
+  "root-invalid",
+  "outside-root",
+  "symlink",
+  "not-regular-file",
+  "not-found",
+  "too-large",
+  "io"
+];
+var workspaceFileFailureReasons = new Set(WORKSPACE_FILE_FAILURE_REASONS);
+function workspaceFileFailureReason(error62) {
+  if (typeof error62 !== "object" || error62 === null || !("details" in error62)) return void 0;
+  const details2 = error62.details;
+  if (typeof details2 !== "object" || details2 === null) return void 0;
+  const reason = details2.reason;
+  return typeof reason === "string" && workspaceFileFailureReasons.has(reason) ? reason : void 0;
+}
+function workspaceFileFailure(code, message, reason) {
+  return new RpcError(code, message, { reason });
+}
 var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
   "IDENTITY_INVALID",
   "IDENTITY_LOCKED",
@@ -98561,14 +98583,17 @@ import { link as link2, lstat as lstat3, open as open5, realpath as realpath6, s
 import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
+var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
+var WORKSPACE_UPLOAD_AUTHORITY_BYTES = 4 * 1024 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
 var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(workspaceUploadMaxBytes("LAN")) }).strict();
 var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
 var WorkspaceUploadHost = class {
-  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0) {
+  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now) {
     this.resolveRoot = resolveRoot;
     this.ttlMs = ttlMs;
     this.transportMode = transportMode;
+    this.now = now;
     this.timer = setInterval(() => {
       void this.serialize(() => this.expire()).catch(() => void 0);
     }, Math.min(ttlMs, 3e4));
@@ -98639,7 +98664,19 @@ var WorkspaceUploadHost = class {
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const temp = join15(root2, `.dsh-upload-${randomUUID16()}.part`);
     const handle = await open5(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
-    const upload = { ...p, received: 0, touched: Date.now(), root: root2, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
+    const upload = {
+      ...p,
+      received: 0,
+      touched: this.now(),
+      root: root2,
+      sourceRoot,
+      dev: directory.dev,
+      ino: directory.ino,
+      temp,
+      handle,
+      authorityCheckedAt: 0,
+      authorityBytes: 0
+    };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
     return { uploadId: p.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK };
@@ -98649,7 +98686,7 @@ var WorkspaceUploadHost = class {
     const upload = this.requireUpload(p);
     const data2 = Buffer.from(p.data, "base64");
     if (!data2.length || data2.length > WORKSPACE_UPLOAD_CHUNK || data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
-    await this.validateRoot(upload);
+    await this.validateRoot(upload, this.authorityExpired(upload));
     let written = 0;
     while (written < data2.length) {
       const result = await upload.handle.write(data2, written, data2.length - written, upload.received + written);
@@ -98658,7 +98695,7 @@ var WorkspaceUploadHost = class {
     }
     this.assertLive();
     upload.received += data2.length;
-    upload.touched = Date.now();
+    upload.touched = this.now();
     return { uploadId: p.uploadId, receivedBytes: upload.received };
   }
   async commit(input4) {
@@ -98687,7 +98724,7 @@ var WorkspaceUploadHost = class {
         throw error62;
       }
       const result = { name: name2, path: `./${name2}`, bytes: upload.totalBytes };
-      this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: Date.now() });
+      this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: this.now() });
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value);
       await this.discard(p.uploadId, upload);
       return result;
@@ -98719,11 +98756,24 @@ var WorkspaceUploadHost = class {
       if (onAbort) signal.removeEventListener("abort", onAbort);
     }
   }
-  async validateRoot(upload) {
+  /**
+   * Chunks re-check the workspace root identity locally on every call. The
+   * expensive session-authority lookup is bounded (TTL/bytes) and always runs
+   * before publication; a revoked session can therefore never publish a file.
+   */
+  authorityExpired(upload) {
+    return this.now() - upload.authorityCheckedAt >= WORKSPACE_UPLOAD_AUTHORITY_TTL_MS || upload.received - upload.authorityBytes >= WORKSPACE_UPLOAD_AUTHORITY_BYTES;
+  }
+  async validateRoot(upload, recheckAuthority = true) {
     if (upload.totalBytes > workspaceUploadMaxBytes(this.transportMode())) throw failure4("UPLOAD_LIMIT");
-    const current = await this.sessionRoot(upload.sessionId);
-    this.assertLive();
-    if (current !== upload.sourceRoot || await realpath6(current) !== upload.root || await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+    if (recheckAuthority) {
+      const current = await this.sessionRoot(upload.sessionId);
+      this.assertLive();
+      if (current !== upload.sourceRoot || await realpath6(current) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
+      upload.authorityCheckedAt = this.now();
+      upload.authorityBytes = upload.received;
+    }
+    if (await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const directory = await stat6(upload.root);
     if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
   }
@@ -98739,7 +98789,7 @@ var WorkspaceUploadHost = class {
     }
   }
   async expire() {
-    const cutoff = Date.now() - this.ttlMs;
+    const cutoff = this.now() - this.ttlMs;
     await Promise.all([...this.uploads].filter(([, u]) => u.touched <= cutoff).map(([id6, u]) => this.discard(id6, u)));
     for (const [id6, entry] of this.completed) if (entry.touched <= cutoff) this.completed.delete(id6);
   }
@@ -99089,12 +99139,14 @@ var RpcRouter = class {
     } catch (error62) {
       const response = errorResponse2(request.id, error62);
       const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
+      const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
         ...failedEndpoint ? { endpoint: failedEndpoint } : {},
         durationMs: Math.round(performance.now() - startedAt),
         code: response.payload.code,
-        retryable: response.payload.retryable
+        retryable: response.payload.retryable,
+        ...reason === void 0 ? {} : { reason }
       });
       return response;
     } finally {
@@ -101013,10 +101065,12 @@ var HarnessRemoteBridge = class {
         });
         return result;
       }
+      const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("harness remote call failed", {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
-        code: this.gateway.failure(error62).code
+        code: this.gateway.failure(error62).code,
+        ...reason === void 0 ? {} : { reason }
       });
       throw error62;
     }
@@ -101348,20 +101402,20 @@ var HarnessRemoteBridge = class {
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
-      throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace identifier is missing.");
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace identifier is missing.", "scope-missing");
     }
     const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal);
     if (!sessionWorkspace) {
-      throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
     const options = isRecord22(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       if ("baseFile" in args && args.baseFile !== void 0 && typeof args.baseFile !== "string") {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
     }
     let safeRel;
@@ -101369,24 +101423,24 @@ var HarnessRemoteBridge = class {
       const path = typeof args.path === "string" ? args.path : "";
       const relative6 = path.replaceAll("\\", "/");
       if (relative6.length === 0 || relative6.startsWith("/") || /^[a-z][a-z\d+.-]*:/iu.test(relative6) || relative6.includes("\0")) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       const baseSegments = process.platform === "win32" ? rawBaseFile.replaceAll("\\", "/").split("/") : rawBaseFile.split("/");
       if (baseSegments.some((segment) => segment === "..")) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint);
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint);
       const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
       const baseDir = dirname7(baseCandidate);
       const targetCandidate = resolve9(baseDir, path);
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint);
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint);
     } else {
       const path = typeof args.path === "string" ? args.path : ".";
       const pathSegments = process.platform === "win32" ? path.replaceAll("\\", "/").split("/") : path.split("/");
       if (pathSegments.some((segment) => segment === "..")) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint);
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint);
     }
     let finalArgs = isRecord22(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
     if (isRecord22(finalArgs.options)) {
@@ -101423,85 +101477,94 @@ var HarnessRemoteBridge = class {
     }
     const cwd2 = await this.resolveWorkspaceRoot(sessionId, signal);
     if (!cwd2) {
-      throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
     try {
       const root2 = await realpath7(cwd2);
       const info = await stat8(root2);
-      if (!info.isDirectory()) throw new Error();
+      if (!info.isDirectory()) {
+        throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "root-invalid");
+      }
       return { root: root2, cwd: cwd2 };
-    } catch {
-      throw new RpcError("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
+    } catch (error62) {
+      if (error62 instanceof RpcError) throw error62;
+      throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
   }
-  async verifyWorkspacePathContainment(root2, cwd2, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve9(path) : resolve9(cwd2, path);
+  /**
+   * Containment is always evaluated against the canonical workspace root, not
+   * the raw `cwd`: a symlinked parent, a `..` segment or a Windows case variant
+   * must not turn an in-root file into a denial. The boundary itself is
+   * unchanged: the canonical target must stay inside the canonical root.
+   */
+  async verifyWorkspacePathContainment(root2, path, endpoint) {
+    const candidate = isAbsolute10(path) ? resolve9(path) : resolve9(root2, path);
     if (process.platform === "win32") {
       const rootDrive = parse4(root2).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();
       if (rootDrive !== candDrive) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
     }
-    const relCwd = relative5(cwd2, candidate);
-    const relRoot = relative5(root2, candidate);
-    if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
-      throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+    if (isPathOutside(relative5(root2, candidate))) {
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
       const rootLstat = await lstat4(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
-      const base = !isPathOutside(relCwd) ? cwd2 : root2;
-      const rel = relative5(base, candidate);
+      const rel = relative5(root2, candidate);
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
-      let currentPath = base;
+      let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
         currentPath = join16(currentPath, parts[i]);
-        const dirRel = relative5(base, currentPath);
-        if (isPathOutside(dirRel)) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        if (isPathOutside(relative5(root2, currentPath))) {
+          throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
         const dirLstat = await lstat4(currentPath);
-        if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.");
+        if (dirLstat.isSymbolicLink()) {
+          throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
+        }
+        if (!dirLstat.isDirectory()) {
+          throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
       const targetLstat = await lstat4(candidate);
       if (targetLstat.isSymbolicLink()) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }
       const canonical = await realpath7(candidate);
       if (process.platform === "win32") {
         const rootDrive = parse4(root2).root.toLowerCase();
         const canonicalDrive = parse4(canonical).root.toLowerCase();
         if (rootDrive !== canonicalDrive) {
-          throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+          throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
       }
       const canonicalRel = relative5(root2, canonical);
       if (isPathOutside(canonicalRel)) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       const info = await stat8(canonical);
       if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
       }
       if (endpoint === "workspaceFiles/readAll" && Number(info.size) > MAX_READ_BYTES2) {
-        throw new RpcError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
+        throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
       }
       const safeRel = canonicalRel === "" ? "." : process.platform === "win32" ? canonicalRel.replaceAll("\\", "/") : canonicalRel;
       const dispatchedCandidate = resolve9(root2, safeRel);
       const dispatchedCanonical = await realpath7(dispatchedCandidate);
       const dispatchedRel = relative5(root2, dispatchedCanonical);
       if (isPathOutside(dispatchedRel)) {
-        throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.");
+        throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
       return safeRel;
     } catch (error62) {
       if (error62 instanceof RpcError) throw error62;
-      throw new RpcError("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.");
+      const reason = error62?.code === "ENOENT" ? "not-found" : "io";
+      throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is unavailable.", reason);
     }
   }
 };

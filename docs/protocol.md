@@ -1250,7 +1250,11 @@ Android 用户可显式下载工作区原文件到系统目录选择器授权的
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
 `officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
 注意：上游 `list` / `changes` 限于工作区；为修复 #250 任意文件读取漏洞，原生 `workspaceFiles/read*` 与 `stat`
-严格限制在 Session 工作区根目录（cwd）物理包含范围内，拒绝未授权的工作区外路径与越界符号链接。旧 `fileviewer.read.v1` 仍使用 provider 授权。
+严格限制在 Session 工作区根目录（cwd）物理包含范围内，拒绝未授权的工作区外路径与越界符号链接。包含性一律以
+realpath 后的规范根目录计算，避免符号链接父目录或大小写差异造成误拒；边界本身不变。拒绝结果可在
+`rpc.error.details.reason` 中携带稳定的安全分类（`scope-missing`、`authority-unavailable`、`root-invalid`、
+`outside-root`、`symlink`、`not-regular-file`、`not-found`、`too-large`、`io`），不得包含路径、文件名、
+文件正文或原始文件系统错误。旧 `fileviewer.read.v1` 仍使用 provider 授权。
 对 `codex:<threadId>` scope，Host 使用 CodeX thread 当前 `cwd` 作为独立根目录，并额外拒绝根目录之外的路径；
 该映射不改变 Harness Session 的既有工作区权限。CodeX 终端同样按 thread 建立独立 context。
 
@@ -1624,8 +1628,11 @@ workspace.upload.commit
 #### 生命周期、重试与落盘边界
 
 每连接最多 2 个活动上传。Host 在工作区根目录排他创建随机 `.dsh-upload-*.part`
-临时文件，权限为 `0600`；根目录必须经过 realpath 与目录身份验证，并在分块写入、
-发布前重验会话 authority 和根目录身份。目录改变或失去 authority 时拒绝继续。
+临时文件，权限为 `0600`；根目录必须经过 realpath 与目录身份验证。每次分块写入都重新
+验证根目录未被替换（realpath 与设备号/inode），会话 authority 则按有界频率重验
+（至多 5 s 或累计 4 MiB 后再次解析，仍受每次 15 s 解析上限约束），并在 `open` 与
+发布前的 `commit` 强制执行。目录改变或失去 authority 时拒绝继续；authority 在上传
+中途丢失时，未提交数据只保留在临时文件中，`commit` 必须失败并清理，不能发布。
 Host 本地进程仍保有原有文件系统权限，本协议不隔离恶意本地进程的并发目录修改。
 
 未提交上传在空闲达到 2 min 后进入清理范围；Host 定时或处理下一次调用时回收。

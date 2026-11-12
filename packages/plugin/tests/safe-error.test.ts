@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { IdentityInvalidError } from '../src/identity-store.js'
 import { RpcError } from '../src/rpc-router.js'
-import { safeErrorCode, safeStartupError } from '../src/safe-error.js'
+import { safeErrorCode, safeStartupError, workspaceFileFailure, workspaceFileFailureReason } from '../src/safe-error.js'
 import { ServerCredentialsBusyError, ServerCredentialsInvalidError } from '../src/server-credentials.js'
 
 describe('safeErrorCode', () => {
@@ -51,5 +51,14 @@ describe('safeErrorCode', () => {
       code: 'INTERNAL_ERROR',
       message: 'Remote plugin failed to start.',
     })
+  })
+
+  it('extracts only known workspace file reasons from error details', () => {
+    const denial = workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.', 'symlink')
+    expect(denial).toMatchObject({ code: 'WORKSPACE_PATH_DENIED', details: { reason: 'symlink' } })
+    expect(workspaceFileFailureReason(denial)).toBe('symlink')
+    expect(workspaceFileFailureReason(Object.assign(denial, { details: { reason: 'C:\\secret\\file.txt' } }))).toBeUndefined()
+    expect(workspaceFileFailureReason(new RpcError('WORKSPACE_PATH_DENIED', 'denied'))).toBeUndefined()
+    expect(workspaceFileFailureReason(null)).toBeUndefined()
   })
 })

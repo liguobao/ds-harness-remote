@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SafeLogger } from '../src/logging.js'
 import { createRpcRequest } from '@dsh-remote/protocol'
-import { WorkspaceUploadHost, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
+import { WorkspaceUploadHost, WORKSPACE_UPLOAD_AUTHORITY_TTL_MS, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
 const hosts: WorkspaceUploadHost[] = []
@@ -63,6 +63,54 @@ describe('workspace-root upload authority and lifecycle', () => {
     expect(await readFile(join(root, 'report.bin'), 'utf8')).toBe('existing')
     expect((await readdir(root)).some(name => name.endsWith('.part'))).toBe(false)
     expect(await put(host, request('empty', 0), Buffer.alloc(0))).toEqual({ name: 'empty', path: './empty', bytes: 0 })
+  })
+
+  it('bounds session-authority lookups between chunks but always revalidates before publication', async () => {
+    const { root } = await setup()
+    const clock = { now: 1_000 }
+    const resolve = vi.fn(async () => root)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => clock.now)
+    hosts.push(host)
+    const p = request('paced', 6)
+    expect(await host.call('workspace.upload.open', p)).toMatchObject({ uploadId: p.uploadId })
+    const afterOpen = resolve.mock.calls.length
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 3, data: 'ZGVm' })
+    expect(resolve).toHaveBeenCalledTimes(afterOpen)
+    expect(await host.call('workspace.upload.commit', scope(p))).toEqual({ name: 'paced', path: './paced', bytes: 6 })
+    expect(resolve.mock.calls.length).toBeGreaterThanOrEqual(afterOpen + 1)
+    expect(await readFile(join(root, 'paced'), 'utf8')).toBe('abcdef')
+  })
+
+  it('never publishes when the session authority is revoked between chunks', async () => {
+    const { root } = await setup()
+    let allowed = true
+    const resolve = vi.fn(async () => allowed ? root : undefined)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => 1_000)
+    hosts.push(host)
+    const p = request('revoked', 3)
+    await host.call('workspace.upload.open', p)
+    allowed = false
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    expect(await readdir(root)).toHaveLength(1)
+    await expect(host.call('workspace.upload.commit', scope(p))).rejects.toMatchObject({ code: 'UPLOAD_WORKSPACE_CHANGED' })
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it('revalidates authority after the ttl even when chunks are small', async () => {
+    const { root } = await setup()
+    const clock = { now: 1_000 }
+    const resolve = vi.fn(async () => root)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => clock.now)
+    hosts.push(host)
+    const p = request('ttl', 6)
+    await host.call('workspace.upload.open', p)
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    const beforeTtl = resolve.mock.calls.length
+    clock.now += WORKSPACE_UPLOAD_AUTHORITY_TTL_MS
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 3, data: 'ZGVm' })
+    expect(resolve).toHaveBeenCalledTimes(beforeTtl + 1)
+    expect(await host.call('workspace.upload.commit', scope(p))).toMatchObject({ bytes: 6 })
   })
 
   it('rejects traversal, client paths, oversized files and unknown/relative workspace authority', async () => {
