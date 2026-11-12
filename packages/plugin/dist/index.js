@@ -101204,44 +101204,41 @@ var HarnessRemoteBridge = class {
   }
   async *remoteEventsWithFallback(source, signal) {
     const iterator = source[Symbol.asyncIterator]();
-    let fallback = false;
+    let first2;
     try {
-      let first2;
-      try {
-        first2 = await iterator.next();
-      } catch (error62) {
-        if (signal.aborted || this.gateway.failure(error62).code !== "gateway/service-unavailable") throw error62;
-        const sessions = await this.gateway.dispatch("session/list", { args: {} }, signal).catch(() => void 0);
-        if (sessions?.ok !== true) {
-          if (!this.warnedMissingRemoteEvents) {
-            this.warnedMissingRemoteEvents = true;
-            this.logger?.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
-          }
-          throw error62;
+      first2 = await iterator.next();
+    } catch (error62) {
+      if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
+      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir9() } };
+      await new Promise((resolve10) => {
+        if (signal.aborted) {
+          resolve10();
+          return;
         }
-        fallback = true;
-        if (!this.warnedMissingRemoteEvents) {
-          this.warnedMissingRemoteEvents = true;
-          this.logger?.warn("Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.");
-        }
-        yield { type: "ready", clientId: randomUUID17(), host: { home: homedir9() } };
-        await new Promise((resolve10) => {
-          if (signal.aborted) {
-            resolve10();
-            return;
-          }
-          signal.addEventListener("abort", () => resolve10(), { once: true });
-        });
-        return;
-      }
-      if (!first2.done) yield first2.value;
-      while (!first2.done) {
-        first2 = await iterator.next();
-        if (!first2.done) yield first2.value;
-      }
-    } finally {
-      if (!fallback) await iterator.return?.();
+        signal.addEventListener("abort", () => resolve10(), { once: true });
+      });
+      return;
     }
+    try {
+      for (let item = first2; !item.done; item = await iterator.next()) yield item.value;
+    } finally {
+      await iterator.return?.();
+    }
+  }
+  async canUseIdleRemoteEvents(error62, signal) {
+    if (signal.aborted || this.gateway.failure(error62).code !== "gateway/service-unavailable") return false;
+    const sessions = await this.gateway.dispatch("session/list", { args: {} }, signal).catch(() => void 0);
+    if (sessions?.ok !== true) {
+      this.warnMissingRemoteEvents("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+      return false;
+    }
+    this.warnMissingRemoteEvents("Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.");
+    return true;
+  }
+  warnMissingRemoteEvents(message) {
+    if (this.warnedMissingRemoteEvents) return;
+    this.warnedMissingRemoteEvents = true;
+    this.logger?.warn(message);
   }
   closeStream(input4) {
     const params = streamCloseSchema3.parse(input4);

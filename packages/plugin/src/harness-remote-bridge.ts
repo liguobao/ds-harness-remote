@@ -587,43 +587,41 @@ export class HarnessRemoteBridge {
 
   private async *remoteEventsWithFallback(source: AsyncIterable<unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
     const iterator = source[Symbol.asyncIterator]()
-    let fallback = false
+    let first: IteratorResult<unknown>
     try {
-      let first: IteratorResult<unknown>
-      try {
-        first = await iterator.next()
-      } catch (error) {
-        if (signal.aborted || this.gateway.failure(error).code !== 'gateway/service-unavailable') throw error
-        // The event source can be absent from an otherwise usable Host.
-        // Do not report a connected generation when its Session API is absent.
-        const sessions = await this.gateway.dispatch('session/list', { args: {} }, signal).catch(() => undefined)
-        if (sessions?.ok !== true) {
-          if (!this.warnedMissingRemoteEvents) {
-            this.warnedMissingRemoteEvents = true
-            this.logger?.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
-          }
-          throw error
-        }
-        fallback = true
-        if (!this.warnedMissingRemoteEvents) {
-          this.warnedMissingRemoteEvents = true
-          this.logger?.warn('Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.')
-        }
-        yield { type: 'ready', clientId: randomUUID(), host: { home: homedir() } }
-        await new Promise<void>(resolve => {
-          if (signal.aborted) { resolve(); return }
-          signal.addEventListener('abort', () => resolve(), { once: true })
-        })
-        return
-      }
-      if (!first.done) yield first.value
-      while (!first.done) {
-        first = await iterator.next()
-        if (!first.done) yield first.value
-      }
-    } finally {
-      if (!fallback) await iterator.return?.()
+      first = await iterator.next()
+    } catch (error) {
+      if (!await this.canUseIdleRemoteEvents(error, signal)) throw error
+      yield { type: 'ready', clientId: randomUUID(), host: { home: homedir() } }
+      await new Promise<void>(resolve => {
+        if (signal.aborted) { resolve(); return }
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return
     }
+    try {
+      for (let item = first; !item.done; item = await iterator.next()) yield item.value
+    } finally {
+      await iterator.return?.()
+    }
+  }
+
+  private async canUseIdleRemoteEvents(error: unknown, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted || this.gateway.failure(error).code !== 'gateway/service-unavailable') return false
+    // Do not report a connected generation when the Host Session API is absent.
+    const sessions = await this.gateway.dispatch('session/list', { args: {} }, signal).catch(() => undefined)
+    if (sessions?.ok !== true) {
+      this.warnMissingRemoteEvents('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
+      return false
+    }
+    this.warnMissingRemoteEvents('Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.')
+    return true
+  }
+
+  private warnMissingRemoteEvents(message: string): void {
+    if (this.warnedMissingRemoteEvents) return
+    this.warnedMissingRemoteEvents = true
+    this.logger?.warn(message)
   }
 
   closeStream(input: unknown): { closed: boolean; streamId: string } {
