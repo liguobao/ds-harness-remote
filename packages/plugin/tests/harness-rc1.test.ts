@@ -3,13 +3,39 @@ import { Peer } from '@deepseek-ai/dsh-client-connection'
 import Gateway from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccess from '@deepseek-ai/dsh-api-remote-access'
 import Registry from '@deepseek-ai/dsh-typert-registry'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 import type { TypertGatewayLike } from '../src/typert-gateway-contract.js'
 
 // Exercise the installed RC.1 implementation, including its Peer identity check.
 describe('Harness RC.1 authenticated carrier', () => {
+  it('reports an incomplete Host with the official Gateway and no Remote API packages', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(Registry).await()
+      await ctx.plugin(RemoteAccess).await()
+      await ctx.plugin(Gateway).await()
+      const gateway = ctx.get('typertGateway') as Gateway
+      const peer = new Peer(ctx, { principal: { kind: 'owner' }, interactions: 'answer' })
+      const local = new TypertGatewaySwitch(gateway as unknown as TypertGatewayLike).local(peer)
+      expect(await local.dispatch('session/list', { args: {} }, new AbortController().signal))
+        .toMatchObject({ ok: false, error: { code: 'gateway/invocation-unavailable' } })
+      const publish = vi.fn(async () => undefined)
+      const warn = vi.fn()
+      const bridge = new HarnessRemoteBridge(local, publish, { warn } as never)
+      await bridge.openStream({ streamId: 'missing-events', endpoint: '$events', payload: { args: {} } })
+      await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+        streamId: 'missing-events', reason: 'failed',
+        failure: expect.objectContaining({ code: 'gateway/service-unavailable' }),
+      }))
+      expect(warn).toHaveBeenCalledOnce()
+      expect(publish).not.toHaveBeenCalledWith('harness.remote.frame', expect.anything())
+      await bridge.closeAll()
+      await peer.dispose()
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('isolates event replies and ends all carrier access with its admitted Peer', async () => {
     const ctx = new Context()
     try {

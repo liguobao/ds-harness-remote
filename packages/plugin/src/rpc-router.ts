@@ -80,7 +80,7 @@ export class RpcRouter {
     private readonly logger?: SafeLogger,
     private readonly fileViewer?: RemoteFileViewerBridge,
     private readonly harnessRemote?: HarnessRemoteBridge,
-    private readonly capabilities: () => readonly string[] = () => HOST_CAPABILITIES,
+    private readonly capabilities: () => readonly string[] | Promise<readonly string[]> = () => HOST_CAPABILITIES,
     private readonly codex?: CodexPeerBridge,
     private readonly acp?: AcpPeerBridge,
     private readonly loopback?: LoopbackHost,
@@ -146,12 +146,14 @@ export class RpcRouter {
     }
   }
 
-  private invoke(method: string, params: unknown): Promise<unknown> | unknown {
+  private async invoke(method: string, params: unknown): Promise<unknown> {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        const capabilities = [...new Set([...this.capabilities(), 'remote.history.compact.v1',
-          ...(this.harnessRemote === undefined ? [] : ['harness.remote.stream.transfer.v1']),
+        const hostCapabilities = await this.capabilities()
+        const remoteAvailable = hostCapabilities.includes('harness.remote.v1') || hostCapabilities.includes('harness.remote.v3')
+        const capabilities = [...new Set([...hostCapabilities, 'remote.history.compact.v1',
+          ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {

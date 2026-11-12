@@ -99236,14 +99236,16 @@ var RpcRouter = class {
       this.active -= 1;
     }
   }
-  invoke(method, params) {
+  async invoke(method, params) {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
+        const hostCapabilities = await this.capabilities();
+        const remoteAvailable = hostCapabilities.includes("harness.remote.v1") || hostCapabilities.includes("harness.remote.v3");
         const capabilities = [.../* @__PURE__ */ new Set([
-          ...this.capabilities(),
+          ...hostCapabilities,
           "remote.history.compact.v1",
-          ...this.harnessRemote === void 0 ? [] : ["harness.remote.stream.transfer.v1"]
+          ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -102142,7 +102144,7 @@ var HostPluginRuntime = class {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.hostCapabilities(),
+        () => this.transportCapabilities(peerGateway),
         codex,
         cursor3,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -102179,6 +102181,7 @@ var HostPluginRuntime = class {
   localCodexPublish = async () => void 0;
   localAcpPeer;
   localAcpPublish = async () => void 0;
+  warnedMissingHostApi = false;
   setTerminalEnabled(enabled) {
     this.terminalEnabled = enabled;
   }
@@ -102522,6 +102525,18 @@ var HostPluginRuntime = class {
       }
     }
     return capabilities;
+  }
+  async transportCapabilities(gateway) {
+    const capabilities = this.hostCapabilities();
+    if (gateway?.supportsCarrier !== true) return capabilities;
+    const result = await gateway.dispatch("session/list", { args: {} }, AbortSignal.timeout(5e3)).catch(() => void 0);
+    const code = result?.ok === false ? result.error.code : void 0;
+    if (code !== "gateway/invocation-unavailable" && code !== "gateway/service-unavailable") return capabilities;
+    if (!this.warnedMissingHostApi) {
+      this.warnedMissingHostApi = true;
+      this.logger.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
+    }
+    return capabilities.filter((value) => !value.startsWith("harness.remote.") && value !== "harness.terminal.v1");
   }
   hostWorkspaceTypes() {
     const types22 = [];

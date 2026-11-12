@@ -9,6 +9,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
+import { probeRemoteHostFeatures } from '../src/client-capabilities.js'
 import { HostServerConnection } from '../src/server-connection.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
@@ -184,6 +185,41 @@ describe('HostPluginRuntime multi-Client routing', () => {
       await pending
     }
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('withholds Harness transport when the Host Session API is absent', async () => {
+    const gateway = localGateway()
+    const dispatch = vi.mocked(gateway.dispatch)
+    dispatch.mockResolvedValueOnce({ ok: false, error: {
+      code: 'gateway/invocation-unavailable', message: 'Unavailable', details: {},
+    } })
+    const log = logger()
+    const runtime = new HostPluginRuntime(config(), identities(), log, gateway)
+    const channel = fakeChannel('missing-host-api', 'client-phone')
+    try {
+      await runtime.start()
+      await runtime.acceptAuthenticatedPeer(channel)
+      const describe = async (): Promise<string[]> => {
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = channel.sent().find(message => message.type === 'rpc.response'
+            && (message.payload as RpcResponsePayload).requestId === request.id)
+          expect(response).toBeDefined()
+        })
+        return ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+      }
+      const missing = await describe()
+      expect(missing.some(value => value.startsWith('harness.remote.'))).toBe(false)
+      expect(missing).not.toContain('harness.remote.stream.transfer.v1')
+      await expect(probeRemoteHostFeatures({ rpc: async () => ({ capabilities: missing }) } as never))
+        .rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      expect(log.warn).toHaveBeenCalledOnce()
+      const recovered = await describe()
+      expect(recovered.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+      expect(recovered).toContain('harness.remote.stream.transfer.v1')
+    } finally { await runtime.close() }
   })
 
   it('advertises ApiProxy alongside compatible Session V3 versions', async () => {
