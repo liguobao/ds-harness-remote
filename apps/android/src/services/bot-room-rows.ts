@@ -38,7 +38,11 @@ export async function pollRoomRows(call: RoomRowsCall, request: RoomRowsRequest,
   try {
     const value = await call('group-rows', { roomId: request.roomId, ...request.range }, signal)
     if (!isObject(value)) throw new Error('group-rows returned an unexpected payload')
-    return { rows: objects(value.rows), open: value.open === true, legacy: false, answered: true }
+    // `open` covers "a later anchor may end these rows"; `active` (DS-Bot 0.3.2+) says
+    // whether the group is working right now. Without `active` a settled newest round
+    // keeps `open` true until the user's next message, which polled once a second forever.
+    const open = value.open === true && value.active !== false
+    return { rows: objects(value.rows), open, legacy: false, answered: true }
   } catch (error) {
     if (signal?.aborted) throw error
   }
