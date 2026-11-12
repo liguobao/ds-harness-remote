@@ -191,3 +191,13 @@ it('persists group rounds with history and isolates scopes', async () => {
   await restored.clearBrowseMemory()
   expect(restored.getCachedGroupRound('host-a', 'room', 'range')).toBeUndefined()
 })
+
+it('keeps the last non-empty rows when a later poll knows nothing yet', async () => {
+  const memory = await load()
+  memory.saveGroupRound('host-a', 'room', 'call:1', [{ text: 'said so' }])
+  memory.saveGroupRound('host-a', 'room', 'call:1', [])
+  expect(memory.getCachedGroupRound('host-a', 'room', 'call:1')).toEqual([{ text: 'said so' }])
+  memory.saveGroupRound('host-a', 'room', 'call:1', [{ text: 'said more' }])
+  expect(memory.getCachedGroupRound('host-a', 'room', 'call:1')).toEqual([{ text: 'said more' }])
+  await memory.clearBrowseMemory()
+})

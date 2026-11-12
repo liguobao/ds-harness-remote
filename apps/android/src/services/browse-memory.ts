@@ -240,6 +240,9 @@ export function getCachedGroupRound(scope: string, id: string, round: string) {
   return useBrowseMemory.getState().entries[browseKey(scope, id)]?.groupRounds?.[round]
 }
 export function saveGroupRound(scope: string, id: string, round: string, rows: Record<string, unknown>[]): void {
+  // A poll that catches the round before any member spoke knows nothing the persisted
+  // rows do not; storing that empty array made the live overlay shadow the fetched rows.
+  if (rows.length === 0) return
   const entry = useBrowseMemory.getState().entries[browseKey(scope, id)]
   const rounds = { ...entry?.groupRounds }
   delete rounds[round]

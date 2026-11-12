@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'r
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
-import { pollRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
+import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
@@ -668,6 +668,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
   const liveRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[`call:${callId}`] : undefined)
   const [loadError, setLoadError] = useState<string>()
   const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? [] : [])
+  const shown = preferredRoomRows(liveRows, rows)
   useEffect(() => {
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -702,7 +703,7 @@ function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
     return () => { control.abort(); if (timer) clearTimeout(timer) }
   }, [client, sessionId, callId, scope, canCache, round])
   return <View>
-    {(liveRows ?? rows)?.length ? <BotReplies rows={liveRows ?? rows} /> : fallback}
+    {shown.length ? <BotReplies rows={shown} /> : fallback}
     {loadError && <Text accessibilityRole="alert">{loadError}</Text>}
   </View>
 }
