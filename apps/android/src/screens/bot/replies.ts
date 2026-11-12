@@ -66,7 +66,7 @@ function isReplyEnvelope(parsed: unknown): parsed is { replies: unknown[] } {
     && Array.isArray((parsed as { replies?: unknown }).replies)
 }
 
-const REPLY_KINDS = new Set(['user', 'failed', 'approval', 'working', 'missed', 'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup'])
+const REPLY_KINDS = new Set(['user', 'failed', 'approval', 'working', 'missed', 'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup', 'folder', 'admin-passed', 'paused'])
 
 /** ds-bot reply entries always carry a spoken text or a known status kind. */
 function isReplyEntry(entry: unknown): entry is BotObject {
@@ -146,4 +146,26 @@ function salvageReplyArray(truncated: string): BotObject[] | undefined {
     } catch { return [] }
   })
   return replies.length > 0 ? replies : undefined
+}
+
+export function parseRelayRange(raw: string | undefined): { from: number; to?: number; anchor?: string } | undefined {
+  try {
+    const value = JSON.parse(raw ?? '')
+    if (!Number.isInteger(value?.from)) return undefined
+    return { from: value.from, ...(Number.isInteger(value.to) ? { to: value.to } : {}), ...(typeof value.anchor === 'string' ? { anchor: value.anchor } : {}) }
+  } catch { return undefined }
+}
+
+/** DS-Bot stacks only adjacent spoken messages by the same identified member. */
+export function stackBotReplies(rows: BotObject[]): { reply: BotObject; texts: string[] }[] {
+  const result: { reply: BotObject; texts: string[] }[] = []
+  for (const reply of rows) {
+    const previous = result.at(-1)
+    if (reply.kind === undefined && typeof reply.botId === 'string'
+      && previous?.reply.kind === undefined && previous?.reply.botId === reply.botId) {
+      previous.texts.push(typeof reply.text === 'string' ? reply.text : '')
+      previous.reply = reply
+    } else result.push({ reply, texts: [typeof reply.text === 'string' ? reply.text : ''] })
+  }
+  return result
 }

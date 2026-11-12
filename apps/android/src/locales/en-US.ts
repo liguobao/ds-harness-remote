@@ -108,6 +108,8 @@ const enUS = {
     "defaultEffort": "Default",
     "resetEffort": "Reset to default",
     "viaPlatform": (platform: string) => `via ${platform}`,
+    "relayTyping": "Typing…",
+    "relayEvents": {"working": "Started working", "approval": "Waiting for approval", "missed": "Did not answer in time", "done": "Finished working", "stopped": "Stopped", "cut": "Interrupted by restart", "resumed": "Resumed after restart", "lookup": "Looked up its own chat", "admin-passed": "No reply; @ a member", "paused": "Paused"},
     "relayFailed": (name: string, reason: string) => `${name} stopped: ${reason}. Switch its model or ask it to go on.`,
     "desktopActionRequired": "This request (connector, mail, or computer use) requires confirmation on the Host desktop.",
     "askBot": (name: string) => `Ask ${name}`,

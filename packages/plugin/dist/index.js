@@ -79133,6 +79133,7 @@ var BOT_REMOTE_OPERATIONS = [
   "thinking",
   "usage",
   "room-progress",
+  "group-rows",
   "schedules",
   "schedule-create",
   "schedule-delete",

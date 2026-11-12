@@ -20,14 +20,17 @@ import type { UiArtifact } from '../../state/ui-artifacts'
 import { buildBotMentionRows, type ReferenceChatCandidate } from './at-menu'
 import { BotAvatar } from './avatar'
 import { BotQuestion, BotSettledCard, BotViewCard } from './cards'
-import { parseBotReplyPayload } from './replies'
+import { parseBotReplyPayload, parseRelayRange } from './replies'
 import { BotReplies, BotViaPill } from './reply-view'
 import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
 import { BotPlusMenuModal, ReferenceChatModal, ReferencedChatPills } from './reference-chat-modal'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
+import { BotMessageActionsContext } from '../message-actions'
 import { SessionToolsPanel } from '../session-tools-panel'
+
+import { browseScope, browseKey, useBrowseMemory, getCachedGroupRound, saveGroupRound } from '../../services/browse-memory'
 
 const EMPTY: ChatItem[] = []
 type BotChatRow =
@@ -67,6 +70,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const openSession = useAppStore(store => store.openSession)
   const connected = useAppStore(store => store.connection.phase === 'connected')
   const [progress, setProgress] = useState<BotObject[]>([])
+  const [speaking, setSpeaking] = useState<string[]>([])
   const [earlier, setEarlier] = useState<BotObject[]>([])
   const [cursor, setCursor] = useState<unknown>(undefined)
   const [olderBusy, setOlderBusy] = useState(false)
@@ -199,7 +203,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     || (room !== undefined && (room.sessionId || room.id) !== session.sessionId)
     || state.readOnly !== undefined
   const disabled = busy || inputDisabled
-  useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
+  useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setSpeaking([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
   useEffect(() => { mounted.current = true; request.current = new AbortController(); return () => { mounted.current = false; request.current.abort() } }, [session.sessionId])
   useEffect(() => {
     if (room === undefined || !active) return
@@ -208,13 +212,25 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const tick = async () => {
       try {
         const value = await client.call('room-progress', { roomId: room.id }, control.signal)
-        if (!control.signal.aborted) setProgress(objects(value).flatMap(entry => objects(entry.replies)))
+        if (!control.signal.aborted) {
+          setSpeaking([...new Set(objects(value).flatMap(entry => Array.isArray(entry.speaking) ? entry.speaking.filter((id): id is string => typeof id === 'string') : typeof entry.speaking === 'string' ? [entry.speaking] : []))])
+          const store = useAppStore.getState()
+          if (store.config?.baseUrl && store.selectedDevice?.identityKey) {
+            for (const entry of objects(value)) {
+              if (typeof entry.callId === 'string') saveGroupRound(browseScope(store), session.sessionId, `call:${entry.callId}`, objects(entry.replies))
+            }
+          }
+        }
+        if (!control.signal.aborted) setProgress(objects(value).filter(entry => {
+          const call = (useAppStore.getState().messages[session.sessionId] ?? []).find(item => item.id === entry.callId)
+          return call?.kind !== 'tool' || call.state !== 'finished'
+        }).flatMap(entry => objects(entry.replies)))
       } catch { /* The parent state refresh reports connection and Host errors. */ }
       if (!control.signal.aborted) timer = setTimeout(() => void tick(), 2000)
     }
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
-  }, [client, room?.id, active])
+  }, [client, room?.id, session.sessionId, active])
   const send = async () => {
     const rawDraft = draftRef.current.trim()
     const submittedRefs = stagedReferences
@@ -373,8 +389,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (item.toolKey === 'show_view') return true
     if (item.toolKey === 'ask_user' && text(closedCards[item.id]) !== '') return true
     // A single Bot can relay a group round too; the payload determines presentation.
-    // A partial or Host-truncated round still shows its recovered replies next to
-    // the expandable tool diagnostics instead of hiding either one.
+    if (item.state === 'finished' && parseRelayRange(item.resultDetail?.text)) return true
     if (item.state === 'finished') return (parseBotReplyPayload(item.resultDetail?.text)?.rows.length ?? 0) > 0
     return false
   }
@@ -383,7 +398,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       // Native system context/receipts can arrive without a turn identifier.
       // They still belong in a disclosure rather than the visible chat body.
       if (section.item.kind === 'message' && section.item.role === 'system') {
-        return [{ kind: 'activity', key: `activity:${section.item.id}`, items: [section.item], closed: true }]
+        return []
       }
       return [section]
     }
@@ -399,7 +414,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
 
     const segments = processSegments(section.items)
     const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
-    const closed = section.items.some(item => item.turnEnd !== undefined) || !selected?.running
 
     const sectionRows: BotChatRow[] = segments.flatMap((segment, index): BotChatRow[] => {
       if (segment.kind === 'response') {
@@ -413,27 +427,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       }
       // Cards and group replies stay visible; only intermediate activity folds.
       const result: BotChatRow[] = []
-      let pending: ChatItem[] = []
-      const flush = () => {
-        if (pending.length) {
-          result.push({
-            kind: 'activity',
-            key: `activity:${pending[0]!.id}`,
-            items: pending,
-            closed: closed || index < segments.length - 1,
-          })
-          pending = []
-        }
-      }
       for (const item of segment.items) {
         if (isDisplayTool(item) || item.kind === 'approval' || item.kind === 'question') {
-          flush()
           result.push({ kind: 'item', key: item.id, item })
-        } else {
-          pending.push(item)
         }
       }
-      flush()
       return result
     })
 
@@ -497,20 +495,17 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       } catch { /* Retain the native tool row if its args are unavailable. */ }
     }
     if (item.kind === 'tool' && item.state === 'finished') {
+      const range = parseRelayRange(item.resultDetail?.text)
+      if (range) return <BotLedgerReplies key={`${session.sessionId}:${item.id}`} client={client} sessionId={session.sessionId} callId={item.id} range={range} fallback={null} />
       const payload = parseBotReplyPayload(item.resultDetail?.text)
       if (payload !== undefined && payload.rows.length > 0) {
-        // A whole round is conversation content; a partially recovered or
-        // Host-truncated one keeps its expandable tool diagnostics beside it.
-        if (payload.complete && !payload.truncated) return <BotReplies rows={payload.rows} />
-        return <View style={styles.section}>
-          <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
-          <BotReplies rows={payload.rows} />
-        </View>
+        return <BotReplies rows={payload.rows} />
       }
     }
+    if (item.kind === 'tool') return null
     return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
   }
-  return <MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
+  return <BotMessageActionsContext.Provider value={true}><MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
     <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => (
       <View style={{ paddingTop: index > 0 && rows[index - 1]?.kind !== 'activity' ? 8 : 0 }}>
         {item.kind === 'activity' ? (
@@ -557,6 +552,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} />}
+        {room && speaking.map(id => <View key={id} style={styles.row}><ActivityIndicator size="small" /><Text style={styles.muted}>{state.bots.find(bot => bot.id === id)?.name ?? id} · {s.bots.relayTyping}</Text></View>)}
         {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
         {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} onDelete={() => void perform('btw-delete', { sessionId: bot.id, id: card.id })} />)}
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
@@ -659,5 +655,74 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     {fileLinkPath !== undefined && connected && ready && <SessionToolsPanel
       key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}
       initialFile={fileLinkPath} onClose={() => setFileLinkPath(undefined)} />}
-  </View></MarkdownLinkProvider>
+  </View></MarkdownLinkProvider></BotMessageActionsContext.Provider>
+}
+
+function BotLedgerReplies({ client, sessionId, callId, range, fallback }: {
+  client: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }; fallback: React.ReactNode
+}) {
+  const scope = useAppStore(browseScope)
+  const canCache = useAppStore(state => Boolean(state.config?.baseUrl && state.selectedDevice?.identityKey))
+  const round = JSON.stringify([range.from, range.to, range.anchor])
+  const liveRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[`call:${callId}`] : undefined)
+  const [loadError, setLoadError] = useState<string>()
+  const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? [] : [])
+  useEffect(() => {
+    const control = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    setLoadError(undefined)
+    setRows(canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
+    const tickLegacy = async () => {
+      try {
+        const progress = objects(await client.call('room-progress', { roomId: sessionId }, control.signal))
+        if (control.signal.aborted) return
+        const entry = progress.find(entry => entry.callId === callId)
+        if (!entry) return
+        const next = objects(entry.replies)
+        setRows(next)
+        if (canCache) saveGroupRound(scope, sessionId, round, next)
+      } catch { if (control.signal.aborted) return }
+      timer = setTimeout(() => void tickLegacy(), 2000)
+    }
+    const tick = async () => {
+      try {
+        const value = object(await client.call('group-rows', { roomId: sessionId, ...range }, control.signal))
+        if (control.signal.aborted) return
+        setLoadError(undefined)
+        if (Array.isArray(value.rows)) {
+          const next = objects(value.rows)
+          setRows(next)
+          if (canCache) saveGroupRound(scope, sessionId, round, next)
+        }
+        if (value.open !== true) return
+      } catch (error) {
+        if (control.signal.aborted) return
+        const message = error instanceof Error ? error.message : s.bots.unavailable
+        if (message.includes('The plugin route call is invalid for the remote channel')) {
+          // Older Remote Hosts reject the new read route before reaching DS-Bot.
+          // Live rows use the existing route and remain available after settlement.
+          try {
+            const progress = objects(await client.call('room-progress', { roomId: sessionId }, control.signal))
+            if (control.signal.aborted) return
+            const entry = progress.find(entry => entry.callId === callId)
+            if (entry) {
+              const next = objects(entry.replies)
+              setRows(next)
+              if (canCache) saveGroupRound(scope, sessionId, round, next)
+              timer = setTimeout(() => void tickLegacy(), 2000)
+            }
+          } catch { /* Retain the encrypted snapshot while disconnected. */ }
+          return
+        }
+        setLoadError(message)
+      }
+      timer = setTimeout(() => void tick(), 1000)
+    }
+    void tick()
+    return () => { control.abort(); if (timer) clearTimeout(timer) }
+  }, [client, sessionId, callId, scope, canCache, round])
+  return <View>
+    {(liveRows ?? rows)?.length ? <BotReplies rows={liveRows ?? rows} /> : fallback}
+    {loadError && <Text accessibilityRole="alert">{loadError}</Text>}
+  </View>
 }

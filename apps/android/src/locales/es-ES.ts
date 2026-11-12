@@ -108,6 +108,8 @@ const esES = {
     "defaultEffort": "Predeterminado",
     "resetEffort": "Restablecer predeterminado",
     "viaPlatform": (platform: string) => `vía ${platform}`,
+    "relayTyping": "Escribiendo…",
+    "relayEvents": {"working": "Empezó a trabajar", "approval": "Esperando aprobación", "missed": "No respondió a tiempo", "done": "Trabajo terminado", "stopped": "Detenido", "cut": "Interrumpido por reinicio", "resumed": "Reanudado tras reinicio", "lookup": "Consultó su conversación", "admin-passed": "Sin respuesta; menciona a un miembro con @", "paused": "En pausa"},
     "relayFailed": (name: string, reason: string) => `${name} se detuvo: ${reason}. Cambia su modelo o pídele que continúe.`,
     "desktopActionRequired": "Esta solicitud (conector, correo o uso del equipo) requiere confirmación en el escritorio del Host.",
     "askBot": (name: string) => `Preguntar a ${name}`,

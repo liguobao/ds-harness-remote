@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { parseBotReplies, parseBotReplyPayload } from '../src/screens/bot/replies'
+import { parseBotReplies, parseBotReplyPayload, stackBotReplies } from '../src/screens/bot/replies'
 
 // Shapes mirror ds-bot/src/host/groups.js round.replies entries.
 const message = (text: string) => ({ botId: 'session-1', name: 'Chief', color: 'deepseek', text, time: 1 })
@@ -104,4 +104,9 @@ describe('Bot reply payload completeness', () => {
     // The legacy accessor stays a thin wrapper for callers that only need rows.
     expect(parseBotReplies(hostCompacted)).toHaveLength(3)
   })
+})
+
+it('stacks adjacent member messages but preserves user and event boundaries', () => {
+  const rows = [message('one'), message('two'), {kind: 'user', text: 'hello'}, message('three'), {kind: 'done', botId: 'session-1'}, message('four')]
+  expect(stackBotReplies(rows).map(row => row.texts)).toEqual([['one', 'two'], ['hello'], ['three'], [''], ['four']])
 })

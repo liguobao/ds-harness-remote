@@ -101,7 +101,7 @@ export interface BotState {
 // Android only exposes the reviewed Bot workflows, never arbitrary plugin routes.
 export const BOT_OPERATIONS = [
   'state', 'models', 'efforts', 'providers', 'local-agents',
-  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress',
+  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'group-rows',
   'schedules', 'schedule-create', 'schedule-delete',
   'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore',
   'folders', 'folder-list', 'team-workspace', 'set-prefs',

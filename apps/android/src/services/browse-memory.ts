@@ -8,6 +8,7 @@ export type ReadingPosition = { key?: string; offset: number; atBottom: boolean 
 export type BrowseEntry = {
   draft?: string; images?: PromptImage[]; quotes?: string[]; position?: ReadingPosition; starred?: boolean
   seenAt?: number; visitedAt?: number; session?: RemoteSession
+  groupRounds?: Record<string, Record<string, string | number | boolean | null>[]>
   messages?: ChatItem[]
 }
 type Snapshot = {
@@ -91,7 +92,7 @@ export function enforceSessionMessageLimits(
     entry.visitedAt ?? entry.seenAt ?? entry.session?.updatedAt ?? 0
 
   const entriesWithMessages = Object.entries(entries).filter(
-    ([_, entry]) => entry.messages && entry.messages.length > 0,
+    ([_, entry]) => (entry.messages && entry.messages.length > 0) || Object.keys(entry.groupRounds ?? {}).length > 0,
   )
 
   if (entriesWithMessages.length <= MAX_CACHED_SESSIONS) return entries
@@ -103,8 +104,8 @@ export function enforceSessionMessageLimits(
 
   const next: Record<string, BrowseEntry> = {}
   for (const [k, entry] of Object.entries(entries)) {
-    if (entry.messages && !allowedKeys.has(k)) {
-      const { messages: _dropped, ...rest } = entry
+    if ((entry.messages || entry.groupRounds) && !allowedKeys.has(k)) {
+      const { messages: _dropped, groupRounds: _rounds, ...rest } = entry
       next[k] = rest
     } else {
       next[k] = entry
@@ -137,6 +138,7 @@ function savedEntry(value: BrowseEntry): BrowseEntry {
   return { draft: value.draft, position: value.position, starred: value.starred,
     seenAt: value.seenAt, visitedAt: value.visitedAt,
     session: value.session === undefined ? undefined : safeSession(value.session),
+    groupRounds: sanitizeGroupRounds(value.groupRounds),
     ...(messages !== undefined ? { messages } : {}) }
 }
 function snapshot(): Snapshot {
@@ -220,4 +222,27 @@ export async function clearBrowseMemory(): Promise<void> {
 export function saveHostMode(scope: string, mode: 'agent' | 'bot'): void {
   useBrowseMemory.setState(state => ({hostModes: {...state.hostModes, [scope]: mode}}))
   void flushBrowseMemory()
+}
+
+// Keep the same session LRU, encryption and reset lifecycle as ordinary history.
+function sanitizeGroupRounds(value: BrowseEntry['groupRounds']): BrowseEntry['groupRounds'] {
+  if (!value || typeof value !== 'object') return undefined
+  return Object.fromEntries(Object.entries(value).slice(-30).flatMap(([id, rows]) => {
+    if (!Array.isArray(rows)) return []
+    const safe = rows.slice(-32).filter(row => row && typeof row === 'object').map(row =>
+      Object.fromEntries(Object.entries(row).slice(0, 24).flatMap<[string, string | number | boolean | null]>(([field, v]) =>
+        typeof v === 'string' ? [[field, v.slice(0, 2048)]] :
+          v === null || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v)) ? [[field, v]] : [])))
+    return [[id, safe]]
+  }))
+}
+export function getCachedGroupRound(scope: string, id: string, round: string) {
+  return useBrowseMemory.getState().entries[browseKey(scope, id)]?.groupRounds?.[round]
+}
+export function saveGroupRound(scope: string, id: string, round: string, rows: Record<string, unknown>[]): void {
+  const entry = useBrowseMemory.getState().entries[browseKey(scope, id)]
+  const rounds = { ...entry?.groupRounds }
+  delete rounds[round]
+  const safe = sanitizeGroupRounds({ [round]: rows as NonNullable<BrowseEntry['groupRounds']>[string] })!
+  updateBrowseEntry(scope, id, { groupRounds: sanitizeGroupRounds({ ...rounds, ...safe }), visitedAt: Date.now() })
 }

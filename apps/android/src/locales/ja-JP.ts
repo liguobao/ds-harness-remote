@@ -108,6 +108,8 @@ const jaJP = {
     "defaultEffort": "デフォルト",
     "resetEffort": "デフォルトに戻す",
     "viaPlatform": (platform: string) => `${platform} 経由`,
+    "relayTyping": "入力中…",
+    "relayEvents": {"working": "作業開始", "approval": "承認待ち", "missed": "応答がタイムアウト", "done": "作業完了", "stopped": "停止", "cut": "再起動で中断", "resumed": "再起動後に再開", "lookup": "自分の会話を検索", "admin-passed": "応答なし・メンバーを @ で指定", "paused": "一時停止"},
     "relayFailed": (name: string, reason: string) => `${name} が停止しました：${reason}。モデルを切り替えるか、続行を指示してください。`,
     "desktopActionRequired": "このリクエスト（コネクタ / メール / PC 操作）はホストのデスクトップで確認が必要です。",
     "askBot": (name: string) => `${name} に質問`,

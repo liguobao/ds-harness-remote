@@ -108,6 +108,8 @@ const deDE = {
     "defaultEffort": "Standard",
     "resetEffort": "Auf Standard zurücksetzen",
     "viaPlatform": (platform: string) => `über ${platform}`,
+    "relayTyping": "Schreibt…",
+    "relayEvents": {"working": "Arbeit begonnen", "approval": "Wartet auf Freigabe", "missed": "Keine rechtzeitige Antwort", "done": "Arbeit abgeschlossen", "stopped": "Gestoppt", "cut": "Durch Neustart unterbrochen", "resumed": "Nach Neustart fortgesetzt", "lookup": "Eigenen Chat durchsucht", "admin-passed": "Keine Antwort; Mitglied mit @ ansprechen", "paused": "Pausiert"},
     "relayFailed": (name: string, reason: string) => `${name} gestoppt: ${reason}. Modell wechseln oder zum Fortfahren auffordern.`,
     "desktopActionRequired": "Diese Anfrage (Konnektor, E-Mail oder Computersteuerung) erfordert eine Bestätigung auf dem Host-Desktop.",
     "askBot": (name: string) => `${name} fragen`,

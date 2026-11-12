@@ -106,6 +106,8 @@ const zhTW = {
     "defaultEffort": "預設",
     "resetEffort": "恢復預設",
     "viaPlatform": (platform: string) => `來自 ${platform}`,
+    "relayTyping": "正在輸入…",
+    "relayEvents": {"working": "開始處理", "approval": "等待審批", "missed": "未及時回覆", "done": "已完成", "stopped": "已停止", "cut": "重啟後中斷", "resumed": "重啟後恢復", "lookup": "搜尋了自己的對話", "admin-passed": "未回覆，請 @成員", "paused": "已暫停"},
     "relayFailed": (name: string, reason: string) => `${name} 停下了：${reason}。換個模型，或讓它繼續。`,
     "desktopActionRequired": "此請求（連接器 / 郵件 / 電腦操控）需在主機桌面端確認。",
     "askBot": (name: string) => `向 ${name} 提問`,

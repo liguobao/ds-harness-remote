@@ -106,6 +106,8 @@ const zhCN = {
     "defaultEffort": "默认",
     "resetEffort": "恢复默认",
     "viaPlatform": (platform: string) => `来自 ${platform}`,
+    "relayTyping": "正在输入…",
+    "relayEvents": {"working": "开始处理", "approval": "等待审批", "missed": "未及时回复", "done": "已完成", "stopped": "已停止", "cut": "重启后中断", "resumed": "重启后恢复", "lookup": "检索了自己的对话", "admin-passed": "未回复，请 @成员", "paused": "已暂停"},
     "relayFailed": (name: string, reason: string) => `${name} 停下了：${reason}。换个模型，或让它继续。`,
     "desktopActionRequired": "此请求（连接器 / 邮件 / 电脑操控）需在主机桌面端确认。",
     "askBot": (name: string) => `向 ${name} 提问`,

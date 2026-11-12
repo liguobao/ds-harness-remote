@@ -108,6 +108,8 @@ const frFR = {
     "defaultEffort": "Par défaut",
     "resetEffort": "Réinitialiser par défaut",
     "viaPlatform": (platform: string) => `via ${platform}`,
+    "relayTyping": "Écrit…",
+    "relayEvents": {"working": "Travail commencé", "approval": "En attente d’approbation", "missed": "Pas de réponse à temps", "done": "Travail terminé", "stopped": "Arrêté", "cut": "Interrompu au redémarrage", "resumed": "Repris après redémarrage", "lookup": "Conversation personnelle consultée", "admin-passed": "Aucune réponse ; mentionnez un membre avec @", "paused": "En pause"},
     "relayFailed": (name: string, reason: string) => `${name} s’est arrêté : ${reason}. Changez son modèle ou demandez-lui de continuer.`,
     "desktopActionRequired": "Cette demande (connecteur, e-mail ou contrôle de l’ordinateur) nécessite une confirmation sur le bureau de l’hôte.",
     "askBot": (name: string) => `Demander à ${name}`,

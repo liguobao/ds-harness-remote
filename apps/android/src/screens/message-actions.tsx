@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { AccessibilityInfo, Alert, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import type { ChatItemBase, ChatMessage, RemoteSession } from '../types'
@@ -142,6 +142,8 @@ export function TurnUsageModal({
 }
 
 /** Mutating icons only change after the official Host write has been read back. */
+export const BotMessageActionsContext = createContext(false)
+
 export function MessageActions({ item }: { item: ChatMessage }) {
   const { colors } = useTheme()
   const connected = useAppStore(state => state.connection.phase === 'connected')
@@ -154,7 +156,8 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const harness = session !== undefined && isDeepSeekHarness
   // Only delivered Harness messages have an official event prefix to fork.
   const pending = item.sendState !== undefined
-  const supportsBranch = harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
+  const botConversation = useContext(BotMessageActionsContext)
+  const supportsBranch = !botConversation && harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
   const time = messageTime(item)
   const fork = useAppStore(state => state.forkChatMessage)
   const [copied, setCopied] = useState(false)
@@ -233,7 +236,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
 
   return (
     <>
-      <View style={styles.assistantRow}>
+      <View style={[styles.assistantRow, botConversation && { justifyContent: 'flex-end' }]}>
         <Animated.View style={{ opacity: copyOpacity }}>
           <Pressable
             accessibilityRole="button"
@@ -263,7 +266,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
             <IconBranchOutline size={14} color={colors.muted} />
           </Pressable>
         )}
-        {!pending && isDeepSeekHarness && item.usage !== undefined && (
+        {!botConversation && !pending && isDeepSeekHarness && item.usage !== undefined && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.usage}
