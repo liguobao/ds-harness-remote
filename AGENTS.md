@@ -21,6 +21,25 @@ WSL 隔离 profile 运行 DSH 0.2.2-rc.1、DS-Bot 0.3.6 和本插件。
 
 # Repository Guide for Agents
 
+## Local plugin online upgrade (2026-11-05)
+
+Harness `0.2.2-rc.1` 的 `pluginManager.updateBundle` 可以替换从 npm registry 安装、
+且被标记 `updatable` 的第三方 bundle。本机 Remote 弹窗在 registry 检查确认有新版本、
+并且官方 `listBundles` 认定当前安装可更新时，footer 的「{latest} 可用」调用该接口，
+旁边保留「发布页」链接。GitHub、本地路径和其他非 registry 安装仍只打开 Releases。只接受本次 registry 检查得到的
+`latest`，不接受调用方自报版本。升级走本机 loopback `plugin.update`。官方管理器先检查
+再卸载，检查失败不改安装；进入卸载后由管理器继续安装，失败时按其自身规则回滚。
+加密 Remote 通道仍然拒绝替换 Remote 自身或拥有它的 bundle。旧 Host 没有该接口时保持
+原来的 Releases 链接。
+
+`plugin.update` 的响应丢失有歧义：管理器卸载本插件时响应会随之断开，但请求未到达 Host
+前的断网表现相同，不能凭错误文案（`failed to fetch`、`ECONNRESET` 等）判定升级已开始。
+弹窗改为轮询 `status`：Host 报告版本不低于目标版本才显示重新加载；控制通道不可达时
+最多等待 60 秒；存活的 Host 连续三次仍报告旧版本，或等待超时，则恢复按钮并提示
+「升级状态未知，点击重试」。响应明确返回 `started` 的路径不变。回归测试
+`plugin-upgrade-settle.test.ts` 覆盖请求未到达即断网、卸载后重载、等待超时和新装插件
+尚无 registry 快照；未做真实 Desktop 升级中途断网的人工验收。
+
 ## Remote async compaction (Issue #416 / PR #420, 2026-11-12)
 
 Remote 转发 `commands/execute` 的 60s deadline 会中止合法的长压缩（本地 prefill 约 1k tok/s，

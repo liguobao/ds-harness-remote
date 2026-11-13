@@ -22,6 +22,7 @@ import { ServerCredentialStore, ServerCredentialsInvalidError } from './server-c
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
 import type { PluginUpdateSnapshot } from './update-check.js'
+import type { PluginSelfUpdateResult } from './plugin-self-update.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
 import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
@@ -107,8 +108,14 @@ export class PluginControlRuntime {
       client: ClientModeRuntime | undefined
       host: HostAuthorizationControl
     }>,
-    /** Update-check snapshots merged into every `status` result; absent when the plugin is disabled. */
-    private readonly updates?: { snapshot(): PluginUpdateSnapshot | undefined },
+    /**
+     * Update-check snapshots merged into every `status` result, and the local
+     * online upgrade. Absent when the plugin is disabled.
+     */
+    private readonly updates?: {
+      snapshot(): PluginUpdateSnapshot | undefined
+      start?(version: string): Promise<PluginSelfUpdateResult>
+    },
     private readonly useDefaultStorage = false,
     private readonly logStore?: HostLogStore,
   ) {}
@@ -184,6 +191,7 @@ export class PluginControlRuntime {
         this.host.reconnectHost()
         return withUpdate(ok(this.hostOnlyStatus()), this.updates?.snapshot())
       }
+      if (endpoint === 'plugin.update') return ok(await this.updatePlugin(payload))
       if (endpoint === 'status') {
         if (this.startupFailure !== undefined) {
           const startupError = safeStartupError(this.startupFailure)
@@ -736,6 +744,25 @@ export class PluginControlRuntime {
       }
       throw error
     }
+  }
+
+  /**
+   * Replace this Desktop install through the official plugin manager.
+   * A version the registry check did not publish is refused. Installs the
+   * manager cannot update stay on the manual releases path.
+   */
+  private async updatePlugin(payload: unknown): Promise<{ status: string; message?: string }> {
+    const version = record(payload).version
+    if (typeof version !== 'string' || version.trim() === '') {
+      throw new ClientModeError('INVALID_MESSAGE', 'A plugin version is required.')
+    }
+    if (this.updates?.start === undefined) return { status: 'manual' }
+    const outcome = await this.updates.start(version)
+    if (outcome.status === 'rejected') {
+      throw new ClientModeError('INVALID_MESSAGE', 'That version is not the published update.')
+    }
+    if (outcome.status === 'failed') return { status: 'failed', message: outcome.message }
+    return { status: outcome.status }
   }
 
   private hostOnlyStatus(): Record<string, unknown> {
