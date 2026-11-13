@@ -343,6 +343,64 @@ describe('HostPluginRuntime multi-Client routing', () => {
     )
   })
 
+  it('advertises remote.session.events.v1 only when DSH >= 0.2.0 and $events opens live', async () => {
+    await runScenarios([
+      {
+        name: 'live DSH 0.2.2 host',
+        version: '0.2.2-rc.1',
+        open: async () => (async function* () {
+          yield { type: 'ready', clientId: 'c1', host: { home: '/tmp' } }
+        })(),
+        expected: true,
+      },
+      {
+        name: 'missing dsh-api-remotes ($events service unavailable)',
+        version: '0.2.2-rc.1',
+        open: async () => { throw Object.assign(new Error('unavailable'), { code: 'gateway/service-unavailable' }) },
+        expected: false,
+      },
+      {
+        name: 'older 0.1.5 host',
+        version: '0.1.5-rc.1',
+        open: async () => (async function* () {
+          yield { type: 'ready', clientId: 'c1', host: { home: '/tmp' } }
+        })(),
+        expected: false,
+      },
+    ].map(({ name, version, open, expected }) => ({
+      name,
+      run: async () => {
+        const gateway = localGateway()
+        gateway.open = vi.fn(open) as unknown as LocalTypertGateway['open']
+        const runtime = new HostPluginRuntime(config(), identities(), logger(), gateway)
+        const internal = runtime as unknown as {
+          readHarnessVersion(): Promise<string>
+          createServerConnection(): unknown
+        }
+        vi.spyOn(internal, 'readHarnessVersion').mockResolvedValue(version)
+        vi.spyOn(internal, 'createServerConnection').mockReturnValue({ start: vi.fn(), stop: vi.fn(async () => undefined), isOnline: () => true, lastError: () => undefined })
+        const channel = fakeChannel('events-cap-' + name, 'client-phone')
+        try {
+          await runtime.start()
+          ;(runtime as unknown as { harnessVersion: string }).harnessVersion = version
+          await runtime.acceptAuthenticatedPeer(channel)
+          const request = createRpcRequest('harness.transport.describe', {})
+          channel.push(request)
+          let response: RemoteMessage | undefined
+          await vi.waitFor(() => {
+            response = channel.sent().find(row => row.type === 'rpc.response'
+              && (row.payload as RpcResponsePayload).requestId === request.id)
+            expect(response).toBeDefined()
+          })
+          const capabilities = ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+          expect(capabilities.includes('remote.session.events.v1')).toBe(expected)
+        } finally {
+          await runtime.close()
+        }
+      },
+    })))
+  })
+
   it('allows identical stream ids on different Client connections without crossing frames', async () => {
     const streamSignals: AbortSignal[] = []
     const gateway = localGateway()

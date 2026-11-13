@@ -147,7 +147,7 @@ export function ChatScreen({
   const reduceMotion = useReduceMotion()
   const session = useAppStore(state => state.selectedSession)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
-  // Legacy Hosts keep the 8s poll; ≥0.6.5 Hosts use catalog-change commands only.
+  // Legacy Hosts keep the 8s poll; event-capable Hosts use `$events` + `session/control`.
   // Keep this mounted in chat so subagent/running updates still arrive when list screens unmount.
   useLiveSessionStatus(!botMode && session !== undefined && (session.backend ?? 'harness') === 'harness')
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)

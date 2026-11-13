@@ -51,6 +51,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   devices: [],
   connection: disconnected,
   connectionProbeOrder: [],
+  hostSessionEvents: false,
   codexAvailable: false,
   cursorAvailable: false,
   antigravityAvailable: false,

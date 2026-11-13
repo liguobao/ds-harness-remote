@@ -497,6 +497,7 @@ export const transportCapabilities = [
 export const harnessCapabilityValues = [
   'remote.history.compact.v1',
   'remote.compaction.async.v1',
+  'remote.session.events.v1',
   'workspace.upload.v1',
   'harness.api.v1',
   'harness.api.transfer.v1',
@@ -743,6 +744,7 @@ export interface HarnessRemoteStreamClosedData {
  * `compaction/end` event never fabricates success.
  */
 export const REMOTE_COMPACTION_CAPABILITY = 'remote.compaction.async.v1'
+export const REMOTE_SESSION_EVENTS_CAPABILITY = 'remote.session.events.v1'
 
 /** Operation states visible to Remote clients. */
 export type RemoteCompactionState =

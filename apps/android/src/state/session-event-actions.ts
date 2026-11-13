@@ -11,7 +11,6 @@ import { applyCursorFrame, cursorNativeId } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
-import { requestSessionListOnCatalogChange } from './session-catalog-commands'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
 import type { AppState } from './store-state'
@@ -22,8 +21,119 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
   return {
     handleMuxFrame(frame) {
       if (frame.payload.type === 'session/catalog-changed') {
-        // Host reported a session we have not listed yet — pull once (debounced).
-        requestSessionListOnCatalogChange()
+        runtime.scheduleHarnessCatalogSync()
+        return
+      }
+      if (frame.payload.type === 'session/status') {
+        const { sessionId, running } = frame.payload
+        if (typeof sessionId !== 'string' || typeof running !== 'boolean') return
+        let missingFromCatalog = false
+        set(state => {
+          const existing = state.sessions.find(item => item.sessionId === sessionId)
+          if (existing === undefined) missingFromCatalog = true
+          const entry = state.sessionLifecycles[sessionId]
+          const nextLifecycle = {
+            seq: entry?.seq ?? -1,
+            turn: entry?.turn,
+            running,
+            ...(running
+              ? { finished: undefined }
+              : { finished: entry?.finished === 'failed' ? 'failed' as const : 'completed' as const }),
+          }
+          const rowChanged = existing !== undefined && existing.running !== running
+          const selectedChanged = state.selectedSession?.sessionId === sessionId && state.selectedSession.running !== running
+          return {
+            sessionLifecycles: { ...state.sessionLifecycles, [sessionId]: nextLifecycle },
+            ...(rowChanged ? { sessions: state.sessions.map(item => item.sessionId === sessionId ? { ...item, running } : item) } : {}),
+            ...(selectedChanged && state.selectedSession !== undefined ? { selectedSession: { ...state.selectedSession, running } } : {}),
+          }
+        })
+        if (missingFromCatalog) runtime.scheduleHarnessCatalogSync()
+        return
+      }
+      if (frame.payload.type === 'session/activity') {
+        const { sessionId, updatedAt } = frame.payload
+        if (typeof sessionId !== 'string' || typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) return
+        let missingFromCatalog = false
+        set(state => {
+          const existing = state.sessions.find(item => item.sessionId === sessionId)
+          if (existing === undefined) missingFromCatalog = true
+          const rowChanged = existing !== undefined && updatedAt > existing.updatedAt
+          const selectedChanged = state.selectedSession?.sessionId === sessionId && updatedAt > state.selectedSession.updatedAt
+          if (!rowChanged && !selectedChanged) return {}
+          return {
+            ...(rowChanged ? { sessions: state.sessions.map(item => item.sessionId === sessionId ? { ...item, updatedAt } : item) } : {}),
+            ...(selectedChanged && state.selectedSession !== undefined ? { selectedSession: { ...state.selectedSession, updatedAt } } : {}),
+          }
+        })
+        if (missingFromCatalog) runtime.scheduleHarnessCatalogSync()
+        return
+      }
+      if (frame.payload.type === 'session/error') {
+        const { sessionId } = frame.payload
+        if (typeof sessionId !== 'string') return
+        set(state => {
+          const entry = state.sessionLifecycles[sessionId]
+          const existing = state.sessions.find(item => item.sessionId === sessionId)
+          return {
+            sessionLifecycles: {
+              ...state.sessionLifecycles,
+              [sessionId]: {
+                seq: entry?.seq ?? -1,
+                turn: entry?.turn,
+                running: entry?.running ?? existing?.running ?? false,
+                finished: 'failed' as const,
+              },
+            },
+          }
+        })
+        return
+      }
+      if (frame.payload.type === 'session/added') {
+        const incoming = frame.payload.session
+        if (incoming === undefined) return
+        let needsWorkspaceSync = false
+        set(state => {
+          const existing = state.sessions.find(item => item.sessionId === incoming.sessionId)
+          const isRoot = incoming.parentSessionId === undefined && incoming.origin !== 'subagent'
+          const assigned = state.workspaces.some(w => (w.backend ?? 'harness') === 'harness' && w.sessionIds.includes(incoming.sessionId))
+          if (existing === undefined && isRoot && !assigned) needsWorkspaceSync = true
+          const merged = existing === undefined
+            ? incoming
+            : {
+                ...existing,
+                ...incoming,
+                ...(incoming.title === undefined && existing.title !== undefined ? { title: existing.title } : {}),
+                ...(incoming.projections === undefined && existing.projections !== undefined ? { projections: existing.projections } : {}),
+              }
+          return {
+            sessions: existing === undefined
+              ? [merged, ...state.sessions]
+              : state.sessions.map(item => item.sessionId === incoming.sessionId ? merged : item),
+            ...(state.selectedSession?.sessionId === incoming.sessionId ? { selectedSession: merged } : {}),
+          }
+        })
+        if (needsWorkspaceSync) runtime.scheduleHarnessCatalogSync()
+        return
+      }
+      if (frame.payload.type === 'session/removed') {
+        const { sessionId } = frame.payload
+        if (typeof sessionId !== 'string') return
+        set(state => {
+          const inSessions = state.sessions.some(item => item.sessionId === sessionId)
+          const inWorkspaces = state.workspaces.some(w => (w.backend ?? 'harness') === 'harness' && w.sessionIds.includes(sessionId))
+          if (!inSessions && !inWorkspaces) return {}
+          return {
+            ...(inSessions ? { sessions: state.sessions.filter(item => item.sessionId !== sessionId) } : {}),
+            ...(inWorkspaces
+              ? {
+                  workspaces: state.workspaces.map(w => (w.backend ?? 'harness') === 'harness' && w.sessionIds.includes(sessionId)
+                    ? { ...w, sessionIds: w.sessionIds.filter(id => id !== sessionId) }
+                    : w),
+                }
+              : {}),
+          }
+        })
         return
       }
       set(state => {
@@ -34,6 +144,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           if (seq !== undefined && previous !== undefined && seq < previous) return {}
           const update = (session: RemoteSession): RemoteSession => session.sessionId !== sessionId ? session : {
             ...session,
+            ...(key === 'title' && typeof value === 'string' && value !== '' ? { title: value } : {}),
             projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
           }
           const currentSession = state.sessions.find(item => item.sessionId === sessionId) ?? state.selectedSession

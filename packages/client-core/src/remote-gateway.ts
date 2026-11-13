@@ -2,6 +2,7 @@ import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
   MAX_REMOTE_CAPABILITY_ENTRIES,
+  REMOTE_SESSION_EVENTS_CAPABILITY,
   parseRemoteWorkspaceTypes,
   type EventPayload,
   type HarnessRemoteFrameData,
@@ -39,6 +40,7 @@ export interface RemoteHostFeatures {
   remoteGateway: boolean
   sessionFormat?: 3
   remoteTransfer: boolean
+  sessionEvents: boolean
   pluginRoute: boolean
   capabilities: readonly string[]
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
@@ -99,6 +101,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     apiTransfer: true,
     remoteGateway: false,
     remoteTransfer: false,
+    sessionEvents: false,
     pluginRoute: false,
     capabilities: ['harness.api.v1'],
   }
@@ -143,6 +146,7 @@ export async function probeRemoteHostFeatures(
     remoteGateway,
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
     remoteTransfer: capabilities.has('harness.remote.transfer.v1'),
+    sessionEvents: capabilities.has(REMOTE_SESSION_EVENTS_CAPABILITY),
     pluginRoute: capabilities.has('plugin.route.v1'),
     capabilities: description.capabilities,
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),

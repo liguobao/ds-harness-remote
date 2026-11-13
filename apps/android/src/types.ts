@@ -455,6 +455,12 @@ export interface MuxFrame {
   deadline?: number
   questionRpcId?: string
   error?: unknown
+  session?: RemoteSession
+  running?: boolean
+  updatedAt?: number
+  known?: boolean
+  existed?: boolean
+  message?: string
 }
 
 /** One mux stream frame with its native rpcId (needed to answer approvals/questions). */

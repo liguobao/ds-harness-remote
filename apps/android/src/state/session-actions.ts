@@ -42,7 +42,7 @@ import type { AppState } from './store-state'
 
 /** Session actions use the store's single connection/session runtime. */
 export function createSessionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'refreshSessionStatus' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
+  'refreshSessionStatus' | 'syncHarnessCatalog' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
   const isHarnessBackend = (backend?: RemoteSession['backend']) =>
     (backend ?? 'harness') === 'harness'
 
@@ -104,6 +104,63 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }
         })
       } catch { /* status refresh is best-effort */ }
+    },
+
+    /** Pull Harness workspaces + sessions after an event-driven membership change. */
+    async syncHarnessCatalog() {
+      if (get().connection.phase !== 'connected') return
+      const generation = runtime.connectionGeneration
+      const deviceId = get().selectedDevice?.deviceId
+      const { config, identity } = get()
+      let proxy: ReturnType<typeof runtime.connection.requireProxy>
+      try {
+        proxy = runtime.connection.requireProxy()
+      } catch {
+        return
+      }
+      const current = () => generation === runtime.connectionGeneration
+        && get().config === config
+        && get().identity === identity
+        && get().connection.phase === 'connected'
+        && get().selectedDevice?.deviceId === deviceId
+        && (() => { try { return runtime.connection.requireProxy() === proxy } catch { return false } })()
+      try {
+        const [workspaces, rows] = await Promise.all([proxy.workspaceList(), proxy.sessionList()])
+        if (!current()) return
+        set(state => {
+          const byId = new Map(rows.map(item => [item.sessionId, item]))
+          const marks: typeof state.sessionLifecycles = { ...state.sessionLifecycles }
+          for (const row of state.sessions) {
+            if ((row.backend ?? 'harness') !== 'harness') continue
+            const fresh = byId.get(row.sessionId)
+            if (fresh === undefined) continue
+            const entry = marks[row.sessionId]
+            const wasRunning = entry?.running ?? row.running
+            if (wasRunning === fresh.running) continue
+            marks[row.sessionId] = {
+              seq: entry?.seq ?? -1,
+              turn: entry?.turn,
+              running: fresh.running,
+              ...(fresh.running
+                ? { finished: undefined }
+                : { finished: entry?.finished === 'failed' ? 'failed' as const : 'completed' as const }),
+            }
+          }
+          const nonHarnessWorkspaces = state.workspaces.filter(item => (item.backend ?? 'harness') !== 'harness')
+          const nonHarnessSessions = state.sessions.filter(item => (item.backend ?? 'harness') !== 'harness')
+          const selectedFresh = state.selectedSession === undefined
+            ? undefined
+            : byId.get(state.selectedSession.sessionId)
+          return {
+            sessionLifecycles: marks,
+            workspaces: [...nonHarnessWorkspaces, ...workspaces.items],
+            sessions: [...nonHarnessSessions, ...rows],
+            archivedSessionIds: workspaces.archivedSessionIds,
+            ...(workspaces.pinnedSessionIds === undefined ? {} : { pinnedSessionIds: workspaces.pinnedSessionIds }),
+            ...(selectedFresh === undefined ? {} : { selectedSession: selectedFresh }),
+          }
+        })
+      } catch { /* background catalog sync is best-effort */ }
     },
 
     async openSession(session) {

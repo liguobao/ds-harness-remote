@@ -350,6 +350,7 @@ export class HarnessAlphaClient {
   private followGeneration = 0
   private eventClientId?: string
   private eventHostHome?: string
+  private hasLoadedSessionList = false
 
   constructor(
     core: RemoteClientCore,
@@ -386,12 +387,15 @@ export class HarnessAlphaClient {
     this.events = undefined
     this.control = undefined
     this.pendingEvents.clear()
+    this.sessionsCache.clear()
+    this.hasLoadedSessionList = false
     this.eventClientId = undefined
   }
 
   async sessionList(): Promise<HarnessRemoteSession[]> {
     const result = await this.callValue<{ items: HarnessRemoteSession[] }>('session/list', { _request: {} })
     const items = Array.isArray(result.items) ? result.items.map(item => normalizeSession(item)).filter((item): item is HarnessRemoteSession => item !== undefined) : []
+    this.hasLoadedSessionList = true
     for (const item of items) this.sessionsCache.set(item.sessionId, item)
     return items
   }
@@ -1234,11 +1238,71 @@ export class HarnessAlphaClient {
       this.eventHostHome = typeof host?.home === 'string' ? host.home : undefined
       return
     }
+    if (value.type === 'emit' && typeof value.event === 'string' && Array.isArray(value.args)) {
+      this.routeForwardedEvent(value.event, value.args)
+      return
+    }
     if (value.type === 'waterfall' && typeof value.eventId === 'string' && typeof value.agentId === 'string' && isRecord(value.request)) {
       this.routeWaterfall(value.event, value.eventId, value.agentId, value.request)
       return
     }
     if (value.type === 'cancel' && typeof value.eventId === 'string') this.cancelRemoteEvent(value.eventId)
+  }
+
+  private routeForwardedEvent(event: string, args: unknown[]): void {
+    switch (event) {
+      case 'api-session/added': {
+        const session = normalizeSession(args[0])
+        if (session === undefined) return
+        const known = this.sessionsCache.has(session.sessionId)
+        this.sessionsCache.set(session.sessionId, session)
+        this.emitFrame({ rpcId: '', payload: { type: 'session/added', session, known } })
+        return
+      }
+      case 'api-session/removed': {
+        const sessionId = args[0]
+        if (typeof sessionId !== 'string' || sessionId.length === 0) return
+        const existed = this.sessionsCache.delete(sessionId)
+        this.emitFrame({ rpcId: '', payload: { type: 'session/removed', sessionId, existed } })
+        return
+      }
+      case 'api-session/status': {
+        const sessionId = args[0]
+        const running = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof running !== 'boolean') return
+        const cached = this.sessionsCache.get(sessionId)
+        if (cached !== undefined && cached.running !== running) {
+          this.sessionsCache.set(sessionId, { ...cached, running })
+        }
+        this.emitFrame({ rpcId: '', payload: { type: 'session/status', sessionId, running } })
+        return
+      }
+      case 'api-session/activity': {
+        const sessionId = args[0]
+        const updatedAt = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) return
+        const cached = this.sessionsCache.get(sessionId)
+        if (cached !== undefined && updatedAt > cached.updatedAt) {
+          this.sessionsCache.set(sessionId, { ...cached, updatedAt })
+        }
+        this.emitFrame({ rpcId: '', payload: { type: 'session/activity', sessionId, updatedAt } })
+        return
+      }
+      case 'api-session/error': {
+        const sessionId = args[0]
+        const message = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0) return
+        this.emitFrame({
+          rpcId: '',
+          payload: {
+            type: 'session/error',
+            sessionId,
+            ...(typeof message === 'string' ? { message } : {}),
+          },
+        })
+        return
+      }
+    }
   }
 
   private routeWaterfall(event: unknown, eventId: string, sessionId: string, request: Record<string, unknown>): void {
@@ -1303,16 +1367,32 @@ export class HarnessAlphaClient {
     if (value.type === 'baseline' && isRecord(value.value) && isRecord(value.value.projections)) {
       let catalogChanged = false
       for (const [sessionId, block] of Object.entries(value.value.projections)) {
-        if (!this.sessionsCache.has(sessionId)) catalogChanged = true
+        if (this.hasLoadedSessionList && !this.sessionsCache.has(sessionId)) catalogChanged = true
         this.applyProjectionBaseline(sessionId, block)
       }
-      // Only pull the full session/list when membership actually changed.
       if (catalogChanged) this.emitCatalogChanged('control-baseline')
       return
     }
-    if (value.type === 'projection' && typeof value.sessionId === 'string' && typeof value.key === 'string') {
-      if (!this.sessionsCache.has(value.sessionId)) this.emitCatalogChanged('control-projection', value.sessionId)
-      this.applyProjection(value.sessionId, value.key, value.value, typeof value.seq === 'number' ? value.seq : undefined)
+    if (value.type === 'projection' && typeof value.sessionId === 'string') {
+      const seq = typeof value.seq === 'number' ? value.seq : undefined
+      if (Array.isArray(value.changes)) {
+        let emitted = false
+        for (const change of value.changes) {
+          if (!isRecord(change) || typeof change.key !== 'string') continue
+          if (!emitted && this.hasLoadedSessionList && !this.sessionsCache.has(value.sessionId)) {
+            emitted = true
+            this.emitCatalogChanged('control-projection', value.sessionId)
+          }
+          this.applyProjection(value.sessionId, change.key, change.val, seq)
+        }
+        return
+      }
+      if (typeof value.key === 'string') {
+        if (this.hasLoadedSessionList && !this.sessionsCache.has(value.sessionId)) {
+          this.emitCatalogChanged('control-projection', value.sessionId)
+        }
+        this.applyProjection(value.sessionId, value.key, value.value, seq)
+      }
     }
   }
 
@@ -1347,6 +1427,7 @@ export class HarnessAlphaClient {
     if (cached !== undefined) {
       this.sessionsCache.set(sessionId, {
         ...cached,
+        ...(key === 'title' && typeof projectedValue === 'string' && projectedValue !== '' ? { title: projectedValue } : {}),
         projections: {
           asOfSeq: seq ?? cached.projections?.asOfSeq,
           values: { ...cached.projections?.values, [key]: projectedValue },
@@ -1540,19 +1621,23 @@ function normalizeSession(value: unknown): HarnessRemoteSession | undefined {
     || typeof value.running !== 'boolean'
     || typeof value.blank !== 'boolean') return undefined
   const session = value as unknown as HarnessRemoteSession
+  const projections = session.projections === undefined
+    ? undefined
+    : {
+        ...session.projections,
+        ...(isRecord(session.projections.values)
+          ? { values: normalizeProjectionValues(session.projections.values) }
+          : {}),
+      }
+  const projectedTitle = isRecord(projections?.values) && typeof projections.values.title === 'string' && projections.values.title !== ''
+    ? projections.values.title
+    : undefined
+  const title = typeof session.title === 'string' && session.title !== '' ? session.title : projectedTitle
   return {
     ...session,
+    ...(title === undefined ? {} : { title }),
     ...(session.agentPreset === undefined ? {} : { agentPreset: normalizeAgentPreset(session.agentPreset) as string }),
-    ...(session.projections === undefined
-      ? {}
-      : {
-          projections: {
-            ...session.projections,
-            ...(isRecord(session.projections.values)
-              ? { values: normalizeProjectionValues(session.projections.values) }
-              : {}),
-          },
-        }),
+    ...(projections === undefined ? {} : { projections }),
   }
 }
 

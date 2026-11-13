@@ -64,6 +64,7 @@ export interface AppState {
   connectionProbeOrder: ConnectionProbeTransport[]
   connectionNetworkDetails?: ConnectionNetworkDetails
   hostDescriptor?: HostDescriptor
+  hostSessionEvents: boolean
   codexAvailable: boolean
   cursorAvailable: boolean
   antigravityAvailable: boolean
@@ -158,6 +159,7 @@ export interface AppState {
   refreshDevices(): Promise<void>
   refreshWorkspaces(backend?: AgentBackend): Promise<void>
   refreshSessionStatus(): Promise<void>
+  syncHarnessCatalog(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   resumeConnection(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
@@ -224,7 +226,7 @@ export const disconnected: ConnectionSnapshot = {
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -237,6 +239,7 @@ export function initialData(): Pick<AppState,
     connectionProbeOrder: [],
     connectionNetworkDetails: undefined,
     hostDescriptor: undefined,
+    hostSessionEvents: false,
     codexAvailable: false,
     cursorAvailable: false,
     antigravityAvailable: false,

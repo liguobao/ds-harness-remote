@@ -64778,6 +64778,7 @@ function acceptNegotiatedCapabilities(offered, negotiated) {
   return [...accepted];
 }
 var REMOTE_COMPACTION_CAPABILITY = "remote.compaction.async.v1";
+var REMOTE_SESSION_EVENTS_CAPABILITY = "remote.session.events.v1";
 var rpcMethodSchema = external_exports.enum(rpcMethods);
 var messageTypeSchema = external_exports.enum(messageTypes);
 var controlFrameTypeSchema = external_exports.enum(controlFrameTypes);
@@ -82634,6 +82635,14 @@ function harnessSessionGeneration(version2) {
   const minor = Number(match[2]);
   const patch = Number(match[3]);
   return major === 0 && (minor === 1 && patch >= 5 || minor === 2) ? "v3" : "legacy";
+}
+function isLiveSessionEventsHarnessVersion(version2) {
+  if (version2 === void 0) return false;
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version2.trim());
+  if (match === null) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 0 || major === 0 && minor >= 2;
 }
 async function readHarnessManifestVersion(manifestPath) {
   try {
@@ -103168,7 +103177,12 @@ var HostPluginRuntime = class {
     } catch {
       throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
     }
-    if (result.ok) return capabilities;
+    if (result.ok) {
+      if (isLiveSessionEventsHarnessVersion(this.harnessVersion) && await this.probeLiveSessionEvents(gateway)) {
+        capabilities.push(REMOTE_SESSION_EVENTS_CAPABILITY);
+      }
+      return capabilities;
+    }
     if (result.error.code === "gateway/service-unavailable") {
       throw new RpcError("CONNECTION_FAILED", "The Host Session API is not ready.", void 0, true);
     }
@@ -103180,6 +103194,23 @@ var HostPluginRuntime = class {
       this.logger.warn("Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.");
     }
     return capabilities.filter((value) => !value.startsWith("harness.remote.") && value !== "harness.terminal.v1");
+  }
+  async probeLiveSessionEvents(gateway) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2e3);
+    let iterator;
+    try {
+      const stream = await gateway.open("$events", { args: {} }, controller.signal);
+      iterator = stream[Symbol.asyncIterator]();
+      const first2 = await iterator.next();
+      return !first2.done && typeof first2.value === "object" && first2.value !== null && !Array.isArray(first2.value) && first2.value.type === "ready";
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      await iterator?.return?.().catch(() => void 0);
+    }
   }
   hostWorkspaceTypes() {
     const types22 = [];

@@ -962,6 +962,8 @@ Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 
 附件、图片 transfer 或只读预览 allowlist。协议详见 [Workspace upload](#workspace-upload)。
 未声明该能力时不调用上传 RPC；旧 Host 的入口保持禁用。
 
+`remote.session.events.v1` 声明 Host 的 `$events` 流具备真实转发能力（而非缺少 `@deepseek-ai/dsh-api-remotes` 时的空转兜底），会持续推送 `api-session/added|removed|status|activity|error` 事件，且 `session/control` 与 `workspace/list` 语义就绪；Client 据此可停止周期性全量 `session/list` 轮询，改为增量更新并在新建/移除未知根会话时按需同步工作区目录。
+
 ### 17.1 工作区类型能力声明（workspaceTypes）
 
 为支持 Web 等客户端动态渲染工作区类型选择器并避免在前端硬编码判断，Host 在 `harness.transport.describe`
