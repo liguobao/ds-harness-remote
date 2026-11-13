@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Alert, FlatList, Image, NativeModules, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
+import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system/legacy'
 import { File as LocalFile, FileMode, Paths } from 'expo-file-system'
 import { randomUUID } from 'expo-crypto'
-import { ChevronLeft, Download, File, Folder, RefreshCw } from 'lucide-react-native'
-import { requireSessionTools } from '../state/store'
+import { ChevronLeft, Download, File, Folder, RefreshCw, Upload } from 'lucide-react-native'
+import { requireConnectionRpc, requireSessionTools, useAppStore } from '../state/store'
+import {
+  formatFileBytes,
+  isDirectTransportMode,
+  sanitizeUploadFileName,
+  uploadStagedFilesToWorkspace,
+  workspaceUploadMaxBytes,
+  type StagedFile,
+} from './chat-files'
 import type { WorkspaceDirectory, WorkspaceText } from '../services/session-tools'
 import { classifyWorkspaceFile, loadWorkspaceDownload, loadWorkspacePreview, MAX_DOWNLOAD_BYTES, PREVIEW_CHUNK_BYTES } from '../services/workspace-file-preview'
 import { strings as t } from '../locales/i18n'
@@ -35,11 +44,79 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
   const [fileBytes, setFileBytes] = useState<number>()
   const tooLargeToSave = fileBytes !== undefined && fileBytes > MAX_DOWNLOAD_BYTES
   const [downloading, setDownloading] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const downloadController = useRef<AbortController | undefined>(undefined)
+  const uploadController = useRef<AbortController | undefined>(undefined)
   useEffect(() => {
     setDownloading(false)
     return () => { downloadController.current?.abort(); downloadController.current = undefined }
   }, [sessionId, file])
+  useEffect(() => () => { uploadController.current?.abort(); uploadController.current = undefined }, [sessionId])
+  const upload = async () => {
+    if (file !== undefined || path !== '' || uploading || uploadController.current) return
+    const controller = new AbortController()
+    uploadController.current = controller
+    setUploading(true)
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: true,
+        copyToCacheDirectory: true,
+      })
+      if (controller.signal.aborted || picked.canceled || !picked.assets || picked.assets.length === 0) return
+      const transportMode = useAppStore.getState().connection.stats.mode
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const direct = isDirectTransportMode(transportMode)
+      const files: StagedFile[] = []
+      for (const asset of picked.assets) {
+        const name = sanitizeUploadFileName(asset.name, asset.mimeType, asset.uri)
+        let size = 0
+        try {
+          const statSize = new LocalFile(asset.uri).size
+          if (typeof statSize === 'number' && Number.isFinite(statSize) && statSize > 0) size = statSize
+        } catch {
+          size = 0
+        }
+        if (size <= 0 && typeof asset.size === 'number' && Number.isFinite(asset.size) && asset.size > 0) {
+          size = asset.size
+        }
+        if (size <= 0) {
+          Alert.alert(t.tools.upload, t.chat.fileSizeUnavailable(name))
+          continue
+        }
+        if (size > maxUploadBytes) {
+          Alert.alert(t.tools.upload, t.chat.fileTooLargeForTransport(name, formatFileBytes(maxUploadBytes), direct))
+          continue
+        }
+        files.push({
+          id: randomUUID(),
+          name,
+          size,
+          ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+          uri: asset.uri,
+        })
+      }
+      if (files.length === 0 || controller.signal.aborted) return
+      const uploaded = await uploadStagedFilesToWorkspace(requireConnectionRpc(), sessionId, files, controller.signal)
+      if (!controller.signal.aborted) {
+        ToastAndroid.show(t.tools.uploadedToWorkspace(uploaded.length), ToastAndroid.SHORT)
+        setRevision(v => v + 1)
+      }
+    } catch (e) {
+      if (!controller.signal.aborted && (e as Error | undefined)?.name !== 'AbortError') {
+        const code = (e as { code?: string })?.code
+        const msg = code === 'FEATURE_NOT_SUPPORTED' || code === 'UPLOAD_WORKSPACE_UNAVAILABLE'
+          ? t.chat.uploadUnavailable
+          : sessionToolsError(e)
+        Alert.alert(t.tools.upload, msg)
+      }
+    } finally {
+      if (uploadController.current === controller) {
+        uploadController.current = undefined
+        setUploading(false)
+      }
+    }
+  }
   const download = async () => {
     if (file === undefined || tooLargeToSave || downloadController.current) return
     const controller = new AbortController()
@@ -160,10 +237,13 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
     title={t.tools.files}
     onBack={back}
     action={<>
+      {file === undefined && path === '' && (uploading
+        ? <ActivityIndicator accessibilityLabel={t.tools.uploading} color={colors.primary} />
+        : <IconButton label={t.tools.upload} icon={Upload} onPress={() => void upload()} disabled={loading || downloading} />)}
       {file !== undefined && (downloading
         ? <ActivityIndicator accessibilityLabel={t.tools.downloading} color={colors.primary} />
         : <IconButton label={t.tools.download} icon={Download} onPress={() => void download()} disabled={tooLargeToSave} />)}
-      <IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || downloading} />
+      <IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || downloading || uploading} />
     </>}
   />}>
     <View style={styles.toolbar}>
