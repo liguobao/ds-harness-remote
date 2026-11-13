@@ -95,3 +95,37 @@ C. 取消
 - Host：`grep 'remote compaction' <host-log>` 的完整片段；`accepted` 次数、
   `command/run` 次数、`operationId` 与状态变化。
 - 若出现 `unconfirmed`：记录当时是否有 `compaction/end`、是否再次发起压缩。
+
+## 实测记录（2026-11-13，跨设备）
+
+- Host：MacBook Pro（隔离的 DSH profile），DSH `0.2.2-rc.1`，插件 `b117427a`；
+  模型 `dgx-spark` / GLM-5.3，端点 `100.104.125.29:1235`（DGX Spark 上的 TensorFold 服务）。
+- Client：**另一台机器 DGX Spark-01**（aarch64，Node 22），通过 Mac 上的自托管 Remote Server
+  （`192.168.1.11:8080`）以 Relay 连接；Host 与 Client 均使用 E2E 加密的 Remote 通道。
+- 会话：600,074 字符的参考材料，压缩报告 `Compacted 4 history items (~150845 tokens)`。
+- 所有用例的会话事件均为 `command/run=1`、`compaction/start=1`、`compaction/end=1`。
+
+| 用例 | 结果 |
+| --- | --- |
+| A. 长压缩 | 137.66s 后 `succeeded`；Host 日志 `settled succeeded, durationMs=137396` |
+| B. 断线重连 | 压缩开始 0.5s 后断开，15.6s 后重连；用同一 `operationId` 继续观察，202.07s 后 `succeeded`；Host 日志 `accepted` 仅 1 次，`command/run` 仅 1 条 |
+| C. 显式取消 | 压缩开始 5.5s 后取消，先返回 `cancelling`；Host 两次 `confirmation not-yet` 后确认 `compaction/end` 失败，6.18s 时 `cancelled`；事件仍为 1/1/1 |
+
+Host 日志摘录（`b117427a`）：
+
+```
+remote compaction accepted {"operationId":"c7aa8f06-...","sessionId":"session-5eadae9a-...","budgetMs":1800000}
+remote compaction settled {"operationId":"c7aa8f06-...","state":"succeeded","durationMs":137396}
+
+remote compaction accepted {"operationId":"b5f1576f-...","sessionId":"session-83604d2d-...","budgetMs":1800000}
+remote compaction settled {"operationId":"b5f1576f-...","state":"succeeded","durationMs":200767}
+
+remote compaction accepted {"operationId":"32bfe660-...","sessionId":"session-14fd1ce9-...","budgetMs":1800000}
+remote compaction cancellation requested {"operationId":"32bfe660-..."}
+remote compaction confirmation {"operationId":"32bfe660-...","kind":"not-yet"}
+remote compaction confirmation {"operationId":"32bfe660-...","kind":"not-yet"}
+remote compaction confirmation {"operationId":"32bfe660-...","kind":"finished","failed":true}
+remote compaction settled {"operationId":"32bfe660-...","state":"cancelled","durationMs":6171}
+```
+
+结论：三个验收项均通过；断线期间 Host 未重跑压缩，取消经过 `compaction/end` 确认后才判定终态。
