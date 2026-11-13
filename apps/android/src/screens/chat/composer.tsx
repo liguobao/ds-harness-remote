@@ -238,7 +238,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
                 hitSlop={6}
                 style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
               >
-                <ArrowUp size={18} color={sendDisabled ? colors.subtle : colors.white} strokeWidth={2.4} />
+                <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onPrimary ?? colors.white)} strokeWidth={2.4} />
               </Pressable>
             </>}
         </View>

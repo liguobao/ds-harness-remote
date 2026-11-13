@@ -1,10 +1,24 @@
 import { StyleSheet } from 'react-native'
-import { floatingShadow, radius, spacing, typeForDensity, type TypographyDensity } from '../../ui/theme'
+import {
+  DEFAULT_CHAT_APPEARANCE,
+  floatingShadow,
+  radius,
+  resolveChatMetrics,
+  spacing,
+  typeForDensity,
+  type ChatAppearance,
+  type TypographyDensity,
+} from '../../ui/theme'
 import type { ThemeColors } from '../../ui/theme-context'
 
-export function createStyles(colors: ThemeColors, density: TypographyDensity = 'compact') {
+export function createStyles(
+  colors: ThemeColors,
+  density: TypographyDensity = 'compact',
+  appearance: ChatAppearance = DEFAULT_CHAT_APPEARANCE,
+) {
   const isCompact = density === 'compact'
   const t = typeForDensity(density)
+  const m = resolveChatMetrics(density, appearance)
   return StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     splitRoot: { flex: 1 },
@@ -98,14 +112,17 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     emptyList: { flexGrow: 1, justifyContent: 'center' },
     messageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: isCompact ? 6 : spacing.sm, marginVertical: isCompact ? 3 : spacing.xs },
     messageRowUser: { flexDirection: 'row-reverse' },
-    assistantBlock: { alignSelf: 'stretch', gap: isCompact ? 4 : 6, marginTop: isCompact ? 2 : 4, marginBottom: isCompact ? 6 : 10 },
+    assistantBlock: { alignSelf: 'stretch', gap: m.assistantGap, marginTop: Math.max(2, m.assistantGap - 2), marginBottom: m.turnBottomGap },
     assistantText: { paddingHorizontal: 0 },
-    userBlock: { alignSelf: 'flex-end', maxWidth: '86%', marginTop: isCompact ? 10 : 14, marginBottom: isCompact ? 4 : 6 },
-    userContent: { paddingHorizontal: isCompact ? 14 : 16, paddingVertical: isCompact ? 9 : 11 },
+    userBlock: { alignSelf: 'flex-end', maxWidth: '86%', marginTop: m.turnTopGap, marginBottom: m.turnBottomGap },
+    userContent: { paddingHorizontal: isCompact ? 14 : 16, paddingVertical: isCompact ? 10 : 12 },
     userMediaOnly: { paddingHorizontal: 0, paddingVertical: 0 },
     userSoftBubble: { backgroundColor: colors.userBubble ?? colors.surfaceStrong, borderRadius: 18, borderTopRightRadius: 6, maxWidth: '100%' },
+    userTintedBubble: { backgroundColor: colors.primarySoft, borderRadius: 18, borderTopRightRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, maxWidth: '100%' },
+    userSolidBubble: { backgroundColor: colors.primary, borderRadius: 18, borderTopRightRadius: 6, maxWidth: '100%' },
+    userMinimalBubble: { backgroundColor: 'transparent', borderRadius: 18, borderTopRightRadius: 6, borderWidth: 1, borderColor: colors.border, maxWidth: '100%' },
     userBubble: { backgroundColor: colors.inverse, borderRadius: 18, borderTopRightRadius: 6, maxWidth: '100%' },
-    userMarkdownWrap: { marginBottom: isCompact ? -5 : -7 },
+    userMarkdownWrap: { marginBottom: -m.paragraphGap },
     userMessageInlineWrap: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -114,9 +131,10 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     },
     userMessageInlineText: {
       ...t.body,
-      fontSize: 15,
+      fontSize: m.bodyFontSize,
+      lineHeight: m.bodyLineHeight,
+      letterSpacing: m.letterSpacing,
       color: colors.ink,
-      lineHeight: 22,
     },
     avatar: { width: isCompact ? 28 : 32, height: isCompact ? 28 : 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
     avatarUser: { backgroundColor: colors.primary },
@@ -184,7 +202,7 @@ export function createStyles(colors: ThemeColors, density: TypographyDensity = '
     toolDetails: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, padding: isCompact ? 8 : 10, gap: isCompact ? 8 : 10 },
     toolDetailBlock: { gap: isCompact ? 4 : spacing.xs },
     toolDetailLabel: { ...t.caption, color: colors.muted },
-    toolDetailCode: { fontFamily: 'monospace', fontSize: isCompact ? 12 : 13, lineHeight: isCompact ? 17 : 20, color: colors.ink, backgroundColor: colors.codeSurface ?? colors.surfaceStrong, borderRadius: radius.sm, padding: isCompact ? 8 : 10 },
+    toolDetailCode: { fontFamily: 'monospace', fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, backgroundColor: colors.codeSurface ?? colors.surfaceStrong, borderRadius: radius.sm, padding: isCompact ? 9 : 11 },
     toolDetailTruncated: { ...t.caption, color: colors.warning },
     permissionCard: { borderRadius: radius.xl, backgroundColor: colors.warningSoft, padding: 14, gap: 12, marginVertical: 6 },
     questionCard: { borderRadius: radius.xl, backgroundColor: colors.accentSoft, padding: 14, gap: 12, marginVertical: 6 },

@@ -10,6 +10,8 @@ import {
 } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useTheme } from './theme-context'
+import { resolveChatMetrics } from './theme'
+import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from './syntax-highlight'
 import { IconWrapFill, IconNowrapFill, IconCopyOutline, IconCheckOutline } from './dsh-icons'
 
 export interface CodeBlockProps {
@@ -22,14 +24,18 @@ const MONOSPACE_FONT = 'monospace'
 const COPY_RESET_MS = 2000
 
 export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
-  const { colors, density } = useTheme()
+  const { colors, scheme, density, appearance } = useTheme()
   const isCompact = density === 'compact'
+  const metrics = resolveChatMetrics(density, appearance)
+  const useDarkCode = appearance.codeTheme === 'dark' || (appearance.codeTheme === 'auto' && scheme === 'dark')
+  const palette = useDarkCode ? DARK_CODE_PALETTE : LIGHT_CODE_PALETTE
   const [wrap, setWrap] = useState<boolean>(false)
   const [copied, setCopied] = useState<boolean>(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cleanCode = (code || '').replace(/\n+$/u, '')
   const label = (language || 'code').toLowerCase()
+  const tokens = React.useMemo(() => highlightCode(cleanCode, language), [cleanCode, language])
 
   useEffect(() => {
     return () => {
@@ -52,10 +58,42 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
     }
   }, [cleanCode])
 
+  const renderedTokens = (
+    <Text
+      selectable
+      style={[
+        styles.codeText,
+        {
+          color: palette.plain,
+          fontSize: metrics.codeFontSize,
+          lineHeight: metrics.codeLineHeight,
+          flexShrink: wrap ? 1 : 0,
+        },
+      ]}
+    >
+      {tokens.map((token, index) => (
+        token.kind === 'plain'
+          ? token.text
+          : (
+            <Text
+              key={index}
+              style={[
+                { color: palette[token.kind] },
+                token.kind === 'comment' && styles.commentToken,
+                token.kind === 'keyword' && styles.keywordToken,
+              ]}
+            >
+              {token.text}
+            </Text>
+          )
+      ))}
+    </Text>
+  )
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.codeSurface ?? colors.surface, borderColor: colors.separator }, style]}>
-      <View style={[styles.header, { borderBottomColor: colors.separator, backgroundColor: colors.codeHeader ?? colors.surfaceStrong }]}>
-        <Text numberOfLines={1} style={[styles.language, { color: colors.muted }]}>
+    <View style={[styles.container, { backgroundColor: palette.background, borderColor: palette.border }, style]}>
+      <View style={[styles.header, { borderBottomColor: palette.border, backgroundColor: palette.headerBackground }]}>
+        <Text numberOfLines={1} style={[styles.language, { color: palette.headerText }]}>
           {label}
         </Text>
         <View style={styles.actions}>
@@ -70,9 +108,9 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
             ]}
           >
             {wrap ? (
-              <IconNowrapFill size={14} color={colors.ink} />
+              <IconNowrapFill size={14} color={palette.plain} />
             ) : (
-              <IconWrapFill size={14} color={colors.muted} />
+              <IconWrapFill size={14} color={palette.headerText} />
             )}
           </Pressable>
           <Pressable
@@ -88,51 +126,25 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
             {copied ? (
               <IconCheckOutline size={14} color={colors.success} />
             ) : (
-              <IconCopyOutline size={14} color={colors.muted} />
+              <IconCopyOutline size={14} color={palette.headerText} />
             )}
           </Pressable>
         </View>
       </View>
 
       {wrap ? (
-        <View style={[styles.wrapBody, { padding: isCompact ? 8 : 10 }]}>
-          <Text
-            selectable
-            style={[
-              styles.codeText,
-              {
-                color: colors.ink,
-                fontSize: isCompact ? 12 : 13,
-                lineHeight: isCompact ? 17 : 18.5,
-                flexShrink: 1,
-              },
-            ]}
-          >
-            {cleanCode}
-          </Text>
+        <View style={[styles.wrapBody, { padding: isCompact ? 10 : 12 }]}>
+          {renderedTokens}
         </View>
       ) : (
         <ScrollView
           horizontal
           nestedScrollEnabled
           showsHorizontalScrollIndicator
-          contentContainerStyle={[styles.scrollContent, { padding: isCompact ? 8 : 10 }]}
+          contentContainerStyle={[styles.scrollContent, { padding: isCompact ? 10 : 12 }]}
           keyboardShouldPersistTaps="handled"
         >
-          <Text
-            selectable
-            style={[
-              styles.codeText,
-              {
-                color: colors.ink,
-                fontSize: isCompact ? 12 : 13,
-                lineHeight: isCompact ? 17 : 18.5,
-                flexShrink: 0,
-              },
-            ]}
-          >
-            {cleanCode}
-          </Text>
+          {renderedTokens}
         </ScrollView>
       )}
     </View>
@@ -180,5 +192,11 @@ const styles = StyleSheet.create({
   codeText: {
     fontFamily: MONOSPACE_FONT,
     includeFontPadding: false,
+  },
+  commentToken: {
+    fontStyle: 'italic',
+  },
+  keywordToken: {
+    fontWeight: '600',
   },
 })

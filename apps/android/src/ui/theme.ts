@@ -73,6 +73,8 @@ export interface ThemeColors {
   /** Elevated code block body surface and header fill. */
   codeSurface?: string
   codeHeader?: string
+  /** Foreground text/icon color drawn on top of `primary`. */
+  onPrimary?: string
 }
 
 // DeepSeek palette: ink #0F0F0F, DeepSeek blue (#4D6BFE) accents, white cards (#FFFFFF)
@@ -111,8 +113,9 @@ export const lightColors: ThemeColors = {
   shadow: '#1A2638',
   userBubble: '#ECEFF5',
   toolSurface: '#F2F4F8',
-  codeSurface: '#F7F8FB',
-  codeHeader: '#EDF0F6',
+  codeSurface: '#F6F8FB',
+  codeHeader: '#EDF1F7',
+  onPrimary: '#FFFFFF',
 }
 
 export const darkColors: ThemeColors = {
@@ -149,12 +152,210 @@ export const darkColors: ThemeColors = {
   shadow: '#000000',
   userBubble: '#1E2430',
   toolSurface: '#141820',
-  codeSurface: '#11151D',
-  codeHeader: '#1A202B',
+  codeSurface: '#131720',
+  codeHeader: '#1B212E',
+  onPrimary: '#FFFFFF',
 }
 
 export function colorsForScheme(scheme: ColorScheme): ThemeColors {
   return scheme === 'dark' ? darkColors : lightColors
+}
+
+export type ChatFontScale = 'sm' | 'md' | 'lg' | 'xl'
+export type ChatSpacingScale = 'tight' | 'balanced' | 'relaxed'
+export type ChatLetterSpacing = 'normal' | 'wide' | 'wider'
+export type ChatAccentPreset = 'deepseek' | 'emerald' | 'violet' | 'amber' | 'graphite'
+export type ChatBubbleStyle = 'soft' | 'tinted' | 'solid' | 'minimal'
+export type ChatCodeTheme = 'auto' | 'dark' | 'light'
+
+export interface ChatAppearance {
+  fontScale: ChatFontScale
+  spacingScale: ChatSpacingScale
+  letterSpacing: ChatLetterSpacing
+  accent: ChatAccentPreset
+  bubbleStyle: ChatBubbleStyle
+  codeTheme: ChatCodeTheme
+}
+
+export const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
+  fontScale: 'md',
+  spacingScale: 'balanced',
+  letterSpacing: 'wide',
+  accent: 'deepseek',
+  bubbleStyle: 'soft',
+  codeTheme: 'auto',
+}
+
+export function isChatFontScale(value: unknown): value is ChatFontScale {
+  return value === 'sm' || value === 'md' || value === 'lg' || value === 'xl'
+}
+
+export function isChatSpacingScale(value: unknown): value is ChatSpacingScale {
+  return value === 'tight' || value === 'balanced' || value === 'relaxed'
+}
+
+export function isChatLetterSpacing(value: unknown): value is ChatLetterSpacing {
+  return value === 'normal' || value === 'wide' || value === 'wider'
+}
+
+export function isChatAccentPreset(value: unknown): value is ChatAccentPreset {
+  return value === 'deepseek' || value === 'emerald' || value === 'violet' || value === 'amber' || value === 'graphite'
+}
+
+export function isChatBubbleStyle(value: unknown): value is ChatBubbleStyle {
+  return value === 'soft' || value === 'tinted' || value === 'solid' || value === 'minimal'
+}
+
+export function isChatCodeTheme(value: unknown): value is ChatCodeTheme {
+  return value === 'auto' || value === 'dark' || value === 'light'
+}
+
+export function normalizeChatAppearance(raw: unknown): ChatAppearance {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ...DEFAULT_CHAT_APPEARANCE }
+  }
+  const obj = raw as Record<string, unknown>
+  return {
+    fontScale: isChatFontScale(obj.fontScale) ? obj.fontScale : DEFAULT_CHAT_APPEARANCE.fontScale,
+    spacingScale: isChatSpacingScale(obj.spacingScale) ? obj.spacingScale : DEFAULT_CHAT_APPEARANCE.spacingScale,
+    letterSpacing: isChatLetterSpacing(obj.letterSpacing) ? obj.letterSpacing : DEFAULT_CHAT_APPEARANCE.letterSpacing,
+    accent: isChatAccentPreset(obj.accent) ? obj.accent : DEFAULT_CHAT_APPEARANCE.accent,
+    bubbleStyle: isChatBubbleStyle(obj.bubbleStyle) ? obj.bubbleStyle : DEFAULT_CHAT_APPEARANCE.bubbleStyle,
+    codeTheme: isChatCodeTheme(obj.codeTheme) ? obj.codeTheme : DEFAULT_CHAT_APPEARANCE.codeTheme,
+  }
+}
+
+export const CHAT_ACCENT_SWATCHES: Record<ChatAccentPreset, {
+  light: { primary: string; primaryPressed: string; primarySoft: string; onPrimary: string }
+  dark: { primary: string; primaryPressed: string; primarySoft: string; onPrimary: string }
+}> = {
+  deepseek: {
+    light: { primary: '#4D6BFE', primaryPressed: '#3A56E6', primarySoft: '#EBEFFF', onPrimary: '#FFFFFF' },
+    dark: { primary: '#6F89FF', primaryPressed: '#5672F5', primarySoft: '#19213F', onPrimary: '#FFFFFF' },
+  },
+  emerald: {
+    light: { primary: '#0D9488', primaryPressed: '#0F766E', primarySoft: '#E6F7F5', onPrimary: '#FFFFFF' },
+    dark: { primary: '#2DD4BF', primaryPressed: '#14B8A6', primarySoft: '#112E2B', onPrimary: '#08201E' },
+  },
+  violet: {
+    light: { primary: '#7C5CFC', primaryPressed: '#6442EE', primarySoft: '#F1EDFF', onPrimary: '#FFFFFF' },
+    dark: { primary: '#A78BFA', primaryPressed: '#8B5CF6', primarySoft: '#221C3D', onPrimary: '#FFFFFF' },
+  },
+  amber: {
+    light: { primary: '#D97706', primaryPressed: '#B45309', primarySoft: '#FEF3C7', onPrimary: '#FFFFFF' },
+    dark: { primary: '#F59E0B', primaryPressed: '#D97706', primarySoft: '#33240E', onPrimary: '#1A1104' },
+  },
+  graphite: {
+    light: { primary: '#27272A', primaryPressed: '#18181B', primarySoft: '#ECEEF2', onPrimary: '#FFFFFF' },
+    dark: { primary: '#E4E4E7', primaryPressed: '#D4D4D8', primarySoft: '#272A32', onPrimary: '#0B0D11' },
+  },
+}
+
+export function resolveThemeColors(scheme: ColorScheme, accent: ChatAccentPreset = 'deepseek'): ThemeColors {
+  const base = colorsForScheme(scheme)
+  if (accent === 'deepseek') return base
+  const swatch = CHAT_ACCENT_SWATCHES[accent][scheme]
+  return {
+    ...base,
+    primary: swatch.primary,
+    primaryPressed: swatch.primaryPressed,
+    primarySoft: swatch.primarySoft,
+    accent: swatch.primary,
+    accentSoft: swatch.primarySoft,
+    onPrimary: swatch.onPrimary,
+  }
+}
+
+export interface ChatMetrics {
+  bodyFontSize: number
+  bodyLineHeight: number
+  letterSpacing: number
+  codeFontSize: number
+  codeLineHeight: number
+  inlineCodeFontSize: number
+  h1Size: number
+  h1LineHeight: number
+  h2Size: number
+  h2LineHeight: number
+  h3Size: number
+  h3LineHeight: number
+  h4Size: number
+  h4LineHeight: number
+  paragraphGap: number
+  headingTopGap: number
+  headingBottomGap: number
+  listGap: number
+  turnTopGap: number
+  turnBottomGap: number
+  assistantGap: number
+}
+
+export function resolveChatMetrics(
+  density: TypographyDensity,
+  appearance: ChatAppearance = DEFAULT_CHAT_APPEARANCE,
+): ChatMetrics {
+  const baseFont = density === 'compact' ? 14.5 : 15.5
+  const fontDelta = appearance.fontScale === 'sm' ? -1
+    : appearance.fontScale === 'lg' ? 1.5
+      : appearance.fontScale === 'xl' ? 3
+        : 0
+  const bodyFontSize = baseFont + fontDelta
+  const lineRatio = appearance.spacingScale === 'tight' ? 1.48
+    : appearance.spacingScale === 'relaxed' ? 1.74
+      : 1.60
+  const bodyLineHeight = Math.round(bodyFontSize * lineRatio)
+  const letterSpacing = appearance.letterSpacing === 'normal' ? 0
+    : appearance.letterSpacing === 'wider' ? 0.5
+      : 0.25
+
+  const codeFontSize = Math.max(11.5, bodyFontSize - 2.5)
+  const codeLineHeight = Math.round(codeFontSize * (appearance.spacingScale === 'relaxed' ? 1.58 : appearance.spacingScale === 'tight' ? 1.38 : 1.48))
+  const inlineCodeFontSize = Math.max(11.5, bodyFontSize - 2)
+
+  const h1Size = Math.round(bodyFontSize + 6.5)
+  const h2Size = Math.round(bodyFontSize + 3.5)
+  const h3Size = Math.round(bodyFontSize + 1.5)
+  const h4Size = Math.round(bodyFontSize)
+
+  const paragraphGap = appearance.spacingScale === 'tight' ? 5
+    : appearance.spacingScale === 'relaxed' ? 12
+      : 8
+  const listGap = appearance.spacingScale === 'tight' ? 2
+    : appearance.spacingScale === 'relaxed' ? 8
+      : 5
+  const turnTopGap = appearance.spacingScale === 'tight' ? 8
+    : appearance.spacingScale === 'relaxed' ? 18
+      : 13
+  const turnBottomGap = appearance.spacingScale === 'tight' ? 4
+    : appearance.spacingScale === 'relaxed' ? 10
+      : 6
+  const assistantGap = appearance.spacingScale === 'tight' ? 3
+    : appearance.spacingScale === 'relaxed' ? 10
+      : 6
+
+  return {
+    bodyFontSize,
+    bodyLineHeight,
+    letterSpacing,
+    codeFontSize,
+    codeLineHeight,
+    inlineCodeFontSize,
+    h1Size,
+    h1LineHeight: Math.round(h1Size * 1.32),
+    h2Size,
+    h2LineHeight: Math.round(h2Size * 1.34),
+    h3Size,
+    h3LineHeight: Math.round(h3Size * 1.36),
+    h4Size,
+    h4LineHeight: Math.round(h4Size * 1.38),
+    paragraphGap,
+    headingTopGap: paragraphGap + 4,
+    headingBottomGap: Math.max(4, paragraphGap - 1),
+    listGap,
+    turnTopGap,
+    turnBottomGap,
+    assistantGap,
+  }
 }
 
 export const spacing = {

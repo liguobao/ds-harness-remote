@@ -41,6 +41,7 @@ import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-
 import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
+import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from '../../ui/syntax-highlight'
 import { parseBotReplyPayload } from '../bot/replies'
 import { BotReplies } from '../bot/reply-view'
 import type { BotObject } from '../../services/bot-catalog'
@@ -339,7 +340,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
   onFilePress?: (path: string) => void
   onSendPrompt?: (text: string) => Promise<boolean>
 }) {
-  const { colors } = useTheme()
+  const { colors, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
@@ -378,29 +379,44 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
     const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(body)
+    const solidText = colors.onPrimary ?? colors.white
+    const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
     const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
+    const solidPalette = { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' }
     const softBubblePalette = { ...colors, surfaceStrong: colors.border }
+    const userBubbleStyle = userBubble
+      ? styles.userBubble
+      : !hasBubbleText
+        ? styles.userMediaOnly
+        : appearance.bubbleStyle === 'tinted'
+          ? styles.userTintedBubble
+          : appearance.bubbleStyle === 'solid'
+            ? styles.userSolidBubble
+            : appearance.bubbleStyle === 'minimal'
+              ? styles.userMinimalBubble
+              : styles.userSoftBubble
+    const quoteTint = userBubble ? colors.onInverse : isSolid ? solidText : colors.primary
     return <View style={styles.userBlock}>
-      <View style={[styles.userContent, userBubble ? styles.userBubble : hasBubbleText ? styles.userSoftBubble : styles.userMediaOnly]}>
+      <View style={[styles.userContent, userBubbleStyle]}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
         {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
             {quotes.map((quoteText, index) => (
               <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
-                <QuoteMarkIcon size={14} color={userBubble ? colors.onInverse : colors.primary} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: userBubble ? colors.onInverse : colors.primary, maxWidth: 200 }]}>
+                <QuoteMarkIcon size={14} color={quoteTint} />
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
                   “{formatQuoteDraftSnippet(quoteText, 16)}”
                 </Text>
               </View>
             ))}
             {hasVisibleMessageText(body) && (
-              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }]}>{body}</Text>
+              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{body}</Text>
             )}
           </View>
         ) : (
           hasVisibleMessageText(body) && (
             <View style={styles.userMarkdownWrap}>
-              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : softBubblePalette} />
+              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
             </View>
           )
         )}
@@ -549,14 +565,33 @@ export function ChatImages({ images, alignEnd = false, tool = false }: { images:
 }
 
 function ToolDetailView({ label, detail }: { label: string; detail: ToolDisplayDetail }) {
-  const { colors } = useTheme()
+  const { scheme, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const useDarkCode = appearance.codeTheme === 'dark' || (appearance.codeTheme === 'auto' && scheme === 'dark')
+  const palette = useDarkCode ? DARK_CODE_PALETTE : LIGHT_CODE_PALETTE
+  const trimmed = detail.text.trimStart()
+  const likelyJson = detail.format !== 'markdown' && (trimmed.startsWith('{') || trimmed.startsWith('['))
+  const tokens = useMemo(
+    () => (detail.format === 'markdown' ? [] : highlightCode(detail.text, likelyJson ? 'json' : undefined)),
+    [detail.format, detail.text, likelyJson],
+  )
   return (
     <View style={styles.toolDetailBlock}>
       <Text style={styles.toolDetailLabel}>{label}</Text>
       {detail.format === 'markdown'
         ? <NativeMarkdown text={detail.text} />
-        : <Text selectable style={styles.toolDetailCode}>{detail.text}</Text>}
+        : (
+          <Text
+            selectable
+            style={[styles.toolDetailCode, { backgroundColor: palette.background, color: palette.plain }]}
+          >
+            {tokens.map((token, index) => (
+              token.kind === 'plain'
+                ? token.text
+                : <Text key={index} style={{ color: palette[token.kind] }}>{token.text}</Text>
+            ))}
+          </Text>
+        )}
       {detail.truncated && <Text style={styles.toolDetailTruncated}>{zhCN.chat.toolTruncated}</Text>}
     </View>
   )

@@ -3,6 +3,7 @@ import { loadWorkspacePreview } from '../services/workspace-file-preview'
 import type { RemoteSession } from '../types'
 import { create } from 'zustand'
 import { getActiveLanguage } from '../locales/i18n'
+import { DEFAULT_CHAT_APPEARANCE } from '../ui/theme'
 import { createAccountActions } from './account-actions'
 import { createConnectionActions } from './connection-actions'
 import { createPreferenceActions } from './preference-actions'
@@ -90,6 +91,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   compactHistory: false,
   themePreference: 'system',
   typographyDensity: 'compact',
+  chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
   activityDockMode: 'compact',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
