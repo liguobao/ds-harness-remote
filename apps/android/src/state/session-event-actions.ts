@@ -11,6 +11,7 @@ import { applyCursorFrame, cursorNativeId } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
+import { requestSessionListOnCatalogChange } from './session-catalog-commands'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
 import type { AppState } from './store-state'
@@ -20,6 +21,11 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
   'handleMuxFrame' | 'handleCodexFrame' | 'handleCodexFrames' | 'handleCursorFrame'> {
   return {
     handleMuxFrame(frame) {
+      if (frame.payload.type === 'session/catalog-changed') {
+        // Host reported a session we have not listed yet — pull once (debounced).
+        requestSessionListOnCatalogChange()
+        return
+      }
       set(state => {
         const sessionId = frame.payload.sessionId
         if (frame.payload.type === 'session/projection' && sessionId !== undefined && typeof frame.payload.key === 'string') {

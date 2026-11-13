@@ -53,6 +53,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
   }
 
   return {
+    /** Pull full `session/list` after a real catalog-change hint (or manual refresh). */
     async refreshSessionStatus() {
       if (get().connection.phase !== 'connected') return
       try {
@@ -89,8 +90,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           const selectedFresh = state.selectedSession === undefined
             ? undefined
             : rows.find(item => item.sessionId === state.selectedSession?.sessionId)
-          // Preserve array identity when nothing moved: the 8s refresh otherwise
-          // hands consumers a fresh `sessions` reference and re-runs their memos.
+          // Preserve array identity when nothing moved so consumers do not
+          // re-run memos on a no-op explicit refresh.
           return {
             sessionLifecycles: marks,
             ...(changed || added.length > 0

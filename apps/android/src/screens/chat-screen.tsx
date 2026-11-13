@@ -97,8 +97,8 @@ import { useChatMentions } from './chat/use-chat-mentions'
 import { useChatPrompts } from './chat/use-chat-prompts'
 import { useChatScroll } from './chat/use-chat-scroll'
 import { useChatTranscript } from './chat/use-chat-transcript'
-import { useLiveSessionStatus } from './device-screens'
 import { BotModeScreen } from './bot-mode-screen'
+import { useLiveSessionStatus } from './device-screens'
 import { HostSessionsDrawer } from './host-sessions-drawer'
 import { PluginsModal } from './plugins-modal'
 import { ReferenceChatModal, ReferencedChatPills } from './bot/reference-chat-modal'
@@ -145,10 +145,10 @@ export function ChatScreen({
   onSelectBot?: (id?: string) => void
 }) {
   const reduceMotion = useReduceMotion()
-  // New subagent children and running-state changes must reach `sessions`
-  // without leaving the chat (the list screens unmount here).
   const session = useAppStore(state => state.selectedSession)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
+  // Legacy Hosts keep the 8s poll; ≥0.6.5 Hosts use catalog-change commands only.
+  // Keep this mounted in chat so subagent/running updates still arrive when list screens unmount.
   useLiveSessionStatus(!botMode && session !== undefined && (session.backend ?? 'harness') === 'harness')
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)

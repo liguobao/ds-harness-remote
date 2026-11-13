@@ -50,6 +50,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
+import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
@@ -248,7 +249,6 @@ export function HostSessionsDrawer({
   const clearError = useAppStore(state => state.clearError)
   const devicesRefreshing = useAppStore(state => state.refreshing)
   const refreshDevices = useAppStore(state => state.refreshDevices)
-  const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const createSession = useAppStore(state => state.createSession)
   const pinSession = useAppStore(state => state.pinSession)
   const unpinSession = useAppStore(state => state.unpinSession)
@@ -330,8 +330,8 @@ export function HostSessionsDrawer({
     setVisibleCounts({})
   }, [deviceId, selected?.backend])
   useEffect(() => {
-    if (connected) void refreshWorkspaces(backend)
-  }, [backend, connected, deviceId, refreshWorkspaces])
+    if (connected) void dispatchSessionCatalogCommand({ type: 'refresh-catalog', backend })
+  }, [backend, connected, deviceId])
 
   const [harnessPickerOpen, setHarnessPickerOpen] = useState(false)
   const windowDimensions = useWindowDimensions()
@@ -608,7 +608,7 @@ export function HostSessionsDrawer({
       if (drawerMode === 'bot') {
         await useBotTeamStore.getState().refresh(true)
       } else {
-        await refreshWorkspaces(backend)
+        await dispatchSessionCatalogCommand({ type: 'refresh-catalog', backend })
       }
     } finally {
       setRefreshing(false)

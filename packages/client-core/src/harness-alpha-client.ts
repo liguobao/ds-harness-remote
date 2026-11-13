@@ -1301,12 +1301,30 @@ export class HarnessAlphaClient {
   private routeControlFrame(value: unknown): void {
     if (!isRecord(value) || typeof value.type !== 'string') return
     if (value.type === 'baseline' && isRecord(value.value) && isRecord(value.value.projections)) {
-      for (const [sessionId, block] of Object.entries(value.value.projections)) this.applyProjectionBaseline(sessionId, block)
+      let catalogChanged = false
+      for (const [sessionId, block] of Object.entries(value.value.projections)) {
+        if (!this.sessionsCache.has(sessionId)) catalogChanged = true
+        this.applyProjectionBaseline(sessionId, block)
+      }
+      // Only pull the full session/list when membership actually changed.
+      if (catalogChanged) this.emitCatalogChanged('control-baseline')
       return
     }
     if (value.type === 'projection' && typeof value.sessionId === 'string' && typeof value.key === 'string') {
+      if (!this.sessionsCache.has(value.sessionId)) this.emitCatalogChanged('control-projection', value.sessionId)
       this.applyProjection(value.sessionId, value.key, value.value, typeof value.seq === 'number' ? value.seq : undefined)
     }
+  }
+
+  private emitCatalogChanged(reason: string, sessionId?: string): void {
+    this.emitFrame({
+      rpcId: '',
+      payload: {
+        type: 'session/catalog-changed',
+        reason,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      },
+    })
   }
 
   private applyProjectionBaseline(sessionId: string, block: unknown): void {
