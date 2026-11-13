@@ -143,20 +143,19 @@ interface DrawerSection {
 }
 
 interface HarnessOption {
-  value: AgentBackend
+  value: AgentBackend & keyof typeof strings.sessions.backendDescriptions
   name: string
-  desc: string
 }
 
 const HARNESS_OPTIONS: HarnessOption[] = [
-  { value: 'harness', name: 'DeepSeek Harness', desc: '官方 DeepSeek 智能体框架' },
-  { value: 'codex', name: 'Codex', desc: 'OpenAI Codex 编程智能体' },
-  { value: 'claude', name: 'Claude', desc: 'Anthropic Claude 智能体' },
-  { value: 'hermes', name: 'Hermes', desc: 'Nous Research Hermes Agent 智能体' },
-  { value: 'cursor', name: 'Cursor', desc: 'Cursor IDE 交互智能体' },
-  { value: 'antigravity', name: 'Antigravity', desc: 'Antigravity 研发框架' },
-  { value: 'opencode', name: 'OpenCode', desc: 'OpenCode 开源智能体' },
-  { value: 'pi', name: 'Pi', desc: 'Personal Intelligence 智能体' },
+  { value: 'harness', name: 'DeepSeek Harness' },
+  { value: 'codex', name: 'Codex' },
+  { value: 'claude', name: 'Claude' },
+  { value: 'hermes', name: 'Hermes' },
+  { value: 'cursor', name: 'Cursor' },
+  { value: 'antigravity', name: 'Antigravity' },
+  { value: 'opencode', name: 'OpenCode' },
+  { value: 'pi', name: 'Pi' },
 ]
 
 function harnessDisplayName(value: AgentBackend): string {
@@ -355,8 +354,8 @@ export function HostSessionsDrawer({
     setHarnessPickerOpen(false)
     if (!isBackendAvailable(target)) {
       Alert.alert(
-        strings.common.unavailable ?? '平台未启用',
-        `当前连接的主机未启用 ${harnessDisplayName(target)} 服务，请在电脑端配置或启动该智能体。`,
+        strings.common.unavailable,
+        strings.sessions.backendUnavailable(harnessDisplayName(target)),
       )
       return
     }
@@ -1141,7 +1140,7 @@ export function HostSessionsDrawer({
         <Pressable
           accessibilityRole="tab"
           accessibilityState={{ selected: drawerMode === 'agent' }}
-          accessibilityLabel="智能体"
+          accessibilityLabel={strings.sessions.agentsTab}
           onPress={() => handleSwitchMode('agent')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
@@ -1150,7 +1149,7 @@ export function HostSessionsDrawer({
         >
           <LayoutGrid size={15} color={drawerMode === 'agent' ? colors.primary : colors.muted} strokeWidth={2} />
           <Text style={[styles.modeSwitcherText, drawerMode === 'agent' && styles.modeSwitcherTextActive]}>
-            智能体
+            {strings.sessions.agentsTab}
           </Text>
         </Pressable>
         <Pressable
@@ -1193,7 +1192,7 @@ export function HostSessionsDrawer({
               <GroupRow
                 first
                 icon={Bot}
-                label="智能体平台"
+                label={strings.sessions.agentPlatform}
                 value={harnessDisplayName(backend)}
                 onPress={() => setHarnessPickerOpen(true)}
               />
@@ -1881,7 +1880,7 @@ export function HostSessionsDrawer({
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={() => setHarnessPickerOpen(false)} />
           <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
             <View style={styles.harnessHeader}>
-              <Text style={styles.harnessTitle} accessibilityRole="header">切换 Harness</Text>
+              <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
               <IconButton label={strings.common.close} icon={X} onPress={() => setHarnessPickerOpen(false)} />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
@@ -1893,7 +1892,7 @@ export function HostSessionsDrawer({
                       key={option.value}
                       first={index === 0}
                       label={option.name}
-                      detail={option.desc}
+                      detail={strings.sessions.backendDescriptions[option.value]}
                       selected={chosen}
                       chevron={false}
                       accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}

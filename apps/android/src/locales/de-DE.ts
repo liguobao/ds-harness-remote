@@ -460,6 +460,9 @@ const deDE = {
     renameFailed: 'Umbenennen fehlgeschlagen, bitte erneut versuchen',
     archiveFailed: 'Archivieren der Sitzung fehlgeschlagen, bitte versuchen Sie es später erneut',
     unarchiveFailed: 'Aufheben der Archivierung fehlgeschlagen, bitte versuchen Sie es später erneut',
+    agentsTab: "Agenten", agentPlatform: "Agentenplattform", switchHarness: "Harness wechseln",
+    backendUnavailable: (name: string) => `${name} ist auf dem verbundenen Host nicht aktiviert. Richten Sie es am Computer ein oder starten Sie es dort.`,
+    backendDescriptions: { harness: "Offizielles DeepSeek-Agenten-Framework", codex: "OpenAI-Codex-Coding-Agent", claude: "Anthropic-Claude-Agent", hermes: "Nous Research Hermes Agent", cursor: "Interaktiver Agent der Cursor IDE", antigravity: "Antigravity-Entwicklungsframework", opencode: "Open-Source-Agent OpenCode", pi: "Personal-Intelligence-Agent" },
   },
   plugins: {
     title: 'Plugins',
@@ -507,6 +510,7 @@ const deDE = {
     installHint: 'Plugins werden nur am Computer installiert. Füge es demselben Profil hinzu, in dem Remote läuft, und starte Harness neu.',
     installDesktop: 'Desktop: Plugin-Verwaltung → aus npm installieren',
     installCli: 'Kommandozeile (web-Profil; Profilnamen bei Bedarf ändern)',
+    installGithub: "GitHub-Installationsquelle (falls npm nicht erreichbar ist)",
     upgradeTitle: 'Aktualisieren, um Einstellungen am Handy zu ändern',
     upgradeHint: (version: string) => `Diese Version lässt sich nicht vom Handy aus konfigurieren. Am Computer auf ${version} oder neuer aktualisieren und Harness neu starten.`,
     copy: 'Kopieren',
@@ -618,6 +622,9 @@ const deDE = {
     deleteTitle: (title: string) => `„${title}“ löschen?`, deleteBody: "Dadurch werden der Arbeitsbereich und alle seine Konversationen von diesem Gerät entfernt. Dies kann nicht rückgängig gemacht werden.", delete: "Arbeitsbereich löschen", rename: "Umbenennen", moveUp: "Bewegen Sie sich nach oben", moveDown: "Bewegen Sie sich nach unten", expandWorkspace: (title: string) => `Arbeitsbereich „${title}“ erweitern`, collapseWorkspace: (title: string) => `Arbeitsbereich „${title}“ einklappen`, newSessionIn: (title: string) => `Neue Konversation in „${title}“`, deviceDirectory: "Projektverzeichnis auf dem Computer", browse: "Verzeichnis auswählen", directoryHint: "Hier erstellte Konversationen verwenden dieses Verzeichnis.", codexDirectoryHint: "Das ausgewählte Verzeichnis wird zum Codex-Projektkatalog auf dem Computer hinzugefügt.", cursorDirectoryHint: "Das ausgewählte Verzeichnis wird zum Cursor-ACP-Sitzungs-CWD (wird nur für diese Telefonverbindung beibehalten).", piDirectoryHint: "Das ausgewählte Verzeichnis wird zum Pi ACP-Sitzungs-CWD (wird nur für diese Telefonverbindung beibehalten).", antigravityDirectoryHint: "Verwenden Sie dieses Verzeichnis für AGY-Gespräche. Bestehende Konversationen werden vom Computer geladen.", opencodeDirectoryHint: "Verwenden Sie dieses Verzeichnis für OpenCode-Konversationen. Bestehende Konversationen werden vom Computer geladen.", claudeDirectoryHint: "Verwenden Sie dieses Verzeichnis für Claude-Gespräche. Bestehende Konversationen werden vom Computer geladen.", hermesDirectoryHint: "Verwenden Sie dieses Verzeichnis für Hermes-Gespräche. Bestehende Konversationen werden vom Computer geladen.", renameTitle: "Arbeitsbereich umbenennen", namePlaceholder: "Geben Sie einen Arbeitsbereichsnamen ein", saveName: "Speichern", chooseFolder: "Wählen Sie ein Projektverzeichnis", loading: "Laden…", loadingDirectory: "Verzeichnis lesen…", noFolders: "Hier sind keine Ordner verfügbar", showHidden: "Versteckte Ordner anzeigen", hideHidden: "Versteckte Ordner ausblenden", chooseThisFolder: "Verwenden Sie dieses Verzeichnis",
   },
   chat: {
+    referenceChat: "Unterhaltung referenzieren", referenceChatDetail: "Eine andere Bot-Unterhaltung oder DSH-Sitzung als Kontext verwenden", referenceChatSubtitle: "Wählen Sie eine andere Bot-Unterhaltung oder DSH-Sitzung als Kontext",
+    referencedChat: (label: string) => `Referenz: ${label}`,
+    renderFailed: "Dieser Inhalt konnte nicht angezeigt werden", renderFailedHint: "Der Rest der Unterhaltung und das Eingabefeld funktionieren weiterhin.", reloadSession: "Unterhaltung neu laden",
     heartbeatExpand: 'Heartbeat-Quelltext anzeigen', heartbeatCollapse: 'Heartbeat-Quelltext ausblenden',
     currentWorkSessions: "Aktuelle Arbeit", noCurrentWorkSessions: "In dieser Remote-Verbindung wurden noch keine Konversationen verwendet",
     otherHostSessions: "Andere Gespräche",

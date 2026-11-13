@@ -458,6 +458,9 @@ const zhTW = {
     renameFailed: '重命名失敗，請稍後重試',
     archiveFailed: '封存對話失敗，請稍後重試',
     unarchiveFailed: '取消封存失敗，請稍後重試',
+    agentsTab: "智慧體", agentPlatform: "智慧體平台", switchHarness: "切換 Harness",
+    backendUnavailable: (name: string) => `目前連線的主機未啟用 ${name} 服務，請在電腦端設定或啟動該智慧體。`,
+    backendDescriptions: { harness: "官方 DeepSeek 智慧體框架", codex: "OpenAI Codex 程式設計智慧體", claude: "Anthropic Claude 智慧體", hermes: "Nous Research Hermes Agent 智慧體", cursor: "Cursor IDE 互動智慧體", antigravity: "Antigravity 研發框架", opencode: "OpenCode 開源智慧體", pi: "Personal Intelligence 智慧體" },
   },
   plugins: {
     title: '外掛',
@@ -505,6 +508,7 @@ const zhTW = {
     installHint: '外掛只能在電腦上安裝。請安裝到執行 Remote 的同一個 profile，然後重新啟動 Harness。',
     installDesktop: 'Desktop：外掛管理 → 從 npm 安裝',
     installCli: '命令列（web profile，依需要替換 profile 名稱）',
+    installGithub: "GitHub 安裝位址（無法連線 npm 時填入）",
     upgradeTitle: '升級以在手機上修改設定',
     upgradeHint: (version: string) => `目前版本不支援在手機上修改設定，請在電腦上升級到 ${version} 或更新版本後重新啟動 Harness。`,
     copy: '複製',
@@ -618,6 +622,9 @@ const zhTW = {
     hermesDirectoryHint: '使用所選目錄進行 Hermes 對話，已有對話從電腦端載入。', renameTitle: '重新命名工作區', namePlaceholder: '輸入工作區名稱', saveName: '儲存', chooseFolder: '選擇專案目錄', loading: '正在載入…', loadingDirectory: '正在讀取目錄…', noFolders: '這裡沒有可選的資料夾', showHidden: '顯示隱藏資料夾', hideHidden: '隱藏隱藏資料夾', chooseThisFolder: '使用此目錄',
   },
   chat: {
+    referenceChat: "引用對話", referenceChatDetail: "將其他 Bot 對話或 DSH 會話作為上下文", referenceChatSubtitle: "選擇一段其他 Bot 對話或 DSH 會話作為上下文",
+    referencedChat: (label: string) => `引用：${label}`,
+    renderFailed: "這段內容無法顯示", renderFailedHint: "其餘對話和輸入框不受影響，可以繼續使用。", reloadSession: "重新載入會話",
     heartbeatExpand: '查看巡檢原文', heartbeatCollapse: '收起巡檢原文',
     currentWorkSessions: '當前工作', noCurrentWorkSessions: '本次遠端尚未使用對話',
     otherHostSessions: '其他對話',

@@ -460,6 +460,9 @@ const esES = {
     renameFailed: 'Error al renombrar la sesión, inténtelo de nuevo más tarde',
     archiveFailed: 'Error al archivar la sesión, inténtelo de nuevo más tarde',
     unarchiveFailed: 'Error al desarchivar la sesión, inténtelo de nuevo más tarde',
+    agentsTab: "Agentes", agentPlatform: "Plataforma de agentes", switchHarness: "Cambiar Harness",
+    backendUnavailable: (name: string) => `${name} no está habilitado en el Host conectado. Configúralo o inícialo en el ordenador.`,
+    backendDescriptions: { harness: "Framework oficial de agentes de DeepSeek", codex: "Agente de programación OpenAI Codex", claude: "Agente Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Agente interactivo de Cursor IDE", antigravity: "Framework de desarrollo Antigravity", opencode: "Agente de código abierto OpenCode", pi: "Agente Personal Intelligence" },
   },
   plugins: {
     title: 'Plugins',
@@ -507,6 +510,7 @@ const esES = {
     installHint: 'Los plugins solo se instalan en el ordenador. Añádelo al mismo perfil que ejecuta Remote y reinicia Harness.',
     installDesktop: 'Desktop: gestión de plugins → instalar desde npm',
     installCli: 'Línea de comandos (perfil web; cambia el nombre si hace falta)',
+    installGithub: "Origen en GitHub (si no se puede acceder a npm)",
     upgradeTitle: 'Actualiza para editar ajustes desde el móvil',
     upgradeHint: (version: string) => `Esta versión no se puede configurar desde el móvil. Actualiza a ${version} o posterior en el ordenador y reinicia Harness.`,
     copy: 'Copiar',
@@ -618,6 +622,9 @@ const esES = {
     deleteTitle: (title: string) => `¿Eliminar “${title}”?`, deleteBody: "Esto elimina el espacio de trabajo y todas sus conversaciones de este dispositivo. Esto no se puede deshacer.", delete: "Eliminar espacio de trabajo", rename: "Rebautizar", moveUp: "Subir", moveDown: "Bajar", expandWorkspace: (title: string) => `Expandir el espacio de trabajo "${title}"`, collapseWorkspace: (title: string) => `Contraer espacio de trabajo “${title}”`, newSessionIn: (title: string) => `Nueva conversación en “${title}”`, deviceDirectory: "Directorio de proyectos en la computadora", browse: "Elige directorio", directoryHint: "Las conversaciones creadas aquí utilizarán este directorio.", codexDirectoryHint: "El directorio seleccionado se agregará al catálogo de proyectos Codex en la computadora.", cursorDirectoryHint: "El directorio seleccionado se convierte en la sesión cwd del Cursor ACP (se conserva solo para esta conexión telefónica).", piDirectoryHint: "El directorio seleccionado se convierte en la sesión cwd de Pi ACP (se conserva solo para esta conexión telefónica).", antigravityDirectoryHint: "Utilice este directorio para conversaciones sobre AGY. Las conversaciones existentes se cargan desde la computadora.", opencodeDirectoryHint: "Utilice este directorio para conversaciones OpenCode. Las conversaciones existentes se cargan desde la computadora.", claudeDirectoryHint: "Utilice este directorio para conversaciones de Claude. Las conversaciones existentes se cargan desde la computadora.", hermesDirectoryHint: "Utilice este directorio para conversaciones de Hermes. Las conversaciones existentes se cargan desde la computadora.", renameTitle: "Cambiar nombre del espacio de trabajo", namePlaceholder: "Ingrese un nombre de espacio de trabajo", saveName: "Ahorrar", chooseFolder: "Elija el directorio del proyecto", loading: "Cargando…", loadingDirectory: "Leyendo directorio…", noFolders: "No hay carpetas disponibles aquí", showHidden: "Mostrar carpetas ocultas", hideHidden: "Ocultar carpetas ocultas", chooseThisFolder: "Utilice este directorio",
   },
   chat: {
+    referenceChat: "Citar conversación", referenceChatDetail: "Usa otra conversación de Bot o sesión de DSH como contexto", referenceChatSubtitle: "Elige otra conversación de Bot o sesión de DSH como contexto",
+    referencedChat: (label: string) => `Referencia: ${label}`,
+    renderFailed: "No se pudo mostrar este contenido", renderFailedHint: "El resto de la conversación y el cuadro de texto siguen funcionando.", reloadSession: "Recargar conversación",
     heartbeatExpand: 'Mostrar original del latido', heartbeatCollapse: 'Ocultar original del latido',
     currentWorkSessions: "Trabajo actual", noCurrentWorkSessions: "Aún no se han utilizado conversaciones en esta conexión remota",
     otherHostSessions: "Otras conversaciones",

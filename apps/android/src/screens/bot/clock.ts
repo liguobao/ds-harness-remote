@@ -12,6 +12,8 @@ const DAY_WORDS: Record<string, [string, string]> = {
   'de-DE': ['Heute', 'Gestern'],
   'fr-FR': ["Aujourd’hui", 'Hier'],
   'es-ES': ['Hoy', 'Ayer'],
+  'ru-RU': ['Сегодня', 'Вчера'],
+  'uk-UA': ['Сьогодні', 'Учора'],
 }
 
 function dayWords(): [string, string] {

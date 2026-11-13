@@ -1,7 +1,7 @@
 import { createRemoteUploadFetch } from './remote-upload-client.js'
 import { renderBodyPortal } from './client/portal.js'
-import type { Translate } from './client-locale.js'
-import { en, localeNamespace, zh } from './client-locale.js'
+import type { LocaleKey, Translate } from './client-locale.js'
+import { en, localeNamespace, ru, uk, zh } from './client-locale.js'
 import { createRemoteSessionHeaderAction } from './client/header.js'
 import { unwrapControlResult } from './client/control-result.js'
 import { pendingWorkspaceSelectionKey, storedWorkspaceSelection, workspacesReady } from './client/navigation.js'
@@ -345,7 +345,7 @@ window.__ModuleLoader__.load({
       locale: {
         bind(namespace: string): Translate
         getLocale(): { active: 'zh' | 'en' }
-        register(namespace: string, dictionaries: { zh: typeof zh; en: typeof en }): () => void
+        register(namespace: string, dictionaries: { zh: typeof zh; en: typeof en } & Record<string, Record<LocaleKey, string>>): () => void
       }
       slots: {
         inject(name: string, factory: () => unknown): void
@@ -625,7 +625,7 @@ window.__ModuleLoader__.load({
           }
         }, 'ds-harness-remote: host mention source')
       })
-      ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en }), 'ds-harness-remote: dictionaries')
+      ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en, ru, uk }), 'ds-harness-remote: dictionaries')
       ctx.effect(() => installStyle(clientModuleId), 'ds-harness-remote: client styles')
       ctx.effect(() => installTerminalAvailabilityNotice(statusFeed, t), 'ds-harness-remote: terminal availability notice')
       ctx.slots.inject('shell.overlay', () => ctx.slots.register({

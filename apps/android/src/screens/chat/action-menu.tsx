@@ -90,12 +90,12 @@ export function ChatActionMenu({ visible, onClose, anchor, canAttachImages, atta
           {onReferenceChat !== undefined && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="引用对话"
+              accessibilityLabel={strings.chat.referenceChat}
               onPress={() => { onClose(); onReferenceChat() }}
               style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
             >
               <MessageSquare size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>引用对话</Text>
+              <Text style={styles.plusMenuOptionText}>{strings.chat.referenceChat}</Text>
               <ChevronRight size={16} color={colors.muted} />
             </Pressable>
           )}

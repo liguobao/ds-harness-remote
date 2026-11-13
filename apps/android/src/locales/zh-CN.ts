@@ -458,6 +458,9 @@ const zhCN = {
     renameFailed: '重命名失败，请稍后重试',
     archiveFailed: '归档会话失败，请稍后重试',
     unarchiveFailed: '取消归档失败，请稍后重试',
+    agentsTab: "智能体", agentPlatform: "智能体平台", switchHarness: "切换 Harness",
+    backendUnavailable: (name: string) => `当前连接的主机未启用 ${name} 服务，请在电脑端配置或启动该智能体。`,
+    backendDescriptions: { harness: "官方 DeepSeek 智能体框架", codex: "OpenAI Codex 编程智能体", claude: "Anthropic Claude 智能体", hermes: "Nous Research Hermes Agent 智能体", cursor: "Cursor IDE 交互智能体", antigravity: "Antigravity 研发框架", opencode: "OpenCode 开源智能体", pi: "Personal Intelligence 智能体" },
   },
   plugins: {
     title: '插件',
@@ -505,6 +508,7 @@ const zhCN = {
     installHint: '插件只能在电脑上安装。请安装到运行 Remote 的同一个 profile，然后重启 Harness。',
     installDesktop: 'Desktop：插件管理 → 从 npm 安装',
     installCli: '命令行（web profile，按需替换 profile 名）',
+    installGithub: "GitHub 安装地址（无法连接 npm 时填入）",
     upgradeTitle: '升级以在手机上修改设置',
     upgradeHint: (version: string) => `当前版本不支持在手机上修改设置，请在电脑上升级到 ${version} 或更高版本后重启 Harness。`,
     copy: '复制',
@@ -618,6 +622,9 @@ const zhCN = {
     hermesDirectoryHint: '使用所选目录进行 Hermes 对话，已有对话从电脑端加载。', renameTitle: '重命名工作区', namePlaceholder: '输入工作区名称', saveName: '保存', chooseFolder: '选择项目目录', loading: '正在加载…', loadingDirectory: '正在读取目录…', noFolders: '这里没有可选的文件夹', showHidden: '显示隐藏文件夹', hideHidden: '隐藏隐藏文件夹', chooseThisFolder: '使用此目录',
   },
   chat: {
+    referenceChat: "引用对话", referenceChatDetail: "将其他 Bot 对话或 DSH 会话作为上下文", referenceChatSubtitle: "选择一段其他 Bot 对话或 DSH 会话作为上下文",
+    referencedChat: (label: string) => `引用：${label}`,
+    renderFailed: "这段内容渲染失败", renderFailedHint: "其余对话和输入框不受影响，可以正常继续。", reloadSession: "重新加载会话",
     heartbeatExpand: '查看巡检原文', heartbeatCollapse: '收起巡检原文',
     currentWorkSessions: '当前工作', noCurrentWorkSessions: '本次远程尚未使用对话',
     otherHostSessions: '其他对话',

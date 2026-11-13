@@ -41,8 +41,8 @@ export function BotPlusMenuModal({
             <GroupRow
               first
               icon={MessageSquare}
-              label="引用对话"
-              detail="将其他 Bot 对话或 DSH 会话作为上下文"
+              label={strings.chat.referenceChat}
+              detail={strings.chat.referenceChatDetail}
               onPress={() => {
                 onClose()
                 onReferenceChat()
@@ -130,8 +130,8 @@ export function ReferenceChatModal({
       <ModalSurface onClose={onClose}>
         <View style={styles.header}>
           <View style={styles.grow}>
-            <Text style={styles.title}>引用对话</Text>
-            <Text style={styles.subtitle}>选择一段其他 Bot 对话或 DSH 会话作为上下文</Text>
+            <Text style={styles.title}>{strings.chat.referenceChat}</Text>
+            <Text style={styles.subtitle}>{strings.chat.referenceChatSubtitle}</Text>
           </View>
           <IconButton label={strings.common.close} icon={X} onPress={onClose} />
         </View>
@@ -287,7 +287,7 @@ export function ReferencedChatPills({
               <MessageSquare size={14} color={colors.primary} />
             )}
             <Text numberOfLines={1} style={styles.referencePillText}>
-              引用：{item.mentionLabel}
+              {strings.chat.referencedChat(item.mentionLabel)}
             </Text>
             <Pressable
               accessibilityRole="button"

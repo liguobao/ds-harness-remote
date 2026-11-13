@@ -460,6 +460,9 @@ const jaJP = {
     renameFailed: '名前の変更に失敗しました。もう一度お試しください',
     archiveFailed: 'セッションのアーカイブに失敗しました。もう一度お試しください',
     unarchiveFailed: 'アーカイブの解除に失敗しました。もう一度お試しください',
+    agentsTab: "エージェント", agentPlatform: "エージェントプラットフォーム", switchHarness: "Harness を切り替え",
+    backendUnavailable: (name: string) => `接続中のホストで ${name} が有効になっていません。パソコン側で設定または起動してください。`,
+    backendDescriptions: { harness: "公式 DeepSeek エージェントフレームワーク", codex: "OpenAI Codex コーディングエージェント", claude: "Anthropic Claude エージェント", hermes: "Nous Research Hermes Agent", cursor: "Cursor IDE 対話型エージェント", antigravity: "Antigravity 開発フレームワーク", opencode: "OpenCode オープンソースエージェント", pi: "Personal Intelligence エージェント" },
   },
   plugins: {
     title: 'プラグイン',
@@ -507,6 +510,7 @@ const jaJP = {
     installHint: 'プラグインはパソコンでのみインストールできます。Remote と同じ profile に追加し、Harness を再起動してください。',
     installDesktop: 'Desktop：プラグイン管理 → npm からインストール',
     installCli: 'コマンドライン（web profile。必要に応じて profile 名を変更）',
+    installGithub: "GitHub のインストール元（npm に接続できない場合）",
     upgradeTitle: 'スマホで設定を変更するにはアップグレード',
     upgradeHint: (version: string) => `このバージョンはスマホから設定できません。パソコンで ${version} 以降にアップグレードし、Harness を再起動してください。`,
     copy: 'コピー',
@@ -618,6 +622,9 @@ const jaJP = {
     deleteTitle: (title: string) => `「${title}」を削除しますか?`, deleteBody: "これにより、ワークスペースとそのすべての会話がこのデバイスから削除されます。これを元に戻すことはできません。", delete: "ワークスペースの削除", rename: "名前の変更", moveUp: "上に移動", moveDown: "下に移動", expandWorkspace: (title: string) => `ワークスペース「${title}」を展開します`, collapseWorkspace: (title: string) => `ワークスペース「${title}」を折りたたむ`, newSessionIn: (title: string) => `「${title}」での新しい会話`, deviceDirectory: "コンピュータ上のプロジェクト ディレクトリ", browse: "ディレクトリを選択してください", directoryHint: "ここで作成された会話はこのディレクトリを使用します。", codexDirectoryHint: "選択したディレクトリがコンピューター上の Codex プロジェクト カタログに追加されます。", cursorDirectoryHint: "選択したディレクトリはCursor ACP セッション cwd になります（この電話接続専用に保持されます）。", piDirectoryHint: "選択したディレクトリは Pi ACP セッション cwd になります（この電話接続専用に保持されます）。", antigravityDirectoryHint: "このディレクトリは AGY の会話に使用します。既存の会話がコンピュータからロードされます。", opencodeDirectoryHint: "このディレクトリは OpenCode の会話に使用します。既存の会話がコンピュータからロードされます。", claudeDirectoryHint: "このディレクトリはClaudeとの会話に使用します。既存の会話がコンピュータからロードされます。", hermesDirectoryHint: "このディレクトリはHermesとの会話に使用します。既存の会話がコンピュータからロードされます。", renameTitle: "ワークスペースの名前を変更する", namePlaceholder: "ワークスペース名を入力してください", saveName: "保存", chooseFolder: "プロジェクトディレクトリを選択してください", loading: "読み込み中…", loadingDirectory: "ディレクトリを読み取り中…", noFolders: "ここには使用できるフォルダーがありません", showHidden: "隠しフォルダーを表示する", hideHidden: "隠しフォルダーを隠す", chooseThisFolder: "このディレクトリを使用します",
   },
   chat: {
+    referenceChat: "会話を参照", referenceChatDetail: "他の Bot の会話や DSH セッションをコンテキストとして使用", referenceChatSubtitle: "コンテキストとして使う他の Bot の会話または DSH セッションを選択",
+    referencedChat: (label: string) => `参照：${label}`,
+    renderFailed: "この内容を表示できませんでした", renderFailedHint: "ほかの会話と入力欄はそのまま使えます。", reloadSession: "会話を再読み込み",
     heartbeatExpand: 'ハートビートの原文を表示', heartbeatCollapse: 'ハートビートの原文を隠す',
     currentWorkSessions: "現在の仕事", noCurrentWorkSessions: "このリモート接続ではまだ会話が使用されていません",
     otherHostSessions: "その他の会話",

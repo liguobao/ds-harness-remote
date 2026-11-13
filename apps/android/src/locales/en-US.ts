@@ -460,6 +460,9 @@ const enUS = {
     renameFailed: 'Failed to rename session, please try again',
     archiveFailed: 'Failed to archive session, please try again',
     unarchiveFailed: 'Failed to unarchive session, please try again',
+    agentsTab: "Agents", agentPlatform: "Agent platform", switchHarness: "Switch Harness",
+    backendUnavailable: (name: string) => `${name} is not enabled on the connected Host. Set it up or start it on the computer.`,
+    backendDescriptions: { harness: "Official DeepSeek agent framework", codex: "OpenAI Codex coding agent", claude: "Anthropic Claude agent", hermes: "Nous Research Hermes Agent", cursor: "Cursor IDE interactive agent", antigravity: "Antigravity development framework", opencode: "OpenCode open-source agent", pi: "Personal Intelligence agent" },
   },
   plugins: {
     title: 'Plugins',
@@ -507,6 +510,7 @@ const enUS = {
     installHint: 'Plugins install on the computer only. Add it to the same profile that runs Remote, then restart Harness.',
     installDesktop: 'Desktop: Plugin management → install from npm',
     installCli: 'Command line (web profile; change the profile name if needed)',
+    installGithub: "GitHub install source (use when npm is unreachable)",
     upgradeTitle: 'Upgrade to edit settings on your phone',
     upgradeHint: (version: string) => `This version cannot be configured from the phone. Upgrade to ${version} or later on the computer, then restart Harness.`,
     copy: 'Copy',
@@ -620,6 +624,9 @@ const enUS = {
     hermesDirectoryHint: 'Use this directory for Hermes conversations. Existing conversations are loaded from the computer.', renameTitle: 'Rename workspace', namePlaceholder: 'Enter a workspace name', saveName: 'Save', chooseFolder: 'Choose project directory', loading: 'Loading…', loadingDirectory: 'Reading directory…', noFolders: 'No folders are available here', showHidden: 'Show hidden folders', hideHidden: 'Hide hidden folders', chooseThisFolder: 'Use this directory',
   },
   chat: {
+    referenceChat: "Reference conversation", referenceChatDetail: "Use another Bot conversation or DSH session as context", referenceChatSubtitle: "Choose another Bot conversation or DSH session as context",
+    referencedChat: (label: string) => `Referenced: ${label}`,
+    renderFailed: "This content could not be displayed", renderFailedHint: "The rest of the conversation and the input box still work.", reloadSession: "Reload conversation",
     heartbeatExpand: 'Show heartbeat source', heartbeatCollapse: 'Hide heartbeat source',
     currentWorkSessions: 'Current work', noCurrentWorkSessions: 'No conversations used in this remote connection yet',
     otherHostSessions: 'Other conversations',

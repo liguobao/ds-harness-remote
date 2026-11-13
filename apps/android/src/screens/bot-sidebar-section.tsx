@@ -148,7 +148,7 @@ function formatBotListTimestamp(updatedAt?: number): string {
     return `${hh}:${mm}`
   }
   if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1}月${date.getDate()}日`
+    return date.toLocaleDateString(s.time.locale, { month: 'short', day: 'numeric' })
   }
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
 }
@@ -899,7 +899,7 @@ export function DsBotInstallCard({ error, loading = false, onRetry }: { error?: 
   const rows = [
     { label: s.plugins.installDesktop, value: 'ds-bot' },
     { label: s.plugins.installCli, value: 'dsh plugin --profile web add -w ds-bot' },
-    { label: 'GitHub 安装地址（无法连接 npm 时填入）', value: 'github:Fei2411/DS-Bot#main&path:/ds-bot' },
+    { label: s.plugins.installGithub, value: 'github:Fei2411/DS-Bot#main&path:/ds-bot' },
   ]
   return (
     <View style={styles.sectionBlock}>

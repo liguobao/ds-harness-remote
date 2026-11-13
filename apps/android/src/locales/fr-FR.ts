@@ -460,6 +460,9 @@ const frFR = {
     renameFailed: 'Échec du renommage de la session, veuillez réessayer plus tard',
     archiveFailed: 'Échec de l\'archivage de la session, veuillez réessayer plus tard',
     unarchiveFailed: 'Échec du désarchivage de la session, veuillez réessayer plus tard',
+    agentsTab: "Agents", agentPlatform: "Plateforme d’agents", switchHarness: "Changer de Harness",
+    backendUnavailable: (name: string) => `${name} n’est pas activé sur l’hôte connecté. Configurez-le ou démarrez-le sur l’ordinateur.`,
+    backendDescriptions: { harness: "Framework d’agents officiel DeepSeek", codex: "Agent de programmation OpenAI Codex", claude: "Agent Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Agent interactif de Cursor IDE", antigravity: "Framework de développement Antigravity", opencode: "Agent open source OpenCode", pi: "Agent Personal Intelligence" },
   },
   plugins: {
     title: 'Plugins',
@@ -507,6 +510,7 @@ const frFR = {
     installHint: 'Les plugins s’installent uniquement sur l’ordinateur. Ajoutez-le au même profil que Remote, puis redémarrez Harness.',
     installDesktop: 'Desktop : gestion des plugins → installer depuis npm',
     installCli: 'Ligne de commande (profil web ; changez le nom si besoin)',
+    installGithub: "Source GitHub (si npm est inaccessible)",
     upgradeTitle: 'Mettre à jour pour régler depuis le téléphone',
     upgradeHint: (version: string) => `Cette version ne se règle pas depuis le téléphone. Mettez à jour vers ${version} ou plus sur l’ordinateur, puis redémarrez Harness.`,
     copy: 'Copier',
@@ -618,6 +622,9 @@ const frFR = {
     deleteTitle: (title: string) => `Supprimer « ${title} » ?`, deleteBody: "Cela supprime l'espace de travail et toutes ses conversations de cet appareil. Cela ne peut pas être annulé.", delete: "Supprimer l'espace de travail", rename: "Rebaptiser", moveUp: "Monter", moveDown: "Descendre", expandWorkspace: (title: string) => `Développer l'espace de travail « ${title} »`, collapseWorkspace: (title: string) => `Réduire l'espace de travail « ${title} »`, newSessionIn: (title: string) => `Nouvelle conversation dans "${title}"`, deviceDirectory: "Répertoire du projet sur ordinateur", browse: "Choisir le répertoire", directoryHint: "Les conversations créées ici utiliseront ce répertoire.", codexDirectoryHint: "Le répertoire sélectionné sera ajouté au catalogue du projet Codex sur l'ordinateur.", cursorDirectoryHint: "Le répertoire sélectionné devient le Cursor ACP session cwd (conservé uniquement pour cette connexion téléphonique).", piDirectoryHint: "Le répertoire sélectionné devient le cwd de la session Pi ACP (conservé uniquement pour cette connexion téléphonique).", antigravityDirectoryHint: "Utilisez cet annuaire pour les conversations AGY. Les conversations existantes sont chargées depuis l'ordinateur.", opencodeDirectoryHint: "Utilisez ce répertoire pour les conversations OpenCode. Les conversations existantes sont chargées depuis l'ordinateur.", claudeDirectoryHint: "Utilisez cet annuaire pour les conversations de Claude. Les conversations existantes sont chargées depuis l'ordinateur.", hermesDirectoryHint: "Utilisez cet annuaire pour les conversations de Hermes. Les conversations existantes sont chargées depuis l'ordinateur.", renameTitle: "Renommer l'espace de travail", namePlaceholder: "Entrez un nom d'espace de travail", saveName: "Sauvegarder", chooseFolder: "Choisir le répertoire du projet", loading: "Chargement…", loadingDirectory: "Répertoire de lecture…", noFolders: "Aucun dossier n'est disponible ici", showHidden: "Afficher les dossiers cachés", hideHidden: "Masquer les dossiers cachés", chooseThisFolder: "Utiliser ce répertoire",
   },
   chat: {
+    referenceChat: "Citer une conversation", referenceChatDetail: "Utiliser une autre conversation de Bot ou session DSH comme contexte", referenceChatSubtitle: "Choisissez une autre conversation de Bot ou session DSH comme contexte",
+    referencedChat: (label: string) => `Référence : ${label}`,
+    renderFailed: "Impossible d’afficher ce contenu", renderFailedHint: "Le reste de la conversation et la zone de saisie restent utilisables.", reloadSession: "Recharger la conversation",
     heartbeatExpand: 'Afficher la source du heartbeat', heartbeatCollapse: 'Masquer la source du heartbeat',
     currentWorkSessions: "Travail actuel", noCurrentWorkSessions: "Aucune conversation utilisée dans cette connexion à distance pour le moment",
     otherHostSessions: "Autres conversations",
