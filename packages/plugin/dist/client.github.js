@@ -5703,6 +5703,11 @@ If a code was sent, recover the original submission without changing it.`,
         if (!isRecord(result) || !Number.isInteger(result.status) || result.status < 200 || result.status > 599)
           throw new PluginRouteFailure("remote-plugin/route-response-invalid", "The plugin route response is invalid.", { stage: "response-structure" });
         let statusCode = result.status;
+        if (statusCode === 404 && body.endpoint === "state")
+          return new Response(JSON.stringify({ ok: !0, value: { bots: [], rooms: [], agents: [] } }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
         if (statusCode === 404) throw new PluginRouteFailure("remote-plugin/bot-not-loaded", "The Host has no DS Bot route. Enable ds-bot in the same DSH instance/profile as the connected Host.");
         if (statusCode === 503) throw new PluginRouteFailure("remote-plugin/host-carrier-unavailable", "The Host plugin route carrier is unavailable. Update and reload Remote on the Host.");
         if (statusCode >= 200 && statusCode < 300 && options.beforeResponse !== void 0)

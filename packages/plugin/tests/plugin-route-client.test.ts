@@ -206,6 +206,19 @@ describe('browser plugin route authority', () => {
     ], cleanup)
   })
 
+  it('returns an empty roster while the Host has no Bot route and discovers it when enabled', async () => {
+    const host = await carrier()
+    host.routeStatus = 404
+    for (let poll = 0; poll < 3; poll++) {
+      const response = await host.fetch('api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) })
+      expect(await response.json()).toEqual({ ok: true, value: { bots: [], rooms: [], agents: [] } })
+    }
+    expect(host.local).not.toHaveBeenCalled()
+    host.routeStatus = 200
+    const response = await host.fetch('api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) })
+    expect(await response.json()).toEqual({ ok: true, value: { source: 'remote' } })
+  })
+
   it('reports Host route and control refusals in the DS Bot error envelope without exposing upstream data', async () => {
     await runScenarios([
       { name: 'missing ds-bot route', status: 404, code: 'remote-plugin/bot-not-loaded' },

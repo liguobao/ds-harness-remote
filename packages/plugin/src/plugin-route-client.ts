@@ -171,6 +171,14 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
         throw new PluginRouteFailure('remote-plugin/route-response-invalid', 'The plugin route response is invalid.', { stage: 'response-structure' })
       }
       const statusCode = result.status as number
+      // DS Bot polls state even when it is absent on the selected Host.
+      // Absence is an empty roster; mutations must still report the missing route.
+      // Probe each time so enabling the plugin needs no reconnect or cache reset.
+      if (statusCode === 404 && body.endpoint === 'state') {
+        return new Response(JSON.stringify({ ok: true, value: { bots: [], rooms: [], agents: [] } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
       if (statusCode === 404) throw new PluginRouteFailure('remote-plugin/bot-not-loaded', 'The Host has no DS Bot route. Enable ds-bot in the same DSH instance/profile as the connected Host.')
       if (statusCode === 503) throw new PluginRouteFailure('remote-plugin/host-carrier-unavailable', 'The Host plugin route carrier is unavailable. Update and reload Remote on the Host.')
       if (statusCode >= 200 && statusCode < 300 && options.beforeResponse !== undefined) {
