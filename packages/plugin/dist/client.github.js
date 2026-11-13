@@ -2076,15 +2076,11 @@ If a code was sent, recover the original submission without changing it.`,
     claudeVirtualWorkspace: "Claude virtual workspace",
     hermesVirtualWorkspace: "Hermes virtual workspace",
     codexVirtualSessions: "Sessions",
-    pairingHostOnlyActionHint: "This Host is in DSH Go inbound-only pairing mode. Re-pair with DSH Go below, or exit pairing mode to sign in with a full account.",
+    pairingHostOnlyActionHint: "This Host is in DSH Go inbound-only pairing mode, and its pairing authorization is missing or expired. Re-pair with DSH Go below, or exit pairing mode to sign in with a full account.",
     exitPairingMode: "Exit pairing mode & switch account",
     resetIdentityDrawerTitle: "Identity & Troubleshooting",
-    resetIdentityWarning: "Rebuilds the selected local device key pair and Device ID, clears its saved credentials and trusted peers (including DSH Go pairings), and disconnects active Remote links. You will need to sign in or pair again.",
-    resetIdentityRoleLabel: "Reset scope",
-    resetIdentityRoleAll: "All (Host + Client)",
-    resetIdentityRoleHost: "Host only",
-    resetIdentityRoleClient: "Client only",
-    resetIdentityConfirmPrompt: "Confirm resetting {scope}? Active Remote links will disconnect and re-authorization will be required.",
+    resetIdentityWarning: "Rebuilds local Host and Client device key pairs and Device IDs, clears all saved credentials and trusted peers (including DSH Go pairings), and disconnects active Remote links. You will need to sign in or pair again.",
+    resetIdentityConfirmPrompt: "Confirm resetting all local Remote identities and credentials? Active Remote links will disconnect and re-authorization will be required.",
     confirmResetIdentity: "Confirm reset",
     cancelResetIdentity: "Cancel"
   }, zh = {
@@ -2466,15 +2462,11 @@ If a code was sent, recover the original submission without changing it.`,
     claudeVirtualWorkspace: "Claude \u5DE5\u4F5C\u533A",
     hermesVirtualWorkspace: "Hermes \u5DE5\u4F5C\u533A",
     codexVirtualSessions: "Sessions",
-    pairingHostOnlyActionHint: "\u5F53\u524D\u4E3B\u673A\u5904\u4E8E DSH Go \u4EC5\u88AB\u63A7\u914D\u5BF9\u6A21\u5F0F\u3002\u53EF\u5728\u4E0B\u65B9\u91CD\u65B0\u4E0E DSH Go \u914D\u5BF9\uFF0C\u6216\u9000\u51FA\u914D\u5BF9\u6A21\u5F0F\u540E\u4F7F\u7528\u5B8C\u6574\u8D26\u53F7\u767B\u5F55\u3002",
+    pairingHostOnlyActionHint: "\u5F53\u524D\u4E3B\u673A\u5904\u4E8E DSH Go \u4EC5\u88AB\u63A7\u914D\u5BF9\u6A21\u5F0F\uFF0C\u4E14\u914D\u5BF9\u6388\u6743\u672A\u5B8C\u6210\u6216\u5DF2\u5931\u6548\u3002\u53EF\u5728\u4E0B\u65B9\u91CD\u65B0\u4E0E DSH Go \u914D\u5BF9\uFF0C\u6216\u9000\u51FA\u914D\u5BF9\u6A21\u5F0F\u540E\u4F7F\u7528\u5B8C\u6574\u8D26\u53F7\u767B\u5F55\u3002",
     exitPairingMode: "\u9000\u51FA\u914D\u5BF9\u6A21\u5F0F\u5E76\u5207\u6362\u8D26\u53F7",
     resetIdentityDrawerTitle: "\u8EAB\u4EFD\u4FEE\u590D\u4E0E\u91CD\u7F6E",
-    resetIdentityWarning: "\u5C06\u91CD\u5EFA\u6240\u9009\u89D2\u8272\u7684\u672C\u673A\u8BBE\u5907\u5BC6\u94A5\u5BF9\u4E0E\u8BBE\u5907 ID\uFF0C\u6E05\u9664\u5BF9\u5E94\u672C\u5730\u767B\u5F55\u51ED\u636E\u4E0E\u5DF2\u4FE1\u4EFB\u8BBE\u5907\uFF08\u542B DSH Go \u914D\u5BF9\u5173\u7CFB\uFF09\uFF0C\u5E76\u65AD\u5F00\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
-    resetIdentityRoleLabel: "\u91CD\u7F6E\u8303\u56F4",
-    resetIdentityRoleAll: "\u5168\u90E8\uFF08Host + Client\uFF09",
-    resetIdentityRoleHost: "\u4EC5 Host\uFF08\u88AB\u63A7\u7AEF\uFF09",
-    resetIdentityRoleClient: "\u4EC5 Client\uFF08\u4E3B\u63A7\u7AEF\uFF09",
-    resetIdentityConfirmPrompt: "\u786E\u8BA4\u91CD\u7F6E\u300C{scope}\u300D\uFF1F\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u5C06\u65AD\u5F00\uFF0C\u4E14\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
+    resetIdentityWarning: "\u5C06\u91CD\u5EFA\u672C\u673A\uFF08Host + Client\uFF09\u8BBE\u5907\u5BC6\u94A5\u5BF9\u4E0E\u8BBE\u5907 ID\uFF0C\u6E05\u9664\u5168\u90E8\u672C\u5730\u767B\u5F55\u51ED\u636E\u4E0E\u5DF2\u4FE1\u4EFB\u8BBE\u5907\uFF08\u542B DSH Go \u914D\u5BF9\u5173\u7CFB\uFF09\uFF0C\u5E76\u65AD\u5F00\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
+    resetIdentityConfirmPrompt: "\u786E\u8BA4\u5168\u90E8\u91CD\u7F6E\u672C\u673A Remote \u8EAB\u4EFD\u4E0E\u51ED\u636E\uFF1F\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u5C06\u65AD\u5F00\uFF0C\u4E14\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
     confirmResetIdentity: "\u786E\u8BA4\u91CD\u7F6E",
     cancelResetIdentity: "\u53D6\u6D88"
   };
@@ -3122,7 +3114,7 @@ If a code was sent, recover the original submission without changing it.`,
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [resetRole, setResetRole] = React.useState("all"), [confirmResetOpen, setConfirmResetOpen] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [confirmResetOpen, setConfirmResetOpen] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
       React.useEffect(() => {
         association !== void 0 && setSignInOpen(!1);
       }, [association]);
@@ -3599,11 +3591,11 @@ If a code was sent, recover the original submission without changing it.`,
             }
           })
         )
-      ), resetIdentity = async (role = resetRole) => {
+      ), resetIdentity = async () => {
         let run = ++associationReadRun.current;
         setResetBusy(!0), setError(void 0), setNotice(void 0);
         try {
-          let view = await props.control("settings.identity.reset", { role }), status = await props.control("status").catch(() => {
+          let view = await props.control("settings.identity.reset", { role: "all" }), status = await props.control("status").catch(() => {
           });
           applyView(view, run === associationReadRun.current), status !== void 0 && (setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "")), clearLocalSignInFlowState(), setConfirmResetOpen(!1), setSignInOpen(!1), setNotice({ key: "resetIdentitySuccess" });
         } catch (reason) {
@@ -3612,11 +3604,7 @@ If a code was sent, recover the original submission without changing it.`,
         } finally {
           setResetBusy(!1);
         }
-      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", startupRecoverableByReset = settingsView?.startupError?.code === "IDENTITY_INVALID" || settingsView?.startupError?.code === "SERVER_CREDENTIALS_INVALID", resetRoleOptions = [
-        { value: "all", label: "resetIdentityRoleAll" },
-        { value: "host", label: "resetIdentityRoleHost" },
-        { value: "client", label: "resetIdentityRoleClient" }
-      ], resetRoleLabel = t(resetRoleOptions.find((item) => item.value === resetRole)?.label ?? "resetIdentityRoleAll"), retryStartup = async () => {
+      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", startupRecoverableByReset = settingsView?.startupError?.code === "IDENTITY_INVALID" || settingsView?.startupError?.code === "SERVER_CREDENTIALS_INVALID", retryStartup = async () => {
         if (retryStartupBusy) return;
         let run = ++associationReadRun.current;
         setRetryStartupBusy(!0), setError(void 0), setNotice(void 0);
@@ -3637,26 +3625,6 @@ If a code was sent, recover the original submission without changing it.`,
         React.createElement(
           "div",
           { className: "dshRemoteResetControls" },
-          React.createElement(
-            "div",
-            { className: "dshRemoteResetScope" },
-            React.createElement("span", null, t("resetIdentityRoleLabel")),
-            React.createElement("div", {
-              className: "dshRemoteEntryStyleChoices",
-              role: "radiogroup",
-              "aria-label": t("resetIdentityRoleLabel")
-            }, resetRoleOptions.map((option) => React.createElement("button", {
-              key: option.value,
-              type: "button",
-              role: "radio",
-              "aria-checked": resetRole === option.value,
-              className: resetRole === option.value ? "isSelected" : void 0,
-              disabled: busy || resetBusy || resetDisabledByStartupState,
-              onClick: () => {
-                setResetRole(option.value), setConfirmResetOpen(!1);
-              }
-            }, t(option.label))))
-          ),
           confirmResetOpen ? null : React.createElement("button", {
             type: "button",
             className: "dshRemoteDangerBtn",
@@ -3669,7 +3637,7 @@ If a code was sent, recover the original submission without changing it.`,
         confirmResetOpen ? React.createElement(
           "div",
           { className: "dshRemoteResetConfirm", role: "alertdialog", "aria-label": t("resetIdentity") },
-          React.createElement("p", null, t("resetIdentityConfirmPrompt", { scope: resetRoleLabel })),
+          React.createElement("p", null, t("resetIdentityConfirmPrompt")),
           React.createElement(
             "div",
             { className: "dshRemoteResetConfirmActions" },
@@ -3677,7 +3645,7 @@ If a code was sent, recover the original submission without changing it.`,
               type: "button",
               className: "dshRemoteDangerBtn",
               disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
-              onClick: () => void resetIdentity(resetRole)
+              onClick: () => void resetIdentity()
             }, t(resetBusy ? "resettingAction" : "confirmResetIdentity")),
             React.createElement("button", {
               type: "button",
@@ -4400,7 +4368,7 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteLogToggleBtn,.dshRemoteLogActionBtn,.dshRemoteLogFilterBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);min-height:28px!important;padding:3px 10px!important;font-size:12px!important;line-height:1.4!important;white-space:nowrap}.dshRemoteLogToggleBtn:hover:not(:disabled),.dshRemoteLogActionBtn:hover:not(:disabled),.dshRemoteLogFilterBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogToggleBtn:disabled,.dshRemoteLogActionBtn:disabled,.dshRemoteLogFilterBtn:disabled{opacity:.45;cursor:default}.dshRemoteLogFilterBtn.isActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-label-secondary);font-weight:500}.dshRemoteLogDrawer{margin-top:12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:8px}.dshRemoteLogToolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.dshRemoteLogFilterGroup,.dshRemoteLogActions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dshRemoteLogMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4}.dshRemoteLogMeta code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}.dshRemoteLogFallback{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogViewport{box-sizing:border-box;width:100%;max-height:260px;min-height:120px;overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}.dshRemoteLogLine{display:block;color:var(--dsw-alias-label-primary);margin-bottom:3px}.dshRemoteLogLine:last-child{margin-bottom:0}.dshRemoteLogLine.isDebug{color:var(--dsw-alias-label-tertiary)}.dshRemoteLogLine.isWarn{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogLine.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteLogEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0;padding:16px 0;text-align:center}",
       ".dshRemotePairingHostOnlyBanner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin:0 0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1))}.dshRemotePairingHostOnlyBanner>p{margin:0;flex:1 1 240px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}",
       ".dshRemoteStartupBanner{display:flex;flex-direction:column;gap:10px;padding:12px;margin:8px 0;border:1px solid var(--dsw-alias-state-error-primary);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1))}.dshRemoteStartupBanner>p{margin:0;font-size:13px;line-height:1.5}.dshRemoteStartupActions{display:flex;flex-wrap:wrap;gap:8px}",
-      ".dshRemoteResetDetails{padding-top:12px;padding-bottom:12px}.dshRemoteResetBody{display:flex;flex-direction:column;gap:12px;padding-top:12px}.dshRemoteResetWarning{margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.55}.dshRemoteResetControls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}.dshRemoteResetScope{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.dshRemoteResetScope>span{font-size:12px;color:var(--dsw-alias-label-secondary)}",
+      ".dshRemoteResetDetails{padding-top:12px;padding-bottom:12px}.dshRemoteResetBody{display:flex;flex-direction:column;gap:12px;padding-top:12px}.dshRemoteResetWarning{margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.55}.dshRemoteResetControls{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:12px}",
       ".dshRemoteDangerBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-state-error-primary);border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5;background:transparent;color:var(--dsw-alias-state-error-primary)}.dshRemoteDangerBtn:hover:not(:disabled){background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-bg-layer-1)}.dshRemoteDangerBtn:disabled{opacity:.4;cursor:default}.dshRemoteDangerBtn:focus-visible{outline:2px solid var(--dsw-alias-state-error-primary);outline-offset:1px}",
       ".dshRemoteResetConfirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-state-error-primary);border-radius:8px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteResetConfirm>p{margin:0;flex:1 1 220px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary)}.dshRemoteResetConfirmActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
       "@media(max-width:620px){.dshRemotePluginCardStatus{display:none}.dshRemoteSettingsTop{gap:10px}.dshRemoteConnection{align-items:flex-start}.dshRemoteReconnect{min-height:40px}.dshRemotePortsRow{flex-direction:column}.dshRemoteAcpAddForm{grid-template-columns:1fr}.dshRemoteAcpAddForm button{min-height:40px}}"

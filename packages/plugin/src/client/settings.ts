@@ -83,7 +83,6 @@ export function createRemotePluginOptions(React: ClientReact) {
     const logsCopyTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
     const logsViewportRef = React.useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
     const [resetBusy, setResetBusy] = React.useState(false)
-    const [resetRole, setResetRole] = React.useState<'all' | 'host' | 'client'>('all')
     const [confirmResetOpen, setConfirmResetOpen] = React.useState(false)
     const [retryStartupBusy, setRetryStartupBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
@@ -796,13 +795,13 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     // The entry style is presentation only, so it lives beside the development
-    const resetIdentity = async (role: 'all' | 'host' | 'client' = resetRole): Promise<void> => {
+    const resetIdentity = async (): Promise<void> => {
       const run = ++associationReadRun.current
       setResetBusy(true)
       setError(undefined)
       setNotice(undefined)
       try {
-        const view = await props.control<PluginSettingsView>('settings.identity.reset', { role })
+        const view = await props.control<PluginSettingsView>('settings.identity.reset', { role: 'all' })
         const status = await props.control<RemoteStatus>('status').catch(() => undefined)
         applyView(view, run === associationReadRun.current)
         if (status !== undefined) {
@@ -826,12 +825,6 @@ export function createRemotePluginOptions(React: ClientReact) {
       || settingsView?.startupError?.code === 'IDENTITY_LOCKED'
     const startupRecoverableByReset = settingsView?.startupError?.code === 'IDENTITY_INVALID'
       || settingsView?.startupError?.code === 'SERVER_CREDENTIALS_INVALID'
-    const resetRoleOptions: ReadonlyArray<{ value: 'all' | 'host' | 'client'; label: 'resetIdentityRoleAll' | 'resetIdentityRoleHost' | 'resetIdentityRoleClient' }> = [
-      { value: 'all', label: 'resetIdentityRoleAll' },
-      { value: 'host', label: 'resetIdentityRoleHost' },
-      { value: 'client', label: 'resetIdentityRoleClient' },
-    ]
-    const resetRoleLabel = t(resetRoleOptions.find(item => item.value === resetRole)?.label ?? 'resetIdentityRoleAll')
 
     const retryStartup = async (): Promise<void> => {
       if (retryStartupBusy) return
@@ -858,21 +851,6 @@ export function createRemotePluginOptions(React: ClientReact) {
     const resetControls = React.createElement('div', { className: 'dshRemoteResetBody' },
       React.createElement('p', { className: 'dshRemoteResetWarning' }, t('resetIdentityWarning')),
       React.createElement('div', { className: 'dshRemoteResetControls' },
-        React.createElement('div', { className: 'dshRemoteResetScope' },
-          React.createElement('span', null, t('resetIdentityRoleLabel')),
-          React.createElement('div', {
-            className: 'dshRemoteEntryStyleChoices',
-            role: 'radiogroup',
-            'aria-label': t('resetIdentityRoleLabel'),
-          }, resetRoleOptions.map(option => React.createElement('button', {
-            key: option.value,
-            type: 'button',
-            role: 'radio',
-            'aria-checked': resetRole === option.value,
-            className: resetRole === option.value ? 'isSelected' : undefined,
-            disabled: busy || resetBusy || resetDisabledByStartupState,
-            onClick: () => { setResetRole(option.value); setConfirmResetOpen(false) },
-          }, t(option.label))))),
         confirmResetOpen ? null : React.createElement('button', {
           type: 'button',
           className: 'dshRemoteDangerBtn',
@@ -880,13 +858,13 @@ export function createRemotePluginOptions(React: ClientReact) {
           onClick: () => { setError(undefined); setConfirmResetOpen(true) },
         }, t(resetBusy ? 'resettingAction' : 'resetIdentity'))),
       !confirmResetOpen ? null : React.createElement('div', { className: 'dshRemoteResetConfirm', role: 'alertdialog', 'aria-label': t('resetIdentity') },
-        React.createElement('p', null, t('resetIdentityConfirmPrompt', { scope: resetRoleLabel })),
+        React.createElement('p', null, t('resetIdentityConfirmPrompt')),
         React.createElement('div', { className: 'dshRemoteResetConfirmActions' },
           React.createElement('button', {
             type: 'button',
             className: 'dshRemoteDangerBtn',
             disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
-            onClick: () => void resetIdentity(resetRole),
+            onClick: () => void resetIdentity(),
           }, t(resetBusy ? 'resettingAction' : 'confirmResetIdentity')),
           React.createElement('button', {
             type: 'button',

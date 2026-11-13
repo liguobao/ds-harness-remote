@@ -133,7 +133,7 @@ describe('pairingHostOnly UI and desktop identity reset overhaul', () => {
     expect(findElement(tree, n => n.props?.role === 'tab' && n.props?.id === 'dsh-remote-password-tab')).toBeTruthy()
   })
 
-  it('places desktop identity reset in a collapsible drawer with role choice and inline confirm (no window.confirm)', async () => {
+  it('places desktop identity reset in a collapsible drawer with unified full reset and inline confirm (no window.confirm)', async () => {
     const { React, resetRender, unmount } = createTestHarness()
     cleanups.push(unmount)
     const confirmSpy = vi.fn(() => true)
@@ -156,8 +156,7 @@ describe('pairingHostOnly UI and desktop identity reset overhaul', () => {
     const details = findElement(tree, n => n.type === 'details' && String(n.props?.className).includes('dshRemoteResetDetails'))
     expect(details).toBeTruthy()
     expect(findElement(tree, n => n.props?.role === 'alertdialog')).toBeNull()
-    findElement(details, n => n.type === 'button' && n.props?.role === 'radio' && textContent(n).includes(zh.resetIdentityRoleHost)).props.onClick()
-    tree = render()
+    expect(findElement(details, n => n.props?.role === 'radiogroup')).toBeNull()
     findElement(tree, n => n.type === 'button' && String(n.props?.className).includes('dshRemoteDangerBtn')).props.onClick()
     tree = render()
     const dialog = findElement(tree, n => n.props?.role === 'alertdialog')
@@ -166,7 +165,7 @@ describe('pairingHostOnly UI and desktop identity reset overhaul', () => {
     findElement(dialog, n => n.type === 'button' && textContent(n).includes(zh.confirmResetIdentity)).props.onClick()
     tree = await settle()
     expect(confirmSpy).not.toHaveBeenCalled()
-    expect(control).toHaveBeenCalledWith('settings.identity.reset', { role: 'host' })
+    expect(control).toHaveBeenCalledWith('settings.identity.reset', { role: 'all' })
     expect(findElement(tree, n => n.props?.role === 'alertdialog')).toBeNull()
   })
 
