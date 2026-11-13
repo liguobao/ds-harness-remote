@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, FileText, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
+import { ArrowDown, ArrowLeft, FileText, Film, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
@@ -54,12 +54,16 @@ import { useReduceMotion } from '../ui/use-reduce-motion'
 import { AutomationTasksModal } from './automation-tasks-modal'
 import { ChatErrorBoundary } from './chat-error-boundary'
 import {
+  formatDurationMs,
   formatFileBytes,
   formatUploadedFilesPrompt,
   formatUploadedFilesReferencePrompt,
-  MAX_TOTAL_FILES_BYTES,
+  isDirectTransportMode,
+  isVideoFile,
   uploadStagedFilesToWorkspace,
-  type StagedFile
+  workspaceUploadMaxBytes,
+  type StagedFile,
+  type UploadProgress
 } from './chat-files'
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
@@ -294,6 +298,7 @@ export function ChatScreen({
   }, [setQuotes, composerInputRef])
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([])
   const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>()
   const uploadingRef = useRef(false)
   const uploadControllerRef = useRef<AbortController | undefined>(undefined)
   const sessionGenerationRef = useRef(0)
@@ -305,6 +310,7 @@ export function ChatScreen({
         lastSessionId = currentId
         sessionGenerationRef.current += 1
         uploadControllerRef.current?.abort()
+        setUploadProgress(undefined)
         setStagedFiles([])
       }
     })
@@ -779,9 +785,26 @@ export function ChatScreen({
       uploadControllerRef.current = controller
       uploadingRef.current = true
       setUploadingFiles(true)
+      setUploadProgress({
+        fileIndex: 0,
+        fileCount: submittedFiles.length,
+        fileName: submittedFiles[0]?.name ?? '',
+        bytesSent: 0,
+        totalBytes: submittedFiles[0]?.size ?? 0,
+      })
       try {
         const rpc = requireConnectionRpc()
-        const uploaded = await uploadStagedFilesToWorkspace(rpc, session.sessionId, submittedFiles, controller.signal)
+        const uploaded = await uploadStagedFilesToWorkspace(
+          rpc,
+          session.sessionId,
+          submittedFiles,
+          controller.signal,
+          progress => {
+            if (!controller.signal.aborted && uploadControllerRef.current === controller) {
+              setUploadProgress(progress)
+            }
+          },
+        )
         // A navigation, session switch, reconnection or unmount during a long
         // upload must never leak the prompt into another conversation.
         if (controller.signal.aborted) return
@@ -796,10 +819,21 @@ export function ChatScreen({
         // Aborted uploads already restored (or discarded) their composer state;
         // do not surface a cancellation as a failure.
         if (controller.signal.aborted || (uploadError as Error | undefined)?.name === 'AbortError') return
-        const isUnsupported = (uploadError as { code?: string })?.code === 'FEATURE_NOT_SUPPORTED'
-        const errorMsg = isUnsupported
-          ? strings.chat.uploadUnavailable
-          : strings.chat.uploadFileFailed(submittedFiles[0]?.name ?? '', (uploadError as Error).message)
+        const code = (uploadError as { code?: string })?.code
+        const activeName = submittedFiles[0]?.name ?? ''
+        const transportMode = useAppStore.getState().connection.stats.mode
+        let errorMsg: string
+        if (code === 'FEATURE_NOT_SUPPORTED' || code === 'UPLOAD_WORKSPACE_UNAVAILABLE') {
+          errorMsg = strings.chat.uploadUnavailable
+        } else if (code === 'UPLOAD_LIMIT') {
+          errorMsg = strings.chat.fileTooLargeForTransport(
+            activeName,
+            formatFileBytes(workspaceUploadMaxBytes(transportMode)),
+            isDirectTransportMode(transportMode),
+          )
+        } else {
+          errorMsg = strings.chat.uploadFileFailed(activeName, (uploadError as Error).message)
+        }
         Alert.alert(strings.messageActions.failed, errorMsg)
         return
       } finally {
@@ -807,6 +841,7 @@ export function ChatScreen({
           uploadControllerRef.current = undefined
           uploadingRef.current = false
           setUploadingFiles(false)
+          setUploadProgress(undefined)
         }
       }
     }
@@ -834,15 +869,14 @@ export function ChatScreen({
         setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
         setStagedReferences(previous => previous.length === 0 ? submittedReferences : [...submittedReferences, ...previous])
         setStagedFiles(current => {
-          const combined = [...submittedFiles, ...current]
-          let acc = 0
-          return combined.filter(f => {
-            if (acc + f.size <= MAX_TOTAL_FILES_BYTES) {
-              acc += f.size
-              return true
-            }
-            return false
-          })
+          const seen = new Set<string>()
+          const restored: StagedFile[] = []
+          for (const f of [...submittedFiles, ...current]) {
+            if (seen.has(f.id)) continue
+            seen.add(f.id)
+            restored.push(f)
+          }
+          return restored
         })
       }
       Alert.alert(strings.messageActions.failed, useAppStore.getState().error ?? strings.messageActions.unavailable)
@@ -1230,30 +1264,53 @@ export function ChatScreen({
         )}
         {stagedFiles.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.fileTray}>
-            {stagedFiles.map((file, index) => (
-              <View key={`${file.id}:${index}`} style={styles.fileCard}>
-                <FileText size={16} color={colors.primary} />
-                <View style={styles.fileCardMeta}>
-                  <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
-                  <Text style={styles.fileCardSize}>{formatFileBytes(file.size)}</Text>
+            {stagedFiles.map((file, index) => {
+              const video = isVideoFile(file.name, file.mimeType)
+              const sizeLine = file.durationMs !== undefined
+                ? `${formatFileBytes(file.size)} · ${formatDurationMs(file.durationMs)}`
+                : formatFileBytes(file.size)
+              return (
+                <View key={`${file.id}:${index}`} style={styles.fileCard}>
+                  {video ? <Film size={16} color={colors.primary} /> : <FileText size={16} color={colors.primary} />}
+                  <View style={styles.fileCardMeta}>
+                    <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
+                    <Text style={styles.fileCardSize}>{sizeLine}</Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={file.name ? strings.chat.removeFile(file.name) : strings.chat.unnamedFile}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
+                    style={styles.removeFileButton}
+                  >
+                    <X size={13} color={colors.muted} />
+                  </Pressable>
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={file.name ? `移除文件“${file.name}”` : '移除文件'}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
-                  style={styles.removeFileButton}
-                >
-                  <X size={13} color={colors.muted} />
-                </Pressable>
-              </View>
-            ))}
+              )
+            })}
           </ScrollView>
         )}
         {uploadingFiles && (
-          <Text style={[styles.fileCardSize, { paddingHorizontal: spacing.md, paddingBottom: spacing.xs }]}>
-            {strings.chat.uploadingFile(stagedFiles[0]?.name ?? '')}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingBottom: spacing.xs, gap: spacing.sm }}>
+            <Text style={[styles.fileCardSize, { flexShrink: 1 }]} numberOfLines={1}>
+              {uploadProgress && uploadProgress.totalBytes > 0
+                ? strings.chat.uploadingFileProgress(
+                    uploadProgress.fileCount > 1
+                      ? `(${uploadProgress.fileIndex + 1}/${uploadProgress.fileCount}) ${uploadProgress.fileName}`
+                      : uploadProgress.fileName,
+                    Math.min(100, Math.round((uploadProgress.bytesSent / uploadProgress.totalBytes) * 100)),
+                  )
+                : strings.chat.uploadingFile(uploadProgress?.fileName ?? stagedFiles[0]?.name ?? '')}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.chat.cancelUpload}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => uploadControllerRef.current?.abort()}
+            >
+              <Text style={[styles.fileCardSize, { color: colors.primary, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
+            </Pressable>
+          </View>
         )}
         <ReferencedChatPills
           items={stagedReferences}

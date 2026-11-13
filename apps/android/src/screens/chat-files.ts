@@ -21,6 +21,7 @@ export interface StagedFile {
   uri: string
   content?: string
   remotePath?: string
+  durationMs?: number
 }
 
 export interface UploadedFileRef {
@@ -29,17 +30,39 @@ export interface UploadedFileRef {
   bytes: number
 }
 
+export interface UploadProgress {
+  fileIndex: number
+  fileCount: number
+  fileName: string
+  bytesSent: number
+  totalBytes: number
+}
+
 export type RpcCaller = (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>
 
-export const MAX_SINGLE_FILE_BYTES = 512 * 1024 // 512 KB
-export const MAX_TOTAL_FILES_BYTES = 2 * 1024 * 1024 // 2 MB
+export const MAX_INLINE_TEXT_BYTES = 512 * 1024 // 512 KB
+export const MAX_TOTAL_INLINE_TEXT_BYTES = 2 * 1024 * 1024 // 2 MB
+export const MAX_SINGLE_FILE_BYTES = MAX_INLINE_TEXT_BYTES
+export const MAX_TOTAL_FILES_BYTES = MAX_TOTAL_INLINE_TEXT_BYTES
 export const UPLOAD_CHUNK_BYTES = 64 * 1024 // 64 KiB protocol chunk
+export const MAX_RELAY_UPLOAD_BYTES = 20 * 1024 * 1024 // 20 MiB
+export const MAX_DIRECT_UPLOAD_BYTES = 1024 * 1024 * 1024 // 1 GiB
 
 // Local memory ceilings also apply when an older Host omits imageLimits.
 const MAX_DOCUMENT_IMAGE_BYTES = 8 * 1024 * 1024
 const MAX_DOCUMENT_IMAGES_BYTES = 32 * 1024 * 1024
+const MAX_UPLOAD_NAME_UTF8_BYTES = 220
 
 const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+export function isDirectTransportMode(mode: string | undefined): boolean {
+  return mode === 'LAN' || mode === 'P2P'
+}
+
+/** Matches Host workspaceUploadMaxBytes(mode): 1 GiB over LAN/P2P, 20 MiB otherwise. */
+export function workspaceUploadMaxBytes(mode: string | undefined): number {
+  return isDirectTransportMode(mode) ? MAX_DIRECT_UPLOAD_BYTES : MAX_RELAY_UPLOAD_BYTES
+}
 
 /**
  * Pure TypeScript RFC 4648 base64 encoder that works uniformly across
@@ -51,7 +74,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   let i = 0
 
   for (; i + 2 < len; i += 3) {
-    const n = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!
+    const n = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | (bytes[i + 2]!)
     out.push(
       B64_ALPHABET[(n >>> 18) & 0x3f]! +
         B64_ALPHABET[(n >>> 12) & 0x3f]! +
@@ -73,9 +96,24 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return out.join('')
 }
 
-function generateUploadId(): string {
-  const rand = (): string => Math.random().toString(36).slice(2, 10)
-  return `up_${Date.now().toString(36)}_${rand()}`
+/** Generate an RFC 4122 UUID v4 required by Host workspace.upload.* schema validation. */
+export function generateUploadId(): string {
+  const cryptoObj = globalThis.crypto
+  if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+    return cryptoObj.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    cryptoObj.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < 16; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,21 +145,82 @@ async function abortUploadQuietly(rpc: RpcCaller, sessionId: string, uploadId: s
   }
 }
 
-async function resolveFileBytes(file: StagedFile, signal?: AbortSignal): Promise<Uint8Array> {
+interface ChunkReader {
+  totalBytes: number
+  read(offset: number, length: number): Promise<Uint8Array>
+  close(): Promise<void> | void
+}
+
+async function openFileChunkReader(file: StagedFile, signal?: AbortSignal): Promise<ChunkReader> {
   throwIfAborted(signal)
   if (typeof file.content === 'string') {
-    return new TextEncoder().encode(file.content)
+    const bytes = new TextEncoder().encode(file.content)
+    return {
+      totalBytes: bytes.byteLength,
+      async read(offset, length) {
+        return bytes.subarray(offset, Math.min(offset + length, bytes.byteLength))
+      },
+      close() {},
+    }
   }
   if (file.uri) {
+    try {
+      const fsMod = await import('expo-file-system')
+      if (typeof fsMod.File === 'function' && fsMod.FileMode?.ReadOnly !== undefined) {
+        const localFile = new fsMod.File(file.uri)
+        const handle = localFile.open(fsMod.FileMode.ReadOnly)
+        const size = handle.size ?? localFile.size ?? file.size
+        if (typeof size === 'number' && Number.isFinite(size) && size >= 0) {
+          return {
+            totalBytes: size,
+            async read(_offset, length) {
+              const chunk = handle.readBytes(length)
+              if (chunk.byteLength === 0 && length > 0) {
+                throw new Error(`Unexpected end of file while reading ${file.name}`)
+              }
+              return chunk
+            },
+            close() {
+              try {
+                handle.close()
+              } catch {
+                // Ignore close failures during cleanup.
+              }
+            },
+          }
+        }
+        try {
+          handle.close()
+        } catch {
+          // Ignore close failures during fallback.
+        }
+      }
+    } catch {
+      // Fall back to fetch when native FileHandle is unavailable (e.g. tests or non-file URIs).
+    }
+
     const response = await fetch(file.uri, { signal })
     if (!response.ok) {
       throw new Error(`Failed to read file ${file.name} from ${file.uri}`)
     }
     const buffer = await response.arrayBuffer()
     throwIfAborted(signal)
-    return new Uint8Array(buffer)
+    const bytes = new Uint8Array(buffer)
+    return {
+      totalBytes: bytes.byteLength,
+      async read(offset, length) {
+        return bytes.subarray(offset, Math.min(offset + length, bytes.byteLength))
+      },
+      close() {},
+    }
   }
-  return new Uint8Array(0)
+  return {
+    totalBytes: 0,
+    async read() {
+      return new Uint8Array(0)
+    },
+    close() {},
+  }
 }
 
 /**
@@ -133,39 +232,49 @@ export async function uploadStagedFileToWorkspace(
   sessionId: string,
   file: StagedFile,
   signal?: AbortSignal,
+  onProgress?: (bytesSent: number, totalBytes: number) => void,
 ): Promise<UploadedFileRef> {
   // Reuse existing remotePath if already uploaded in an earlier attempt/retry
   if (typeof file.remotePath === 'string' && file.remotePath.trim().length > 0) {
+    onProgress?.(file.size, file.size)
     return { name: file.name, path: file.remotePath, bytes: file.size }
   }
 
   throwIfAborted(signal)
 
-  const bytes = await resolveFileBytes(file, signal)
-  const totalBytes = bytes.byteLength
-  throwIfAborted(signal)
-
+  const reader = await openFileChunkReader(file, signal)
+  const totalBytes = reader.totalBytes
   const uploadId = generateUploadId()
   let committed = false
+  let opened = false
 
   try {
+    throwIfAborted(signal)
     const openRes = await rpc('workspace.upload.open', {
       sessionId,
       uploadId,
       name: file.name,
       totalBytes,
     }, signal)
+    opened = true
 
     if (!isRecord(openRes)) throw new Error('workspace.upload.open returned a non-object')
     const chunkBytes = typeof openRes.chunkBytes === 'number' && openRes.chunkBytes > 0
       ? openRes.chunkBytes
       : UPLOAD_CHUNK_BYTES
 
+    onProgress?.(0, totalBytes)
+
     let offset = 0
     while (offset < totalBytes) {
       throwIfAborted(signal)
-      const end = Math.min(offset + chunkBytes, totalBytes)
-      const chunkData = bytesToBase64(bytes.subarray(offset, end))
+      const sliceLength = Math.min(chunkBytes, totalBytes - offset)
+      const chunkBytesView = await reader.read(offset, sliceLength)
+      if (chunkBytesView.byteLength === 0) {
+        throw new Error(`Unexpected empty chunk while reading ${file.name}`)
+      }
+      throwIfAborted(signal)
+      const chunkData = bytesToBase64(chunkBytesView)
 
       const chunkRes = await rpc('workspace.upload.chunk', {
         sessionId,
@@ -174,7 +283,8 @@ export async function uploadStagedFileToWorkspace(
         data: chunkData,
       }, signal)
       if (!isRecord(chunkRes)) throw new Error('workspace.upload.chunk returned a non-object')
-      offset = end
+      offset += chunkBytesView.byteLength
+      onProgress?.(offset, totalBytes)
     }
 
     throwIfAborted(signal)
@@ -192,10 +302,12 @@ export async function uploadStagedFileToWorkspace(
 
     return { name, path, bytes: bytesCount }
   } catch (error) {
-    if (!committed) {
+    if (opened && !committed) {
       await abortUploadQuietly(rpc, sessionId, uploadId)
     }
     throw error
+  } finally {
+    await reader.close()
   }
 }
 
@@ -207,11 +319,34 @@ export async function uploadStagedFilesToWorkspace(
   sessionId: string,
   files: StagedFile[],
   signal?: AbortSignal,
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<UploadedFileRef[]> {
   const uploaded: UploadedFileRef[] = []
-  for (const file of files) {
-    if (signal?.aborted) throw new Error('upload-aborted')
-    const result = await uploadStagedFileToWorkspace(rpc, sessionId, file, signal)
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]!
+    throwIfAborted(signal)
+    onProgress?.({
+      fileIndex: index,
+      fileCount: files.length,
+      fileName: file.name,
+      bytesSent: 0,
+      totalBytes: file.size,
+    })
+    const result = await uploadStagedFileToWorkspace(
+      rpc,
+      sessionId,
+      file,
+      signal,
+      (bytesSent, totalBytes) => {
+        onProgress?.({
+          fileIndex: index,
+          fileCount: files.length,
+          fileName: file.name,
+          bytesSent,
+          totalBytes,
+        })
+      },
+    )
     file.remotePath = result.path
     uploaded.push(result)
   }
@@ -284,6 +419,25 @@ const TEXT_EXTENSIONS = new Set([
   'gradle', 'cmake', 'dockerfile', 'makefile', 'r', 'lua', 'dart', 'scala'
 ])
 
+const VIDEO_EXTENSIONS = new Set([
+  'mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', '3gp', 'flv', 'wmv', 'ts', 'mts',
+])
+
+const MIME_TO_EXTENSION: Record<string, string> = {
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
+  'video/x-matroska': '.mkv',
+  'video/x-msvideo': '.avi',
+  'video/3gpp': '.3gp',
+  'audio/mpeg': '.mp3',
+  'audio/mp4': '.m4a',
+  'audio/wav': '.wav',
+  'audio/ogg': '.ogg',
+  'application/zip': '.zip',
+  'application/pdf': '.pdf',
+}
+
 export function isTextFile(fileName: string, mimeType?: string): boolean {
   if (mimeType?.startsWith('text/')) return true
   if (mimeType === 'application/json' || mimeType === 'application/xml' || mimeType === 'application/javascript') return true
@@ -293,6 +447,79 @@ export function isTextFile(fileName: string, mimeType?: string): boolean {
   const lower = baseName.toLowerCase()
   if (lower === 'dockerfile' || lower === 'makefile' || lower === 'license' || lower === 'readme') return true
   return false
+}
+
+export function isVideoFile(fileName: string, mimeType?: string | null): boolean {
+  if (mimeType?.toLowerCase().startsWith('video/')) return true
+  const baseName = fileName.split(/[?#]/, 1)[0] ?? fileName
+  const ext = baseName.split('.').at(-1)?.toLowerCase() ?? ''
+  return VIDEO_EXTENSIONS.has(ext)
+}
+
+/**
+ * Normalize a picker filename so it satisfies Host `workspace.upload.open`
+ * rules (no path separators/reserved characters, UTF-8 <= 220 bytes).
+ */
+export function sanitizeUploadFileName(
+  rawName: string | null | undefined,
+  mimeType?: string | null,
+  uri?: string,
+): string {
+  const fromUri = uri ? uri.split(/[?#]/, 1)[0]?.split(/[\\/]/).pop() : undefined
+  const rawBase = rawName && rawName.trim().length > 0 ? rawName.split(/[\\/]/).pop() : fromUri
+  let base = rawBase ?? ''
+  base = base.replace(/[\x00-\x1f\x7f]/gu, '').replace(/[<>:"|?*]/gu, '_').replace(/[. ]+$/u, '').trim()
+  if (base.startsWith('.dsh-upload-')) {
+    base = `_${base.slice(1)}`
+  }
+  if (base === '' || base === '.' || base === '..') {
+    base = mimeType?.toLowerCase().startsWith('video/') ? 'video' : 'file'
+  }
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(base)) {
+    base = `file_${base}`
+  }
+
+  const normalizedMime = mimeType?.toLowerCase().split(';', 1)[0]?.trim()
+  const inferredExt = normalizedMime ? MIME_TO_EXTENSION[normalizedMime] : undefined
+  const uriExtMatch = fromUri?.match(/(\.[a-zA-Z0-9]{1,10})$/u)?.[1]?.toLowerCase()
+  const hasExt = /\.[^.]+$/u.test(base)
+  if (!hasExt && (inferredExt || uriExtMatch)) {
+    base = `${base}${inferredExt ?? uriExtMatch}`
+  }
+
+  const encoder = new TextEncoder()
+  if (encoder.encode(base).byteLength <= MAX_UPLOAD_NAME_UTF8_BYTES) {
+    return base
+  }
+
+  const dotIdx = base.lastIndexOf('.')
+  const ext = dotIdx > 0 ? base.slice(dotIdx) : ''
+  const extBytes = encoder.encode(ext).byteLength
+  const stemBudget = Math.max(1, MAX_UPLOAD_NAME_UTF8_BYTES - (extBytes < MAX_UPLOAD_NAME_UTF8_BYTES ? extBytes : 0))
+  const safeExt = extBytes < MAX_UPLOAD_NAME_UTF8_BYTES ? ext : ''
+  const chars = Array.from(safeExt ? base.slice(0, dotIdx) : base)
+  let stem = ''
+  let usedBytes = 0
+  for (const ch of chars) {
+    const chBytes = encoder.encode(ch).byteLength
+    if (usedBytes + chBytes > stemBudget) break
+    stem += ch
+    usedBytes += chBytes
+  }
+  stem = stem.replace(/[. ]+$/u, '') || 'file'
+  return `${stem}${safeExt}`
+}
+
+export function formatDurationMs(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return '0:00'
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
 /** Check if text contains null bytes or replacement characters indicating binary/decode corruption. */
