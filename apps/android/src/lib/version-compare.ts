@@ -57,9 +57,10 @@ export function compareVersions(left: string, right: string): number {
   const parsedRight = parseVersion(right)
   if (parsedLeft === undefined || parsedRight === undefined) return 0
   for (let index = 0; index < 3; index += 1) {
-    if (parsedLeft.core[index] !== parsedRight.core[index]) {
-      return Math.sign(parsedLeft.core[index] - parsedRight.core[index])
-    }
+    // Indexing the tuple with a loop counter is `number | undefined` under Android tsc.
+    const leftPart = parsedLeft.core[index] ?? 0
+    const rightPart = parsedRight.core[index] ?? 0
+    if (leftPart !== rightPart) return Math.sign(leftPart - rightPart)
   }
   return comparePrerelease(parsedLeft.prerelease, parsedRight.prerelease)
 }
