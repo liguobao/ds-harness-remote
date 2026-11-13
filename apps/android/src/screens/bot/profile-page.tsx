@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   BackHandler,
   Dimensions,
@@ -13,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native'
+import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import {
   ArrowLeftRight,

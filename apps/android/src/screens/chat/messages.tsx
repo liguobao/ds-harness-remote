@@ -5,7 +5,6 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Alert,
   Animated,
   Modal,
   Pressable,
@@ -16,6 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native'
+import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import Svg, { Path } from 'react-native-svg'

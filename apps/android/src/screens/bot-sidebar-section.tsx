@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -56,6 +55,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { ModalSurface } from './chat/modal'
+import { ConfirmDialog } from './chat/confirm-dialog'
 import { resolveSessionDisplayTitle } from './session-title'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar, BotAvatarWithBadge } from './bot/avatar'
@@ -661,16 +661,8 @@ export function BotModalsHost() {
 
   const performAdapter: BotPerform = (operation, payload) => perform(operation, payload)
 
-  const confirmDelete = (kind: 'bot' | 'room', id: string) => {
-    Alert.alert(s.bots.delete, s.bots.deleteHint, [
-      { text: s.bots.cancel, style: 'cancel' },
-      {
-        text: s.bots.delete,
-        style: 'destructive',
-        onPress: () => void perform(kind === 'bot' ? 'delete-bot' : 'delete-room', { id }),
-      },
-    ])
-  }
+  const [deleteConfirm, setDeleteConfirm] = useState<{ kind: 'bot' | 'room'; id: string } | undefined>()
+  const confirmDelete = (kind: 'bot' | 'room', id: string) => setDeleteConfirm({ kind, id })
 
   const menuBot = contextMenu?.kind === 'bot' ? state?.bots.find(b => b.id === contextMenu.id) : undefined
   const menuRoom = contextMenu?.kind === 'room' ? state?.rooms.find(r => r.id === contextMenu.id) : undefined
@@ -831,6 +823,24 @@ export function BotModalsHost() {
           </ModalSurface>
         </Modal>
       )}
+
+      <ConfirmDialog
+        visible={deleteConfirm !== undefined}
+        title={s.bots.delete}
+        message={s.bots.deleteHint}
+        onClose={() => setDeleteConfirm(undefined)}
+        buttons={[
+          { label: s.bots.cancel },
+          {
+            label: s.bots.delete,
+            danger: true,
+            onPress: () => {
+              if (!deleteConfirm) return
+              void perform(deleteConfirm.kind === 'bot' ? 'delete-bot' : 'delete-room', { id: deleteConfirm.id })
+            },
+          },
+        ]}
+      />
     </>
   )
 }
