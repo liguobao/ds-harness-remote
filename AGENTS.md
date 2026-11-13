@@ -32,7 +32,11 @@ Client：`client-core` 的 `HarnessAlphaClient.compactSessionTracked()` 在提�
 同会话互斥、跨设备拒绝、取消需生命周期确认、取消/成功竞争、committed-but-unconfirmed、
 预算超时、重启 interrupted、shutdown、session/events 解析）；client-core 新增 7 个
 async/tracked 测试（含丢响应同 requestId 重试、断线恢复不重提、过期不重放）；Android
-connection/message-actions 回归通过。未做真实跨设备长压缩验收（需要两台 Spark 的运行环境）。
+connection/message-actions 回归通过。2026-11-13 已完成跨设备真机验收：Host 为隔离 DSH
+profile（Mac，DSH 0.2.2-rc.1 + 本插件 + GLM-5.3），Client 为另一台 DGX Spark-01，经自托管
+Remote Server 以 Relay 连接；600K 字符上下文下长压缩 137.66s 成功、断线重连用同一
+operationId 继续且 accepted/command-run 均 1、显式取消经 compaction/end 确认后 6.18s
+进入 cancelled。详见 docs/remote-compaction-verification.md。
 
 ## Android coherent transitions (Issue #8, 2026-11-12)
 
