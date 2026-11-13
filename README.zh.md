@@ -9,22 +9,20 @@
   <strong>中文</strong>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">文档</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.zh.md">自部署</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue?logo=googledocs&amp;logoColor=white" alt="文档"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.zh.md"><img src="https://img.shields.io/badge/%E8%87%AA%E9%83%A8%E7%BD%B2-Docker-2496ED?logo=docker&amp;logoColor=white" alt="自部署"></a>
+  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量"></a>
 </p>
 
 
@@ -36,7 +34,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.5`
 
 ## 主要特性
 
@@ -55,7 +53,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 | 客户端 | 形态 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.3`；Host 也可以就是这台电脑 |
+| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.5`；Host 也可以就是这台电脑 |
 | Web | 浏览器页面 | 已支持 | 打开 [https://dsh.r2049.cn](https://dsh.r2049.cn)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
 | DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: DeepSeek Harness 的 Android 客户端。手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
@@ -72,10 +70,10 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.5`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`。
 
 DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
 
@@ -303,6 +301,27 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
  </picture>
 </a>
 
+## 贡献者
+
+`ds-harness-remote` 由开源社区共同驱动与维护。我们坚信，优秀的基础工具不仅由代码铸就，更由每一位使用它、测试它、修正文档或分享想法的人共同塑造。
+
+无论你的技术背景如何，任何形式的参与都同样珍贵：
+
+- **提交 Issue**：发现异常、有新功能设想，或对使用体验有更好的建议？欢迎随时发起讨论。
+- **文档与多语言**：完善使用指南、修正表述细节，或协助保持中文、英文与日文文档同步。
+- **测试与多端体验**：在你的实际环境中（Desktop / Web / Android）体验运行，反馈真实场景下的表现。
+- **代码与代码审查**：认领待办事项、修复缺陷、实现新特性，或是协助 Review 社区的 Pull Request。
+
+<p align="center">
+  <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=liguobao/ds-harness-remote&max=30" alt="贡献者头像墙" />
+  </a>
+</p>
+
+<p align="center">
+  <em>衷心感谢每一位让这个项目变得更好的贡献者！</em>
+</p>
+
 ## 项目声明与商标
 
 本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
@@ -316,3 +335,7 @@ Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效�
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### 与 DSH-Go 配对
+
+在电脑本机 Remote 设置的「登录账号 → DSH-Go 扫码」中生成二维码，使用支持此协议的 DSH-Go 扫码确认，再将手机验证码输入电脑。仅允许校验一次，错误后整个配对作废。新 Host 默认仅被控，新建 Device-only 账号无 Web/Admin 权限。需要完整 Server 配对 v1 API 及按[接入文档](docs/dsh-go-pairing-integration.md)改造的 DSH-Go；随仓库提供的最小 Server 暂不支持此流程。

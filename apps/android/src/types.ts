@@ -382,6 +382,7 @@ export interface ApprovalActivity extends ChatItemBase {
   kind: 'approval'
   approvalId: string
   toolName: string
+  callId?: string
   reason?: string
   frameRpcId?: string
   outcome?: ApprovalOutcome
@@ -454,6 +455,12 @@ export interface MuxFrame {
   deadline?: number
   questionRpcId?: string
   error?: unknown
+  session?: RemoteSession
+  running?: boolean
+  updatedAt?: number
+  known?: boolean
+  existed?: boolean
+  message?: string
 }
 
 /** One mux stream frame with its native rpcId (needed to answer approvals/questions). */
@@ -471,6 +478,7 @@ export interface ConnectionSnapshot {
   phase: ConnectionPhase
   stats: TransportStats
   error?: string
+  errorCode?: string
   /** False for protocol/security refusals or a replaced connection. */
   retryable?: boolean
 }

@@ -1,0 +1,71 @@
+{
+  "name": "relay-data-wire-json",
+  "cases": [
+    {
+      "name": "accept-canonical-relay-data",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"relay\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"counter\":0,\"ciphertext\":\"AQ\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-noncanonical-relay-data-ciphertext",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"relay\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"counter\":0,\"ciphertext\":\"AR\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-negative-relay-data-counter",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"relay\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"counter\":-1,\"ciphertext\":\"AQ\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-duplicate-relay-data-counter",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"relay\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"counter\":1,\"counter\":0,\"ciphertext\":\"AQ\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "accept-canonical-handshake-data",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"secure.handshake\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"step\":1,\"data\":\"AQ\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-noncanonical-handshake-data",
+      "operation": "decodeRelayDataFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"data-vector-1\",\"timestamp\":1786000000000,\"type\":\"secure.handshake\",\"payload\":{\"connectionId\":\"0198abc8-1001-7abc-8123-123456789abc\",\"targetDeviceId\":\"0198abc8-2001-7abc-8123-123456789abc\",\"step\":1,\"data\":\"AR\"}}",
+        "limits": {}
+      },
+      "expect": {
+        "accepted": false
+      }
+    }
+  ]
+}

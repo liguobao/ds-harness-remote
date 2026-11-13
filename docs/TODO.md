@@ -1,5 +1,20 @@
 # TODO
 
+## Android 断线保留输入草稿（Issue #7 / 上游 #409）
+
+- [x] 断线不再禁用聊天输入框：编辑只受权限切换与上传中等组合器本地状态约束，恢复连接后仍由用户手动发送。
+- [x] 离线发送在清空草稿前短路；`sendMessage` 在插入乐观行前对非连接状态失败关闭，避免幽灵行或重复消息。
+- [x] 草稿继续按会话加密保存并随切后台落盘；七种语言新增离线发送提示。
+- [ ] 真机/跨设备验收：断网继续编辑、切后台与杀进程后草稿恢复、重连后手动发送一次、离线点击发送无副作用、TalkBack 与大字体；Bot 模式草稿不落盘的差异需在说明中保留。
+
+## PR #384：Linux 单机凭据刷新与迁移
+
+- [x] 默认目录迁移与刷新共用闸门。迁移清理死亡 Holder，识别队列 `.tmp`。
+- [x] 文档说明 V2 Marker、0.6.3 降级步骤和平台范围。
+- [x] Linux 测试覆盖多进程刷新、强杀 Holder、死亡 Holder 迁移和硬链接失败。
+- [x] CI 在本地 XFS 挂载上验证硬链接，并通过凭据锁与迁移测试。
+- [ ] Windows Harness Host 在实际 Electron 44.7.0 / Node 24.21.0 环境验收。
+
 更新日期：2026-11-05。当前源码版本为 `0.6.3`，Android `versionCode 71`，Expo iOS `buildNumber 71`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
 
 最近一次构建验证见 [AGENTS.md 的 0.5.20 合并后重建记录](../AGENTS.md#post-merge-0520-rebuild-2026-10-27)：全仓 check、847 tests、串行生产 build（含 Android Hermes）、DSH bundle 与打包检查通过。这是既有验证记录，本轮文档清理未重新运行；未新增 APK、原生真机或跨设备验收。Metro noble/hashes exports fallback 警告仍保留。
@@ -55,7 +70,10 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 ## 2026-10-21 移动端精简历史
 
 - [x] 全局持久化开关与新 Host capability 协商；按连接隔离历史精简，保留正文、游标、工具关联和错误状态，模式切换失效旧分页缓存；旧 Host 不做手机本地精简。
-- [ ] 重建 APK 后完成真机/跨设备验收：各后端长历史流量与内存、历史翻页、完整/精简切换、重连恢复、运行中审批，以及与 Desktop 并行打开同一会话。
+- [x] Issue #4：精简投影对已识别的 DS Bot 群聊轮次 `{"replies":[...]}` 改为有界结构化保留（条目/正文/投影/文档预算 + `truncated` 标记），Android 仅在整段未被裁剪时隐藏 `group_relay` 工具行，否则正文与工具诊断并列。
+- [ ] 为 Harness 历史增加通用惰性详情句柄（对齐 CodeX `dsh/historyDetail`），使超出结构化预算的正文可按需、去重、可取消地补取；需要协议、连接级缓存与 allowlist 变更。
+- [ ] 若评审需要「回复被精简裁剪」的显式提示，需新增文案并同步 `en-US/zh-CN/zh-TW/ja-JP/es-ES/de-DE/fr-FR` 七份目录。
+- [ ] 重建 APK 后完成真机/跨设备验收：各后端长历史流量与内存、历史翻页、完整/精简切换、重连恢复、运行中审批，以及与 Desktop 并行打开同一会话；iOS/DSH-Go 需在外部仓库单独验收群聊轮次渲染。
 
 ## 2026-10-18 版本审查后续
 
@@ -240,8 +258,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 本地集成验证不替代真实跨设备验收。
 
 - [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
-- [ ] 拒绝原始 JSON 中重复的安全字段。分别核对 Control 与 REST 入口。
-- [ ] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。
+- [x] 拒绝原始 JSON 中重复的安全字段。Control、Relay 和自部署 Server REST 入口均拒绝转义后重复的字段名。
+- [x] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。共享 schema 和 conformance fixtures 覆盖无 padding 与尾部闲置位。
 - [ ] 明确握手 step、heartbeat 数值与标识符范围。同步 schema 和共享 fixtures。
 - [ ] 清理协议第 22 节的 `connection.ping` 冲突说明。区分 replay/rekey 目标与实现状态。
 - [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
@@ -250,10 +268,10 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [ ] 完成 Noise 实现的独立安全审查。
 - [ ] 定义并实现长期连接 rekey 与连接最大生命周期。
 - [ ] 核对断线密钥清理。补齐清理策略与核心测试。
-- [ ] 增加剩余协议 golden vectors
+- [ ] 增加剩余协议 golden vectors。Control 全部帧类型、Relay data envelope 和 Noise IK 已覆盖；Typert、CodeX 与 ACP tunnel 仍需逐项补齐。
 - [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
-- [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证
+- [x] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证。Server/WebSocket、Noise IK 和生产 ClientSecureTransport 集成测试覆盖这些路径。
 - [x] WSL 本地 Server/WebSocket 验证密文篡改与提高 counter 后的重放拒绝。
 - [x] WSL 本地 Relay 验证错误静态公钥与连接 prologue 的 Noise 握手拒绝。
 
@@ -387,3 +405,7 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 
 - [x] AGY 工作区/会话 catalog、空白新会话、历史/图片、流式、标题刷新与重连恢复
 - [ ] Android AGY APK 与真机/加密跨设备回归；每目录超过 100 个会话的分页体验
+
+## DSH-Go pairing acceptance
+
+Implement Dart mobile proof vectors, scanner/credential integration and Android end-to-end acceptance using docs/dsh-go-pairing-integration.md. C# Server/Remote integration uses a simulated Node phone, not an Android build. Local UI and `isTrusted` cannot establish genuine human presence against OS automation; use a trusted native primitive if Harness makes one available. No deployment/release is included.

@@ -464,7 +464,7 @@ describe('AdaptiveTransport capability negotiation', () => {
   })
 
   it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
-    await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
+    await runScenarios(['control-closed', 'control-error', 'retryable-control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
       name: reason, run: async () => {
         vi.stubGlobal('WebSocket', FakeWebSocket)
         const diagnostic = vi.fn()
@@ -485,6 +485,9 @@ describe('AdaptiveTransport capability negotiation', () => {
         await connecting
         if (reason === 'control-closed') socket.onclose?.({ code: 4003, reason: 'private upstream detail' })
         if (reason === 'control-error') socket.onerror?.()
+        if (reason === 'retryable-control-error') {
+          socket.receive(createControlFrame('error', { code: 'CONNECTION_FAILED', message: 'CONNECTION_FAILED', connectionId: 'connection-1', retryable: true }))
+        }
         if (reason === 'invalid-control-frame') socket.receiveRaw('invalid private content')
         if (rtc !== undefined) (rtc.channel as unknown as { onclose: () => void }).onclose()
         if (reason === 'local-close') await transport.close()
@@ -493,9 +496,10 @@ describe('AdaptiveTransport capability negotiation', () => {
         expect(transport.getStats().connected).toBe(false)
         if (reason === 'local-close') expect(diagnostic).not.toHaveBeenCalled()
         else expect(diagnostic.mock.calls).toEqual([[{
-          reason,
+          reason: reason === 'retryable-control-error' ? 'control-error' : reason,
           ...(reason === 'control-closed' ? { closeCode: 4003, closeReason: 'private upstream detail' } : {}),
           ...(reason === 'webrtc-closed' ? { transport: 'p2p' } : {}),
+          ...(reason === 'retryable-control-error' ? { errorCode: 'CONNECTION_FAILED' } : {}),
           ...(reason === 'invalid-control-frame' ? { errorCode: 'INVALID_MESSAGE' } : {}),
         }]])
         socket.onclose?.({ code: 1006, reason: '' })

@@ -1,6 +1,13 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'TUI prerelease version (for example 0.6.4-tui.1); publishes to tui-test'
+        required: true
+        type: string
+        default: '0.6.4-tui.1'
   push:
     tags:
       - "v*"
@@ -18,13 +25,54 @@ env:
   CI: true
 
 jobs:
+  tui-manual:
+    if: github.event_name == 'workflow_dispatch'
+    name: Publish TUI prerelease without a tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      - name: Prepare TUI package
+        env:
+          TUI_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const file = 'packages/tui/package.json'
+          const manifest = JSON.parse(readFileSync(file, 'utf8'))
+          const base = JSON.parse(readFileSync('packages/plugin/package.json', 'utf8')).version
+          const version = process.env.TUI_VERSION
+          if (!version.startsWith(`${base}-tui.`) || !/^\d+\.\d+\.\d+-tui\.[1-9]\d*$/.test(version)) {
+            throw new Error(`Expected ${base}-tui.<positive integer>`)
+          }
+          manifest.version = version
+          manifest.dependencies['ds-harness-remote'] = base
+          writeFileSync(file, JSON.stringify(manifest, null, 2) + '\n')
+          NODE
+      - name: Verify dependency and publish
+        env:
+          TUI_VERSION: ${{ inputs.version }}
+        run: |
+          BASE_VERSION="$(node -p "require('./packages/plugin/package.json').version")"
+          npm view "ds-harness-remote@$BASE_VERSION" version
+          npm pack ./packages/tui --dry-run
+          npm publish ./packages/tui --access public --provenance --tag tui-test
+
   release:
+    if: github.event_name == 'push'
     name: Build and publish release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -32,7 +80,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           # npm trusted publishing requires the npm version bundled with Node 24.
           node-version: 24
@@ -47,9 +95,13 @@ jobs:
           const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'))
           const root = await readJson('package.json')
           const plugin = await readJson('packages/plugin/package.json')
+          const tui = await readJson('packages/tui/package.json')
           const androidPackage = await readJson('apps/android/package.json')
           const androidApp = await readJson('apps/android/app.json')
-          const versions = new Set([root.version, plugin.version, androidPackage.version, androidApp.expo?.version])
+          const versions = new Set([root.version, plugin.version, tui.version, androidPackage.version, androidApp.expo?.version])
+          if (tui.dependencies['ds-harness-remote'] !== `workspace:${plugin.version}`) {
+            throw new Error('TUI must depend on the matching Remote workspace version.')
+          }
           const expectedTag = `v${plugin.version}`
 
           if (versions.size !== 1) {
@@ -91,6 +143,9 @@ jobs:
           mkdir -p release-assets
           pnpm --dir packages/plugin pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
 
+      - name: Pack npm TUI
+        run: pnpm --dir packages/tui pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
+
       - name: Stage release assets
         run: |
           cd release-assets
@@ -125,6 +180,20 @@ jobs:
       - name: Report npm publish failure
         if: steps.npm-publish.outcome == 'failure'
         run: echo '::warning::npm publish failed; GitHub Packages, GitHub Release, and Android APK publication will continue. Retry this tag after refreshing npm registry credentials.'
+
+      - name: Publish npm TUI
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "ds-harness-remote@$VERSION" >/dev/null 2>&1; then
+            if npm view "ds-harness-remote-tui@$VERSION" >/dev/null 2>&1; then
+              echo "TUI version already exists on npm, skip publish."
+            else
+              npm publish "release-assets/ds-harness-remote-tui-$VERSION.tgz" --access public --provenance
+            fi
+          else
+            echo '::error::Publish ds-harness-remote before its matching TUI package.'
+            exit 1
+          fi
 
       - name: Publish GitHub Packages plugin
         env:
@@ -182,7 +251,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -190,7 +259,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.9.0
           cache: pnpm
@@ -211,7 +280,7 @@ jobs:
         run: pnpm --filter './packages/**' -r build
 
       - name: Check out Intelligent UI renderer source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: dreamfarer-space/deepseek-harness-intelligent-ui
           # Pinned upstream PR #82 merge commit; update only after auditing the new artifact.

@@ -62,7 +62,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -70,7 +70,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.9.0
           cache: pnpm
@@ -107,6 +107,38 @@ jobs:
       - name: Verify packed Host WebRTC fallback and installation closure
         run: node scripts/verify-packed-webrtc.mjs
 
+  xfs-refresh:
+    name: Test credential locks on XFS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.9.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter './packages/**' -r build
+      - name: Mount local XFS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xfsprogs
+          truncate -s 512M "$RUNNER_TEMP/refresh-xfs.img"
+          sudo mkfs.xfs -f "$RUNNER_TEMP/refresh-xfs.img"
+          mkdir "$RUNNER_TEMP/refresh-xfs"
+          sudo mount -o loop "$RUNNER_TEMP/refresh-xfs.img" "$RUNNER_TEMP/refresh-xfs"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/refresh-xfs"
+          findmnt -T "$RUNNER_TEMP/refresh-xfs" -o FSTYPE
+          touch "$RUNNER_TEMP/refresh-xfs/source"
+          ln "$RUNNER_TEMP/refresh-xfs/source" "$RUNNER_TEMP/refresh-xfs/linked"
+      - name: Run refresh and migration tests on XFS
+        run: pnpm --dir packages/plugin exec vitest run tests/server-credentials.test.ts tests/identity-store.test.ts
+        env:
+          TMPDIR: ${{ runner.temp }}/refresh-xfs
+
   plugin-package:
     name: Package npm plugin
     needs: quality
@@ -114,7 +146,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -122,7 +154,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.9.0
           cache: pnpm
@@ -179,7 +211,12 @@ jobs:
       packages: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -208,6 +245,7 @@ jobs:
         with:
           context: .
           file: apps/server/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -224,7 +262,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -232,7 +270,7 @@ jobs:
           version: 9.15.4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.9.0
           cache: pnpm
@@ -253,7 +291,7 @@ jobs:
         run: pnpm --filter './packages/**' -r build
 
       - name: Check out Intelligent UI renderer source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: dreamfarer-space/deepseek-harness-intelligent-ui
           # Pinned upstream PR #82 merge commit; update only after auditing the new artifact.

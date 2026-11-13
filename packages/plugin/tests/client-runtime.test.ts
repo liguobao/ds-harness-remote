@@ -32,6 +32,25 @@ const cleanupScenario1 = async () => {
 afterEach(cleanupScenario1)
 
 describe('ClientModeRuntime Host account control', () => {
+  it('does not create or authorize a Client on a paired Host, including logout', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-host-only-'))
+    directories.push(directory)
+    const identities = new IdentityStore({ directory })
+    const create = vi.spyOn(identities, 'loadOrCreate')
+    const server = { bindIdentity: vi.fn(), authenticate: vi.fn(), clearAuthorization: vi.fn(async () => {}) } as unknown as ClientServerApi
+    const host = { hostStatus: () => ({ pairingHostOnly: true }) } as HostAuthorizationControl
+    const runtime = new ClientModeRuntime(config(), identities, server, gatewayWithCarrier(), logger(), host)
+    await runtime.start()
+    try {
+      expect(create).not.toHaveBeenCalled()
+      await expect(runtime.devices()).rejects.toMatchObject({ code: 'DEVICE_SCOPE_REQUIRED' })
+      await expect(runtime.authorizeClientWithAccount('test@example.test', 'password')).rejects.toMatchObject({ code: 'DEVICE_SCOPE_REQUIRED' })
+      await runtime.clearClientAuthorization()
+      expect(create).not.toHaveBeenCalled()
+      expect(server.authenticate).not.toHaveBeenCalled()
+    } finally { await runtime.close() }
+  })
+
   it('reuses the prepared device connection for tools without replacing or closing it', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-shared-'))
     directories.push(directory)
@@ -1556,6 +1575,7 @@ describe('ClientModeRuntime Host account control', () => {
 function config(): ResolvedConfig {
   return {
     terminal: { enabled: false },
+    httpServerAllowlist: [],
     sidebar: { entry: 'standard' },
     loopback: { ports: [] },
     enabled: true,

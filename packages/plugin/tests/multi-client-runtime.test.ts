@@ -9,11 +9,12 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
+import { probeRemoteHostFeatures } from '../src/client-capabilities.js'
 import { HostServerConnection } from '../src/server-connection.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
-import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
+import type { LocalTypertGateway, TypertRpcResult } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
   it('does not start inbound Host authorization when control is disabled at startup', async () => {
@@ -122,8 +123,9 @@ describe('HostPluginRuntime multi-Client routing', () => {
                                   'codex.appserver.v1',
                       'codex.appserver.transfer.v1',
                       'remote.history.compact.v1',
+                      'remote.compaction.async.v1',
                     ]
-                  : ['workspace.upload.v1', 'remote.history.compact.v1'],
+                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1'],
               )
               expect(result.workspaceTypes).toEqual(
                 scenario === 'ready'
@@ -186,6 +188,131 @@ describe('HostPluginRuntime multi-Client routing', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
+  it('withholds Harness transport when the Host Session API is absent', async () => {
+    const gateway = localGateway()
+    const dispatch = vi.mocked(gateway.dispatch)
+    dispatch.mockResolvedValueOnce({ ok: false, error: {
+      code: 'gateway/invocation-unavailable', message: 'Unavailable', details: {},
+    } })
+    const log = logger()
+    const runtime = new HostPluginRuntime(config(), identities(), log, gateway)
+    const channel = fakeChannel('missing-host-api', 'client-phone')
+    try {
+      await runtime.start()
+      await runtime.acceptAuthenticatedPeer(channel)
+      const describe = async (): Promise<string[]> => {
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        let response: RemoteMessage | undefined
+        await vi.waitFor(() => {
+          response = channel.sent().find(message => message.type === 'rpc.response'
+            && (message.payload as RpcResponsePayload).requestId === request.id)
+          expect(response).toBeDefined()
+        })
+        return ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+      }
+      const missing = await describe()
+      expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
+      expect(missing.some(value => value.startsWith('harness.remote.'))).toBe(false)
+      expect(missing).not.toContain('harness.remote.stream.transfer.v1')
+      await expect(probeRemoteHostFeatures({ rpc: async () => ({ capabilities: missing }) } as never))
+        .rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      expect(log.warn).toHaveBeenCalledOnce()
+      const recovered = await describe()
+      expect(recovered.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+      expect(recovered).toContain('harness.remote.stream.transfer.v1')
+    } finally { await runtime.close() }
+  })
+
+  it('runs /compact as a Host-owned operation with idempotent submission and status', async () => {
+    const gateway = localGateway()
+    let release!: (value: TypertRpcResult) => void
+    vi.mocked(gateway.dispatch).mockImplementation(async (endpoint: string) => {
+      if (endpoint === 'session/list') return { ok: true as const, value: [] }
+      if (endpoint === 'commands/execute') {
+        return await new Promise(resolve => { release = resolve })
+      }
+      return { ok: true as const }
+    })
+    const runtime = new HostPluginRuntime(config(), identities(), logger(), gateway)
+    const channel = fakeChannel('compaction-client', 'client-phone')
+    const rpc = async (method: string, params: unknown): Promise<Record<string, unknown>> => {
+      const request = createRpcRequest(method as never, params)
+      channel.push(request)
+      let response: RemoteMessage | undefined
+      await vi.waitFor(() => {
+        response = channel.sent().find(message => message.type === 'rpc.response'
+          && (message.payload as RpcResponsePayload).requestId === request.id)
+        expect(response).toBeDefined()
+      })
+      return (response!.payload as RpcResponsePayload).result as Record<string, unknown>
+    }
+    try {
+      await runtime.start()
+      await runtime.acceptAuthenticatedPeer(channel)
+
+      const submitted = await rpc('harness.remote.compaction.submit', { sessionId: 'session-1', requestId: 'request-1' })
+      expect(submitted.state).toBe('accepted')
+      const duplicate = await rpc('harness.remote.compaction.submit', { sessionId: 'session-1', requestId: 'request-1' })
+      expect(duplicate.operationId).toBe(submitted.operationId)
+      expect(vi.mocked(gateway.dispatch).mock.calls.filter(([endpoint]) => endpoint === 'commands/execute')).toHaveLength(1)
+
+      const first = await rpc('harness.remote.compaction.status', {
+        sessionId: 'session-1', operationId: submitted.operationId,
+      })
+      expect(['accepted', 'running']).toContain(first.state)
+
+      release({ ok: true, value: { result: { kind: 'success', text: 'Compacted.' } } })
+      await vi.waitFor(async () => {
+        const status = await rpc('harness.remote.compaction.status', {
+          sessionId: 'session-1', operationId: submitted.operationId,
+        })
+        expect(status).toMatchObject({ state: 'succeeded', message: 'Compacted.' })
+      })
+    } finally { await runtime.close() }
+  })
+
+
+  it('reports an unready or unverified Session API as a retryable discovery failure', async () => {
+    await runScenarios([
+      { name: 'service unavailable', answer: { ok: false as const, error: {
+        code: 'gateway/service-unavailable', message: 'Service unavailable', details: {},
+      } }, message: 'The Host Session API is not ready.' },
+      { name: 'invalid arguments', answer: { ok: false as const, error: {
+        code: 'gateway/arguments-invalid', message: 'Invalid arguments', details: {},
+      } }, message: 'Cannot verify the Host Session API.' },
+      { name: 'timeout', answer: new DOMException('Timed out', 'TimeoutError'), message: 'Cannot verify the Host Session API.' },
+    ].map(({ name, answer, message }) => ({ name, run: async () => {
+      const gateway = localGateway()
+      const dispatch = vi.mocked(gateway.dispatch)
+      if (answer instanceof Error) dispatch.mockRejectedValueOnce(answer)
+      else dispatch.mockResolvedValueOnce(answer)
+      const log = logger()
+      const runtime = new HostPluginRuntime(config(), identities(), log, gateway)
+      const channel = fakeChannel(`unverified-${name}`, 'client-phone')
+      try {
+        await runtime.start()
+        await runtime.acceptAuthenticatedPeer(channel)
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        await vi.waitFor(() => expect(channel.sent().find(row => row.type === 'rpc.error'
+          && (row.payload as RpcErrorPayload).requestId === request.id)).toBeDefined())
+        const response = channel.sent().find(row => row.type === 'rpc.error'
+          && (row.payload as RpcErrorPayload).requestId === request.id)!
+        expect(response.payload).toMatchObject({ code: 'CONNECTION_FAILED', message, retryable: true })
+        expect(log.warn).not.toHaveBeenCalledWith(expect.stringContaining('Install @deepseek-ai/dsh-api-remotes'))
+        const recovered = createRpcRequest('harness.transport.describe', {})
+        channel.push(recovered)
+        await vi.waitFor(() => expect(channel.sent().find(row => row.type === 'rpc.response'
+          && (row.payload as RpcResponsePayload).requestId === recovered.id)).toBeDefined())
+        const restored = channel.sent().find(row => row.type === 'rpc.response'
+          && (row.payload as RpcResponsePayload).requestId === recovered.id)!
+        const capabilities = ((restored.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+        expect(capabilities.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+      } finally { await runtime.close() }
+    } })))
+  })
+
   it('advertises ApiProxy alongside compatible Session V3 versions', async () => {
     const rows = ['0.1.5-rc.1', '0.2.0-rc.1'] as const
     await runScenarios(
@@ -214,6 +341,64 @@ describe('HostPluginRuntime multi-Client routing', () => {
         }
       }),
     )
+  })
+
+  it('advertises remote.session.events.v1 only when DSH >= 0.2.0 and $events opens live', async () => {
+    await runScenarios([
+      {
+        name: 'live DSH 0.2.2 host',
+        version: '0.2.2-rc.1',
+        open: async () => (async function* () {
+          yield { type: 'ready', clientId: 'c1', host: { home: '/tmp' } }
+        })(),
+        expected: true,
+      },
+      {
+        name: 'missing dsh-api-remotes ($events service unavailable)',
+        version: '0.2.2-rc.1',
+        open: async () => { throw Object.assign(new Error('unavailable'), { code: 'gateway/service-unavailable' }) },
+        expected: false,
+      },
+      {
+        name: 'older 0.1.5 host',
+        version: '0.1.5-rc.1',
+        open: async () => (async function* () {
+          yield { type: 'ready', clientId: 'c1', host: { home: '/tmp' } }
+        })(),
+        expected: false,
+      },
+    ].map(({ name, version, open, expected }) => ({
+      name,
+      run: async () => {
+        const gateway = localGateway()
+        gateway.open = vi.fn(open) as unknown as LocalTypertGateway['open']
+        const runtime = new HostPluginRuntime(config(), identities(), logger(), gateway)
+        const internal = runtime as unknown as {
+          readHarnessVersion(): Promise<string>
+          createServerConnection(): unknown
+        }
+        vi.spyOn(internal, 'readHarnessVersion').mockResolvedValue(version)
+        vi.spyOn(internal, 'createServerConnection').mockReturnValue({ start: vi.fn(), stop: vi.fn(async () => undefined), isOnline: () => true, lastError: () => undefined })
+        const channel = fakeChannel('events-cap-' + name, 'client-phone')
+        try {
+          await runtime.start()
+          ;(runtime as unknown as { harnessVersion: string }).harnessVersion = version
+          await runtime.acceptAuthenticatedPeer(channel)
+          const request = createRpcRequest('harness.transport.describe', {})
+          channel.push(request)
+          let response: RemoteMessage | undefined
+          await vi.waitFor(() => {
+            response = channel.sent().find(row => row.type === 'rpc.response'
+              && (row.payload as RpcResponsePayload).requestId === request.id)
+            expect(response).toBeDefined()
+          })
+          const capabilities = ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+          expect(capabilities.includes('remote.session.events.v1')).toBe(expected)
+        } finally {
+          await runtime.close()
+        }
+      },
+    })))
   })
 
   it('allows identical stream ids on different Client connections without crossing frames', async () => {
@@ -509,6 +694,7 @@ function fakeChannel(
 function config(): ResolvedConfig {
   return {
     terminal: { enabled: false },
+    httpServerAllowlist: [],
     sidebar: { entry: 'standard' },
     loopback: { ports: [] },
     enabled: true,

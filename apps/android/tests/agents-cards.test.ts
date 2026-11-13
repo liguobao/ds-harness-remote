@@ -2,11 +2,28 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>()
+  // Stateful mock: components are invoked directly (no renderer), so state lives in
+  // a small registry keyed by hook call order. `beginPass` restarts the call order
+  // (a re-render) while keeping the stored values (state updates).
+  const stores = new Map<string, any>()
+  const ctx = { order: 0 }
+  ;(globalThis as any).__dshReactMock = {
+    beginPass: () => { ctx.order = 0 },
+    reset: () => { stores.clear(); ctx.order = 0 },
+  }
   return {
     ...actual,
     useRef: (v: any) => ({ current: v }),
     useEffect: () => {},
-    useState: (v: any) => [typeof v === 'function' ? v() : v, vi.fn()],
+    useState: (v: any) => {
+      const key = `s${ctx.order++}`
+      if (!stores.has(key)) stores.set(key, typeof v === 'function' ? v() : v)
+      const set = (next: any) => {
+        const current = stores.get(key)
+        stores.set(key, typeof next === 'function' ? next(current) : next)
+      }
+      return [stores.get(key), set]
+    },
     useMemo: (fn: any) => fn(),
     useCallback: (fn: any) => fn,
   }
@@ -24,6 +41,7 @@ vi.mock('react-native', () => {
     Text: (props: any) => React.createElement('Text', props, props.children),
     Pressable: (props: any) => React.createElement('Pressable', props, props.children),
     ScrollView: (props: any) => React.createElement('ScrollView', props, props.children),
+    ActivityIndicator: (props: any) => React.createElement('ActivityIndicator', props),
     Animated: {
       Value: class {
         interpolate = vi.fn().mockReturnValue('0deg')
@@ -61,6 +79,9 @@ vi.mock('lucide-react-native', () => {
     X: (props: any) => React.createElement('X', props),
     Flag: (props: any) => React.createElement('Flag', props),
     PauseCircle: (props: any) => React.createElement('PauseCircle', props),
+    RefreshCw: (props: any) => React.createElement('RefreshCw', props),
+    Square: (props: any) => React.createElement('Square', props),
+    Terminal: (props: any) => React.createElement('Terminal', props),
   }
 })
 
@@ -68,6 +89,8 @@ vi.mock('../src/state/store', () => ({
   requireSessionTools: () => ({
     watchJobs: vi.fn(),
   }),
+  // The dock falls back to `compact` when the persisted preference is unset.
+  useAppStore: (selector: any) => selector({ activityDockMode: undefined }),
 }))
 
 const MOCK_THEME_COLORS = {
@@ -92,6 +115,7 @@ vi.mock('../src/ui/theme-context', () => ({
 }))
 
 import React from 'react'
+import { X as XIcon } from 'lucide-react-native'
 import {
   AgentStatusGlyph,
   AgentTeamCard,
@@ -100,11 +124,47 @@ import {
   formatTeamStats,
   parseAgentLabel,
 } from '../src/screens/chat/agents'
+import { BackgroundJobsCard, JobStatusGlyph } from '../src/screens/chat/background-jobs-card'
+import { SessionActivityDock } from '../src/screens/chat/session-activity'
+import { TaskProgressChecklist } from '../src/screens/chat/task-progress-checklist'
+import { IconJobOutline } from '../src/ui/dsh-icons'
+import { isActivityDockMode } from '../src/ui/theme'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../src/types'
 
 const renderSubagentsCard = (props: any) => ((SubagentsCard as any).type ?? SubagentsCard)(props)
 const renderAgentTeamCard = (props: any) => ((AgentTeamCard as any).type ?? AgentTeamCard)(props)
 const renderStatusGlyph = (props: any) => ((AgentStatusGlyph as any).type ?? AgentStatusGlyph)(props)
+
+/** Shared hook-state registry exposed by the mocked `react` module. */
+const reactMockApi = () => (globalThis as any).__dshReactMock as {
+  beginPass: () => void
+  reset: () => void
+}
+
+/** Invoke a component (no renderer) and collect every element in its output tree. */
+const collectElements = (node: any, out: any[] = []): any[] => {
+  if (node === null || node === undefined || typeof node === 'boolean' || typeof node === 'string' || typeof node === 'number') {
+    return out
+  }
+  if (Array.isArray(node)) {
+    for (const child of node) collectElements(child, out)
+    return out
+  }
+  if (typeof node === 'object' && node.props) {
+    out.push(node)
+    collectElements(node.props.children, out)
+  }
+  return out
+}
+
+const findByTestId = (node: any, testID: string) =>
+  collectElements(node).find(element => element.props?.testID === testID)
+
+const findByComponent = (node: any, type: any) =>
+  collectElements(node).find(element => element.type === type)
+
+/** Host element created by the lucide mock (`<X />` becomes the mocked `X` component). */
+const findByCloseIcon = (node: any) => findByComponent(node, XIcon)
 
 describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', () => {
   describe('parseAgentLabel', () => {
@@ -185,6 +245,7 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
       ]
       const stats = formatTeamStats(members, sessions)
       expect(stats.activeCount).toBe(0)
+      expect(stats.totalCount).toBe(1)
       expect(stats.statsText).toBe('1')
     })
   })
@@ -353,6 +414,289 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
       expect(testerItem.props.onPress).toBeUndefined()
       expect(testerItem.props.accessibilityLabel).toContain('测试专家')
       expect(testerItem.props.accessibilityLabel).toMatch(/failed|失败/i)
+    })
+  })
+})
+
+describe('isActivityDockMode', () => {
+  it('accepts the three supported activity dock modes', () => {
+    expect(isActivityDockMode('compact')).toBe(true)
+    expect(isActivityDockMode('cards')).toBe(true)
+    expect(isActivityDockMode('hidden')).toBe(true)
+  })
+
+  it('rejects invalid dock mode values', () => {
+    const invalid: unknown[] = [
+      'Compact',
+      'CARDS',
+      'hidden ',
+      '',
+      'none',
+      'grid',
+      undefined,
+      null,
+      0,
+      1,
+      true,
+      {},
+      [],
+      ['compact'],
+    ]
+    for (const value of invalid) {
+      expect(isActivityDockMode(value)).toBe(false)
+    }
+  })
+})
+
+describe('SessionActivityDock', () => {
+  const baseSession = (overrides: any = {}): RemoteSession => ({
+    sessionId: 'sess-1',
+    title: '主会话',
+    running: true,
+    updatedAt: 0,
+    blank: false,
+    projections: { values: {} },
+    ...overrides,
+  } as any)
+
+  const runningJob = { id: 'job-1', label: 'pnpm test', status: 'running' as const, startedAt: 1 }
+  const idleJob = { id: 'job-2', label: 'pnpm build', status: 'completed' as const, startedAt: 1 }
+  const childSession: RemoteSession = { sessionId: 'child-1', title: '子任务', running: true } as any
+  const idleChildSession: RemoteSession = { sessionId: 'child-2', title: '子任务 2', running: false } as any
+  const teamMember: TeamMemberSnapshot = { id: 'member-1', name: 'coder', phase: 'active' } as any
+  const teamSessions: RemoteSession[] = [{ sessionId: 'member-1', running: true } as any]
+
+  const renderDock = (props: any) => {
+    reactMockApi().beginPass()
+    return (SessionActivityDock as any)(props)
+  }
+
+  beforeEach(() => {
+    reactMockApi().reset()
+  })
+
+  describe('compact mode (default)', () => {
+    it('renders the pill bar with jobs, subagents and team pills for non-empty data', () => {
+      const el = renderDock({
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      })
+
+      expect(findByTestId(el, 'activity-pill-bar')).toBeTruthy()
+      expect(findByTestId(el, 'activity-pill-jobs')).toBeTruthy()
+      expect(findByTestId(el, 'activity-pill-subagents')).toBeTruthy()
+      expect(findByTestId(el, 'activity-pill-team')).toBeTruthy()
+    })
+
+    it('renders no pills when jobs, subagents and team members are all empty', () => {
+      const el = renderDock({
+        session: baseSession(),
+        initialJobs: [],
+        childSessions: [],
+        teamState: { members: [], tasks: [] },
+        sessions: [],
+      })
+
+      expect(findByTestId(el, 'activity-pill-bar')).toBeUndefined()
+      expect(findByTestId(el, 'activity-pill-jobs')).toBeUndefined()
+      expect(findByTestId(el, 'activity-pill-subagents')).toBeUndefined()
+      expect(findByTestId(el, 'activity-pill-team')).toBeUndefined()
+    })
+
+    it('renders only the pills backed by available data', () => {
+      const el = renderDock({
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [],
+        teamState: { members: [], tasks: [] },
+      })
+
+      expect(findByTestId(el, 'activity-pill-bar')).toBeTruthy()
+      expect(findByTestId(el, 'activity-pill-jobs')).toBeTruthy()
+      expect(findByTestId(el, 'activity-pill-subagents')).toBeUndefined()
+      expect(findByTestId(el, 'activity-pill-team')).toBeUndefined()
+    })
+
+    it('highlights active pills with running glyphs', () => {
+      const el = renderDock({
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      })
+
+      const jobsPill = findByTestId(el, 'activity-pill-jobs')
+      const jobGlyph = findByComponent(jobsPill, JobStatusGlyph)
+      expect(jobGlyph).toBeTruthy()
+      expect(jobGlyph.props.status).toBe('running')
+      expect(jobsPill.props.style({ pressed: false })[1]).toBeTruthy()
+
+      const subagentsPill = findByTestId(el, 'activity-pill-subagents')
+      const subagentGlyph = findByComponent(subagentsPill, AgentStatusGlyph)
+      expect(subagentGlyph).toBeTruthy()
+      expect(subagentGlyph.props.status).toBe('running')
+      expect(subagentsPill.props.style({ pressed: false })[1]).toBeTruthy()
+
+      const teamPill = findByTestId(el, 'activity-pill-team')
+      const teamGlyph = findByComponent(teamPill, AgentStatusGlyph)
+      expect(teamGlyph).toBeTruthy()
+      expect(teamGlyph.props.status).toBe('running')
+      expect(teamPill.props.style({ pressed: false })[1]).toBeTruthy()
+    })
+
+    it('does not highlight inactive pills and shows the idle job glyph', () => {
+      const el = renderDock({
+        session: baseSession(),
+        initialJobs: [idleJob],
+        childSessions: [idleChildSession],
+        teamState: { members: [{ id: 'member-9', name: 'idle', phase: 'active' } as any], tasks: [] },
+        sessions: [{ sessionId: 'member-9', running: false } as any],
+      })
+
+      const jobsPill = findByTestId(el, 'activity-pill-jobs')
+      expect(findByComponent(jobsPill, JobStatusGlyph)).toBeUndefined()
+      expect(findByComponent(jobsPill, IconJobOutline)).toBeTruthy()
+      expect(jobsPill.props.style({ pressed: false })[1]).toBeFalsy()
+
+      const subagentsPill = findByTestId(el, 'activity-pill-subagents')
+      expect(subagentsPill.props.style({ pressed: false })[1]).toBeFalsy()
+
+      const teamPill = findByTestId(el, 'activity-pill-team')
+      expect(teamPill.props.style({ pressed: false })[1]).toBeFalsy()
+    })
+
+    it('opens the activity card modal when a pill is pressed', () => {
+      const props = {
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      }
+
+      const initial = renderDock(props)
+      expect(findByTestId(initial, 'activity-card-modal')).toBeUndefined()
+
+      findByTestId(initial, 'activity-pill-jobs').props.onPress()
+
+      const opened = renderDock(props)
+      expect(findByTestId(opened, 'activity-card-modal')).toBeTruthy()
+
+      const jobsCard = findByComponent(opened, BackgroundJobsCard)
+      expect(jobsCard).toBeTruthy()
+      expect(jobsCard.props.expanded).toBe(true)
+      expect(typeof jobsCard.props.onClose).toBe('function')
+    })
+
+    it('renders the expanded card with an X close icon inside the modal', () => {
+      const props = {
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      }
+
+      renderDock(props)
+      const initial = renderDock(props)
+      findByTestId(initial, 'activity-pill-subagents').props.onPress()
+      const opened = renderDock(props)
+
+      const subagentsCard = findByComponent(opened, SubagentsCard)
+      expect(subagentsCard).toBeTruthy()
+      expect(subagentsCard.props.expanded).toBe(true)
+      expect(typeof subagentsCard.props.onClose).toBe('function')
+
+      // Render the card on its own to observe the close (X) affordance.
+      reactMockApi().reset()
+      const renderedCard = renderSubagentsCard(subagentsCard.props)
+      expect(findByCloseIcon(renderedCard)).toBeTruthy()
+    })
+
+    it('closes the modal when the card onClose is triggered', () => {
+      const props = {
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      }
+
+      const initial = renderDock(props)
+      findByTestId(initial, 'activity-pill-subagents').props.onPress()
+      const opened = renderDock(props)
+      expect(findByTestId(opened, 'activity-card-modal')).toBeTruthy()
+
+      findByComponent(opened, SubagentsCard).props.onClose()
+
+      const closed = renderDock(props)
+      expect(findByTestId(closed, 'activity-card-modal')).toBeUndefined()
+    })
+
+    it('closes the modal and notifies the host when onOpenSession is triggered', () => {
+      const onOpenSession = vi.fn()
+      const props = {
+        session: baseSession(),
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+        onOpenSession,
+      }
+
+      const initial = renderDock(props)
+      findByTestId(initial, 'activity-pill-subagents').props.onPress()
+      const opened = renderDock(props)
+      expect(findByTestId(opened, 'activity-card-modal')).toBeTruthy()
+
+      findByComponent(opened, SubagentsCard).props.onOpen(childSession)
+
+      expect(onOpenSession).toHaveBeenCalledWith(childSession)
+      const closed = renderDock(props)
+      expect(findByTestId(closed, 'activity-card-modal')).toBeUndefined()
+    })
+  })
+
+  describe('cards mode', () => {
+    it('renders the three activity cards inline instead of the pill bar', () => {
+      const el = renderDock({
+        session: baseSession(),
+        mode: 'cards',
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      })
+
+      expect(findByTestId(el, 'activity-pill-bar')).toBeUndefined()
+      expect(findByComponent(el, BackgroundJobsCard)).toBeTruthy()
+      expect(findByComponent(el, SubagentsCard)).toBeTruthy()
+      expect(findByComponent(el, AgentTeamCard)).toBeTruthy()
+    })
+  })
+
+  describe('hidden mode', () => {
+    it('hides every activity widget but keeps the task progress checklist', () => {
+      const el = renderDock({
+        session: baseSession({
+          projections: { values: { todos: [{ content: '编写测试', status: 'pending' }] } },
+        }),
+        mode: 'hidden',
+        initialJobs: [runningJob],
+        childSessions: [childSession],
+        teamState: { members: [teamMember], tasks: [] },
+        sessions: teamSessions,
+      })
+
+      expect(findByTestId(el, 'activity-pill-bar')).toBeUndefined()
+      expect(findByComponent(el, BackgroundJobsCard)).toBeUndefined()
+      expect(findByComponent(el, SubagentsCard)).toBeUndefined()
+      expect(findByComponent(el, AgentTeamCard)).toBeUndefined()
+      expect(findByComponent(el, TaskProgressChecklist)).toBeTruthy()
     })
   })
 })

@@ -120,4 +120,60 @@ describe('foreground carrier recovery', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(reconnect).toHaveBeenCalledTimes(4)
   })
+
+  it('skips the 0ms fast-retry and uses jittered exponential backoff when the Host or device is offline', async () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    try {
+      for (const errorCode of ['HOST_OFFLINE', 'DEVICE_OFFLINE'] as const) {
+        prepare()
+        state = {
+          ...state,
+          connection: { phase: 'offline', stats: { mode: 'Disconnected' }, errorCode },
+        }
+        recovery.update()
+        // 0.5 -> 0.5 + 0.25 = 0.75 * [3000, 6000, 12000, 24000, 30000, 60000, 60000, 60000]
+        const expectedDelays = [2_250, 4_500, 9_000, 18_000, 22_500, 45_000, 45_000, 45_000]
+        for (let i = 0; i < expectedDelays.length; i++) {
+          const delay = expectedDelays[i]!
+          await vi.advanceTimersByTimeAsync(delay - 1)
+          expect(reconnect).toHaveBeenCalledTimes(i)
+          await vi.advanceTimersByTimeAsync(1)
+          expect(reconnect).toHaveBeenCalledTimes(i + 1)
+        }
+        expect(exhausted).toHaveBeenCalledOnce()
+
+        // After the 8-attempt ladder exhausts, a low-frequency 60s jittered probe (0.75 * 60_000 = 45_000ms)
+        // continues while the Host remains offline, even if a probe transitions to another retryable
+        // error (CONNECTION_FAILED -> 120_000ms probe), and automatically recovers once the Host returns.
+        reconnect.mockImplementationOnce(async () => {
+          state = {
+            ...state,
+            connection: { phase: 'offline', stats: { mode: 'Disconnected' }, errorCode: 'CONNECTION_FAILED' },
+          }
+          recovery.update()
+          return false
+        })
+        await vi.advanceTimersByTimeAsync(44_999)
+        expect(reconnect).toHaveBeenCalledTimes(8)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(reconnect).toHaveBeenCalledTimes(9)
+
+        reconnect.mockImplementationOnce(async () => {
+          state = {
+            ...state,
+            connection: { phase: 'connected', stats: { mode: 'Relay' } },
+          }
+          recovery.update()
+          return true
+        })
+        await vi.advanceTimersByTimeAsync(119_999)
+        expect(reconnect).toHaveBeenCalledTimes(9)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(reconnect).toHaveBeenCalledTimes(10)
+        expect(state.connection.phase).toBe('connected')
+      }
+    } finally {
+      random.mockRestore()
+    }
+  })
 })

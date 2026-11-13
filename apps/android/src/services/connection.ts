@@ -1,4 +1,5 @@
 import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
+import { classifyControlClose } from '@dsh-remote/protocol'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { connectionFailure, connectionLog } from './connection-log'
@@ -7,6 +8,7 @@ import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
 import { BotRemoteClient } from './bot-catalog'
+import { compactionStore } from './compaction-store'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
 export type CloseHandler = (options?: { retryable: boolean; lastTransport?: 'lan' | 'p2p' | 'turn' | 'relay' }) => void
@@ -25,6 +27,7 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private sessionEventsSupported = false
   private pluginRouteSupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
@@ -90,8 +93,10 @@ export class AndroidRemoteConnection {
       onDisconnect: event => {
         // Refused/replaced credentials, protocol errors and malformed frames
         // need manual recovery; do not automatically compete for ownership.
+        const retryableControlClose = event.closeCode !== undefined
+          && classifyControlClose(event.closeCode, event.closeReason).retryable
         retryableClose = event.reason !== 'invalid-control-frame'
-          && !(event.closeCode !== undefined && (event.closeCode >= 4000
+          && !(event.closeCode !== undefined && !retryableControlClose && (event.closeCode >= 4000
             || [1002, 1003, 1007, 1008, 1009].includes(event.closeCode)))
         if (event.transport !== undefined) lastTransport = event.transport
         connectionLog('disconnect', { reason: event.reason, closeCode: event.closeCode, transport: event.transport })
@@ -138,7 +143,8 @@ export class AndroidRemoteConnection {
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
-        this.codexAvailable = false
+        this.sessionEventsSupported = false
+    this.codexAvailable = false
         this.cursor = undefined
         this.acpBackends.clear()
         this.sessionTools = undefined
@@ -180,11 +186,16 @@ export class AndroidRemoteConnection {
           {
             clientVersion: host.clientVersion,
             harnessVersion: host.harnessVersion,
+            capabilities: features.capabilities,
             ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
           },
           frame => emitFrame(frame as unknown as MuxStreamFrame),
+          { store: compactionStore, scope: host.deviceId },
         )
         alpha.start()
+        // Reconcile attempts persisted before the disconnect. This only queries
+        // the Host; it never submits a new compaction.
+        void alpha.resumeCompactions().catch(() => undefined)
         this.proxy = alpha
         this.closeMux = async (notifyRemote = true) => { await alpha.close(notifyRemote) }
       } else {
@@ -209,6 +220,7 @@ export class AndroidRemoteConnection {
   }
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
+    this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -297,6 +309,10 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
+  }
+
+  hasSessionEvents(): boolean {
+    return this.sessionEventsSupported
   }
 
   hasCodex(): boolean {

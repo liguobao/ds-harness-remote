@@ -18,11 +18,13 @@ import { ServerCredentialStore } from '../../../packages/plugin/src/server-crede
 import {
   createRemoteServer,
   normalizeGatewayOptions,
+  normalizeMaxFramesPerSec,
   normalizeIp,
   normalizeTrustedProxyIps,
   parseHelloTimeout,
   parseHeartbeatInterval,
   parseHeartbeatDisconnect,
+  parseMaxFramesPerSec,
   type Config,
 } from '../src/server.js'
 import {
@@ -42,6 +44,14 @@ const noiseSessions: NoiseIkSession[] = []
 async function request(path: string, method = 'GET', body?: unknown, token?: string, headers = {}) {
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
+}
+async function rawJsonRequest(path: string, body: string | Uint8Array, token?: string) {
+  const response = await fetch(`${base}/api/v1${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body,
+  })
+  return { status: response.status, data: await response.json() }
 }
 async function start(pass = password, trustedProxyIps: readonly string[] = [], configOverrides: Partial<Config> = {}) {
   app = createRemoteServer({ account, password: pass, dataFile: join(dir, 'state.json'), publicUrl: 'http://localhost:8080', trustedProxyIps, ...configOverrides })
@@ -179,6 +189,39 @@ const cleanupScenario2 = async () => {
 afterEach(cleanupScenario2)
 
 describe('account and device authorization', () => {
+  it('rejects duplicate REST fields before authentication or state changes', async () => {
+    const d = await device()
+    const registration = JSON.stringify({ v: 1, device: {
+      deviceId: randomUUID(), identityKey: generateKeyPair().publicKey,
+      name: 'new-device', role: 'client', platform: 'linux', clientVersion: '0.6.4',
+    } })
+    const cases = [
+      { path: '/auth/login', body: JSON.stringify({ email: account, password }).replace('"password":', '"password":"wrong","password":') },
+      { path: '/auth/login', body: JSON.stringify({ email: account, password }).replace('"password":', '"pass\\u0077ord":"wrong","password":') },
+      { path: '/devices/register', body: registration.replace('"identityKey":', '"identityKey":"wrong","identityKey":'), token: accountToken },
+      { path: '/auth/refresh', body: JSON.stringify({ deviceId: d.deviceId, refreshToken: d.refreshToken }).replace('"refreshToken":', '"refreshToken":"wrong","refreshToken":') },
+      { path: `/devices/${d.deviceId}/name`, body: '{"name":"first","name":"second"}', token: accountToken },
+      { path: '/auth/login', body: Uint8Array.from([0xc0, 0xaf]) },
+    ]
+    for (const entry of cases) {
+      const result = await rawJsonRequest(entry.path, entry.body, entry.token)
+      expect(result.status).toBe(400)
+      expect(result.data.error.code).toBe('INVALID_MESSAGE')
+    }
+    const devices = await request('/account/devices', 'GET', undefined, accountToken)
+    expect(devices.data.items).toHaveLength(1)
+    expect(devices.data.items[0].name).toBe('test-device')
+  })
+  it('rejects a noncanonical registered X25519 public key', async () => {
+    const keys = generateKeyPair()
+    const descriptor = {
+      deviceId: randomUUID(), identityKey: `${keys.publicKey.slice(0, -1)}B`,
+      name: 'invalid-key', role: 'client', platform: 'linux', clientVersion: '0.6.4',
+    }
+    const result = await request('/devices/register', 'POST', { v: 1, device: descriptor }, accountToken)
+    expect(result.status).toBe(400)
+    expect(result.data.error.code).toBe('INVALID_MESSAGE')
+  })
   it('separates account, cookie and device credentials; rejects cross-origin requests', async () => {
     expect((await request('/auth/login', 'POST', { email: account, password: 'wrong' })).status).toBe(401)
     expect((await request('/auth/login', 'POST', { email: account, password }, undefined, { Origin: 'https://attacker.example' })).status).toBe(403)
@@ -262,6 +305,7 @@ describe('account and device authorization', () => {
         const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
         try {
           if (delay === 0) await api.refreshCredentials()
+          else expect((await api.authenticate(identity)).accessTokenExpiresAt).toBeGreaterThan(now)
           await expect(api.listDevices()).resolves.toEqual([])
           const recovered = await credentials.load(base, identity.deviceId)
           expect(recovered?.refreshToken).not.toBe(before?.refreshToken)
@@ -280,18 +324,24 @@ describe('account and device authorization', () => {
 })
 describe('control authorization and encrypted relay', () => {
   it('rejects invalid Control messages at the WebSocket boundary', async () => {
-    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type'].map(reason => ({
+    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type', 'duplicate-payload-field', 'noncanonical-handshake'].map(reason => ({
       name: reason,
       run: async () => {
         const wire = await socket(await device())
         await wire.next('hello.ack')
         const closed = once(wire.ws, 'close')
         const frame = {
-          ...createControlFrame('ping', { nonce: reason === 'oversized-control' ? 'a'.repeat(MAX_CONTROL_FRAME_BYTES) : 'test' }),
+          ...createControlFrame(reason === 'noncanonical-handshake' ? 'secure.handshake' : 'ping',
+            reason === 'noncanonical-handshake'
+              ? { connectionId: randomUUID(), targetDeviceId: randomUUID(), step: 1, data: 'AQIDBB' }
+              : { nonce: reason === 'oversized-control' ? 'a'.repeat(MAX_CONTROL_FRAME_BYTES) : 'test' }),
           ...(reason === 'unsupported-version' ? { v: 2 } : {}),
           ...(reason === 'unknown-frame-type' ? { type: 'unknown' } : {}),
         }
-        wire.ws.send(JSON.stringify(frame), { binary: reason === 'binary-control' })
+        const encoded = JSON.stringify(frame)
+        wire.ws.send(reason === 'duplicate-payload-field'
+          ? encoded.replace('"nonce":', '"nonce":"other","nonce":')
+          : encoded, { binary: reason === 'binary-control' })
         expect((await wire.next('error')).code).toBe(reason === 'unsupported-version' ? 'UNSUPPORTED_VERSION' : 'INVALID_MESSAGE')
         expect((await closed)[0]).toBe(4001)
       },
@@ -923,6 +973,13 @@ describe('structured logger and sensitive data redaction', () => {
     expect(parseLogLevel('WARN')).toBe('warn')
     expect(parseLogLevel('silent')).toBe('silent')
     expect(parseLogLevel('invalid_level')).toBe('info')
+
+    // Max frames per second
+    expect(parseMaxFramesPerSec(undefined)).toBe(512)
+    expect(parseMaxFramesPerSec('4096')).toBe(4096)
+    expect(parseMaxFramesPerSec('32')).toBe(512)
+    expect(parseMaxFramesPerSec('100000')).toBe(512)
+    expect(normalizeMaxFramesPerSec(Number.NaN)).toBe(512)
   })
 })
 
@@ -1195,5 +1252,151 @@ describe('gateway diagnostics redaction', () => {
     expect(log).toContain('ws_connection_closed')
     expect(log).toContain('"hasReason":true')
     expect(log).not.toContain('CANARY-REASON')
+  })
+})
+
+describe('stale link frame dropping and configurable rate limit', () => {
+  it('silently drops late frames for a closed link even after the active frame quota is full, while bounding sustained stale byte floods', async () => {
+    await app.close()
+    await start(password, [], { maxFramesPerSec: 64 })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+
+    const ctx = await connection()
+    await handshake(ctx)
+    const closedClient = once(ctx.client.ws, 'close')
+    ctx.client.ws.close(1000, 'client closed')
+    await closedClient
+    expect(await ctx.host.next('error')).toMatchObject({
+      code: 'CONNECTION_FAILED',
+      connectionId: ctx.connectionId,
+      retryable: true,
+    })
+
+    // Churn 1,100 dropped links on an unrelated Host: per-Host tombstone isolation must prevent
+    // unrelated churn from evicting ctx.connectionId's tombstone.
+    const churnHost = await device('host')
+    const churnClient = await device('client')
+    const churnHostWire = await socket(churnHost)
+    const churnClientWire = await socket(churnClient)
+    await churnHostWire.next('hello.ack')
+    await churnClientWire.next('hello.ack')
+    const gatewayInternals = app.gateway as unknown as {
+      recordDroppedLink(link: { id: string; host: string; client: string }): void
+    }
+    for (let i = 0; i < 1100; i++) {
+      gatewayInternals.recordDroppedLink({
+        id: `churn-link-${i}`,
+        host: churnHost.deviceId,
+        client: churnClient.deviceId,
+      })
+    }
+
+    // Fill the normal 64-frame quota first with active traffic in the current window.
+    for (let i = 0; i < 60; i++) {
+      ctx.host.send('ping', { nonce: `fill-${i}` })
+      expect(await ctx.host.next('pong')).toEqual({ nonce: `fill-${i}` })
+    }
+
+    // Now burst 200 late relay frames (exceeding the 64 frames/sec active cap) on the dropped link:
+    // they are absorbed by the dedicated dropped-link drain budget without touching the active quota.
+    const lateCiphertext = 'A'.repeat(16 * 1024)
+    for (let i = 0; i < 200; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: i,
+        ciphertext: lateCiphertext,
+      })
+    }
+
+    // Wait for the 1s rate window to roll over and confirm the Host control connection
+    // was not closed with RATE_LIMITED and received zero error frames.
+    await new Promise(resolve => setTimeout(resolve, 1050))
+    ctx.host.send('ping', { nonce: 'host-survives-stale-burst' })
+    expect(await ctx.host.next('pong')).toEqual({ nonce: 'host-survives-stale-burst' })
+    expect(ctx.host.messages.filter(m => m.type === 'error')).toHaveLength(0)
+    expect(app.gateway.droppedLinkFrameCount(ctx.connectionId)).toBe(200)
+
+    // Even if the same Host subsequently drops >64 links (evicting ctx.connectionId's tombstone),
+    // evictedTombstoneUntil on the Peer still protects late frames for ctx.connectionId.
+    for (let i = 0; i < 70; i++) {
+      gatewayInternals.recordDroppedLink({
+        id: `same-host-churn-${i}`,
+        host: ctx.h.deviceId,
+        client: ctx.c.deviceId,
+      })
+    }
+    expect(app.gateway.droppedLinkFrameCount(ctx.connectionId)).toBe(0)
+    for (let i = 0; i < 100; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: 500 + i,
+        ciphertext: lateCiphertext,
+      })
+    }
+    await new Promise(resolve => setTimeout(resolve, 1050))
+    ctx.host.send('ping', { nonce: 'host-survives-post-eviction-burst' })
+    expect(await ctx.host.next('pong')).toEqual({ nonce: 'host-survives-post-eviction-burst' })
+    expect(ctx.host.messages.filter(m => m.type === 'error')).toHaveLength(0)
+
+    // Sustained stale traffic exceeding the 8 MiB/sec dropped-link byte ceiling is still bounded.
+    const hostClosed = once(ctx.host.ws, 'close')
+    const hugeCiphertext = 'B'.repeat(128 * 1024)
+    for (let i = 0; i < 70; i++) {
+      ctx.host.send('relay', {
+        connectionId: ctx.connectionId,
+        targetDeviceId: ctx.c.deviceId,
+        counter: 1000 + i,
+        ciphertext: hugeCiphertext,
+      })
+    }
+    expect(await ctx.host.next('error')).toMatchObject({
+      code: 'RATE_LIMITED',
+      retryable: false,
+    })
+    const [hostCloseCode] = await hostClosed
+    expect(hostCloseCode).toBe(4001)
+  })
+
+  it('enforces configured maxFramesPerSec on active frames and immediately reaps a heartbeat-expired host on connect.request', async () => {
+    await app.close()
+    await start(password, [], { maxFramesPerSec: 64 })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+    expect(app.gateway.maxFramesPerSec).toBe(64)
+
+    const h = await device('host')
+    const c = await device('client')
+    const rateLimitedClient = await device('client')
+    const hostWire = await socket(h)
+    const clientWire = await socket(c)
+    const noisyWire = await socket(rateLimitedClient)
+    await hostWire.next('hello.ack')
+    await clientWire.next('hello.ack')
+    await noisyWire.next('hello.ack')
+
+    // Simulate a Host whose last pong is older than heartbeatDisconnectMs before
+    // the next periodic interval tick runs.
+    const hostPeer = app.gateway.peers.get(h.deviceId)!
+    hostPeer.lastPong = Date.now() - (app.gateway.heartbeatDisconnectMs + 1000)
+
+    clientWire.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: ['relay'] })
+    expect(await clientWire.next('error')).toMatchObject({
+      code: 'HOST_OFFLINE',
+      retryable: true,
+    })
+    expect(app.gateway.peers.has(h.deviceId)).toBe(false)
+
+    // Active frames exceeding the configured 64 frames/sec threshold trigger RATE_LIMITED (4001).
+    const noisyClosed = once(noisyWire.ws, 'close')
+    for (let i = 0; i < 70; i++) {
+      noisyWire.send('ping', { nonce: `active-${i}` })
+    }
+    expect(await noisyWire.next('error')).toMatchObject({
+      code: 'RATE_LIMITED',
+      retryable: false,
+    })
+    const [closeCode] = await noisyClosed
+    expect(closeCode).toBe(4001)
   })
 })

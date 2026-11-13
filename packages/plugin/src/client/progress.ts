@@ -27,7 +27,9 @@ export function createRemoteProgressView(React: ClientReact) {
     },
       React.createElement('div', { className: 'dshRemoteProgressHeader' },
         React.createElement('strong', null, props.t(progress.label)),
-        React.createElement('span', null, `${percent}%`)),
+        React.createElement('span', { className: 'dshRemoteProgressStatus' },
+          React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+          `${percent}%`)),
       React.createElement('p', null, detail),
       React.createElement('div', {
         className: 'dshRemoteProgressBar',

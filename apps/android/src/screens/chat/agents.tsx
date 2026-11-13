@@ -215,6 +215,7 @@ export interface SubagentsCardProps {
   sessions: readonly RemoteSession[]
   expanded?: boolean
   onToggle?: () => void
+  onClose?: () => void
   defaultExpanded?: boolean
   maxHeight?: number
   onOpen?: (session: RemoteSession) => void
@@ -231,6 +232,7 @@ export const SubagentsCard = memo(function SubagentsCard({
   sessions,
   expanded,
   onToggle,
+  onClose,
   defaultExpanded = false,
   maxHeight,
   onOpen,
@@ -264,7 +266,7 @@ export const SubagentsCard = memo(function SubagentsCard({
         accessibilityRole="button"
         accessibilityLabel={`${title} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
-        onPress={handleToggle}
+        onPress={onClose ?? handleToggle}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
@@ -283,7 +285,9 @@ export const SubagentsCard = memo(function SubagentsCard({
         </View>
 
         <View style={styles.chevron}>
-          {isOpen ? (
+          {onClose ? (
+            <X size={16} color={colors.muted} />
+          ) : isOpen ? (
             <ChevronUp size={16} color={colors.muted} />
           ) : (
             <ChevronDown size={16} color={colors.muted} />
@@ -344,6 +348,7 @@ export interface AgentTeamCardProps {
   sessions?: readonly RemoteSession[]
   expanded?: boolean
   onToggle?: () => void
+  onClose?: () => void
   defaultExpanded?: boolean
   maxHeight?: number
   onOpen?: (session: RemoteSession) => void
@@ -362,6 +367,7 @@ export const AgentTeamCard = memo(function AgentTeamCard({
   sessions = [],
   expanded,
   onToggle,
+  onClose,
   defaultExpanded = false,
   maxHeight,
   onOpen,
@@ -405,7 +411,7 @@ export const AgentTeamCard = memo(function AgentTeamCard({
         accessibilityRole="button"
         accessibilityLabel={`${title} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
-        onPress={handleToggle}
+        onPress={onClose ?? handleToggle}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
@@ -424,7 +430,9 @@ export const AgentTeamCard = memo(function AgentTeamCard({
         </View>
 
         <View style={styles.chevron}>
-          {isOpen ? (
+          {onClose ? (
+            <X size={16} color={colors.muted} />
+          ) : isOpen ? (
             <ChevronUp size={16} color={colors.muted} />
           ) : (
             <ChevronDown size={16} color={colors.muted} />

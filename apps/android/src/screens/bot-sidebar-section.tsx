@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
-  AppState,
   Modal,
   Pressable,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -38,6 +37,7 @@ import {
 import { strings as s } from '../locales/i18n'
 import { browseScope } from '../services/browse-memory'
 import {
+  canDeleteBot,
   object,
   objects,
   text,
@@ -55,6 +55,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { ModalSurface } from './chat/modal'
+import { ConfirmDialog } from './chat/confirm-dialog'
 import { resolveSessionDisplayTitle } from './session-title'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
 import { BotAvatar, BotAvatarWithBadge } from './bot/avatar'
@@ -62,8 +63,8 @@ import { BotEditor, type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { BotProfilePage } from './bot/profile-page'
 
-/** Shared polling hook so the sidebar and main Bot screen stay in sync. */
-export function useBotTeamPolling(enabled: boolean): void {
+/** Load once on entry or reconnection; roster refreshes are otherwise explicit. */
+export function useBotTeamLoad(enabled: boolean): void {
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const botScope = useAppStore(browseScope)
   const ensureScope = useBotTeamStore(state => state.ensureScope)
@@ -75,37 +76,9 @@ export function useBotTeamPolling(enabled: boolean): void {
 
   useEffect(() => {
     if (!enabled || !connected) return
-    let active = AppState.currentState === 'active'
-    let disposed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
     const controller = new AbortController()
-
-    const tick = async () => {
-      if (disposed || !active) return
-      await refresh(false, controller.signal)
-      if (!disposed && active) {
-        timer = setTimeout(() => void tick(), 3000)
-      }
-    }
-
-    const sub = AppState.addEventListener('change', next => {
-      const wasActive = active
-      active = next === 'active'
-      if (active && !wasActive && !disposed) {
-        clearTimeout(timer)
-        void tick()
-      } else if (!active) {
-        clearTimeout(timer)
-      }
-    })
-
-    void tick()
-    return () => {
-      disposed = true
-      controller.abort()
-      clearTimeout(timer)
-      sub.remove()
-    }
+    void refresh(false, controller.signal)
+    return () => controller.abort()
   }, [enabled, connected, botScope, refresh])
 }
 
@@ -183,10 +156,14 @@ function formatBotListTimestamp(updatedAt?: number): string {
 type RosterFilter = 'all' | 'bots' | 'rooms' | 'agents'
 
 export function BotSidebarSection({
+  refreshing = false,
+  onRefresh,
   searchQuery,
   onSearchChange,
   onSelectBot,
 }: {
+  refreshing?: boolean
+  onRefresh?: () => void
   searchQuery: string
   onSearchChange: (q: string) => void
   showSearch?: boolean
@@ -382,6 +359,10 @@ export function BotSidebarSection({
       )}
 
       <ScrollView
+        alwaysBounceVertical
+        refreshControl={onRefresh ? (
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+        ) : undefined}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -408,14 +389,14 @@ export function BotSidebarSection({
           </View>
         )}
 
-        {loading && state === undefined && (
+        {loading && state === undefined && visibleError === undefined && (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color={colors.primary} />
           </View>
         )}
 
-        {!loading && state === undefined && (
-          <DsBotInstallCard error={visibleError} onRetry={() => void refresh(true)} />
+        {state === undefined && (!loading || visibleError !== undefined) && (
+          <DsBotInstallCard error={visibleError} loading={loading} onRetry={() => void refresh(true)} />
         )}
 
         {state !== undefined && state.bots.length === 0 && state.rooms.length === 0 && (
@@ -680,16 +661,8 @@ export function BotModalsHost() {
 
   const performAdapter: BotPerform = (operation, payload) => perform(operation, payload)
 
-  const confirmDelete = (kind: 'bot' | 'room', id: string) => {
-    Alert.alert(s.bots.delete, s.bots.deleteHint, [
-      { text: s.bots.cancel, style: 'cancel' },
-      {
-        text: s.bots.delete,
-        style: 'destructive',
-        onPress: () => void perform(kind === 'bot' ? 'delete-bot' : 'delete-room', { id }),
-      },
-    ])
-  }
+  const [deleteConfirm, setDeleteConfirm] = useState<{ kind: 'bot' | 'room'; id: string } | undefined>()
+  const confirmDelete = (kind: 'bot' | 'room', id: string) => setDeleteConfirm({ kind, id })
 
   const menuBot = contextMenu?.kind === 'bot' ? state?.bots.find(b => b.id === contextMenu.id) : undefined
   const menuRoom = contextMenu?.kind === 'room' ? state?.rooms.find(r => r.id === contextMenu.id) : undefined
@@ -775,7 +748,7 @@ export function BotModalsHost() {
       onPress: () => void perform('agent-session', { agentId: menuAgent.id }),
     })
   }
-  if ((menuBot && !menuBot.main) || menuRoom || menuAgent) {
+  if (canDeleteBot(state, menuBot) || menuRoom || menuAgent) {
     contextActions.push({
       key: 'delete',
       icon: Trash2,
@@ -850,6 +823,24 @@ export function BotModalsHost() {
           </ModalSurface>
         </Modal>
       )}
+
+      <ConfirmDialog
+        visible={deleteConfirm !== undefined}
+        title={s.bots.delete}
+        message={s.bots.deleteHint}
+        onClose={() => setDeleteConfirm(undefined)}
+        buttons={[
+          { label: s.bots.cancel },
+          {
+            label: s.bots.delete,
+            danger: true,
+            onPress: () => {
+              if (!deleteConfirm) return
+              void perform(deleteConfirm.kind === 'bot' ? 'delete-bot' : 'delete-room', { id: deleteConfirm.id })
+            },
+          },
+        ]}
+      />
     </>
   )
 }
@@ -902,13 +893,13 @@ function BotReportView({ value, kind, state }: { value: unknown; kind: 'usage' |
   )
 }
 
-export function DsBotInstallCard({ error, onRetry }: { error?: string; onRetry: () => void }) {
+export function DsBotInstallCard({ error, loading = false, onRetry }: { error?: string; loading?: boolean; onRetry: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const rows = [
     { label: s.plugins.installDesktop, value: 'ds-bot' },
     { label: s.plugins.installCli, value: 'dsh plugin --profile web add -w ds-bot' },
-    { label: 'GitHub 源码地址（无法连接 npm 时填入）', value: 'github:Fei2411/DS-Bot&path:/ds-bot' },
+    { label: 'GitHub 安装地址（无法连接 npm 时填入）', value: 'github:Fei2411/DS-Bot#main&path:/ds-bot' },
   ]
   return (
     <View style={styles.sectionBlock}>
@@ -935,6 +926,8 @@ export function DsBotInstallCard({ error, onRetry }: { error?: string; onRetry: 
           label={s.bots.retry}
           detail={s.plugins.installOnDesktop}
           onPress={onRetry}
+          disabled={loading}
+          accessory={loading ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
         />
       </GroupCard>
     </View>

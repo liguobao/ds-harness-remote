@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { connectionLogEntries, connectionLogText, subscribeConnectionLog } from '../services/connection-log'
 import { exportConnectionLog } from '../services/export-connection-log'
 import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
@@ -6,9 +7,11 @@ import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
@@ -28,8 +31,11 @@ import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, resolveMotion } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
+import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, ThemePreference, TypographyDensity } from '../ui/theme'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
@@ -602,7 +608,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onReset: () => void }) {
+export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void; onOpenAbout?: () => void }) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -617,6 +623,10 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const typographyDensity = useAppStore(state => state.typographyDensity)
   const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
+  const { phase: updatePhase, progress: updateProgress, latestVersion, checkForUpdates } = useUpdateCheck()
+  const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
+  const buildVersion = Application.nativeBuildVersion
+  const versionLabel = buildVersion === null ? appVersion : `${appVersion} (${buildVersion})`
   const showIdentity = (label: string, value?: string) => {
     if (!value) return
     Alert.alert(label, value, [
@@ -629,18 +639,27 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
       } },
     ])
   }
-  const [exportingLog, setExportingLog] = useState(false)
-  const exportLog = async () => {
-    if (exportingLog) return
-    setExportingLog(true)
-    try {
-      if (await exportConnectionLog()) Alert.alert(zhCN.settings.logExported)
-    } catch { Alert.alert(zhCN.settings.logExportFailed, zhCN.settings.logExportRetry) }
-    finally { setExportingLog(false) }
-  }
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const chatAppearance = useAppStore(state => state.chatAppearance)
+  const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
+  useEffect(() => {
+    setLogCount(connectionLogEntries().length)
+    return subscribeConnectionLog(() => setLogCount(connectionLogEntries().length))
+  }, [])
   const [densitySaving, setDensitySaving] = useState(false)
   const [densityPickerOpen, setDensityPickerOpen] = useState(false)
   const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
+  const activityDockMode = useAppStore(state => state.activityDockMode)
+  const setActivityDockMode = useAppStore(state => state.setActivityDockMode)
+  const [activityDockSaving, setActivityDockSaving] = useState(false)
+  const [activityDockPickerOpen, setActivityDockPickerOpen] = useState(false)
+  const currentActivityDockLabel = activityDockMode === 'cards'
+    ? zhCN.settings.activityDockCards
+    : activityDockMode === 'hidden'
+      ? zhCN.settings.activityDockHidden
+      : zhCN.settings.activityDockCompact
   const compactHistory = useAppStore(state => state.compactHistory)
   const setCompactHistory = useAppStore(state => state.setCompactHistory)
   const [compactSaving, setCompactSaving] = useState(false)
@@ -687,6 +706,14 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
     try { await setTypographyDensity(value) }
     catch { Alert.alert(zhCN.settings.typographyDensitySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setDensitySaving(false) }
+  }
+
+  const toggleActivityDockMode = async (value: ActivityDockMode) => {
+    if (activityDockSaving || value === activityDockMode) return
+    setActivityDockSaving(true)
+    try { await setActivityDockMode(value) }
+    catch { Alert.alert(zhCN.settings.activityDockModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setActivityDockSaving(false) }
   }
 
   const toggleStatusBar = async (visible: boolean) => {
@@ -741,6 +768,26 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
 
+  if (diagnosticsOpen && !onOpenDiagnostics) {
+    return <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
+  }
+  if (aboutOpen && !onOpenAbout) {
+    return <AboutScreen onBack={() => setAboutOpen(false)} />
+  }
+  if (appearanceOpen) {
+    return <ChatAppearanceScreen onBack={() => setAppearanceOpen(false)} />
+  }
+
+  const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
+    : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
+      : chatAppearance.fontScale === 'xl' ? zhCN.settings.fontSizeXl
+        : zhCN.settings.fontSizeMd
+  const bubbleLabel = chatAppearance.bubbleStyle === 'tinted' ? zhCN.settings.bubbleTinted
+    : chatAppearance.bubbleStyle === 'solid' ? zhCN.settings.bubbleSolid
+      : chatAppearance.bubbleStyle === 'minimal' ? zhCN.settings.bubbleMinimal
+        : zhCN.settings.bubbleSoft
+  const chatAppearanceSummary = `${fontLabel} · ${bubbleLabel}`
+
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
@@ -763,11 +810,25 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
+                icon={Palette}
+                label={zhCN.settings.chatAppearance}
+                value={chatAppearanceSummary}
+                chevron
+                onPress={() => setAppearanceOpen(true)}
+              />
+              <GroupRow
                 icon={Type}
                 label={zhCN.settings.typographyDensity}
                 value={currentDensityLabel}
                 chevron
                 onPress={() => setDensityPickerOpen(true)}
+              />
+              <GroupRow
+                icon={Layers}
+                label={zhCN.settings.activityDockMode}
+                value={currentActivityDockLabel}
+                chevron
+                onPress={() => setActivityDockPickerOpen(true)}
               />
               <GroupRow
                 icon={PanelTop}
@@ -910,16 +971,21 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
 
-            {Platform.OS === 'android' && <>
-              <SectionTitle>{zhCN.settings.diagnostics}</SectionTitle>
-              <GroupCard>
-                <GroupRow first icon={Download}
-                  label={exportingLog ? zhCN.settings.logExporting : zhCN.settings.exportLog}
-                  detail={zhCN.settings.exportLogNote} disabled={exportingLog}
-                  accessory={exportingLog ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
-                  chevron={!exportingLog} onPress={() => void exportLog()} />
-              </GroupCard>
-            </>}
+            <SectionTitle>{zhCN.settings.diagnostics}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Terminal}
+                label={zhCN.settings.connectionLog}
+                detail={zhCN.settings.diagnosticsLead}
+                value={zhCN.settings.logLineCount(logCount)}
+                chevron
+                onPress={() => {
+                  if (onOpenDiagnostics) onOpenDiagnostics()
+                  else setDiagnosticsOpen(true)
+                }}
+              />
+            </GroupCard>
 
             <SectionTitle>{zhCN.settings.identity}</SectionTitle>
             <GroupCard>
@@ -930,6 +996,41 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
             <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
 
+            <SectionTitle>{zhCN.settings.about}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Download}
+                label={zhCN.settings.checkUpdates}
+                detail={
+                  updatePhase === 'checking'
+                    ? zhCN.settings.checkingUpdates
+                    : updatePhase === 'downloading'
+                      ? updateProgress === null
+                        ? zhCN.settings.downloadingUpdate
+                        : `${zhCN.settings.downloadingUpdate} ${updateProgress}%`
+                      : latestVersion !== null
+                        ? `${zhCN.settings.updateFoundTitle} v${latestVersion}`
+                        : undefined
+                }
+                value={versionLabel}
+                disabled={updatePhase !== 'idle'}
+                chevron={updatePhase === 'idle'}
+                accessory={updatePhase !== 'idle' ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                onPress={() => void checkForUpdates()}
+              />
+              <GroupRow
+                icon={Info}
+                label={zhCN.settings.about}
+                detail={zhCN.settings.aboutLead}
+                chevron
+                onPress={() => {
+                  if (onOpenAbout) onOpenAbout()
+                  else setAboutOpen(true)
+                }}
+              />
+            </GroupCard>
+
             <GroupCard style={styles.signOutCard}>
               <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} onPress={confirmSignOut} />
               <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} onPress={confirmReset} />
@@ -937,10 +1038,11 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
           </View>
         </Screen>
       </BlurHeaderFrame>
-      <Modal visible={languagePickerOpen} transparent animationType="fade" onRequestClose={() => setLanguagePickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setLanguagePickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={languagePickerOpen}
+        onClose={() => setLanguagePickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.language}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setLanguagePickerOpen(false)} />
@@ -966,14 +1068,13 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
       <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
-      <Modal visible={densityPickerOpen} transparent animationType="fade" onRequestClose={() => setDensityPickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setDensityPickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={densityPickerOpen}
+        onClose={() => setDensityPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.typographyDensity}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setDensityPickerOpen(false)} />
@@ -1002,9 +1103,42 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
+      <SheetModal
+        visible={activityDockPickerOpen}
+        onClose={() => setActivityDockPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.activityDockMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setActivityDockPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'compact' as const, name: zhCN.settings.activityDockCompact },
+                  { value: 'cards' as const, name: zhCN.settings.activityDockCards },
+                  { value: 'hidden' as const, name: zhCN.settings.activityDockHidden },
+                ]).map((option, index) => {
+                  const chosen = option.value === activityDockMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setActivityDockPickerOpen(false)
+                        void toggleActivityDockMode(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+      </SheetModal>
     </View>
   )
 }
@@ -1060,6 +1194,22 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
   const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
+  const reduceMotion = useReduceMotion()
+  // The menu is anchored under the toolbar chip; growing from that corner
+  // avoids a card that pops in from nowhere.
+  const entrance = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (!visible) return
+    entrance.setValue(0)
+    const animation = Animated.timing(entrance, {
+      toValue: 1,
+      duration: resolveMotion('micro', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [visible, entrance, reduceMotion])
 
   if (!visible) return null
 
@@ -1078,7 +1228,19 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: menuTop, maxHeight: menuMaxHeight }]} pointerEvents="box-none">
+      <Animated.View
+        accessibilityRole="menu"
+        pointerEvents="box-none"
+        style={[styles.homeMenuCard, {
+          top: menuTop,
+          maxHeight: menuMaxHeight,
+          opacity: entrance,
+          transform: [
+            { scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+            { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) },
+          ],
+        }]}
+      >
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
@@ -1102,19 +1264,33 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
             last
           />
         </ScrollView>
-      </View>
+      </Animated.View>
     </View>
   )
+}
+
+let cachedLatestVersion: string | null = null
+let startupUpdateChecked = false
+
+export function useStartupUpdateCheck(enabled = true) {
+  const { checkForUpdates } = useUpdateCheck()
+  useEffect(() => {
+    if (!enabled || startupUpdateChecked) return
+    startupUpdateChecked = true
+    void checkForUpdates({ silent: true })
+  }, [enabled])
 }
 
 function useUpdateCheck() {
   const [phase, setPhase] = useState<'idle' | 'checking' | 'downloading'>('idle')
   const [progress, setProgress] = useState<number | null>(null)
+  const [latestVersion, setLatestVersion] = useState<string | null>(() => cachedLatestVersion)
   const appVersion = Application.nativeApplicationVersion ?? ''
 
-  const checkForUpdates = async () => {
+  const checkForUpdates = async (options?: { silent?: boolean }) => {
     if (phase !== 'idle') return
-    setPhase('checking')
+    const silent = options?.silent === true
+    if (!silent) setPhase('checking')
     try {
       const response = await fetch(releaseApiUrl)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -1127,8 +1303,10 @@ function useUpdateCheck() {
         ? release.assets.find(asset => typeof asset.name === 'string' && asset.name.toLowerCase().endsWith('.apk'))
         : undefined
       const downloadUrl = typeof apkAsset?.browser_download_url === 'string' ? apkAsset.browser_download_url : undefined
-      setPhase('idle')
+      if (!silent) setPhase('idle')
       if (latest !== '' && isNewerVersion(latest, appVersion)) {
+        cachedLatestVersion = latest
+        setLatestVersion(latest)
         Alert.alert(
           zhCN.settings.updateFoundTitle,
           zhCN.settings.updateFoundBody(latest, appVersion),
@@ -1140,11 +1318,15 @@ function useUpdateCheck() {
           ],
         )
       } else {
-        Alert.alert(zhCN.settings.upToDateTitle, zhCN.settings.upToDateBody)
+        cachedLatestVersion = null
+        setLatestVersion(null)
+        if (!silent) Alert.alert(zhCN.settings.upToDateTitle, zhCN.settings.upToDateBody)
       }
     } catch {
-      setPhase('idle')
-      Alert.alert(zhCN.settings.checkFailedTitle, zhCN.settings.checkFailedBody)
+      if (!silent) {
+        setPhase('idle')
+        Alert.alert(zhCN.settings.checkFailedTitle, zhCN.settings.checkFailedBody)
+      }
     }
   }
 
@@ -1192,7 +1374,7 @@ function useUpdateCheck() {
     }
   }
 
-  return { phase, progress, checkForUpdates }
+  return { phase, progress, latestVersion, checkForUpdates }
 }
 
 function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, last = false }: {
@@ -1247,12 +1429,225 @@ function isNewerVersion(latest: string, current: string): boolean {
   return false
 }
 
+const TERMINAL_PALETTE = {
+  surface: '#0D1117',
+  header: '#161B22',
+  border: 'rgba(255, 255, 255, 0.08)',
+  ink: '#E6EDF3',
+  muted: '#8B949E',
+  accent: '#58A6FF',
+  success: '#3FB950',
+  danger: '#F85149',
+} as const
+
+function classifyLogLineColor(line: string): string {
+  if (/ (disconnect|fallback|stream-failed|health-failed|secure-send-failed|secure-receive-failed) /.test(line)
+    || /"keyMismatch":[1-9]|"lookupFailed":[1-9]|"status":[45]\d\d/.test(line)) {
+    return TERMINAL_PALETTE.danger
+  }
+  if (/ selected-path |"(?:phase|connectionState)":"(?:ready|secure|connected)"/.test(line)) {
+    return TERMINAL_PALETTE.success
+  }
+  return TERMINAL_PALETTE.ink
+}
+
+export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
+  useAppStore(state => state.language)
+  const config = useAppStore(state => state.config)
+  const account = useAppStore(state => state.account)
+  const devices = useAppStore(state => state.devices)
+  const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connection = useAppStore(state => state.connection)
+  const error = useAppStore(state => state.error)
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
+  const appVersion = Application.nativeApplicationVersion ?? '0.6.3'
+
+  const [lines, setLines] = useState<readonly string[]>(() => connectionLogEntries())
+  const [exportingLog, setExportingLog] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const logScrollRef = useRef<ScrollView>(null)
+  const stickToEndRef = useRef(true)
+
+  useEffect(() => {
+    setLines(connectionLogEntries())
+    return subscribeConnectionLog(() => setLines(connectionLogEntries()))
+  }, [])
+
+  const copyLog = async () => {
+    try {
+      await Clipboard.setStringAsync(connectionLogText(appVersion))
+      setCopied(true)
+      Alert.alert(zhCN.settings.logCopied)
+    } catch {
+      Alert.alert(zhCN.settings.identityCopyFailed)
+    }
+  }
+
+  const exportLog = async () => {
+    if (exportingLog) return
+    setExportingLog(true)
+    try {
+      if (await exportConnectionLog()) Alert.alert(zhCN.settings.logExported)
+    } catch {
+      Alert.alert(zhCN.settings.logExportFailed, zhCN.settings.logExportRetry)
+    } finally {
+      setExportingLog(false)
+    }
+  }
+
+  const onlineCount = devices.filter(item => item.online).length
+  const deviceSummary = selectedDevice !== undefined
+    ? `${selectedDevice.name} · ${connection.phase === 'connected' ? zhCN.status.online : connection.phase === 'connecting' || connection.phase === 'reconnecting' ? zhCN.status.waiting : zhCN.status.offline}`
+    : zhCN.devices.summary(devices.length, onlineCount)
+
+  return (
+    <View style={styles.flex}>
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.diagnostics} onBack={onBack} />}>
+        <Screen>
+          <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Globe}
+                label={zhCN.settings.server}
+                value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured}
+              />
+              <GroupRow
+                icon={UserRound}
+                label={zhCN.settings.account}
+                value={account ?? zhCN.settings.notSignedIn}
+              />
+              <GroupRow
+                icon={Laptop}
+                label={zhCN.devices.title}
+                value={deviceSummary}
+              />
+              <GroupRow
+                icon={Route}
+                label={zhCN.settings.transport}
+                value={connection.stats.mode}
+              />
+              {error !== undefined && (
+                <GroupRow
+                  icon={AlertTriangle}
+                  label={zhCN.devices.connectionInterrupted}
+                  detail={error}
+                  danger
+                  chevron={false}
+                />
+              )}
+            </GroupCard>
+
+            <SectionTitle>{zhCN.settings.connectionLog}</SectionTitle>
+            <View style={styles.terminalCard}>
+              <View style={styles.terminalHeader}>
+                <Terminal size={15} color={TERMINAL_PALETTE.accent} strokeWidth={2} />
+                <Text style={styles.terminalTitle}>{zhCN.settings.connectionLog}</Text>
+                <Text style={styles.terminalCount}>{zhCN.settings.logLineCount(lines.length)}</Text>
+                <View style={styles.flex} />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.settings.copyLog}
+                  onPress={() => void copyLog()}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
+                >
+                  {copied
+                    ? <Check size={16} color={TERMINAL_PALETTE.success} strokeWidth={2.2} />
+                    : <Copy size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />}
+                </Pressable>
+                {Platform.OS === 'android' && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={zhCN.settings.exportLog}
+                    disabled={exportingLog}
+                    onPress={() => void exportLog()}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
+                  >
+                    <Download size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />
+                  </Pressable>
+                )}
+              </View>
+              {lines.length === 0 ? (
+                <View style={styles.terminalEmpty}>
+                  <Text style={styles.terminalEmptyText}>{zhCN.settings.logEmpty}</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  ref={logScrollRef}
+                  style={styles.terminalScroll}
+                  contentContainerStyle={styles.terminalScrollContent}
+                  nestedScrollEnabled
+                  scrollEventThrottle={16}
+                  onScroll={event => {
+                    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+                    stickToEndRef.current = contentSize.height - layoutMeasurement.height - contentOffset.y <= 32
+                  }}
+                  onContentSizeChange={() => {
+                    if (stickToEndRef.current) logScrollRef.current?.scrollToEnd({ animated: false })
+                  }}
+                >
+                  {lines.map((line, index) => (
+                    <Text
+                      key={`${index}-${line.slice(0, 24)}`}
+                      selectable
+                      style={[styles.terminalLine, { color: classifyLogLineColor(line) }]}
+                    >
+                      {line}
+                    </Text>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+
+            <GroupCard style={styles.settingsGap}>
+              <GroupRow
+                first
+                icon={Copy}
+                label={zhCN.settings.copyLog}
+                detail={zhCN.settings.copyLogNote}
+                chevron
+                onPress={() => void copyLog()}
+              />
+              {Platform.OS === 'android' && (
+                <GroupRow
+                  icon={Download}
+                  label={exportingLog ? zhCN.settings.logExporting : zhCN.settings.exportLog}
+                  detail={zhCN.settings.exportLogNote}
+                  disabled={exportingLog}
+                  accessory={exportingLog ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                  chevron={!exportingLog}
+                  onPress={() => void exportLog()}
+                />
+              )}
+            </GroupCard>
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
+    </View>
+  )
+}
+
 export function AboutScreen({ onBack }: { onBack: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const { phase, progress, latestVersion, checkForUpdates } = useUpdateCheck()
   const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
   const buildVersion = Application.nativeBuildVersion
   const versionLabel = buildVersion === null ? appVersion : `${appVersion} (${buildVersion})`
+  const updateSubtitle = phase === 'checking'
+    ? zhCN.settings.checkingUpdates
+    : phase === 'downloading'
+      ? progress === null
+        ? zhCN.settings.downloadingUpdate
+        : `${zhCN.settings.downloadingUpdate} ${progress}%`
+      : latestVersion !== null
+        ? `${zhCN.settings.updateFoundTitle} v${latestVersion}`
+        : versionLabel
 
   return (
     <View style={styles.flex}>
@@ -1265,6 +1660,22 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
           </View>
 
           <View style={styles.group}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.settings.checkUpdates}
+              accessibilityState={{ disabled: phase !== 'idle', busy: phase !== 'idle' }}
+              disabled={phase !== 'idle'}
+              onPress={() => void checkForUpdates()}
+              style={({ pressed }) => [styles.settingsLink, pressed && phase === 'idle' && styles.settingsLinkPressed]}
+            >
+              <View style={styles.settingsLinkCopy}>
+                <Text style={styles.settingsLinkLabel}>{zhCN.settings.checkUpdates}</Text>
+                <Text style={styles.settingsLinkUrl}>{updateSubtitle}</Text>
+              </View>
+              {phase !== 'idle'
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Download size={18} color={colors.primary} />}
+            </Pressable>
             <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
             <SettingsLink label={zhCN.settings.twitter} url={twitterUrl} />
             <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />
@@ -1470,5 +1881,32 @@ function createStyles(colors: ThemeColors) {
   languageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: spacing.xs },
   languageTitle: { ...type.heading, fontSize: 18, color: colors.ink, fontWeight: '700' },
   languageList: { paddingBottom: spacing.md },
+  terminalCard: {
+    borderRadius: radius.xl,
+    backgroundColor: TERMINAL_PALETTE.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: TERMINAL_PALETTE.border,
+    overflow: 'hidden',
+  },
+  terminalHeader: {
+    minHeight: 44,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: TERMINAL_PALETTE.header,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: TERMINAL_PALETTE.border,
+  },
+  terminalTitle: { ...type.smallStrong, color: TERMINAL_PALETTE.ink },
+  terminalCount: { ...type.caption, color: TERMINAL_PALETTE.muted, fontVariant: ['tabular-nums'] },
+  terminalIconBtn: { width: 34, height: 34, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  terminalIconBtnPressed: { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+  terminalScroll: { maxHeight: 320 },
+  terminalScrollContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
+  terminalLine: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  terminalEmpty: { height: 160, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
+  terminalEmptyText: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
   })
 }

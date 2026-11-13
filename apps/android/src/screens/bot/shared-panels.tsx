@@ -397,11 +397,21 @@ export function BotBrowserGrantsSection({
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createSharedStyles)
-  const [adding, setAdding] = useState(false)
   const [pickedBotId, setPickedBotId] = useState(fixedBot?.id ?? bots[0]?.id ?? '')
+  const [botPickerOpen, setBotPickerOpen] = useState(false)
   const [site, setSite] = useState('')
   const [actions, setActions] = useState<string[]>(['post'])
-  const [duration, setDuration] = useState<'hour' | 'today' | 'week' | 'always'>('always')
+  const [duration, setDuration] = useState<'hour' | 'today' | 'week' | 'always'>('hour')
+
+  useEffect(() => {
+    if (fixedBot) {
+      setPickedBotId(fixedBot.id)
+      return
+    }
+    if (!bots.some(b => b.id === pickedBotId) && bots[0]) {
+      setPickedBotId(bots[0].id)
+    }
+  }, [bots, fixedBot, pickedBotId])
 
   const rows = useMemo(
     () =>
@@ -431,15 +441,16 @@ export function BotBrowserGrantsSection({
     return null
   }
 
+  const targetBot = fixedBot ?? bots.find(b => b.id === pickedBotId) ?? bots[0]
+
   const saveGrant = async () => {
-    const targetBot = fixedBot ?? bots.find(b => b.id === pickedBotId) ?? bots[0]
-    if (!targetBot || actions.length === 0) return
-    const normalizedSite = site.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') || '*'
+    if (!targetBot || !site.trim() || actions.length === 0) return
+    const normalizedSite = site.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+    if (!normalizedSite) return
     const existing = (targetBot.browserGrants ?? []).filter(g => text(g.site) !== normalizedSite)
     const nextGrants = [...existing, { site: normalizedSite, actions, until: computeUntil() }]
     const res = await perform('update-bot', { id: targetBot.id, browserGrants: nextGrants })
     if (res.ok) {
-      setAdding(false)
       setSite('')
     }
   }
@@ -456,19 +467,33 @@ export function BotBrowserGrantsSection({
     delete: s.bots.browserActDelete,
   }
 
+  const formatUntilLabel = (untilVal: unknown): string => {
+    if (untilVal === null || untilVal === undefined) return s.bots.browserDurAlways
+    const ts = Number(untilVal)
+    if (!Number.isFinite(ts) || ts <= 0) return s.bots.browserDurAlways
+    const diff = ts - Date.now()
+    if (diff <= 0) return '已过期'
+    if (diff <= 3_700_000) return s.bots.browserDurHour
+    if (diff <= 86_400_000) return s.bots.browserDurToday
+    return s.bots.browserDurWeek
+  }
+
   return (
-    <View style={{ gap: 12 }}>
-      <Text style={styles.helperNote}>{s.bots.browserGrantsDesc}</Text>
+    <View style={{ gap: 14 }}>
+      <Text style={styles.helperNote}>
+        Bot 可以自行打开网页、阅读内容和填写表单。发布、上传、下载和删除需要你事先允许；涉及付款的操作始终交给你本人处理。
+      </Text>
 
       <View style={styles.groupCard}>
         {rows.length === 0 ? (
           <View style={styles.emptyCardRow}>
-            <Text style={styles.mutedText}>{s.bots.none}</Text>
+            <Text style={styles.mutedText}>还没有预授权的操作。</Text>
           </View>
         ) : (
           rows.map((row, idx) => {
             const siteText = text(row.grant.site)
             const acts = Array.isArray(row.grant.actions) ? row.grant.actions.map(a => actionLabels[String(a)] ?? String(a)) : []
+            const untilText = formatUntilLabel(row.grant.until)
             return (
               <View key={row.key}>
                 {idx > 0 && <View style={styles.divider} />}
@@ -479,7 +504,9 @@ export function BotBrowserGrantsSection({
                       {!fixedBot ? `${row.bot.name} · ` : ''}
                       {siteText === '*' || !siteText ? s.bots.browserAllSites : siteText}
                     </Text>
-                    <Text style={styles.rowSub}>{acts.join(' · ')}</Text>
+                    <Text style={styles.rowSub}>
+                      {[acts.join('、'), untilText].filter(Boolean).join(' · ')}
+                    </Text>
                   </View>
                   <Pressable onPress={() => void removeGrant(row.bot, siteText)} hitSlop={8} style={styles.iconHit}>
                     <Trash2 size={16} color={colors.danger} />
@@ -491,34 +518,76 @@ export function BotBrowserGrantsSection({
         )}
       </View>
 
-      {adding ? (
-        <View style={[styles.groupCard, { padding: 14, gap: 12 }]}>
-          {!fixedBot && bots.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {bots.map(b => {
-                const on = b.id === pickedBotId
-                return (
-                  <Pressable
-                    key={b.id}
-                    onPress={() => setPickedBotId(b.id)}
-                    style={[styles.choicePill, on && styles.choicePillActive]}
-                  >
-                    <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{b.name}</Text>
-                  </Pressable>
-                )
-              })}
-            </ScrollView>
-          )}
+      <View style={[styles.groupCard, { padding: 16, gap: 14 }]}>
+        <Text style={styles.sectionSubHeader}>允许操作</Text>
+
+        {!fixedBot && targetBot && (
+          <View style={{ gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Text style={[styles.rowSub, { width: 44, marginTop: 0 }]}>Bot</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setBotPickerOpen((v: boolean) => !v)}
+                style={[
+                  styles.input,
+                  {
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingVertical: 8,
+                  },
+                ]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <BotAvatar bot={targetBot} size={22} />
+                  <Text style={styles.rowTitle} numberOfLines={1}>{targetBot.name}</Text>
+                </View>
+                <ChevronRight
+                  size={16}
+                  color={colors.muted}
+                  style={{ transform: [{ rotate: botPickerOpen ? '90deg' : '0deg' }] }}
+                />
+              </Pressable>
+            </View>
+            {botPickerOpen && bots.length > 1 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingLeft: 56 }}>
+                {bots.map(b => {
+                  const on = b.id === targetBot.id
+                  return (
+                    <Pressable
+                      key={b.id}
+                      onPress={() => {
+                        setPickedBotId(b.id)
+                        setBotPickerOpen(false)
+                      }}
+                      style={[styles.choicePill, on && styles.choicePillActive]}
+                    >
+                      <Text style={[styles.choicePillText, on && styles.choicePillTextActive]}>{b.name}</Text>
+                    </Pressable>
+                  )
+                })}
+              </ScrollView>
+            )}
+          </View>
+        )}
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <Text style={[styles.rowSub, { width: 44, marginTop: 0 }]}>网站</Text>
           <TextInput
             value={site}
             onChangeText={setSite}
-            placeholder={s.bots.browserSitePlaceholder}
+            placeholder="如 x.com, github.com"
             placeholderTextColor={colors.muted}
             autoCapitalize="none"
             autoCorrect={false}
-            style={styles.input}
+            style={[styles.input, { flex: 1 }]}
           />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <Text style={[styles.rowSub, { width: 44, marginTop: 6 }]}>动作</Text>
+          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {(['post', 'upload', 'download', 'delete'] as const).map(act => {
               const on = actions.includes(act)
               return (
@@ -532,7 +601,11 @@ export function BotBrowserGrantsSection({
               )
             })}
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        </View>
+
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <Text style={[styles.rowSub, { width: 44, marginTop: 6 }]}>时限</Text>
+          <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {([
               ['hour', s.bots.browserDurHour],
               ['today', s.bots.browserDurToday],
@@ -551,23 +624,16 @@ export function BotBrowserGrantsSection({
               )
             })}
           </View>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
-            <Button label={s.bots.cancel} variant="secondary" onPress={() => setAdding(false)} />
-            <Button label={s.bots.save} disabled={actions.length === 0} onPress={() => void saveGrant()} />
-          </View>
         </View>
-      ) : (
-        <View style={{ alignItems: 'flex-start' }}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setAdding(true)}
-            style={({ pressed }) => [styles.softActionBtn, pressed && { opacity: 0.8 }]}
-          >
-            <Plus size={15} color={colors.ink} />
-            <Text style={styles.softActionBtnText}>{s.bots.browserAddGrant}</Text>
-          </Pressable>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+          <Button
+            label="添加"
+            disabled={!site.trim() || actions.length === 0}
+            onPress={() => void saveGrant()}
+          />
         </View>
-      )}
+      </View>
     </View>
   )
 }
@@ -598,6 +664,7 @@ export function BotSchedulesPanel({
   const deleteDeviceSchedule = useAppStore(store => store.deleteScheduleTask)
 
   const [tasks, setTasks] = useState<BotObject[]>([])
+  const [available, setAvailable] = useState(true)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(initialCreating)
   const [submitting, setSubmitting] = useState(false)
@@ -622,7 +689,9 @@ export function BotSchedulesPanel({
     setError(null)
     try {
       const res = await client.call('schedules')
-      const raw = objects(object(res).tasks)
+      const obj = object(res)
+      setAvailable(obj.available !== false)
+      const raw = objects(obj.tasks)
       setTasks(raw)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -678,15 +747,15 @@ export function BotSchedulesPanel({
     let whenPayload: BotObject
     let fallbackReq: ScheduleCreateRequest
     if (kind === 'daily') {
-      whenPayload = { kind: 'daily', time: normalizedTime }
+      whenPayload = { kind: 'daily', time: normalizedTime, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), daily: { time: `${normalizedTime}:00`, time_zone: timeZone } }
     } else if (kind === 'weekly') {
       const days = weekdays.length > 0 ? weekdays : [1]
-      whenPayload = { kind: 'weekly', time: normalizedTime, weekdays: days }
+      whenPayload = { kind: 'weekly', time: normalizedTime, weekdays: days, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), weekly: { time: `${normalizedTime}:00`, time_zone: timeZone, weekdays: days } }
     } else if (kind === 'every') {
       const mins = Math.max(1, Math.min(7 * 24 * 60, Number.parseInt(everyMinutes, 10) || 60))
-      whenPayload = { kind: 'every', minutes: mins }
+      whenPayload = { kind: 'every', minutes: mins, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), every_seconds: mins * 60 }
     } else {
       const parts = normalizedTime.split(':')
@@ -696,7 +765,7 @@ export function BotSchedulesPanel({
       next.setHours(hh, mm, 0, 0)
       if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1)
       const iso = next.toISOString()
-      whenPayload = { kind: 'once', at: iso }
+      whenPayload = { kind: 'at', at: iso, timeZone }
       fallbackReq = { title: title.trim(), prompt: prompt.trim(), at: iso }
     }
 
@@ -771,7 +840,14 @@ export function BotSchedulesPanel({
     <View style={{ gap: 12 }}>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      {!creating && (
+      {!available && (
+        <View style={[styles.groupCard, { padding: 14, gap: 6 }]}>
+          <Text style={styles.rowTitle}>在 DSH 里打开「自动化任务」</Text>
+          <Text style={styles.rowSub}>在 Harness 设置的插件页启用「自动化任务」。</Text>
+        </View>
+      )}
+
+      {!creating && available && (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Pressable
             accessibilityRole="button"

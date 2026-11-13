@@ -310,6 +310,61 @@ describe('ordered history recovery', () => {
     }))), prepareScenario1)
   })
 
+  it('settles an acknowledged prompt that history and inbox never recorded, and releases the composer', async () => {
+    const local = (): ChatItem => ({ kind: 'message', id: 'local:rpc-lost', sessionId: 's1', role: 'user',
+      text: '@missing.png', createdAt: 2, requestRpcId: 'rpc-lost' })
+    const withInbox = (inbox: unknown, running = false) => ({ ...session, running,
+      projections: { values: { permissions: { currentValue: 'default' }, inbox } } })
+    await runScenarios([
+      { name: 'idle session with no record', inbox: { 'next-turn': [] }, running: false, settled: true },
+      { name: 'inbox still owns the request', inbox: { 'next-turn': [{ id: 'q1', source: { kind: 'user', rpcId: 'rpc-lost' }, content: [] }] }, running: false, settled: false },
+      { name: 'session is still running', inbox: { 'next-turn': [] }, running: true, settled: false },
+    ].map(({ name, inbox, running, settled }) => ({ name, run: async () => {
+      const target = withInbox(inbox, running)
+      useAppStore.setState({
+        ...useAppStore.getInitialState(),
+        selectedSession: target,
+        selectedDevice: { deviceId: 'host' } as never,
+        sessions: [target],
+        connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
+        messages: { s1: [local()] },
+        busyAction: 'send-message',
+      })
+      proxy.sessionHistory.mockResolvedValueOnce(page([]))
+      proxy.sessionList.mockResolvedValueOnce([target])
+      expect(await useAppStore.getState().openSession(target)).toBe(true)
+      const row = useAppStore.getState().messages.s1?.[0]
+      if (settled) expect(row).toMatchObject({ sendState: 'unconfirmed' })
+      else expect(row).not.toHaveProperty('sendState')
+      expect(useAppStore.getState().busyAction).toBeUndefined()
+    } })), prepareScenario1)
+  })
+
+  it('rejects an offline prompt before creating an optimistic row for every backend', async () => {
+    // A tap that cannot reach the Host must not leave a `local:` row or a queued
+    // acknowledgement: the composer keeps the draft and the user sends manually
+    // after reconnection. Both send paths fail closed before the optimistic row.
+    await runScenarios((['harness', 'codex', 'claude'] as const).map(backend => ({ name: backend, run: async () => {
+      const target: RemoteSession = { ...session, sessionId: `offline-${backend}`, backend }
+      useAppStore.setState({
+        ...useAppStore.getInitialState(),
+        selectedSession: target,
+        selectedDevice: { deviceId: 'host' } as never,
+        sessions: [target],
+        connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false } },
+      })
+      proxy.sessionPrompt.mockClear()
+      acp.prompt.mockClear()
+      codex.request.mockClear()
+      expect(await useAppStore.getState().sendMessage('draft typed offline')).toBe('rejected')
+      expect(proxy.sessionPrompt).not.toHaveBeenCalled()
+      expect(acp.prompt).not.toHaveBeenCalled()
+      expect(codex.request).not.toHaveBeenCalled()
+      expect(useAppStore.getState().messages[target.sessionId] ?? []).toHaveLength(0)
+      expect(useAppStore.getState().busyAction).toBeUndefined()
+    } })), prepareScenario1)
+  })
+
   it('reconciles local delivery states by marking, never by deleting', async () => {
     const row = (id: string, requestRpcId: string, sendState: 'queued' | 'failed' | 'unconfirmed', createdAt = 1): ChatItem => ({
       kind: 'message', id, sessionId: 's1', role: 'user', text: 'hello', createdAt, requestRpcId, sendState,
@@ -842,8 +897,10 @@ describe('session restore state machine', () => {
     await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
       ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
         const selected = { ...session, backend, sessionId: `${backend}:old`, nativeId: 'old' }
-        useAppStore.setState({ messages: { [selected.sessionId]: [{ kind: 'message', id: 'cursor-assistant-live',
-          sessionId: selected.sessionId, role: 'assistant', text: 'stale cache', createdAt: 1, streaming: true }] } })
+        useAppStore.setState({ messages: { [selected.sessionId]: [
+          { kind: 'message', id: 'cursor-assistant-live', sessionId: selected.sessionId, role: 'assistant', text: 'stale cache', createdAt: 1, streaming: true },
+          { kind: 'approval', id: 'cursor-approval:pre-open', sessionId: selected.sessionId, approvalId: 'pre-open', toolName: 'Ask Question', frameRpcId: 'pre-open', createdAt: 2 },
+        ] } })
         let finish!: (value: { events: HistoryEntry[] }) => void
         let fail!: (error: Error) => void
         acp.transferCall.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
@@ -884,6 +941,7 @@ describe('session restore state machine', () => {
         expect(items).toEqual(expect.arrayContaining([
           expect.objectContaining({ kind: 'tool', state: 'finished', resultDetail: { text: 'tail output', format: 'code' } }),
           expect.objectContaining({ kind: 'message', text: 'tail answer', streaming: mode !== 'completed' }),
+          expect.objectContaining({ kind: 'approval', approvalId: 'pre-open' }),
           expect.objectContaining({ kind: 'approval', approvalId: 'current-approval' }),
         ]))
         if (mode === 'completed') expect(useAppStore.getState().selectedSession?.running).toBe(false)
@@ -1372,6 +1430,181 @@ describe('authoritative permission projection', () => {
           expect(proxy.sessionHistory).toHaveBeenCalledTimes(3)
           expect(useBotTeamStore.getState().session?.title).toBe('Host B Chief')
           expect(useAppStore.getState().selectedSession?.title).toBe('Host B Chief')
+        },
+      },
+      {
+        name: 'deletes an active or main Bot cleanly without bouncing back to the deleted selection',
+        run: async () => {
+          let bots = [
+            { id: 'chief', sessionId: 'chief-part-2', name: 'Chief', role: 'Lead', main: true },
+            { id: 'writer', sessionId: 'writer-part-1', name: 'Writer', role: 'Docs', main: true },
+            { id: 'helper', sessionId: ' chief-part-1', name: 'Helper', role: 'Ops', main: false },
+          ]
+          useAppStore.setState({
+            config: { baseUrl: 'https://remote.example' } as never,
+            identity: { deviceId: 'phone' } as never,
+            selectedDevice: { deviceId: 'host-a', name: 'Host A', identityKey: 'key-a', online: true, trusted: true } as never,
+            sessions: [chiefPart1, chiefPart2, writerPart1],
+          })
+          useBotTeamStore.getState().ensureScope('reset-delete-bot-test')
+          proxy.sessionList.mockResolvedValue([chiefPart1, chiefPart2, writerPart1])
+          const calls: Array<{ endpoint: string; payload?: Record<string, unknown> }> = []
+          botDispatch.mockImplementation(async ({ endpoint, payload }: { endpoint: string; payload?: Record<string, unknown> }) => {
+            calls.push({ endpoint, payload })
+            if (endpoint === 'set-main') {
+              const id = String(payload?.id ?? '')
+              const main = Boolean(payload?.main)
+              const replace = typeof payload?.replace === 'string' ? payload.replace : undefined
+              bots = bots.map(entry => {
+                if (entry.id === id) return { ...entry, main }
+                if (replace && entry.id === replace) return { ...entry, main: false }
+                return entry
+              })
+              return { status: 200, json: { ok: true, value: { mainBotId: bots.find(b => b.main)?.id, mainBotIds: bots.filter(b => b.main).map(b => b.id), bots, rooms: [] } } }
+            }
+            if (endpoint === 'delete-bot') {
+              const id = String(payload?.id ?? '')
+              const target = bots.find(b => b.id === id)
+              if (target?.main) {
+                return { status: 200, json: { ok: false, error: { message: 'A Main Bot cannot be deleted' } } }
+              }
+              bots = bots.filter(entry => entry.id !== id)
+              return { status: 200, json: { ok: true, value: { mainBotId: bots.find(b => b.main)?.id, mainBotIds: bots.filter(b => b.main).map(b => b.id), bots, rooms: [] } } }
+            }
+            return {
+              status: 200,
+              json: {
+                ok: true,
+                value: {
+                  mainBotId: bots.find(b => b.main)?.id,
+                  mainBotIds: bots.filter(b => b.main).map(b => b.id),
+                  bots,
+                  rooms: [],
+                },
+              },
+            }
+          })
+
+          await useBotTeamStore.getState().refresh()
+          useBotTeamStore.getState().setSelectedId('writer')
+          await useBotTeamStore.getState().syncSelectedSession()
+          expect(useBotTeamStore.getState().selectedId).toBe('writer')
+          expect(useBotTeamStore.getState().session?.sessionId).toBe('writer-part-1')
+
+          // Deleting 'writer' (which is one of two main bots) demotes it first, deletes it, and leaves selectedId undefined.
+          const delWriter = await useBotTeamStore.getState().perform('delete-bot', { id: 'writer' })
+          expect(delWriter.ok).toBe(true)
+          expect(calls.some(c => c.endpoint === 'set-main' && c.payload?.id === 'writer' && c.payload?.main === false)).toBe(true)
+          expect(calls.some(c => c.endpoint === 'delete-bot' && c.payload?.id === 'writer')).toBe(true)
+          expect(useBotTeamStore.getState().selectedId).toBeUndefined()
+          expect(useBotTeamStore.getState().session).toBeUndefined()
+          expect(useBotTeamStore.getState().state?.bots.map(b => b.id)).toEqual(['chief', 'helper'])
+
+          // Deleting 'chief' (now the sole main bot, with non-private 'helper' available) hands over main role to 'helper' first.
+          const delChief = await useBotTeamStore.getState().perform('delete-bot', { id: 'chief' })
+          expect(delChief.ok).toBe(true)
+          expect(calls.some(c => c.endpoint === 'set-main' && c.payload?.id === 'helper' && c.payload?.replace === 'chief')).toBe(true)
+          expect(calls.some(c => c.endpoint === 'delete-bot' && c.payload?.id === 'chief')).toBe(true)
+          expect(useBotTeamStore.getState().state?.bots.map(b => b.id)).toEqual(['helper'])
+        },
+      },
+      {
+        name: 'retains background ask_user_question and approval cards across notification openSession and re-entry',
+        run: async () => {
+          const askCall = entry('tool/call', 10, {
+            turn: 2,
+            callId: 'call-ask-1',
+            name: 'ask_user_question',
+            arguments: JSON.stringify({ questions: [{ id: 'q1', question: 'Deploy target?' }] }),
+          })
+          // Background state: session s1 only received the mux question/approval frames (no cached native history overlap).
+          useAppStore.getState().handleMuxFrame({
+            rpcId: 'evt-question-1',
+            payload: {
+              type: 'question/requested',
+              sessionId: 's1',
+              questions: [{ id: 'q1', question: 'Deploy target?', options: [{ label: 'Staging' }, { label: 'Prod' }] }],
+            },
+          })
+          useAppStore.getState().handleMuxFrame({
+            rpcId: 'evt-approval-1',
+            payload: {
+              type: 'approval/requested',
+              sessionId: 's1',
+              approvalId: 'evt-approval-1',
+              toolName: 'bash',
+              callId: 'call-ask-1',
+            },
+          })
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'question', id: 'question:evt-question-1' },
+            { kind: 'approval', id: 'approval:evt-approval-1' },
+          ])
+
+          // Notification tap opens s1; history tail has no overlap with cachedIds (`contiguousCache === false`)
+          // and `session.running` may even be stale false while `ask_user_question` tool/call is still running.
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession({ ...session, running: false })).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-ask-1', state: 'running', turn: '2' },
+            { kind: 'question', id: 'question:evt-question-1', turn: '2' },
+            { kind: 'approval', id: 'approval:evt-approval-1', turn: '2' },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+
+          // Re-entering the session preserves the active question and approval cards.
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession({ ...session, running: true })).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-ask-1', state: 'running', turn: '2' },
+            { kind: 'question', id: 'question:evt-question-1', turn: '2' },
+            { kind: 'approval', id: 'approval:evt-approval-1', turn: '2' },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+        },
+      },
+      {
+        name: 'restores timed userQuestions projection on openSession even when no prior mux frame was cached',
+        run: async () => {
+          const askCall = entry('tool/call', 10, {
+            turn: 2,
+            callId: 'call-timed-1',
+            name: 'ask_user_question',
+            arguments: JSON.stringify({ questions: [{ id: 'q1', question: 'Pick mode?' }] }),
+          })
+          const targetWithProjection = {
+            ...session,
+            running: true,
+            projections: {
+              asOfSeq: 10,
+              values: {
+                userQuestions: {
+                  active: [{
+                    callId: 'call-timed-1',
+                    state: 'open',
+                    questions: [{ id: 'q1', question: 'Pick mode?', options: [{ label: 'Fast' }] }],
+                  }],
+                  settled: [],
+                },
+              },
+            },
+          }
+          useAppStore.setState({ sessions: [targetWithProjection], messages: {} })
+          proxy.sessionHistory.mockResolvedValueOnce(page([askCall]))
+          expect(await useAppStore.getState().openSession(targetWithProjection)).toBe(true)
+          expect(useAppStore.getState().messages.s1).toMatchObject([
+            { kind: 'tool', id: 'call-timed-1', turn: '2' },
+            {
+              kind: 'question',
+              id: 'question:timed-question:["s1","call-timed-1"]',
+              callId: 'call-timed-1',
+              questionState: 'open',
+              turn: '2',
+            },
+          ])
+          expect(useAppStore.getState().messages.s1?.find(item => item.kind === 'question')?.outcome).toBeUndefined()
         },
       },
     ], async () => {

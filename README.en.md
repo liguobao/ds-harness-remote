@@ -9,22 +9,20 @@
   <a href="README.zh.md">中文</a>
   &nbsp;·&nbsp;
   <a href="README.ja.md">日本語</a>
-  &nbsp;·&nbsp;
-  <a href="docs/README.md">Documentation</a>
-  &nbsp;·&nbsp;
-  <a href="https://dsh.r2049.cn/app">Web</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest">Android</a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/liguobao/ds-harness-remote/issues/20">iOS</a>
 </p>
 
 <p align="center">
-  <a href="apps/server/README.md">Self-hosting</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/ds-harness-remote">npm</a>
-  &nbsp;·&nbsp;
-  <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
+  <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation-blue?logo=googledocs&amp;logoColor=white" alt="Documentation"></a>
+  <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
+  <a href="https://github.com/liguobao/ds-harness-remote/issues/20"><img src="https://img.shields.io/badge/iOS-000000?logo=apple&amp;logoColor=white" alt="iOS"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/ds-harness-remote"><img src="https://img.shields.io/npm/v/ds-harness-remote?color=CB3837&amp;logo=npm" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"></a>
+  <a href="apps/server/README.md"><img src="https://img.shields.io/badge/Self--hosting-Docker-2496ED?logo=docker&amp;logoColor=white" alt="Self-hosting"></a>
+  <a href="https://dshfind.com/en/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=en" alt="dshfind downloads"></a>
 </p>
 
 ## Connect once. Ready whenever you are.
@@ -35,7 +33,7 @@ Harness keeps running on your work computer, with the same workspaces, tools, an
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.5`
 
 ## Features
 
@@ -54,7 +52,7 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 
 | Client | Form | Status | Notes |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;plugin | Remote sidebar | Supported | Install `ds-harness-remote@0.6.3`; this computer can also be the Host |
+| DSH&nbsp;Desktop&nbsp;plugin | Remote sidebar | Supported | Install `ds-harness-remote@0.6.5`; this computer can also be the Host |
 | Web | Browser page | Supported | Open [https://dsh.r2049.cn](https://dsh.r2049.cn); reuses the native Harness interface |
 | Android | Native app | Supported | Download the APK from [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest); see the [Android guide](apps/android/README.md) |
 | DSH Go | A standout app by ccch1mneyyy | Supported | See [ccch1mneyyy/dsh-go: an Android client for DeepSeek Harness. Run it directly on your phone or control DSH on your computer remotely.](https://github.com/ccch1mneyyy/dsh-go) |
@@ -72,10 +70,10 @@ Several clients can connect to the same Host at once; RPC calls and streams are 
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.6.3`
+`ds-harness-remote@0.6.5`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.3`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`.
 
 On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
 
@@ -299,6 +297,27 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
  </picture>
 </a>
 
+## Contributors
+
+`ds-harness-remote` is proudly community-driven. We believe that great open-source tools are not built by code alone, but by everyone who uses them, explores edge cases, refines explanations, or shares an idea.
+
+No matter your background, your involvement is deeply valued:
+
+- **Submit Issues**: Share bug reports, feature proposals, or user experience thoughts.
+- **Docs & Localization**: Improve guides, polish explanations, or help keep English, Chinese, and Japanese docs in sync.
+- **Testing & Cross-Platform**: Run the project across your devices (Desktop / Web / Android) and tell us how it feels in real environments.
+- **Code & Review**: Tackle open tasks, fix bugs, implement features, or help review community Pull Requests.
+
+<p align="center">
+  <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=liguobao/ds-harness-remote&max=30" alt="Contributors" />
+  </a>
+</p>
+
+<p align="center">
+  <em>Thanks to all the wonderful contributors who make this project possible!</em>
+</p>
+
 ## Project status and trademarks
 
 This is an independent community project and is not an official DeepSeek product.
@@ -313,3 +332,7 @@ On the Host, enable **Debug logging** in **Plugins → Remote settings**. The se
 ## License
 
 [MIT](packages/plugin/LICENSE)
+
+### Pair with DSH-Go
+
+Open Sign in → DSH-Go pairing in the local Remote settings and generate a QR code, scan and confirm on a compatible DSH-Go build, then enter the phone code on this computer. A wrong code invalidates the whole pairing. New Hosts accept incoming connections only; Device-only accounts have no Web/Admin access. Requires the full Server pairing v1 API and a DSH-Go build implementing [this integration](docs/dsh-go-pairing-integration.md). The bundled minimal Server does not support this workflow.

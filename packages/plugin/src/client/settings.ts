@@ -1,3 +1,4 @@
+import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import QRCode from 'qrcode'
 import type { LocalizedMessage, Translate } from '../client-locale.js'
@@ -8,7 +9,9 @@ import {
   connectionStatusClass,
   connectionStatusLabel,
   formatLocalTime,
+  displayRemoteAccount,
   messageOf,
+  startupErrorMessage,
 } from './presentation.js'
 import type {
   ClientReact,
@@ -17,12 +20,16 @@ import type {
   OAuthQrPollResult,
   OAuthQrSession,
   PluginAssociation,
+  PluginLogFilter,
+  PluginLogView,
   PluginConfigureResult,
   PluginSettingsView,
   RemoteStatus,
   SidebarEntryPreference,
   SidebarEntryStyle,
 } from './types.js'
+
+type SettingsLoginMethod = LoginMethod | 'device_pairing'
 
 const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sidebarEntryStandard' | 'sidebarEntryCompact' }> = [
   { value: 'standard', label: 'sidebarEntryStandard' },
@@ -31,6 +38,7 @@ const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sid
 
 export function createRemotePluginOptions(React: ClientReact) {
   const ServerNotice = createServerNotice(React)
+  const HostPairingPanel = createHostPairingPanel(React)
   function RemotePluginOptions(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
@@ -52,6 +60,9 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
     const [open, setOpen] = React.useState(props.view === 'page')
     const [serverUrl, setServerUrl] = React.useState('')
+    const [savingServer, setSavingServer] = React.useState(false)
+    const [editingServer, setEditingServer] = React.useState(false)
+    const serverDraftEdited = React.useRef(false)
     const [remoteToolsBusy, setRemoteToolsBusy] = React.useState(false)
     const [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(true)
     const [associations, setAssociations] = React.useState<Partial<Record<'host' | 'client', PluginAssociation>>>({})
@@ -61,6 +72,18 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [debugBusy, setDebugBusy] = React.useState(false)
     const [debugLogging, setDebugLogging] = React.useState(false)
+    const [logsOpen, setLogsOpen] = React.useState(false)
+    const [logsFilter, setLogsFilter] = React.useState<PluginLogFilter>('all')
+    const [logsLoading, setLogsLoading] = React.useState(false)
+    const [logsClearing, setLogsClearing] = React.useState(false)
+    const [logsSnapshot, setLogsSnapshot] = React.useState<PluginLogView | undefined>(undefined)
+    const [logsError, setLogsError] = React.useState<string | undefined>(undefined)
+    const [logsCopyState, setLogsCopyState] = React.useState<'idle' | 'copied' | 'failed'>('idle')
+    const logsRequestRun = React.useRef(0)
+    const logsCopyTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const logsViewportRef = React.useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
+    const [resetBusy, setResetBusy] = React.useState(false)
+    const [retryStartupBusy, setRetryStartupBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
     const [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(false)
@@ -81,10 +104,11 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [signInOpen, setSignInOpen] = React.useState(false)
     const [loginEmail, setLoginEmail] = React.useState('')
     const [loginPassword, setLoginPassword] = React.useState('')
-    const [loginMethod, setLoginMethod] = React.useState<LoginMethod>('password')
+    const [loginMethod, setLoginMethod] = React.useState<SettingsLoginMethod>('password')
     const [oauthProviders, setOAuthProviders] = React.useState<OAuthProviderInfo[]>([])
     const [providersLoading, setProvidersLoading] = React.useState(false)
     const [providersFailed, setProvidersFailed] = React.useState(false)
+    const [pairingServerUrl, setPairingServerUrl] = React.useState<string | undefined>(undefined)
     const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
     const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
     const [qrExpired, setQrExpired] = React.useState(false)
@@ -99,6 +123,14 @@ export function createRemotePluginOptions(React: ClientReact) {
 
     const associationReadRun = React.useRef(0)
     const association = associations.client ?? associations.host
+    React.useEffect(() => { if (association !== undefined) setSignInOpen(false) }, [association])
+    const savedServerUrl = settingsView?.config.serverUrl
+    const pairingAvailable = pairingServerUrl !== undefined && pairingServerUrl === savedServerUrl
+    const serverDirty = savedServerUrl === undefined || serverUrl.trim() !== savedServerUrl
+    React.useEffect(() => {
+      setPairingServerUrl(undefined)
+      setLoginMethod(current => current === 'device_pairing' ? 'password' : current)
+    }, [savedServerUrl])
 
     const applyAssociations = (view: PluginSettingsView): void => {
       setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
@@ -106,7 +138,7 @@ export function createRemotePluginOptions(React: ClientReact) {
 
     const applyView = (view: PluginSettingsView, updateAssociations = true): void => {
       setSettingsView(view)
-      setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
+      if (!serverDraftEdited.current) setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
       setTerminalEnabled(view.config.terminal?.enabled ?? true)
       setDebugLogging(view.config.logLevel === 'debug')
       setRemoteToolsEnabled(view.config.remoteTools?.enabled ?? true)
@@ -146,7 +178,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         // Refresh the read-only settings snapshot on that change without
         // fetching settings for ordinary connection/statistics updates.
         const key = JSON.stringify([status.serverUrl, status.deviceId, status.host?.deviceId,
-          status.host?.authorized, status.host?.account])
+          status.host?.authorized, status.host?.account, status.startupError?.code])
         if (key === authorizationKey) return
         authorizationKey = key
         const run = ++associationReadRun.current
@@ -158,7 +190,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     }, [props.statusFeed])
 
     React.useEffect(() => {
-      if (!signInOpen) return
+      if (!signInOpen || savingServer || serverDirty) return
       let active = true
       const run = ++providerRequestRun.current
       qrFlowRun.current += 1
@@ -173,27 +205,28 @@ export function createRemotePluginOptions(React: ClientReact) {
       setProvidersFailed(false)
       void props.control<OAuthProviderInfo[]>('client.account.providers').then(items => {
         if (!active || run !== providerRequestRun.current) return
+        const pairingSupported = items.some(item => item.devicePairing === true)
+        setPairingServerUrl(pairingSupported ? savedServerUrl : undefined)
         const available = items.filter(item => item.qrStartUrl != null)
         setOAuthProviders(available)
         setLoginMethod(current => {
-          if (loginMethodManuallySelected.current && (current === 'password'
+          if (loginMethodManuallySelected.current && (current === 'password' || current === 'device_pairing' && pairingSupported
             || available.some(item => `oauth:${item.id}` === current))) return current
           const preferred = available.find(item => item.id === props.preferredQrProvider) ?? available[0]
           return preferred === undefined ? 'password' : `oauth:${preferred.id}`
         })
-      }).catch(reason => {
+      }).catch(() => {
         if (!active || run !== providerRequestRun.current) return
         setProvidersFailed(true)
-        setLoginMethod('password')
-        setError(messageOf(reason, t))
+        setLoginMethod(current => loginMethodManuallySelected.current && current === 'device_pairing' ? current : 'password')
       }).finally(() => {
         if (active && run === providerRequestRun.current) setProvidersLoading(false)
       })
       return () => { active = false }
-    }, [signInOpen, props.preferredQrProvider, providerReload])
+    }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl])
 
     React.useEffect(() => {
-      if (!signInOpen || providersLoading || loginMethod === 'password'
+      if (!signInOpen || savingServer || serverDirty || providersLoading || !loginMethod.startsWith('oauth:')
         || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod)
         || qrSession !== undefined || qrExpired || qrFailed || qrCompleted) return
       let active = true
@@ -223,10 +256,10 @@ export function createRemotePluginOptions(React: ClientReact) {
           if (active && run === qrFlowRun.current) setQrBusy(false)
         })
       return () => { active = false }
-    }, [signInOpen, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload])
+    }, [signInOpen, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!signInOpen || loginMethod === 'password' || qrSession === undefined) return
+      if (!signInOpen || savingServer || serverDirty || !loginMethod.startsWith('oauth:') || qrSession === undefined) return
       let active = true
       let polling = false
       let settled = false
@@ -267,11 +300,11 @@ export function createRemotePluginOptions(React: ClientReact) {
         settled = true
         if (timer !== undefined) clearInterval(timer)
       }
-    }, [signInOpen, loginMethod, qrSession])
+    }, [signInOpen, loginMethod, qrSession, savingServer, serverDirty])
 
     // Dedicated settings refresh effect on QR authorization completion
     React.useEffect(() => {
-      if (!signInOpen || !qrCompleted) return
+      if (!signInOpen || savingServer || serverDirty || !qrCompleted) return
       let active = true
       setError(undefined)
       void props.control<PluginSettingsView>('settings.get')
@@ -290,10 +323,43 @@ export function createRemotePluginOptions(React: ClientReact) {
       return () => {
         active = false
       }
-    }, [signInOpen, qrCompleted, completionReload])
+    }, [signInOpen, qrCompleted, completionReload, savingServer, serverDirty])
+
+    const saveLoginServer = async (serverUrlOverride?: string): Promise<void> => {
+      const nextServerUrl = (serverUrlOverride ?? serverUrl).trim()
+      if (busy || savingServer || !writable || nextServerUrl === '' || serverUrlOverride === undefined && !serverDirty) return
+      setSavingServer(true)
+      setBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      qrFlowRun.current += 1
+      providerRequestRun.current += 1
+      setQrSession(undefined)
+      setQrImage(undefined)
+      setQrCompleted(false)
+      setQrFailed(false)
+      setQrExpired(false)
+      setQrBusy(false)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: nextServerUrl })
+        serverDraftEdited.current = false
+        setEditingServer(false)
+        applyView(view)
+        setLoginPassword('')
+        setLoginEmail('')
+        setHostStatus(undefined)
+        setProviderReload(value => value + 1)
+        setNotice({ key: view.applies === 'live' ? 'serverSavedLive' : 'serverSaved' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+      } finally {
+        setSavingServer(false)
+        setBusy(false)
+      }
+    }
 
     const signInClient = async (): Promise<void> => {
-      if (loginEmail.trim() === '' || loginPassword === '') return
+      if (savingServer || serverDirty || loginEmail.trim() === '' || loginPassword === '') return
       setBusy(true)
       setError(undefined)
       try {
@@ -314,7 +380,7 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
-    const selectLoginMethod = (method: LoginMethod): void => {
+    const selectLoginMethod = (method: SettingsLoginMethod): void => {
       loginMethodManuallySelected.current = true
       if (method === loginMethod) return
       qrFlowRun.current += 1
@@ -484,26 +550,199 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
+    const loadLogs = async (filter: PluginLogFilter = logsFilter): Promise<void> => {
+      const run = ++logsRequestRun.current
+      setLogsLoading(true)
+      setLogsError(undefined)
+      try {
+        const next = await props.control<PluginLogView>('settings.logs.get', { filter, limit: 500 })
+        if (run !== logsRequestRun.current) return
+        setLogsSnapshot(next)
+      } catch (reason) {
+        if (run !== logsRequestRun.current) return
+        setLogsError(messageOf(reason, t))
+      } finally {
+        if (run === logsRequestRun.current) setLogsLoading(false)
+      }
+    }
+
+    const toggleLogsDrawer = (): void => {
+      const nextOpen = !logsOpen
+      setLogsOpen(nextOpen)
+      if (nextOpen) void loadLogs(logsFilter)
+    }
+
+    const changeLogsFilter = (filter: PluginLogFilter): void => {
+      if (filter === logsFilter && logsSnapshot !== undefined) return
+      setLogsFilter(filter)
+      void loadLogs(filter)
+    }
+
+    const copyLogs = async (): Promise<void> => {
+      const lines = logsSnapshot?.entries.map(entry => entry.line).join('\n') ?? ''
+      if (!lines) return
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(lines)
+          setLogsCopyState('copied')
+        } else {
+          setLogsCopyState('failed')
+        }
+      } catch {
+        setLogsCopyState('failed')
+      }
+      if (logsCopyTimer.current !== undefined) clearTimeout(logsCopyTimer.current)
+      logsCopyTimer.current = setTimeout(() => {
+        logsCopyTimer.current = undefined
+        setLogsCopyState('idle')
+      }, 2000)
+    }
+
+    const exportLogs = (): void => {
+      const lines = logsSnapshot?.entries.map(entry => entry.line).join('\n') ?? ''
+      if (!lines || typeof document === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return
+      const blob = new Blob([lines + '\n'], { type: 'text/plain;charset=utf-8' })
+      const href = URL.createObjectURL(blob)
+      try {
+        const link = document.createElement('a')
+        link.href = href
+        link.download = 'ds-harness-remote-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.log'
+        document.body?.appendChild(link)
+        link.click()
+        link.remove()
+      } finally {
+        URL.revokeObjectURL(href)
+      }
+    }
+
+    const clearLogs = async (): Promise<void> => {
+      if (logsClearing) return
+      const run = ++logsRequestRun.current
+      setLogsLoading(false)
+      setLogsClearing(true)
+      setLogsError(undefined)
+      try {
+        const cleared = await props.control<PluginLogView>('settings.logs.clear', {})
+        if (run !== logsRequestRun.current) return
+        setLogsSnapshot(cleared)
+      } catch (reason) {
+        if (run !== logsRequestRun.current) return
+        setLogsError(messageOf(reason, t))
+      } finally {
+        setLogsClearing(false)
+      }
+    }
+
+    React.useEffect(() => () => {
+      if (logsCopyTimer.current !== undefined) clearTimeout(logsCopyTimer.current)
+    }, [])
+
+    React.useEffect(() => {
+      if (!logsOpen) return
+      const viewport = logsViewportRef.current
+      if (viewport && typeof viewport.scrollHeight === 'number') {
+        viewport.scrollTop = viewport.scrollHeight
+      }
+    }, [logsOpen, logsSnapshot])
+
     const setDebug = async (enabled: boolean): Promise<void> => {
       if (debugBusy) return
       setDebugBusy(true)
       setError(undefined)
       try {
         applyView(await props.control<PluginSettingsView>('settings.development.set', { debugLogging: enabled }))
+        if (logsOpen) void loadLogs(logsFilter)
       } catch (reason) { setError(messageOf(reason, t)) }
       finally { setDebugBusy(false) }
     }
 
     const developmentSetting = React.createElement('section', { className: 'dshRemoteDevelopmentSettings' },
-      React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('debugLogging')),
-          React.createElement('p', null, t('debugLoggingHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', checked: debugLogging,
-          disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
-          onChange: (event: Event) => void setDebug((event.target as HTMLInputElement).checked),
-        })),
+      React.createElement('div', { className: 'dshRemoteDebugLogGroup' },
+        React.createElement('div', { className: 'dshRemoteDebugLogHeader' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDebugLogTrigger',
+            'aria-expanded': logsOpen,
+            onClick: toggleLogsDrawer,
+          },
+            React.createElement('span', { className: 'dshRemoteDebugLogTitleRow' },
+              React.createElement('strong', null, t('debugLogging')),
+              React.createElement('span', {
+                className: debugLogging ? 'dshRemoteDebugLogLevelBadge isDebug' : 'dshRemoteDebugLogLevelBadge',
+              }, debugLogging ? t('debugLoggingLevelDebug') : t('debugLoggingLevelInfo'))),
+            React.createElement('p', null, t('debugLoggingHint'))),
+          React.createElement('div', { className: 'dshRemoteDebugLogControls' },
+            React.createElement('button', {
+              type: 'button',
+              className: 'dshRemoteLogToggleBtn',
+              'aria-expanded': logsOpen,
+              onClick: toggleLogsDrawer,
+            }, logsOpen ? (t('debugLogsToggleClose') + ' ▴') : (t('debugLogsToggleOpen') + ' ▾')),
+            React.createElement('input', {
+              type: 'checkbox', role: 'switch', checked: debugLogging,
+              disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
+              onChange: (event: Event) => void setDebug((event.target as HTMLInputElement).checked),
+            }))),
+        logsOpen && React.createElement('div', { className: 'dshRemoteLogDrawer', role: 'region', 'aria-label': t('debugLogging') },
+          React.createElement('div', { className: 'dshRemoteLogToolbar' },
+            React.createElement('div', { className: 'dshRemoteLogFilterGroup', role: 'group' },
+              React.createElement('button', {
+                type: 'button',
+                className: logsFilter === 'all' ? 'dshRemoteLogFilterBtn isActive' : 'dshRemoteLogFilterBtn',
+                'aria-pressed': logsFilter === 'all',
+                onClick: () => changeLogsFilter('all'),
+              }, t('debugLogsFilterAll')),
+              React.createElement('button', {
+                type: 'button',
+                className: logsFilter === 'warn' ? 'dshRemoteLogFilterBtn isActive' : 'dshRemoteLogFilterBtn',
+                'aria-pressed': logsFilter === 'warn',
+                onClick: () => changeLogsFilter('warn'),
+              }, t('debugLogsFilterWarn'))),
+            React.createElement('div', { className: 'dshRemoteLogActions' },
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: logsLoading,
+                onClick: () => void loadLogs(logsFilter),
+              }, logsLoading ? t('debugLogsRefreshing') : t('debugLogsRefresh')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: !logsSnapshot?.entries.length,
+                onClick: () => void copyLogs(),
+              }, logsCopyState === 'copied' ? t('debugLogsCopied') : logsCopyState === 'failed' ? t('debugLogsCopyFailed') : t('debugLogsCopy')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: !logsSnapshot?.entries.length,
+                onClick: exportLogs,
+              }, t('debugLogsExport')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: logsClearing || !logsSnapshot?.totalBuffered,
+                onClick: () => void clearLogs(),
+              }, t('debugLogsClear')))),
+          (logsSnapshot?.filePath || logsSnapshot?.fileError || logsSnapshot) && React.createElement('div', { className: 'dshRemoteLogMeta' },
+            logsSnapshot?.filePath && React.createElement('span', null, t('debugLogsFileLabel'), ' ', React.createElement('code', null, logsSnapshot.filePath)),
+            logsSnapshot?.fileError && React.createElement('span', { className: 'dshRemoteLogFallback' }, t('debugLogsFileFallback', { error: logsSnapshot.fileError })),
+            logsSnapshot && React.createElement('span', null, t('debugLogsCount', { count: logsSnapshot.entries.length }))),
+          logsError && React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, logsError),
+          logsLoading && !logsSnapshot
+            ? React.createElement('p', { className: 'dshRemoteLogEmpty' }, t('debugLogsLoading'))
+            : !logsSnapshot || logsSnapshot.entries.length === 0
+              ? React.createElement('p', { className: 'dshRemoteLogEmpty' }, t('debugLogsEmpty'))
+              : React.createElement('div', { className: 'dshRemoteLogViewport', ref: logsViewportRef },
+                  logsSnapshot.entries.map(entry => React.createElement('span', {
+                    key: entry.seq,
+                    className: entry.level === 'error'
+                      ? 'dshRemoteLogLine isError'
+                      : entry.level === 'warn'
+                        ? 'dshRemoteLogLine isWarn'
+                        : entry.level === 'debug'
+                          ? 'dshRemoteLogLine isDebug'
+                          : 'dshRemoteLogLine',
+                  }, entry.line))))),
       React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
         React.createElement('div', null,
           React.createElement('strong', null, t('terminalRemote')),
@@ -529,6 +768,78 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     // The entry style is presentation only, so it lives beside the development
+    const resetIdentity = async (): Promise<void> => {
+      if (!window.confirm(t('resetIdentityConfirm'))) return
+      const run = ++associationReadRun.current
+      setResetBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.identity.reset', {})
+        const status = await props.control<RemoteStatus>('status').catch(() => undefined)
+        applyView(view, run === associationReadRun.current)
+        if (status !== undefined) {
+          setHostStatus(status.host)
+          setHostName(status.deviceName ?? '')
+          setHostDeviceId(status.host?.deviceId ?? '')
+        }
+        setSignInOpen(false)
+        setNotice({ key: 'resetIdentitySuccess' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+      } finally {
+        setResetBusy(false)
+      }
+    }
+
+    const resetDisabledByStartupState = settingsView?.startupError?.code === 'STORAGE_CONFLICT'
+      || settingsView?.startupError?.code === 'IDENTITY_LOCKED'
+
+    const retryStartup = async (): Promise<void> => {
+      if (retryStartupBusy) return
+      const run = ++associationReadRun.current
+      setRetryStartupBusy(true)
+      setError(undefined)
+      setNotice(undefined)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.startup.retry', {})
+        const status = await props.control<RemoteStatus>('status').catch(() => undefined)
+        applyView(view, run === associationReadRun.current)
+        setHostStatus(status?.host)
+        setHostName(status?.deviceName ?? '')
+        setHostDeviceId(status?.host?.deviceId ?? '')
+        setNotice({ key: 'retryStartupSuccess' })
+      } catch (reason) {
+        setError(messageOf(reason, t))
+        void load().catch(() => undefined)
+      } finally {
+        setRetryStartupBusy(false)
+      }
+    }
+
+    const resetIdentitySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+      React.createElement('div', null,
+        React.createElement('strong', null, t('resetIdentity')),
+        React.createElement('p', null, t('resetIdentityHint'))),
+      React.createElement('button', {
+        type: 'button',
+        className: 'dshRemoteDiscard',
+        disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+        onClick: () => void resetIdentity(),
+      }, t(resetBusy ? 'resettingAction' : 'resetIdentity')),
+    )
+
+    const startupErrorBanner = settingsView?.startupError !== undefined
+      ? React.createElement('div', { className: 'dshRemoteError', role: 'alert' },
+          React.createElement('p', null, startupErrorMessage(settingsView.startupError, t)),
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDiscard',
+            disabled: busy || resetBusy || retryStartupBusy,
+            onClick: () => void retryStartup(),
+          }, t('retryStartup')))
+      : null
+
     // switches instead of inside the Host-facing settings block.
     const sidebarEntrySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
       React.createElement('div', null,
@@ -585,8 +896,8 @@ export function createRemotePluginOptions(React: ClientReact) {
       Number(b.id === props.preferredQrProvider) - Number(a.id === props.preferredQrProvider))
     const selectedProvider = oauthProviders.find(item => `oauth:${item.id}` === loginMethod)
     const scanLabel = t('scanWithProvider', { provider: selectedProvider?.displayName ?? '' })
-    const passwordVisible = loginMethod === 'password' && (
-      loginMethodManuallySelected.current || (!providersLoading && !providersFailed && oauthProviders.length === 0)
+    const passwordVisible = !savingServer && !serverDirty && loginMethod === 'password' && (
+      loginMethodManuallySelected.current || (!providersLoading && oauthProviders.length === 0)
     )
 
     const qrLoginTab = (provider: OAuthProviderInfo): unknown => React.createElement('button', {
@@ -596,11 +907,18 @@ export function createRemotePluginOptions(React: ClientReact) {
       onClick: () => selectLoginMethod(`oauth:${provider.id}`),
     }, provider.displayName)
 
-    const inlineSignIn = !signInOpen ? null : React.createElement('div', {
+    const inlineSignIn = !signInOpen || association !== undefined ? null : React.createElement('div', {
       id: 'dsh-remote-inline-signin',
       className: 'dshRemoteInlineSignIn',
     },
-      oauthProviders.length === 0 && !providersLoading && !providersFailed ? null : React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
+      serverDirty && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('saveServerBeforeLogin')) : null,
+      React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist', 'aria-label': t('signInAccount') },
+        pairingAvailable ? React.createElement('button', {
+          type: 'button', role: 'tab', id: 'dsh-remote-settings-device-pairing-tab',
+          'aria-selected': loginMethod === 'device_pairing', 'aria-controls': 'dsh-remote-settings-device-pairing-panel',
+          className: loginMethod === 'device_pairing' ? 'isActive' : '', disabled: busy,
+          onClick: () => selectLoginMethod('device_pairing'),
+        }, t('pairingLoginTab')) : null,
         ...orderedQrProviders.map(qrLoginTab),
         React.createElement('button', {
           type: 'button', role: 'tab', id: 'dsh-remote-settings-password-tab',
@@ -608,12 +926,17 @@ export function createRemotePluginOptions(React: ClientReact) {
           className: passwordVisible ? 'isActive' : '', disabled: busy,
           onClick: () => selectLoginMethod('password'),
         }, t('accountPasswordLogin'))),
-      providersLoading ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
-      providersFailed ? React.createElement('button', {
-        type: 'button', className: 'dshRemoteReconnect', disabled: busy,
-        onClick: () => { setError(undefined); setProviderReload(v => v + 1) },
-      }, t('retryLoginProviders')) : null,
-      passwordVisible
+      React.createElement('div', { className: 'dshRemoteLoginContent' },
+      providersLoading && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
+      providersFailed ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' },
+        t('noLoginProviders'), ' ', React.createElement('button', {
+          type: 'button', disabled: busy || savingServer || serverDirty,
+          onClick: () => setProviderReload(value => value + 1),
+        }, t('retryLoginProviders'))) : null,
+      loginMethod === 'device_pairing' && pairingAvailable
+        ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-settings-device-pairing-panel', 'aria-labelledby': 'dsh-remote-settings-device-pairing-tab' },
+          React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => { applyView(view); setSignInOpen(false); props.onSignIn?.() }).catch(() => undefined) }))
+        : passwordVisible
         ? React.createElement('div', {
           className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-settings-password-panel',
           'aria-labelledby': 'dsh-remote-settings-password-tab',
@@ -631,14 +954,16 @@ export function createRemotePluginOptions(React: ClientReact) {
             onClick: () => void signInClient(),
           }, t(busy ? 'signingIn' : 'startSignIn')),
           React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))
-        : selectedProvider !== undefined
+        : !savingServer && !serverDirty && selectedProvider !== undefined
           ? React.createElement('div', {
             className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-settings-${loginMethod}-panel`,
             'aria-labelledby': `dsh-remote-settings-${loginMethod}-tab`,
           },
             qrCompleted
               ? React.createElement('div', { className: 'dshRemoteInlineSignInQrState' },
-                React.createElement('p', null, t('loadingSettings')),
+                React.createElement('div', { className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite' },
+                  React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+                  t('loginLoadingSettings')),
                 React.createElement('button', {
                   type: 'button', className: 'dshRemoteReconnect', disabled: busy,
                   onClick: () => {
@@ -686,8 +1011,58 @@ export function createRemotePluginOptions(React: ClientReact) {
                       React.createElement('span', null, t('openInBrowser'), ' ↗'))
                     : null,
             React.createElement('strong', null, scanLabel),
-            React.createElement('p', null, t('scanLoginHint')))
+            React.createElement('p', null, t('scanLoginHint')),
+            !qrCompleted && !qrFailed && !qrExpired && (qrBusy || qrSession !== undefined)
+              ? React.createElement('div', { className: 'dshRemoteLoginProgress', role: 'status', 'aria-live': 'polite' },
+                React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true }),
+                t('loginWaitingAuthorization')) : null)
           : null,
+      ),
+              React.createElement('div', { className: 'dshRemoteServiceAddress' },
+                React.createElement('span', null, t('currentServiceAddress')),
+                editingServer
+                  ? React.createElement('form', {
+                    className: 'dshRemoteLoginServer',
+                    onSubmit: (event: Event) => { event.preventDefault(); void saveLoginServer() },
+                  },
+                    React.createElement('input', {
+                      id: 'dsh-remote-settings-server', type: 'url', required: true,
+                      'aria-label': t('serverUrl'), value: serverUrl,
+                      disabled: busy || savingServer || !writable, autoComplete: 'url',
+                      placeholder: t('serverUrl'), onChange: (event: Event) => {
+                        serverDraftEdited.current = true
+                        setServerUrl((event.target as HTMLInputElement).value)
+                      },
+                    }),
+                    React.createElement('button', {
+                      type: 'submit', disabled: busy || savingServer || !writable || !serverDirty || serverUrl.trim() === '',
+                    }, t(savingServer ? 'saving' : 'save')),
+                    React.createElement('button', {
+                      type: 'button', disabled: busy || savingServer || !writable,
+                      onClick: () => { serverDraftEdited.current = true; setServerUrl('https://dsh.r2049.cn'); void saveLoginServer('https://dsh.r2049.cn') },
+                    }, t('restoreDefaultServiceAddress')),
+                    React.createElement('button', {
+                      type: 'button', disabled: busy || savingServer || !writable,
+                      onClick: () => {
+                        serverDraftEdited.current = false
+                        setServerUrl(savedServerUrl ?? 'https://dsh.r2049.cn')
+                        setEditingServer(false)
+                      },
+                    }, t('cancelServiceAddressEdit')))
+                  : React.createElement(React.Fragment, null,
+                    React.createElement('a', {
+                      href: savedServerUrl ?? serverUrl, target: '_blank', rel: 'noreferrer',
+                    }, savedServerUrl ?? serverUrl),
+                    React.createElement('button', {
+                      type: 'button', className: 'dshRemoteServiceAddressEdit',
+                      disabled: busy || savingServer || !writable,
+                      title: t('editServiceAddress'), 'aria-label': t('editServiceAddress'),
+                      onClick: () => setEditingServer(true),
+                    }, React.createElement('svg', {
+                      viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none',
+                      stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+                      'aria-hidden': true,
+                    }, React.createElement('path', { d: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z' }))))),
     )
 
     return React.createElement(props.view === 'page' ? 'div' : 'li', {
@@ -726,8 +1101,7 @@ export function createRemotePluginOptions(React: ClientReact) {
               React.createElement('div', { className: 'dshRemoteSettingsTop' },
                 React.createElement('div', { className: 'dshRemoteAssociation' },
                   React.createElement('span', null, t(association.account === undefined ? 'authorization' : 'account')),
-                  React.createElement('strong', null, association.account
-                    ?? t('authorizationComplete')),
+                  React.createElement('strong', null, association.account === undefined ? t('authorizationComplete') : displayRemoteAccount(association.account)),
                   React.createElement('p', null, association.account === undefined
                     ? serverUrl
                     : t('authorizedOn', { role: 'Remote', serverUrl })))),
@@ -738,8 +1112,10 @@ export function createRemotePluginOptions(React: ClientReact) {
                 React.createElement('div', null,
                   React.createElement('span', null, t('deviceId')),
                   React.createElement('code', null, hostDeviceId || '—'))),
+              startupErrorBanner,
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
                 React.createElement('div', null,
@@ -790,8 +1166,10 @@ export function createRemotePluginOptions(React: ClientReact) {
                   className: 'dshRemoteDiscard',
                   disabled: busy || !writable,
                   onClick: () => void logout(),
-                }, t(busy ? 'signingOut' : 'signOut'))))
+                }, t(busy ? 'signingOut' : 'signOut'))),
+              inlineSignIn)
             : React.createElement('div', { className: 'dshRemoteSettings' },
+              startupErrorBanner,
               React.createElement('div', { className: 'dshRemoteHostIdentity' },
                 React.createElement('div', null,
                   React.createElement('span', null, t('hostName')),
@@ -801,13 +1179,14 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
               sidebarEntrySetting,
+              resetIdentitySetting,
               acpSetting,
               React.createElement('div', { className: 'dshRemoteSettingsSignIn' },
                 React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
                 React.createElement('button', {
                   type: 'button',
                   className: signInOpen ? 'dshRemoteDiscard' : 'dshRemoteSave',
-                  disabled: busy || !loaded,
+                  disabled: busy || resetBusy || !loaded || settingsView?.startupError !== undefined,
                   'aria-expanded': signInOpen,
                   'aria-controls': 'dsh-remote-inline-signin',
                   onClick: () => {

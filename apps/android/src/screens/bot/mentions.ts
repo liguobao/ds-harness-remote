@@ -11,14 +11,15 @@ export function botMentionTarget(href: string, bots: BotEntry[]): string | undef
   } catch { return undefined }
 }
 
-/** Match upstream @Name boundaries, keeping code, links and file references literal. */
-export function linkBotMentions(text: string, bots: BotEntry[], selfId?: string): string {
-  if (!text.includes('@')) return text
+export interface MentionSpan { start: number; end: number; bot: BotEntry }
+
+/** Where each `@Name` sits in a message, skipping code, links and file references. */
+export function botMentionSpans(text: string, bots: BotEntry[], selfId?: string): MentionSpan[] {
+  if (!text.includes('@')) return []
   const literal = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`|\[[^\]\n]*\]\([^)\n]*\)/g
   const excluded = [...text.matchAll(literal)].map(match => [match.index, match.index + match[0].length])
   const candidates = bots.filter(bot => bot.name).slice().sort((a, b) => b.name.length - a.name.length)
-  let result = ''
-  let cursor = 0
+  const spans: MentionSpan[] = []
   for (let at = text.indexOf('@'); at !== -1; at = text.indexOf('@', at + 1)) {
     if ((at > 0 && /[a-z0-9_./]/i.test(text[at - 1]!)) || excluded.some(([start, end]) => at >= start! && at < end!)) continue
     const bot = candidates.find(candidate => {
@@ -28,12 +29,22 @@ export function linkBotMentions(text: string, bots: BotEntry[], selfId?: string)
     })
     if (!bot) continue
     const end = at + 1 + bot.name.length
-    if (bot.id !== selfId) {
-      const label = text.slice(at, end).replace(/[\[\]\\]/g, '\\$&')
-      result += `${text.slice(cursor, at)}[${label}](${origin}${encodeURIComponent(bot.id)})`
-      cursor = end
-    }
+    if (bot.id !== selfId) spans.push({ start: at, end, bot })
     at = end - 1
+  }
+  return spans
+}
+
+/** Match upstream @Name boundaries, keeping code, links and file references literal. */
+export function linkBotMentions(text: string, bots: BotEntry[], selfId?: string): string {
+  const spans = botMentionSpans(text, bots, selfId)
+  if (spans.length === 0) return text
+  let result = ''
+  let cursor = 0
+  for (const span of spans) {
+    const label = text.slice(span.start, span.end).replace(/[\[\]\\]/g, '\\$&')
+    result += `${text.slice(cursor, span.start)}[${label}](${origin}${encodeURIComponent(span.bot.id)})`
+    cursor = span.end
   }
   return result + text.slice(cursor)
 }

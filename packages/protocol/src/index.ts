@@ -1,5 +1,6 @@
 export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
+export { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
@@ -169,6 +170,9 @@ export const rpcMethods = [
   'harness.remote.transfer.close',
   'harness.remote.stream.open',
   'harness.remote.stream.close',
+  'harness.remote.compaction.submit',
+  'harness.remote.compaction.status',
+  'harness.remote.compaction.cancel',
   'loopback.call',
   'fileviewer.call',
   'codex.app.call',
@@ -492,6 +496,8 @@ export const transportCapabilities = [
  */
 export const harnessCapabilityValues = [
   'remote.history.compact.v1',
+  'remote.compaction.async.v1',
+  'remote.session.events.v1',
   'workspace.upload.v1',
   'harness.api.v1',
   'harness.api.transfer.v1',
@@ -722,6 +728,67 @@ export interface HarnessRemoteStreamClosedData {
     message: string
     details: Record<string, unknown>
   }
+}
+
+/**
+ * Remote-owned asynchronous compaction contract.
+ *
+ * Harness `commands/execute('/compact')` legitimately waits for the whole
+ * summarization, which can take minutes on slow local inference backends. The
+ * Remote bridge therefore registers the operation on the Host and returns
+ * immediately; the command keeps running on the Host runtime even when the
+ * submitting client disconnects. Clients observe the operation through
+ * `harness.remote.compaction.status` and the ordinary Session event stream.
+ *
+ * Every result is settled by the Host's own background call: a
+ * `compaction/end` event never fabricates success.
+ */
+export const REMOTE_COMPACTION_CAPABILITY = 'remote.compaction.async.v1'
+export const REMOTE_SESSION_EVENTS_CAPABILITY = 'remote.session.events.v1'
+
+/** Operation states visible to Remote clients. */
+export type RemoteCompactionState =
+  | 'accepted'
+  | 'running'
+  | 'cancelling'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  /** The run committed, but cancellation/timing hid the final persistence result. */
+  | 'unconfirmed'
+
+export interface RemoteCompactionSubmitParams {
+  sessionId: string
+  /** Client-chosen idempotency key; retrying the same id never starts a second run. */
+  requestId: string
+  /**
+   * Wall-clock budget for the compaction task itself, independent of any RPC
+   * deadline. Hosts clamp it to [60_000, 7_200_000]; the default is 30 minutes.
+   */
+  budgetMs?: number
+}
+
+export interface RemoteCompactionSubmitResult {
+  operationId: string
+  state: RemoteCompactionState
+}
+
+export interface RemoteCompactionStatusParams {
+  sessionId: string
+  operationId: string
+}
+
+export interface RemoteCompactionStatusResult {
+  operationId: string
+  sessionId: string
+  state: RemoteCompactionState
+  /** Epoch ms when the Host accepted the operation; absent when the Host lost it. */
+  acceptedAt?: number
+  startedAt?: number
+  finishedAt?: number
+  /** Human-readable outcome detail; never a substituted success. */
+  message?: string
 }
 
 export interface RemoteWorkspaceTypeDescription {
@@ -1325,7 +1392,7 @@ export function encodeRelayDataFrame(
   frame: RelayDataFrame,
   limits: ControlFrameByteLimits = {},
 ): string {
-  const parsed = relayDataFrameSchema.parse(frame)
+  const parsed = parseRelayDataFrame(frame)
   const encoded = JSON.stringify(parsed)
   assertControlFrameSize(new TextEncoder().encode(encoded).byteLength, 'relay', limits)
   return encoded
@@ -1338,10 +1405,17 @@ export function decodeRelayDataFrame(
   const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
   assertControlFrameSize(encoded.byteLength, 'relay', limits)
   try {
-    return relayDataFrameSchema.parse(parseWireJson(data))
+    return parseRelayDataFrame(parseWireJson(data))
   } catch {
     throw new Error('Invalid Relay data frame.')
   }
+}
+
+function parseRelayDataFrame(input: unknown): RelayDataFrame {
+  const frame = relayDataFrameSchema.parse(input)
+  if (frame.type === 'relay') return { ...frame, payload: relayPayloadSchema.parse(frame.payload) }
+  if (frame.type === 'secure.handshake') return { ...frame, payload: secureHandshakePayloadSchema.parse(frame.payload) }
+  return frame
 }
 
 export function encodeMessage(message: RemoteMessage): Uint8Array {

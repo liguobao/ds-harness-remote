@@ -4,6 +4,7 @@ import type { HarnessSessionGeneration } from '../harness-version.js'
 import { contentBlocks, toolOutputImageBlocks } from './codex-image-codec.js'
 import type { CodexModelSelection } from './virtual-catalog.js'
 import { modelSelection } from './virtual-catalog.js'
+import { turnEndReason } from './turn-end-reason.js'
 import type { JsonRecord } from './virtual-values.js'
 import { array, CODEX_SESSION_PREFIX, hashString, integer, normalizeTime, record, string } from './virtual-values.js'
 
@@ -163,16 +164,6 @@ export function projectCodexNativeHistory(
     nextTurn: turnNumber,
     ...(active === undefined ? {} : { activeTurnId: active }),
   }
-}
-
-function turnEndReason(turn: JsonRecord): JsonRecord {
-  if (turn.status === 'failed' || turn.error !== undefined && turn.error !== null) {
-    return { kind: 'error', error: { message: 'CodeX turn failed.', code: 'codex-turn-failed' } }
-  }
-  if (turn.status === 'interrupted' || turn.status === 'cancelled' || turn.status === 'canceled' || turn.status === 'aborted') {
-    return { kind: 'interrupted' }
-  }
-  return { kind: 'completed' }
 }
 
 export function paginateCodexNativeHistory(

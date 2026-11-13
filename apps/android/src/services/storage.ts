@@ -6,8 +6,17 @@ import * as SecureStore from 'expo-secure-store'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isThemePreference, isTypographyDensity, type ThemePreference, type TypographyDensity } from '../ui/theme'
+import { isActivityDockMode, isThemePreference, isTypographyDensity, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type ThemePreference, type TypographyDensity } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
+
+/** Durable compaction attempt shape shared with `compaction-store`. */
+export interface StoredCompactionRecord {
+  sessionId: string
+  requestId: string
+  operationId?: string
+  state: string
+  updatedAt: number
+}
 
 const KEYS = {
   config: 'dshremote.server.v1',
@@ -20,6 +29,8 @@ const KEYS = {
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
   typographyDensity: 'dshremote.typography-density.v1',
+  chatAppearance: 'dshremote.chat-appearance.v1',
+  activityDockMode: 'dshremote.activity-dock-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
@@ -30,6 +41,7 @@ const KEYS = {
   favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
   recentWorkspaces: 'dshremote.recent-workspaces.v1',
   customPrompts: 'dshremote.custom-prompts.v1',
+  compactions: 'dshremote.compactions.v1',
 } as const
 
 const secureOptions: SecureStore.SecureStoreOptions = {
@@ -213,6 +225,34 @@ export function saveCollapsedWorkspaceIds(deviceId: string, workspaceIds: readon
 // operation rejects its caller, but must not poison later reads or writes.
 let hostSessionsDrawerWrite = Promise.resolve()
 
+export type SessionGroupBy = 'workspace' | 'workspace-tree' | 'list'
+export type SessionOrderBy = 'manual' | 'updated'
+export type SessionFilterMode = 'hideArchived' | 'all' | 'archivedOnly'
+
+export interface HostSessionsDrawerPreferences {
+  groupBy?: SessionGroupBy
+  orderBy?: SessionOrderBy
+  filterMode?: SessionFilterMode
+  manualOrders?: Record<string, string[]>
+}
+
+export function isSessionGroupBy(value: unknown): value is SessionGroupBy {
+  return value === 'workspace' || value === 'workspace-tree' || value === 'list'
+}
+
+export function isSessionOrderBy(value: unknown): value is SessionOrderBy {
+  return value === 'manual' || value === 'updated'
+}
+
+export function isSessionFilterMode(value: unknown): value is SessionFilterMode {
+  return value === 'hideArchived' || value === 'all' || value === 'archivedOnly'
+}
+
+function isManualOrders(value: unknown): value is Record<string, string[]> {
+  if (!isRecord(value)) return false
+  return Object.values(value).every(arr => Array.isArray(arr) && arr.every(item => typeof item === 'string'))
+}
+
 export async function loadHostSessionsDrawerGroups(deviceId: string): Promise<Record<string, boolean>> {
   await hostSessionsDrawerWrite
   const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
@@ -226,10 +266,82 @@ export async function loadHostSessionsDrawerGroups(deviceId: string): Promise<Re
 export function saveHostSessionsDrawerGroup(deviceId: string, groupKey: string, expanded: boolean): Promise<void> {
   const nextWrite = hostSessionsDrawerWrite.then(async () => {
     const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
-    const byDevice = isRecord(stored) && isRecord(stored.byDevice) ? stored.byDevice : {}
+    const current = isRecord(stored) ? stored : {}
+    const byDevice = isRecord(current.byDevice) ? current.byDevice : {}
     const groups = isRecord(byDevice[deviceId]) ? byDevice[deviceId] : {}
     await writeJson(KEYS.hostSessionsDrawer, {
+      ...current,
       byDevice: { ...byDevice, [deviceId]: { ...groups, [groupKey]: expanded } },
+    })
+  })
+  hostSessionsDrawerWrite = nextWrite.catch(() => undefined)
+  return nextWrite
+}
+
+export async function loadHostSessionsDrawerPreferences(deviceId?: string): Promise<HostSessionsDrawerPreferences> {
+  await hostSessionsDrawerWrite
+  const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+  if (!isRecord(stored)) return {}
+  const prefsByDevice = isRecord(stored.preferencesByDevice) ? stored.preferencesByDevice : {}
+  const devicePrefs = deviceId && isRecord(prefsByDevice[deviceId]) ? prefsByDevice[deviceId] : {}
+  const globalPrefs = isRecord(stored.globalPreferences) ? stored.globalPreferences : {}
+
+  const groupBy = isSessionGroupBy(devicePrefs.groupBy)
+    ? devicePrefs.groupBy
+    : (isSessionGroupBy(globalPrefs.groupBy) ? globalPrefs.groupBy : undefined)
+
+  const orderBy = isSessionOrderBy(devicePrefs.orderBy)
+    ? devicePrefs.orderBy
+    : (isSessionOrderBy(globalPrefs.orderBy) ? globalPrefs.orderBy : undefined)
+
+  const filterMode = isSessionFilterMode(devicePrefs.filterMode)
+    ? devicePrefs.filterMode
+    : (isSessionFilterMode(globalPrefs.filterMode) ? globalPrefs.filterMode : undefined)
+
+  const manualOrders = isManualOrders(devicePrefs.manualOrders)
+    ? devicePrefs.manualOrders
+    : undefined
+
+  return {
+    ...(groupBy !== undefined ? { groupBy } : {}),
+    ...(orderBy !== undefined ? { orderBy } : {}),
+    ...(filterMode !== undefined ? { filterMode } : {}),
+    ...(manualOrders !== undefined ? { manualOrders } : {}),
+  }
+}
+
+export function saveHostSessionsDrawerPreferences(
+  deviceId: string | undefined,
+  patch: Partial<HostSessionsDrawerPreferences>,
+): Promise<void> {
+  const nextWrite = hostSessionsDrawerWrite.then(async () => {
+    const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+    const current = isRecord(stored) ? stored : {}
+    const prefsByDevice = isRecord(current.preferencesByDevice) ? { ...current.preferencesByDevice } : {}
+    const globalPrefs = isRecord(current.globalPreferences) ? { ...current.globalPreferences } : {}
+
+    const nextGlobal: Record<string, unknown> = { ...globalPrefs }
+    if (patch.groupBy !== undefined) nextGlobal.groupBy = patch.groupBy
+    if (patch.orderBy !== undefined) nextGlobal.orderBy = patch.orderBy
+    if (patch.filterMode !== undefined) nextGlobal.filterMode = patch.filterMode
+
+    let nextPrefsByDevice = prefsByDevice
+    if (deviceId) {
+      const currentDevice = isRecord(prefsByDevice[deviceId]) ? { ...prefsByDevice[deviceId] } : {}
+      if (patch.groupBy !== undefined) currentDevice.groupBy = patch.groupBy
+      if (patch.orderBy !== undefined) currentDevice.orderBy = patch.orderBy
+      if (patch.filterMode !== undefined) currentDevice.filterMode = patch.filterMode
+      if (patch.manualOrders !== undefined) currentDevice.manualOrders = patch.manualOrders
+      nextPrefsByDevice = {
+        ...prefsByDevice,
+        [deviceId]: currentDevice,
+      }
+    }
+
+    await writeJson(KEYS.hostSessionsDrawer, {
+      ...current,
+      globalPreferences: nextGlobal,
+      preferencesByDevice: nextPrefsByDevice,
     })
   })
   hostSessionsDrawerWrite = nextWrite.catch(() => undefined)
@@ -287,6 +399,31 @@ export async function clearCodexPermissionPresets(hostDeviceId: string): Promise
 
 export async function clearLocalData(): Promise<void> {
   await Promise.all(Object.values(KEYS).map(key => SecureStore.deleteItemAsync(key, secureOptions)))
+}
+
+/** Persisted compaction attempts keyed by Host scope and Session id. */
+export async function loadCompactionRecords(): Promise<Record<string, Record<string, StoredCompactionRecord>>> {
+  const stored = await readJson<Record<string, Record<string, StoredCompactionRecord>>>(KEYS.compactions)
+  if (stored === undefined || !isRecord(stored)) return {}
+  const scopes: Record<string, Record<string, StoredCompactionRecord>> = {}
+  for (const [scope, records] of Object.entries(stored)) {
+    if (!isRecord(records)) continue
+    const valid: Record<string, StoredCompactionRecord> = {}
+    for (const [sessionId, record] of Object.entries(records)) {
+      if (!isRecord(record)) continue
+      if (typeof record.sessionId !== 'string' || typeof record.requestId !== 'string'
+        || typeof record.state !== 'string' || typeof record.updatedAt !== 'number') continue
+      valid[sessionId] = record as unknown as StoredCompactionRecord
+    }
+    if (Object.keys(valid).length > 0) scopes[scope] = valid
+  }
+  return scopes
+}
+
+export async function saveCompactionRecords(
+  scopes: Record<string, Record<string, StoredCompactionRecord>>,
+): Promise<void> {
+  await writeJson(KEYS.compactions, scopes)
 }
 
 async function readJson<T>(key: string): Promise<T | undefined> {
@@ -448,4 +585,22 @@ export async function loadTypographyDensity(): Promise<TypographyDensity> {
 
 export async function saveTypographyDensity(value: TypographyDensity): Promise<void> {
   await writeJson(KEYS.typographyDensity, { value })
+}
+
+export async function loadActivityDockMode(): Promise<ActivityDockMode> {
+  const stored = await readJson<{ value: unknown }>(KEYS.activityDockMode)
+  return isActivityDockMode(stored?.value) ? stored.value : 'compact'
+}
+
+export async function saveActivityDockMode(value: ActivityDockMode): Promise<void> {
+  await writeJson(KEYS.activityDockMode, { value })
+}
+
+export async function loadChatAppearance(): Promise<ChatAppearance> {
+  const stored = await readJson<{ value?: unknown }>(KEYS.chatAppearance)
+  return normalizeChatAppearance(stored?.value ?? stored)
+}
+
+export async function saveChatAppearance(value: ChatAppearance): Promise<void> {
+  await writeJson(KEYS.chatAppearance, { value })
 }

@@ -101,7 +101,7 @@ export interface BotState {
 // Android only exposes the reviewed Bot workflows, never arbitrary plugin routes.
 export const BOT_OPERATIONS = [
   'state', 'models', 'efforts', 'providers', 'local-agents',
-  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress',
+  'exchange', 'exchange-text', 'file-text', 'earlier', 'chat', 'run-stats', 'thinking', 'usage', 'room-progress', 'group-rows',
   'schedules', 'schedule-create', 'schedule-delete',
   'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore',
   'folders', 'folder-list', 'team-workspace', 'set-prefs',
@@ -176,6 +176,7 @@ export class BotRemoteClient {
 
 export function parseBotState(value: unknown): BotState {
   if (!isBotObject(value) || !Array.isArray(value.bots) || !Array.isArray(value.rooms)) throw new Error(strings.bots.invalid)
+  const hasExplicitMainIds = Array.isArray(value.mainBotIds) || nonempty(value.mainBotId)
   const mainBotIds = Array.isArray(value.mainBotIds)
     ? value.mainBotIds.filter(nonempty)
     : nonempty(value.mainBotId)
@@ -203,7 +204,7 @@ export function parseBotState(value: unknown): BotState {
       ...(entry.private === true ? { private: true } : {}),
       ...(Array.isArray(entry.browserGrants) ? { browserGrants: objects(entry.browserGrants) } : {}),
       ...(Array.isArray(entry.capabilities) ? { capabilities: entry.capabilities.filter(nonempty) } : {}),
-      main: mainBotIds.includes(entry.id),
+      main: hasExplicitMainIds ? mainBotIds.includes(entry.id) : entry.main === true,
       tile: mainBotId === entry.id,
       ...(entry.pinned === true ? { pinned: true } : {}),
       ...(entry.hidden === true ? { hidden: true } : {}),
@@ -318,9 +319,10 @@ function compactPreview(value: string): string { return value.replace(/\s+/g, ' 
 /** Claim /btw before normal sending; refusals never become queued prompts. */
 export function botMessageRequest(state: BotState, targetId: string, draft: string): { endpoint: BotOperation; payload: BotObject } {
   const message = draft.trim()
-  const bot = state.bots.find(entry => entry.id === targetId)
-  const room = state.rooms.find(entry => entry.id === targetId)
-  if ((!bot && !room) || state.readOnly !== undefined || !message) throw new Error(strings.bots.sessionUnavailable)
+  const bot = state.bots.find(entry => entry.id === targetId || entry.sessionId === targetId)
+  const room = state.rooms.find(entry => entry.id === targetId || entry.sessionId === targetId)
+  const isAgentSession = (state.agents ?? []).some(entry => entry.sessions.includes(targetId))
+  if ((!bot && !room && !isAgentSession) || state.readOnly !== undefined || !message) throw new Error(strings.bots.sessionUnavailable)
   const aside = /^\/btw(?:\s|$)/.test(message)
   if (aside) {
     if (!bot) throw new Error(strings.bots.btwPrivate)
@@ -329,7 +331,21 @@ export function botMessageRequest(state: BotState, targetId: string, draft: stri
     if (!question) throw new Error(strings.bots.btwEmpty)
     return { endpoint: 'btw', payload: { sessionId: bot.id, text: question } }
   }
-  return { endpoint: 'send', payload: { sessionId: targetId, text: message } }
+  const resolvedTargetId = bot?.id ?? room?.id ?? targetId
+  return { endpoint: 'send', payload: { sessionId: resolvedTargetId, text: message } }
+}
+
+/**
+ * Whether a Bot can be deleted: non-main Bots can always be deleted; a Main Bot
+ * can be deleted when another Main Bot exists or another non-private Bot can
+ * take over the Main Bot role first.
+ */
+export function canDeleteBot(state: BotState | undefined, bot: BotEntry | undefined): boolean {
+  if (!state || !bot || state.readOnly !== undefined) return false
+  if (!bot.main) return true
+  const mainCount = state.bots.filter(entry => entry.main).length
+  if (mainCount > 1) return true
+  return state.bots.some(entry => entry.id !== bot.id && !entry.private)
 }
 
 const knownBotSessionIdsByScope = new Map<string, Set<string>>()

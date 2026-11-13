@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from 'react-native'
+import { useEffect, useRef } from 'react'
+import { Animated, Easing, StyleSheet, View } from 'react-native'
 import Svg, { Path, Rect } from 'react-native-svg'
 import { Check, Lock, X } from 'lucide-react-native'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { useReduceMotion } from '../ui/use-reduce-motion'
 
 // DeepSeek brand blue, matching the splash mark.
 const BRAND = '#4D6BFE'
@@ -112,22 +113,6 @@ export function ConnectionHero({ secured, ready, failed }: {
       )}
     </View>
   )
-}
-
-function useReduceMotion() {
-  const [reduceMotion, setReduceMotion] = useState(false)
-  useEffect(() => {
-    let mounted = true
-    void AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
-      if (mounted) setReduceMotion(enabled)
-    })
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
-    return () => {
-      mounted = false
-      subscription.remove()
-    }
-  }, [])
-  return reduceMotion
 }
 
 function createStyles(colors: ThemeColors) {

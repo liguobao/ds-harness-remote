@@ -5,7 +5,8 @@
 ## 目标与当前状态
 
 [protocol.md](../protocol.md)是 wire contract 权威来源，`packages/protocol` 提供共享类型与运行时校验。
-已有 Control / Account / Connect / Relay 等 schema、frame/counter 边界测试、Noise IK vector 和跨仓库 fixtures；
+已有 Control / Account / Connect / Relay 等 schema、frame/counter 边界测试、Noise IK vector 和跨仓库 fixtures。
+Control 全部帧类型和 Relay data envelope 已有 conformance fixtures。
 完整 schema 逐项对齐、剩余 golden vectors、独立加密审查与真实 runtime conformance 仍见[TODO](../TODO.md)。
 不把 fixture 通过描述成所有领域 schema 已齐全或所有平台已验收。
 

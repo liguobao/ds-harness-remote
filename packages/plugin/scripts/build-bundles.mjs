@@ -26,6 +26,11 @@ async function buildBundle(options) {
       ? file.text
         .replace(/^([ \t]*\/\/ )(?:.*\/)?node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(.+)$/gm, '$1node_modules/$2')
         .replace(/^([ \t]*")(?:[^"\r\n]*\/)?node_modules\/(?:\.pnpm\/[^/"\r\n]+\/node_modules\/)?([^"\r\n]+)("\([^\r\n)]*\) \{)$/gm, '$1node_modules/$2$3')
+        // esbuild derives source module comments from the process cwd. Keep
+        // the committed GitHub bundle stable when CI builds from the repo
+        // root while local package builds run from packages/plugin.
+        .replace(/^([ \t]*\/\/ )src\//gm, '$1packages/plugin/src/')
+        .replace(/^([ \t]*\/\/ )\.\.\/(protocol|client-core|crypto|webrtc)\//gm, '$1packages/$2/')
       : file.contents
     await mkdir(dirname(file.path), { recursive: true })
     await writeFile(file.path, content)

@@ -180,3 +180,24 @@ it('defaults autoConnectHost to enabled, persists toggles and restores legacy sn
     },
   ], () => { files.clear(); keys.clear() })
 })
+
+it('persists group rounds with history and isolates scopes', async () => {
+  const memory = await load()
+  memory.saveGroupRound('host-a', 'room', 'range', [{ text: 'hello', nested: { private: true } }])
+  expect(memory.getCachedGroupRound('host-b', 'room', 'range')).toBeUndefined()
+  await memory.flushBrowseMemory()
+  const restored = await load()
+  expect(restored.getCachedGroupRound('host-a', 'room', 'range')).toEqual([{ text: 'hello' }])
+  await restored.clearBrowseMemory()
+  expect(restored.getCachedGroupRound('host-a', 'room', 'range')).toBeUndefined()
+})
+
+it('keeps the last non-empty rows when a later poll knows nothing yet', async () => {
+  const memory = await load()
+  memory.saveGroupRound('host-a', 'room', 'call:1', [{ text: 'said so' }])
+  memory.saveGroupRound('host-a', 'room', 'call:1', [])
+  expect(memory.getCachedGroupRound('host-a', 'room', 'call:1')).toEqual([{ text: 'said so' }])
+  memory.saveGroupRound('host-a', 'room', 'call:1', [{ text: 'said more' }])
+  expect(memory.getCachedGroupRound('host-a', 'room', 'call:1')).toEqual([{ text: 'said more' }])
+  await memory.clearBrowseMemory()
+})

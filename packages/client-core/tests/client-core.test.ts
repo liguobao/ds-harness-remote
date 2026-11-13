@@ -1,6 +1,6 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createEvent, createRpcError, createRpcResponse, encodeMessage } from '@dsh-remote/protocol'
+import { createEvent, createRpcError, createRpcResponse, encodeMessage, REMOTE_COMPACTION_CAPABILITY } from '@dsh-remote/protocol'
 import { BaseTransport } from '@dsh-remote/webrtc'
 import {
   CodexRemoteClient,
@@ -1203,6 +1203,80 @@ describe('HarnessAlphaClient', () => {
     }))
     await client.close()
   })
+
+  it('re-emits pending blocking questions and approvals when sessionHistory re-opens the session', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(
+      core as unknown as RemoteClientCore,
+      { sessionFormat: 3 },
+      frame => frames.push(frame),
+    )
+
+    client.start()
+    await vi.waitFor(() => expect(core.streamIdFor('$events')).toBeTruthy())
+    const eventsStreamId = core.streamIdFor('$events')
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: { type: 'ready', clientId: 'client-1', host: { sessionFormat: 3 } },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'waterfall',
+          event: 'user-questions/request',
+          eventId: 'evt-q-1',
+          agentId: 'session-q',
+          request: { questions: [{ id: 'q1', question: 'Confirm?' }] },
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'waterfall',
+          event: 'approval/request',
+          eventId: 'evt-a-1',
+          agentId: 'session-q',
+          request: { toolName: 'bash', callId: 'call-1' },
+        },
+      },
+    })
+    await vi.waitFor(() => expect(frames.filter(item => item.rpcId === 'evt-q-1')).toHaveLength(1))
+    expect(frames.filter(item => item.rpcId === 'evt-a-1')).toHaveLength(1)
+
+    const history = client.sessionHistory('session-q')
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const followStreamId = core.streamIdFor('session/follow')
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: followStreamId,
+        hasValue: true,
+        value: {
+          type: 'snapshot',
+          cursor: 1,
+          records: [],
+          hasMore: false,
+          projections: { asOfSeq: 1, values: {} },
+        },
+      },
+    })
+    await history
+    expect(frames.filter(item => item.rpcId === 'evt-q-1')).toHaveLength(2)
+    expect(frames.filter(item => item.rpcId === 'evt-a-1')).toHaveLength(2)
+    await client.close()
+  })
 })
 
 
@@ -1236,5 +1310,363 @@ describe('HarnessAlphaClient.sessionAttachment', () => {
     const result = await client.sessionAttachment('s1', reference)
     expect(result.data).toBe(data)
     expect(requestOf(core)).toEqual({ sessionId: 's1', attachmentId: 'att-1', attachment: reference })
+  })
+})
+
+describe('HarnessAlphaClient async compaction', () => {
+  function recordingCore(handle: (method: string, params: any) => unknown) {
+    const methods: string[] = []
+    const core = {
+      rpc: vi.fn(async (method: string, params: any) => {
+        methods.push(method)
+        return handle(method, params)
+      }),
+    } as unknown as RemoteClientCore
+    return { core, methods }
+  }
+
+  it('runs /compact as a tracked Host operation instead of one long RPC', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-1', state: 'accepted' }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-1', sessionId: 's1', state: 'succeeded', message: 'Compacted.' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+
+    await expect(client.sessionExecuteCommand('s1', '/compact')).resolves.toEqual({ kind: 'success', text: 'Compacted.' })
+    expect(methods).toEqual([
+      'harness.remote.compaction.submit',
+      'harness.remote.compaction.status',
+    ])
+    expect(methods).not.toContain('harness.remote.call')
+  })
+
+  it('polls until a running operation settles', async () => {
+    let polls = 0
+    const { core, methods } = recordingCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-2', state: 'accepted' }
+      polls += 1
+      return {
+        operationId: 'op-2',
+        sessionId: 's1',
+        state: polls < 3 ? 'running' : 'succeeded',
+      }
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+    const status = await client.compactSession('s1', { pollIntervalMs: 1 })
+    expect(status.state).toBe('succeeded')
+    expect(methods.filter(method => method === 'harness.remote.compaction.status')).toHaveLength(3)
+  })
+
+  it('resumes observation without submitting a second compaction', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method !== 'harness.remote.compaction.status') throw new Error(`unexpected ${method}`)
+      return { operationId: 'op-3', sessionId: 's1', state: 'succeeded' }
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] })
+    await expect(client.compactSession('s1', { operationId: 'op-3', pollIntervalMs: 1 }))
+      .resolves.toMatchObject({ state: 'succeeded' })
+    expect(methods).toEqual(['harness.remote.compaction.status'])
+  })
+
+  it('keeps the legacy command path for Hosts without the capability', async () => {
+    const { core, methods } = recordingCore((method) => {
+      if (method !== 'harness.remote.call') throw new Error(`unexpected ${method}`)
+      return { ok: true, value: { result: { kind: 'success', text: 'legacy' } } }
+    })
+    const client = new HarnessAlphaClient(core, {})
+    await expect(client.sessionExecuteCommand('s1', '/compact')).resolves.toEqual({ kind: 'success', text: 'legacy' })
+    expect(methods).toEqual(['harness.remote.call'])
+  })
+})
+
+describe('HarnessAlphaClient tracked compaction', () => {
+  class MemoryStore {
+    records = new Map<string, any>()
+    async load(scope: string, sessionId: string) { return this.records.get(`${scope}:${sessionId}`) }
+    async list(scope: string) {
+      return [...this.records.entries()]
+        .filter(([key]) => key.startsWith(`${scope}:`))
+        .map(([, record]) => record)
+    }
+    async save(scope: string, record: any) { this.records.set(`${scope}:${record.sessionId}`, record) }
+    async remove(scope: string, sessionId: string) { this.records.delete(`${scope}:${sessionId}`) }
+  }
+
+  function trackedCore(handle: (method: string, params: any) => unknown) {
+    const calls: Array<{ method: string; params: any }> = []
+    const core = {
+      rpc: vi.fn(async (method: string, params: any) => {
+        calls.push({ method, params })
+        return handle(method, params)
+      }),
+    } as unknown as RemoteClientCore
+    return { core, calls }
+  }
+
+  it('retries a lost submit response with the same requestId instead of starting twice', async () => {
+    let submits = 0
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') {
+        submits += 1
+        if (submits === 1) throw Object.assign(new Error('response lost'), { code: 'RPC_TIMEOUT' })
+        return { operationId: 'op-1', state: 'accepted' }
+      }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-1', sessionId: 's1', state: 'succeeded', message: 'done' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const outcome = await client.compactSessionTracked('s1', { pollIntervalMs: 1 })
+    expect(outcome.kind).toBe('settled')
+    const requestIds = calls
+      .filter(call => call.method === 'harness.remote.compaction.submit')
+      .map(call => call.params.requestId)
+    expect(requestIds).toHaveLength(2)
+    expect(requestIds[1]).toBe(requestIds[0])
+    expect(store.records.size).toBe(0)
+  })
+
+  it('keeps the operation id across an observation failure and resumes without resubmitting', async () => {
+    let submitCalls = 0
+    let failPolls = 3
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') {
+        submitCalls += 1
+        return { operationId: 'op-2', state: 'accepted' }
+      }
+      if (method === 'harness.remote.compaction.status') {
+        if (failPolls > 0) {
+          failPolls -= 1
+          throw Object.assign(new Error('offline'), { code: 'TRANSPORT_CLOSED' })
+        }
+        return { operationId: 'op-2', sessionId: 's1', state: 'succeeded' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const first = await client.compactSessionTracked('s1', { pollIntervalMs: 1 })
+    expect(first.kind).toBe('unconfirmed')
+    expect(submitCalls).toBe(1)
+    expect(store.records.get('host-1:s1')).toMatchObject({ operationId: 'op-2' })
+
+    // A reconnect observes the same operation; it never submits again.
+    const resumed = await client.resumeCompactions()
+    expect(resumed).toEqual([{ sessionId: 's1', outcome: expect.objectContaining({ kind: 'settled' }) }])
+    expect(submitCalls).toBe(1)
+    expect(calls.filter(call => call.method === 'harness.remote.compaction.submit')).toHaveLength(1)
+    expect(store.records.size).toBe(0)
+  })
+
+
+  it('cancels the saved operation on an explicit cancel request', async () => {
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-4', state: 'accepted' }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-4', sessionId: 's1', state: 'running' }
+      }
+      if (method === 'harness.remote.compaction.cancel') {
+        return { operationId: 'op-4', sessionId: 's1', state: 'cancelled', message: 'Compaction cancelled.' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    await store.save('host-1', {
+      sessionId: 's1', requestId: 'request-4', operationId: 'op-4', state: 'running', updatedAt: Date.now(),
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    await expect(client.cancelTrackedCompaction('s1')).resolves.toMatchObject({ state: 'cancelled' })
+    expect(calls.filter(call => call.method === 'harness.remote.compaction.cancel')).toHaveLength(1)
+    expect(calls.some(call => call.method === 'harness.remote.compaction.submit')).toBe(false)
+    expect(store.records.size).toBe(0)
+  })
+
+  it('does not replay a stale request that never produced an operation id', async () => {
+    const { core, calls } = trackedCore((method) => {
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    await store.save('host-1', {
+      sessionId: 's1', requestId: 'old-request', state: 'accepted', updatedAt: Date.now() - 10 * 60_000,
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const outcome = await client.compactSessionTracked('s1')
+    expect(outcome.kind).toBe('unconfirmed')
+    expect(calls).toHaveLength(0)
+    expect(store.records.size).toBe(0)
+  })
+})
+
+
+describe('HarnessAlphaClient file attachments', () => {
+  it('uploads into the receiving Agent and submits only the staged receipt', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => ({ ok: true, value:
+      params.endpoint === 'fileUploads/upload' ? { receiptId: 'receipt-s1', file: { name: 'report.pdf' } } : {} }))
+    const client = new HarnessAlphaClient({ rpc } as any)
+    const uploaded = await client.sessionUploadFile('s1', 'JVBERi0x', 'report.pdf')
+    await client.sessionPrompt('s1', 'Read this', 'request-1', [], [uploaded])
+    expect(rpc.mock.calls[0]?.[1]).toEqual({ endpoint: 'fileUploads/upload', payload: { args: {
+      agentId: 's1', request: { data: 'JVBERi0x', name: 'report.pdf' },
+    } } })
+    expect(rpc.mock.calls[1]?.[1].payload.args.request.content).toEqual([
+      { type: 'file', receiptId: 'receipt-s1' }, { type: 'text', text: 'Read this' },
+    ])
+  })
+})
+
+describe('HarnessAlphaClient live session events and control changes', () => {
+  it('recognizes remote.session.events.v1 capability in probeRemoteHostFeatures', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(
+      encodeMessage(
+        createRpcResponse(request.id, {
+          capabilities: ['harness.remote.v3', 'remote.session.events.v1'],
+        }),
+      ),
+    )
+
+    await expect(probing).resolves.toMatchObject({
+      remoteGateway: true,
+      sessionFormat: 3,
+      sessionEvents: true,
+    })
+    await cleanupContract1()
+  })
+
+  it('forwards api-session/* emit frames and DSH 0.2.2 projection changes without false initial baseline pulls', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, { capabilities: ['harness.remote.v3', 'remote.session.events.v1'] }, frame => frames.push(frame))
+
+    client.start()
+    await vi.waitFor(() => expect(core.streamIdFor('$events')).toBeTruthy())
+    await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
+    const eventsStreamId = core.streamIdFor('$events')
+    const controlStreamId = core.streamIdFor('session/control')
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'baseline',
+          value: {
+            projections: {
+              s1: { asOfSeq: 1, values: { title: 'Initial' } },
+            },
+          },
+        },
+      },
+    })
+    await vi.waitFor(() => expect(frames.some(f => f.payload.type === 'session/projection')).toBe(true))
+    expect(frames.some(f => f.payload.type === 'session/catalog-changed')).toBe(false)
+
+    const originalRpc = core.rpc.bind(core)
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call' && (params as any).endpoint === 'session/list') {
+        return { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 100, running: false, blank: false }] } }
+      }
+      return await originalRpc(method, params)
+    })
+    await client.sessionList()
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'projection',
+          sessionId: 's1',
+          seq: 2,
+          changes: [{ key: 'title', val: 'Renamed' }],
+        },
+      },
+    })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        rpcId: '',
+        payload: { type: 'session/projection', sessionId: 's1', key: 'title', value: 'Renamed', seq: 2 },
+      })
+    })
+    expect(frames.some(f => f.payload.type === 'session/catalog-changed')).toBe(false)
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'projection',
+          sessionId: 's-unknown',
+          seq: 1,
+          changes: [{ key: 'title', val: 'From Reconnect' }],
+        },
+      },
+    })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        rpcId: '',
+        payload: { type: 'session/catalog-changed', reason: 'control-projection', sessionId: 's-unknown' },
+      })
+    })
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'emit',
+          event: 'api-session/added',
+          args: [{ sessionId: 's2', updatedAt: 200, running: false, blank: true, projections: { asOfSeq: 0, values: { title: 'Child' } } }],
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/status', args: ['s2', true] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/activity', args: ['s2', 250] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/error', args: ['s2', 'Turn failed'] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/removed', args: ['s2'] } },
+    })
+
+    await vi.waitFor(() => {
+      expect(frames.some(f => f.payload.type === 'session/added' && (f.payload.session as any).title === 'Child' && f.payload.known === false)).toBe(true)
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/status', sessionId: 's2', running: true } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/activity', sessionId: 's2', updatedAt: 250 } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/error', sessionId: 's2', message: 'Turn failed' } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/removed', sessionId: 's2', existed: true } })
+    })
+
+    await client.close()
   })
 })

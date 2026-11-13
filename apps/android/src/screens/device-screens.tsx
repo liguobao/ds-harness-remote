@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
-import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
+import { shouldPollSessionStatus } from '../state/session-catalog-commands'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice } from '../types'
 import {
   BlurHeaderFrame,
@@ -41,24 +43,29 @@ function confirmDeviceUnbind(device: RemoteDevice): Promise<boolean> {
 
 const SWIPE_ACTION_WIDTH = 96
 
-/** Keep visible session lists honest: refresh execution status while mounted. */
+/**
+ * Hosts without `remote.session.events.v1` poll full `session/list` every 8s while mounted.
+ * Event-capable Hosts update running/activity/catalog incrementally from `$events` + `session/control`.
+ */
 export function useLiveSessionStatus(enabled = true): void {
   const phase = useAppStore(state => state.connection.phase)
+  const hostSessionEvents = useAppStore(state => state.hostSessionEvents)
   useEffect(() => {
-    if (!enabled || phase !== 'connected') return
+    if (!shouldPollSessionStatus({ enabled, phase, hostSessionEvents })) return
     void useAppStore.getState().refreshSessionStatus()
     const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
     return () => clearInterval(timer)
-  }, [phase, enabled])
+  }, [phase, enabled, hostSessionEvents])
 }
 
 const connectionStages = ['authenticating', 'transport', 'secure', 'loading'] as const satisfies readonly ConnectionStage[]
 const CONNECTION_STUCK_MS = 3000
 
-export function ConnectionScreen({ device, onBack, onConnected }: {
+export function ConnectionScreen({ device, onBack, onConnected, embedded = false }: {
   device: RemoteDevice
   onBack: () => void
   onConnected: () => void
+  embedded?: boolean
 }) {
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
@@ -74,6 +81,11 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const leaving = useRef(false)
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
+
+  useEffect(() => () => {
+    leaving.current = true
+    if (embedded && launchedAttempt.current >= 0 && completedAttempt.current !== launchedAttempt.current) void disconnect()
+  }, [disconnect, embedded])
 
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
@@ -159,18 +171,18 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
 
   return (
     <View style={styles.flex}>
-      {showBack && (
+      {showBack && !embedded && (
         <View style={[styles.connectionBack, { top: insets.top + spacing.xs }]}>
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={cancel} />
         </View>
       )}
       <Screen fill>
-        <View style={[styles.connectionHero, compactHero && styles.connectionHeroCompact]}>
-          <ConnectionHero
+        <View style={[styles.connectionHero, compactHero && styles.connectionHeroCompact, embedded && styles.connectionHeroEmbedded]}>
+          {!embedded && <ConnectionHero
             secured={currentIndex > connectionStages.indexOf('secure')}
             ready={currentStage === 'ready'}
             failed={failed}
-          />
+          />}
           <View style={styles.connectionHeading}>
             <View style={styles.connectionStatusLine}>
               <View style={[styles.connectionStatusDot, currentStage === 'ready' && styles.connectionStatusDotReady, failed && styles.connectionStatusDotFailed]} />
@@ -239,7 +251,8 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
             <Button label={zhCN.devices.retryConnection} variant="secondary" onPress={retry} />
           </View>
         )}
-        <View style={styles.connectionBottomSpace} />
+        {embedded && showBack && <Button label={zhCN.common.back} variant="secondary" onPress={cancel} />}
+        {!embedded && <View style={styles.connectionBottomSpace} />}
       </Screen>
     </View>
   )
@@ -540,6 +553,7 @@ function createStyles(colors: ThemeColors) {
   compactSessionRunning: { color: colors.primary },
   connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.md, zIndex: 2, width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
   connectionHero: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-end', paddingTop: spacing.xl, paddingBottom: spacing.xxl + spacing.xs, gap: spacing.xl },
+  connectionHeroEmbedded: { flexGrow: 0, paddingTop: spacing.sm, paddingBottom: spacing.lg, gap: spacing.sm },
   connectionBottomSpace: { flexGrow: 1.4 },
   connectionHeroCompact: { paddingTop: spacing.xs, paddingBottom: spacing.md, gap: spacing.sm },
   connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xs },

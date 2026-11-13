@@ -315,11 +315,29 @@ Content-Type: application/json
 
 Server 每次首次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值。按 [协议 §8.2](protocol.md#82-refresh)，刷新响应丢失可恢复尚未再次轮换、撤销或过期的直接后继；若恢复 pair 的 access 已过期，保存后用其 refresh token 继续正常轮换。过时 token 被拒绝但不会撤销当前有效凭据；旧版 Server 可能仍采用重用即撤销策略。不要并发刷新，同一设备应使用 single-flight/互斥锁。
 
-Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁，在获得锁后重新
-读取凭据，串行执行读取、刷新与原子落盘。等待 15 秒仍未获得锁时返回
-`SERVER_CREDENTIALS_BUSY`，不按锁龄抢占。进程异常退出后，应停止所有共享该目录的实例，
-移除遗留锁并重新授权，避免重用可能已被 Server 消耗的 refresh token。
+Plugin 在凭据文件旁保存 `server-credentials.json.refresh-lock` 文件。文件内容为
+`DSH_REFRESH_LOCK_V2`。它标记 V2 刷新队列，也阻止 0.6.3 创建同名目录锁。
+每个刷新进程用独立 Holder 文件排队。进程退出后，新进程清理已确认死亡的 Holder。
+获得队列后，Plugin 重新读取凭据，再执行刷新和原子落盘。等待 15 秒后仍未入队时，
+Plugin 返回 `SERVER_CREDENTIALS_BUSY`。进程状态不明时，Plugin 保留 Holder。
+硬链接不可用时，Plugin 返回 `SERVER_CREDENTIALS_LOCK_UNSUPPORTED`，不执行刷新。
+默认目录迁移和刷新共用目录外的闸门。迁移等待活跃刷新，并清理死亡 Holder。
+迁移识别队列写入留下的 `.tmp` 文件；这些文件不授予队列所有权。
 刷新失败日志只标记 `phase: credential_refresh` 与错误码，不记录响应正文或 token。
+
+此锁正式支持 Linux 单机本地 ext4 和 XFS。WSL2 ext4.vhdx 用于开发和测试。
+不要将 `DSH_HOME` 放在 NFS 或 SMB 共享目录。不要让两台主机共用凭据目录。
+Windows Harness Host 的锁恢复未在本次范围内完成验收。Windows 上不明 PID 状态会保留锁。
+
+升级时先停止所有 Harness Host 和 CLI 进程。确认旧进程退出后再启动新版。
+旧版不能读取 V2 Marker。新版也不能接管旧版的活跃目录锁。
+如需降级到 0.6.3，优先恢复升级前的完整 `$DSH_HOME` 备份。
+没有备份时，先停止全部进程并备份当前 `$DSH_HOME`。
+然后检查每个 `server-credentials.json.refresh-lock*` 文件，确认没有活跃 Holder。
+删除 V2 Marker、Holder 和队列 `.tmp` 文件。将 `$DSH_HOME/ds-harness-remote`
+改名为 `$DSH_HOME/remote`，再安装 0.6.3。不要同时保留两个根目录。
+0.6.3 的凭据 schema 只接受 `account`、`host_registration_code` 和 `owned_device`。
+如凭据使用新字段，保留备份并在 0.6.3 中重新授权。0.6.3 不能直接读取这些凭据。
 
 同一 deviceId 只保留一个控制连接。收到 `4003` 时 Plugin 进入 `CONNECTION_REPLACED`
 并停止自动重连；同时运行的 Host 应使用独立 `DSH_HOME` 并分别授权。
@@ -492,3 +510,7 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 ## 最小自部署 Server
 
 本仓库 `apps/server` 提供上述账号密码、设备注册/自有角色注册、刷新、设备详情、Control、WebRTC signaling/TURN credential 与 Relay API 子集。账号来自 `DSH_SERVER_ACCOUNT`，密码来自 `DSH_SERVER_PASSWORD`；WebRTC 的 STUN/TURN 由 `DSH_SERVER_STUN_URLS` / `DSH_SERVER_TURN_URLS` / `DSH_SERVER_TURN_SECRET` 配置，留空时保持 Relay-only。配置自定义 Server 地址后选择账号密码登录。运行方法见 [README](../apps/server/README.zh.md)。
+
+## Device pairing v1
+
+The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.

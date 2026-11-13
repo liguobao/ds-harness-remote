@@ -1,3 +1,42 @@
+## Offline composer drafts (Issue #7 / upstream #409, 2026-11-12)
+
+聊天输入框的 `editable` 不再由连接状态决定：`chat-screen.tsx` 通过
+`chat/composer-gate.ts` 的 `composerEditable({ permissionSelecting, uploading })` 计算，
+只有权限切换与上传中会锁定；动作入口（`+`、快捷提示词、附件、工具、权限）继续由
+`composerDisabled`（含 `!connected`）禁用。`submit()` 先用同一模块的 `submitIntent()`
+判定，`'offline'` 在 `applyDraft('')`/`setQuotes([])` 之前返回，因此离线点击不会清空草稿、
+不会插入乐观行；`'ignore'` 覆盖空内容、上传中、历史同步窗口与权限切换。输入框下方在
+`!connected && draft.length > 0` 时显示 `chat.offlineSendBlocked`（`composerHint` 样式，
+`accessibilityLiveRegion="polite"`）。
+
+store 侧同轮失败关闭：`state/prompt-actions.ts` 的 `sendMessage` 在 `local:` 乐观行插入
+之前对 `connection.phase !== 'connected'` 返回 `'rejected'`，Harness / CodeX / ACP 共用
+同一入口；注意 `'kept'` 契约要求调用方不回填草稿，因此离线绝不能走到那里。
+全屏输入框收起改为只在 `sessionId` 变化时发生，重连不再打断编辑。
+
+边界：草稿仍复用 `browse-memory` 的加密 `draft`（按 server/账号/设备/identity 作用域），
+600ms 去抖写入，切后台由 `browse-tracking` flush；不做自动发送、排队或 Host 侧存储。
+Bot 模式输入框本就不依赖连接（`inputDisabled`），但其草稿是组件本地 state、不落盘，
+本轮未改。
+
+验证：Android check、62 文件 / 581 tests（新增 `chat-quote-and-composer.test.ts` 的
+输入可用性矩阵与 `session-recovery.test.ts` 的离线失败关闭场景）与 `git diff --check`
+通过。未构建 APK，未做真机断网/后台/TalkBack 验收。
+
+## Notification conversation navigation (Issue #378, 2026-11-09)
+
+显式外部会话打开成功后，App 的 chat 路由携带独立 externalOpenRevision，ChatScreen
+据此解锁抽屉并关闭会话列表；重复打开当前会话也触发，普通自动选择会话仍保留启动侧栏。
+成功导航切回 Agent 模式并关闭 Host 切换层，支持从设置页等返回目标聊天。保留 bootstrapComplete
+等待；空设备目录也消费链接并显示未知 Host 错误，不回退连接另一设备。聊天路由允许全局
+错误横幅，避免未知 Host / Session 静默失败。并行 openKnownSession 使用代际隔离迟到提交；
+尚未覆盖用户离开页面或同 Host 断线重连期间的完整导航取消。
+
+验证：Android check、现有 61 文件 / 553 tests、production Hermes export（29 MB）与
+ git diff --check 通过；本机 Node 22.22.0 / pnpm 9.15.4，存在 TUI 要求 Node >=24.9
+的环境警告；保留 Metro noble/hashes exports fallback 警告。未新增展示类测试，
+未构建 APK 或验证 Android 真机通知点击；验收矩阵见关联 Issue / PR。
+
 # Expo HAS CHANGED
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.

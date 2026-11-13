@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native'
 import Svg, { Circle, Path, Rect } from 'react-native-svg'
-import { ChevronDown, ChevronUp, RefreshCw, Square, Terminal } from 'lucide-react-native'
+import { ChevronDown, ChevronUp, RefreshCw, Square, Terminal, X } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import { IconJobOutline } from '../../ui/dsh-icons'
 import { strings } from '../../locales/i18n'
@@ -265,13 +265,13 @@ export const JobLogPanel = memo(function JobLogPanel({
         if (!controller.signal.aborted) setError(true)
       } finally {
         if (!controller.signal.aborted) setLoading(false)
-        await stream?.close().catch(() => {})
+        await stream?.close?.().catch(() => {})
       }
     })()
 
     return () => {
       controller.abort()
-      void stream?.close().catch(() => {})
+      void stream?.close?.().catch(() => {})
     }
   }, [sessionId, jobId, attempt])
 
@@ -438,6 +438,7 @@ export interface BackgroundJobsCardProps {
   sessionId: string
   expanded?: boolean
   onToggle?: () => void
+  onClose?: () => void
   defaultExpanded?: boolean
   loading?: boolean
   error?: boolean
@@ -458,6 +459,7 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
   sessionId,
   expanded,
   onToggle,
+  onClose,
   defaultExpanded = false,
   loading = false,
   error = false,
@@ -515,7 +517,7 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
         accessibilityRole="button"
         accessibilityLabel={`${copy.backgroundJobs || copy.jobs} · ${statsText}`}
         accessibilityState={{ expanded: isOpen }}
-        onPress={handleToggle}
+        onPress={onClose ?? handleToggle}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
         testID={`${testID}-header`}
       >
@@ -553,7 +555,9 @@ export const BackgroundJobsCard = memo(function BackgroundJobsCard({
           )}
 
           <View style={styles.chevron}>
-            {isOpen ? (
+            {onClose ? (
+              <X size={16} color={colors.muted} />
+            ) : isOpen ? (
               <ChevronUp size={16} color={colors.muted} />
             ) : (
               <ChevronDown size={16} color={colors.muted} />

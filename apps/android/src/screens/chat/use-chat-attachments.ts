@@ -2,12 +2,26 @@ import * as DocumentPicker from 'expo-document-picker'
 import { File } from 'expo-file-system'
 import * as ImagePicker from 'expo-image-picker'
 import { useState, type MutableRefObject } from 'react'
-import { Alert, Image } from 'react-native'
+import { Image } from 'react-native'
+import { Alert } from '../../ui/alert'
 import { strings } from '../../locales/i18n'
 import { useBrowseMemory } from '../../services/browse-memory'
 import { useAppStore } from '../../state/store'
 import type { PromptImage, RemoteSession } from '../../types'
-import { documentImageReadBudget, formatFileBytes, isTextFile, isValidUtf8Text, MAX_SINGLE_FILE_BYTES, MAX_TOTAL_FILES_BYTES, readDocumentImageBase64, type StagedFile } from '../chat-files'
+import {
+  documentImageReadBudget,
+  formatFileBytes,
+  isDirectTransportMode,
+  isTextFile,
+  isValidUtf8Text,
+  isVideoFile,
+  MAX_INLINE_TEXT_BYTES,
+  MAX_TOTAL_INLINE_TEXT_BYTES,
+  readDocumentImageBase64,
+  sanitizeUploadFileName,
+  workspaceUploadMaxBytes,
+  type StagedFile,
+} from '../chat-files'
 import { promptImageFromAsset, promptImageFromBase64, sessionImageLimits, validatePromptImages } from '../chat-images'
 
 const EMPTY_IMAGES: PromptImage[] = []
@@ -22,18 +36,46 @@ type Options = {
   sessionGenerationRef: MutableRefObject<number>
 }
 
+function resolveDiskFileSize(uri: string, fallbackSize?: number | null): number {
+  try {
+    const statSize = new File(uri).size
+    if (typeof statSize === 'number' && Number.isFinite(statSize) && statSize > 0) {
+      return statSize
+    }
+  } catch {
+    // Fall back to picker metadata if direct File.size lookup is unavailable.
+  }
+  if (typeof fallbackSize === 'number' && Number.isFinite(fallbackSize) && fallbackSize > 0) {
+    return fallbackSize
+  }
+  return 0
+}
+
+function makeStagedId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
 export function useChatAttachments({ session, memoryKey, images, setImages, stagedFiles, setStagedFiles, sessionGenerationRef }: Options) {
   const [pickingImages, setPickingImages] = useState(false)
   const [pickingFiles, setPickingFiles] = useState(false)
+
+  const canAttachImages = session !== undefined && (sessionImageLimits(session) !== undefined
+    || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex')
+
   const pickImage = async (source: 'camera' | 'library') => {
     if (session === undefined) return
+    if (source === 'camera' && !canAttachImages) return
+
     const limits = sessionImageLimits(session)
     const maxAllowed = limits?.maxImagesPerMessage ?? 4
     const remaining = Math.max(0, maxAllowed - images.length)
-    if (remaining === 0) {
+    if (source === 'camera' && remaining === 0) {
       Alert.alert(strings.chat.imageLimitTitle, strings.chat.tooManyImages(maxAllowed))
       return
     }
+
+    const targetSessionId = session.sessionId
+    const capturedGen = sessionGenerationRef.current
     setPickingImages(true)
     try {
       if (source === 'camera') {
@@ -46,32 +88,109 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
       const result = source === 'camera'
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 1, base64: true })
         : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
+          mediaTypes: canAttachImages ? ['images', 'videos'] : ['videos'],
           allowsMultipleSelection: true,
-          selectionLimit: remaining,
           orderedSelection: true,
           allowsEditing: false,
           quality: 1,
-          base64: true,
+          base64: canAttachImages,
         })
-      if (result.canceled) return
-      const picked = result.assets.map(promptImageFromAsset)
-      const next = [...images, ...picked]
-      const problem = validatePromptImages(next, limits)
-      if (problem !== undefined) {
-        Alert.alert(strings.chat.imageLimitTitle, problem)
-        return
+      if (result.canceled || !result.assets || result.assets.length === 0) return
+
+      if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
+
+      const transportMode = useAppStore.getState().connection.stats.mode
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const direct = isDirectTransportMode(transportMode)
+
+      const pickedImages: PromptImage[] = []
+      const pickedVideos: StagedFile[] = []
+
+      for (const asset of result.assets) {
+        const isVideo = asset.type === 'video'
+          || (asset.mimeType?.toLowerCase().startsWith('video/') ?? false)
+          || (asset.fileName ? isVideoFile(asset.fileName, asset.mimeType) : false)
+
+        if (isVideo) {
+          const name = sanitizeUploadFileName(asset.fileName, asset.mimeType ?? 'video/mp4', asset.uri)
+          const realSize = resolveDiskFileSize(asset.uri, asset.fileSize)
+          if (realSize <= 0) {
+            Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.fileSizeUnavailable(name))
+            continue
+          }
+          if (realSize > maxUploadBytes) {
+            Alert.alert(
+              strings.chat.filePickerFailedTitle,
+              strings.chat.fileTooLargeForTransport(name, formatFileBytes(maxUploadBytes), direct),
+            )
+            continue
+          }
+          pickedVideos.push({
+            id: makeStagedId(),
+            name,
+            size: realSize,
+            mimeType: asset.mimeType ?? 'video/mp4',
+            uri: asset.uri,
+            ...(typeof asset.duration === 'number' && Number.isFinite(asset.duration) && asset.duration > 0
+              ? { durationMs: asset.duration }
+              : {}),
+          })
+          continue
+        }
+
+        if (!canAttachImages) {
+          const label = asset.fileName ?? strings.chat.unnamedImage
+          Alert.alert(strings.chat.imageLimitTitle, strings.chat.unsupportedImage(label))
+          continue
+        }
+
+        try {
+          if (asset.base64 && asset.base64.length > 0) {
+            pickedImages.push(promptImageFromAsset(asset))
+          } else {
+            const fileObj = new File(asset.uri)
+            const currentMemoryImages = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
+            const stagedBytes = [...currentMemoryImages, ...pickedImages].reduce((acc, img) => acc + img.bytes, 0)
+            const base64 = await readDocumentImageBase64(fileObj, stagedBytes, limits)
+            const dim = asset.width > 0 && asset.height > 0 ? { width: asset.width, height: asset.height } : await imageSize(asset.uri)
+            pickedImages.push(promptImageFromBase64({
+              uri: asset.uri,
+              base64,
+              ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+              ...(asset.fileName ? { name: asset.fileName } : {}),
+              width: dim.width,
+              height: dim.height,
+            }))
+          }
+        } catch {
+          Alert.alert(strings.chat.imagePickerFailedTitle, strings.chat.imagePickerFailedBody)
+        }
       }
-      setImages(next)
+
+      if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
+
+      if (pickedImages.length > 0) {
+        const next = [...images, ...pickedImages]
+        const problem = validatePromptImages(next, limits)
+        if (problem !== undefined) {
+          Alert.alert(strings.chat.imageLimitTitle, problem)
+        } else {
+          setImages(next)
+        }
+      }
+
+      if (pickedVideos.length > 0) {
+        setStagedFiles(current => [...current, ...pickedVideos])
+      }
     } catch {
-      Alert.alert(strings.chat.imagePickerFailedTitle, strings.chat.imagePickerFailedBody)
+      Alert.alert(
+        strings.chat.imagePickerFailedTitle,
+        canAttachImages ? strings.chat.imagePickerFailedBody : strings.chat.videoPickerFailedBody,
+      )
     } finally {
       setPickingImages(false)
     }
   }
-
-  const canAttachImages = session !== undefined && (sessionImageLimits(session) !== undefined
-    || session.backend === 'antigravity' || session.backend === 'cursor' || session.backend === 'codex')
 
   const pickFiles = async () => {
     if (session === undefined) return
@@ -92,34 +211,29 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
       const newImages: PromptImage[] = []
       const limits = sessionImageLimits(session)
       const imageBudget = documentImageReadBudget(limits)
+      const transportMode = useAppStore.getState().connection.stats.mode
+      const maxUploadBytes = workspaceUploadMaxBytes(transportMode)
+      const direct = isDirectTransportMode(transportMode)
+
       const currentImages = useBrowseMemory.getState().entries[memoryKey]?.images ?? EMPTY_IMAGES
       let stagedImagesCount = currentImages.length
       let stagedImagesBytes = currentImages.reduce((acc, img) => acc + img.bytes, 0)
-      let stagedTextBytes = stagedFiles.reduce((acc, f) => acc + f.size, 0)
+      let stagedTextBytes = stagedFiles.reduce((acc, f) => acc + (typeof f.content === 'string' ? f.size : 0), 0)
 
       for (const asset of result.assets) {
-        const name = asset.name ?? 'file'
-        const ext = name.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
+        const rawName = asset.name ?? 'file'
+        const ext = rawName.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
         const isImage = asset.mimeType?.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext ?? '')
 
         if (isImage && !canAttachImages) {
-          Alert.alert(strings.chat.imageLimitTitle, strings.chat.unsupportedImage(name))
+          Alert.alert(strings.chat.imageLimitTitle, strings.chat.unsupportedImage(rawName))
           continue
         }
 
         const fileObj = new File(asset.uri)
-        let realSize = 0
-        try {
-          const statSize = fileObj.size
-          if (typeof statSize === 'number' && Number.isFinite(statSize) && statSize > 0) {
-            realSize = statSize
-          }
-        } catch {
-          realSize = 0
-        }
-
+        const realSize = resolveDiskFileSize(asset.uri, asset.size)
         if (realSize <= 0) {
-          Alert.alert(strings.chat.filePickerFailedTitle, `无法获取 ${name} 的真实磁盘大小。`)
+          Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.fileSizeUnavailable(rawName))
           continue
         }
 
@@ -130,7 +244,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
             continue
           }
           if (realSize > imageBudget.maxImageBytes) {
-            Alert.alert(strings.chat.imageLimitTitle, strings.chat.imageTooLarge(name, formatFileBytes(imageBudget.maxImageBytes)))
+            Alert.alert(strings.chat.imageLimitTitle, strings.chat.imageTooLarge(rawName, formatFileBytes(imageBudget.maxImageBytes)))
             continue
           }
           if (stagedImagesBytes + realSize > imageBudget.maxMessageImageBytes) {
@@ -144,7 +258,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
               uri: asset.uri,
               base64,
               ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
-              name,
+              name: rawName,
               width: imgDim.width,
               height: imgDim.height,
             })
@@ -154,24 +268,20 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
           } catch {
             Alert.alert(strings.chat.imagePickerFailedTitle, strings.chat.imagePickerFailedBody)
           }
-        } else if (isTextFile(name, asset.mimeType)) {
-          if (realSize > MAX_SINGLE_FILE_BYTES) {
-            Alert.alert(strings.chat.filePickerFailedTitle, `${name} 超过单文件大小上限 (${formatFileBytes(MAX_SINGLE_FILE_BYTES)})`)
-            continue
-          }
-          if (stagedTextBytes + realSize > MAX_TOTAL_FILES_BYTES) {
-            Alert.alert(strings.chat.filePickerFailedTitle, `本次选择的文件合计超过上限 (${formatFileBytes(MAX_TOTAL_FILES_BYTES)})，后续文件已停止读取。`)
-            break
-          }
+          continue
+        }
+
+        const safeName = sanitizeUploadFileName(rawName, asset.mimeType, asset.uri)
+        if (isTextFile(rawName, asset.mimeType) && realSize <= MAX_INLINE_TEXT_BYTES && stagedTextBytes + realSize <= MAX_TOTAL_INLINE_TEXT_BYTES) {
           try {
             const textContent = await fileObj.text()
             if (!isValidUtf8Text(textContent)) {
-              Alert.alert(strings.chat.filePickerFailedTitle, `“${name}” 包含非有效 UTF-8 字符或控制字符，已跳过。`)
+              Alert.alert(strings.chat.filePickerFailedTitle, `“${rawName}” 包含非有效 UTF-8 字符或控制字符，已跳过。`)
               continue
             }
             newStagedFiles.push({
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              name,
+              id: makeStagedId(),
+              name: safeName,
               size: realSize,
               mimeType: asset.mimeType ?? 'text/plain',
               uri: asset.uri,
@@ -179,11 +289,26 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
             })
             stagedTextBytes += realSize
           } catch {
-            Alert.alert(strings.chat.filePickerFailedTitle, `无法读取 ${name}，请确保为有效的 UTF-8 文本文件。`)
+            Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.filePickerFailedBody)
           }
-        } else {
-          Alert.alert(strings.chat.filePickerFailedTitle, `暂不支持二进制文件 “${name}”，请选择代码或文本文件。`)
+          continue
         }
+
+        if (realSize > maxUploadBytes) {
+          Alert.alert(
+            strings.chat.filePickerFailedTitle,
+            strings.chat.fileTooLargeForTransport(rawName, formatFileBytes(maxUploadBytes), direct),
+          )
+          continue
+        }
+
+        newStagedFiles.push({
+          id: makeStagedId(),
+          name: safeName,
+          size: realSize,
+          mimeType: asset.mimeType ?? 'application/octet-stream',
+          uri: asset.uri,
+        })
       }
 
       if (sessionGenerationRef.current !== capturedGen || useAppStore.getState().selectedSession?.sessionId !== targetSessionId) return
@@ -201,23 +326,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
       }
 
       if (newStagedFiles.length > 0) {
-        setStagedFiles(current => {
-          let currentBytes = current.reduce((acc, f) => acc + f.size, 0)
-          const accepted: StagedFile[] = []
-          let exceeded = false
-          for (const file of newStagedFiles) {
-            if (currentBytes + file.size <= MAX_TOTAL_FILES_BYTES) {
-              currentBytes += file.size
-              accepted.push(file)
-            } else {
-              exceeded = true
-            }
-          }
-          if (exceeded) {
-            Alert.alert(strings.chat.filePickerFailedTitle, `部分文件超过总附件上限 (${formatFileBytes(MAX_TOTAL_FILES_BYTES)})，未能添加。`)
-          }
-          return [...current, ...accepted]
-        })
+        setStagedFiles(current => [...current, ...newStagedFiles])
       }
     } catch {
       Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.filePickerFailedBody)
@@ -226,7 +335,13 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
     }
   }
 
-  return { canAttachImages, attachmentPicking: pickingImages || pickingFiles, pickImages: () => pickImage('library'), takePhoto: () => pickImage('camera'), pickFiles }
+  return {
+    canAttachImages,
+    attachmentPicking: pickingImages || pickingFiles,
+    pickImages: () => pickImage('library'),
+    takePhoto: () => pickImage('camera'),
+    pickFiles,
+  }
 }
 
 /** Resolve image dimensions for files that arrive without picker metadata (document picker). */

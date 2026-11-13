@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert,
   ActivityIndicator,
   Animated,
+  Easing,
   Keyboard,
   KeyboardAvoidingView,
   PanResponder,
   Platform,
   TextInput,
   SectionList,
+  RefreshControl,
   ScrollView,
   Modal,
   Pressable,
@@ -17,8 +18,10 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native'
+import { Alert } from '../ui/alert'
 import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
+import Svg, { Path } from 'react-native-svg'
 import {
   ArrowLeft,
   Bot,
@@ -36,7 +39,7 @@ import {
   Monitor,
   MoreHorizontal,
   Plus,
-  RefreshCw,
+  MoreVertical,
   Search,
   Server,
   Settings,
@@ -47,29 +50,41 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
+import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 import { strings } from '../locales/i18n'
-import { GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
+import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
+import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { browseStatus } from '../lib/backend-groups'
 import { browseScope, saveHostMode, useBrowseMemory } from '../services/browse-memory'
 import {
   loadHostSessionsDrawerGroups,
+  loadHostSessionsDrawerPreferences,
   saveHostSessionsDrawerGroup,
+  saveHostSessionsDrawerPreferences,
   saveWorkspaceBackend,
+  type SessionFilterMode,
+  type SessionGroupBy,
+  type SessionOrderBy,
 } from '../services/storage'
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
-import { BotModalsHost, BotSidebarSection, useBotTeamPolling } from './bot-sidebar-section'
+import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
+import { HomeActionsMenu } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
 const DRAWER_WIDTH_RATIO = 1
+/** Padding inside the Agent / DS-Bot segmented track. */
+const MODE_SWITCHER_INSET = 3
 
 /** 浮窗相对工具栏底部的间距 */
 const POPOVER_OFFSET = 4
@@ -78,6 +93,30 @@ const POPOVER_RIGHT_INSET = spacing.md
 
 /** 内存缓存每台设备的工作区展开状态，关闭/重开侧边栏或切换模式时保持上次离开状态 */
 const memoryGroupsByDevice: Record<string, Record<string, boolean>> = {}
+
+interface DrawerPreferencesMemory {
+  groupBy: SessionGroupBy
+  orderBy: SessionOrderBy
+  filterMode: SessionFilterMode
+  manualOrders: Record<string, string[]>
+}
+
+/** 内存缓存全局与每台设备的侧边栏偏好（分组方式、排序方式、筛选条件、手动排序顺序），关闭/重开抽屉或进入回话再返回时保持上次离开状态 */
+const memoryPreferencesByDevice: Record<string, Partial<DrawerPreferencesMemory>> = {}
+const memoryGlobalPreferences: Omit<DrawerPreferencesMemory, 'manualOrders'> = {
+  groupBy: 'workspace',
+  orderBy: 'updated',
+  filterMode: 'hideArchived',
+}
+
+export function resetDrawerPreferencesMemoryForTesting(): void {
+  for (const k of Object.keys(memoryPreferencesByDevice)) {
+    delete memoryPreferencesByDevice[k]
+  }
+  memoryGlobalPreferences.groupBy = 'workspace'
+  memoryGlobalPreferences.orderBy = 'updated'
+  memoryGlobalPreferences.filterMode = 'hideArchived'
+}
 
 function formatRelativeTime(timestamp?: number | string): string {
   if (!timestamp) return ''
@@ -145,6 +184,7 @@ export function HostSessionsDrawer({
   onOpenPlugins,
   onOpenHostSwitcher,
   onOpenSettings,
+  onOpenAbout,
   botMode,
   onBotModeChange,
   onSelectBot,
@@ -162,6 +202,7 @@ export function HostSessionsDrawer({
   onOpenPlugins?: () => void
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
+  onOpenAbout?: () => void
   botMode?: boolean
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (botId: string) => void
@@ -204,7 +245,10 @@ export function HostSessionsDrawer({
   const deleteWorkspace = useAppStore(state => state.workspaceDelete)
   const busy = useAppStore(state => state.busyAction)
   const connected = useAppStore(state => state.connection.phase === 'connected')
-  const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
+  const error = useAppStore(state => state.error)
+  const clearError = useAppStore(state => state.clearError)
+  const devicesRefreshing = useAppStore(state => state.refreshing)
+  const refreshDevices = useAppStore(state => state.refreshDevices)
   const createSession = useAppStore(state => state.createSession)
   const pinSession = useAppStore(state => state.pinSession)
   const unpinSession = useAppStore(state => state.unpinSession)
@@ -217,12 +261,29 @@ export function HostSessionsDrawer({
   const persistedBotMode = useBrowseMemory(state => state.hostModes[hostScope] === 'bot')
   const activeBotMode = botMode ?? persistedBotMode
   const [drawerMode, setDrawerMode] = useState<'agent' | 'bot'>(activeBotMode ? 'bot' : 'agent')
+  const reduceMotion = useReduceMotion()
+  // One indicator travels between the two equal-width segments; it starts
+  // hidden until the track has measured so it cannot flash at x=0.
+  const [modeTrackWidth, setModeTrackWidth] = useState(0)
+  const modeIndicator = useRef(new Animated.Value(activeBotMode ? 1 : 0)).current
+  const modeStart = indicatorGeometry(0, modeTrackWidth, MODE_SWITCHER_INSET)
+  const modeEnd = indicatorGeometry(1, modeTrackWidth, MODE_SWITCHER_INSET)
+  useEffect(() => {
+    const animation = Animated.timing(modeIndicator, {
+      toValue: drawerMode === 'bot' ? 1 : 0,
+      duration: resolveMotion('indicator', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [drawerMode, modeIndicator, reduceMotion])
 
   useEffect(() => {
     setDrawerMode(activeBotMode ? 'bot' : 'agent')
   }, [activeBotMode, hostScope])
 
-  useBotTeamPolling(drawerMode === 'bot')
+  useBotTeamLoad(drawerMode === 'bot')
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
@@ -269,8 +330,8 @@ export function HostSessionsDrawer({
     setVisibleCounts({})
   }, [deviceId, selected?.backend])
   useEffect(() => {
-    if (connected) void refreshWorkspaces(backend)
-  }, [backend, connected, deviceId, refreshWorkspaces])
+    if (connected) void dispatchSessionCatalogCommand({ type: 'refresh-catalog', backend })
+  }, [backend, connected, deviceId])
 
   const [harnessPickerOpen, setHarnessPickerOpen] = useState(false)
   const windowDimensions = useWindowDimensions()
@@ -300,48 +361,36 @@ export function HostSessionsDrawer({
       return
     }
 
-    if (target === backend && selected && (selected.backend ?? 'harness') === target) {
-      closeDrawer()
-      return
+    // Switching categories only browses the target catalogue. It must not
+    // depend on cached sessions or create a thread in a fallback directory.
+    setBackend(target)
+    setVisibleCounts({})
+    if (deviceId !== undefined) {
+      void saveWorkspaceBackend(deviceId, target)
     }
-
-    let success = false
-    const targetSessions = sessions.filter(s => (s.backend ?? 'harness') === target && !archivedIds.includes(s.sessionId))
-    if (targetSessions.length > 0) {
-      const latest = [...targetSessions].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      if (latest) {
-        await onSelect(latest)
-        success = true
-      }
-    } else {
-      const targetWs = workspaces.find(w => (w.backend ?? 'harness') === target)?.workspaceId
-      success = await createSession(targetWs, target)
-    }
-
-    if (success) {
-      setBackend(target)
-      if (deviceId !== undefined) {
-        void saveWorkspaceBackend(deviceId, target)
-      }
-      if (connected) {
-        void refreshWorkspaces(target)
-      }
-      closeDrawer()
-    } else {
-      Alert.alert(
-        strings.common.unavailable ?? '切换失败',
-        `无法切换到 ${harnessDisplayName(target)} 对话，请稍后重试。`,
-      )
-    }
+    // The backend effect loads the catalogue without changing the open chat.
   }
 
   const [refreshing, setRefreshing] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchMounted, setSearchMounted] = useState(false)
+  const searchMotion = useRef(new Animated.Value(0)).current
   const [showConfigModal, setShowConfigModal] = useState(false)
-  const [groupBy, setGroupBy] = useState<'workspace' | 'workspace-tree' | 'list'>('workspace')
-  const [orderBy, setOrderBy] = useState<'manual' | 'updated'>('updated')
-  const [manualOrders, setManualOrders] = useState<Record<string, string[]>>({})
+  const configMotion = useRef(new Animated.Value(0)).current
+  const [appMenuOpen, setAppMenuOpen] = useState(false)
+  const [groupBy, setGroupBy] = useState<SessionGroupBy>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.groupBy ?? memoryGlobalPreferences.groupBy
+  })
+  const [orderBy, setOrderBy] = useState<SessionOrderBy>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.orderBy ?? memoryGlobalPreferences.orderBy
+  })
+  const [manualOrders, setManualOrders] = useState<Record<string, string[]>>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.manualOrders ?? {}
+  })
   const [dragState, setDragState] = useState<{
     sessionId: string
     sectionId: string
@@ -353,7 +402,120 @@ export function HostSessionsDrawer({
   const touchStartY = useRef(0)
   const dragActiveRef = useRef(false)
   const justDraggedRef = useRef(false)
-  const [filterMode, setFilterMode] = useState<'hideArchived' | 'all' | 'archivedOnly'>('hideArchived')
+  const [filterMode, setFilterMode] = useState<SessionFilterMode>(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    return devPrefs?.filterMode ?? memoryGlobalPreferences.filterMode
+  })
+
+  const updateGroupBy = (nextGroupBy: SessionGroupBy) => {
+    setGroupBy(nextGroupBy)
+    memoryGlobalPreferences.groupBy = nextGroupBy
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        groupBy: nextGroupBy,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { groupBy: nextGroupBy }).catch(() => undefined)
+  }
+
+  const updateOrderBy = (nextOrderBy: SessionOrderBy) => {
+    setOrderBy(nextOrderBy)
+    memoryGlobalPreferences.orderBy = nextOrderBy
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        orderBy: nextOrderBy,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { orderBy: nextOrderBy }).catch(() => undefined)
+  }
+
+  const updateFilterMode = (nextFilter: SessionFilterMode) => {
+    setFilterMode(nextFilter)
+    memoryGlobalPreferences.filterMode = nextFilter
+    if (deviceId) {
+      memoryPreferencesByDevice[deviceId] = {
+        ...memoryPreferencesByDevice[deviceId],
+        filterMode: nextFilter,
+      }
+    }
+    void saveHostSessionsDrawerPreferences(deviceId, { filterMode: nextFilter }).catch(() => undefined)
+  }
+
+  const updateManualOrders = (accountKey: string, nextIds: string[], alsoSetManualOrder: boolean) => {
+    setManualOrders(prev => {
+      const nextManualOrders = { ...prev, [accountKey]: nextIds }
+      if (deviceId) {
+        memoryPreferencesByDevice[deviceId] = {
+          ...memoryPreferencesByDevice[deviceId],
+          manualOrders: nextManualOrders,
+          ...(alsoSetManualOrder ? { orderBy: 'manual' } : {}),
+        }
+      }
+      void saveHostSessionsDrawerPreferences(deviceId, {
+        manualOrders: nextManualOrders,
+        ...(alsoSetManualOrder ? { orderBy: 'manual' } : {}),
+      }).catch(() => undefined)
+      return nextManualOrders
+    })
+    if (alsoSetManualOrder) {
+      setOrderBy('manual')
+      memoryGlobalPreferences.orderBy = 'manual'
+    }
+  }
+
+  useEffect(() => {
+    const devPrefs = deviceId ? memoryPreferencesByDevice[deviceId] : undefined
+    if (devPrefs) {
+      if (devPrefs.groupBy !== undefined) setGroupBy(devPrefs.groupBy)
+      if (devPrefs.orderBy !== undefined) setOrderBy(devPrefs.orderBy)
+      if (devPrefs.filterMode !== undefined) setFilterMode(devPrefs.filterMode)
+      if (devPrefs.manualOrders !== undefined) setManualOrders(devPrefs.manualOrders)
+    }
+
+    let cancelled = false
+    void loadHostSessionsDrawerPreferences(deviceId).then(saved => {
+      if (cancelled) return
+      if (saved.groupBy !== undefined) {
+        memoryGlobalPreferences.groupBy = saved.groupBy
+        setGroupBy(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.groupBy : undefined
+          return activeMem ?? saved.groupBy!
+        })
+      }
+      if (saved.orderBy !== undefined) {
+        memoryGlobalPreferences.orderBy = saved.orderBy
+        setOrderBy(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.orderBy : undefined
+          return activeMem ?? saved.orderBy!
+        })
+      }
+      if (saved.filterMode !== undefined) {
+        memoryGlobalPreferences.filterMode = saved.filterMode
+        setFilterMode(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.filterMode : undefined
+          return activeMem ?? saved.filterMode!
+        })
+      }
+      if (saved.manualOrders !== undefined) {
+        setManualOrders(prev => {
+          const activeMem = deviceId ? memoryPreferencesByDevice[deviceId]?.manualOrders : undefined
+          return activeMem ?? saved.manualOrders!
+        })
+      }
+      if (deviceId) {
+        memoryPreferencesByDevice[deviceId] = {
+          ...(saved.groupBy !== undefined ? { groupBy: saved.groupBy } : {}),
+          ...(saved.orderBy !== undefined ? { orderBy: saved.orderBy } : {}),
+          ...(saved.filterMode !== undefined ? { filterMode: saved.filterMode } : {}),
+          ...(saved.manualOrders !== undefined ? { manualOrders: saved.manualOrders } : {}),
+          ...memoryPreferencesByDevice[deviceId],
+        }
+      }
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [deviceId])
   const groupScopeKey = deviceId ? `${hostScope}:${deviceId}` : undefined
   const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>(() => ({ ...memoryGroupsByDevice }))
   const [loadedDeviceId, setLoadedDeviceId] = useState<string | undefined>(() => (groupScopeKey && memoryGroupsByDevice[groupScopeKey] ? deviceId : undefined))
@@ -436,13 +598,17 @@ export function HostSessionsDrawer({
   }, [showConfigModal])
 
   const handleRefresh = async () => {
-    if (refreshing || busy !== undefined || !connected) return
+    if (refreshing || busy !== undefined) return
+    if (!connected) {
+      if (!devicesRefreshing) await refreshDevices()
+      return
+    }
     setRefreshing(true)
     try {
       if (drawerMode === 'bot') {
         await useBotTeamStore.getState().refresh(true)
       } else {
-        await refreshWorkspaces(backend)
+        await dispatchSessionCatalogCommand({ type: 'refresh-catalog', backend })
       }
     } finally {
       setRefreshing(false)
@@ -488,8 +654,18 @@ export function HostSessionsDrawer({
       strings.workspaces.deleteBody,
       [
         { text: strings.common.cancel, style: 'cancel' },
-        { text: strings.workspaces.delete, style: 'destructive', onPress: () => void deleteWorkspace(target.workspaceId) },
+        {
+          text: strings.workspaces.delete,
+          style: 'destructive',
+          onPress: () => {
+            setWorkspaceActionTarget(undefined)
+            void deleteWorkspace(target.workspaceId)
+          },
+        },
       ],
+      // Keep the actions sheet mounted while the confirmation is open: closing
+      // one Modal window while another fades in flickers on Android.
+      { onDismiss: () => setWorkspaceActionTarget(undefined) },
     )
   }
 
@@ -645,6 +821,33 @@ export function HostSessionsDrawer({
     dismissibleRef.current = dismissible
   }, [dismissible])
 
+  useEffect(() => {
+    if (showSearch) setSearchMounted(true)
+    const animation = Animated.timing(searchMotion, {
+      toValue: showSearch ? 1 : 0,
+      duration: reduceMotion ? motionTokens.duration.reduced : motionTokens.duration.sheetExit,
+      easing: Easing.bezier(...easingCurve(showSearch ? 'expand' : 'retreat')),
+      useNativeDriver: true,
+    })
+    animation.start(({ finished }) => {
+      if (finished && !showSearch) setSearchMounted(false)
+    })
+    return () => animation.stop()
+  }, [showSearch, searchMotion, reduceMotion])
+
+  useEffect(() => {
+    if (!showConfigModal) return
+    configMotion.setValue(0)
+    const animation = Animated.timing(configMotion, {
+      toValue: 1,
+      duration: resolveMotion('micro', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [showConfigModal, configMotion, reduceMotion])
+
   const smoothClose = (withHaptic = true) => {
     if (closingRef.current) return
     // A cold start parks the user in this drawer without a chosen page; only an
@@ -758,22 +961,26 @@ export function HostSessionsDrawer({
 
   /** 排序配置浮窗（在覆盖层内部渲染，供点击命中） */
   const configPopover = (
-    <View
+    <Animated.View
       style={[
         styles.configPopover,
         { top: popoverTop, right: POPOVER_RIGHT_INSET },
+        {
+          opacity: configMotion,
+          transform: [{ translateY: configMotion.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }],
+        },
       ]}
     >
       <Text style={styles.modalSectionLabel}>{strings.sessions.groupBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspace}</Text>
         {groupBy === 'workspace' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('workspace-tree'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('workspace-tree'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByWorkspaceTree}</Text>
         {groupBy === 'workspace-tree' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setGroupBy('list'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateGroupBy('list'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.groupByList}</Text>
         {groupBy === 'list' && <Check size={14} color={colors.ink} />}
       </Pressable>
@@ -781,11 +988,11 @@ export function HostSessionsDrawer({
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.orderBy}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('manual'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('manual'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderManual}</Text>
         {orderBy === 'manual' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setOrderBy('updated'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateOrderBy('updated'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.orderUpdated}</Text>
         {orderBy === 'updated' && <Check size={14} color={colors.ink} />}
       </Pressable>
@@ -793,19 +1000,19 @@ export function HostSessionsDrawer({
       <View style={styles.modalDivider} />
 
       <Text style={styles.modalSectionLabel}>{strings.sessions.filterSessions}</Text>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('hideArchived'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('hideArchived'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterHideArchived}</Text>
         {filterMode === 'hideArchived' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('all'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('all'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterAll}</Text>
         {filterMode === 'all' && <Check size={14} color={colors.ink} />}
       </Pressable>
-      <Pressable style={styles.modalItem} onPress={() => { setFilterMode('archivedOnly'); closeConfig() }}>
+      <Pressable style={styles.modalItem} onPress={() => { updateFilterMode('archivedOnly'); closeConfig() }}>
         <Text style={styles.modalItemText}>{strings.sessions.filterArchivedOnly}</Text>
         {filterMode === 'archivedOnly' && <Check size={14} color={colors.ink} />}
       </Pressable>
-    </View>
+    </Animated.View>
   )
 
   const hostStatusDotColor = connectionPhase === 'connected'
@@ -821,50 +1028,76 @@ export function HostSessionsDrawer({
   const FooterHostIcon = platform === 'win32' ? Monitor : platform === 'linux' ? Server : Laptop
   const hostFooterDeviceInfo = (
     <>
-      <View style={styles.hostFooterIcon}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
+        disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
+        onPress={() => {
+          Keyboard.dismiss()
+          if (!inline) closeDrawer()
+          onOpenDeviceInfo?.()
+        }}
+        style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedFade]}
+      >
         <FooterHostIcon size={20} color={colors.ink} strokeWidth={1.8} />
-      </View>
-      <View style={styles.hostFooterInfo}>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
+        disabled={onOpenHostSwitcher === undefined}
+        onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher?.() }}
+        style={({ pressed }) => [styles.hostFooterInfo, pressed && styles.pressedBg]}
+      >
         <View style={styles.hostFooterNameRow}>
           <Text numberOfLines={1} style={styles.hostFooterName}>{deviceName ?? strings.devices.title}</Text>
-          <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />
         </View>
         <View style={styles.hostFooterStatusRow}>
           <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
-          <Text style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
+          <Text numberOfLines={1} style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
         </View>
-      </View>
+        {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />}
+      </Pressable>
     </>
   )
 
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
-      {/* 当前主机 */}
+      {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
+          accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
+          disabled={onOpenAbout === undefined}
           onPress={() => {
             Keyboard.dismiss()
-            if (onOpenDeviceInfo) onOpenDeviceInfo()
-            else if (onOpenHostSwitcher) onOpenHostSwitcher()
-            else if (onOpenWorkspaces) onOpenWorkspaces()
+            if (!inline) closeDrawer()
+            onOpenAbout?.()
           }}
           hitSlop={8}
           style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
         >
-          <Text style={styles.brandTitle} numberOfLines={1}>{deviceName ?? strings.devices.title}</Text>
+          <Svg
+            width={20}
+            height={(20 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+            accessible={false}
+          >
+            <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+          </Svg>
+          <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
         </Pressable>
         <View style={styles.brandRight}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.common.refresh}
-            onPress={() => void handleRefresh()}
-            hitSlop={8}
-            style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
-          >
-            <RefreshCw size={17} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
+          {onOpenSettings !== undefined && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.settings.more}
+              onPress={() => { Keyboard.dismiss(); setAppMenuOpen(true) }}
+              hitSlop={8}
+              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+            >
+              <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
+            </Pressable>
+          )}
           {Boolean(onBack) && (inline || dismissible) && (
             <Pressable accessibilityRole="button" accessibilityLabel={backLabel ?? strings.chat.backToChat} onPress={handleBack} hitSlop={8} style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}>
               <ArrowLeft size={18} color={colors.ink} strokeWidth={1.9} />
@@ -873,8 +1106,38 @@ export function HostSessionsDrawer({
         </View>
       </View>
 
+      {!connected && error !== undefined && (
+        <ErrorBanner
+          message={error}
+          onRetry={() => void refreshDevices()}
+          onDismiss={clearError}
+        />
+      )}
+
       {/* 顶部模式切换分段胶囊：智能体 / DS-Bot */}
-      <View style={styles.modeSwitcherWrap}>
+      <View
+        style={styles.modeSwitcherWrap}
+        onLayout={event => setModeTrackWidth(event.nativeEvent.layout.width)}
+      >
+        {modeStart.width > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.modeSwitcherIndicator,
+              {
+                width: modeStart.width,
+                transform: [
+                  { translateX: modeIndicator.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [modeStart.x - MODE_SWITCHER_INSET, modeEnd.x - MODE_SWITCHER_INSET],
+                  }) },
+                  { scaleX: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.04, 1] }) },
+                  { scaleY: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.92, 1] }) },
+                ],
+              },
+            ]}
+          />
+        )}
         <Pressable
           accessibilityRole="tab"
           accessibilityState={{ selected: drawerMode === 'agent' }}
@@ -882,7 +1145,6 @@ export function HostSessionsDrawer({
           onPress={() => handleSwitchMode('agent')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
-            drawerMode === 'agent' && styles.modeSwitcherTabActive,
             pressed && styles.pressedFade,
           ]}
         >
@@ -898,7 +1160,6 @@ export function HostSessionsDrawer({
           onPress={() => handleSwitchMode('bot')}
           style={({ pressed }) => [
             styles.modeSwitcherTab,
-            drawerMode === 'bot' && styles.modeSwitcherTabActive,
             pressed && styles.pressedFade,
           ]}
         >
@@ -911,6 +1172,8 @@ export function HostSessionsDrawer({
 
       {drawerMode === 'bot' ? (
         <BotSidebarSection
+          refreshing={connected ? refreshing : devicesRefreshing}
+          onRefresh={() => void handleRefresh()}
           searchQuery={botSearchQuery}
           onSearchChange={setBotSearchQuery}
           showSearch={showBotSearch}
@@ -996,8 +1259,13 @@ export function HostSessionsDrawer({
           </View>
 
           {/* 搜索框 */}
-          {showSearch && (
-            <View style={styles.searchContainer}>
+          {searchMounted && (
+            <Animated.View
+              style={[styles.searchContainer, {
+                opacity: searchMotion,
+                transform: [{ translateY: searchMotion.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+              }]}
+            >
               <Search size={16} color={colors.muted} />
               <TextInput
                 value={searchQuery}
@@ -1007,12 +1275,21 @@ export function HostSessionsDrawer({
                 style={styles.searchInput}
                 autoFocus
               />
-            </View>
+            </Animated.View>
           )}
 
           {groupStorageError && <Text accessibilityRole="alert" style={{ color: colors.muted, paddingHorizontal: spacing.md }}>{groupStorageError}</Text>}
           {/* 会话树状列表 */}
           <SectionList<RemoteSession, DrawerSection>
+            refreshControl={
+              <RefreshControl
+                refreshing={connected ? refreshing : devicesRefreshing}
+                onRefresh={() => void handleRefresh()}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
+            }
+            alwaysBounceVertical
             scrollEnabled={dragState === null}
             sections={groupsReady ? sections : []}
             ListHeaderComponent={
@@ -1252,10 +1529,7 @@ export function HostSessionsDrawer({
                       const fullIds = baselineSessions.map(s => s.sessionId)
                       const direction = fromIndex < overIndex ? 'after' : 'before'
                       const next = reorderSessionIds(fullIds, item.sessionId, targetSession.sessionId, direction)
-                      setManualOrders(prev => ({ ...prev, [currentAccountKey]: next }))
-                      if (orderBy === 'updated') {
-                        setOrderBy('manual')
-                      }
+                      updateManualOrders(currentAccountKey, next, orderBy === 'updated')
                       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
                     }
                   }
@@ -1318,18 +1592,7 @@ export function HostSessionsDrawer({
 
       {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧唯一设置按钮 */}
       <View style={styles.hostFooterBar}>
-        {onOpenHostSwitcher !== undefined ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
-            onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher() }}
-            style={({ pressed }) => [styles.hostFooterLeft, pressed && styles.pressedBg]}
-          >
-            {hostFooterDeviceInfo}
-          </Pressable>
-        ) : (
-          <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        )}
+        <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
         {onOpenSettings !== undefined && (
           <Pressable
             accessibilityRole="button"
@@ -1744,10 +2007,34 @@ export function HostSessionsDrawer({
         }}
         onDelete={() => {
           const target = workspaceActionTarget
-          setWorkspaceActionTarget(undefined)
           if (target !== undefined) confirmDeleteWorkspace(target)
         }}
       />
+
+      <Modal
+        visible={appMenuOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setAppMenuOpen(false)}
+      >
+        <View style={{ flex: 1 }}>
+          <HomeActionsMenu
+            visible={appMenuOpen}
+            onClose={() => setAppMenuOpen(false)}
+            onSettings={() => {
+              setAppMenuOpen(false)
+              if (!inline) closeDrawer()
+              onOpenSettings?.()
+            }}
+            onAbout={() => {
+              setAppMenuOpen(false)
+              if (!inline) closeDrawer()
+              onOpenAbout?.()
+            }}
+          />
+        </View>
+      </Modal>
 
       {/* DS-Bot 弹窗宿主 (创建/编辑 Bot & 群聊、上下文菜单、用量/日程报表) */}
       <BotModalsHost />
@@ -1793,8 +2080,21 @@ const createStyles = (colors: ThemeColors) =>
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
-    brandLeft: { flex: 1, minWidth: 0, marginRight: spacing.sm, gap: 4 },
-    brandTitle: { ...type.heading, fontSize: 20, lineHeight: 26, fontWeight: '700', color: colors.ink },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 6 },
+    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, flexShrink: 1 },
+    brandBadge: {
+      backgroundColor: colors.ink,
+      paddingHorizontal: 5,
+      paddingVertical: 1.5,
+      borderRadius: 4,
+    },
+    brandBadgeText: {
+      color: colors.background,
+      fontSize: 10,
+      lineHeight: 12,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     iconBtn: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
@@ -1831,6 +2131,18 @@ const createStyles = (colors: ThemeColors) =>
     modeSwitcherTabActive: {
       backgroundColor: colors.surface,
       ...floatingShadow(colors),
+    },
+    // Deliberately no elevation: the indicator is painted before the tab
+    // Pressables, and an elevated sibling would cover their labels on Android.
+    modeSwitcherIndicator: {
+      position: 'absolute',
+      top: MODE_SWITCHER_INSET,
+      bottom: MODE_SWITCHER_INSET,
+      left: MODE_SWITCHER_INSET,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
     },
     modeSwitcherText: {
       ...type.smallStrong,
@@ -1894,18 +2206,18 @@ const createStyles = (colors: ThemeColors) =>
     hostFooterLeft: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
+      gap: 4,
       flex: 1,
       minWidth: 0,
       paddingHorizontal: spacing.sm,
       paddingVertical: 6,
       borderRadius: radius.lg,
     },
-    hostFooterIcon: { width: 20, alignItems: 'center', justifyContent: 'center' },
-    hostFooterInfo: { flex: 1, minWidth: 0, gap: 2 },
-    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
+    hostFooterIcon: { width: 48, minHeight: 48, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
+    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xs, borderRadius: radius.lg },
+    hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0, flexShrink: 1 },
     hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
-    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
     hostFooterStatusText: { ...type.caption, color: colors.muted },
     sectionList: { flex: 1 },

@@ -8,6 +8,26 @@
 
 - 从 npm 安装的 Remote 插件，可以在 Desktop 弹窗里直接升级（需要 Harness 支持替换该 bundle），「可用」旁边保留发布页链接。GitHub 与本地安装仍直接打开发布页。已连接的远端设备仍然不能替换 Host 上的 Remote 插件。
 
+## 0.6.5 — 2026-11-13
+
+Android build 72.
+
+### English
+
+- Fix prompt-image uploads from Harness Desktop and embedded IDE clients: upload to the selected Remote Host and retain official Session attachment receipts. Large images use the existing chunked encrypted transport; acceptance follows Host image limits.
+- Forward ordinary file uploads from HTTP and IDE RPC carriers, preserve Session file receipts in prompts and supported commands, and add a file/image picker to the standalone VS Code extension.
+- Support tracked asynchronous compaction, including recovery after reconnect and lifecycle-confirmed cancellation, without extending ordinary RPC deadlines.
+- Android: introduce coherent sheet and screen transitions with reduced-motion support.
+- Preserve DS Bot group replies in compact history while bounding projected payloads.
+
+### 中文
+
+- 修复 Harness Desktop 和内嵌 IDE 的图片上传：图片发送到选中的 Remote Host，保留官方 Session 附件凭证。大图复用加密分块传输，实际接受范围由 Host 图片配置决定。
+- 支持 HTTP 与 IDE RPC 的普通文件上传，在消息和受支持命令中保留 Session 文件凭证；独立 VS Code 扩展支持选择文件或图片。
+- 支持可追踪的异步压缩、断线恢复和经生命周期确认的取消，普通 RPC 超时保持不变。
+- Android：为 Sheet 和页面切换增加连续过渡，支持系统减少动态效果设置。
+- 保留压缩历史中的 DS Bot 群聊回复，同时限制投影载荷大小。
+
 ## 0.6.3 — 2026-11-05
 
 Android build 71.
@@ -1204,3 +1224,26 @@ Android could display plugin-injected model context as user conversation rows.
 `0.3.17` was withdrawn because its Client could forward `commands.list` and
 register the remote file provider against older Hosts without a compatibility
 fallback.
+## 0.6.4 — 2026-11-08
+
+Android build 71.
+
+### English
+
+- Add DS Bot 0.3.0 conversations, groups, agent badges, settings subpages, schedules and desktop installation guidance.
+- Android: keep the chat input editable and preserve each conversation's local draft while the Host is unreachable; sending still requires a reconnected, user-triggered send.
+- Add offline session instant-open, cached reading while hosts are offline, direct workspace creation, host switching and connection diagnostics.
+- Improve pairing and sign-in with DSH-Go pairing, compact QR, editable server address, clearer account labels and responsive login layouts.
+- Fix session catalogue handling for oversized shared lists, corrupt identity recovery, reconnect behavior and delayed packets on destroyed links.
+- Add Windows Codex CLI discovery and recover lost self-hosted refresh responses without revoking valid credentials.
+- Normalize release bundle paths, add bilingual issue forms, and publish the repository license.
+
+### 中文
+
+- 新增 DS Bot 0.3.0 多会话、群聊、本地 Agent 标识、设置二级页、日程联动和电脑端安装指引。
+- Android：主机断线期间聊天输入框仍可编辑，并按会话保留本地草稿；恢复连接后仍需用户手动发送。
+- 新增离线会话秒开、主机离线缓存阅读、侧栏直接创建工作区、主机切换和连接诊断。
+- 改进 DSH-Go 配对、紧凑二维码、可编辑服务地址、设备账号标签和响应式登录布局。
+- 修复超大共享会话目录、损坏身份恢复、重连行为和已销毁链路延迟包处理问题。
+- 新增 Windows Codex CLI 发现，并在自部署 Server 丢失刷新响应时恢复有效凭据。
+- 统一发布 bundle 路径，新增中英文 Issue 表单并补充仓库许可证。

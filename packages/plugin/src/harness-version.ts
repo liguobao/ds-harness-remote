@@ -1,6 +1,6 @@
 import { readFile, realpath as realpathEntrypoint } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 const HARNESS_PACKAGE_NAME = '@deepseek-ai/dsh'
 
@@ -15,6 +15,8 @@ export interface HarnessVersionLookupContext {
   /** Extra directory roots that may hold `node_modules/@deepseek-ai/dsh`. */
   globalRoots?: string[]
   env?: NodeJS.ProcessEnv
+  /** Sibling module resolution scope. Pass null to disable. */
+  moduleScope?: string | null
 }
 
 export type HarnessSessionGeneration = 'legacy' | 'v3'
@@ -40,6 +42,15 @@ export function harnessSessionGeneration(version: string | undefined): HarnessSe
   const patch = Number(match[3])
   // 0.2.0 retains the existing Remote carrier; its on-disk format is unrelated.
   return major === 0 && ((minor === 1 && patch >= 5) || minor === 2) ? 'v3' : 'legacy'
+}
+/** True on DSH 0.2.x+ hosts whose Session Controller emits `api-session/*` events. */
+export function isLiveSessionEventsHarnessVersion(version: string | undefined): boolean {
+  if (version === undefined) return false
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim())
+  if (match === null) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 0 || (major === 0 && minor >= 2)
 }
 
 /** Read a candidate manifest, ignoring every package that is not the Harness CLI. */
@@ -89,6 +100,11 @@ function globalNpmRoots(context: HarnessVersionLookupContext, execPath: string, 
  * `process.argv[1]`. In that case recover the version from the working
  * directory, the running executable's ancestors, `createRequire(...)` module
  * scope, and the usual global npm roots instead of returning `undefined`.
+ *
+ * HarmonyOS / DSHM on-device installs are even further removed: the Harness
+ * runs in-process inside the host application, so every filesystem anchor
+ * above belongs to the host. `DSHM_CORE_DIR` (exported by the launcher) and
+ * this module's own resolution scope are consulted as additional candidates.
  */
 export async function readHarnessDistributionVersion(
   entrypoint: string | undefined = process.argv[1],
@@ -135,6 +151,31 @@ export async function readHarnessDistributionVersion(
     if (isAbsolute(resolvedEntrypoint)) {
       addAncestors(dirname(resolvedEntrypoint))
       addResolved(resolvedEntrypoint)
+    }
+  }
+
+  // HarmonyOS / DSHM on-device runtime: the Harness runs in-process (the app's
+  // main.js calls runProfile), so argv[1], execPath and the global npm roots all
+  // point at the host application instead of the Harness package. The launcher
+  // exports DSHM_CORE_DIR (trusted environment variable), the directory whose
+  // node_modules holds the CLI.
+  // Priority chain: CLI entrypoint -> DSHM_CORE_DIR -> moduleScope -> execPath/globalRoots/cwd.
+  const rawCoreDir = (context.env ?? process.env).DSHM_CORE_DIR?.trim() ?? ''
+  if (rawCoreDir.length > 0) {
+    const dshmCoreDir = isAbsolute(rawCoreDir) ? rawCoreDir : resolve(cwd, rawCoreDir)
+    addManifest(join(dshmCoreDir, 'node_modules', HARNESS_PACKAGE_NAME, 'package.json'))
+    addManifest(join(dshmCoreDir, 'package.json'))
+  }
+
+  // In-process hosts expose no filesystem anchor at all, but the module scope
+  // that loaded this plugin can still resolve the Harness package when it is a
+  // sibling dependency of the same installation.
+  const moduleScope = context.moduleScope === undefined ? import.meta.url : context.moduleScope
+  if (typeof moduleScope === 'string' && moduleScope.length > 0) {
+    try {
+      addManifest(createRequire(moduleScope).resolve(`${HARNESS_PACKAGE_NAME}/package.json`))
+    } catch {
+      // The install does not expose the Harness manifest to this module scope.
     }
   }
 

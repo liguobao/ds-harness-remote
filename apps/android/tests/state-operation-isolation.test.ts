@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
-    'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
+    'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveChatAppearance', 'loadChatAppearance', 'saveActivityDockMode', 'loadActivityDockMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
   createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(), loadHermes: vi.fn(),
@@ -200,9 +200,15 @@ describe('account directory operation isolation', () => {
   })
 
   it('still removes every revoked pin sequentially and handles current authorization failures', async () => {
-    await runScenarios(['cleanup', 'auth-error'].map(name => ({ name, run: async () => {
+    await runScenarios(['cleanup', 'auth-error', 'key-mismatch', 'lookup-failed-pinned', 'preserve-unrelated-error'].map(name => ({ name, run: async () => {
       const store = accountFixture()
       if (name === 'auth-error') mocks.reconcile.mockRejectedValueOnce(authError())
+      else if (name === 'key-mismatch') mocks.reconcile.mockResolvedValueOnce({ devices: [], missingTrustedDeviceIds: [], keyMismatchDeviceIds: ['host-1'], lookupFailedDeviceIds: [] })
+      else if (name === 'lookup-failed-pinned') mocks.reconcile.mockResolvedValueOnce({ devices: [{ deviceId: 'host-1' }], missingTrustedDeviceIds: [], keyMismatchDeviceIds: [], lookupFailedDeviceIds: ['host-1'], lookupError: new Error('descriptor timeout') })
+      else if (name === 'preserve-unrelated-error') {
+        store.set({ error: 'unrelated session error' })
+        mocks.reconcile.mockResolvedValueOnce({ devices: [{ deviceId: 'valid' }], missingTrustedDeviceIds: [] })
+      }
       else mocks.reconcile.mockResolvedValueOnce({ devices: [{ deviceId: 'valid' }], missingTrustedDeviceIds: ['one', 'two'] })
       await store.get().refreshDevices()
       expect(store.get().refreshing).toBe(false)
@@ -210,8 +216,21 @@ describe('account directory operation isolation', () => {
         expect(store.get().reauthRequired).toBe(true)
         expect(mocks.storage.clearDeviceCredentials).toHaveBeenCalledOnce()
         expect(store.get().disconnect).toHaveBeenCalledOnce()
+      } else if (name === 'key-mismatch') {
+        expect(store.get().devices).toEqual([])
+        expect(store.get().error).toBeTruthy()
+        mocks.reconcile.mockResolvedValueOnce({ devices: [{ deviceId: 'host-1' }], missingTrustedDeviceIds: [] })
+        await store.get().refreshDevices()
+        expect(store.get().error).toBeUndefined()
+      } else if (name === 'lookup-failed-pinned') {
+        expect(store.get().devices).toEqual([{ deviceId: 'host-1' }])
+        expect(store.get().error).toBeTruthy()
+      } else if (name === 'preserve-unrelated-error') {
+        expect(store.get().devices).toEqual([{ deviceId: 'valid' }])
+        expect(store.get().error).toBe('unrelated session error')
       } else {
         expect(store.get().devices).toEqual([{ deviceId: 'valid' }])
+        expect(store.get().error).toBeUndefined()
         expect(mocks.storage.forgetHost!.mock.calls).toEqual([['one'], ['two']])
         expect(mocks.storage.clearCodexPermissionPresets!.mock.calls).toEqual([['one'], ['two']])
         expect(mocks.storage.clearCodexPermissionPresets!.mock.invocationCallOrder[0]).toBeLessThan(mocks.storage.forgetHost!.mock.invocationCallOrder[1]!)

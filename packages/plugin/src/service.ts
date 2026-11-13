@@ -1,13 +1,16 @@
+import { HostPairing } from './host-pairing.js'
+import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
-import { createEvent, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
+import { createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
 import {
   harnessSessionGeneration,
+  isLiveSessionEventsHarnessVersion,
   readHarnessDistributionVersion,
 } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
@@ -24,7 +27,8 @@ import {
 } from './server-api.js'
 import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
-import { HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
+import { dispatchCommandForHost, HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
+import { readCompactionConfirmation, RemoteCompactionOperations } from './remote-compaction-operations.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
@@ -58,6 +62,7 @@ export interface HostRemoteStatus {
   account?: string
   authorized: boolean
   accountRequired: boolean
+  pairingHostOnly?: boolean
   connectedClients: HostConnectedClient[]
 }
 
@@ -71,14 +76,21 @@ export class HostPluginRuntime {
   private readonly serverApi?: HostServerApi
   private serverConnection?: HostServerConnection
   private harnessVersion?: string
+  private pairing?: HostPairing
   private closed = false
   private readonly codex: CodexRemoteDomain
   private readonly acp: AcpRemoteGateway
   private readonly codexWorkspaceState = new CodexWorkspaceState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
+  /**
+   * Host-wide async compaction registry. It deliberately lives on the runtime,
+   * not on a connection: disconnecting a client must not abort a compaction.
+   */
+  private readonly compactionOperations: RemoteCompactionOperations
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
   private localAcpPeer?: AcpPeerBridge
   private localAcpPublish: PublishAcpFrame = async () => undefined
+  private warnedMissingHostApi = false
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -96,8 +108,44 @@ export class HostPluginRuntime {
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
+    // Each operation runs on its own owner Peer minted from the Host gateway,
+    // so its lifetime is independent of the client connection that submitted it.
+    this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
+      const gateway = this.localGateway?.createPeer?.() ?? this.localGateway
+      if (gateway === undefined) throw new RpcError('HARNESS_UNAVAILABLE', 'The Host Harness gateway is unavailable.')
+      try {
+        return await dispatchCommandForHost(
+          gateway,
+          { args: { agentId: sessionId, line: '/compact' } },
+          signal,
+          this.harnessVersion,
+        )
+      } finally {
+        await gateway.dispose?.()
+      }
+    }, {
+      logger,
+      // `commands/execute` stops waiting on abort while the compaction handler
+      // keeps running, so lifecycle confirmation comes from the Session log.
+      confirm: async (sessionId, acceptedAt, commandId) => {
+        const gateway = this.localGateway?.createPeer?.() ?? this.localGateway
+        if (gateway === undefined) return { kind: 'unknown' }
+        try {
+          const result = await gateway.dispatch('session/events', {
+            args: { request: { address: { kind: 'session', sessionId }, maxMessages: 128 } },
+          }, AbortSignal.timeout(5_000))
+          return readCompactionConfirmation(result, acceptedAt, commandId)
+        } catch {
+          return { kind: 'unknown' }
+        } finally {
+          await gateway.dispose?.()
+        }
+      },
+    })
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
+      const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer)
+      const uploadBridge = uploadDispatcher === undefined ? undefined : new PluginRouteBridge(uploadDispatcher, this.logger)
       const harnessRemote = peerGateway?.supportsCarrier === true
         ? new HarnessRemoteBridge(
             peerGateway,
@@ -118,6 +166,7 @@ export class HostPluginRuntime {
               sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
             ),
             this.schedule,
+            uploadBridge === undefined ? undefined : body => uploadBridge.call({ route: 'api/session/uploadFileBinary', body }, true),
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(
@@ -142,7 +191,7 @@ export class HostPluginRuntime {
         this.logger,
         fileViewer,
         harnessRemote,
-        () => this.hostCapabilities(),
+        () => this.transportCapabilities(peerGateway),
         codex,
         cursor,
         // Handles and their lifetime belong to this connection; only policy is shared.
@@ -155,10 +204,14 @@ export class HostPluginRuntime {
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
         ), undefined, context.transportMode),
+        {
+          operations: this.compactionOperations,
+          owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId },
+        },
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
-      this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory))
+      this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory), fetch, 'host', config.httpServerAllowlist)
     }
   }
 
@@ -208,6 +261,8 @@ export class HostPluginRuntime {
       this.harnessVersion = await this.readHarnessVersion()
       this.serverApi.setHarnessVersion(this.harnessVersion)
       this.serverApi.bindIdentity(this.identity)
+      await this.serverApi.loadStoredPolicy()
+      this.initializePairing()
       this.serverConnection = this.createServerConnection(this.identity)
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
     }
@@ -238,9 +293,28 @@ export class HostPluginRuntime {
       ...(error === undefined ? {} : { error }),
       ...(authorization?.account === undefined ? {} : { account: authorization.account }),
       authorized: authorization !== undefined,
+      pairingHostOnly: this.serverApi?.pairingHostOnly() ?? false,
       accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED' || error === 'DEVICE_REVOKED' || error === 'DEVICE_OWNERSHIP_REQUIRED',
       connectedClients: this.listConnectedClients(),
     }
+  }
+
+  private initializePairing(): void {
+    this.pairing?.close()
+    if (!this.serverApi || !this.identity || !this.config.serverUrl) { this.pairing = undefined; return }
+    this.pairing = new HostPairing(this.config.serverUrl!, this.identities.directory, this.identity, {
+      deviceId: this.identity.deviceId, name: this.identity.name, role: 'host', platform: process.platform,
+      identityKey: this.identity.publicKey,
+      ...(this.harnessVersion === undefined ? {} : { harnessVersion: this.harnessVersion }),
+    }, async result => { await this.serverApi!.adoptPairing(result); if (!this.closed) this.serverConnection?.reconnect() }, fetch, this.config.httpServerAllowlist)
+  }
+
+  async pairingControl(action: 'start' | 'status' | 'confirm' | 'cancel', input: { sessionId?: string; verificationCode?: string }): Promise<HostPairingView | undefined> {
+    if (this.pairing === undefined || this.closed) throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure and save the Server URL before pairing.', false)
+    if (action === 'start') return this.pairing.start()
+    if (action === 'status') return this.pairing.status()
+    if (typeof input.sessionId !== 'string') throw new ServerApiError('INVALID_MESSAGE', 'A specific pairing session is required.', false)
+    return action === 'confirm' ? this.pairing.confirm(input.sessionId, input.verificationCode) : this.pairing.cancel(input.sessionId)
   }
 
   async hasStoredAuthorization(): Promise<boolean> {
@@ -291,9 +365,12 @@ export class HostPluginRuntime {
     }
     const result = await this.serverApi.pollOAuthQrLogin(this.currentIdentity(), qrId, async () => {
       await this.serverConnection?.stop()
+      await this.pairing?.discard()
+      this.pairing = undefined
       this.identity = await this.identities.reset(this.config.deviceName)
       this.serverApi!.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
+      this.initializePairing()
       return this.identity
     })
     if (result.status === 'complete') {
@@ -304,6 +381,8 @@ export class HostPluginRuntime {
   }
 
   async clearHostAuthorization(): Promise<void> {
+    await this.pairing?.discard()
+    this.pairing = undefined
     await this.serverConnection?.stop()
     let revokeFailure: unknown
     try {
@@ -314,6 +393,7 @@ export class HostPluginRuntime {
     this.identity = await this.identities.reset(this.config.deviceName)
     this.serverApi?.bindIdentity(this.identity)
     if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
+    this.initializePairing()
     this.logger.info('Host authorization cleared')
     if (revokeFailure !== undefined) throw revokeFailure
   }
@@ -328,9 +408,12 @@ export class HostPluginRuntime {
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
       await this.serverConnection?.stop()
+      await this.pairing?.discard()
+      this.pairing = undefined
       this.identity = await this.identities.reset(this.config.deviceName)
       this.serverApi.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
+      this.initializePairing()
       result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account)
       this.logger.info('Rotated revoked Host identity before owned-device authorization')
     }
@@ -345,9 +428,12 @@ export class HostPluginRuntime {
     }
     const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password, async () => {
       await this.serverConnection?.stop()
+      await this.pairing?.discard()
+      this.pairing = undefined
       this.identity = await this.identities.reset(this.config.deviceName)
       this.serverApi!.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
+      this.initializePairing()
       this.logger.info('Rotated revoked Host identity before account authorization')
       return this.identity
     })
@@ -425,8 +511,10 @@ export class HostPluginRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.pairing?.close()
     this.serverApi?.close()
     await this.serverConnection?.stop()
+    this.compactionOperations.closeAll()
     await this.connections.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined
@@ -504,6 +592,56 @@ export class HostPluginRuntime {
       }
     }
     return capabilities
+  }
+
+  private async transportCapabilities(gateway?: LocalTypertGateway): Promise<string[]> {
+    const capabilities = this.hostCapabilities()
+    if (gateway?.supportsCarrier !== true) return capabilities
+    let result: Awaited<ReturnType<LocalTypertGateway['dispatch']>>
+    try {
+      result = await gateway.dispatch('session/list', { args: { _request: {} } }, AbortSignal.timeout(5_000))
+    } catch {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
+    if (result.ok) {
+      if (isLiveSessionEventsHarnessVersion(this.harnessVersion) && await this.probeLiveSessionEvents(gateway)) {
+        capabilities.push(REMOTE_SESSION_EVENTS_CAPABILITY)
+      }
+      return capabilities
+    }
+    if (result.error.code === 'gateway/service-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'The Host Session API is not ready.', undefined, true)
+    }
+    if (result.error.code !== 'gateway/invocation-unavailable') {
+      throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
+    }
+    if (!this.warnedMissingHostApi) {
+      this.warnedMissingHostApi = true
+      this.logger.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
+    }
+    return capabilities.filter(value => !value.startsWith('harness.remote.') && value !== 'harness.terminal.v1')
+  }
+
+  private async probeLiveSessionEvents(gateway: LocalTypertGateway): Promise<boolean> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2_000)
+    let iterator: AsyncIterator<unknown> | undefined
+    try {
+      const stream = await gateway.open('$events', { args: {} }, controller.signal)
+      iterator = stream[Symbol.asyncIterator]()
+      const first = await iterator.next()
+      return !first.done
+        && typeof first.value === 'object'
+        && first.value !== null
+        && !Array.isArray(first.value)
+        && (first.value as { type?: unknown }).type === 'ready'
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      await iterator?.return?.().catch(() => undefined)
+    }
   }
 
   private hostWorkspaceTypes(): RemoteWorkspaceTypeDescription[] {

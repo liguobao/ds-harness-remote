@@ -54,6 +54,20 @@ Client 与 Host 通过 HTTPS 完成：
 
 生产 Server 必须使用 HTTPS；只有 localhost 开发环境允许 HTTP。Token 放在认证 header 或请求体中，不能进入 URL、日志或 WebRTC signaling。
 
+自建 Server 如果运行在企业内网的非标准地址段，可以通过 Host 配置 `httpServerAllowlist`
+放行 HTTP。配置值支持 IPv4/IPv6 CIDR、单个 IP 和精确主机名，例如：
+
+```json
+{
+  "serverUrl": "http://11.23.4.5:8080",
+  "httpServerAllowlist": ["11.0.0.0/8"]
+}
+```
+
+也可以设置环境变量 `DSH_REMOTE_HTTP_SERVER_ALLOWLIST=11.0.0.0/8,2001:db8::/32`。
+该白名单只放宽 HTTP origin 检查，HTTPS 不受影响。文件中的显式配置优先于环境变量，
+未知或无效的网段会拒绝启动。
+
 ### 2.2 Control 平面
 
 Host 和 Client 各自建立一条出站 WebSocket：

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { parseBotReplies } from '../src/screens/bot/replies'
+import { parseBotReplies, parseBotReplyPayload, stackBotReplies } from '../src/screens/bot/replies'
 
 // Shapes mirror ds-bot/src/host/groups.js round.replies entries.
 const message = (text: string) => ({ botId: 'session-1', name: 'Chief', color: 'deepseek', text, time: 1 })
@@ -34,4 +34,79 @@ describe('Bot room reply extraction', () => {
       if (row.expected > 0) expect(replies![0]).toMatchObject(row.first ?? { name: 'Chief' })
     } })))
   })
+})
+
+/**
+ * Contract with the Host compact projection (`packages/plugin/src/compact-bot-round.ts`):
+ * the payload stays `{"replies":[...]}` and only adds a `truncated` flag, so the
+ * client can tell a whole round from a prefix without a new wire format.
+ */
+const hostCompacted = JSON.stringify({
+  replies: [
+    { botId: 'session-1', name: 'Chief', text: '甲'.repeat(2048), time: 1 },
+    { botId: 'session-1', name: 'Monitor', text: '乙'.repeat(2048), time: 1 },
+    { botId: 'session-1', name: 'Scribe', text: '丙'.repeat(2048), time: 1 },
+  ],
+  passed: 5,
+  truncated: true,
+})
+
+describe('Bot reply payload completeness', () => {
+  it('distinguishes whole, Host-truncated and salvaged-prefix payloads', async () => {
+    await runScenarios([
+      {
+        name: 'whole round',
+        detail: round([message('x'), message('y')]),
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => {
+          expect(payload).toMatchObject({ complete: true, truncated: false })
+          expect(payload?.rows).toHaveLength(2)
+        },
+      },
+      {
+        name: 'Host structural projection with a capped round',
+        detail: hostCompacted,
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => {
+          expect(payload).toMatchObject({ complete: true, truncated: true })
+          expect(payload?.rows.map(row => row.name)).toEqual(['Chief', 'Monitor', 'Scribe'])
+          expect(payload?.rows.every(row => (row.text as string).length === 2048)).toBe(true)
+        },
+      },
+      {
+        name: 'salvaged prefix keeps only closed entries and is incomplete',
+        detail: `{"replies":[${JSON.stringify(message('x'.repeat(2000)))},${JSON.stringify(message('y')).slice(0, 20)}`,
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => {
+          expect(payload).toMatchObject({ complete: false, truncated: false })
+          expect(payload?.rows).toHaveLength(1)
+        },
+      },
+      {
+        name: 'content-block envelope is a whole round',
+        detail: JSON.stringify({ content: [{ type: 'tool-result', content: [{ type: 'text', text: round([message('x')]) }] }] }),
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => {
+          expect(payload).toMatchObject({ complete: true, truncated: false })
+          expect(payload?.rows).toHaveLength(1)
+        },
+      },
+      {
+        name: 'empty replies array is a whole empty payload',
+        detail: round([]),
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => {
+          expect(payload).toMatchObject({ complete: true, truncated: false })
+          expect(payload?.rows).toHaveLength(0)
+        },
+      },
+      {
+        name: 'ordinary tool output has no payload',
+        detail: JSON.stringify({ ok: true, lines: ['a'] }),
+        run: (payload: ReturnType<typeof parseBotReplyPayload>) => expect(payload).toBeUndefined(),
+      },
+    ].map(row => ({ name: row.name, run: async () => row.run(parseBotReplyPayload(row.detail)) })))
+    // The legacy accessor stays a thin wrapper for callers that only need rows.
+    expect(parseBotReplies(hostCompacted)).toHaveLength(3)
+  })
+})
+
+it('stacks adjacent member messages but preserves user and event boundaries', () => {
+  const rows = [message('one'), message('two'), {kind: 'user', text: 'hello'}, message('three'), {kind: 'done', botId: 'session-1'}, message('four')]
+  expect(stackBotReplies(rows).map(row => row.texts)).toEqual([['one', 'two'], ['hello'], ['three'], [''], ['four']])
 })

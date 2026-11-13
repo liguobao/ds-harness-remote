@@ -1,15 +1,19 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native'
+import { Camera, ChevronRight, FileText, Film, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { IconButton } from '../../ui/components'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { ModalSurface, usePickerListMaxHeight } from './modal'
+import { usePickerListMaxHeight } from './modal'
+import { SheetModal } from '../../ui/sheet'
+import type { Rect } from '../../ui/motion'
 import { createStyles } from './styles'
 
 type Props = {
   visible: boolean
   onClose: () => void
+  /** Window rect of the composer the sheet grows out of. */
+  anchor?: Rect
   canAttachImages: boolean
   attachmentPicking: boolean
   takePhoto: () => Promise<void>
@@ -31,7 +35,7 @@ type Props = {
   onOpenPermissions: () => void
 }
 
-export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPicking,
+export function ChatActionMenu({ visible, onClose, anchor, canAttachImages, attachmentPicking,
   takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
   permissionDisabled, permissionLabel, onReferenceChat, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions }: Props) {
@@ -39,8 +43,7 @@ export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPi
   const styles = useThemedStyles(createStyles)
   const plusMenuListMaxHeight = usePickerListMaxHeight()
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <ModalSurface onClose={onClose}>
+    <SheetModal visible={visible} onClose={onClose} anchor={anchor}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
           style={{ maxHeight: plusMenuListMaxHeight }}
@@ -49,31 +52,29 @@ export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPi
         >
           <View style={styles.plusCardRow}>
             {canAttachImages && (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.chat.takePhoto}
-                  accessibilityState={{ disabled: attachmentPicking }}
-                  disabled={attachmentPicking}
-                  onPress={() => { onClose(); void takePhoto() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-                >
-                  <Camera size={22} color={colors.primary} />
-                  <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.chat.photos}
-                  accessibilityState={{ disabled: attachmentPicking }}
-                  disabled={attachmentPicking}
-                  onPress={() => { onClose(); void pickImages() }}
-                  style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-                >
-                  <Images size={22} color={colors.primary} />
-                  <Text style={styles.plusCardText}>{strings.chat.photos}</Text>
-                </Pressable>
-              </>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.chat.takePhoto}
+                accessibilityState={{ disabled: attachmentPicking }}
+                disabled={attachmentPicking}
+                onPress={() => { onClose(); void takePhoto() }}
+                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
+              >
+                <Camera size={22} color={colors.primary} />
+                <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
+              </Pressable>
             )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={canAttachImages ? strings.chat.photos : strings.chat.videos}
+              accessibilityState={{ disabled: attachmentPicking }}
+              disabled={attachmentPicking}
+              onPress={() => { onClose(); void pickImages() }}
+              style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
+            >
+              {canAttachImages ? <Images size={22} color={colors.primary} /> : <Film size={22} color={colors.primary} />}
+              <Text style={styles.plusCardText}>{canAttachImages ? strings.chat.photos : strings.chat.videos}</Text>
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.files}
@@ -162,8 +163,7 @@ export function ChatActionMenu({ visible, onClose, canAttachImages, attachmentPi
             </Pressable>
           )}
         </ScrollView>
-      </ModalSurface>
-    </Modal>
+    </SheetModal>
 
   )
 }

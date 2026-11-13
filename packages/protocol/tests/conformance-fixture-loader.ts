@@ -14,6 +14,7 @@ export type FixtureOperation =
   | 'parseRpcErrorPayload'
   | 'encodeControlFrameWithLimits'
   | 'decodeControlFrameWithLimits'
+  | 'decodeRelayDataFrameWithLimits'
 
 export interface ProtocolFixtureCase {
   name: string
@@ -50,6 +51,7 @@ const operations = new Set<FixtureOperation>([
   'parseRpcErrorPayload',
   'encodeControlFrameWithLimits',
   'decodeControlFrameWithLimits',
+  'decodeRelayDataFrameWithLimits',
 ])
 
 export async function loadProtocolFixtures(): Promise<ProtocolFixtureSuite[]> {

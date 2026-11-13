@@ -20,6 +20,10 @@ export interface RemoteStatus {
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
   controlUnavailable?: boolean
+  startupError?: {
+    code: string
+    message: string
+  }
   deviceName?: string
   deviceId?: string
   serverUrl?: string
@@ -60,6 +64,7 @@ export interface RemoteStatus {
   hostAuthorizationAvailable: boolean
   host?: {
     deviceId?: string
+    pairingHostOnly?: boolean
     configured: boolean
     online: boolean
     reconnecting: boolean
@@ -252,10 +257,31 @@ export interface PluginSettingsView {
     action: 'configured' | 'installed' | 'download_required'
     downloadUrl?: string
   }
+  startupError?: {
+    code: string
+    message: string
+  }
 }
 
+export type PluginLogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type PluginLogFilter = 'all' | 'warn'
+
+export interface PluginLogEntry {
+  seq: number
+  timestamp: string
+  level: PluginLogLevel
+  line: string
+}
+
+export interface PluginLogView {
+  logLevel: PluginLogLevel
+  entries: PluginLogEntry[]
+  totalBuffered: number
+  filePath?: string
+  fileError?: string
+}
 export interface PluginAssociation {
-  method: 'account' | 'host_registration_code' | 'owned_device'
+  method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
 }
 

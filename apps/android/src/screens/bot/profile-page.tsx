@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   BackHandler,
   Dimensions,
@@ -13,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native'
+import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import {
   ArrowLeftRight,
@@ -38,6 +38,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as s } from '../../locales/i18n'
 import {
+  canDeleteBot,
   object,
   objects,
   text,
@@ -357,7 +358,7 @@ export function BotProfilePage({
       label: s.bots.copyId,
       onPress: () => void Clipboard.setStringAsync(bot.id),
     })
-    if (!bot.main) {
+    if (canDeleteBot(state, bot)) {
       popoverActions.push({
         key: 'delete',
         icon: Trash2,
@@ -863,6 +864,25 @@ export function BotProfilePage({
                       </View>
                     )}
                   </View>
+
+                  {canDeleteBot(state, bot) && (
+                    <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={s.bots.delete}
+                        disabled={busy || Boolean(state.readOnly)}
+                        onPress={confirmDelete}
+                        style={({ pressed }) => [
+                          styles.cardRow,
+                          pressed && styles.cardRowPressed,
+                          (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
+                        ]}
+                      >
+                        <Trash2 size={19} color={colors.danger} />
+                        <Text style={[styles.rowLabel, { color: colors.danger }]}>{s.bots.delete}</Text>
+                      </Pressable>
+                    </View>
+                  )}
                 </View>
               ) : room ? (
                 <View style={{ gap: 16 }}>
@@ -975,6 +995,23 @@ export function BotProfilePage({
                         onValueChange={() => void perform('set-flags', { id: room.id, pinned: !room.pinned })}
                       />
                     </View>
+                  </View>
+
+                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={s.bots.delete}
+                      disabled={busy || Boolean(state.readOnly)}
+                      onPress={confirmDelete}
+                      style={({ pressed }) => [
+                        styles.cardRow,
+                        pressed && styles.cardRowPressed,
+                        (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
+                      ]}
+                    >
+                      <Trash2 size={19} color={colors.danger} />
+                      <Text style={[styles.rowLabel, { color: colors.danger }]}>{s.bots.delete}</Text>
+                    </Pressable>
                   </View>
                 </View>
               ) : null}

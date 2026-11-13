@@ -1,5 +1,6 @@
 services:
   server:
+    image: ghcr.io/liguobao/ds-harness-remote/server:latest
     build:
       context: ../..
       dockerfile: apps/server/Dockerfile

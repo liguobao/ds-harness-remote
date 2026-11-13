@@ -4,7 +4,8 @@
  * bundle's sandboxed widget iframe, never as this page's document.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Share, StyleSheet, Text, View } from 'react-native'
+import { Share, StyleSheet, Text, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import * as Crypto from 'expo-crypto'
 import WebView from 'react-native-webview'
 import type { WebViewMessageEvent } from 'react-native-webview'

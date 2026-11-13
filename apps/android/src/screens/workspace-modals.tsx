@@ -7,8 +7,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  type StyleProp,
-  type ViewStyle,
   View,
 } from 'react-native'
 import {
@@ -37,6 +35,7 @@ import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { SheetModal } from '../ui/sheet'
 import { strings } from '../locales/i18n'
 
 const DIRECTORY_SHEET_COMPACT_RATIO = 0.92
@@ -74,8 +73,7 @@ export function WorkspaceActionsModal({
   const canManage = target !== undefined && (target.backend === undefined || target.backend === 'harness')
 
   return (
-    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+    <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
         <View style={styles.grabber} />
         <View style={styles.sheetHeader}>
           <View style={styles.workspaceActionHeading}>
@@ -156,8 +154,7 @@ export function WorkspaceActionsModal({
             </GroupCard>
           )}
         </ScrollView>
-      </WorkspaceModalSurface>
-    </Modal>
+    </SheetModal>
   )
 }
 
@@ -435,8 +432,7 @@ export function RenameWorkspaceModal({
   }
 
   return (
-    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+    <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
         <View style={styles.grabber} />
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.renameTitle}</Text>
@@ -460,8 +456,7 @@ export function RenameWorkspaceModal({
           />
           <Button label={strings.workspaces.saveName} onPress={() => void rename()} loading={busy} disabled={title.trim().length === 0} />
         </ScrollView>
-      </WorkspaceModalSurface>
-    </Modal>
+    </SheetModal>
   )
 }
 
@@ -509,8 +504,7 @@ export function DirectoryBrowserModal({
   const entries = listing === undefined ? [] : listing.entries.filter(entry => showHidden || !entry.hidden)
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight }]}>
+    <SheetModal visible={visible} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight, maxHeight: browserSheetHeight }]}>
         <View style={styles.grabber} />
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>
@@ -564,33 +558,7 @@ export function DirectoryBrowserModal({
             onPress={() => { if (listing !== undefined) onChoose(listing.path) }}
           />
         </View>
-      </WorkspaceModalSurface>
-    </Modal>
-  )
-}
-
-function WorkspaceModalSurface({
-  onClose,
-  backdropStyle,
-  sheetStyle,
-  children,
-}: {
-  onClose: () => void
-  backdropStyle: StyleProp<ViewStyle>
-  sheetStyle: StyleProp<ViewStyle>
-  children: ReactNode
-}) {
-  return (
-    <View style={backdropStyle} pointerEvents="box-none">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={strings.common.close}
-        onPress={onClose}
-        pointerEvents="box-only"
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={[sheetStyle, { zIndex: 1, elevation: 1 }]} pointerEvents="box-none">{children}</View>
-    </View>
+    </SheetModal>
   )
 }
 

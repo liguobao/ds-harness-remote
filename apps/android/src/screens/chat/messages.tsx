@@ -4,7 +4,7 @@ import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp,
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
-  Alert,
+  ActivityIndicator,
   Animated,
   Modal,
   Pressable,
@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native'
+import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import Svg, { Path } from 'react-native-svg'
@@ -40,7 +41,8 @@ import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-
 import { PresentedFileGroup } from '../../ui/file-card'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { parseBotReplies } from '../bot/replies'
+import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from '../../ui/syntax-highlight'
+import { parseBotReplyPayload } from '../bot/replies'
 import { BotReplies } from '../bot/reply-view'
 import type { BotObject } from '../../services/bot-catalog'
 import type { ProcessActivity, ProcessSegment } from '../chat-process'
@@ -73,16 +75,17 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     const result: (ProcessSegment | { kind: 'botReplies'; key: string; rows: BotObject[]; groupRelay: boolean })[] = []
     let pending: ChatItem[] = []
     for (const item of segment.items) {
-      const replies = item.kind === 'tool' && item.state === 'finished'
-        ? parseBotReplies(item.resultDetail?.text) : undefined
-      if (!replies?.length) { pending.push(item); continue }
+      const payload = item.kind === 'tool' && item.state === 'finished'
+        ? parseBotReplyPayload(item.resultDetail?.text) : undefined
+      if (!payload?.rows.length) { pending.push(item); continue }
       const groupRelay = item.kind === 'tool' && (item.toolKey ?? item.toolName) === 'group_relay'
-      // A completed group relay is conversation content, not a visible tool step.
-      // Unrecognized/failed results and all other tools retain their diagnostics.
-      if (!groupRelay) pending.push(item)
+      // A whole group relay is conversation content, not a visible tool step.
+      // A partially recovered or Host-truncated round keeps its expandable tool
+      // diagnostics: the visible replies are only a prefix of that round.
+      if (!groupRelay || !payload.complete || payload.truncated) pending.push(item)
       if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
       pending = []
-      result.push({ kind: 'botReplies', key: `bot-replies:${item.id}`, rows: replies, groupRelay })
+      result.push({ kind: 'botReplies', key: `bot-replies:${item.id}`, rows: payload.rows, groupRelay })
     }
     if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
     return result
@@ -215,21 +218,21 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
       accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
-      hitSlop={dense ? { top: 6, bottom: 6 } : undefined}
+      hitSlop={{ top: 7, bottom: 7 }}
       style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
-      <View style={styles.processIcon}><ActivityIcon size={17} color={colors.muted} /></View>
+      <View style={styles.processIcon}><ActivityIcon size={15} color={running ? colors.primary : colors.muted} /></View>
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
-      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+      {expanded ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
     </Pressable>
     {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
       {latestTool === undefined || (!closed && latestTool.state === 'running')
         ? <ReplyStatusDots />
-        : latestTool.state === 'failed' ? <X size={14} color={colors.muted} /> : <CircleCheck size={14} color={colors.muted} />}
+        : latestTool.state === 'failed' ? <X size={13} color={colors.danger} /> : <CircleCheck size={13} color={colors.muted} />}
       <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
-    {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
+    {expanded && <ScrollView ref={body} style={[{ maxHeight: Math.min(400, height / 2) }, styles.processScroll, running && styles.processScrollActive]} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
-      onLayout={() => { if (running) body.current?.scrollToEnd({ animated: false }) }}
+      onLayout={() => { if (running || pending) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
       {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text) && !item.images?.length
         ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>
@@ -238,10 +241,12 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt, userBubble }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
+  /** Paint the user's own message as a bubble on the inverse surface (group chats). */
+  userBubble?: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
   artifacts?: UiArtifact[]
@@ -255,7 +260,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
     && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} />
+  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -326,15 +331,16 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
-function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt }: {
+function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
+  userBubble?: boolean
   artifacts?: UiArtifact[]
   editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
   onFilePress?: (path: string) => void
   onSendPrompt?: (text: string) => Promise<boolean>
 }) {
-  const { colors } = useTheme()
+  const { colors, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
   const user = item.role === 'user'
   const remote = item.role === 'assistant'
@@ -372,32 +378,54 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
     const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
+    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(body)
+    const solidText = colors.onPrimary ?? colors.white
+    const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
+    const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
+    const solidPalette = { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' }
+    const softBubblePalette = { ...colors, surfaceStrong: colors.border }
+    const userBubbleStyle = userBubble
+      ? styles.userBubble
+      : !hasBubbleText
+        ? styles.userMediaOnly
+        : appearance.bubbleStyle === 'tinted'
+          ? styles.userTintedBubble
+          : appearance.bubbleStyle === 'solid'
+            ? styles.userSolidBubble
+            : appearance.bubbleStyle === 'minimal'
+              ? styles.userMinimalBubble
+              : styles.userSoftBubble
+    const quoteTint = userBubble ? colors.onInverse : isSolid ? solidText : colors.primary
     return <View style={styles.userBlock}>
-      <View style={styles.userContent}>
+      <View style={[styles.userContent, userBubbleStyle]}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
         {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
             {quotes.map((quoteText, index) => (
               <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
-                <QuoteMarkIcon size={14} color={colors.primary} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 200 }]}>
+                <QuoteMarkIcon size={14} color={quoteTint} />
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: quoteTint, maxWidth: 200 }]}>
                   “{formatQuoteDraftSnippet(quoteText, 16)}”
                 </Text>
               </View>
             ))}
             {hasVisibleMessageText(body) && (
-              <Text selectable style={styles.userMessageInlineText}>{body}</Text>
+              <Text selectable style={[styles.userMessageInlineText, userBubble && { color: colors.onInverse }, isSolid && { color: solidText }]}>{body}</Text>
             )}
           </View>
         ) : (
-          hasVisibleMessageText(body) && <NativeMarkdown text={body} />
+          hasVisibleMessageText(body) && (
+            <View style={styles.userMarkdownWrap}>
+              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
+            </View>
+          )
         )}
       </View>
       {item.sendState === 'canceled'
         ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
         : undelivered
           ? <UserRowResend item={item} status={status} />
-          : <MessageActions item={item} />}
+          : <MessageActions item={item} hideTime={userBubble} />}
       {/* Failed rows keep their actions: losing copy would be a regression. */}
       {undelivered && item.sendState !== 'canceled' && <MessageActions item={item} />}
     </View>
@@ -436,16 +464,19 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel}。${preview}`}
         accessibilityState={{ expanded }}
+        hitSlop={{ top: 7, bottom: 7 }}
         onPress={() => setExpanded(value => !value)}
         style={({ pressed }) => [styles.reasoningHeader, pressed && styles.reasoningHeaderPressed]}
       >
-        <Sparkles size={16} color={active ? colors.accent : colors.muted} />
+        <View style={styles.processIcon}>
+          <Sparkles size={15} color={active ? colors.accent : colors.muted} />
+        </View>
         <Text style={[styles.reasoningLabel, active && styles.reasoningLabelActive]}>{label}</Text>
         <Text style={styles.activitySeparator}>·</Text>
         <Text style={styles.reasoningPreview} numberOfLines={1}>{preview}</Text>
         {expanded
-          ? <ChevronDown size={17} color={colors.muted} />
-          : <ChevronRight size={17} color={colors.muted} />}
+          ? <ChevronDown size={16} color={colors.muted} />
+          : <ChevronRight size={16} color={colors.muted} />}
       </Pressable>
       {expanded && <View style={styles.reasoningBody}><NativeMarkdown text={item.reasoning ?? ''} /></View>}
     </View>
@@ -491,11 +522,11 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
       >
         <View style={styles.toolIcon}>
           {item.toolName === 'todo_write' || (item.toolKey ?? '').endsWith('todo_write') ? (
-            <IconChecklistOutline size={16} color={colors.primary} />
+            <IconChecklistOutline size={15} color={colors.primary} />
           ) : /command|bash|shell|命令|终端/i.test(item.toolName) ? (
-            <Terminal size={16} color={colors.muted} />
+            <Terminal size={15} color={colors.muted} />
           ) : (
-            <Code2 size={16} color={colors.muted} />
+            <Code2 size={15} color={colors.muted} />
           )}
         </View>
         <View style={styles.toolCopy}>
@@ -503,10 +534,13 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
           {detail !== undefined && <Text style={styles.activitySeparator}>·</Text>}
           {detail !== undefined && <Text style={styles.toolSummary} numberOfLines={1}>{detail}</Text>}
         </View>
+        {item.state === 'running' && (
+          <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+        )}
         {item.state === 'failed' && <Text style={styles.toolFailed}>{stateText}</Text>}
         {hasDetail && (expanded
-          ? <ChevronDown size={17} color={colors.muted} />
-          : <ChevronRight size={17} color={colors.muted} />)}
+          ? <ChevronDown size={16} color={colors.muted} />
+          : <ChevronRight size={16} color={colors.muted} />)}
       </Pressable>
       {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} tool />}
       {expanded && hasDetail && (
@@ -531,14 +565,33 @@ export function ChatImages({ images, alignEnd = false, tool = false }: { images:
 }
 
 function ToolDetailView({ label, detail }: { label: string; detail: ToolDisplayDetail }) {
-  const { colors } = useTheme()
+  const { scheme, appearance } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const useDarkCode = appearance.codeTheme === 'dark' || (appearance.codeTheme === 'auto' && scheme === 'dark')
+  const palette = useDarkCode ? DARK_CODE_PALETTE : LIGHT_CODE_PALETTE
+  const trimmed = detail.text.trimStart()
+  const likelyJson = detail.format !== 'markdown' && (trimmed.startsWith('{') || trimmed.startsWith('['))
+  const tokens = useMemo(
+    () => (detail.format === 'markdown' ? [] : highlightCode(detail.text, likelyJson ? 'json' : undefined)),
+    [detail.format, detail.text, likelyJson],
+  )
   return (
     <View style={styles.toolDetailBlock}>
       <Text style={styles.toolDetailLabel}>{label}</Text>
       {detail.format === 'markdown'
         ? <NativeMarkdown text={detail.text} />
-        : <Text selectable style={styles.toolDetailCode}>{detail.text}</Text>}
+        : (
+          <Text
+            selectable
+            style={[styles.toolDetailCode, { backgroundColor: palette.background, color: palette.plain }]}
+          >
+            {tokens.map((token, index) => (
+              token.kind === 'plain'
+                ? token.text
+                : <Text key={index} style={{ color: palette[token.kind] }}>{token.text}</Text>
+            ))}
+          </Text>
+        )}
       {detail.truncated && <Text style={styles.toolDetailTruncated}>{zhCN.chat.toolTruncated}</Text>}
     </View>
   )

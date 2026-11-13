@@ -1,0 +1,241 @@
+{
+  "name": "remaining-control",
+  "cases": [
+    {
+      "name": "accept-signal-offer",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "signal.offer",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "sdp": "v=0\r\n"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-signal-answer",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "signal.answer",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "sdp": "v=0\r\n"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-empty-signal-sdp",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "signal.offer",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "sdp": ""
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "accept-signal-ice",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "signal.ice",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "candidate": {
+            "candidate": "candidate:1 1 udp 1 127.0.0.1 9999 typ host",
+            "sdpMid": "0",
+            "sdpMLineIndex": 0
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "normalize-negative-ice-index",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "signal.ice",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "candidate": {
+            "sdpMLineIndex": -1
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-transport-selected",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "transport.selected",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "transport": "relay"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-unknown-transport-selected",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "transport.selected",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc7-2001-7abc-8123-123456789abc",
+          "transport": "udp"
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "accept-lease-request",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "connection.lease.request",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "requestId": "lease-1",
+          "ticket": "opaque-ticket"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-lease-ack",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "connection.lease.ack",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "requestId": "lease-1",
+          "ticket": "opaque-ticket",
+          "leaseMs": 300000
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-lease-ack-with-wrong-duration",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "connection.lease.ack",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "requestId": "lease-1",
+          "ticket": "opaque-ticket",
+          "leaseMs": 1000
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "accept-lease-close",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "connection.lease.close",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-pong",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "pong",
+        "payload": {
+          "nonce": "nonce-1"
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-empty-pong-nonce",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "wire-vector-1",
+        "timestamp": 1786000000000,
+        "type": "pong",
+        "payload": {
+          "nonce": ""
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    }
+  ]
+}

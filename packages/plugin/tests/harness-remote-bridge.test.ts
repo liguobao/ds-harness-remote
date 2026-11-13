@@ -234,6 +234,47 @@ describe('HarnessRemoteBridge', () => {
     await expect(bridge.call({ endpoint: 'session/projections', payload: { args: {} } })).resolves.toEqual(original)
   })
 
+  it('keeps an oversized session catalogue listable by dropping non-root rows and lifting projected titles', async () => {
+    const row = (index: number, extra: Record<string, unknown> = {}) => ({
+      sessionId: `s${index}`,
+      updatedAt: index,
+      projections: { asOfSeq: 1, values: { title: `Titled ${index}` } },
+      ...extra,
+    })
+    await runScenarios(['subagent rows dropped', 'roots over budget', 'within budget', 'search rows'].map(name => ({ name, run: async () => {
+      const rows = name === 'within budget'
+        ? [row(1), row(2, { parentSessionId: 's1' })]
+        : name === 'subagent rows dropped'
+          ? Array.from({ length: 2_100 }, (_, index) => index < 2_000 ? row(index) : row(index, { parentSessionId: 's0' }))
+          : Array.from({ length: 2_100 }, (_, index) => row(index, name === 'roots over budget' ? {} : { parentSessionId: 's0' }))
+      const endpoint = name === 'search rows' ? 'session/search' : 'session/list'
+      const dispatch = vi.fn(async () => ({ ok: true as const, value: { items: rows } }))
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+      const result = await bridge.call({ endpoint, payload: { args: {} } }) as {
+        ok: true
+        value: { items: Array<{ sessionId: string; title?: string; parentSessionId?: string }> }
+      }
+      const items = result.value.items
+      if (name === 'subagent rows dropped') {
+        expect(items).toHaveLength(2_000)
+        expect(items.some(item => item.parentSessionId !== undefined)).toBe(false)
+      }
+      if (name === 'roots over budget') {
+        expect(items).toHaveLength(2_048)
+        expect(items[0]!.title).toBe('Titled 2099')
+      }
+      if (name === 'within budget') {
+        expect(items).toHaveLength(2)
+        expect(items.some(item => item.parentSessionId !== undefined)).toBe(true)
+      }
+      if (name === 'search rows') {
+        expect(items).toHaveLength(2_100)
+        return
+      }
+      expect(items.every(item => typeof item.title === 'string' && item.title !== '')).toBe(true)
+    } })))
+  })
+
   it('forwards only the fixed alpha Gateway endpoint allowlist', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: [{ id: 'session-1' }] }))
     const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
@@ -761,6 +802,70 @@ describe('HarnessRemoteBridge', () => {
       reason: 'failed',
       failure: { code: 'gateway-failed', message: 'Request failed.', details: {} },
     })
+  })
+
+  it('keeps the event generation open when the Host has no Remote event source', async () => {
+    const publish = vi.fn(async () => undefined)
+    const warn = vi.fn()
+    const missing = Object.assign(new Error('source unavailable'), { code: 'gateway/service-unavailable' })
+    const open = vi.fn(async () => (async function* () { throw missing })())
+    const dispatch = vi.fn(async () => ({ ok: true as const }))
+    const bridge = new HarnessRemoteBridge(gateway({
+      open,
+      dispatch,
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish, { warn } as never)
+
+    await bridge.openStream({ streamId: 'events-1', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.frame', {
+      streamId: 'events-1', hasValue: true,
+      value: { type: 'ready', clientId: expect.any(String), host: { home: expect.any(String) } },
+    }))
+    expect(publish).not.toHaveBeenCalledWith('harness.remote.stream.closed', expect.anything())
+    expect(warn).toHaveBeenCalledOnce()
+    expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
+    await bridge.openStream({ streamId: 'events-2', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.frame', expect.objectContaining({ streamId: 'events-2' })))
+    expect(warn).toHaveBeenCalledOnce()
+    bridge.closeStream({ streamId: 'events-1' })
+    bridge.closeStream({ streamId: 'events-2' })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-1', reason: 'cancelled',
+    }))
+    expect(open).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps other event source failures terminal', async () => {
+    const publish = vi.fn(async () => undefined)
+    const failure = Object.assign(new Error('stream failed'), { code: 'gateway/peer-disposed' })
+    const bridge = new HarnessRemoteBridge(gateway({
+      open: async () => (async function* () { throw failure })(),
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish)
+    await bridge.openStream({ streamId: 'events-failed', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-failed', reason: 'failed',
+      failure: { code: 'gateway/peer-disposed', message: 'Request failed.', details: {} },
+    }))
+  })
+
+  it('does not report a ready generation when the Host Session API is missing', async () => {
+    const publish = vi.fn(async () => undefined)
+    const warn = vi.fn()
+    const missing = Object.assign(new Error('source unavailable'), { code: 'gateway/service-unavailable' })
+    const bridge = new HarnessRemoteBridge(gateway({
+      dispatch: async () => ({ ok: false, error: { code: 'gateway/service-unavailable', message: 'Unavailable', details: {} } }),
+      open: async () => (async function* () { throw missing })(),
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish, { warn } as never)
+    await bridge.openStream({ streamId: 'events-no-api', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-no-api', reason: 'failed',
+      failure: { code: 'gateway/service-unavailable', message: 'Request failed.', details: {} },
+    }))
+    expect(publish).not.toHaveBeenCalledWith('harness.remote.frame', expect.anything())
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith('Cannot verify the Host Session API. Remote events cannot start.')
   })
 
   it('routes CodeX terminal calls to the CodeX carrier and keeps device ownership', async () => {

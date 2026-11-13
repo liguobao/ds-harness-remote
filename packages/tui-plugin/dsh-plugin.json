@@ -1,0 +1,18 @@
+{
+  "$schema": "https://dsh.community/schemas/dsh-plugin-0.15.json",
+  "id": "com.r2049.ds-harness-remote-tui",
+  "name": "ds-harness-remote-tui",
+  "version": "0.1.0-alpha.0",
+  "manifestVersion": "0.15",
+  "facets": {
+    "host": {
+      "entry": "dist/index.js",
+      "apiVersion": "v1alpha1"
+    }
+  },
+  "subscriptions": [],
+  "license": "MIT",
+  "source": {
+    "repository": "https://github.com/liguobao/ds-harness-remote"
+  }
+}

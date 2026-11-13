@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { z } from 'zod'
-import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
+import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 import { buildIceServers, parseIceConfig, type IceConfig } from './ice.js'
@@ -15,11 +15,13 @@ import {
   HEARTBEAT_DISCONNECT_MS_MAX,
   HELLO_TIMEOUT_MS_RANGE,
   HEARTBEAT_INTERVAL_MS_RANGE,
+  MAX_FRAMES_PER_SEC_RANGE,
   normalizeForceTerminateGraceMs,
   normalizeGatewayOptions,
   normalizeHeartbeatDisconnectMs,
   normalizeHeartbeatIntervalMs,
   normalizeHelloTimeoutMs,
+  normalizeMaxFramesPerSec,
 } from './config.js'
 
 export interface Config {
@@ -32,6 +34,7 @@ export interface Config {
   heartbeatIntervalMs?: number
   heartbeatDisconnectMs?: number
   forceTerminateGraceMs?: number
+  maxFramesPerSec?: number
   logLevel?: LogLevel
   ice?: IceConfig
 }
@@ -58,16 +61,22 @@ export function parseForceTerminateGrace(val: string | undefined): number {
   return normalizeForceTerminateGraceMs(val)
 }
 
+export function parseMaxFramesPerSec(val: string | undefined): number {
+  return normalizeMaxFramesPerSec(val)
+}
+
 export {
   normalizeGatewayOptions,
   normalizeHelloTimeoutMs,
   normalizeHeartbeatIntervalMs,
   normalizeHeartbeatDisconnectMs,
   normalizeForceTerminateGraceMs,
+  normalizeMaxFramesPerSec,
   HELLO_TIMEOUT_MS_RANGE,
   HEARTBEAT_INTERVAL_MS_RANGE,
   HEARTBEAT_DISCONNECT_MS_MAX,
   FORCE_TERMINATE_GRACE_MS_RANGE,
+  MAX_FRAMES_PER_SEC_RANGE,
 }
 export type { GatewayTimingOptions, NormalizedGatewayOptions } from './config.js'
 
@@ -93,7 +102,7 @@ async function body(req: IncomingMessage): Promise<unknown> {
     if (length > 16384) throw new ApiError('FRAME_TOO_LARGE', 413)
     chunks.push(chunk)
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new ApiError('INVALID_MESSAGE') }
+  try { return parseWireJson(Buffer.concat(chunks)) } catch { throw new ApiError('INVALID_MESSAGE') }
 }
 /**
  * Normalize one bare IPv4/IPv6 literal to a single canonical form. IPv4-mapped
@@ -205,6 +214,7 @@ export function createRemoteServer(config: Config) {
   })
   const gateway = new Gateway(server, store, url.origin, {
     ...timing,
+    maxFramesPerSec: normalizeMaxFramesPerSec(config.maxFramesPerSec),
     logLevel: config.logLevel,
     logger: logger.child('gateway'),
     turnEnabled: ice.turnUrls.length > 0,

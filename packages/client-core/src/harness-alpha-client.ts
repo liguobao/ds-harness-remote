@@ -1,12 +1,67 @@
 import { HarnessQuestions } from './harness-questions.js'
 import { RemoteGatewayError, RemoteTypertGateway, createRemoteId, type RemoteGatewayResult, type RemoteGatewayStream } from './remote-gateway.js'
 import type { RemoteClientCore } from './index.js'
+import {
+  REMOTE_COMPACTION_CAPABILITY,
+  type RemoteCompactionState,
+  type RemoteCompactionStatusResult,
+  type RemoteCompactionSubmitResult,
+} from '@dsh-remote/protocol'
 
 export interface HarnessAlphaHostInfo {
   clientVersion?: string
   harnessVersion?: string
   sessionFormat?: 3
+  /** Capabilities negotiated by `probeRemoteHostFeatures`. */
+  capabilities?: readonly string[]
 }
+
+/** Options for {@link HarnessAlphaClient.compactSession}. */
+export interface RemoteCompactionRunOptions {
+  /** Resume polling an operation submitted earlier instead of submitting again. */
+  operationId?: string
+  /** Idempotency key for a fresh submission; retries with the same id dedupe. */
+  requestId?: string
+  /** Host-side budget for the compaction task itself. */
+  budgetMs?: number
+  pollIntervalMs?: number
+  signal?: AbortSignal
+  onStatus?: (status: RemoteCompactionStatusResult) => void
+}
+
+/** Durable client-side record of one compaction attempt. */
+export interface RemoteCompactionRecord {
+  sessionId: string
+  /** Idempotency key saved before submission so a lost response is recoverable. */
+  requestId: string
+  operationId?: string
+  state: RemoteCompactionState
+  updatedAt: number
+}
+
+/**
+ * Persistence used by the product call path. Scope should identify the Host
+ * (for example its device id) so records never cross Hosts.
+ */
+export interface RemoteCompactionStore {
+  load(scope: string, sessionId: string): Promise<RemoteCompactionRecord | undefined>
+  list(scope: string): Promise<RemoteCompactionRecord[]>
+  save(scope: string, record: RemoteCompactionRecord): Promise<void>
+  remove(scope: string, sessionId: string): Promise<void>
+}
+
+export interface RemoteCompactionPersistence {
+  store: RemoteCompactionStore
+  scope: string
+}
+
+/**
+ * Result of a tracked compaction. `unconfirmed` means observation failed; it
+ * is not a failure of the compaction and must not trigger a second run.
+ */
+export type RemoteCompactionOutcome =
+  | { kind: 'settled'; status: RemoteCompactionStatusResult }
+  | { kind: 'unconfirmed'; status?: RemoteCompactionStatusResult; message: string }
 
 export interface HarnessClientFrame {
   rpcId: string
@@ -255,6 +310,7 @@ interface PendingRemoteEvent {
   event: RemoteEventKind
   eventId: string
   sessionId: string
+  frame: HarnessClientFrame
 }
 
 type StreamHandle = {
@@ -294,11 +350,13 @@ export class HarnessAlphaClient {
   private followGeneration = 0
   private eventClientId?: string
   private eventHostHome?: string
+  private hasLoadedSessionList = false
 
   constructor(
     core: RemoteClientCore,
     private readonly host: HarnessAlphaHostInfo = {},
     private readonly onFrame?: (frame: HarnessClientFrame) => void,
+    private readonly compactionPersistence?: RemoteCompactionPersistence,
   ) {
     this.gateway = new RemoteTypertGateway(core)
     this.questions = new HarnessQuestions(this.gateway, (id, outcome) => this.respondEvent(id, outcome), frame => this.emitFrame(frame))
@@ -329,12 +387,15 @@ export class HarnessAlphaClient {
     this.events = undefined
     this.control = undefined
     this.pendingEvents.clear()
+    this.sessionsCache.clear()
+    this.hasLoadedSessionList = false
     this.eventClientId = undefined
   }
 
   async sessionList(): Promise<HarnessRemoteSession[]> {
     const result = await this.callValue<{ items: HarnessRemoteSession[] }>('session/list', { _request: {} })
     const items = Array.isArray(result.items) ? result.items.map(item => normalizeSession(item)).filter((item): item is HarnessRemoteSession => item !== undefined) : []
+    this.hasLoadedSessionList = true
     for (const item of items) this.sessionsCache.set(item.sessionId, item)
     return items
   }
@@ -417,12 +478,263 @@ export class HarnessAlphaClient {
   }
 
   async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    // `/compact` inside the official UI is a blocking command by design, but the
+    // underlying summarization can outlive any single RPC deadline. When the
+    // Host advertises the async contract, run it as a tracked Host operation so
+    // only the short submit/status calls cross the wire.
+    if (this.supportsAsyncCompaction && line.trim() === '/compact') {
+      if (this.compactionPersistence !== undefined) {
+        const outcome = await this.compactSessionTracked(sessionId)
+        if (outcome.kind === 'unconfirmed') return { kind: 'error', text: outcome.message }
+        const status = outcome.status
+        return status.state === 'succeeded'
+          ? { kind: 'success', ...(status.message === undefined ? {} : { text: status.message }) }
+          : { kind: 'error', text: status.message ?? `Compaction ${status.state}.` }
+      }
+      const status = await this.compactSession(sessionId)
+      if (status.state === 'succeeded') {
+        return { kind: 'success', ...(status.message === undefined ? {} : { text: status.message }) }
+      }
+      return { kind: 'error', text: status.message ?? `Compaction ${status.state}.` }
+    }
     const execution = await this.callValue<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands/execute', {
       agentId: sessionId, line, ...(this.host.sessionFormat === 3 ? { submittedAttachments: [] } : { images: [] }),
     })
     if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'Unknown or unavailable Host command.')
     if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid command result.')
     return execution.result
+  }
+
+  /** True when the Host advertises the Remote-owned asynchronous compaction contract. */
+  get supportsAsyncCompaction(): boolean {
+    return this.host.capabilities?.includes(REMOTE_COMPACTION_CAPABILITY) === true
+  }
+
+  /** Submit `/compact` without holding one RPC open for the whole run. */
+  async submitCompaction(
+    sessionId: string,
+    options: { requestId?: string; budgetMs?: number; signal?: AbortSignal } = {},
+  ): Promise<RemoteCompactionSubmitResult> {
+    return await this.gateway.submitCompaction({
+      sessionId,
+      requestId: options.requestId ?? createRemoteId(),
+      ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+    }, options.signal)
+  }
+
+  async compactionStatus(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+  }
+
+  async cancelCompaction(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.cancelCompaction({ sessionId, operationId }, signal)
+  }
+
+  /**
+   * Submit (or resume) one compaction and poll until it settles.
+   *
+   * Polling is observation only. Closing this client, a page or a connection
+   * does not abort the Host run: resume by passing the operation id again.
+   */
+  async compactSession(
+    sessionId: string,
+    options: RemoteCompactionRunOptions = {},
+  ): Promise<RemoteCompactionStatusResult> {
+    let operationId = options.operationId
+    if (operationId === undefined) {
+      const submitted = await this.submitCompactionWithRetry(
+        sessionId,
+        options.requestId ?? createRemoteId(),
+        options,
+      )
+      operationId = submitted.operationId
+      options.onStatus?.({ operationId, sessionId, state: submitted.state })
+    }
+    return await this.pollCompaction(sessionId, operationId, options)
+  }
+
+  /**
+   * Product-facing tracked compaction.
+   *
+   * The requestId is persisted before submission and the operationId as soon as
+   * the Host answers, so a lost submit response or a reconnect can query the
+   * same Host operation instead of starting a second compaction. Observation
+   * failures return `unconfirmed`, never a failure.
+   */
+  async compactSessionTracked(
+    sessionId: string,
+    options: RemoteCompactionRunOptions = {},
+  ): Promise<RemoteCompactionOutcome> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) {
+      return { kind: 'settled', status: await this.compactSession(sessionId, options) }
+    }
+    const { store, scope } = persistence
+    let record = await safeLoad(store, scope, sessionId)
+    if (record === undefined) {
+      record = {
+        sessionId,
+        requestId: options.requestId ?? createRemoteId(),
+        state: 'accepted',
+        updatedAt: Date.now(),
+      }
+      await safeSave(store, scope, record)
+    }
+    let operationId = record.operationId
+    try {
+      if (operationId === undefined) {
+        // Only recover an in-flight submission. An old record without an
+        // operation id may be from before a Host restart (whose dedupe ledger
+        // is gone); replaying it would start a new compaction.
+        if (record.state !== 'accepted' || Date.now() - record.updatedAt > SUBMIT_RECOVERY_MS) {
+          await safeRemove(store, scope, sessionId)
+          return {
+            kind: 'unconfirmed',
+            message: '上一次压缩提交的结果未知；为避免重复执行，请先确认会话状态。',
+          }
+        }
+        const submitted = await this.submitCompactionWithRetry(sessionId, record.requestId, options)
+        operationId = submitted.operationId
+        record = { ...record, operationId, state: submitted.state, updatedAt: Date.now() }
+        await safeSave(store, scope, record)
+        options.onStatus?.({ operationId, sessionId, state: submitted.state })
+      }
+      const boundOperationId = operationId
+      const status = await this.pollCompaction(sessionId, boundOperationId, {
+        ...options,
+        onStatus: next => {
+          record = { ...record!, operationId: boundOperationId, state: next.state, updatedAt: Date.now() }
+          void safeSave(store, scope, record)
+          options.onStatus?.(next)
+        },
+      })
+      record = { ...record, operationId: boundOperationId, state: status.state, updatedAt: Date.now() }
+      await safeSave(store, scope, record)
+      if (isTerminalCompactionState(status.state)) {
+        await safeRemove(store, scope, sessionId)
+        return { kind: 'settled', status }
+      }
+      return { kind: 'unconfirmed', status, message: '压缩仍在收尾，暂时无法确认最终状态。' }
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted === true) throw error
+      if (isPermanentCompactionError(error)) {
+        await safeRemove(store, scope, sessionId)
+        throw error
+      }
+      return {
+        kind: 'unconfirmed',
+        ...(record.operationId === undefined ? {} : { status: statusFromRecord(record) }),
+        message: '暂时无法确认压缩状态；重连后会查询同一操作，不会重复发起压缩。',
+      }
+    }
+  }
+
+  /**
+   * Ask the Host to cancel the tracked compaction for one Session. Returns
+   * undefined when no persisted operation exists (for example a legacy Host or
+   * a command that was never tracked).
+   */
+  async cancelTrackedCompaction(sessionId: string): Promise<RemoteCompactionStatusResult | undefined> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) return undefined
+    const record = await safeLoad(persistence.store, persistence.scope, sessionId)
+    if (record?.operationId === undefined) return undefined
+    const status = await this.gateway.cancelCompaction({ sessionId, operationId: record.operationId })
+    await safeSave(persistence.store, persistence.scope, {
+      ...record,
+      state: status.state,
+      updatedAt: Date.now(),
+    })
+    if (isTerminalCompactionState(status.state)) {
+      await safeRemove(persistence.store, persistence.scope, sessionId)
+    }
+    return status
+  }
+
+  /** Query every persisted attempt for this Host scope, usually after reconnect. */
+  async resumeCompactions(options: {
+    signal?: AbortSignal
+    onOutcome?: (sessionId: string, outcome: RemoteCompactionOutcome) => void
+  } = {}): Promise<Array<{ sessionId: string; outcome: RemoteCompactionOutcome }>> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) return []
+    let records: RemoteCompactionRecord[] = []
+    try {
+      records = await persistence.store.list(persistence.scope)
+    } catch {
+      return []
+    }
+    const results: Array<{ sessionId: string; outcome: RemoteCompactionOutcome }> = []
+    for (const record of records) {
+      try {
+        const outcome = await this.compactSessionTracked(record.sessionId, { signal: options.signal })
+        results.push({ sessionId: record.sessionId, outcome })
+        options.onOutcome?.(record.sessionId, outcome)
+      } catch {
+        // A resume must never take the connection down; the record stays for
+        // the next reconnect.
+      }
+    }
+    return results
+  }
+
+  private async submitCompactionWithRetry(
+    sessionId: string,
+    requestId: string,
+    options: RemoteCompactionRunOptions,
+  ): Promise<RemoteCompactionSubmitResult> {
+    let failures = 0
+    for (;;) {
+      try {
+        return await this.gateway.submitCompaction({
+          sessionId,
+          requestId,
+          ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+        }, options.signal)
+      } catch (error) {
+        if (isAbortError(error) || options.signal?.aborted === true || isPermanentCompactionError(error)) throw error
+        failures += 1
+        if (failures >= COMPACTION_POLL_RETRIES) throw error
+        await waitFor(500 * failures, options.signal)
+      }
+    }
+  }
+
+  private async pollCompaction(
+    sessionId: string,
+    operationId: string,
+    options: RemoteCompactionRunOptions,
+  ): Promise<RemoteCompactionStatusResult> {
+    const signal = options.signal
+    const interval = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS
+    let consecutiveFailures = 0
+    for (;;) {
+      throwIfAborted(signal)
+      let status: RemoteCompactionStatusResult
+      try {
+        status = await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+        consecutiveFailures = 0
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted === true) throw error
+        consecutiveFailures += 1
+        // A lost poll is not a lost operation: back off and ask again, but do
+        // not retry a permanent rejection (wrong owner, unknown method, ...).
+        if (isTerminalCompactionError(error) || consecutiveFailures >= COMPACTION_POLL_RETRIES) throw error
+        await waitFor(interval * consecutiveFailures, signal)
+        continue
+      }
+      options.onStatus?.(status)
+      if (isTerminalCompactionState(status.state)) return status
+      await waitFor(interval, signal)
+    }
   }
 
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
@@ -528,6 +840,7 @@ export class HarnessAlphaClient {
     if (cursor !== undefined) this.followCursors.set(sessionId, cursor)
     if (this.host.sessionFormat === 3) handle.assistant = assistantStreamBaseline(snapshot.assistantStream)
     this.applyProjectionBaseline(sessionId, snapshot.projections)
+    this.republishPendingSessionInteractions(sessionId, isRecord(snapshot.projections) && isRecord(snapshot.projections.values) && snapshot.projections.values.userQuestions !== undefined)
     void this.pumpSessionFollow(handle, iterator).catch(error => this.emitStreamFailure(handle, this.sessionFollow, error))
     return {
       events: historyEntriesFromRecords(Array.isArray(snapshot.records) ? snapshot.records : []),
@@ -536,9 +849,15 @@ export class HarnessAlphaClient {
     }
   }
 
-  async sessionPrompt(sessionId: string, text: string, requestId = createRemoteId(), images: HarnessPromptImage[] = []): Promise<void> {
+  /** Stage exact file bytes in the receiving Session; only its receipt may be submitted. */
+  async sessionUploadFile(sessionId: string, data: string, name?: string): Promise<{ receiptId: string; file: unknown }> {
+    return this.callValue('fileUploads/upload', { agentId: sessionId, request: { data, ...(name === undefined ? {} : { name }) } })
+  }
+
+  async sessionPrompt(sessionId: string, text: string, requestId = createRemoteId(), images: HarnessPromptImage[] = [], files: { receiptId: string }[] = []): Promise<void> {
     const timeZone = clientTimeZone()
     const content = [
+      ...files.map(file => ({ type: 'file' as const, receiptId: file.receiptId })),
       ...(text.length === 0 ? [] : [{ type: 'text' as const, text }]),
       ...images.map(image => ({
         type: 'image' as const,
@@ -919,6 +1238,10 @@ export class HarnessAlphaClient {
       this.eventHostHome = typeof host?.home === 'string' ? host.home : undefined
       return
     }
+    if (value.type === 'emit' && typeof value.event === 'string' && Array.isArray(value.args)) {
+      this.routeForwardedEvent(value.event, value.args)
+      return
+    }
     if (value.type === 'waterfall' && typeof value.eventId === 'string' && typeof value.agentId === 'string' && isRecord(value.request)) {
       this.routeWaterfall(value.event, value.eventId, value.agentId, value.request)
       return
@@ -926,10 +1249,65 @@ export class HarnessAlphaClient {
     if (value.type === 'cancel' && typeof value.eventId === 'string') this.cancelRemoteEvent(value.eventId)
   }
 
+  private routeForwardedEvent(event: string, args: unknown[]): void {
+    switch (event) {
+      case 'api-session/added': {
+        const session = normalizeSession(args[0])
+        if (session === undefined) return
+        const known = this.sessionsCache.has(session.sessionId)
+        this.sessionsCache.set(session.sessionId, session)
+        this.emitFrame({ rpcId: '', payload: { type: 'session/added', session, known } })
+        return
+      }
+      case 'api-session/removed': {
+        const sessionId = args[0]
+        if (typeof sessionId !== 'string' || sessionId.length === 0) return
+        const existed = this.sessionsCache.delete(sessionId)
+        this.emitFrame({ rpcId: '', payload: { type: 'session/removed', sessionId, existed } })
+        return
+      }
+      case 'api-session/status': {
+        const sessionId = args[0]
+        const running = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof running !== 'boolean') return
+        const cached = this.sessionsCache.get(sessionId)
+        if (cached !== undefined && cached.running !== running) {
+          this.sessionsCache.set(sessionId, { ...cached, running })
+        }
+        this.emitFrame({ rpcId: '', payload: { type: 'session/status', sessionId, running } })
+        return
+      }
+      case 'api-session/activity': {
+        const sessionId = args[0]
+        const updatedAt = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) return
+        const cached = this.sessionsCache.get(sessionId)
+        if (cached !== undefined && updatedAt > cached.updatedAt) {
+          this.sessionsCache.set(sessionId, { ...cached, updatedAt })
+        }
+        this.emitFrame({ rpcId: '', payload: { type: 'session/activity', sessionId, updatedAt } })
+        return
+      }
+      case 'api-session/error': {
+        const sessionId = args[0]
+        const message = args[1]
+        if (typeof sessionId !== 'string' || sessionId.length === 0) return
+        this.emitFrame({
+          rpcId: '',
+          payload: {
+            type: 'session/error',
+            sessionId,
+            ...(typeof message === 'string' ? { message } : {}),
+          },
+        })
+        return
+      }
+    }
+  }
+
   private routeWaterfall(event: unknown, eventId: string, sessionId: string, request: Record<string, unknown>): void {
     if (event === 'approval/request') {
-      this.pendingEvents.set(eventId, { event, eventId, sessionId })
-      this.emitFrame({
+      const frame: HarnessClientFrame = {
         rpcId: eventId,
         payload: {
           type: 'approval/requested',
@@ -939,20 +1317,30 @@ export class HarnessAlphaClient {
           ...(typeof request.callId === 'string' ? { callId: request.callId } : {}),
           ...(typeof request.reason === 'string' ? { reason: request.reason } : {}),
         },
-      })
+      }
+      this.pendingEvents.set(eventId, { event, eventId, sessionId, frame })
+      this.emitFrame(frame)
       return
     }
     if (event === 'user-questions/request') {
       if (this.questions.request(sessionId, eventId, request)) return
-      this.pendingEvents.set(eventId, { event, eventId, sessionId })
-      this.emitFrame({
+      const frame: HarnessClientFrame = {
         rpcId: eventId,
         payload: {
           type: 'question/requested',
           sessionId,
           questions: Array.isArray(request.questions) ? request.questions : [],
         },
-      })
+      }
+      this.pendingEvents.set(eventId, { event, eventId, sessionId, frame })
+      this.emitFrame(frame)
+    }
+  }
+
+  private republishPendingSessionInteractions(sessionId: string, hasUserQuestionsProjection: boolean): void {
+    if (!hasUserQuestionsProjection) this.questions.republish(sessionId)
+    for (const pending of this.pendingEvents.values()) {
+      if (pending.sessionId === sessionId) this.emitFrame(pending.frame)
     }
   }
 
@@ -977,12 +1365,46 @@ export class HarnessAlphaClient {
   private routeControlFrame(value: unknown): void {
     if (!isRecord(value) || typeof value.type !== 'string') return
     if (value.type === 'baseline' && isRecord(value.value) && isRecord(value.value.projections)) {
-      for (const [sessionId, block] of Object.entries(value.value.projections)) this.applyProjectionBaseline(sessionId, block)
+      let catalogChanged = false
+      for (const [sessionId, block] of Object.entries(value.value.projections)) {
+        if (this.hasLoadedSessionList && !this.sessionsCache.has(sessionId)) catalogChanged = true
+        this.applyProjectionBaseline(sessionId, block)
+      }
+      if (catalogChanged) this.emitCatalogChanged('control-baseline')
       return
     }
-    if (value.type === 'projection' && typeof value.sessionId === 'string' && typeof value.key === 'string') {
-      this.applyProjection(value.sessionId, value.key, value.value, typeof value.seq === 'number' ? value.seq : undefined)
+    if (value.type === 'projection' && typeof value.sessionId === 'string') {
+      const seq = typeof value.seq === 'number' ? value.seq : undefined
+      if (Array.isArray(value.changes)) {
+        let emitted = false
+        for (const change of value.changes) {
+          if (!isRecord(change) || typeof change.key !== 'string') continue
+          if (!emitted && this.hasLoadedSessionList && !this.sessionsCache.has(value.sessionId)) {
+            emitted = true
+            this.emitCatalogChanged('control-projection', value.sessionId)
+          }
+          this.applyProjection(value.sessionId, change.key, change.val, seq)
+        }
+        return
+      }
+      if (typeof value.key === 'string') {
+        if (this.hasLoadedSessionList && !this.sessionsCache.has(value.sessionId)) {
+          this.emitCatalogChanged('control-projection', value.sessionId)
+        }
+        this.applyProjection(value.sessionId, value.key, value.value, seq)
+      }
     }
+  }
+
+  private emitCatalogChanged(reason: string, sessionId?: string): void {
+    this.emitFrame({
+      rpcId: '',
+      payload: {
+        type: 'session/catalog-changed',
+        reason,
+        ...(sessionId === undefined ? {} : { sessionId }),
+      },
+    })
   }
 
   private applyProjectionBaseline(sessionId: string, block: unknown): void {
@@ -1005,6 +1427,7 @@ export class HarnessAlphaClient {
     if (cached !== undefined) {
       this.sessionsCache.set(sessionId, {
         ...cached,
+        ...(key === 'title' && typeof projectedValue === 'string' && projectedValue !== '' ? { title: projectedValue } : {}),
         projections: {
           asOfSeq: seq ?? cached.projections?.asOfSeq,
           values: { ...cached.projections?.values, [key]: projectedValue },
@@ -1079,6 +1502,118 @@ export class HarnessAlphaClient {
   }
 }
 
+const COMPACTION_TERMINAL_STATES = new Set<RemoteCompactionState>([
+  'succeeded',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'unconfirmed',
+])
+const COMPACTION_POLL_INTERVAL_MS = 2_000
+const COMPACTION_POLL_RETRIES = 3
+/** Recover a lost submit response only while the attempt is still fresh. */
+const SUBMIT_RECOVERY_MS = 120_000
+
+function isTerminalCompactionState(state: RemoteCompactionState): boolean {
+  return COMPACTION_TERMINAL_STATES.has(state)
+}
+
+function isPermanentCompactionError(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && [
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_FOUND',
+    'PERMISSION_DENIED',
+    'INVALID_MESSAGE',
+    'SESSION_NOT_FOUND',
+    'AGENT_BUSY',
+    'UNSUPPORTED',
+  ].includes(code)
+}
+
+function statusFromRecord(record: RemoteCompactionRecord): RemoteCompactionStatusResult {
+  return {
+    operationId: record.operationId ?? '',
+    sessionId: record.sessionId,
+    state: record.state,
+  }
+}
+
+async function safeLoad(
+  store: RemoteCompactionStore,
+  scope: string,
+  sessionId: string,
+): Promise<RemoteCompactionRecord | undefined> {
+  try {
+    return await store.load(scope, sessionId)
+  } catch {
+    return undefined
+  }
+}
+
+async function safeSave(
+  store: RemoteCompactionStore,
+  scope: string,
+  record: RemoteCompactionRecord,
+): Promise<void> {
+  try {
+    await store.save(scope, record)
+  } catch {}
+}
+
+async function safeRemove(store: RemoteCompactionStore, scope: string, sessionId: string): Promise<void> {
+  try {
+    await store.remove(scope, sessionId)
+  } catch {}
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.')
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as { code?: unknown }).code
+  return error.name === 'AbortError' || code === 'RPC_ABORTED' || code === 'CANCELLED'
+}
+
+function isTerminalCompactionError(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && [
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_FOUND',
+    'PERMISSION_DENIED',
+    'INVALID_MESSAGE',
+    'SESSION_NOT_FOUND',
+  ].includes(code)
+}
+
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(signal?.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function normalizeSession(value: unknown): HarnessRemoteSession | undefined {
   if (!isRecord(value)
     || typeof value.sessionId !== 'string'
@@ -1086,19 +1621,23 @@ function normalizeSession(value: unknown): HarnessRemoteSession | undefined {
     || typeof value.running !== 'boolean'
     || typeof value.blank !== 'boolean') return undefined
   const session = value as unknown as HarnessRemoteSession
+  const projections = session.projections === undefined
+    ? undefined
+    : {
+        ...session.projections,
+        ...(isRecord(session.projections.values)
+          ? { values: normalizeProjectionValues(session.projections.values) }
+          : {}),
+      }
+  const projectedTitle = isRecord(projections?.values) && typeof projections.values.title === 'string' && projections.values.title !== ''
+    ? projections.values.title
+    : undefined
+  const title = typeof session.title === 'string' && session.title !== '' ? session.title : projectedTitle
   return {
     ...session,
+    ...(title === undefined ? {} : { title }),
     ...(session.agentPreset === undefined ? {} : { agentPreset: normalizeAgentPreset(session.agentPreset) as string }),
-    ...(session.projections === undefined
-      ? {}
-      : {
-          projections: {
-            ...session.projections,
-            ...(isRecord(session.projections.values)
-              ? { values: normalizeProjectionValues(session.projections.values) }
-              : {}),
-          },
-        }),
+    ...(projections === undefined ? {} : { projections }),
   }
 }
 

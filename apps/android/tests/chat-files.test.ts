@@ -1,15 +1,24 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   type StagedFile,
+  type UploadProgress,
   bytesToBase64,
   documentImageReadBudget,
-  readDocumentImageBase64,
+  formatDurationMs,
   formatUploadedFilesPrompt,
   formatUploadedFilesReferencePrompt,
+  generateUploadId,
+  isDirectTransportMode,
   isTextFile,
   isValidUtf8Text,
+  isVideoFile,
+  MAX_DIRECT_UPLOAD_BYTES,
+  MAX_RELAY_UPLOAD_BYTES,
+  readDocumentImageBase64,
+  sanitizeUploadFileName,
   uploadStagedFileToWorkspace,
   uploadStagedFilesToWorkspace,
+  workspaceUploadMaxBytes,
 } from '../src/screens/chat-files'
 
 describe('chat-files utilities', () => {
@@ -253,6 +262,23 @@ describe('chat-files utilities', () => {
       expect(files[1]!.remotePath).toBeDefined()
     })
 
+    it('stops mid-transfer, aborts the upload once and never commits', async () => {
+      const controller = new AbortController()
+      const methods: string[] = []
+      const rpc = vi.fn(async (method: string) => {
+        methods.push(method)
+        if (method === 'workspace.upload.open') return { uploadId: 'up-cancel', chunkBytes: 4 }
+        if (method === 'workspace.upload.chunk') { controller.abort(); return { uploadId: 'up-cancel', receivedBytes: 4 } }
+        if (method === 'workspace.upload.abort') return { aborted: true }
+        return {}
+      })
+      const file: StagedFile = { id: 'cancel', name: 'a.txt', size: 8, uri: 'file:///a', content: 'abcdefgh' }
+      await expect(uploadStagedFileToWorkspace(rpc, sessionId, file, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' })
+      expect(methods.filter(method => method === 'workspace.upload.abort')).toHaveLength(1)
+      expect(methods).not.toContain('workspace.upload.commit')
+    })
+
     it('rejects when commit does not return a valid path', async () => {
       const rpc = vi.fn(async (method: string) => {
         if (method === 'workspace.upload.open') return { uploadId: 'up-nopath', chunkBytes: 64 * 1024 }
@@ -282,4 +308,95 @@ describe('chat-files utilities', () => {
       expect(rpc).not.toHaveBeenCalled()
     })
   })
+
+  describe('binary and video helpers', () => {
+    it('detects video files by mimeType or extension', () => {
+      expect(isVideoFile('Record_2026-11-11.mp4')).toBe(true)
+      expect(isVideoFile('clip.MOV')).toBe(true)
+      expect(isVideoFile('unknown', 'video/mp4')).toBe(true)
+      expect(isVideoFile('photo.jpg', 'image/jpeg')).toBe(false)
+      expect(isVideoFile('notes.txt', 'text/plain')).toBe(false)
+    })
+
+    it('sanitizes filenames to comply with Host upload constraints', () => {
+      expect(sanitizeUploadFileName('Record:2026*11?.mp4')).toBe('Record_2026_11_.mp4')
+      expect(sanitizeUploadFileName('.dsh-upload-secret.mp4')).toBe('_dsh-upload-secret.mp4')
+      expect(sanitizeUploadFileName('con.mp4')).toBe('file_con.mp4')
+      expect(sanitizeUploadFileName(null, 'video/mp4', 'file:///cache/abc')).toBe('abc.mp4')
+      expect(sanitizeUploadFileName('', 'video/mp4')).toBe('video.mp4')
+      const longName = '中'.repeat(120) + '.mp4'
+      const sanitized = sanitizeUploadFileName(longName)
+      expect(new TextEncoder().encode(sanitized).byteLength).toBeLessThanOrEqual(220)
+      expect(sanitized.endsWith('.mp4')).toBe(true)
+    })
+
+    it('formats video duration concisely', () => {
+      expect(formatDurationMs(0)).toBe('0:00')
+      expect(formatDurationMs(12_400)).toBe('0:12')
+      expect(formatDurationMs(65_000)).toBe('1:05')
+      expect(formatDurationMs(3_661_000)).toBe('1:01:01')
+    })
+
+    it('enforces transport-aware workspace upload budgets', () => {
+      expect(isDirectTransportMode('LAN')).toBe(true)
+      expect(isDirectTransportMode('P2P')).toBe(true)
+      expect(isDirectTransportMode('TURN')).toBe(false)
+      expect(isDirectTransportMode('Relay')).toBe(false)
+      expect(workspaceUploadMaxBytes('LAN')).toBe(MAX_DIRECT_UPLOAD_BYTES)
+      expect(workspaceUploadMaxBytes('P2P')).toBe(MAX_DIRECT_UPLOAD_BYTES)
+      expect(workspaceUploadMaxBytes('TURN')).toBe(MAX_RELAY_UPLOAD_BYTES)
+      expect(workspaceUploadMaxBytes('Relay')).toBe(MAX_RELAY_UPLOAD_BYTES)
+      expect(workspaceUploadMaxBytes(undefined)).toBe(MAX_RELAY_UPLOAD_BYTES)
+    })
+
+    it('generates RFC 4122 UUID v4 uploadIds accepted by Host schema', () => {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      expect(generateUploadId()).toMatch(uuidPattern)
+      expect(generateUploadId()).not.toBe(generateUploadId())
+    })
+
+    it('uploads binary uri video files in chunks with UUID uploadId and progress updates', async () => {
+      const payload = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32])
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = vi.fn(async () => new Response(payload, { status: 200 })) as unknown as typeof fetch
+
+      try {
+        const calls: { method: string; params: Record<string, unknown> }[] = []
+        const rpc = vi.fn(async (method: string, params: unknown) => {
+          calls.push({ method, params: params as Record<string, unknown> })
+          if (method === 'workspace.upload.open') return { uploadId: (params as { uploadId: string }).uploadId, chunkBytes: 5 }
+          if (method === 'workspace.upload.chunk') return { uploadId: (params as { uploadId: string }).uploadId, receivedBytes: 5 }
+          if (method === 'workspace.upload.commit') return { name: 'clip.mp4', path: './clip.mp4', bytes: payload.byteLength }
+          return {}
+        })
+
+        const progressEvents: UploadProgress[] = []
+        const videoFile: StagedFile = {
+          id: 'vid-1',
+          name: 'clip.mp4',
+          size: payload.byteLength,
+          mimeType: 'video/mp4',
+          uri: 'file:///cache/clip.mp4',
+          durationMs: 4200,
+        }
+
+        const uploaded = await uploadStagedFilesToWorkspace(rpc, 'session-vid', [videoFile], undefined, event => {
+          progressEvents.push(event)
+        })
+
+        expect(uploaded).toEqual([{ name: 'clip.mp4', path: './clip.mp4', bytes: payload.byteLength }])
+        expect(videoFile.remotePath).toBe('./clip.mp4')
+        const openCall = calls.find(c => c.method === 'workspace.upload.open')
+        expect(String(openCall?.params.uploadId)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+        expect(openCall?.params.totalBytes).toBe(payload.byteLength)
+        const chunkCalls = calls.filter(c => c.method === 'workspace.upload.chunk')
+        expect(chunkCalls).toHaveLength(3)
+        expect(progressEvents.at(-1)?.bytesSent).toBe(payload.byteLength)
+        expect(progressEvents.at(-1)?.totalBytes).toBe(payload.byteLength)
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+  })
+
 })
