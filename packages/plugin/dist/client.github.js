@@ -1735,7 +1735,7 @@ If a code was sent, recover the original submission without changing it.`,
     terminalRemoteUnavailable: "Remote terminal is unavailable. Enable Remote terminal in the Host Remote settings; the switch applies immediately.",
     terminalSaved: "Remote terminal setting saved. Applies immediately.",
     sidebarEntry: "Sidebar entry",
-    sidebarEntryHint: "Standard keeps the Remote button in the sidebar footer. Compact moves it to the account row as an icon. Toggling applies immediately.",
+    sidebarEntryHint: "Standard keeps the Remote button in the sidebar footer. Compact moves it to the account row: an icon locally, or the Host name and Exit when remote. Toggling applies immediately.",
     sidebarEntryStandard: "Standard",
     sidebarEntryCompact: "Compact",
     sidebarEntrySaved: "Sidebar entry style saved.",
@@ -2091,7 +2091,7 @@ If a code was sent, recover the original submission without changing it.`,
     terminalRemoteUnavailable: "\u8FDC\u7A0B\u7EC8\u7AEF\u4E0D\u53EF\u7528\u3002\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u4F1A\u7ACB\u5373\u751F\u6548\u3002",
     terminalSaved: "\u8FDC\u7A0B\u7EC8\u7AEF\u8BBE\u7F6E\u5DF2\u4FDD\u5B58\uFF0C\u7ACB\u5373\u751F\u6548\u3002",
     sidebarEntry: "\u4FA7\u680F\u5165\u53E3\u6837\u5F0F",
-    sidebarEntryHint: "\u300C\u6807\u51C6\u300D\u628A Remote \u6309\u94AE\u7559\u5728\u4FA7\u680F\u5E95\u90E8\uFF1B\u300C\u7B80\u6D01\u300D\u628A\u5B83\u6536\u8FDB\u8D26\u53F7\u884C\u53F3\u4FA7\uFF0C\u53EA\u663E\u793A\u56FE\u6807\u3002\u5207\u6362\u540E\u7ACB\u5373\u751F\u6548\u3002",
+    sidebarEntryHint: "\u300C\u6807\u51C6\u300D\u628A Remote \u6309\u94AE\u7559\u5728\u4FA7\u680F\u5E95\u90E8\uFF1B\u300C\u7B80\u6D01\u300D\u628A\u5B83\u6536\u8FDB\u8D26\u53F7\u884C\u53F3\u4FA7\uFF0C\u672C\u5730\u663E\u793A\u56FE\u6807\uFF0C\u8FDC\u7A0B\u663E\u793A\u4E3B\u673A\u540D\u548C\u9000\u51FA\u3002\u5207\u6362\u540E\u7ACB\u5373\u751F\u6548\u3002",
     sidebarEntryStandard: "\u6807\u51C6",
     sidebarEntryCompact: "\u7B80\u6D01",
     sidebarEntrySaved: "\u4FA7\u680F\u5165\u53E3\u6837\u5F0F\u5DF2\u4FDD\u5B58\u3002",
@@ -4642,7 +4642,7 @@ If a code was sent, recover the original submission without changing it.`,
           disabled: busy,
           onClick: () => void openLocalWorkspaces()
         }, t("exitRemote")) : null
-      ), accountEntry = React.createElement(
+      ), accountEntry = remoteActive ? entry : React.createElement(
         "div",
         { className: `dshRemoteAccountEntry${remoteActive ? " isActive" : ""}` },
         React.createElement("button", {

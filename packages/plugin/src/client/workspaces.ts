@@ -1188,9 +1188,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         disabled: busy,
         onClick: () => void openLocalWorkspaces(),
       }, t('exitRemote')) : null)
-    // The Compact style drops the label and lives in the account row, so it is
-    // always a plain icon button regardless of the current Remote mode.
-    const accountEntry = React.createElement('div', { className: `dshRemoteAccountEntry${remoteActive ? ' isActive' : ''}` },
+    // Compact stays in the account row, but remote mode must expose the Host
+    // identity and the same explicit exit action as the standard entry.
+    const accountEntry = remoteActive ? entry : React.createElement('div', { className: `dshRemoteAccountEntry${remoteActive ? ' isActive' : ''}` },
       React.createElement('button', {
         type: 'button',
         className: 'dshRemoteAccountEntryButton',
