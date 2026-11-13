@@ -1,5 +1,5 @@
 {
-  "version": "0.6.4",
+  "version": "0.6.5",
   "author": "liguobao <lgb835485368@gmail.com>",
   "license": "MIT",
   "homepage": "https://github.com/liguobao/ds-harness-remote#readme",
@@ -39,7 +39,7 @@
     }
   },
   "dependencies": {
-    "ds-harness-remote": "workspace:0.6.4",
+    "ds-harness-remote": "workspace:0.6.5",
     "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
     "@deepseek-ai/dsh-client-file-upload": "0.2.2-rc.1",
     "@deepseek-ai/dsh-session-reference": "0.2.2-rc.1",
