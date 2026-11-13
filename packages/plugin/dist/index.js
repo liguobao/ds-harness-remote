@@ -3227,7 +3227,7 @@ var require_stream = __commonJS({
       };
       duplex._final = function(callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open6() {
+          ws.once("open", function open7() {
             duplex._final(callback);
           });
           return;
@@ -3248,7 +3248,7 @@ var require_stream = __commonJS({
       };
       duplex._write = function(chunk, encoding, callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open6() {
+          ws.once("open", function open7() {
             duplex._write(chunk, encoding, callback);
           });
           return;
@@ -9169,10 +9169,10 @@ function generateCodecStatsId(transportId, payloadType, scopeId) {
 function getStatsTimestamp() {
   return performance.timeOrigin + performance.now();
 }
-function getReferencedStatsIds(stat10) {
+function getReferencedStatsIds(stat11) {
   const references = [];
   for (const [key, value] of Object.entries(
-    stat10
+    stat11
   )) {
     if (key === "id") {
       continue;
@@ -9195,8 +9195,8 @@ function getReferencedStatsIds(stat10) {
 }
 function buildStatsReport(stats, rootIds) {
   const index = /* @__PURE__ */ new Map();
-  for (const stat10 of stats) {
-    index.set(stat10.id, stat10);
+  for (const stat11 of stats) {
+    index.set(stat11.id, stat11);
   }
   if (!rootIds) {
     return new RTCStatsReport([...index.values()]);
@@ -9208,15 +9208,15 @@ function buildStatsReport(stats, rootIds) {
     if (!id6 || includedIds.has(id6)) {
       continue;
     }
-    const stat10 = index.get(id6);
-    if (!stat10) {
+    const stat11 = index.get(id6);
+    if (!stat11) {
       continue;
     }
     includedIds.add(id6);
-    queue.push(...getReferencedStatsIds(stat10));
+    queue.push(...getReferencedStatsIds(stat11));
   }
   return new RTCStatsReport(
-    [...includedIds].map((id6) => index.get(id6)).filter((stat10) => !!stat10)
+    [...includedIds].map((id6) => index.get(id6)).filter((stat11) => !!stat11)
   );
 }
 function getApplicationStopRevision(transceiver) {
@@ -24138,8 +24138,8 @@ var init_lib = __esm({
       constructor(stats) {
         super();
         if (stats) {
-          for (const stat10 of stats) {
-            this.set(stat10.id, stat10);
+          for (const stat11 of stats) {
+            this.set(stat11.id, stat11);
           }
         }
       }
@@ -41443,11 +41443,11 @@ var require_dijkstra = __commonJS({
         var predecessors = {};
         var costs = {};
         costs[s] = 0;
-        var open6 = dijkstra.PriorityQueue.make();
-        open6.push(s, 0);
+        var open7 = dijkstra.PriorityQueue.make();
+        open7.push(s, 0);
         var closest, u, v, cost_of_s_to_u, adjacent_nodes, cost_of_e, cost_of_s_to_u_plus_cost_of_e, cost_of_s_to_v, first_visit;
-        while (!open6.empty()) {
-          closest = open6.pop();
+        while (!open7.empty()) {
+          closest = open7.pop();
           u = closest.value;
           cost_of_s_to_u = closest.cost;
           adjacent_nodes = graph[u] || {};
@@ -41459,7 +41459,7 @@ var require_dijkstra = __commonJS({
               first_visit = typeof costs[v] === "undefined";
               if (first_visit || cost_of_s_to_v > cost_of_s_to_u_plus_cost_of_e) {
                 costs[v] = cost_of_s_to_u_plus_cost_of_e;
-                open6.push(v, cost_of_s_to_u_plus_cost_of_e);
+                open7.push(v, cost_of_s_to_u_plus_cost_of_e);
                 predecessors[v] = u;
               }
             }
@@ -86381,7 +86381,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error62) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open6 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open7 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -86390,7 +86390,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open6,
+      open: open7,
       failure: (error62) => this.failure(error62),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -86417,12 +86417,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open6 = this.originalOpen;
-      const rc1 = usesRc1Arity(open6);
+      const open7 = this.originalOpen;
+      const rc1 = usesRc1Arity(open7);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open6, this.runtime, callArgs) : open6.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open7, this.runtime, callArgs) : open7.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -86506,8 +86506,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open6) {
-  return open6.length >= 5;
+function usesRc1Arity(open7) {
+  return open7.length >= 5;
 }
 function endedUplink() {
   return {
@@ -86526,9 +86526,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open6 = runtime.openWireStream;
-  if (open6 !== void 0) {
-    return usesRc1Arity(open6) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open6.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open6.call(runtime, endpoint, payload, signal);
+  const open7 = runtime.openWireStream;
+  if (open7 !== void 0) {
+    return usesRc1Arity(open7) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open7.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open7.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -86681,10 +86681,10 @@ function isUsableExternalNode(candidate, requireFrom) {
 }
 function isExecutableFile(candidate) {
   try {
-    const stat10 = statSync(candidate);
-    if (!stat10.isFile()) return false;
+    const stat11 = statSync(candidate);
+    if (!stat11.isFile()) return false;
     if (process.platform === "win32") return true;
-    return (stat10.mode & 73) !== 0;
+    return (stat11.mode & 73) !== 0;
   } catch {
     return false;
   }
@@ -94228,16 +94228,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
     await this.readNewLines();
   }
   async readNewLines() {
-    let stat10;
+    let stat11;
     try {
-      stat10 = await fs2.stat(this.transcriptPath);
+      stat11 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
-    if (stat10.size <= this.offset) return;
+    if (stat11.size <= this.offset) return;
     const handle = await fs2.open(this.transcriptPath, "r");
     try {
-      const bytesToRead = stat10.size - this.offset;
+      const bytesToRead = stat11.size - this.offset;
       const buffer3 = Buffer.alloc(bytesToRead);
       const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, this.offset);
       this.offset += bytesRead;
@@ -95766,7 +95766,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   try {
     const path = await transcriptPath(baseDir, conversationId);
     if (path === void 0) return void 0;
-    const stat10 = await fs3.stat(path);
+    const stat11 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     try {
       const buffer3 = Buffer.alloc(4096);
@@ -95777,7 +95777,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (record11.type !== "USER_INPUT") return void 0;
       const title = cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat10.mtimeMs, updatedAt: stat10.mtimeMs };
+      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -97677,8 +97677,8 @@ function isBuiltinAcpBackend(id6) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat10 = statSync3(candidate);
-    if (!stat10.isFile()) return false;
+    const stat11 = statSync3(candidate);
+    if (!stat11.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
     return true;
@@ -97956,7 +97956,7 @@ async function installOrConfigureBackend(backendId, options = {}) {
 
 // packages/plugin/src/control-runtime.ts
 var PluginControlRuntime = class {
-  constructor(config2, identityDirectory, settings, client, host, switchServer, updates, useDefaultStorage = false) {
+  constructor(config2, identityDirectory, settings, client, host, switchServer, updates, useDefaultStorage = false, logStore) {
     this.config = config2;
     this.identityDirectory = identityDirectory;
     this.settings = settings;
@@ -97965,6 +97965,7 @@ var PluginControlRuntime = class {
     this.switchServer = switchServer;
     this.updates = updates;
     this.useDefaultStorage = useDefaultStorage;
+    this.logStore = logStore;
   }
   logoutFlight;
   serverSwitchFlight;
@@ -98034,6 +98035,8 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.installOrConfigure") return ok3(await this.installOrConfigureAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
       if (endpoint === "settings.identity.reset") return ok3(await this.resetIdentity(payload));
+      if (endpoint === "settings.logs.get") return ok3(await this.getLogs(payload));
+      if (endpoint === "settings.logs.clear") return ok3(await this.clearLogs());
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
         const value = record9(payload);
         if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
@@ -98272,6 +98275,34 @@ var PluginControlRuntime = class {
     }
     await this.settings.replace({ ...current, role: role2 });
     return this.settingsView();
+  }
+  currentLogLevel() {
+    return resolveConfig(this.settings === void 0 ? this.config : this.settings.get()).logLevel;
+  }
+  async getLogs(payload) {
+    const value = payload === void 0 ? {} : record9(payload);
+    const filter = value.filter;
+    if (filter !== void 0 && filter !== "all" && filter !== "warn") {
+      throw new ClientModeError("INVALID_MESSAGE", "The log filter must be all or warn.");
+    }
+    const limit = value.limit;
+    if (limit !== void 0 && (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 1e3)) {
+      throw new ClientModeError("INVALID_MESSAGE", "The log limit must be an integer between 1 and 1000.");
+    }
+    const logLevel = this.currentLogLevel();
+    if (this.logStore === void 0) {
+      return { logLevel, entries: [], totalBuffered: 0 };
+    }
+    const snapshot2 = await this.logStore.snapshot({ filter, limit });
+    return { logLevel, ...snapshot2 };
+  }
+  async clearLogs() {
+    const logLevel = this.currentLogLevel();
+    if (this.logStore === void 0) {
+      return { logLevel, entries: [], totalBuffered: 0 };
+    }
+    const snapshot2 = await this.logStore.clear();
+    return { logLevel, ...snapshot2 };
   }
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
@@ -98612,6 +98643,249 @@ function fail5(error62) {
   };
 }
 
+// packages/plugin/src/index.ts
+import { basename as basename9, dirname as dirname9 } from "node:path";
+
+// packages/plugin/src/host-log-store.ts
+import { mkdir as mkdir4, open as open5, readFile as readFile5, rename as rename3, rm as rm4, stat as stat6, writeFile as writeFile3 } from "node:fs/promises";
+import { homedir as homedir8 } from "node:os";
+import { dirname as dirname6, join as join14 } from "node:path";
+var DEFAULT_MAX_ENTRIES = 1e3;
+var DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
+var DEFAULT_MAX_BACKUPS = 2;
+var MAX_LINE_CHARS = 8192;
+var TAIL_READ_BYTES = 512 * 1024;
+function resolveHostLogPath(options = {}) {
+  const env = options.env ?? process.env;
+  const home = env.DSH_HOME || join14(options.homeDirectory ?? homedir8(), ".dsh");
+  const rawProfile = options.profile ?? env.DSH_PROFILE ?? "";
+  const profileSlug = rawProfile.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "host";
+  return join14(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
+}
+var HostLogStore = class {
+  filePath;
+  maxEntries;
+  maxFileBytes;
+  maxBackups;
+  liveEntries = [];
+  persistedEntries = [];
+  nextSeq = 1;
+  currentBytes = 0;
+  fileError;
+  writeChain = Promise.resolve();
+  initPromise;
+  clearedBeforeInit = false;
+  sizeVerified = false;
+  constructor(options = {}) {
+    this.filePath = options.filePath;
+    this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
+    this.maxFileBytes = Math.max(1024, options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES);
+    this.maxBackups = Math.max(0, options.maxBackups ?? DEFAULT_MAX_BACKUPS);
+    this.initPromise = this.loadInitialFile();
+    this.writeChain = this.initPromise.catch(() => void 0);
+  }
+  record(level, message, now = /* @__PURE__ */ new Date()) {
+    const timestamp = now.toISOString();
+    const clean4 = sanitizeLogMessage(message);
+    const line = `${timestamp} [${level.toUpperCase()}] ${clean4}`;
+    const entry = {
+      seq: this.nextSeq++,
+      timestamp,
+      level,
+      line
+    };
+    this.liveEntries.push(entry);
+    this.trimInMemory();
+    if (this.filePath !== void 0) {
+      const payload = `${line}
+`;
+      this.enqueueWrite(async () => {
+        await this.appendToDisk(payload);
+      });
+    }
+  }
+  async snapshot(options = {}) {
+    await this.initPromise.catch(() => void 0);
+    const filter = options.filter ?? "all";
+    const limit = Math.min(this.maxEntries, Math.max(1, options.limit ?? 500));
+    const combined = this.combinedEntries();
+    const filtered = filter === "warn" ? combined.filter((entry) => entry.level === "warn" || entry.level === "error") : combined;
+    const entries = filtered.length > limit ? filtered.slice(-limit) : filtered;
+    return {
+      entries,
+      totalBuffered: combined.length,
+      ...this.filePath === void 0 ? {} : { filePath: this.filePath },
+      ...this.fileError === void 0 ? {} : { fileError: this.fileError }
+    };
+  }
+  async clear() {
+    this.clearedBeforeInit = true;
+    this.persistedEntries = [];
+    this.liveEntries = [];
+    if (this.filePath !== void 0) {
+      this.enqueueWrite(async () => {
+        await this.clearDisk();
+      });
+      await this.writeChain;
+    }
+    const entries = this.combinedEntries();
+    return {
+      entries,
+      totalBuffered: entries.length,
+      ...this.filePath === void 0 ? {} : { filePath: this.filePath },
+      ...this.fileError === void 0 ? {} : { fileError: this.fileError }
+    };
+  }
+  async flush() {
+    await this.writeChain;
+  }
+  enqueueWrite(task) {
+    this.writeChain = this.writeChain.then(async () => {
+      try {
+        await task();
+        this.fileError = void 0;
+      } catch (error62) {
+        this.fileError = safeFsErrorMessage(error62);
+      }
+    });
+  }
+  async loadInitialFile() {
+    if (this.filePath === void 0) return;
+    try {
+      const info = await stat6(this.filePath);
+      this.currentBytes = info.size;
+      this.sizeVerified = true;
+      if (this.clearedBeforeInit || info.size === 0) return;
+      const text = await readTailUtf8(this.filePath, info.size, TAIL_READ_BYTES);
+      if (this.clearedBeforeInit) return;
+      const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
+      const tail = lines.slice(-this.maxEntries);
+      const parsed = [];
+      let seqBase = 1;
+      for (const line of tail) {
+        parsed.push(parsePersistedLine(line, seqBase++));
+      }
+      this.persistedEntries = parsed;
+      let next = parsed.length + 1;
+      for (const entry of this.liveEntries) {
+        entry.seq = next++;
+      }
+      this.nextSeq = next;
+      this.trimInMemory();
+    } catch (error62) {
+      if (isEnoent(error62)) {
+        this.currentBytes = 0;
+        this.sizeVerified = true;
+        return;
+      }
+      this.fileError = safeFsErrorMessage(error62);
+    }
+  }
+  async appendToDisk(payload) {
+    const target3 = this.filePath;
+    await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+    if (!this.sizeVerified) {
+      const existing = await stat6(target3).catch((err5) => isEnoent(err5) ? void 0 : Promise.reject(err5));
+      this.currentBytes = existing?.size ?? 0;
+      this.sizeVerified = true;
+    }
+    const byteLength = Buffer.byteLength(payload, "utf8");
+    if (this.currentBytes > 0 && this.currentBytes + byteLength > this.maxFileBytes) {
+      await this.rotateFiles(target3);
+    }
+    await writeFile3(target3, payload, { encoding: "utf8", flag: "a", mode: 384 });
+    this.currentBytes += byteLength;
+  }
+  async rotateFiles(target3) {
+    if (this.maxBackups === 0) {
+      await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
+      this.currentBytes = 0;
+      return;
+    }
+    for (let index = this.maxBackups; index >= 1; index--) {
+      const dest = `${target3}.${index}`;
+      const src = index === 1 ? target3 : `${target3}.${index - 1}`;
+      if (index === this.maxBackups) {
+        await rm4(dest, { force: true }).catch(() => void 0);
+      }
+      try {
+        await rename3(src, dest);
+      } catch (error62) {
+        if (!isEnoent(error62)) throw error62;
+      }
+    }
+    this.currentBytes = 0;
+  }
+  async clearDisk() {
+    const target3 = this.filePath;
+    await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+    await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
+    this.sizeVerified = true;
+    for (let index = 1; index <= this.maxBackups; index++) {
+      await rm4(`${target3}.${index}`, { force: true }).catch(() => void 0);
+    }
+    this.currentBytes = 0;
+  }
+  combinedEntries() {
+    if (this.persistedEntries.length === 0) return [...this.liveEntries];
+    const merged = [...this.persistedEntries, ...this.liveEntries];
+    return merged.length > this.maxEntries ? merged.slice(-this.maxEntries) : merged;
+  }
+  trimInMemory() {
+    const total = this.persistedEntries.length + this.liveEntries.length;
+    if (total <= this.maxEntries) return;
+    const overflow = total - this.maxEntries;
+    if (this.persistedEntries.length >= overflow) {
+      this.persistedEntries.splice(0, overflow);
+    } else {
+      const remaining = overflow - this.persistedEntries.length;
+      this.persistedEntries = [];
+      this.liveEntries.splice(0, remaining);
+    }
+  }
+};
+function sanitizeLogMessage(message) {
+  const collapsed = message.replace(/[\r\n]+/g, " ").trimEnd();
+  if (collapsed.length <= MAX_LINE_CHARS) return collapsed;
+  return `${collapsed.slice(0, MAX_LINE_CHARS)}...`;
+}
+function parsePersistedLine(line, seq) {
+  const match = line.match(/^(\d{4}-\d{2}-\d{2}T\S+)\s+\[(DEBUG|INFO|WARN|ERROR)\]\s+(.*)$/);
+  if (match === null) {
+    return { seq, timestamp: "", level: "info", line };
+  }
+  const level = match[2].toLowerCase();
+  return {
+    seq,
+    timestamp: match[1],
+    level,
+    line
+  };
+}
+async function readTailUtf8(filePath, totalSize, maxBytes) {
+  if (totalSize <= maxBytes) {
+    return readFile5(filePath, "utf8");
+  }
+  const handle = await open5(filePath, "r");
+  try {
+    const start = totalSize - maxBytes;
+    const buffer3 = Buffer.allocUnsafe(maxBytes);
+    const { bytesRead } = await handle.read(buffer3, 0, maxBytes, start);
+    const raw = buffer3.subarray(0, bytesRead).toString("utf8");
+    const firstNewline = raw.indexOf("\n");
+    return firstNewline === -1 ? raw : raw.slice(firstNewline + 1);
+  } finally {
+    await handle.close();
+  }
+}
+function isEnoent(error62) {
+  return typeof error62 === "object" && error62 !== null && error62.code === "ENOENT";
+}
+function safeFsErrorMessage(error62) {
+  if (error62 instanceof Error && error62.message.trim().length > 0) return error62.message;
+  return "Failed to write log file.";
+}
+
 // packages/plugin/src/logging.ts
 var levels = ["debug", "info", "warn", "error"];
 var secretKey = /authorization|cookie|token|secret|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i;
@@ -98648,8 +98922,8 @@ function redact(value, key = "") {
 
 // packages/plugin/src/host-pairing.ts
 import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes13, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
-import { join as join14 } from "node:path";
-import { rm as rm4 } from "node:fs/promises";
+import { join as join15 } from "node:path";
+import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
 var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
 function rawKey(text) {
@@ -98680,7 +98954,7 @@ var HostPairing = class {
     this.adopt = adopt;
     this.fetcher = fetcher;
     this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
-    this.path = join14(directory, "host-pairing.json");
+    this.path = join15(directory, "host-pairing.json");
   }
   path;
   serverUrl;
@@ -98692,7 +98966,7 @@ var HostPairing = class {
   async discard() {
     this.close();
     await this.queue.catch(() => void 0);
-    await rm4(this.path, { force: true });
+    await rm5(this.path, { force: true });
   }
   serial(fn) {
     const task = this.queue.catch(() => void 0).then(fn);
@@ -98756,7 +99030,7 @@ var HostPairing = class {
     if (s.serverUrl !== this.serverUrl || s.deviceId !== this.identity.deviceId)
       throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Pairing belongs to another identity.", false);
     if (s.session.expiresAt + 3e5 <= Date.now()) {
-      await rm4(this.path, { force: true });
+      await rm5(this.path, { force: true });
       return void 0;
     }
     return s;
@@ -98877,8 +99151,8 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat4, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
+import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
@@ -98958,10 +99232,10 @@ var WorkspaceUploadHost = class {
     this.assertLive();
     if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const root2 = await realpath6(sourceRoot);
-    const directory = await stat6(root2);
+    const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const temp = join15(root2, `.dsh-upload-${randomUUID16()}.part`);
-    const handle = await open5(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
+    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
     const upload = {
       ...p,
       received: 0,
@@ -99016,7 +99290,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join15(upload.root, name2));
+        await link2(upload.temp, join16(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -99072,7 +99346,7 @@ var WorkspaceUploadHost = class {
       upload.authorityBytes = upload.received;
     }
     if (await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
-    const directory = await stat6(upload.root);
+    const directory = await stat7(upload.root);
     if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
   }
   async discard(id6, upload) {
@@ -101067,24 +101341,24 @@ function closeCode(code) {
 
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
-import { homedir as homedir9 } from "node:os";
-import { lstat as lstat5, realpath as realpath7, stat as stat8 } from "node:fs/promises";
-import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { homedir as homedir10 } from "node:os";
+import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir4, readdir as readdir6, stat as stat7 } from "node:fs/promises";
-import { homedir as homedir8, platform as platform2 } from "node:os";
-import { basename as basename8, dirname as dirname6, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
+import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
+import { homedir as homedir9, platform as platform2 } from "node:os";
+import { basename as basename8, dirname as dirname7, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve8(path) === parse3(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
-  await mkdir4(path, { recursive: true });
+  await mkdir5(path, { recursive: true });
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve8(homedir8());
+  const home = resolve8(homedir9());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve8(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir6(target3, { withFileTypes: true });
@@ -101093,7 +101367,7 @@ async function listRemoteDirectory(path, signal) {
     signal?.throwIfAborted();
     const child = resolve8(target3, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat7(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat8(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -101113,7 +101387,7 @@ function crumbs(path) {
   let current = path;
   while (current !== root2) {
     segments.unshift(basename8(current));
-    current = dirname6(current);
+    current = dirname7(current);
   }
   for (const segment of segments) {
     current = resolve8(current, segment);
@@ -101602,7 +101876,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir9() } };
+      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir10() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -101811,7 +102085,7 @@ var HarnessRemoteBridge = class {
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint);
       const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
-      const baseDir = dirname7(baseCandidate);
+      const baseDir = dirname8(baseCandidate);
       const targetCandidate = resolve9(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint);
     } else {
@@ -101861,7 +102135,7 @@ var HarnessRemoteBridge = class {
     }
     try {
       const root2 = await realpath7(cwd2);
-      const info = await stat8(root2);
+      const info = await stat9(root2);
       if (!info.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "root-invalid");
       }
@@ -101898,7 +102172,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join16(currentPath, parts[i]);
+        currentPath = join17(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
@@ -101926,7 +102200,7 @@ var HarnessRemoteBridge = class {
       if (isPathOutside(canonicalRel)) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const info = await stat8(canonical);
+      const info = await stat9(canonical);
       if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
       }
@@ -103769,9 +104043,9 @@ function decodeBase64(value) {
 }
 
 // packages/plugin/src/cli.ts
-import { stat as stat9 } from "node:fs/promises";
+import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -103863,7 +104137,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join17(directory, "device.json"))) {
+  if (!await exists3(join18(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -103923,9 +104197,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join17(directory, "device.json")),
-    exists3(join17(directory, "device.key")),
-    exists3(join17(directory, "server-credentials.json"))
+    exists3(join18(directory, "device.json")),
+    exists3(join18(directory, "device.key")),
+    exists3(join18(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
@@ -104054,7 +104328,7 @@ function terminalLink(url2, target3) {
 }
 async function exists3(path) {
   try {
-    await stat9(path);
+    await stat10(path);
     return true;
   } catch (error62) {
     if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return false;
@@ -104180,6 +104454,29 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const connection = ctx.get("connection");
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
+  const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
+  const logger2 = new SafeLogger({
+    debug: (message) => {
+      logStore.record("debug", message);
+      ctx.logger.debug(message);
+      console.debug(message);
+    },
+    info: (message) => {
+      logStore.record("info", message);
+      ctx.logger.info(message);
+      console.info(message);
+    },
+    warn: (message) => {
+      logStore.record("warn", message);
+      ctx.logger.warn(message);
+      console.warn(message);
+    },
+    error: (message) => {
+      logStore.record("error", message);
+      ctx.logger.error(message);
+      console.error(message);
+    }
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   let defaultIdentityDirectory = new IdentityStore().directory;
   let initialStorageError;
   try {
@@ -104197,33 +104494,23 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         void 0,
         void 0,
         void 0,
-        true
+        true,
+        logStore
       );
       if (initialStorageError !== void 0) {
+        logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
         controlRuntime2.setStartupFailure(initialStorageError, { storageAvailable: false });
       }
-      ctx.effect(() => controlRuntime2.register(connection, webServer), "ds-harness-remote disabled control");
+      ctx.effect(() => {
+        const dispose = controlRuntime2.register(connection, webServer);
+        return async () => {
+          await dispose();
+          await logStore.flush();
+        };
+      }, "ds-harness-remote disabled control");
     }
     return;
   }
-  const logger2 = new SafeLogger({
-    debug: (message) => {
-      ctx.logger.debug(message);
-      console.debug(message);
-    },
-    info: (message) => {
-      ctx.logger.info(message);
-      console.info(message);
-    },
-    warn: (message) => {
-      ctx.logger.warn(message);
-      console.warn(message);
-    },
-    error: (message) => {
-      ctx.logger.error(message);
-      console.error(message);
-    }
-  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
   const updateChecker = new PluginUpdateChecker(logger2);
   const nativeTypertGateway = ctx.get("typertGateway");
   const connectionExports = DshConnection;
@@ -104366,7 +104653,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     runtime,
     replaceServer,
     updateChecker,
-    true
+    true,
+    logStore
   );
   if (initialStorageError !== void 0) {
     controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
@@ -104414,9 +104702,23 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       await disposeControl?.();
       await clientRuntime?.close();
       await runtime?.close();
+      await logStore.flush();
     };
   }, "ds-harness-remote lifecycle");
   if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
+}
+function resolveLogProfileName(ctx) {
+  const envProfile = process.env.DSH_PROFILE?.trim();
+  if (envProfile) return envProfile;
+  const baseDir = ctx.root?.baseDir;
+  if (typeof baseDir === "string" && baseDir.trim().length > 0) {
+    const trimmed = baseDir.trim();
+    if (basename9(dirname9(trimmed)) === "profiles") {
+      const segment = basename9(trimmed);
+      if (segment.length > 0) return segment;
+    }
+  }
+  return void 0;
 }
 function readEntryConfig(entry) {
   if (entry === void 0) return {};

@@ -25,6 +25,7 @@ import type { PluginUpdateSnapshot } from './update-check.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
 import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
+import type { HostLogSnapshot, HostLogStore, PluginLogFilter } from './host-log-store.js'
 
 export interface PluginSettingsView {
   config: Config
@@ -43,6 +44,10 @@ export interface PluginSettingsView {
     code: string
     message: string
   }
+}
+
+export interface PluginLogView extends HostLogSnapshot {
+  logLevel: 'debug' | 'info' | 'warn' | 'error'
 }
 
 export interface PluginAssociation {
@@ -105,6 +110,7 @@ export class PluginControlRuntime {
     /** Update-check snapshots merged into every `status` result; absent when the plugin is disabled. */
     private readonly updates?: { snapshot(): PluginUpdateSnapshot | undefined },
     private readonly useDefaultStorage = false,
+    private readonly logStore?: HostLogStore,
   ) {}
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -161,6 +167,8 @@ export class PluginControlRuntime {
       if (endpoint === 'settings.acp.installOrConfigure') return ok(await this.installOrConfigureAcp(payload))
       if (endpoint === 'settings.logout') return ok(await this.logout())
       if (endpoint === 'settings.identity.reset') return ok(await this.resetIdentity(payload))
+      if (endpoint === 'settings.logs.get') return ok(await this.getLogs(payload))
+      if (endpoint === 'settings.logs.clear') return ok(await this.clearLogs())
       if (endpoint === 'host.authorization.set' && this.client !== undefined) {
         const value = record(payload)
         if (typeof value.enabled !== 'boolean') throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
@@ -415,6 +423,37 @@ export class PluginControlRuntime {
     }
     await this.settings.replace({ ...current, role })
     return this.settingsView()
+  }
+
+  private currentLogLevel(): 'debug' | 'info' | 'warn' | 'error' {
+    return resolveConfig(this.settings === undefined ? this.config : this.settings.get()).logLevel
+  }
+
+  private async getLogs(payload: unknown): Promise<PluginLogView> {
+    const value = payload === undefined ? {} : record(payload)
+    const filter = value.filter
+    if (filter !== undefined && filter !== 'all' && filter !== 'warn') {
+      throw new ClientModeError('INVALID_MESSAGE', 'The log filter must be all or warn.')
+    }
+    const limit = value.limit
+    if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+      throw new ClientModeError('INVALID_MESSAGE', 'The log limit must be an integer between 1 and 1000.')
+    }
+    const logLevel = this.currentLogLevel()
+    if (this.logStore === undefined) {
+      return { logLevel, entries: [], totalBuffered: 0 }
+    }
+    const snapshot = await this.logStore.snapshot({ filter: filter as PluginLogFilter | undefined, limit })
+    return { logLevel, ...snapshot }
+  }
+
+  private async clearLogs(): Promise<PluginLogView> {
+    const logLevel = this.currentLogLevel()
+    if (this.logStore === undefined) {
+      return { logLevel, entries: [], totalBuffered: 0 }
+    }
+    const snapshot = await this.logStore.clear()
+    return { logLevel, ...snapshot }
   }
 
   private async setDevelopment(payload: unknown): Promise<PluginSettingsView> {
