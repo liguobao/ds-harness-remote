@@ -15,12 +15,14 @@ import {
   redirectLoginChannelFor,
 } from '../services/login'
 import { serverSession } from '../services/server-session'
+import { DEFAULT_CHAT_APPEARANCE } from '../ui/theme'
 import {
   clearCodexPermissionPresets,
   clearDeviceCredentials,
   clearLastConnectedDeviceId,
   clearLocalData,
   forgetHost,
+  loadChatAppearance,
   loadDefaultPermissionPreset,
   loadFavoriteWorkspaces,
   loadCompactHistory,
@@ -35,6 +37,7 @@ import {
   loadStatusBarVisible,
   loadTransportPreference,
   loadTrustedHosts,
+  saveChatAppearance,
   saveDefaultPermissionPreset,
   saveFavoriteWorkspaces,
   saveCompactHistory,
@@ -109,13 +112,14 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, activityDockMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
           loadLanguagePreference(),
           loadThemePreference(),
           loadTypographyDensity(),
+          loadChatAppearance(),
           loadActivityDockMode(),
           loadStatusBarVisible(),
           loadFavoriteWorkspaces(),
@@ -134,6 +138,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           language,
           themePreference,
           typographyDensity,
+          chatAppearance,
           activityDockMode,
           statusBarVisible,
           compactHistory,
@@ -531,6 +536,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         language,
         themePreference: 'system',
         typographyDensity: 'compact',
+        chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
         activityDockMode: 'compact',
         statusBarVisible: true,
         compactHistory: false,
@@ -543,7 +549,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, typographyDensity, activityDockMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
+      const { config, identity, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       await clearBrowseMemory()
       if (config !== undefined && identity !== undefined) {
@@ -558,6 +564,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveLanguagePreference(languagePreference)
       await saveThemePreference(themePreference)
       await saveTypographyDensity(typographyDensity)
+      await saveChatAppearance(chatAppearance)
       await saveActivityDockMode(activityDockMode)
       await saveStatusBarVisible(statusBarVisible)
       await saveCompactHistory(compactHistory)

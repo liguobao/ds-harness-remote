@@ -116,7 +116,7 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palet
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
-  const styles = useMemo(() => createStyles(colors), [colors])
+  const styles = useMemo(() => createStyles(colors, theme.density, theme.appearance), [colors, theme.density, theme.appearance])
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
   const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, "\n")), [source])

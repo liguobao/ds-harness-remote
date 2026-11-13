@@ -6,7 +6,7 @@ import * as SecureStore from 'expo-secure-store'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isActivityDockMode, isThemePreference, isTypographyDensity, type ActivityDockMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
+import { isActivityDockMode, isThemePreference, isTypographyDensity, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type ThemePreference, type TypographyDensity } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 /** Durable compaction attempt shape shared with `compaction-store`. */
@@ -29,6 +29,7 @@ const KEYS = {
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
   typographyDensity: 'dshremote.typography-density.v1',
+  chatAppearance: 'dshremote.chat-appearance.v1',
   activityDockMode: 'dshremote.activity-dock-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
@@ -593,4 +594,13 @@ export async function loadActivityDockMode(): Promise<ActivityDockMode> {
 
 export async function saveActivityDockMode(value: ActivityDockMode): Promise<void> {
   await writeJson(KEYS.activityDockMode, { value })
+}
+
+export async function loadChatAppearance(): Promise<ChatAppearance> {
+  const stored = await readJson<{ value?: unknown }>(KEYS.chatAppearance)
+  return normalizeChatAppearance(stored?.value ?? stored)
+}
+
+export async function saveChatAppearance(value: ChatAppearance): Promise<void> {
+  await writeJson(KEYS.chatAppearance, { value })
 }

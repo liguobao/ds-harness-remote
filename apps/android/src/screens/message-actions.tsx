@@ -72,8 +72,8 @@ export function TurnUsageModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={styles.modalOverlay} onPress={onClose}>
-        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.border }]} onStartShouldSetResponder={() => true}>
+      <Pressable style={[styles.modalOverlay, { backgroundColor: colors.scrim }]} onPress={onClose}>
+        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.border, shadowColor: colors.shadow }]} onStartShouldSetResponder={() => true}>
           {/* Header row */}
           <View style={styles.usageTitleRow}>
             <View style={styles.usageTitleLeft}>
@@ -210,7 +210,7 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
   if (user) {
     return (
       <View style={[styles.row, styles.userRow]}>
-        {time !== undefined && !hideTime && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
+        {time !== undefined && !hideTime && <Text style={[styles.userTimeText, { color: colors.subtle }]}>{messageClock(time)}</Text>}
         <Animated.View style={{ opacity: copyOpacity }}>
           <Pressable
             accessibilityRole="button"
@@ -221,9 +221,9 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
             onPress={handleCopy}
           >
             {copied ? (
-              <IconCheckOutline size={14} color={colors.primary} />
+              <IconCheckOutline size={13} color={colors.primary} />
             ) : (
-              <IconCopyOutline size={14} color={colors.muted} />
+              <IconCopyOutline size={13} color={colors.subtle} />
             )}
           </Pressable>
         </Animated.View>
@@ -281,7 +281,7 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
           </Pressable>
         )}
         {time !== undefined && (
-          <Text style={[styles.timeText, { color: colors.muted }]}>
+          <Text style={[styles.timeText, { color: colors.subtle }]}>
             {messageClock(time)}
           </Text>
         )}
@@ -300,24 +300,25 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', minHeight: 32 },
-  userRow: { justifyContent: 'flex-end', gap: 8, paddingTop: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 24 },
+  userRow: { justifyContent: 'flex-end', gap: 6, paddingTop: 3, paddingRight: 2 },
+  userTimeText: { fontSize: 11, fontVariant: ['tabular-nums'] },
   assistantRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    minHeight: 32,
-    paddingTop: 8,
+    gap: 10,
+    minHeight: 28,
+    paddingTop: 6,
     paddingBottom: 2,
   },
   timeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontVariant: ['tabular-nums'],
-    marginLeft: -4,
+    marginLeft: -2,
   },
   actionBtn: {
-    width: 28,
-    height: 28,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -325,16 +326,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    height: 28,
+    height: 26,
     paddingHorizontal: 2,
   },
   usageText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '400',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -342,10 +342,9 @@ const styles = StyleSheet.create({
   usageCard: {
     width: '100%',
     maxWidth: 340,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     padding: 16,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 16,

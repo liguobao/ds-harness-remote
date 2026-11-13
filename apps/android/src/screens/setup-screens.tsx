@@ -9,7 +9,8 @@ import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
@@ -639,6 +640,8 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const chatAppearance = useAppStore(state => state.chatAppearance)
   const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
   useEffect(() => {
     setLogCount(connectionLogEntries().length)
@@ -770,6 +773,19 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   if (aboutOpen && !onOpenAbout) {
     return <AboutScreen onBack={() => setAboutOpen(false)} />
   }
+  if (appearanceOpen) {
+    return <ChatAppearanceScreen onBack={() => setAppearanceOpen(false)} />
+  }
+
+  const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
+    : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
+      : chatAppearance.fontScale === 'xl' ? zhCN.settings.fontSizeXl
+        : zhCN.settings.fontSizeMd
+  const bubbleLabel = chatAppearance.bubbleStyle === 'tinted' ? zhCN.settings.bubbleTinted
+    : chatAppearance.bubbleStyle === 'solid' ? zhCN.settings.bubbleSolid
+      : chatAppearance.bubbleStyle === 'minimal' ? zhCN.settings.bubbleMinimal
+        : zhCN.settings.bubbleSoft
+  const chatAppearanceSummary = `${fontLabel} · ${bubbleLabel}`
 
   return (
     <View style={styles.flex}>
@@ -793,6 +809,13 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
+                icon={Palette}
+                label={zhCN.settings.chatAppearance}
+                value={chatAppearanceSummary}
+                chevron
+                onPress={() => setAppearanceOpen(true)}
+              />
+              <GroupRow
                 icon={Type}
                 label={zhCN.settings.typographyDensity}
                 value={currentDensityLabel}

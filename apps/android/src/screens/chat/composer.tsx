@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, CircleStop, Plus, Zap } from 'lucide-react-native'
+import { ArrowUp, ChevronDown, CircleStop, Plus, X, Zap } from 'lucide-react-native'
 import { useMemo } from 'react'
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
@@ -73,6 +73,8 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
   const replyStatusLabel = stopping ? strings.chat.stopping : strings.chat[backendTextKeys.generating]
+  const showExpand = draft.length > 0 && !compactRunning && onOpenExpand !== undefined
+  const hasQuotes = quotes !== undefined && quotes.length > 0
   return <>
     {replyActive && (
       <View
@@ -81,7 +83,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
         accessibilityLiveRegion="polite"
         style={styles.replyStatus}
       >
-        <Svg width={18} height={18} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}><Path d={FISH_LOGO_PATH} fill={colors.accent} /></Svg>
+        <Svg width={15} height={15} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}><Path d={FISH_LOGO_PATH} fill={colors.accent} /></Svg>
         <Text style={styles.replyStatusText}>{replyStatusLabel}</Text>
         {!stopping && <ReplyStatusDots />}
       </View>
@@ -92,8 +94,9 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
       )}
       {compactRunning ? <View style={[styles.composerCard, styles.runningComposer]}>
         <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.moreActions} onPress={onOpenActions}
+          hitSlop={6}
           style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}>
-          <Plus size={22} color={colors.ink} />
+          <Plus size={19} color={colors.ink} />
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={strings.sessionActivity.composeRunning}
           onPress={onExpand} style={styles.runningComposerPrompt}>
@@ -101,11 +104,12 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.stop} disabled={stopping}
           accessibilityState={{ disabled: stopping, busy: stopping }} onPress={onStop}
+          hitSlop={6}
           style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed]}>
-          {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={20} color={colors.onInverse} />}
+          {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={18} color={colors.onInverse} />}
         </Pressable>
       </View> : <View style={styles.composerCard}>
-        {draft.length > 0 && !compactRunning && onOpenExpand !== undefined && (
+        {showExpand && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.chat.expandComposer}
@@ -113,29 +117,35 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             hitSlop={8}
             style={({ pressed }) => [styles.composerExpandButton, pressed && styles.plusPressed]}
           >
-            <ExpandCornerIcon size={17} color={colors.muted} />
+            <ExpandCornerIcon size={16} color={colors.muted} />
           </Pressable>
         )}
+        {hasQuotes && (
+          <View style={[styles.composerQuotesWrap, showExpand && { paddingRight: 36 }]}>
+            {quotes.map((quoteText, index) => (
+              <Pressable
+                key={`inline-quote-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
+                onPress={() => onRemoveQuote?.(index)}
+                hitSlop={4}
+                style={styles.composerQuotePill}
+              >
+                <QuoteMarkIcon size={12} color={colors.primary} />
+                <Text numberOfLines={1} style={styles.composerQuotePillText}>
+                  “{formatQuoteDraftSnippet(quoteText, 18)}”
+                </Text>
+                <X size={12} color={colors.primary} />
+              </Pressable>
+            ))}
+          </View>
+        )}
         <View style={styles.composerInputWrap}>
-          {quotes?.map((quoteText, index) => (
-            <Pressable
-              key={`inline-quote-${index}`}
-              accessibilityRole="button"
-              accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
-              onPress={() => onRemoveQuote?.(index)}
-              style={styles.composerInlineQuoteBadge}
-            >
-              <QuoteMarkIcon size={14} color={colors.primary} />
-              <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 180 }]}>
-                “{formatQuoteDraftSnippet(quoteText, 14)}”
-              </Text>
-            </Pressable>
-          ))}
           {/* Native attributed text keeps references blue without an opaque Android value layer. */}
           <TextInput
             ref={composerInputRef}
             accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
-            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }, draft.length > 0 && !compactRunning && onOpenExpand !== undefined && { paddingRight: 32 }]}
+            style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }, showExpand && !hasQuotes && { paddingRight: 32 }]}
             onChangeText={onChangeText}
             onSelectionChange={onSelectionChange}
             onKeyPress={({ nativeEvent }) => {
@@ -162,10 +172,10 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             accessibilityState={{ disabled: composerDisabled }}
             disabled={composerDisabled}
             onPress={onOpenActions}
-            hitSlop={8}
+            hitSlop={6}
             style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
           >
-            <Plus size={20} color={connected ? colors.ink : colors.disabled} />
+            <Plus size={19} color={connected ? colors.ink : colors.disabled} />
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -173,14 +183,14 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             accessibilityState={{ disabled: composerDisabled, expanded: promptsPickerOpen }}
             disabled={composerDisabled}
             onPress={onOpenPrompts}
-            hitSlop={{ top: 8, bottom: 8 }}
+            hitSlop={6}
             style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
           >
-            <Zap size={18} color={connected ? colors.ink : colors.disabled} strokeWidth={1.9} />
+            <Zap size={17} color={connected ? colors.ink : colors.disabled} strokeWidth={1.9} />
           </Pressable>
           <View style={styles.composerSpacer} />
           {model.available && (
-            <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.selectModel} onPress={model.onOpen} style={styles.modelChip}>
+            <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.selectModel} onPress={model.onOpen} hitSlop={4} style={styles.modelChip}>
               <Text style={styles.modelChipText} numberOfLines={1}>{model.label}</Text>
               {model.selecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
             </Pressable>
@@ -192,11 +202,12 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
               accessibilityState={{ disabled: stopping, busy: stopping }}
               disabled={stopping}
               onPress={onStop}
+              hitSlop={6}
               style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
             >
               {stopping
                 ? <ActivityIndicator size="small" color={colors.onInverse} />
-                : <CircleStop size={20} color={colors.onInverse} />}
+                : <CircleStop size={18} color={colors.onInverse} />}
             </Pressable>
             : <>
               {/* With text in the composer the primary action is the send
@@ -210,11 +221,12 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
                   accessibilityState={{ disabled: stopping, busy: stopping }}
                   disabled={stopping}
                   onPress={onStop}
+                  hitSlop={6}
                   style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
                 >
                   {stopping
-                    ? <ActivityIndicator size="small" color={colors.white} />
-                    : <CircleStop size={17} color={colors.onInverse} />}
+                    ? <ActivityIndicator size="small" color={colors.onInverse} />
+                    : <CircleStop size={16} color={colors.onInverse} />}
                 </Pressable>
               )}
               <Pressable
@@ -223,9 +235,10 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
                 accessibilityState={{ disabled: sendDisabled }}
                 disabled={sendDisabled}
                 onPress={onSubmit}
+                hitSlop={6}
                 style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
               >
-                <ArrowUp size={20} color={sendDisabled ? colors.subtle : colors.white} strokeWidth={2.4} />
+                <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onPrimary ?? colors.white)} strokeWidth={2.4} />
               </Pressable>
             </>}
         </View>
@@ -237,7 +250,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
     {/* The draft survives a carrier drop; say so instead of silently
         swallowing an offline send tap (the primary action stays disabled). */}
     {!connected && draft.length > 0 && (
-      <Text accessibilityLiveRegion="polite" style={styles.composerHint}>{strings.chat.offlineSendBlocked}</Text>
+      <Text accessibilityLiveRegion="polite" style={[styles.composerHint, styles.composerHintWarning]}>{strings.chat.offlineSendBlocked}</Text>
     )}
     {/* Landscape phones leave almost no space above the IME once the
         composer is visible; keep the privacy note for roomier windows. */}
