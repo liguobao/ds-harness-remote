@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Modal } from 'react-native'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -30,8 +30,8 @@ export function ConfirmDialog({
   onClose: () => void
 }) {
   const styles = useThemedStyles(createStyles)
-  // Button handlers run after the dismiss fade completes, mirroring the
-  // popover's dismiss-then-act timing without cutting the animation short.
+  // iOS runs handlers after its dismiss fade. Android does not emit
+  // Modal.onDismiss, so it must run the action when requesting the close.
   const pendingRef = useRef<(() => void) | undefined>(undefined)
   const runPending = () => {
     const pending = pendingRef.current
@@ -64,6 +64,7 @@ export function ConfirmDialog({
                 onPress={() => {
                   pendingRef.current = button.onPress
                   onClose()
+                  if (Platform.OS !== 'ios') runPending()
                 }}
                 style={({ pressed }) => [
                   styles.button,
