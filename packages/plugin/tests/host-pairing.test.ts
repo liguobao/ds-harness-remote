@@ -129,6 +129,23 @@ it('uses a short fragment ticket only when advertised and retains it across rest
     expect(JSON.parse(await readFile(join(f.directory, 'host-pairing.json'), 'utf8')).qrFormat).toBe('fragment-ticket-v1');
     pairing.close();
 });
+it('removes pairing-host-only.json when IdentityStore.reset replaces the device identity', async () => {
+    const f = await setup();
+    const store = new ServerCredentialStore(f.directory);
+    const api = new HostServerApi('http://127.0.0.1:8081', store);
+    api.bindIdentity(f.identity);
+    await api.adoptPairing(f.credentials);
+    expect(await store.pairingHostOnly()).toBe(true);
+    const rotated = await new IdentityStore({ directory: f.directory }).reset('Host');
+    expect(rotated.deviceId).not.toBe(f.identity.deviceId);
+    expect(await store.pairingHostOnly()).toBe(false);
+    const reloaded = new HostServerApi('http://127.0.0.1:8081', store);
+    reloaded.bindIdentity(rotated);
+    await reloaded.loadStoredPolicy();
+    expect(reloaded.pairingHostOnly()).toBe(false);
+    api.close();
+    reloaded.close();
+});
 it('preserves full JSON QR compatibility when compact discovery is absent', async () => {
     const f = await setup();
     const pairing = f.create();

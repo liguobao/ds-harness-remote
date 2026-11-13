@@ -392,6 +392,7 @@ export class HostPluginRuntime {
     }
     this.identity = await this.identities.reset(this.config.deviceName)
     this.serverApi?.bindIdentity(this.identity)
+    await this.serverApi?.loadStoredPolicy()
     if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
     this.initializePairing()
     this.logger.info('Host authorization cleared')

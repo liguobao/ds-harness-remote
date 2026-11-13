@@ -1111,12 +1111,19 @@ function isIdentityTempArtifact(name: string): boolean {
 }
 
 function isOwnedIdentityRecord(name: string): boolean {
-  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json' || name === 'host-pairing.json') return true
+  if (
+    name === 'device.json'
+    || name === 'device.key'
+    || name === 'trusted-peers.json'
+    || name === 'host-pairing.json'
+    || name === 'pairing-host-only.json'
+  ) return true
   return (
     name.startsWith('device.json.')
     || name.startsWith('device.key.')
     || name.startsWith('trusted-peers.json.')
     || name.startsWith('host-pairing.json.')
+    || name.startsWith('pairing-host-only.json.')
   ) && name.endsWith('.tmp')
 }
 

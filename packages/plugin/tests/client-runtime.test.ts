@@ -1570,6 +1570,32 @@ describe('ClientModeRuntime Host account control', () => {
     })
     await runtime.close()
   })
+
+  it('blocks QR start while pairingHostOnly is active and initializes Client identity once cleared', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-host-only-recover-'))
+    directories.push(directory)
+    let pairingHostOnly = true
+    const identities = new IdentityStore({ directory })
+    const server = {
+      bindIdentity: vi.fn(),
+      clearAuthorization: vi.fn(async () => {}),
+      startOAuthQrLogin: vi.fn(async () => ({ qrId: 'qr-1', scanUrl: 'https://example.com/qr' })),
+      authorizeWithAccount: vi.fn(async () => ({ deviceId: 'client-1' })),
+    } as unknown as ClientServerApi
+    const host = { hostStatus: () => ({ pairingHostOnly }) } as HostAuthorizationControl
+    const runtime = new ClientModeRuntime(config(), identities, server, gatewayWithCarrier(), logger(), host)
+    await runtime.start()
+    try {
+      await expect(runtime.startClientOAuthQrLogin('google')).rejects.toMatchObject({ code: 'DEVICE_SCOPE_REQUIRED' })
+      expect(server.startOAuthQrLogin).not.toHaveBeenCalled()
+      pairingHostOnly = false
+      await runtime.clearClientAuthorization()
+      expect(server.bindIdentity).toHaveBeenCalledTimes(1)
+      await expect(runtime.authorizeClientWithAccount('user@example.test', 'password')).resolves.toMatchObject({ deviceId: 'client-1' })
+    } finally {
+      await runtime.close()
+    }
+  })
 })
 
 function config(): ResolvedConfig {

@@ -379,6 +379,17 @@ export const en = {
   claudeVirtualWorkspace: 'Claude virtual workspace',
   hermesVirtualWorkspace: 'Hermes virtual workspace',
   codexVirtualSessions: 'Sessions',
+  pairingHostOnlyActionHint: 'This Host is in DSH Go inbound-only pairing mode. Re-pair with DSH Go below, or exit pairing mode to sign in with a full account.',
+  exitPairingMode: 'Exit pairing mode & switch account',
+  resetIdentityDrawerTitle: 'Identity & Troubleshooting',
+  resetIdentityWarning: 'Rebuilds the selected local device key pair and Device ID, clears its saved credentials and trusted peers (including DSH Go pairings), and disconnects active Remote links. You will need to sign in or pair again.',
+  resetIdentityRoleLabel: 'Reset scope',
+  resetIdentityRoleAll: 'All (Host + Client)',
+  resetIdentityRoleHost: 'Host only',
+  resetIdentityRoleClient: 'Client only',
+  resetIdentityConfirmPrompt: 'Confirm resetting {scope}? Active Remote links will disconnect and re-authorization will be required.',
+  confirmResetIdentity: 'Confirm reset',
+  cancelResetIdentity: 'Cancel',
 } as const
 
 export const zh: Record<keyof typeof en, string> = {
@@ -759,6 +770,17 @@ export const zh: Record<keyof typeof en, string> = {
   claudeVirtualWorkspace: 'Claude 工作区',
   hermesVirtualWorkspace: 'Hermes 工作区',
   codexVirtualSessions: 'Sessions',
+  pairingHostOnlyActionHint: '当前主机处于 DSH Go 仅被控配对模式。可在下方重新与 DSH Go 配对，或退出配对模式后使用完整账号登录。',
+  exitPairingMode: '退出配对模式并切换账号',
+  resetIdentityDrawerTitle: '身份修复与重置',
+  resetIdentityWarning: '将重建所选角色的本机设备密钥对与设备 ID，清除对应本地登录凭据与已信任设备（含 DSH Go 配对关系），并断开当前远程连接。重置后需要重新登录或配对。',
+  resetIdentityRoleLabel: '重置范围',
+  resetIdentityRoleAll: '全部（Host + Client）',
+  resetIdentityRoleHost: '仅 Host（被控端）',
+  resetIdentityRoleClient: '仅 Client（主控端）',
+  resetIdentityConfirmPrompt: '确认重置「{scope}」？当前远程连接将断开，且需要重新登录或配对。',
+  confirmResetIdentity: '确认重置',
+  cancelResetIdentity: '取消',
 }
 
 export type LocaleKey = keyof typeof en

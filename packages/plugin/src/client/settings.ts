@@ -83,6 +83,8 @@ export function createRemotePluginOptions(React: ClientReact) {
     const logsCopyTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
     const logsViewportRef = React.useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
     const [resetBusy, setResetBusy] = React.useState(false)
+    const [resetRole, setResetRole] = React.useState<'all' | 'host' | 'client'>('all')
+    const [confirmResetOpen, setConfirmResetOpen] = React.useState(false)
     const [retryStartupBusy, setRetryStartupBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
     const [sidebarEntry, setSidebarEntry] = React.useState<SidebarEntryStyle>(() => props.sidebarEntry?.read?.() ?? 'standard')
@@ -126,6 +128,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     React.useEffect(() => { if (association !== undefined) setSignInOpen(false) }, [association])
     const savedServerUrl = settingsView?.config.serverUrl
     const pairingAvailable = pairingServerUrl !== undefined && pairingServerUrl === savedServerUrl
+    const pairingHostOnly = hostStatus?.pairingHostOnly === true
     const serverDirty = savedServerUrl === undefined || serverUrl.trim() !== savedServerUrl
     React.useEffect(() => {
       setPairingServerUrl(undefined)
@@ -210,6 +213,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         const available = items.filter(item => item.qrStartUrl != null)
         setOAuthProviders(available)
         setLoginMethod(current => {
+          if (pairingHostOnly) return 'device_pairing'
           if (loginMethodManuallySelected.current && (current === 'password' || current === 'device_pairing' && pairingSupported
             || available.some(item => `oauth:${item.id}` === current))) return current
           const preferred = available.find(item => item.id === props.preferredQrProvider) ?? available[0]
@@ -218,15 +222,15 @@ export function createRemotePluginOptions(React: ClientReact) {
       }).catch(() => {
         if (!active || run !== providerRequestRun.current) return
         setProvidersFailed(true)
-        setLoginMethod(current => loginMethodManuallySelected.current && current === 'device_pairing' ? current : 'password')
+        setLoginMethod(current => pairingHostOnly ? 'device_pairing' : loginMethodManuallySelected.current && current === 'device_pairing' ? current : 'password')
       }).finally(() => {
         if (active && run === providerRequestRun.current) setProvidersLoading(false)
       })
       return () => { active = false }
-    }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl])
+    }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl, pairingHostOnly])
 
     React.useEffect(() => {
-      if (!signInOpen || savingServer || serverDirty || providersLoading || !loginMethod.startsWith('oauth:')
+      if (!signInOpen || pairingHostOnly || savingServer || serverDirty || providersLoading || !loginMethod.startsWith('oauth:')
         || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod)
         || qrSession !== undefined || qrExpired || qrFailed || qrCompleted) return
       let active = true
@@ -256,10 +260,10 @@ export function createRemotePluginOptions(React: ClientReact) {
           if (active && run === qrFlowRun.current) setQrBusy(false)
         })
       return () => { active = false }
-    }, [signInOpen, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload, savingServer, serverDirty])
+    }, [signInOpen, pairingHostOnly, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!signInOpen || savingServer || serverDirty || !loginMethod.startsWith('oauth:') || qrSession === undefined) return
+      if (!signInOpen || pairingHostOnly || savingServer || serverDirty || !loginMethod.startsWith('oauth:') || qrSession === undefined) return
       let active = true
       let polling = false
       let settled = false
@@ -300,7 +304,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         settled = true
         if (timer !== undefined) clearInterval(timer)
       }
-    }, [signInOpen, loginMethod, qrSession, savingServer, serverDirty])
+    }, [signInOpen, pairingHostOnly, loginMethod, qrSession, savingServer, serverDirty])
 
     // Dedicated settings refresh effect on QR authorization completion
     React.useEffect(() => {
@@ -394,6 +398,22 @@ export function createRemotePluginOptions(React: ClientReact) {
       setError(undefined)
     }
 
+    const clearLocalSignInFlowState = (): void => {
+      qrFlowRun.current += 1
+      providerRequestRun.current += 1
+      loginMethodManuallySelected.current = false
+      setLoginMethod('password')
+      setPairingServerUrl(undefined)
+      setOAuthProviders([])
+      setQrSession(undefined)
+      setQrImage(undefined)
+      setQrExpired(false)
+      setQrFailed(false)
+      setQrBusy(false)
+      setQrCompleted(false)
+      setLoginPassword('')
+    }
+
     const logout = async (): Promise<void> => {
       const run = ++associationReadRun.current
       setBusy(true)
@@ -401,11 +421,19 @@ export function createRemotePluginOptions(React: ClientReact) {
       setNotice(undefined)
       try {
         const view = await props.control<PluginSettingsView>('settings.logout')
+        const status = await props.control<RemoteStatus>('status').catch(() => undefined)
         applyView(view, run === associationReadRun.current)
+        if (status !== undefined) {
+          setHostStatus(status.host)
+          setHostName(status.deviceName ?? '')
+          setHostDeviceId(status.host?.deviceId ?? '')
+        }
+        clearLocalSignInFlowState()
         setSignInOpen(false)
         setNotice({ key: 'signedOut' })
       } catch (reason) {
         setError(messageOf(reason, t))
+        void load().catch(() => undefined)
       } finally {
         setBusy(false)
       }
@@ -768,14 +796,13 @@ export function createRemotePluginOptions(React: ClientReact) {
     )
 
     // The entry style is presentation only, so it lives beside the development
-    const resetIdentity = async (): Promise<void> => {
-      if (!window.confirm(t('resetIdentityConfirm'))) return
+    const resetIdentity = async (role: 'all' | 'host' | 'client' = resetRole): Promise<void> => {
       const run = ++associationReadRun.current
       setResetBusy(true)
       setError(undefined)
       setNotice(undefined)
       try {
-        const view = await props.control<PluginSettingsView>('settings.identity.reset', {})
+        const view = await props.control<PluginSettingsView>('settings.identity.reset', { role })
         const status = await props.control<RemoteStatus>('status').catch(() => undefined)
         applyView(view, run === associationReadRun.current)
         if (status !== undefined) {
@@ -783,10 +810,13 @@ export function createRemotePluginOptions(React: ClientReact) {
           setHostName(status.deviceName ?? '')
           setHostDeviceId(status.host?.deviceId ?? '')
         }
+        clearLocalSignInFlowState()
+        setConfirmResetOpen(false)
         setSignInOpen(false)
         setNotice({ key: 'resetIdentitySuccess' })
       } catch (reason) {
         setError(messageOf(reason, t))
+        void load().catch(() => undefined)
       } finally {
         setResetBusy(false)
       }
@@ -794,6 +824,14 @@ export function createRemotePluginOptions(React: ClientReact) {
 
     const resetDisabledByStartupState = settingsView?.startupError?.code === 'STORAGE_CONFLICT'
       || settingsView?.startupError?.code === 'IDENTITY_LOCKED'
+    const startupRecoverableByReset = settingsView?.startupError?.code === 'IDENTITY_INVALID'
+      || settingsView?.startupError?.code === 'SERVER_CREDENTIALS_INVALID'
+    const resetRoleOptions: ReadonlyArray<{ value: 'all' | 'host' | 'client'; label: 'resetIdentityRoleAll' | 'resetIdentityRoleHost' | 'resetIdentityRoleClient' }> = [
+      { value: 'all', label: 'resetIdentityRoleAll' },
+      { value: 'host', label: 'resetIdentityRoleHost' },
+      { value: 'client', label: 'resetIdentityRoleClient' },
+    ]
+    const resetRoleLabel = t(resetRoleOptions.find(item => item.value === resetRole)?.label ?? 'resetIdentityRoleAll')
 
     const retryStartup = async (): Promise<void> => {
       if (retryStartupBusy) return
@@ -817,27 +855,70 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
-    const resetIdentitySetting = React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-      React.createElement('div', null,
-        React.createElement('strong', null, t('resetIdentity')),
-        React.createElement('p', null, t('resetIdentityHint'))),
-      React.createElement('button', {
-        type: 'button',
-        className: 'dshRemoteDiscard',
-        disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
-        onClick: () => void resetIdentity(),
-      }, t(resetBusy ? 'resettingAction' : 'resetIdentity')),
-    )
-
-    const startupErrorBanner = settingsView?.startupError !== undefined
-      ? React.createElement('div', { className: 'dshRemoteError', role: 'alert' },
-          React.createElement('p', null, startupErrorMessage(settingsView.startupError, t)),
+    const resetControls = React.createElement('div', { className: 'dshRemoteResetBody' },
+      React.createElement('p', { className: 'dshRemoteResetWarning' }, t('resetIdentityWarning')),
+      React.createElement('div', { className: 'dshRemoteResetControls' },
+        React.createElement('div', { className: 'dshRemoteResetScope' },
+          React.createElement('span', null, t('resetIdentityRoleLabel')),
+          React.createElement('div', {
+            className: 'dshRemoteEntryStyleChoices',
+            role: 'radiogroup',
+            'aria-label': t('resetIdentityRoleLabel'),
+          }, resetRoleOptions.map(option => React.createElement('button', {
+            key: option.value,
+            type: 'button',
+            role: 'radio',
+            'aria-checked': resetRole === option.value,
+            className: resetRole === option.value ? 'isSelected' : undefined,
+            disabled: busy || resetBusy || resetDisabledByStartupState,
+            onClick: () => { setResetRole(option.value); setConfirmResetOpen(false) },
+          }, t(option.label))))),
+        confirmResetOpen ? null : React.createElement('button', {
+          type: 'button',
+          className: 'dshRemoteDangerBtn',
+          disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+          onClick: () => { setError(undefined); setConfirmResetOpen(true) },
+        }, t(resetBusy ? 'resettingAction' : 'resetIdentity'))),
+      !confirmResetOpen ? null : React.createElement('div', { className: 'dshRemoteResetConfirm', role: 'alertdialog', 'aria-label': t('resetIdentity') },
+        React.createElement('p', null, t('resetIdentityConfirmPrompt', { scope: resetRoleLabel })),
+        React.createElement('div', { className: 'dshRemoteResetConfirmActions' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDangerBtn',
+            disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+            onClick: () => void resetIdentity(resetRole),
+          }, t(resetBusy ? 'resettingAction' : 'confirmResetIdentity')),
           React.createElement('button', {
             type: 'button',
             className: 'dshRemoteDiscard',
-            disabled: busy || resetBusy || retryStartupBusy,
-            onClick: () => void retryStartup(),
-          }, t('retryStartup')))
+            disabled: resetBusy,
+            onClick: () => setConfirmResetOpen(false),
+          }, t('cancelResetIdentity')))))
+
+    const resetIdentitySetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting dshRemoteResetDetails' },
+      React.createElement('summary', null,
+        React.createElement('div', { className: 'dshRemoteAcpSummaryText' },
+          React.createElement('strong', null, t('resetIdentityDrawerTitle')),
+          React.createElement('p', null, t('resetIdentityHint')))),
+      resetControls)
+
+    const startupErrorBanner = settingsView?.startupError !== undefined
+      ? React.createElement('div', { className: 'dshRemoteStartupBanner dshRemoteError', role: 'alert' },
+          React.createElement('p', null, startupErrorMessage(settingsView.startupError, t)),
+          React.createElement('div', { className: 'dshRemoteStartupActions' },
+            React.createElement('button', {
+              type: 'button',
+              className: 'dshRemoteDiscard',
+              disabled: busy || resetBusy || retryStartupBusy,
+              onClick: () => void retryStartup(),
+            }, t('retryStartup')),
+            startupRecoverableByReset ? React.createElement('button', {
+              type: 'button',
+              className: 'dshRemoteDangerBtn',
+              disabled: busy || resetBusy || retryStartupBusy || !writable,
+              onClick: () => { setError(undefined); setConfirmResetOpen(true) },
+            }, t(resetBusy ? 'resettingAction' : 'resetIdentity')) : null),
+          startupRecoverableByReset && confirmResetOpen ? resetControls : null)
       : null
 
     // switches instead of inside the Host-facing settings block.
@@ -912,31 +993,39 @@ export function createRemotePluginOptions(React: ClientReact) {
       className: 'dshRemoteInlineSignIn',
     },
       serverDirty && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('saveServerBeforeLogin')) : null,
+      pairingHostOnly ? React.createElement('div', { className: 'dshRemotePairingHostOnlyBanner', role: 'status' },
+        React.createElement('p', null, t('pairingHostOnlyActionHint')),
+        React.createElement('button', {
+          type: 'button',
+          className: 'dshRemoteDiscard',
+          disabled: busy || !writable,
+          onClick: () => void logout(),
+        }, t(busy ? 'signingOut' : 'exitPairingMode'))) : null,
       React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist', 'aria-label': t('signInAccount') },
-        pairingAvailable ? React.createElement('button', {
+        (pairingHostOnly || pairingAvailable) ? React.createElement('button', {
           type: 'button', role: 'tab', id: 'dsh-remote-settings-device-pairing-tab',
-          'aria-selected': loginMethod === 'device_pairing', 'aria-controls': 'dsh-remote-settings-device-pairing-panel',
-          className: loginMethod === 'device_pairing' ? 'isActive' : '', disabled: busy,
+          'aria-selected': pairingHostOnly || loginMethod === 'device_pairing', 'aria-controls': 'dsh-remote-settings-device-pairing-panel',
+          className: pairingHostOnly || loginMethod === 'device_pairing' ? 'isActive' : '', disabled: busy,
           onClick: () => selectLoginMethod('device_pairing'),
         }, t('pairingLoginTab')) : null,
-        ...orderedQrProviders.map(qrLoginTab),
-        React.createElement('button', {
+        ...(pairingHostOnly ? [] : orderedQrProviders.map(qrLoginTab)),
+        pairingHostOnly ? null : React.createElement('button', {
           type: 'button', role: 'tab', id: 'dsh-remote-settings-password-tab',
           'aria-selected': passwordVisible, 'aria-controls': 'dsh-remote-settings-password-panel',
           className: passwordVisible ? 'isActive' : '', disabled: busy,
           onClick: () => selectLoginMethod('password'),
         }, t('accountPasswordLogin'))),
       React.createElement('div', { className: 'dshRemoteLoginContent' },
-      providersLoading && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
-      providersFailed ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' },
+      !pairingHostOnly && providersLoading && loginMethod !== 'device_pairing' ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' }, t('loadingLoginProviders')) : null,
+      !pairingHostOnly && providersFailed ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' },
         t('noLoginProviders'), ' ', React.createElement('button', {
           type: 'button', disabled: busy || savingServer || serverDirty,
           onClick: () => setProviderReload(value => value + 1),
         }, t('retryLoginProviders'))) : null,
-      loginMethod === 'device_pairing' && pairingAvailable
+      (pairingHostOnly || (loginMethod === 'device_pairing' && pairingAvailable))
         ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-settings-device-pairing-panel', 'aria-labelledby': 'dsh-remote-settings-device-pairing-tab' },
           React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? '', control: props.control, serverUrl: settingsView?.config.serverUrl ?? '', disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control<PluginSettingsView>('settings.get').then(view => { applyView(view); setSignInOpen(false); props.onSignIn?.() }).catch(() => undefined) }))
-        : passwordVisible
+        : pairingHostOnly ? null : passwordVisible
         ? React.createElement('div', {
           className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-settings-password-panel',
           'aria-labelledby': 'dsh-remote-settings-password-tab',
@@ -1104,7 +1193,8 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('strong', null, association.account === undefined ? t('authorizationComplete') : displayRemoteAccount(association.account)),
                   React.createElement('p', null, association.account === undefined
                     ? serverUrl
-                    : t('authorizedOn', { role: 'Remote', serverUrl })))),
+                    : t('authorizedOn', { role: 'Remote', serverUrl })),
+                  pairingHostOnly ? React.createElement('p', { className: 'dshRemoteSettingsState' }, t('pairingHostOnly')) : null)),
               React.createElement('div', { className: 'dshRemoteHostIdentity' },
                 React.createElement('div', null,
                   React.createElement('span', null, t('hostName')),
@@ -1115,8 +1205,8 @@ export function createRemotePluginOptions(React: ClientReact) {
               startupErrorBanner,
               developmentSetting,
               sidebarEntrySetting,
-              resetIdentitySetting,
               acpSetting,
+              resetIdentitySetting,
               React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
                 React.createElement('div', null,
                   React.createElement('strong', null, t('allowControlCurrentDevice')),
@@ -1179,8 +1269,8 @@ export function createRemotePluginOptions(React: ClientReact) {
                   React.createElement('code', null, hostDeviceId || '—'))),
               developmentSetting,
               sidebarEntrySetting,
-              resetIdentitySetting,
               acpSetting,
+              resetIdentitySetting,
               React.createElement('div', { className: 'dshRemoteSettingsSignIn' },
                 React.createElement('p', { className: 'dshRemoteSettingsState' }, t('authorizeFromRemote')),
                 React.createElement('button', {

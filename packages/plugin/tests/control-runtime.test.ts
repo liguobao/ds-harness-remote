@@ -673,6 +673,52 @@ describe('PluginControlRuntime local log endpoints', () => {
       },
     })
   })
+
+  it('clears Host authorization before Client on logout so pairingHostOnly lifts in sequence', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const order: string[] = []
+    let pairingHostOnly = true
+    const host = {
+      hostStatus: () => ({ configured: true, online: false, reconnecting: false, authorized: !pairingHostOnly, accountRequired: false, pairingHostOnly }),
+      reconnectHost: vi.fn(),
+      clearHostAuthorization: vi.fn(async () => { order.push('host'); pairingHostOnly = false }),
+      authorizeHostAsOwned: vi.fn(),
+      authorizeHostWithAccount: vi.fn(),
+      authorizeHostWithCode: vi.fn(),
+    } as unknown as HostAuthorizationControl
+    const client = {
+      handleControl: vi.fn(async () => ({ ok: true as const, value: {} })),
+      clearClientAuthorization: vi.fn(async () => { order.push(pairingHostOnly ? 'client-still-host-only' : 'client-unblocked') }),
+    } as unknown as ClientModeRuntime
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, client, host))
+    await expect(handler('settings.logout', {}, signal())).resolves.toMatchObject({ ok: true })
+    expect(order).toEqual(['host', 'client-unblocked'])
+  })
+
+  it('closes active Host and Client runtimes before resetting identities on disk', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const events: string[] = []
+    const host = {
+      hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+      reconnectHost: vi.fn(),
+      clearHostAuthorization: vi.fn(),
+      authorizeHostAsOwned: vi.fn(),
+      authorizeHostWithAccount: vi.fn(),
+      authorizeHostWithCode: vi.fn(),
+      close: vi.fn(async () => { events.push('host-close') }),
+    } as unknown as HostAuthorizationControl
+    const client = {
+      handleControl: vi.fn(async (endpoint: string) => { events.push('client-' + endpoint); return { ok: true as const, value: {} } }),
+      clearClientAuthorization: vi.fn(),
+      close: vi.fn(async () => { events.push('client-close') }),
+    } as unknown as ClientModeRuntime
+    const switchServer = vi.fn(async () => { events.push('switchServer'); return { client, host } })
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), root, settings, client, host, switchServer))
+    await expect(handler('settings.identity.reset', { role: 'host' }, signal())).resolves.toMatchObject({ ok: true })
+    expect(events).toEqual(['client-mode.set', 'client-close', 'host-close', 'switchServer'])
+  })
 })
 function register(runtime: PluginControlRuntime) {
   let handler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<ControlResult<unknown>>) | undefined

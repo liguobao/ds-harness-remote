@@ -390,15 +390,17 @@ export class PluginControlRuntime {
     }
     const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
     const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
-    const nextDirectory = await resetDefaultIdentityRoles(
-      roles,
-      config.serverUrl,
-      hostname(),
-      this.useDefaultStorage ? {} : { directory: this.identityDirectory },
-    )
-    this.setIdentityDirectory(nextDirectory)
+    await this.client?.handleControl('mode.set', { mode: 'local' }, new AbortController().signal).catch(() => undefined)
     if (this.switchServer !== undefined) {
+      await Promise.allSettled([this.client?.close?.(), this.host?.close?.()])
       try {
+        const nextDirectory = await resetDefaultIdentityRoles(
+          roles,
+          config.serverUrl,
+          hostname(),
+          this.useDefaultStorage ? {} : { directory: this.identityDirectory },
+        )
+        this.setIdentityDirectory(nextDirectory)
         const runtimes = await this.switchServer(config)
         this.client = runtimes.client
         this.host = runtimes.host
@@ -410,6 +412,13 @@ export class PluginControlRuntime {
       }
       return { ...await this.settingsView(), applies: 'live' }
     }
+    const nextDirectory = await resetDefaultIdentityRoles(
+      roles,
+      config.serverUrl,
+      hostname(),
+      this.useDefaultStorage ? {} : { directory: this.identityDirectory },
+    )
+    this.setIdentityDirectory(nextDirectory)
     this.clearStartupFailure()
     return { ...await this.settingsView(), applies: 'live' }
   }
@@ -676,10 +685,11 @@ export class PluginControlRuntime {
     }
     const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
     if (config.serverUrl !== undefined) {
-      const runtimes = await Promise.allSettled([
-        this.client?.clearClientAuthorization(),
-        this.host?.clearHostAuthorization(),
-      ])
+      // Clear Host first so rotating a paired Host identity lifts pairingHostOnly
+      // before Client cleanup restores or rotates its own identity.
+      const hostCleanup = await Promise.allSettled([this.host?.clearHostAuthorization()])
+      const clientCleanup = await Promise.allSettled([this.client?.clearClientAuthorization()])
+      const runtimes = [...hostCleanup, ...clientCleanup]
       const stores = await Promise.allSettled((['host', 'client'] as const).map(async role => {
         const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl!, role)
         await new ServerCredentialStore(directory).clear()

@@ -2075,7 +2075,18 @@ If a code was sent, recover the original submission without changing it.`,
     opencodeVirtualWorkspace: "OpenCode virtual workspace",
     claudeVirtualWorkspace: "Claude virtual workspace",
     hermesVirtualWorkspace: "Hermes virtual workspace",
-    codexVirtualSessions: "Sessions"
+    codexVirtualSessions: "Sessions",
+    pairingHostOnlyActionHint: "This Host is in DSH Go inbound-only pairing mode. Re-pair with DSH Go below, or exit pairing mode to sign in with a full account.",
+    exitPairingMode: "Exit pairing mode & switch account",
+    resetIdentityDrawerTitle: "Identity & Troubleshooting",
+    resetIdentityWarning: "Rebuilds the selected local device key pair and Device ID, clears its saved credentials and trusted peers (including DSH Go pairings), and disconnects active Remote links. You will need to sign in or pair again.",
+    resetIdentityRoleLabel: "Reset scope",
+    resetIdentityRoleAll: "All (Host + Client)",
+    resetIdentityRoleHost: "Host only",
+    resetIdentityRoleClient: "Client only",
+    resetIdentityConfirmPrompt: "Confirm resetting {scope}? Active Remote links will disconnect and re-authorization will be required.",
+    confirmResetIdentity: "Confirm reset",
+    cancelResetIdentity: "Cancel"
   }, zh = {
     serverSavedLive: "\u670D\u52A1\u5668\u5730\u5740\u5DF2\u4FDD\u5B58\u5E76\u751F\u6548\u3002",
     saveServerBeforeLogin: "\u8BF7\u5148\u4FDD\u5B58\u670D\u52A1\u5668\u5730\u5740\uFF0C\u518D\u7EE7\u7EED\u767B\u5F55\u6216\u914D\u5BF9\u3002",
@@ -2454,7 +2465,18 @@ If a code was sent, recover the original submission without changing it.`,
     opencodeVirtualWorkspace: "OpenCode \u5DE5\u4F5C\u533A",
     claudeVirtualWorkspace: "Claude \u5DE5\u4F5C\u533A",
     hermesVirtualWorkspace: "Hermes \u5DE5\u4F5C\u533A",
-    codexVirtualSessions: "Sessions"
+    codexVirtualSessions: "Sessions",
+    pairingHostOnlyActionHint: "\u5F53\u524D\u4E3B\u673A\u5904\u4E8E DSH Go \u4EC5\u88AB\u63A7\u914D\u5BF9\u6A21\u5F0F\u3002\u53EF\u5728\u4E0B\u65B9\u91CD\u65B0\u4E0E DSH Go \u914D\u5BF9\uFF0C\u6216\u9000\u51FA\u914D\u5BF9\u6A21\u5F0F\u540E\u4F7F\u7528\u5B8C\u6574\u8D26\u53F7\u767B\u5F55\u3002",
+    exitPairingMode: "\u9000\u51FA\u914D\u5BF9\u6A21\u5F0F\u5E76\u5207\u6362\u8D26\u53F7",
+    resetIdentityDrawerTitle: "\u8EAB\u4EFD\u4FEE\u590D\u4E0E\u91CD\u7F6E",
+    resetIdentityWarning: "\u5C06\u91CD\u5EFA\u6240\u9009\u89D2\u8272\u7684\u672C\u673A\u8BBE\u5907\u5BC6\u94A5\u5BF9\u4E0E\u8BBE\u5907 ID\uFF0C\u6E05\u9664\u5BF9\u5E94\u672C\u5730\u767B\u5F55\u51ED\u636E\u4E0E\u5DF2\u4FE1\u4EFB\u8BBE\u5907\uFF08\u542B DSH Go \u914D\u5BF9\u5173\u7CFB\uFF09\uFF0C\u5E76\u65AD\u5F00\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u3002\u91CD\u7F6E\u540E\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
+    resetIdentityRoleLabel: "\u91CD\u7F6E\u8303\u56F4",
+    resetIdentityRoleAll: "\u5168\u90E8\uFF08Host + Client\uFF09",
+    resetIdentityRoleHost: "\u4EC5 Host\uFF08\u88AB\u63A7\u7AEF\uFF09",
+    resetIdentityRoleClient: "\u4EC5 Client\uFF08\u4E3B\u63A7\u7AEF\uFF09",
+    resetIdentityConfirmPrompt: "\u786E\u8BA4\u91CD\u7F6E\u300C{scope}\u300D\uFF1F\u5F53\u524D\u8FDC\u7A0B\u8FDE\u63A5\u5C06\u65AD\u5F00\uFF0C\u4E14\u9700\u8981\u91CD\u65B0\u767B\u5F55\u6216\u914D\u5BF9\u3002",
+    confirmResetIdentity: "\u786E\u8BA4\u91CD\u7F6E",
+    cancelResetIdentity: "\u53D6\u6D88"
   };
 
   // packages/plugin/src/client/server-notice.ts
@@ -2575,7 +2597,7 @@ If a code was sent, recover the original submission without changing it.`,
     };
   }
   function connectionErrorMessage(code, t) {
-    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_REQUIRED" ? "hostSignInHint" : code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" ? "serverUnavailableError" : code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
+    return t(code === "ACCOUNT_AUTH_REQUIRED" || code === "AUTH_REQUIRED" ? "hostSignInHint" : code === "AUTH_INVALID" || code === "TOKEN_EXPIRED" ? "connectionAuthorizationExpired" : code === "CONNECTION_REPLACED" ? "connectionReplaced" : code === "SERVER_CREDENTIALS_BUSY" ? "connectionCredentialsBusy" : code === "DEVICE_REVOKED" ? "connectionDeviceRevoked" : code === "DEVICE_OWNERSHIP_REQUIRED" ? "connectionOwnershipRequired" : code === "RATE_LIMITED" ? "connectionRateLimited" : code === "UNSUPPORTED_VERSION" ? "connectionVersionMismatch" : code === "INVALID_MESSAGE" ? "connectionInvalidResponse" : code === "CONNECTION_FAILED" ? "serverUnavailableError" : code === "DEVICE_SCOPE_REQUIRED" ? "pairingHostOnly" : code === "SERVER_NOT_CONFIGURED" ? "connectionReachability" : "connectionUnexpected");
   }
   function connectionStatusLabel(status, t) {
     return status === void 0 ? t("checkingConnection") : status.online ? t("online") : status.error !== void 0 ? connectionErrorMessage(status.error, t) : status.reconnecting ? t(status.lastActiveAt === void 0 ? "connecting" : "serverUnavailableShort") : t("offline");
@@ -2600,6 +2622,7 @@ If a code was sent, recover the original submission without changing it.`,
         let message = "message" in reason && typeof reason.message == "string" ? reason.message : "";
         return storageConflictMessage(message, t);
       }
+      if (reason.code === "DEVICE_SCOPE_REQUIRED") return t("pairingHostOnly");
       if (reason.code === "SERVER_CREDENTIALS_BUSY") return t("connectionCredentialsBusy");
     }
     return reason instanceof Error ? reason.message : String(reason);
@@ -3099,11 +3122,11 @@ If a code was sent, recover the original submission without changing it.`,
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [resetRole, setResetRole] = React.useState("all"), [confirmResetOpen, setConfirmResetOpen] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
       React.useEffect(() => {
         association !== void 0 && setSignInOpen(!1);
       }, [association]);
-      let savedServerUrl = settingsView?.config.serverUrl, pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === savedServerUrl, serverDirty = savedServerUrl === void 0 || serverUrl.trim() !== savedServerUrl;
+      let savedServerUrl = settingsView?.config.serverUrl, pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === savedServerUrl, pairingHostOnly = hostStatus?.pairingHostOnly === !0, serverDirty = savedServerUrl === void 0 || serverUrl.trim() !== savedServerUrl;
       React.useEffect(() => {
         setPairingServerUrl(void 0), setLoginMethod((current) => current === "device_pairing" ? "password" : current);
       }, [savedServerUrl]);
@@ -3152,19 +3175,20 @@ If a code was sent, recover the original submission without changing it.`,
           setPairingServerUrl(pairingSupported ? savedServerUrl : void 0);
           let available = items.filter((item) => item.qrStartUrl != null);
           setOAuthProviders(available), setLoginMethod((current) => {
+            if (pairingHostOnly) return "device_pairing";
             if (loginMethodManuallySelected.current && (current === "password" || current === "device_pairing" && pairingSupported || available.some((item) => `oauth:${item.id}` === current))) return current;
             let preferred = available.find((item) => item.id === props.preferredQrProvider) ?? available[0];
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch(() => {
-          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod((current) => loginMethodManuallySelected.current && current === "device_pairing" ? current : "password"));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod((current) => pairingHostOnly ? "device_pairing" : loginMethodManuallySelected.current && current === "device_pairing" ? current : "password"));
         }).finally(() => {
           active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
           active = !1;
         };
-      }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl]), React.useEffect(() => {
-        if (!signInOpen || savingServer || serverDirty || providersLoading || !loginMethod.startsWith("oauth:") || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || qrFailed || qrCompleted) return;
+      }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl, pairingHostOnly]), React.useEffect(() => {
+        if (!signInOpen || pairingHostOnly || savingServer || serverDirty || providersLoading || !loginMethod.startsWith("oauth:") || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || qrFailed || qrCompleted) return;
         let active = !0, run = ++qrFlowRun.current;
         return setQrBusy(!0), setQrFailed(!1), setError(void 0), setQrExpired(!1), props.control("client.account.qr.start", { provider: loginMethod.slice(6) }).then(async (session) => {
           if (!active || run !== qrFlowRun.current) return;
@@ -3181,8 +3205,8 @@ If a code was sent, recover the original submission without changing it.`,
         }), () => {
           active = !1;
         };
-      }, [signInOpen, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload, savingServer, serverDirty]), React.useEffect(() => {
-        if (!signInOpen || savingServer || serverDirty || !loginMethod.startsWith("oauth:") || qrSession === void 0) return;
+      }, [signInOpen, pairingHostOnly, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, qrFailed, providerReload, savingServer, serverDirty]), React.useEffect(() => {
+        if (!signInOpen || pairingHostOnly || savingServer || serverDirty || !loginMethod.startsWith("oauth:") || qrSession === void 0) return;
         let active = !0, polling = !1, settled = !1, run = qrFlowRun.current, timer, poll = () => {
           polling || settled || !active || run !== qrFlowRun.current || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then((result) => {
             !active || settled || run !== qrFlowRun.current || (result.status === "complete" ? (settled = !0, timer !== void 0 && clearInterval(timer), setError(void 0), setQrExpired(!1), setQrCompleted(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)) : result.status === "expired" && (settled = !0, timer !== void 0 && clearInterval(timer), setQrExpired(!0), setQrSession(void 0), setQrImage(void 0), setQrBusy(!1)));
@@ -3195,7 +3219,7 @@ If a code was sent, recover the original submission without changing it.`,
         return poll(), timer = setInterval(poll, 1500), () => {
           active = !1, settled = !0, timer !== void 0 && clearInterval(timer);
         };
-      }, [signInOpen, loginMethod, qrSession, savingServer, serverDirty]), React.useEffect(() => {
+      }, [signInOpen, pairingHostOnly, loginMethod, qrSession, savingServer, serverDirty]), React.useEffect(() => {
         if (!signInOpen || savingServer || serverDirty || !qrCompleted) return;
         let active = !0;
         return setError(void 0), props.control("settings.get").then((view) => {
@@ -3238,14 +3262,18 @@ If a code was sent, recover the original submission without changing it.`,
         }
       }, selectLoginMethod = (method) => {
         loginMethodManuallySelected.current = !0, method !== loginMethod && (qrFlowRun.current += 1, setLoginMethod(method), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setQrFailed(!1), setQrBusy(!1), setQrCompleted(!1), setError(void 0));
+      }, clearLocalSignInFlowState = () => {
+        qrFlowRun.current += 1, providerRequestRun.current += 1, loginMethodManuallySelected.current = !1, setLoginMethod("password"), setPairingServerUrl(void 0), setOAuthProviders([]), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setQrFailed(!1), setQrBusy(!1), setQrCompleted(!1), setLoginPassword("");
       }, logout = async () => {
         let run = ++associationReadRun.current;
         setBusy(!0), setError(void 0), setNotice(void 0);
         try {
-          let view = await props.control("settings.logout");
-          applyView(view, run === associationReadRun.current), setSignInOpen(!1), setNotice({ key: "signedOut" });
+          let view = await props.control("settings.logout"), status = await props.control("status").catch(() => {
+          });
+          applyView(view, run === associationReadRun.current), status !== void 0 && (setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "")), clearLocalSignInFlowState(), setSignInOpen(!1), setNotice({ key: "signedOut" });
         } catch (reason) {
-          setError(messageOf(reason, t));
+          setError(messageOf(reason, t)), load().catch(() => {
+          });
         } finally {
           setBusy(!1);
         }
@@ -3571,20 +3599,24 @@ If a code was sent, recover the original submission without changing it.`,
             }
           })
         )
-      ), resetIdentity = async () => {
-        if (!window.confirm(t("resetIdentityConfirm"))) return;
+      ), resetIdentity = async (role = resetRole) => {
         let run = ++associationReadRun.current;
         setResetBusy(!0), setError(void 0), setNotice(void 0);
         try {
-          let view = await props.control("settings.identity.reset", {}), status = await props.control("status").catch(() => {
+          let view = await props.control("settings.identity.reset", { role }), status = await props.control("status").catch(() => {
           });
-          applyView(view, run === associationReadRun.current), status !== void 0 && (setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "")), setSignInOpen(!1), setNotice({ key: "resetIdentitySuccess" });
+          applyView(view, run === associationReadRun.current), status !== void 0 && (setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "")), clearLocalSignInFlowState(), setConfirmResetOpen(!1), setSignInOpen(!1), setNotice({ key: "resetIdentitySuccess" });
         } catch (reason) {
-          setError(messageOf(reason, t));
+          setError(messageOf(reason, t)), load().catch(() => {
+          });
         } finally {
           setResetBusy(!1);
         }
-      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", retryStartup = async () => {
+      }, resetDisabledByStartupState = settingsView?.startupError?.code === "STORAGE_CONFLICT" || settingsView?.startupError?.code === "IDENTITY_LOCKED", startupRecoverableByReset = settingsView?.startupError?.code === "IDENTITY_INVALID" || settingsView?.startupError?.code === "SERVER_CREDENTIALS_INVALID", resetRoleOptions = [
+        { value: "all", label: "resetIdentityRoleAll" },
+        { value: "host", label: "resetIdentityRoleHost" },
+        { value: "client", label: "resetIdentityRoleClient" }
+      ], resetRoleLabel = t(resetRoleOptions.find((item) => item.value === resetRole)?.label ?? "resetIdentityRoleAll"), retryStartup = async () => {
         if (retryStartupBusy) return;
         let run = ++associationReadRun.current;
         setRetryStartupBusy(!0), setError(void 0), setNotice(void 0);
@@ -3598,31 +3630,100 @@ If a code was sent, recover the original submission without changing it.`,
         } finally {
           setRetryStartupBusy(!1);
         }
-      }, resetIdentitySetting = React.createElement(
+      }, resetControls = React.createElement(
         "div",
-        { className: "dshRemoteAuthorizationSetting" },
+        { className: "dshRemoteResetBody" },
+        React.createElement("p", { className: "dshRemoteResetWarning" }, t("resetIdentityWarning")),
         React.createElement(
           "div",
-          null,
-          React.createElement("strong", null, t("resetIdentity")),
-          React.createElement("p", null, t("resetIdentityHint"))
+          { className: "dshRemoteResetControls" },
+          React.createElement(
+            "div",
+            { className: "dshRemoteResetScope" },
+            React.createElement("span", null, t("resetIdentityRoleLabel")),
+            React.createElement("div", {
+              className: "dshRemoteEntryStyleChoices",
+              role: "radiogroup",
+              "aria-label": t("resetIdentityRoleLabel")
+            }, resetRoleOptions.map((option) => React.createElement("button", {
+              key: option.value,
+              type: "button",
+              role: "radio",
+              "aria-checked": resetRole === option.value,
+              className: resetRole === option.value ? "isSelected" : void 0,
+              disabled: busy || resetBusy || resetDisabledByStartupState,
+              onClick: () => {
+                setResetRole(option.value), setConfirmResetOpen(!1);
+              }
+            }, t(option.label))))
+          ),
+          confirmResetOpen ? null : React.createElement("button", {
+            type: "button",
+            className: "dshRemoteDangerBtn",
+            disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+            onClick: () => {
+              setError(void 0), setConfirmResetOpen(!0);
+            }
+          }, t(resetBusy ? "resettingAction" : "resetIdentity"))
         ),
-        React.createElement("button", {
-          type: "button",
-          className: "dshRemoteDiscard",
-          disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
-          onClick: () => void resetIdentity()
-        }, t(resetBusy ? "resettingAction" : "resetIdentity"))
+        confirmResetOpen ? React.createElement(
+          "div",
+          { className: "dshRemoteResetConfirm", role: "alertdialog", "aria-label": t("resetIdentity") },
+          React.createElement("p", null, t("resetIdentityConfirmPrompt", { scope: resetRoleLabel })),
+          React.createElement(
+            "div",
+            { className: "dshRemoteResetConfirmActions" },
+            React.createElement("button", {
+              type: "button",
+              className: "dshRemoteDangerBtn",
+              disabled: busy || resetBusy || !writable || resetDisabledByStartupState,
+              onClick: () => void resetIdentity(resetRole)
+            }, t(resetBusy ? "resettingAction" : "confirmResetIdentity")),
+            React.createElement("button", {
+              type: "button",
+              className: "dshRemoteDiscard",
+              disabled: resetBusy,
+              onClick: () => setConfirmResetOpen(!1)
+            }, t("cancelResetIdentity"))
+          )
+        ) : null
+      ), resetIdentitySetting = React.createElement(
+        "details",
+        { className: "dshRemoteAuthorizationSetting dshRemoteAcpSetting dshRemoteResetDetails" },
+        React.createElement(
+          "summary",
+          null,
+          React.createElement(
+            "div",
+            { className: "dshRemoteAcpSummaryText" },
+            React.createElement("strong", null, t("resetIdentityDrawerTitle")),
+            React.createElement("p", null, t("resetIdentityHint"))
+          )
+        ),
+        resetControls
       ), startupErrorBanner = settingsView?.startupError !== void 0 ? React.createElement(
         "div",
-        { className: "dshRemoteError", role: "alert" },
+        { className: "dshRemoteStartupBanner dshRemoteError", role: "alert" },
         React.createElement("p", null, startupErrorMessage(settingsView.startupError, t)),
-        React.createElement("button", {
-          type: "button",
-          className: "dshRemoteDiscard",
-          disabled: busy || resetBusy || retryStartupBusy,
-          onClick: () => void retryStartup()
-        }, t("retryStartup"))
+        React.createElement(
+          "div",
+          { className: "dshRemoteStartupActions" },
+          React.createElement("button", {
+            type: "button",
+            className: "dshRemoteDiscard",
+            disabled: busy || resetBusy || retryStartupBusy,
+            onClick: () => void retryStartup()
+          }, t("retryStartup")),
+          startupRecoverableByReset ? React.createElement("button", {
+            type: "button",
+            className: "dshRemoteDangerBtn",
+            disabled: busy || resetBusy || retryStartupBusy || !writable,
+            onClick: () => {
+              setError(void 0), setConfirmResetOpen(!0);
+            }
+          }, t(resetBusy ? "resettingAction" : "resetIdentity")) : null
+        ),
+        startupRecoverableByReset && confirmResetOpen ? resetControls : null
       ) : null, sidebarEntrySetting = React.createElement(
         "div",
         { className: "dshRemoteAuthorizationSetting" },
@@ -3725,21 +3826,32 @@ If a code was sent, recover the original submission without changing it.`,
           className: "dshRemoteInlineSignIn"
         },
         serverDirty && loginMethod !== "device_pairing" ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("saveServerBeforeLogin")) : null,
+        pairingHostOnly ? React.createElement(
+          "div",
+          { className: "dshRemotePairingHostOnlyBanner", role: "status" },
+          React.createElement("p", null, t("pairingHostOnlyActionHint")),
+          React.createElement("button", {
+            type: "button",
+            className: "dshRemoteDiscard",
+            disabled: busy || !writable,
+            onClick: () => void logout()
+          }, t(busy ? "signingOut" : "exitPairingMode"))
+        ) : null,
         React.createElement(
           "div",
           { className: "dshRemoteLoginTabs", role: "tablist", "aria-label": t("signInAccount") },
-          pairingAvailable ? React.createElement("button", {
+          pairingHostOnly || pairingAvailable ? React.createElement("button", {
             type: "button",
             role: "tab",
             id: "dsh-remote-settings-device-pairing-tab",
-            "aria-selected": loginMethod === "device_pairing",
+            "aria-selected": pairingHostOnly || loginMethod === "device_pairing",
             "aria-controls": "dsh-remote-settings-device-pairing-panel",
-            className: loginMethod === "device_pairing" ? "isActive" : "",
+            className: pairingHostOnly || loginMethod === "device_pairing" ? "isActive" : "",
             disabled: busy,
             onClick: () => selectLoginMethod("device_pairing")
           }, t("pairingLoginTab")) : null,
-          ...orderedQrProviders.map(qrLoginTab),
-          React.createElement("button", {
+          ...pairingHostOnly ? [] : orderedQrProviders.map(qrLoginTab),
+          pairingHostOnly ? null : React.createElement("button", {
             type: "button",
             role: "tab",
             id: "dsh-remote-settings-password-tab",
@@ -3753,8 +3865,8 @@ If a code was sent, recover the original submission without changing it.`,
         React.createElement(
           "div",
           { className: "dshRemoteLoginContent" },
-          providersLoading && loginMethod !== "device_pairing" ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("loadingLoginProviders")) : null,
-          providersFailed ? React.createElement(
+          !pairingHostOnly && providersLoading && loginMethod !== "device_pairing" ? React.createElement("p", { className: "dshRemoteSettingsState", role: "status" }, t("loadingLoginProviders")) : null,
+          !pairingHostOnly && providersFailed ? React.createElement(
             "p",
             { className: "dshRemoteSettingsState", role: "status" },
             t("noLoginProviders"),
@@ -3765,14 +3877,14 @@ If a code was sent, recover the original submission without changing it.`,
               onClick: () => setProviderReload((value) => value + 1)
             }, t("retryLoginProviders"))
           ) : null,
-          loginMethod === "device_pairing" && pairingAvailable ? React.createElement(
+          pairingHostOnly || loginMethod === "device_pairing" && pairingAvailable ? React.createElement(
             "div",
             { role: "tabpanel", id: "dsh-remote-settings-device-pairing-panel", "aria-labelledby": "dsh-remote-settings-device-pairing-tab" },
             React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control("settings.get").then((view) => {
               applyView(view), setSignInOpen(!1), props.onSignIn?.();
             }).catch(() => {
             }) })
-          ) : passwordVisible ? React.createElement(
+          ) : pairingHostOnly ? null : passwordVisible ? React.createElement(
             "div",
             {
               className: "dshRemoteClientLogin",
@@ -4005,7 +4117,8 @@ If a code was sent, recover the original submission without changing it.`,
                 { className: "dshRemoteAssociation" },
                 React.createElement("span", null, t(association.account === void 0 ? "authorization" : "account")),
                 React.createElement("strong", null, association.account === void 0 ? t("authorizationComplete") : displayRemoteAccount(association.account)),
-                React.createElement("p", null, association.account === void 0 ? serverUrl : t("authorizedOn", { role: "Remote", serverUrl }))
+                React.createElement("p", null, association.account === void 0 ? serverUrl : t("authorizedOn", { role: "Remote", serverUrl })),
+                pairingHostOnly ? React.createElement("p", { className: "dshRemoteSettingsState" }, t("pairingHostOnly")) : null
               )
             ),
             React.createElement(
@@ -4027,8 +4140,8 @@ If a code was sent, recover the original submission without changing it.`,
             startupErrorBanner,
             developmentSetting,
             sidebarEntrySetting,
-            resetIdentitySetting,
             acpSetting,
+            resetIdentitySetting,
             React.createElement(
               "div",
               { className: "dshRemoteAuthorizationSetting" },
@@ -4117,8 +4230,8 @@ If a code was sent, recover the original submission without changing it.`,
             ),
             developmentSetting,
             sidebarEntrySetting,
-            resetIdentitySetting,
             acpSetting,
+            resetIdentitySetting,
             React.createElement(
               "div",
               { className: "dshRemoteSettingsSignIn" },
@@ -4285,6 +4398,11 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}",
       ".dshRemoteDebugLogGroup{border-top:1px solid var(--dsw-alias-border-l2);padding:12px 0}.dshRemoteDebugLogHeader{display:flex;align-items:center;justify-content:space-between;gap:16px}.dshRemoteDebugLogTrigger{appearance:none;border:0!important;border-radius:6px!important;background:transparent!important;padding:0!important;margin:0;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0;flex:1;min-height:unset!important;white-space:normal}.dshRemoteDebugLogTrigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:6px}.dshRemoteDebugLogTitleRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemoteDebugLogTitleRow strong{font-size:13px;font-weight:500}.dshRemoteDebugLogTrigger p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.4;white-space:normal}.dshRemoteDebugLogLevelBadge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:500;line-height:1.5;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2)}.dshRemoteDebugLogLevelBadge.isDebug{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.dshRemoteDebugLogControls{display:flex;align-items:center;gap:10px;flex:0 0 auto}",
       ".dshRemoteLogToggleBtn,.dshRemoteLogActionBtn,.dshRemoteLogFilterBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);min-height:28px!important;padding:3px 10px!important;font-size:12px!important;line-height:1.4!important;white-space:nowrap}.dshRemoteLogToggleBtn:hover:not(:disabled),.dshRemoteLogActionBtn:hover:not(:disabled),.dshRemoteLogFilterBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogToggleBtn:disabled,.dshRemoteLogActionBtn:disabled,.dshRemoteLogFilterBtn:disabled{opacity:.45;cursor:default}.dshRemoteLogFilterBtn.isActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-label-secondary);font-weight:500}.dshRemoteLogDrawer{margin-top:12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:8px}.dshRemoteLogToolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.dshRemoteLogFilterGroup,.dshRemoteLogActions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dshRemoteLogMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4}.dshRemoteLogMeta code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}.dshRemoteLogFallback{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogViewport{box-sizing:border-box;width:100%;max-height:260px;min-height:120px;overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}.dshRemoteLogLine{display:block;color:var(--dsw-alias-label-primary);margin-bottom:3px}.dshRemoteLogLine:last-child{margin-bottom:0}.dshRemoteLogLine.isDebug{color:var(--dsw-alias-label-tertiary)}.dshRemoteLogLine.isWarn{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogLine.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteLogEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0;padding:16px 0;text-align:center}",
+      ".dshRemotePairingHostOnlyBanner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin:0 0 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1))}.dshRemotePairingHostOnlyBanner>p{margin:0;flex:1 1 240px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}",
+      ".dshRemoteStartupBanner{display:flex;flex-direction:column;gap:10px;padding:12px;margin:8px 0;border:1px solid var(--dsw-alias-state-error-primary);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1))}.dshRemoteStartupBanner>p{margin:0;font-size:13px;line-height:1.5}.dshRemoteStartupActions{display:flex;flex-wrap:wrap;gap:8px}",
+      ".dshRemoteResetDetails{padding-top:12px;padding-bottom:12px}.dshRemoteResetBody{display:flex;flex-direction:column;gap:12px;padding-top:12px}.dshRemoteResetWarning{margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.55}.dshRemoteResetControls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}.dshRemoteResetScope{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.dshRemoteResetScope>span{font-size:12px;color:var(--dsw-alias-label-secondary)}",
+      ".dshRemoteDangerBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-state-error-primary);border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5;background:transparent;color:var(--dsw-alias-state-error-primary)}.dshRemoteDangerBtn:hover:not(:disabled){background:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-bg-layer-1)}.dshRemoteDangerBtn:disabled{opacity:.4;cursor:default}.dshRemoteDangerBtn:focus-visible{outline:2px solid var(--dsw-alias-state-error-primary);outline-offset:1px}",
+      ".dshRemoteResetConfirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--dsw-alias-state-error-primary);border-radius:8px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteResetConfirm>p{margin:0;flex:1 1 220px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary)}.dshRemoteResetConfirmActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
       "@media(max-width:620px){.dshRemotePluginCardStatus{display:none}.dshRemoteSettingsTop{gap:10px}.dshRemoteConnection{align-items:flex-start}.dshRemoteReconnect{min-height:40px}.dshRemotePortsRow{flex-direction:column}.dshRemoteAcpAddForm{grid-template-columns:1fr}.dshRemoteAcpAddForm button{min-height:40px}}"
     ].join(""), document.head.append(style), () => style.remove();
   }
@@ -4422,7 +4540,7 @@ If a code was sent, recover the original submission without changing it.`,
           if (typeof code == "string") return connectionErrorMessage(code, translate);
         }
         return messageOf(reason, translate);
-      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [discoveryUnavailable, setDiscoveryUnavailable] = React.useState(!1), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [upgradePhase, setUpgradePhase] = React.useState("idle"), [upgradeError, setUpgradeError] = React.useState(void 0), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [refreshingHosts, setRefreshingHosts] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === status?.serverUrl, [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
+      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [discoveryUnavailable, setDiscoveryUnavailable] = React.useState(!1), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [upgradePhase, setUpgradePhase] = React.useState("idle"), [upgradeError, setUpgradeError] = React.useState(void 0), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [refreshingHosts, setRefreshingHosts] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === status?.serverUrl, pairingHostOnly = status?.host?.pairingHostOnly === !0, [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
       React.useEffect(
         () => props.sidebarEntry.subscribe(() => setSidebarEntry(props.sidebarEntry.read())),
         [props.sidebarEntry]
@@ -4493,21 +4611,22 @@ If a code was sent, recover the original submission without changing it.`,
           setPairingServerUrl(pairingSupported ? status?.serverUrl : void 0);
           let available = items.filter((item) => item.qrStartUrl != null);
           setOAuthProviders(available), setLoginMethod((current) => {
+            if (pairingHostOnly) return "device_pairing";
             if (loginMethodManuallySelected.current && (current === "password" || current === "device_pairing" && pairingSupported || available.some((item) => `oauth:${item.id}` === current))) return current;
             let preferred = available.find((item) => item.id === props.preferredQrProvider) ?? available[0];
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch(() => {
-          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod((current) => loginMethodManuallySelected.current && current === "device_pairing" ? current : "password"));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod((current) => pairingHostOnly ? "device_pairing" : loginMethodManuallySelected.current && current === "device_pairing" ? current : "password"));
         }).finally(() => {
           active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
           active = !1;
         };
-      }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload, savingServer, serverDirty]), React.useEffect(() => {
-        !open || !needsAuthorization || savingServer || serverDirty || providersLoading || loginMethod === "password" || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod.slice(6));
-      }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, savingServer, serverDirty]), React.useEffect(() => {
-        if (!open || savingServer || serverDirty || loginMethod === "password" || qrSession === void 0) return;
+      }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload, savingServer, serverDirty, pairingHostOnly]), React.useEffect(() => {
+        !open || !needsAuthorization || pairingHostOnly || savingServer || serverDirty || providersLoading || loginMethod === "password" || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod.slice(6));
+      }, [open, needsAuthorization, pairingHostOnly, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, savingServer, serverDirty]), React.useEffect(() => {
+        if (!open || pairingHostOnly || savingServer || serverDirty || loginMethod === "password" || qrSession === void 0) return;
         let active = !0, polling = !1, settled = !1, run = qrFlowRun.current, timer, poll = () => {
           polling || settled || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then(async (result) => {
             if (!(!active || settled || run !== qrFlowRun.current))
@@ -4534,7 +4653,7 @@ If a code was sent, recover the original submission without changing it.`,
         return poll(), timer = window.setInterval(poll, 1500), () => {
           active = !1, timer !== void 0 && window.clearInterval(timer);
         };
-      }, [open, loginMethod, qrSession, savingServer, serverDirty]);
+      }, [open, pairingHostOnly, loginMethod, qrSession, savingServer, serverDirty]);
       let selectLoginMethod = (method) => {
         loginMethodManuallySelected.current = !0, method !== loginMethod && (qrFlowRun.current += 1, setLoginMethod(method), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setError(void 0));
       }, orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), passwordVisible = !savingServer && !serverDirty && loginMethod === "password" && (loginMethodManuallySelected.current || !providersLoading && oauthProviders.length === 0), qrLoginTab = (provider) => React.createElement("button", {
@@ -4742,9 +4861,12 @@ If a code was sent, recover the original submission without changing it.`,
       }, logoutRemote = async () => {
         qrFlowRun.current += 1, progressRun.current += 1, setBusy(!0), setError(void 0);
         try {
-          await props.control("settings.logout"), setDevices([]), setSelectedHost(void 0), setConnectingHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setDirectory(void 0), setPath(""), setPassword(""), setProgress(void 0), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
+          await props.control("settings.logout"), setDevices([]), setSelectedHost(void 0), setConnectingHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setHermesWorkspaces([]), setDirectory(void 0), setPath(""), setPassword(""), setProgress(void 0), setNeedsAuthorization(!0), loginMethodManuallySelected.current = !1, setLoginMethod("password"), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
         } catch (reason) {
           setError(messageOf(reason, t));
+          let nextStatus = await props.control("status").catch(() => {
+          });
+          nextStatus !== void 0 && setStatus(nextStatus);
         } finally {
           setBusy(!1);
         }
@@ -5012,21 +5134,32 @@ If a code was sent, recover the original submission without changing it.`,
                     React.createElement("span", null, t("signInClientDescription"))
                   )
                 ),
+                pairingHostOnly ? React.createElement(
+                  "div",
+                  { className: "dshRemotePairingHostOnlyBanner", role: "status" },
+                  React.createElement("p", null, t("pairingHostOnlyActionHint")),
+                  React.createElement("button", {
+                    type: "button",
+                    className: "dshRemoteDiscard",
+                    disabled: busy || savingServer,
+                    onClick: () => void logoutRemote()
+                  }, t(busy ? "signingOut" : "exitPairingMode"))
+                ) : null,
                 React.createElement(
                   "div",
                   { className: "dshRemoteLoginTabs", role: "tablist" },
-                  pairingAvailable && status?.hostAuthorizationAvailable ? React.createElement("button", {
+                  (pairingHostOnly || pairingAvailable) && status?.hostAuthorizationAvailable ? React.createElement("button", {
                     type: "button",
                     role: "tab",
                     id: "dsh-remote-pairing-tab",
-                    "aria-selected": loginMethod === "device_pairing",
+                    "aria-selected": pairingHostOnly || loginMethod === "device_pairing",
                     "aria-controls": "dsh-remote-pairing-panel",
-                    className: loginMethod === "device_pairing" ? "isActive" : "",
+                    className: pairingHostOnly || loginMethod === "device_pairing" ? "isActive" : "",
                     disabled: busy || savingServer,
                     onClick: () => selectLoginMethod("device_pairing")
                   }, t("pairingLoginTab")) : null,
-                  ...orderedQrProviders.map(qrLoginTab),
-                  React.createElement("button", {
+                  ...pairingHostOnly ? [] : orderedQrProviders.map(qrLoginTab),
+                  pairingHostOnly ? null : React.createElement("button", {
                     type: "button",
                     role: "tab",
                     id: "dsh-remote-password-tab",
@@ -5040,8 +5173,8 @@ If a code was sent, recover the original submission without changing it.`,
                 React.createElement(
                   "div",
                   { className: "dshRemoteLoginContent" },
-                  providersLoading && loginMethod !== "device_pairing" ? React.createElement("p", { role: "status" }, t("loadingLoginProviders")) : null,
-                  providersFailed ? React.createElement(
+                  !pairingHostOnly && providersLoading && loginMethod !== "device_pairing" ? React.createElement("p", { role: "status" }, t("loadingLoginProviders")) : null,
+                  !pairingHostOnly && providersFailed ? React.createElement(
                     "p",
                     { role: "status" },
                     t("noLoginProviders"),
@@ -5052,8 +5185,8 @@ If a code was sent, recover the original submission without changing it.`,
                       onClick: () => setProviderReload((value) => value + 1)
                     }, t("retryLoginProviders"))
                   ) : null,
-                  !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0 && loginMethod !== "device_pairing" ? React.createElement("p", { role: "status" }, t("noLoginProviders")) : null,
-                  loginMethod === "device_pairing" && pairingAvailable && status?.hostAuthorizationAvailable ? React.createElement(
+                  !pairingHostOnly && !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0 && loginMethod !== "device_pairing" ? React.createElement("p", { role: "status" }, t("noLoginProviders")) : null,
+                  (pairingHostOnly || loginMethod === "device_pairing" && pairingAvailable) && status?.hostAuthorizationAvailable ? React.createElement(
                     "div",
                     { role: "tabpanel", id: "dsh-remote-pairing-panel", "aria-labelledby": "dsh-remote-pairing-tab", className: "dshRemotePanelPairing" },
                     React.createElement(HostPairingPanel, {
@@ -5066,7 +5199,7 @@ If a code was sent, recover the original submission without changing it.`,
                         refreshRemote();
                       }
                     })
-                  ) : passwordVisible ? React.createElement(
+                  ) : pairingHostOnly ? null : passwordVisible ? React.createElement(
                     "div",
                     {
                       className: "dshRemoteClientLogin",

@@ -143,6 +143,7 @@ export interface HostAuthorizationControl {
   hasStoredAuthorization?(): Promise<boolean>
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>
+  close?(): Promise<void>
   localHarnessVersion?(): string | undefined
   authorizeHostAsOwned(accessToken: string, account?: string): Promise<unknown>
   authorizeHostWithAccount(email: string, password: string): Promise<unknown>

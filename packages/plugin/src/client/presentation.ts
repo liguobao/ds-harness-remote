@@ -159,6 +159,7 @@ export function connectionErrorMessage(code: string, t: Translate): string {
   if (code === 'UNSUPPORTED_VERSION') return t('connectionVersionMismatch')
   if (code === 'INVALID_MESSAGE') return t('connectionInvalidResponse')
   if (code === 'CONNECTION_FAILED') return t('serverUnavailableError')
+  if (code === 'DEVICE_SCOPE_REQUIRED') return t('pairingHostOnly')
   if (code === 'SERVER_NOT_CONFIGURED') return t('connectionReachability')
   return t('connectionUnexpected')
 }
@@ -201,6 +202,7 @@ export function messageOf(reason: unknown, t: Translate): string {
       const message = 'message' in reason && typeof reason.message === 'string' ? reason.message : ''
       return storageConflictMessage(message, t)
     }
+    if (reason.code === 'DEVICE_SCOPE_REQUIRED') return t('pairingHostOnly')
     if (reason.code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
   }
   return reason instanceof Error ? reason.message : String(reason)

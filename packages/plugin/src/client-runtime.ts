@@ -239,7 +239,7 @@ export class ClientModeRuntime {
         if (status.authorized) return
         if (this.host.hasStoredAuthorization !== undefined && await this.host.hasStoredAuthorization()) return
       }
-      const credentials = await this.server.authenticate(this.requireIdentity())
+      const credentials = await this.server.authenticate(await this.ensureIdentity())
       try {
         await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
       } catch (error) {
@@ -326,7 +326,7 @@ export class ClientModeRuntime {
     signal?.throwIfAborted()
     if (this.closed) throw new ClientModeError('CANCELLED', 'The Remote runtime is closed.')
     this.assertHostAuthorizationForDeviceDiscovery()
-    this.requireIdentity()
+    await this.ensureIdentity()
     const devices: RemoteDeviceView[] = []
     for await (const page of this.server.devicePages(signal)) {
       const remoteDevices = page.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
@@ -380,9 +380,10 @@ export class ClientModeRuntime {
   }
 
   async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {
+    const identity = await this.ensureIdentity()
     let authorization
     try {
-      authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password)
+      authorization = await this.server.authorizeWithAccount(identity, email, password)
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
       this.identity = await this.identities.reset(this.config.deviceName)
@@ -396,11 +397,15 @@ export class ClientModeRuntime {
   }
 
   async startClientOAuthQrLogin(provider: OAuthProvider): Promise<unknown> {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
+    }
     return this.server.startOAuthQrLogin(provider)
   }
 
   async pollClientOAuthQrLogin(qrId: string): Promise<unknown> {
-    const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
+    const identity = await this.ensureIdentity()
+    const result = await this.server.pollOAuthQrLogin(identity, qrId, async () => {
       this.identity = await this.identities.reset(this.config.deviceName)
       this.server.bindIdentity(this.identity)
       this.logger.info('Rotated revoked Client identity before QR authorization retry')
@@ -419,7 +424,14 @@ export class ClientModeRuntime {
     this.codexOpenedSessions.clear()
     this.acpOpenedSessions.clear()
     this.clearHistoryCaches()
-    if (this.identity === undefined) { await Promise.all([cleanup, this.server.clearAuthorization()]); return }
+    if (this.identity === undefined) {
+      await Promise.all([cleanup, this.server.clearAuthorization()])
+      if (!this.host?.hostStatus().pairingHostOnly) {
+        this.identity = await this.identities.reset(this.config.deviceName)
+        this.server.bindIdentity(this.identity)
+      }
+      return
+    }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()])
     // A Host-only installation never creates a Client identity on logout.
     if (this.host?.hostStatus().pairingHostOnly) this.identity = undefined
@@ -1121,6 +1133,17 @@ export class ClientModeRuntime {
   private requireIdentity(): HostIdentity {
     if (this.host?.hostStatus().pairingHostOnly) throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
     if (this.identity === undefined) throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
+    return this.identity
+  }
+
+  private async ensureIdentity(): Promise<HostIdentity> {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError('DEVICE_SCOPE_REQUIRED', 'This Host only accepts incoming Remote connections.')
+    }
+    if (this.identity === undefined) {
+      this.identity = await this.identities.loadOrCreate(this.config.deviceName)
+      this.server.bindIdentity(this.identity)
+    }
     return this.identity
   }
 

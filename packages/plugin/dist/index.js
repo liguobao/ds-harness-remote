@@ -87830,7 +87830,7 @@ var ClientModeRuntime = class {
         if (status2.authorized) return;
         if (this.host.hasStoredAuthorization !== void 0 && await this.host.hasStoredAuthorization()) return;
       }
-      const credentials = await this.server.authenticate(this.requireIdentity());
+      const credentials = await this.server.authenticate(await this.ensureIdentity());
       try {
         await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
       } catch (error62) {
@@ -87906,7 +87906,7 @@ var ClientModeRuntime = class {
     signal?.throwIfAborted();
     if (this.closed) throw new ClientModeError("CANCELLED", "The Remote runtime is closed.");
     this.assertHostAuthorizationForDeviceDiscovery();
-    this.requireIdentity();
+    await this.ensureIdentity();
     const devices = [];
     for await (const page of this.server.devicePages(signal)) {
       const remoteDevices = page.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
@@ -87957,9 +87957,10 @@ var ClientModeRuntime = class {
     throw new ClientModeError(status2.error, message);
   }
   async authorizeClientWithAccount(email3, password) {
+    const identity3 = await this.ensureIdentity();
     let authorization;
     try {
-      authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email3, password);
+      authorization = await this.server.authorizeWithAccount(identity3, email3, password);
     } catch (error62) {
       if (!(error62 instanceof ServerApiError) || error62.code !== "DEVICE_REVOKED") throw error62;
       this.identity = await this.identities.reset(this.config.deviceName);
@@ -87972,10 +87973,14 @@ var ClientModeRuntime = class {
     return authorization;
   }
   async startClientOAuthQrLogin(provider) {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
+    }
     return this.server.startOAuthQrLogin(provider);
   }
   async pollClientOAuthQrLogin(qrId) {
-    const result = await this.server.pollOAuthQrLogin(this.requireIdentity(), qrId, async () => {
+    const identity3 = await this.ensureIdentity();
+    const result = await this.server.pollOAuthQrLogin(identity3, qrId, async () => {
       this.identity = await this.identities.reset(this.config.deviceName);
       this.server.bindIdentity(this.identity);
       this.logger.info("Rotated revoked Client identity before QR authorization retry");
@@ -87995,6 +88000,10 @@ var ClientModeRuntime = class {
     this.clearHistoryCaches();
     if (this.identity === void 0) {
       await Promise.all([cleanup, this.server.clearAuthorization()]);
+      if (!this.host?.hostStatus().pairingHostOnly) {
+        this.identity = await this.identities.reset(this.config.deviceName);
+        this.server.bindIdentity(this.identity);
+      }
       return;
     }
     const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()]);
@@ -88623,6 +88632,16 @@ var ClientModeRuntime = class {
   requireIdentity() {
     if (this.host?.hostStatus().pairingHostOnly) throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
+    return this.identity;
+  }
+  async ensureIdentity() {
+    if (this.host?.hostStatus().pairingHostOnly) {
+      throw new ClientModeError("DEVICE_SCOPE_REQUIRED", "This Host only accepts incoming Remote connections.");
+    }
+    if (this.identity === void 0) {
+      this.identity = await this.identities.loadOrCreate(this.config.deviceName);
+      this.server.bindIdentity(this.identity);
+    }
     return this.identity;
   }
   beginSelection(signal) {
@@ -89600,8 +89619,8 @@ function isIdentityTempArtifact(name2) {
   return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
 }
 function isOwnedIdentityRecord(name2) {
-  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json") return true;
-  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.")) && name2.endsWith(".tmp");
+  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json" || name2 === "pairing-host-only.json") return true;
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.") || name2.startsWith("pairing-host-only.json.")) && name2.endsWith(".tmp");
 }
 async function removeStaleTemporaries(directory) {
   let entries;
@@ -98237,15 +98256,17 @@ var PluginControlRuntime = class {
     }
     const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
-    const nextDirectory = await resetDefaultIdentityRoles(
-      roles,
-      config2.serverUrl,
-      hostname4(),
-      this.useDefaultStorage ? {} : { directory: this.identityDirectory }
-    );
-    this.setIdentityDirectory(nextDirectory);
+    await this.client?.handleControl("mode.set", { mode: "local" }, new AbortController().signal).catch(() => void 0);
     if (this.switchServer !== void 0) {
+      await Promise.allSettled([this.client?.close?.(), this.host?.close?.()]);
       try {
+        const nextDirectory2 = await resetDefaultIdentityRoles(
+          roles,
+          config2.serverUrl,
+          hostname4(),
+          this.useDefaultStorage ? {} : { directory: this.identityDirectory }
+        );
+        this.setIdentityDirectory(nextDirectory2);
         const runtimes = await this.switchServer(config2);
         this.client = runtimes.client;
         this.host = runtimes.host;
@@ -98257,6 +98278,13 @@ var PluginControlRuntime = class {
       }
       return { ...await this.settingsView(), applies: "live" };
     }
+    const nextDirectory = await resetDefaultIdentityRoles(
+      roles,
+      config2.serverUrl,
+      hostname4(),
+      this.useDefaultStorage ? {} : { directory: this.identityDirectory }
+    );
+    this.setIdentityDirectory(nextDirectory);
     this.clearStartupFailure();
     return { ...await this.settingsView(), applies: "live" };
   }
@@ -98496,10 +98524,9 @@ var PluginControlRuntime = class {
     }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     if (config2.serverUrl !== void 0) {
-      const runtimes = await Promise.allSettled([
-        this.client?.clearClientAuthorization(),
-        this.host?.clearHostAuthorization()
-      ]);
+      const hostCleanup = await Promise.allSettled([this.host?.clearHostAuthorization()]);
+      const clientCleanup = await Promise.allSettled([this.client?.clearClientAuthorization()]);
+      const runtimes = [...hostCleanup, ...clientCleanup];
       const stores = await Promise.allSettled(["host", "client"].map(async (role2) => {
         const directory = serverStorageDirectory(this.identityDirectory, config2.serverUrl, role2);
         await new ServerCredentialStore(directory).clear();
@@ -103282,6 +103309,7 @@ var HostPluginRuntime = class {
     }
     this.identity = await this.identities.reset(this.config.deviceName);
     this.serverApi?.bindIdentity(this.identity);
+    await this.serverApi?.loadStoredPolicy();
     if (this.serverApi !== void 0) this.serverConnection = this.createServerConnection(this.identity);
     this.initializePairing();
     this.logger.info("Host authorization cleared");
