@@ -1,12 +1,67 @@
 import { HarnessQuestions } from './harness-questions.js'
 import { RemoteGatewayError, RemoteTypertGateway, createRemoteId, type RemoteGatewayResult, type RemoteGatewayStream } from './remote-gateway.js'
 import type { RemoteClientCore } from './index.js'
+import {
+  REMOTE_COMPACTION_CAPABILITY,
+  type RemoteCompactionState,
+  type RemoteCompactionStatusResult,
+  type RemoteCompactionSubmitResult,
+} from '@dsh-remote/protocol'
 
 export interface HarnessAlphaHostInfo {
   clientVersion?: string
   harnessVersion?: string
   sessionFormat?: 3
+  /** Capabilities negotiated by `probeRemoteHostFeatures`. */
+  capabilities?: readonly string[]
 }
+
+/** Options for {@link HarnessAlphaClient.compactSession}. */
+export interface RemoteCompactionRunOptions {
+  /** Resume polling an operation submitted earlier instead of submitting again. */
+  operationId?: string
+  /** Idempotency key for a fresh submission; retries with the same id dedupe. */
+  requestId?: string
+  /** Host-side budget for the compaction task itself. */
+  budgetMs?: number
+  pollIntervalMs?: number
+  signal?: AbortSignal
+  onStatus?: (status: RemoteCompactionStatusResult) => void
+}
+
+/** Durable client-side record of one compaction attempt. */
+export interface RemoteCompactionRecord {
+  sessionId: string
+  /** Idempotency key saved before submission so a lost response is recoverable. */
+  requestId: string
+  operationId?: string
+  state: RemoteCompactionState
+  updatedAt: number
+}
+
+/**
+ * Persistence used by the product call path. Scope should identify the Host
+ * (for example its device id) so records never cross Hosts.
+ */
+export interface RemoteCompactionStore {
+  load(scope: string, sessionId: string): Promise<RemoteCompactionRecord | undefined>
+  list(scope: string): Promise<RemoteCompactionRecord[]>
+  save(scope: string, record: RemoteCompactionRecord): Promise<void>
+  remove(scope: string, sessionId: string): Promise<void>
+}
+
+export interface RemoteCompactionPersistence {
+  store: RemoteCompactionStore
+  scope: string
+}
+
+/**
+ * Result of a tracked compaction. `unconfirmed` means observation failed; it
+ * is not a failure of the compaction and must not trigger a second run.
+ */
+export type RemoteCompactionOutcome =
+  | { kind: 'settled'; status: RemoteCompactionStatusResult }
+  | { kind: 'unconfirmed'; status?: RemoteCompactionStatusResult; message: string }
 
 export interface HarnessClientFrame {
   rpcId: string
@@ -300,6 +355,7 @@ export class HarnessAlphaClient {
     core: RemoteClientCore,
     private readonly host: HarnessAlphaHostInfo = {},
     private readonly onFrame?: (frame: HarnessClientFrame) => void,
+    private readonly compactionPersistence?: RemoteCompactionPersistence,
   ) {
     this.gateway = new RemoteTypertGateway(core)
     this.questions = new HarnessQuestions(this.gateway, (id, outcome) => this.respondEvent(id, outcome), frame => this.emitFrame(frame))
@@ -418,12 +474,263 @@ export class HarnessAlphaClient {
   }
 
   async sessionExecuteCommand(sessionId: string, line: string): Promise<{ kind: 'success' | 'error'; text?: string }> {
+    // `/compact` inside the official UI is a blocking command by design, but the
+    // underlying summarization can outlive any single RPC deadline. When the
+    // Host advertises the async contract, run it as a tracked Host operation so
+    // only the short submit/status calls cross the wire.
+    if (this.supportsAsyncCompaction && line.trim() === '/compact') {
+      if (this.compactionPersistence !== undefined) {
+        const outcome = await this.compactSessionTracked(sessionId)
+        if (outcome.kind === 'unconfirmed') return { kind: 'error', text: outcome.message }
+        const status = outcome.status
+        return status.state === 'succeeded'
+          ? { kind: 'success', ...(status.message === undefined ? {} : { text: status.message }) }
+          : { kind: 'error', text: status.message ?? `Compaction ${status.state}.` }
+      }
+      const status = await this.compactSession(sessionId)
+      if (status.state === 'succeeded') {
+        return { kind: 'success', ...(status.message === undefined ? {} : { text: status.message }) }
+      }
+      return { kind: 'error', text: status.message ?? `Compaction ${status.state}.` }
+    }
     const execution = await this.callValue<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>('commands/execute', {
       agentId: sessionId, line, ...(this.host.sessionFormat === 3 ? { submittedAttachments: [] } : { images: [] }),
     })
     if (execution === undefined) throw new RemoteGatewayError('UNSUPPORTED', 'Unknown or unavailable Host command.')
     if (execution.result?.kind !== 'success' && execution.result?.kind !== 'error') throw new RemoteGatewayError('INVALID_MESSAGE', 'Invalid command result.')
     return execution.result
+  }
+
+  /** True when the Host advertises the Remote-owned asynchronous compaction contract. */
+  get supportsAsyncCompaction(): boolean {
+    return this.host.capabilities?.includes(REMOTE_COMPACTION_CAPABILITY) === true
+  }
+
+  /** Submit `/compact` without holding one RPC open for the whole run. */
+  async submitCompaction(
+    sessionId: string,
+    options: { requestId?: string; budgetMs?: number; signal?: AbortSignal } = {},
+  ): Promise<RemoteCompactionSubmitResult> {
+    return await this.gateway.submitCompaction({
+      sessionId,
+      requestId: options.requestId ?? createRemoteId(),
+      ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+    }, options.signal)
+  }
+
+  async compactionStatus(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+  }
+
+  async cancelCompaction(
+    sessionId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.gateway.cancelCompaction({ sessionId, operationId }, signal)
+  }
+
+  /**
+   * Submit (or resume) one compaction and poll until it settles.
+   *
+   * Polling is observation only. Closing this client, a page or a connection
+   * does not abort the Host run: resume by passing the operation id again.
+   */
+  async compactSession(
+    sessionId: string,
+    options: RemoteCompactionRunOptions = {},
+  ): Promise<RemoteCompactionStatusResult> {
+    let operationId = options.operationId
+    if (operationId === undefined) {
+      const submitted = await this.submitCompactionWithRetry(
+        sessionId,
+        options.requestId ?? createRemoteId(),
+        options,
+      )
+      operationId = submitted.operationId
+      options.onStatus?.({ operationId, sessionId, state: submitted.state })
+    }
+    return await this.pollCompaction(sessionId, operationId, options)
+  }
+
+  /**
+   * Product-facing tracked compaction.
+   *
+   * The requestId is persisted before submission and the operationId as soon as
+   * the Host answers, so a lost submit response or a reconnect can query the
+   * same Host operation instead of starting a second compaction. Observation
+   * failures return `unconfirmed`, never a failure.
+   */
+  async compactSessionTracked(
+    sessionId: string,
+    options: RemoteCompactionRunOptions = {},
+  ): Promise<RemoteCompactionOutcome> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) {
+      return { kind: 'settled', status: await this.compactSession(sessionId, options) }
+    }
+    const { store, scope } = persistence
+    let record = await safeLoad(store, scope, sessionId)
+    if (record === undefined) {
+      record = {
+        sessionId,
+        requestId: options.requestId ?? createRemoteId(),
+        state: 'accepted',
+        updatedAt: Date.now(),
+      }
+      await safeSave(store, scope, record)
+    }
+    let operationId = record.operationId
+    try {
+      if (operationId === undefined) {
+        // Only recover an in-flight submission. An old record without an
+        // operation id may be from before a Host restart (whose dedupe ledger
+        // is gone); replaying it would start a new compaction.
+        if (record.state !== 'accepted' || Date.now() - record.updatedAt > SUBMIT_RECOVERY_MS) {
+          await safeRemove(store, scope, sessionId)
+          return {
+            kind: 'unconfirmed',
+            message: '上一次压缩提交的结果未知；为避免重复执行，请先确认会话状态。',
+          }
+        }
+        const submitted = await this.submitCompactionWithRetry(sessionId, record.requestId, options)
+        operationId = submitted.operationId
+        record = { ...record, operationId, state: submitted.state, updatedAt: Date.now() }
+        await safeSave(store, scope, record)
+        options.onStatus?.({ operationId, sessionId, state: submitted.state })
+      }
+      const boundOperationId = operationId
+      const status = await this.pollCompaction(sessionId, boundOperationId, {
+        ...options,
+        onStatus: next => {
+          record = { ...record!, operationId: boundOperationId, state: next.state, updatedAt: Date.now() }
+          void safeSave(store, scope, record)
+          options.onStatus?.(next)
+        },
+      })
+      record = { ...record, operationId: boundOperationId, state: status.state, updatedAt: Date.now() }
+      await safeSave(store, scope, record)
+      if (isTerminalCompactionState(status.state)) {
+        await safeRemove(store, scope, sessionId)
+        return { kind: 'settled', status }
+      }
+      return { kind: 'unconfirmed', status, message: '压缩仍在收尾，暂时无法确认最终状态。' }
+    } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted === true) throw error
+      if (isPermanentCompactionError(error)) {
+        await safeRemove(store, scope, sessionId)
+        throw error
+      }
+      return {
+        kind: 'unconfirmed',
+        ...(record.operationId === undefined ? {} : { status: statusFromRecord(record) }),
+        message: '暂时无法确认压缩状态；重连后会查询同一操作，不会重复发起压缩。',
+      }
+    }
+  }
+
+  /**
+   * Ask the Host to cancel the tracked compaction for one Session. Returns
+   * undefined when no persisted operation exists (for example a legacy Host or
+   * a command that was never tracked).
+   */
+  async cancelTrackedCompaction(sessionId: string): Promise<RemoteCompactionStatusResult | undefined> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) return undefined
+    const record = await safeLoad(persistence.store, persistence.scope, sessionId)
+    if (record?.operationId === undefined) return undefined
+    const status = await this.gateway.cancelCompaction({ sessionId, operationId: record.operationId })
+    await safeSave(persistence.store, persistence.scope, {
+      ...record,
+      state: status.state,
+      updatedAt: Date.now(),
+    })
+    if (isTerminalCompactionState(status.state)) {
+      await safeRemove(persistence.store, persistence.scope, sessionId)
+    }
+    return status
+  }
+
+  /** Query every persisted attempt for this Host scope, usually after reconnect. */
+  async resumeCompactions(options: {
+    signal?: AbortSignal
+    onOutcome?: (sessionId: string, outcome: RemoteCompactionOutcome) => void
+  } = {}): Promise<Array<{ sessionId: string; outcome: RemoteCompactionOutcome }>> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) return []
+    let records: RemoteCompactionRecord[] = []
+    try {
+      records = await persistence.store.list(persistence.scope)
+    } catch {
+      return []
+    }
+    const results: Array<{ sessionId: string; outcome: RemoteCompactionOutcome }> = []
+    for (const record of records) {
+      try {
+        const outcome = await this.compactSessionTracked(record.sessionId, { signal: options.signal })
+        results.push({ sessionId: record.sessionId, outcome })
+        options.onOutcome?.(record.sessionId, outcome)
+      } catch {
+        // A resume must never take the connection down; the record stays for
+        // the next reconnect.
+      }
+    }
+    return results
+  }
+
+  private async submitCompactionWithRetry(
+    sessionId: string,
+    requestId: string,
+    options: RemoteCompactionRunOptions,
+  ): Promise<RemoteCompactionSubmitResult> {
+    let failures = 0
+    for (;;) {
+      try {
+        return await this.gateway.submitCompaction({
+          sessionId,
+          requestId,
+          ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
+        }, options.signal)
+      } catch (error) {
+        if (isAbortError(error) || options.signal?.aborted === true || isPermanentCompactionError(error)) throw error
+        failures += 1
+        if (failures >= COMPACTION_POLL_RETRIES) throw error
+        await waitFor(500 * failures, options.signal)
+      }
+    }
+  }
+
+  private async pollCompaction(
+    sessionId: string,
+    operationId: string,
+    options: RemoteCompactionRunOptions,
+  ): Promise<RemoteCompactionStatusResult> {
+    const signal = options.signal
+    const interval = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS
+    let consecutiveFailures = 0
+    for (;;) {
+      throwIfAborted(signal)
+      let status: RemoteCompactionStatusResult
+      try {
+        status = await this.gateway.compactionStatus({ sessionId, operationId }, signal)
+        consecutiveFailures = 0
+      } catch (error) {
+        if (isAbortError(error) || signal?.aborted === true) throw error
+        consecutiveFailures += 1
+        // A lost poll is not a lost operation: back off and ask again, but do
+        // not retry a permanent rejection (wrong owner, unknown method, ...).
+        if (isTerminalCompactionError(error) || consecutiveFailures >= COMPACTION_POLL_RETRIES) throw error
+        await waitFor(interval * consecutiveFailures, signal)
+        continue
+      }
+      options.onStatus?.(status)
+      if (isTerminalCompactionState(status.state)) return status
+      await waitFor(interval, signal)
+    }
   }
 
   async sessionSelectPermission(sessionId: string, preset: string): Promise<void> {
@@ -1088,6 +1395,118 @@ export class HarnessAlphaClient {
     }
     handle.controller.abort()
   }
+}
+
+const COMPACTION_TERMINAL_STATES = new Set<RemoteCompactionState>([
+  'succeeded',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'unconfirmed',
+])
+const COMPACTION_POLL_INTERVAL_MS = 2_000
+const COMPACTION_POLL_RETRIES = 3
+/** Recover a lost submit response only while the attempt is still fresh. */
+const SUBMIT_RECOVERY_MS = 120_000
+
+function isTerminalCompactionState(state: RemoteCompactionState): boolean {
+  return COMPACTION_TERMINAL_STATES.has(state)
+}
+
+function isPermanentCompactionError(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && [
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_FOUND',
+    'PERMISSION_DENIED',
+    'INVALID_MESSAGE',
+    'SESSION_NOT_FOUND',
+    'AGENT_BUSY',
+    'UNSUPPORTED',
+  ].includes(code)
+}
+
+function statusFromRecord(record: RemoteCompactionRecord): RemoteCompactionStatusResult {
+  return {
+    operationId: record.operationId ?? '',
+    sessionId: record.sessionId,
+    state: record.state,
+  }
+}
+
+async function safeLoad(
+  store: RemoteCompactionStore,
+  scope: string,
+  sessionId: string,
+): Promise<RemoteCompactionRecord | undefined> {
+  try {
+    return await store.load(scope, sessionId)
+  } catch {
+    return undefined
+  }
+}
+
+async function safeSave(
+  store: RemoteCompactionStore,
+  scope: string,
+  record: RemoteCompactionRecord,
+): Promise<void> {
+  try {
+    await store.save(scope, record)
+  } catch {}
+}
+
+async function safeRemove(store: RemoteCompactionStore, scope: string, sessionId: string): Promise<void> {
+  try {
+    await store.remove(scope, sessionId)
+  } catch {}
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.')
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as { code?: unknown }).code
+  return error.name === 'AbortError' || code === 'RPC_ABORTED' || code === 'CANCELLED'
+}
+
+function isTerminalCompactionError(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && [
+    'FEATURE_NOT_SUPPORTED',
+    'METHOD_NOT_FOUND',
+    'PERMISSION_DENIED',
+    'INVALID_MESSAGE',
+    'SESSION_NOT_FOUND',
+  ].includes(code)
+}
+
+function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      reject(signal?.reason instanceof Error
+        ? signal.reason
+        : new RemoteGatewayError('CANCELLED', 'The compaction observation was cancelled.'))
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function normalizeSession(value: unknown): HarnessRemoteSession | undefined {

@@ -166,6 +166,7 @@ export function ChatScreen({
   const permissionSelecting = useAppStore(state => state.permissionSelecting)
   const sendMessage = useAppStore(state => state.sendMessage)
   const stopSession = useAppStore(state => state.stopSession)
+  const cancelCompaction = useAppStore(state => state.cancelCompaction)
   const reconnect = useAppStore(state => state.reconnect)
   const openSession = useAppStore(state => state.openSession)
   const respondApproval = useAppStore(state => state.respondApproval)
@@ -933,6 +934,13 @@ export function ChatScreen({
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
   const compactRunning = replyActive && !hasComposerContent && !composingDuringRun
   const stopping = busy === 'stop-session'
+  const commandRunning = busy === 'command'
+  const stopOrCancel = () => {
+    if (!commandRunning) { void stopSession(); return }
+    // A tracked /compact can run for minutes; the stop control asks the Host to
+    // cancel it and keeps observing the confirmed terminal state.
+    void cancelCompaction().then(cancelled => { if (!cancelled) void stopSession() })
+  }
   // Action entries (attachments, tools, prompts) still need the channel, but the
   // text field itself only blocks on composer-local states so an offline draft
   // can be typed, edited and kept for the manual send after reconnection.
@@ -1254,7 +1262,7 @@ export function ChatScreen({
         <ChatComposer
           backend={session.backend} draft={draft} input={mentionInput}
           quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
-          replyActive={replyActive} stopping={stopping} compactRunning={compactRunning}
+          replyActive={replyActive} stopping={stopping} compactRunning={compactRunning} commandRunning={commandRunning}
           hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
           compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
@@ -1262,7 +1270,7 @@ export function ChatScreen({
           promptsPickerOpen={promptsPickerOpen} onExpand={() => setComposingDuringRun(true)}
           onOpenExpand={() => setComposerExpanded(true)}
           onOpenActions={openPlusMenu} onOpenPrompts={openPromptsPicker}
-          onSubmit={() => void submit()} onStop={() => void stopSession()}
+          onSubmit={() => void submit()} onStop={stopOrCancel}
         />
         </View>
       </View>
@@ -1278,7 +1286,7 @@ export function ChatScreen({
         stopping={stopping}
         sendDisabled={sendDisabled}
         onSubmit={() => void submit()}
-        onStop={() => void stopSession()}
+        onStop={stopOrCancel}
       />
         </View>
       </View>

@@ -14,7 +14,7 @@ import { HostServerConnection } from '../src/server-connection.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
-import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
+import type { LocalTypertGateway, TypertRpcResult } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
   it('does not start inbound Host authorization when control is disabled at startup', async () => {
@@ -123,8 +123,9 @@ describe('HostPluginRuntime multi-Client routing', () => {
                                   'codex.appserver.v1',
                       'codex.appserver.transfer.v1',
                       'remote.history.compact.v1',
+                      'remote.compaction.async.v1',
                     ]
-                  : ['workspace.upload.v1', 'remote.history.compact.v1'],
+                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1'],
               )
               expect(result.workspaceTypes).toEqual(
                 scenario === 'ready'
@@ -222,6 +223,55 @@ describe('HostPluginRuntime multi-Client routing', () => {
       expect(recovered).toContain('harness.remote.stream.transfer.v1')
     } finally { await runtime.close() }
   })
+
+  it('runs /compact as a Host-owned operation with idempotent submission and status', async () => {
+    const gateway = localGateway()
+    let release!: (value: TypertRpcResult) => void
+    vi.mocked(gateway.dispatch).mockImplementation(async (endpoint: string) => {
+      if (endpoint === 'session/list') return { ok: true as const, value: [] }
+      if (endpoint === 'commands/execute') {
+        return await new Promise(resolve => { release = resolve })
+      }
+      return { ok: true as const }
+    })
+    const runtime = new HostPluginRuntime(config(), identities(), logger(), gateway)
+    const channel = fakeChannel('compaction-client', 'client-phone')
+    const rpc = async (method: string, params: unknown): Promise<Record<string, unknown>> => {
+      const request = createRpcRequest(method as never, params)
+      channel.push(request)
+      let response: RemoteMessage | undefined
+      await vi.waitFor(() => {
+        response = channel.sent().find(message => message.type === 'rpc.response'
+          && (message.payload as RpcResponsePayload).requestId === request.id)
+        expect(response).toBeDefined()
+      })
+      return (response!.payload as RpcResponsePayload).result as Record<string, unknown>
+    }
+    try {
+      await runtime.start()
+      await runtime.acceptAuthenticatedPeer(channel)
+
+      const submitted = await rpc('harness.remote.compaction.submit', { sessionId: 'session-1', requestId: 'request-1' })
+      expect(submitted.state).toBe('accepted')
+      const duplicate = await rpc('harness.remote.compaction.submit', { sessionId: 'session-1', requestId: 'request-1' })
+      expect(duplicate.operationId).toBe(submitted.operationId)
+      expect(vi.mocked(gateway.dispatch).mock.calls.filter(([endpoint]) => endpoint === 'commands/execute')).toHaveLength(1)
+
+      const first = await rpc('harness.remote.compaction.status', {
+        sessionId: 'session-1', operationId: submitted.operationId,
+      })
+      expect(['accepted', 'running']).toContain(first.state)
+
+      release({ ok: true, value: { result: { kind: 'success', text: 'Compacted.' } } })
+      await vi.waitFor(async () => {
+        const status = await rpc('harness.remote.compaction.status', {
+          sessionId: 'session-1', operationId: submitted.operationId,
+        })
+        expect(status).toMatchObject({ state: 'succeeded', message: 'Compacted.' })
+      })
+    } finally { await runtime.close() }
+  })
+
 
   it('reports an unready or unverified Session API as a retryable discovery failure', async () => {
     await runScenarios([

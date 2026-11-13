@@ -1,5 +1,43 @@
 # Repository Guide for Agents
 
+## Remote async compaction (Issue #416 / PR #420, 2026-11-12)
+
+Remote 转发 `commands/execute` 的 60s deadline 会中止合法的长压缩（本地 prefill 约 1k tok/s，
+500K 上下文单次压缩需数分钟）。本改动不统一拉长 RPC 超时，而是新增 Remote 自有异步契约：
+capability `remote.compaction.async.v1` 与
+`harness.remote.compaction.submit|status|cancel`（见 `docs/protocol.md` §17 与
+`harness.remote.compaction.*`）。
+
+Host：`packages/plugin/src/remote-compaction-operations.ts` 的 `RemoteCompactionOperations` 挂在
+`HostPluginRuntime`（不是连接）。后台用独立 owner Peer 执行固定 `/compact`，`requestId` 在
+`(deviceId, sessionId)` 内幂等去重；同一 Session 只接纳一个未结束操作（新 requestId 返回
+`AGENT_BUSY`），最多跟踪 32 个操作（超出 `RATE_LIMITED`）；预算默认 30 分钟且与 RPC 超时分离。
+
+取消收尾：Harness `commands/execute` 经 `withAbort()` 在 abort 后立即停止等待 handler，而
+handler 仍会继续压缩/持锁/持久化，所以“命令调用结束”不等于“压缩收尾”。取消或预算中止后，
+Host 读取 `session/events` 中同一 `sourceCommandId` 的 `command/run` 与 `compaction/end`
+确认：确认失败→`cancelled`（取消）/`failed`（预算）；确认已提交但取消期间无法确认持久化
+→`unconfirmed`；仍无法确认→保持 `cancelling` 并继续由状态查询触发确认。成功结果优先于
+取消标记（取消与完成竞争时保留 `succeeded`）。
+
+Client：`client-core` 的 `HarnessAlphaClient.compactSessionTracked()` 在提交前持久化
+`requestId`、响应后持久化 `operationId`，按 Host scope 隔离；提交响应丢失时用同一
+`requestId` 重试，重连后 `resumeCompactions()` 只查询原操作；观察失败返回
+`unconfirmed`，不得当作失败或再次提交。Android 用 `services/compaction-store.ts`
+（SecureStore，懒加载以避开单元测试的 Expo 依赖）接入，`prompt-actions` 对 `/compact`
+走 tracked 路径，连接建立后自动恢复。未声明能力的旧 Host 完全保持原 `commands/execute`
+行为，普通查询、插件清单校验、提醒创建等仍用 60s RPC 超时。
+
+验证：`remote-compaction-operations.test.ts`（提交/结算、不伪造成功、requestId 去重、
+同会话互斥、跨设备拒绝、取消需生命周期确认、取消/成功竞争、committed-but-unconfirmed、
+预算超时、重启 interrupted、shutdown、session/events 解析）；client-core 新增 7 个
+async/tracked 测试（含丢响应同 requestId 重试、断线恢复不重提、过期不重放）；Android
+connection/message-actions 回归通过。2026-11-13 已完成跨设备真机验收：Host 为隔离 DSH
+profile（Mac，DSH 0.2.2-rc.1 + 本插件 + GLM-5.3），Client 为另一台 DGX Spark-01，经自托管
+Remote Server 以 Relay 连接；600K 字符上下文下长压缩 137.66s 成功、断线重连用同一
+operationId 继续且 accepted/command-run 均 1、显式取消经 compaction/end 确认后 6.18s
+进入 cancelled。详见 docs/remote-compaction-verification.md。
+
 ## Android coherent transitions (Issue #8, 2026-11-12)
 
 Android 把“状态突变”改为同一界面的连续过渡，未改路由架构、协议、Host 或持久化。

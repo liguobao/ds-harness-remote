@@ -14641,8 +14641,8 @@ var init_lib = __esm({
         const id6 = setTimeout(...args);
         return () => clearTimeout(id6);
       },
-      setInterval: (callback, delay) => {
-        const id6 = setInterval(callback, delay);
+      setInterval: (callback, delay2) => {
+        const id6 = setInterval(callback, delay2);
         return () => clearInterval(id6);
       }
     };
@@ -15742,8 +15742,8 @@ var init_lib = __esm({
       handleAbort = () => {
         this.stop();
       };
-      schedule(delay) {
-        const handle = this.scheduler.setTimeout(this.handleTimer, delay);
+      schedule(delay2) {
+        const handle = this.scheduler.setTimeout(this.handleTimer, delay2);
         if (this.unref) {
           handle?.unref?.();
         }
@@ -15928,8 +15928,8 @@ var init_lib = __esm({
           return;
         }
         this.anchor ??= { time: now + this.latencyMs, dts: next.dts };
-        const delay = Math.max(0, this.deadline(next.dts) - now);
-        const handle = this.scheduler.setTimeout(this.handleTimer, delay);
+        const delay2 = Math.max(0, this.deadline(next.dts) - now);
+        const handle = this.scheduler.setTimeout(this.handleTimer, delay2);
         if (this.unref) {
           handle?.unref?.();
         }
@@ -19768,10 +19768,10 @@ var init_lib = __esm({
             abort.abort();
           });
           while (!abort.signal.aborted) {
-            const delay = 5 / 6 * exp * 1e3;
-            log23("refresh delay", delay, { exp });
+            const delay2 = 5 / 6 * exp * 1e3;
+            log23("refresh delay", delay2, { exp });
             try {
-              await setTimeout42(delay, void 0, { signal: abort.signal });
+              await setTimeout42(delay2, void 0, { signal: abort.signal });
             } catch (error62) {
               if (abort.signal.aborted) {
                 return;
@@ -64609,6 +64609,9 @@ var rpcMethods = [
   "harness.remote.transfer.close",
   "harness.remote.stream.open",
   "harness.remote.stream.close",
+  "harness.remote.compaction.submit",
+  "harness.remote.compaction.status",
+  "harness.remote.compaction.cancel",
   "loopback.call",
   "fileviewer.call",
   "codex.app.call",
@@ -64705,6 +64708,7 @@ function acceptNegotiatedCapabilities(offered, negotiated) {
   }
   return [...accepted];
 }
+var REMOTE_COMPACTION_CAPABILITY = "remote.compaction.async.v1";
 var rpcMethodSchema = external_exports.enum(rpcMethods);
 var messageTypeSchema = external_exports.enum(messageTypes);
 var controlFrameTypeSchema = external_exports.enum(controlFrameTypes);
@@ -67780,8 +67784,8 @@ var AcpSessionTitles = class {
     this.pending.set(session2.sessionId, controller);
     const deadline = this.backend === "opencode" ? setTimeout(() => controller.abort(), 2e4) : void 0;
     try {
-      for (const delay of this.backend === "opencode" ? [0, 1e3, 3e3, 6e3, 9e3] : [0]) {
-        if (delay) await waitForTitle(delay, signal);
+      for (const delay2 of this.backend === "opencode" ? [0, 1e3, 3e3, 6e3, 9e3] : [0]) {
+        if (delay2) await waitForTitle(delay2, signal);
         if (signal.aborted || this.closed || session2.titleOverridden) return;
         const previous = session2.title;
         try {
@@ -67806,14 +67810,14 @@ var AcpSessionTitles = class {
     this.pending.clear();
   }
 };
-function waitForTitle(delay, signal) {
+function waitForTitle(delay2, signal) {
   return new Promise((resolve10) => {
     const finish = () => {
       clearTimeout(timer2);
       signal.removeEventListener("abort", finish);
       resolve10();
     };
-    const timer2 = setTimeout(finish, delay);
+    const timer2 = setTimeout(finish, delay2);
     signal.addEventListener("abort", finish, { once: true });
     if (signal.aborted) finish();
   });
@@ -70462,12 +70466,12 @@ var AdaptiveTransport = class extends BaseTransport {
     socket?.close();
     if (this.recoveryTimer !== void 0)
       return;
-    const delay = recoveryDelayMs(this.recoveryAttempt, diagnostic);
+    const delay2 = recoveryDelayMs(this.recoveryAttempt, diagnostic);
     this.recoveryAttempt++;
     this.recoveryTimer = setTimeout(() => {
       this.recoveryTimer = void 0;
       void this.reopenControl();
-    }, delay);
+    }, delay2);
   }
   async reopenControl() {
     const lifetime = this.lifetime;
@@ -78484,14 +78488,14 @@ var ClientReconnect = class {
   }
   async run(connect4, pending) {
     while (!pending.signal.aborted) {
-      const delay = Math.random() * this.config.maxDelayMs;
+      const delay2 = Math.random() * this.config.maxDelayMs;
       await new Promise((resolve10) => {
         const finish = () => {
           clearTimeout(timer2);
           pending.signal.removeEventListener("abort", finish);
           resolve10();
         };
-        const timer2 = setTimeout(finish, delay);
+        const timer2 = setTimeout(finish, delay2);
         pending.signal.addEventListener("abort", finish, { once: true });
       });
       if (pending.signal.aborted) return;
@@ -89178,7 +89182,7 @@ var LOCK_RETRY_MAX_MS = 200;
 async function withIdentityLock(directory, operation) {
   const lockPath = join5(directory, LOCK_FILE_NAME);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  let delay = LOCK_RETRY_INITIAL_MS;
+  let delay2 = LOCK_RETRY_INITIAL_MS;
   for (; ; ) {
     try {
       await writeFile2(lockPath, `${process.pid}
@@ -89194,8 +89198,8 @@ async function withIdentityLock(directory, operation) {
         "IDENTITY_LOCKED"
       );
     }
-    await new Promise((resolve10) => setTimeout(resolve10, delay));
-    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
+    await new Promise((resolve10) => setTimeout(resolve10, delay2));
+    delay2 = Math.min(delay2 * 2, LOCK_RETRY_MAX_MS);
   }
   try {
     return await operation();
@@ -99125,6 +99129,16 @@ function shortId2(value) {
 var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
 var emptyParamsSchema = external_exports.object({}).strict();
 var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
+var compactionSessionSchema = external_exports.string().min(1).max(128);
+var compactionSubmitSchema = external_exports.object({
+  sessionId: compactionSessionSchema,
+  requestId: external_exports.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/),
+  budgetMs: external_exports.number().int().min(6e4).max(72e5).optional()
+}).strict();
+var compactionOperationSchema = external_exports.object({
+  sessionId: compactionSessionSchema,
+  operationId: external_exports.string().uuid()
+}).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   "harness.transport.describe",
   "remote.history.configure",
@@ -99136,6 +99150,9 @@ var apiMethods = /* @__PURE__ */ new Set([
   "harness.remote.transfer.close",
   "harness.remote.stream.open",
   "harness.remote.stream.close",
+  "harness.remote.compaction.submit",
+  "harness.remote.compaction.status",
+  "harness.remote.compaction.cancel",
   "loopback.call",
   "fileviewer.call",
   "codex.app.call",
@@ -99173,7 +99190,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -99185,6 +99202,7 @@ var RpcRouter = class {
     this.workspaceTypes = workspaceTypes;
     this.pluginRoute = pluginRoute;
     this.workspaceUpload = workspaceUpload;
+    this.compaction = compaction;
   }
   active = 0;
   async closePeerStreams() {
@@ -99246,7 +99264,8 @@ var RpcRouter = class {
         const capabilities = [.../* @__PURE__ */ new Set([
           ...hostCapabilities,
           "remote.history.compact.v1",
-          ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"]
+          ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
+          ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -99267,6 +99286,18 @@ var RpcRouter = class {
           if (bridge !== void 0) bridge.compactHistoryEnabled = compact;
         }
         return { compact };
+      }
+      case "harness.remote.compaction.submit": {
+        const route = this.requireCompaction();
+        return route.operations.submit(compactionSubmitSchema.parse(params), route.owner);
+      }
+      case "harness.remote.compaction.status": {
+        const route = this.requireCompaction();
+        return route.operations.status(compactionOperationSchema.parse(params), route.owner);
+      }
+      case "harness.remote.compaction.cancel": {
+        const route = this.requireCompaction();
+        return route.operations.cancel(compactionOperationSchema.parse(params), route.owner);
       }
       case "harness.remote.call":
         return this.requireRemoteGateway().call(params);
@@ -99342,6 +99373,12 @@ var RpcRouter = class {
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
+  }
+  requireCompaction() {
+    if (this.compaction === void 0) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host does not provide asynchronous Remote compaction.");
+    }
+    return this.compaction;
   }
   requireRemoteGateway() {
     if (this.harnessRemote === void 0) {
@@ -100589,12 +100626,12 @@ var HostServerConnection = class {
     }
   }
   waitBeforeRetry() {
-    const delay = Math.round(Math.random() * this.config.reconnect.maxDelayMs);
+    const delay2 = Math.round(Math.random() * this.config.reconnect.maxDelayMs);
     return new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         this.retryWake = void 0;
         resolve10();
-      }, delay);
+      }, delay2);
       this.retryWake = () => {
         clearTimeout(timer2);
         resolve10();
@@ -102068,6 +102105,346 @@ function remoteOwnedBundleRow(row, plugin) {
   return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord22(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
+// packages/plugin/src/remote-compaction-operations.ts
+import { randomUUID as randomUUID18 } from "node:crypto";
+var MIN_BUDGET_MS = 6e4;
+var MAX_BUDGET_MS = 72e5;
+var DEFAULT_BUDGET_MS = 18e5;
+var RETENTION_MS = 6e5;
+var CANCEL_SETTLE_MS = 15e3;
+var MAX_OPERATIONS = 32;
+function requestIndexKey(ownerDeviceId, sessionId, requestId) {
+  return `${ownerDeviceId}\0${sessionId}\0${requestId}`;
+}
+function isRecord23(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function commandIdOf(result) {
+  if (result?.ok !== true || !isRecord23(result.value)) return void 0;
+  return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
+}
+var RemoteCompactionOperations = class {
+  constructor(runner, options = {}) {
+    this.runner = runner;
+    this.confirm = options.confirm;
+    this.logger = options.logger;
+    this.now = options.now ?? Date.now;
+  }
+  operations = /* @__PURE__ */ new Map();
+  requestIndex = /* @__PURE__ */ new Map();
+  confirm;
+  logger;
+  now;
+  closed = false;
+  submit(params, owner) {
+    if (this.closed) throw new RpcError("HARNESS_UNAVAILABLE", "The Remote Host is shutting down.");
+    this.prune();
+    const key = requestIndexKey(owner.deviceId, params.sessionId, params.requestId);
+    const existing = this.requestIndex.get(key);
+    if (existing !== void 0) {
+      const operation2 = this.operations.get(existing);
+      if (operation2 !== void 0) return { operationId: operation2.operationId, state: operation2.state };
+      this.requestIndex.delete(key);
+    }
+    for (const operation2 of this.operations.values()) {
+      if (operation2.sessionId === params.sessionId && operation2.finishedAt === void 0) {
+        throw new RpcError("AGENT_BUSY", "A compaction operation is already running for this Session.");
+      }
+    }
+    if (this.operations.size >= MAX_OPERATIONS) {
+      throw new RpcError("RATE_LIMITED", "Too many Remote compaction operations are tracked by this Host.", void 0, true);
+    }
+    const budgetMs = clampBudget(params.budgetMs);
+    const operation = this.createOperation(params, owner, budgetMs);
+    this.operations.set(operation.operationId, operation);
+    this.requestIndex.set(key, operation.operationId);
+    this.logger?.info("remote compaction accepted", {
+      operationId: operation.operationId,
+      sessionId: operation.sessionId,
+      budgetMs
+    });
+    void this.run(operation);
+    return { operationId: operation.operationId, state: "accepted" };
+  }
+  async status(params, owner) {
+    this.prune();
+    const operation = this.find(params, owner);
+    if (operation === void 0) return this.interrupted(params);
+    if (operation.finishedAt === void 0 && operation.commandSettledFlag && (operation.state === "cancelling" || operation.state === "unconfirmed")) {
+      await this.reconcile(operation);
+    }
+    return this.view(operation);
+  }
+  async cancel(params, owner) {
+    this.prune();
+    const operation = this.find(params, owner);
+    if (operation === void 0) return this.interrupted(params);
+    if (operation.finishedAt !== void 0) return this.view(operation);
+    if (!operation.cancelled) {
+      operation.cancelled = true;
+      operation.state = "cancelling";
+      operation.controller.abort(new Error("Remote compaction cancelled by the client."));
+      this.logger?.info("remote compaction cancellation requested", { operationId: operation.operationId });
+    }
+    await Promise.race([operation.commandSettled, delay(CANCEL_SETTLE_MS)]);
+    if (operation.commandSettledFlag) await this.reconcile(operation);
+    return this.view(operation);
+  }
+  /** Host shutdown: stop work and report every unfinished operation as interrupted. */
+  closeAll() {
+    this.closed = true;
+    for (const operation of this.operations.values()) {
+      if (operation.finishedAt !== void 0) continue;
+      this.settle(operation, "interrupted", "The Remote Host shut down before the compaction finished.");
+      operation.controller.abort(new Error("Remote Host shut down."));
+    }
+  }
+  createOperation(params, owner, budgetMs) {
+    let resolveCommandSettled = () => {
+    };
+    const commandSettled = new Promise((resolve10) => {
+      resolveCommandSettled = resolve10;
+    });
+    return {
+      operationId: randomUUID18(),
+      requestId: params.requestId,
+      sessionId: params.sessionId,
+      ownerDeviceId: owner.deviceId,
+      budgetMs,
+      acceptedAt: this.now(),
+      controller: new AbortController(),
+      commandSettled,
+      resolveCommandSettled,
+      state: "accepted",
+      cancelled: false,
+      timedOut: false,
+      commandSettledFlag: false,
+      confirmation: "pending"
+    };
+  }
+  async run(operation) {
+    operation.state = "running";
+    operation.startedAt = this.now();
+    operation.timer = setTimeout(() => {
+      operation.timedOut = true;
+      operation.controller.abort(new Error("Remote compaction exceeded its budget."));
+    }, operation.budgetMs);
+    let result;
+    let thrown;
+    try {
+      result = await this.runner(operation.sessionId, operation.controller.signal);
+    } catch (error62) {
+      thrown = error62;
+    } finally {
+      if (operation.timer !== void 0) {
+        clearTimeout(operation.timer);
+        operation.timer = void 0;
+      }
+      operation.commandSettledFlag = true;
+      operation.resolveCommandSettled();
+    }
+    operation.commandId = commandIdOf(result);
+    if (result?.ok === true && isCommandSuccess(result)) {
+      this.settle(operation, "succeeded", commandText2(result) ?? void 0);
+      return;
+    }
+    if (operation.cancelled || operation.timedOut) {
+      await this.reconcile(operation);
+      return;
+    }
+    this.settle(operation, "failed", this.commandFailureMessage(operation, result, thrown));
+  }
+  /**
+   * Inspect the compaction lifecycle for a settled command call. A confirmed
+   * `compaction/end` with an error marks the run stopped; a confirmed end
+   * without error means it committed, but the final persistence result is no
+   * longer observable after the abort.
+   */
+  async reconcile(operation) {
+    if (operation.finishedAt !== void 0) return;
+    if (!operation.commandSettledFlag) return;
+    if (this.confirm === void 0) {
+      operation.state = "unconfirmed";
+      operation.message = "The Host cannot observe the compaction lifecycle for this run.";
+      operation.finishedAt = this.now();
+      return;
+    }
+    let confirmation;
+    try {
+      confirmation = await this.confirm(operation.sessionId, operation.acceptedAt, operation.commandId);
+    } catch {
+      confirmation = { kind: "unknown" };
+    }
+    this.logger?.info("remote compaction confirmation", {
+      operationId: operation.operationId,
+      kind: confirmation.kind,
+      ...confirmation.kind === "finished" ? { failed: confirmation.error !== void 0 } : {}
+    });
+    if (confirmation.kind === "finished") {
+      operation.confirmation = "finished";
+      operation.confirmError = confirmation.error;
+      if (confirmation.error !== void 0) {
+        this.settle(
+          operation,
+          operation.cancelled ? "cancelled" : "failed",
+          operation.cancelled ? "Compaction cancelled and the Host confirmed the run stopped." : sanitizeMessage(confirmation.error)
+        );
+        return;
+      }
+      this.settle(
+        operation,
+        "unconfirmed",
+        "Compaction committed despite the stop request; the final persistence result could not be confirmed."
+      );
+      return;
+    }
+    if (confirmation.kind === "not-yet" || confirmation.kind === "unknown") {
+      operation.confirmation = "unknown";
+      operation.state = "cancelling";
+      operation.message = operation.cancelled ? "Cancellation was requested; the Host is still waiting for the compaction to finish." : "The compaction budget expired; the Host is still waiting for the compaction to finish.";
+      return;
+    }
+  }
+  commandFailureMessage(operation, result, thrown) {
+    if (result?.ok === true) {
+      const text = commandText2(result);
+      return text === void 0 ? "The Host rejected the compaction command." : sanitizeMessage(text);
+    }
+    if (result !== void 0 && result.ok === false) return sanitizeMessage(result.error.message);
+    if (operation.timedOut) return `Compaction exceeded its ${operation.budgetMs}ms budget.`;
+    if (thrown instanceof RpcError) return sanitizeMessage(thrown.message);
+    this.logger?.warn("remote compaction failed", {
+      operationId: operation.operationId,
+      reason: thrown instanceof Error ? thrown.name : "unknown"
+    });
+    return "The Host failed to run the compaction command.";
+  }
+  settle(operation, state2, message) {
+    if (operation.finishedAt !== void 0) return;
+    if (operation.timer !== void 0) {
+      clearTimeout(operation.timer);
+      operation.timer = void 0;
+    }
+    operation.state = state2;
+    operation.finishedAt = this.now();
+    if (message !== void 0) operation.message = message;
+    this.logger?.info("remote compaction settled", {
+      operationId: operation.operationId,
+      state: state2,
+      durationMs: operation.startedAt === void 0 ? 0 : operation.finishedAt - operation.startedAt
+    });
+    this.prune();
+  }
+  find(params, owner) {
+    const operation = this.operations.get(params.operationId);
+    if (operation === void 0) return void 0;
+    if (operation.ownerDeviceId !== owner.deviceId) {
+      throw new RpcError("PERMISSION_DENIED", "This compaction operation belongs to another device.");
+    }
+    if (operation.sessionId !== params.sessionId) {
+      throw new RpcError("INVALID_MESSAGE", "The compaction operation does not belong to this Session.");
+    }
+    return operation;
+  }
+  view(operation) {
+    return {
+      operationId: operation.operationId,
+      sessionId: operation.sessionId,
+      state: operation.state,
+      acceptedAt: operation.acceptedAt,
+      ...operation.startedAt === void 0 ? {} : { startedAt: operation.startedAt },
+      ...operation.finishedAt === void 0 ? {} : { finishedAt: operation.finishedAt },
+      ...operation.message === void 0 ? {} : { message: operation.message }
+    };
+  }
+  interrupted(params) {
+    return {
+      operationId: params.operationId,
+      sessionId: params.sessionId,
+      state: "interrupted",
+      message: "The Host no longer tracks this operation; it may have restarted."
+    };
+  }
+  /** Drop settled operations past retention; unfinished ones are never pruned. */
+  prune() {
+    const cutoff = this.now() - RETENTION_MS;
+    for (const [operationId2, operation] of this.operations) {
+      if (operation.finishedAt === void 0 || operation.finishedAt > cutoff) continue;
+      this.operations.delete(operationId2);
+      this.requestIndex.delete(requestIndexKey(operation.ownerDeviceId, operation.sessionId, operation.requestId));
+    }
+  }
+};
+function clampBudget(value) {
+  if (value === void 0) return DEFAULT_BUDGET_MS;
+  if (!Number.isFinite(value) || !Number.isSafeInteger(value)) {
+    throw new RpcError("INVALID_MESSAGE", "budgetMs must be a safe integer.");
+  }
+  return Math.min(Math.max(value, MIN_BUDGET_MS), MAX_BUDGET_MS);
+}
+function isCommandSuccess(result) {
+  if (result.ok !== true || !isRecord23(result.value)) return false;
+  const command = isRecord23(result.value.result) ? result.value.result : void 0;
+  return command?.kind === "success";
+}
+function commandText2(result) {
+  if (result.ok !== true || !isRecord23(result.value)) return void 0;
+  const command = isRecord23(result.value.result) ? result.value.result : void 0;
+  return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
+}
+function sanitizeMessage(message) {
+  return message.length <= 2e3 ? message : `${message.slice(0, 2e3)}\u2026`;
+}
+function delay(ms) {
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
+}
+function readCompactionConfirmation(result, acceptedAt, commandId) {
+  if (result.ok !== true || !isRecord23(result.value)) return { kind: "unknown" };
+  const records = Array.isArray(result.value.records) ? result.value.records : [];
+  const legacy = Array.isArray(result.value.events) ? result.value.events : [];
+  const events = [];
+  for (const record11 of [...records, ...legacy]) {
+    const event = isRecord23(record11) && isRecord23(record11.event) ? record11.event : record11;
+    if (isRecord23(event) && typeof event.type === "string") events.push(event);
+  }
+  if (events.length === 0) return { kind: "unknown" };
+  const resolvedCommandId = commandId ?? latestCompactCommandId(events, acceptedAt);
+  if (resolvedCommandId === void 0) return { kind: "not-yet" };
+  const end = [...events].reverse().find((event) => {
+    if (event.type !== "compaction/end") return false;
+    const data3 = isRecord23(event.data) ? event.data : void 0;
+    return data3?.sourceCommandId === resolvedCommandId;
+  });
+  if (end === void 0) return { kind: "not-yet" };
+  const data2 = isRecord23(end.data) ? end.data : {};
+  const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
+  return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
+}
+function latestCompactCommandId(events, acceptedAt) {
+  for (const event of [...events].reverse()) {
+    if (event.type !== "command/run") continue;
+    const data2 = isRecord23(event.data) ? event.data : void 0;
+    if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
+    const time3 = typeof event.time === "number" ? event.time : 0;
+    if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
+    return data2.commandId;
+  }
+  return void 0;
+}
+function errorText(error62) {
+  if (typeof error62 === "string") return sanitizeMessage(error62);
+  if (isRecord23(error62)) {
+    const message = error62.message ?? error62.error ?? error62.reason;
+    if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
+    try {
+      return sanitizeMessage(JSON.stringify(error62));
+    } catch {
+      return "The compaction failed.";
+    }
+  }
+  return "The compaction failed.";
+}
+
 // packages/plugin/src/service.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
 import { existsSync as existsSync5 } from "node:fs";
@@ -102104,6 +102481,38 @@ var HostPluginRuntime = class {
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
     this.acp = new AcpRemoteGateway(config2.acp ?? { enabled: false, backends: [] }, logger2, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
+    this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
+      const gateway = this.localGateway?.createPeer?.() ?? this.localGateway;
+      if (gateway === void 0) throw new RpcError("HARNESS_UNAVAILABLE", "The Host Harness gateway is unavailable.");
+      try {
+        return await dispatchCommandForHost(
+          gateway,
+          { args: { agentId: sessionId, line: "/compact" } },
+          signal,
+          this.harnessVersion
+        );
+      } finally {
+        await gateway.dispose?.();
+      }
+    }, {
+      logger: logger2,
+      // `commands/execute` stops waiting on abort while the compaction handler
+      // keeps running, so lifecycle confirmation comes from the Session log.
+      confirm: async (sessionId, acceptedAt, commandId) => {
+        const gateway = this.localGateway?.createPeer?.() ?? this.localGateway;
+        if (gateway === void 0) return { kind: "unknown" };
+        try {
+          const result = await gateway.dispatch("session/events", {
+            args: { request: { address: { kind: "session", sessionId }, maxMessages: 128 } }
+          }, AbortSignal.timeout(5e3));
+          return readCompactionConfirmation(result, acceptedAt, commandId);
+        } catch {
+          return { kind: "unknown" };
+        } finally {
+          await gateway.dispose?.();
+        }
+      }
+    });
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
       const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
@@ -102157,7 +102566,11 @@ var HostPluginRuntime = class {
           () => harnessSessionGeneration(this.harnessVersion) === "v3",
           (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-        ), void 0, context.transportMode)
+        ), void 0, context.transportMode),
+        {
+          operations: this.compactionOperations,
+          owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
+        }
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -102178,6 +102591,11 @@ var HostPluginRuntime = class {
   codex;
   acp;
   codexWorkspaceState = new WorkspaceBridgeState((key) => TerminalPolicy.releaseOwner(this.terminalOwners, key));
+  /**
+   * Host-wide async compaction registry. It deliberately lives on the runtime,
+   * not on a connection: disconnecting a client must not abort a compaction.
+   */
+  compactionOperations;
   localCodexPeer;
   localCodexPublish = async () => void 0;
   localAcpPeer;
@@ -102456,6 +102874,7 @@ var HostPluginRuntime = class {
     this.pairing?.close();
     this.serverApi?.close();
     await this.serverConnection?.stop();
+    this.compactionOperations.closeAll();
     await this.connections.close();
     await this.localCodexPeer?.closeAll();
     this.localCodexPeer = void 0;

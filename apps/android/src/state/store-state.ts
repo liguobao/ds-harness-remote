@@ -174,6 +174,8 @@ export interface AppState {
   quoteChatMessage(text: string, sessionId?: string): void
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
+  /** Cancel the tracked /compact operation for the selected Session, if any. */
+  cancelCompaction(): Promise<boolean>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>

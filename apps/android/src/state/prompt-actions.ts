@@ -17,7 +17,7 @@ import type { AppState } from './store-state'
 
 /** Prompt actions use the store's single connection/session runtime. */
 export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'respondApproval' | 'respondQuestion'> {
+  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'cancelCompaction' | 'respondApproval' | 'respondQuestion'> {
   return {
     async sendMessage(input, images = [], reuseRpcId) {
       if (get().busyAction?.startsWith('session:')) return 'rejected'
@@ -33,6 +33,38 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       if (session.backend === 'codex' && (get().codexReadySessionId !== session.sessionId
         || runtime.activeCodexStream === undefined
         || runtime.activeCodexTimeline?.session.nativeId !== codexThreadId(session))) return 'rejected'
+      // `/compact` can legitimately outlive every RPC deadline. When the Host
+      // advertises the async contract, submit a tracked operation and observe
+      // it: a disconnect leaves it running and the next connection resumes the
+      // saved operation instead of starting a second compaction.
+      if ((session.backend === undefined || session.backend === 'harness') && /^\/compact(?:\s|$)/u.test(text)) {
+        const proxy = runtime.connection.requireProxy()
+        if (proxy.supportsAsyncCompaction) {
+          set({ busyAction: 'command', error: undefined })
+          try {
+          if (images.length > 0) throw new Error(zhCN.messageActions.unavailable)
+          const outcome = await proxy.compactSessionTracked(session.sessionId)
+          if (outcome.kind === 'unconfirmed') {
+            set({
+              busyAction: undefined,
+              commandResult: { sessionId: session.sessionId, text: outcome.message },
+            })
+            return 'sent'
+          }
+          const status = outcome.status
+          set({ busyAction: undefined })
+          if (status.state !== 'succeeded') throw new Error(status.message ?? zhCN.messageActions.failed)
+          set({
+            commandResult: status.message?.trim()
+              ? { sessionId: session.sessionId, text: status.message } : undefined,
+          })
+          return 'sent'
+          } catch (error) {
+            set({ busyAction: undefined, error: friendlyError(error) })
+            return 'rejected'
+          }
+        }
+      }
       if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
         set({ busyAction: 'command', error: undefined })
         try {
@@ -271,6 +303,28 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       // Reuse the original request rpcId: a prompt the Host already accepted
       // (unconfirmed outcome) must not be executed twice where the Host dedupes.
       return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'
+    },
+
+    async cancelCompaction() {
+      const session = get().selectedSession
+      if (session === undefined) return false
+      try {
+        const proxy = runtime.connection.requireProxy()
+        if (!proxy.supportsAsyncCompaction) return false
+        const status = await proxy.cancelTrackedCompaction(session.sessionId)
+        if (status === undefined) return false
+        set({
+          commandResult: {
+            sessionId: session.sessionId,
+            text: status.message?.trim()
+              || (status.state === 'cancelled' ? 'Compaction cancelled.' : `Compaction ${status.state}.`),
+          },
+        })
+        return true
+      } catch (error) {
+        set({ error: friendlyError(error) })
+        return false
+      }
     },
 
     async stopSession() {

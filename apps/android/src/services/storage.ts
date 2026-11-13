@@ -9,6 +9,15 @@ import zhCN from '../locales/zh-CN'
 import { isActivityDockMode, isThemePreference, isTypographyDensity, type ActivityDockMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
+/** Durable compaction attempt shape shared with `compaction-store`. */
+export interface StoredCompactionRecord {
+  sessionId: string
+  requestId: string
+  operationId?: string
+  state: string
+  updatedAt: number
+}
+
 const KEYS = {
   config: 'dshremote.server.v1',
   identity: 'dshremote.identity.v1',
@@ -31,6 +40,7 @@ const KEYS = {
   favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
   recentWorkspaces: 'dshremote.recent-workspaces.v1',
   customPrompts: 'dshremote.custom-prompts.v1',
+  compactions: 'dshremote.compactions.v1',
 } as const
 
 const secureOptions: SecureStore.SecureStoreOptions = {
@@ -388,6 +398,31 @@ export async function clearCodexPermissionPresets(hostDeviceId: string): Promise
 
 export async function clearLocalData(): Promise<void> {
   await Promise.all(Object.values(KEYS).map(key => SecureStore.deleteItemAsync(key, secureOptions)))
+}
+
+/** Persisted compaction attempts keyed by Host scope and Session id. */
+export async function loadCompactionRecords(): Promise<Record<string, Record<string, StoredCompactionRecord>>> {
+  const stored = await readJson<Record<string, Record<string, StoredCompactionRecord>>>(KEYS.compactions)
+  if (stored === undefined || !isRecord(stored)) return {}
+  const scopes: Record<string, Record<string, StoredCompactionRecord>> = {}
+  for (const [scope, records] of Object.entries(stored)) {
+    if (!isRecord(records)) continue
+    const valid: Record<string, StoredCompactionRecord> = {}
+    for (const [sessionId, record] of Object.entries(records)) {
+      if (!isRecord(record)) continue
+      if (typeof record.sessionId !== 'string' || typeof record.requestId !== 'string'
+        || typeof record.state !== 'string' || typeof record.updatedAt !== 'number') continue
+      valid[sessionId] = record as unknown as StoredCompactionRecord
+    }
+    if (Object.keys(valid).length > 0) scopes[scope] = valid
+  }
+  return scopes
+}
+
+export async function saveCompactionRecords(
+  scopes: Record<string, Record<string, StoredCompactionRecord>>,
+): Promise<void> {
+  await writeJson(KEYS.compactions, scopes)
 }
 
 async function readJson<T>(key: string): Promise<T | undefined> {
