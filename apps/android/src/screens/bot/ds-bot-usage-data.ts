@@ -1,4 +1,5 @@
 import { object, objects, text, type BotObject } from '../../services/bot-catalog'
+import { strings } from '../../locales/i18n'
 
 export type UsageRangeId = '24h' | '7d' | '30d' | '12w' | '12m' | 'all'
 
@@ -137,12 +138,12 @@ export function buildDsBotUsageView(
   const scanning = usage.scanning === true
 
   const rangeMeta: Record<UsageRangeId, { label: string; step: string; windowMs: number; bucketKind: 'hour' | 'day' | 'week' | 'month' }> = {
-    '24h': { label: '24 小时', step: '按小时', windowMs: 24 * HOUR_MS, bucketKind: 'hour' },
-    '7d': { label: '7 天', step: '按天', windowMs: 7 * DAY_MS, bucketKind: 'day' },
-    '30d': { label: '30 天', step: '按天', windowMs: 30 * DAY_MS, bucketKind: 'day' },
-    '12w': { label: '12 周', step: '按周', windowMs: 84 * DAY_MS, bucketKind: 'week' },
-    '12m': { label: '12 个月', step: '按月', windowMs: 365 * DAY_MS, bucketKind: 'month' },
-    all: { label: '全部用量', step: '按月', windowMs: Number.POSITIVE_INFINITY, bucketKind: 'month' },
+    '24h': { label: strings.dsBotSettings.ranges['24h'], step: strings.dsBotSettings.steps.hour, windowMs: 24 * HOUR_MS, bucketKind: 'hour' },
+    '7d': { label: strings.dsBotSettings.ranges['7d'], step: strings.dsBotSettings.steps.day, windowMs: 7 * DAY_MS, bucketKind: 'day' },
+    '30d': { label: strings.dsBotSettings.ranges['30d'], step: strings.dsBotSettings.steps.day, windowMs: 30 * DAY_MS, bucketKind: 'day' },
+    '12w': { label: strings.dsBotSettings.ranges['12w'], step: strings.dsBotSettings.steps.week, windowMs: 84 * DAY_MS, bucketKind: 'week' },
+    '12m': { label: strings.dsBotSettings.ranges['12m'], step: strings.dsBotSettings.steps.month, windowMs: 365 * DAY_MS, bucketKind: 'month' },
+    all: { label: strings.dsBotSettings.ranges.all, step: strings.dsBotSettings.steps.month, windowMs: Number.POSITIVE_INFINITY, bucketKind: 'month' },
   }
 
   const meta = rangeMeta[rangeId]
@@ -294,7 +295,7 @@ export function buildDsBotUsageView(
       const rawName = text(metaObj.name)
       const name =
         rawName
-        || (kind === 'other' ? '其他' : kind === 'room' ? '已删除的群聊' : '已删除的 Bot')
+        || (kind === 'other' ? strings.dsBotSettings.otherOwner : kind === 'room' ? strings.dsBotSettings.deletedGroup : strings.dsBotSettings.deletedBot)
       return {
         key: text(metaObj.key) || `owner-${idx}`,
         name,
@@ -312,7 +313,7 @@ export function buildDsBotUsageView(
     .map(([idx, agg], i) => {
       finalizeTotals(agg)
       const metaObj = object(models[idx])
-      const modelName = text(metaObj.name) || text(metaObj.model) || '未知模型'
+      const modelName = text(metaObj.name) || text(metaObj.model) || strings.dsBotSettings.unknownModel
       const providerName = text(metaObj.providerName) || text(metaObj.provider)
       return {
         key: text(metaObj.key) || `model-${idx}`,
@@ -421,15 +422,15 @@ export const DS_BOT_RECOMMENDED_CONNECTOR_IDS = [
 ] as const
 
 export const DS_BOT_CONNECTOR_CATEGORIES: { id: string; label: string }[] = [
-  { id: 'all', label: '全部' },
-  { id: 'dev', label: '开发' },
-  { id: 'docs', label: '文档与文件' },
-  { id: 'work', label: '工作' },
-  { id: 'design', label: '设计' },
-  { id: 'data', label: '数据' },
-  { id: 'commerce', label: '商务' },
-  { id: 'search', label: '搜索' },
-  { id: 'mail', label: '邮件' },
+  { id: 'all', get label() { return strings.dsBotSettings.connectorCategories.all } },
+  { id: 'dev', get label() { return strings.dsBotSettings.connectorCategories.dev } },
+  { id: 'docs', get label() { return strings.dsBotSettings.connectorCategories.docs } },
+  { id: 'work', get label() { return strings.dsBotSettings.connectorCategories.work } },
+  { id: 'design', get label() { return strings.dsBotSettings.connectorCategories.design } },
+  { id: 'data', get label() { return strings.dsBotSettings.connectorCategories.data } },
+  { id: 'commerce', get label() { return strings.dsBotSettings.connectorCategories.commerce } },
+  { id: 'search', get label() { return strings.dsBotSettings.connectorCategories.search } },
+  { id: 'mail', get label() { return strings.dsBotSettings.connectorCategories.mail } },
 ]
 
 /**
@@ -437,45 +438,45 @@ export const DS_BOT_CONNECTOR_CATEGORIES: { id: string; label: string }[] = [
  * and `src/client/i18n.js`.
  */
 export const DS_BOT_CONNECTOR_CATALOG: ConnectorCatalogItem[] = [
-  { id: 'github', name: 'GitHub', category: 'dev', desc: '代码仓库、Issue 和 Pull Request', color: '#24292F', authKind: 'oauth' },
-  { id: 'mail', name: '邮箱', category: 'mail', desc: 'QQ、163、126、Gmail、iCloud 等 IMAP 邮箱', color: '#3B82F6', authKind: 'mail' },
-  { id: 'notion', name: 'Notion', category: 'docs', desc: '页面、数据库和 Wiki 内容', color: '#191919', authKind: 'oauth' },
-  { id: 'linear', name: 'Linear', category: 'work', desc: 'Issue、项目和迭代', color: '#5E6AD2', authKind: 'oauth' },
-  { id: 'figma', name: 'Figma', category: 'design', desc: '设计文件、组件和评论', color: '#F24E1E', authKind: 'oauth' },
-  { id: 'slack', name: 'Slack', category: 'work', desc: '频道和消息', color: '#E01E5A', authKind: 'oauth' },
-  { id: 'sentry', name: 'Sentry', category: 'dev', desc: '错误、调用链和发布', color: '#6C5FC7', authKind: 'oauth' },
-  { id: 'cloudflare', name: 'Cloudflare', category: 'dev', desc: 'Workers、DNS 和账户资源', color: '#F38020', authKind: 'oauth' },
-  { id: 'vercel', name: 'Vercel', category: 'dev', desc: '项目、部署和日志', color: '#171717', authKind: 'oauth' },
-  { id: 'netlify', name: 'Netlify', category: 'dev', desc: '站点、部署和表单', color: '#00C7B7', authKind: 'oauth' },
-  { id: 'postman', name: 'Postman', category: 'dev', desc: '集合、请求和工作区', color: '#FF6C37', authKind: 'oauth' },
-  { id: 'dropbox', name: 'Dropbox', category: 'docs', desc: '文件和文件夹', color: '#0061FF', authKind: 'oauth' },
-  { id: 'box', name: 'Box', category: 'docs', desc: '文件、文件夹和元数据', color: '#0061D5', authKind: 'oauth' },
-  { id: 'deepwiki', name: 'DeepWiki', category: 'docs', desc: '公开代码仓库的文档', color: '#2563EB', authKind: 'none' },
-  { id: 'context7', name: 'Context7', category: 'docs', desc: '库文档和代码示例', color: '#10B981', authKind: 'none' },
-  { id: 'mslearn', name: 'Microsoft Learn', category: 'docs', desc: '微软产品文档', color: '#0078D4', authKind: 'none' },
-  { id: 'cloudflare-docs', name: 'Cloudflare Docs', category: 'docs', desc: 'Cloudflare 产品文档', color: '#F38020', authKind: 'none' },
-  { id: 'atlassian', name: 'Atlassian', category: 'work', desc: 'Jira 工单和 Confluence 页面', color: '#0052CC', authKind: 'oauth' },
-  { id: 'intercom', name: 'Intercom', category: 'work', desc: '会话、联系人和文章', color: '#0057FF', authKind: 'oauth' },
-  { id: 'monday', name: 'monday.com', category: 'work', desc: '看板、条目和工作流', color: '#FF3D57', authKind: 'oauth' },
-  { id: 'zapier', name: 'Zapier', category: 'work', desc: 'Zap 和应用操作', color: '#FF4A00', authKind: 'oauth' },
-  { id: 'clickup', name: 'ClickUp', category: 'work', desc: '任务、清单和文档', color: '#7B68EE', authKind: 'oauth' },
-  { id: 'todoist', name: 'Todoist', category: 'work', desc: '任务和项目', color: '#E44332', authKind: 'oauth' },
-  { id: 'attio', name: 'Attio', category: 'work', desc: 'CRM 记录、列表和备注', color: '#6366F1', authKind: 'oauth' },
-  { id: 'asana', name: 'Asana', category: 'work', desc: '任务、项目和工作区', color: '#F06A6A', authKind: 'oauth' },
-  { id: 'hubspot', name: 'HubSpot', category: 'work', desc: '联系人、交易和工单', color: '#FF7A59', authKind: 'oauth' },
-  { id: 'canva', name: 'Canva', category: 'design', desc: '设计稿、文件夹和导出', color: '#00C4CC', authKind: 'oauth' },
-  { id: 'webflow', name: 'Webflow', category: 'design', desc: '站点、页面和 CMS 内容', color: '#146EF5', authKind: 'oauth' },
-  { id: 'wix', name: 'Wix', category: 'design', desc: '站点、页面和站点内容', color: '#0C6EFC', authKind: 'oauth' },
-  { id: 'miro', name: 'Miro', category: 'design', desc: '白板和白板条目', color: '#F59E0B', authKind: 'oauth' },
-  { id: 'supabase', name: 'Supabase', category: 'data', desc: '数据库、数据表和项目设置', color: '#3ECF8E', authKind: 'oauth' },
-  { id: 'neon', name: 'Neon', category: 'data', desc: 'Postgres 数据库和分支', color: '#00C885', authKind: 'oauth' },
-  { id: 'airtable', name: 'Airtable', category: 'data', desc: 'Bases、表和记录', color: '#18BFFF', authKind: 'oauth' },
-  { id: 'huggingface', name: 'Hugging Face', category: 'data', desc: '模型、数据集和 Space', color: '#F59E0B', authKind: 'none' },
-  { id: 'stripe', name: 'Stripe', category: 'commerce', desc: '支付、发票和客户', color: '#635BFF', authKind: 'oauth' },
-  { id: 'paypal', name: 'PayPal', category: 'commerce', desc: '订单、支付和发票', color: '#00457C', authKind: 'oauth' },
-  { id: 'square', name: 'Square', category: 'commerce', desc: '支付、订单和商品目录', color: '#006AFF', authKind: 'oauth' },
-  { id: 'exa', name: 'Exa', category: 'search', desc: '面向 Agent 的网络搜索', color: '#254BF6', authKind: 'none' },
-  { id: 'amap', name: '高德地图', category: 'search', desc: '中国地图、地点和路线', color: '#2563EB', authKind: 'key' },
+  { id: 'github', name: 'GitHub', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.github }, color: '#24292F', authKind: 'oauth' },
+  { id: 'mail', get name() { return strings.dsBotSettings.connectorNames.mail }, category: 'mail', get desc() { return strings.dsBotSettings.connectorDescriptions.mail }, color: '#3B82F6', authKind: 'mail' },
+  { id: 'notion', name: 'Notion', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.notion }, color: '#191919', authKind: 'oauth' },
+  { id: 'linear', name: 'Linear', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.linear }, color: '#5E6AD2', authKind: 'oauth' },
+  { id: 'figma', name: 'Figma', category: 'design', get desc() { return strings.dsBotSettings.connectorDescriptions.figma }, color: '#F24E1E', authKind: 'oauth' },
+  { id: 'slack', name: 'Slack', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.slack }, color: '#E01E5A', authKind: 'oauth' },
+  { id: 'sentry', name: 'Sentry', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.sentry }, color: '#6C5FC7', authKind: 'oauth' },
+  { id: 'cloudflare', name: 'Cloudflare', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.cloudflare }, color: '#F38020', authKind: 'oauth' },
+  { id: 'vercel', name: 'Vercel', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.vercel }, color: '#171717', authKind: 'oauth' },
+  { id: 'netlify', name: 'Netlify', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.netlify }, color: '#00C7B7', authKind: 'oauth' },
+  { id: 'postman', name: 'Postman', category: 'dev', get desc() { return strings.dsBotSettings.connectorDescriptions.postman }, color: '#FF6C37', authKind: 'oauth' },
+  { id: 'dropbox', name: 'Dropbox', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.dropbox }, color: '#0061FF', authKind: 'oauth' },
+  { id: 'box', name: 'Box', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.box }, color: '#0061D5', authKind: 'oauth' },
+  { id: 'deepwiki', name: 'DeepWiki', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.deepwiki }, color: '#2563EB', authKind: 'none' },
+  { id: 'context7', name: 'Context7', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.context7 }, color: '#10B981', authKind: 'none' },
+  { id: 'mslearn', name: 'Microsoft Learn', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.mslearn }, color: '#0078D4', authKind: 'none' },
+  { id: 'cloudflare-docs', name: 'Cloudflare Docs', category: 'docs', get desc() { return strings.dsBotSettings.connectorDescriptions.cloudflareDocs }, color: '#F38020', authKind: 'none' },
+  { id: 'atlassian', name: 'Atlassian', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.atlassian }, color: '#0052CC', authKind: 'oauth' },
+  { id: 'intercom', name: 'Intercom', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.intercom }, color: '#0057FF', authKind: 'oauth' },
+  { id: 'monday', name: 'monday.com', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.monday }, color: '#FF3D57', authKind: 'oauth' },
+  { id: 'zapier', name: 'Zapier', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.zapier }, color: '#FF4A00', authKind: 'oauth' },
+  { id: 'clickup', name: 'ClickUp', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.clickup }, color: '#7B68EE', authKind: 'oauth' },
+  { id: 'todoist', name: 'Todoist', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.todoist }, color: '#E44332', authKind: 'oauth' },
+  { id: 'attio', name: 'Attio', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.attio }, color: '#6366F1', authKind: 'oauth' },
+  { id: 'asana', name: 'Asana', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.asana }, color: '#F06A6A', authKind: 'oauth' },
+  { id: 'hubspot', name: 'HubSpot', category: 'work', get desc() { return strings.dsBotSettings.connectorDescriptions.hubspot }, color: '#FF7A59', authKind: 'oauth' },
+  { id: 'canva', name: 'Canva', category: 'design', get desc() { return strings.dsBotSettings.connectorDescriptions.canva }, color: '#00C4CC', authKind: 'oauth' },
+  { id: 'webflow', name: 'Webflow', category: 'design', get desc() { return strings.dsBotSettings.connectorDescriptions.webflow }, color: '#146EF5', authKind: 'oauth' },
+  { id: 'wix', name: 'Wix', category: 'design', get desc() { return strings.dsBotSettings.connectorDescriptions.wix }, color: '#0C6EFC', authKind: 'oauth' },
+  { id: 'miro', name: 'Miro', category: 'design', get desc() { return strings.dsBotSettings.connectorDescriptions.miro }, color: '#F59E0B', authKind: 'oauth' },
+  { id: 'supabase', name: 'Supabase', category: 'data', get desc() { return strings.dsBotSettings.connectorDescriptions.supabase }, color: '#3ECF8E', authKind: 'oauth' },
+  { id: 'neon', name: 'Neon', category: 'data', get desc() { return strings.dsBotSettings.connectorDescriptions.neon }, color: '#00C885', authKind: 'oauth' },
+  { id: 'airtable', name: 'Airtable', category: 'data', get desc() { return strings.dsBotSettings.connectorDescriptions.airtable }, color: '#18BFFF', authKind: 'oauth' },
+  { id: 'huggingface', name: 'Hugging Face', category: 'data', get desc() { return strings.dsBotSettings.connectorDescriptions.huggingface }, color: '#F59E0B', authKind: 'none' },
+  { id: 'stripe', name: 'Stripe', category: 'commerce', get desc() { return strings.dsBotSettings.connectorDescriptions.stripe }, color: '#635BFF', authKind: 'oauth' },
+  { id: 'paypal', name: 'PayPal', category: 'commerce', get desc() { return strings.dsBotSettings.connectorDescriptions.paypal }, color: '#00457C', authKind: 'oauth' },
+  { id: 'square', name: 'Square', category: 'commerce', get desc() { return strings.dsBotSettings.connectorDescriptions.square }, color: '#006AFF', authKind: 'oauth' },
+  { id: 'exa', name: 'Exa', category: 'search', get desc() { return strings.dsBotSettings.connectorDescriptions.exa }, color: '#254BF6', authKind: 'none' },
+  { id: 'amap', get name() { return strings.dsBotSettings.connectorNames.amap }, category: 'search', get desc() { return strings.dsBotSettings.connectorDescriptions.amap }, color: '#2563EB', authKind: 'key' },
 ]
 
 export interface ImPlatformCatalogItem {
@@ -491,29 +492,29 @@ export interface ImPlatformCatalogItem {
  * 8 IM platforms in the exact order of DS-Bot `src/shared/im-platforms.js` (Screenshot 3).
  */
 export const DS_BOT_IM_PLATFORMS: ImPlatformCatalogItem[] = [
-  { id: 'telegram', name: 'Telegram', sub: '通过 @BotFather 获取 Bot Token 接入', color: '#26A5E4', glyph: 'TG', fieldsHint: 'Bot Token' },
-  { id: 'wechat', name: '微信', sub: '扫码直接连接个人微信', color: '#07C160', glyph: '微', fieldsHint: '微信扫码授权' },
-  { id: 'feishu', name: '飞书 / Lark', sub: '自建应用长连接模式，无需公网地址', color: '#3370FF', glyph: '飞', fieldsHint: 'App ID + App Secret' },
-  { id: 'dingtalk', name: '钉钉', sub: '企业内部机器人 Stream 模式接收消息', color: '#0089FF', glyph: '钉', fieldsHint: 'Client ID + Client Secret' },
-  { id: 'wecom', name: '企业微信', sub: '企业微信智能机器人长连接接入', color: '#2B7FD9', glyph: '企', fieldsHint: 'Bot ID + Secret' },
-  { id: 'qq', name: 'QQ', sub: 'QQ 开放平台机器人接入群聊与私聊', color: '#1EBAFC', glyph: 'QQ', fieldsHint: 'AppID + AppSecret' },
-  { id: 'discord', name: 'Discord', sub: 'Discord Bot 接入服务器频道与私信', color: '#5865F2', glyph: 'DC', fieldsHint: 'Bot Token' },
-  { id: 'slack', name: 'Slack', sub: 'Slack Socket Mode 应用接入', color: '#E01E5A', glyph: 'SL', fieldsHint: 'Bot Token + App Token' },
+  { id: 'telegram', name: 'Telegram', get sub() { return strings.dsBotSettings.imDescriptions.telegram }, color: '#26A5E4', glyph: 'TG', fieldsHint: 'Bot Token' },
+  { id: 'wechat', get name() { return strings.dsBotSettings.imNames.wechat }, get sub() { return strings.dsBotSettings.imDescriptions.wechat }, color: '#07C160', glyph: '微', get fieldsHint() { return strings.dsBotSettings.wechatFieldsHint } },
+  { id: 'feishu', get name() { return strings.dsBotSettings.imNames.feishu }, get sub() { return strings.dsBotSettings.imDescriptions.feishu }, color: '#3370FF', glyph: '飞', fieldsHint: 'App ID + App Secret' },
+  { id: 'dingtalk', get name() { return strings.dsBotSettings.imNames.dingtalk }, get sub() { return strings.dsBotSettings.imDescriptions.dingtalk }, color: '#0089FF', glyph: '钉', fieldsHint: 'Client ID + Client Secret' },
+  { id: 'wecom', get name() { return strings.dsBotSettings.imNames.wecom }, get sub() { return strings.dsBotSettings.imDescriptions.wecom }, color: '#2B7FD9', glyph: '企', fieldsHint: 'Bot ID + Secret' },
+  { id: 'qq', name: 'QQ', get sub() { return strings.dsBotSettings.imDescriptions.qq }, color: '#1EBAFC', glyph: 'QQ', fieldsHint: 'AppID + AppSecret' },
+  { id: 'discord', name: 'Discord', get sub() { return strings.dsBotSettings.imDescriptions.discord }, color: '#5865F2', glyph: 'DC', fieldsHint: 'Bot Token' },
+  { id: 'slack', name: 'Slack', get sub() { return strings.dsBotSettings.imDescriptions.slack }, color: '#E01E5A', glyph: 'SL', fieldsHint: 'Bot Token + App Token' },
 ]
 
 export const DS_BOT_POPULAR_PROVIDERS = [
-  { id: 'deepseek', name: 'DeepSeek', desc: 'DeepSeek-V3 / R1 官方接口' },
-  { id: 'openrouter', name: 'OpenRouter', desc: '聚合多厂商主流大模型' },
-  { id: 'siliconflow', name: 'SiliconFlow (硅基流动)', desc: '开源与国产模型高速推理' },
-  { id: 'volcengine', name: '火山方舟 (Volcengine Ark)', desc: '豆包与 DeepSeek 企业级接入' },
-  { id: 'dashscope', name: '阿里云百炼 (DashScope)', desc: '通义千问 Qwen 全系列模型' },
-  { id: 'moonshot', name: 'Moonshot (Kimi)', desc: 'Kimi 长文本与多模态模型' },
-  { id: 'zhipu', name: '智谱清言 (GLM)', desc: 'GLM-4.5 / 4.6 系列模型' },
-  { id: 'minimax', name: 'MiniMax', desc: 'MiniMax-Text / M1 系列模型' },
-  { id: 'openai', name: 'OpenAI', desc: 'GPT-4.1 / o3 / o4-mini 系列' },
-  { id: 'anthropic', name: 'Anthropic', desc: 'Claude 4 Opus / Sonnet 系列' },
-  { id: 'gemini', name: 'Google Gemini', desc: 'Gemini 2.5 Pro / Flash 系列' },
-  { id: 'xai', name: 'xAI', desc: 'Grok 3 / Grok 4 系列模型' },
+  { id: 'deepseek', name: 'DeepSeek', get desc() { return strings.dsBotSettings.providerDescriptions.deepseek } },
+  { id: 'openrouter', name: 'OpenRouter', get desc() { return strings.dsBotSettings.providerDescriptions.openrouter } },
+  { id: 'siliconflow', name: 'SiliconFlow (硅基流动)', get desc() { return strings.dsBotSettings.providerDescriptions.siliconflow } },
+  { id: 'volcengine', name: '火山方舟 (Volcengine Ark)', get desc() { return strings.dsBotSettings.providerDescriptions.volcengine } },
+  { id: 'dashscope', name: '阿里云百炼 (DashScope)', get desc() { return strings.dsBotSettings.providerDescriptions.dashscope } },
+  { id: 'moonshot', name: 'Moonshot (Kimi)', get desc() { return strings.dsBotSettings.providerDescriptions.moonshot } },
+  { id: 'zhipu', name: '智谱清言 (GLM)', get desc() { return strings.dsBotSettings.providerDescriptions.zhipu } },
+  { id: 'minimax', name: 'MiniMax', get desc() { return strings.dsBotSettings.providerDescriptions.minimax } },
+  { id: 'openai', name: 'OpenAI', get desc() { return strings.dsBotSettings.providerDescriptions.openai } },
+  { id: 'anthropic', name: 'Anthropic', get desc() { return strings.dsBotSettings.providerDescriptions.anthropic } },
+  { id: 'gemini', name: 'Google Gemini', get desc() { return strings.dsBotSettings.providerDescriptions.gemini } },
+  { id: 'xai', name: 'xAI', get desc() { return strings.dsBotSettings.providerDescriptions.xai } },
 ]
 
 export const DS_BOT_LOCAL_SERVERS = [
