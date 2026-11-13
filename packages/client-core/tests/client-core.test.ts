@@ -1467,6 +1467,31 @@ describe('HarnessAlphaClient tracked compaction', () => {
     expect(store.records.size).toBe(0)
   })
 
+
+  it('cancels the saved operation on an explicit cancel request', async () => {
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') return { operationId: 'op-4', state: 'accepted' }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-4', sessionId: 's1', state: 'running' }
+      }
+      if (method === 'harness.remote.compaction.cancel') {
+        return { operationId: 'op-4', sessionId: 's1', state: 'cancelled', message: 'Compaction cancelled.' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    await store.save('host-1', {
+      sessionId: 's1', requestId: 'request-4', operationId: 'op-4', state: 'running', updatedAt: Date.now(),
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    await expect(client.cancelTrackedCompaction('s1')).resolves.toMatchObject({ state: 'cancelled' })
+    expect(calls.filter(call => call.method === 'harness.remote.compaction.cancel')).toHaveLength(1)
+    expect(calls.some(call => call.method === 'harness.remote.compaction.submit')).toBe(false)
+    expect(store.records.size).toBe(0)
+  })
+
   it('does not replay a stale request that never produced an operation id', async () => {
     const { core, calls } = trackedCore((method) => {
       throw new Error(`unexpected ${method}`)

@@ -102275,6 +102275,11 @@ var RemoteCompactionOperations = class {
     } catch {
       confirmation = { kind: "unknown" };
     }
+    this.logger?.info("remote compaction confirmation", {
+      operationId: operation.operationId,
+      kind: confirmation.kind,
+      ...confirmation.kind === "finished" ? { failed: confirmation.error !== void 0 } : {}
+    });
     if (confirmation.kind === "finished") {
       operation.confirmation = "finished";
       operation.confirmError = confirmation.error;

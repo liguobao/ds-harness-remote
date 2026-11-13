@@ -17,7 +17,7 @@ import type { AppState } from './store-state'
 
 /** Prompt actions use the store's single connection/session runtime. */
 export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'respondApproval' | 'respondQuestion'> {
+  'sendMessage' | 'updateQueueItem' | 'retrySendMessage' | 'stopSession' | 'cancelCompaction' | 'respondApproval' | 'respondQuestion'> {
   return {
     async sendMessage(input, images = [], reuseRpcId) {
       if (get().busyAction?.startsWith('session:')) return 'rejected'
@@ -303,6 +303,28 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       // Reuse the original request rpcId: a prompt the Host already accepted
       // (unconfirmed outcome) must not be executed twice where the Host dedupes.
       return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'
+    },
+
+    async cancelCompaction() {
+      const session = get().selectedSession
+      if (session === undefined) return false
+      try {
+        const proxy = runtime.connection.requireProxy()
+        if (!proxy.supportsAsyncCompaction) return false
+        const status = await proxy.cancelTrackedCompaction(session.sessionId)
+        if (status === undefined) return false
+        set({
+          commandResult: {
+            sessionId: session.sessionId,
+            text: status.message?.trim()
+              || (status.state === 'cancelled' ? 'Compaction cancelled.' : `Compaction ${status.state}.`),
+          },
+        })
+        return true
+      } catch (error) {
+        set({ error: friendlyError(error) })
+        return false
+      }
     },
 
     async stopSession() {

@@ -633,6 +633,28 @@ export class HarnessAlphaClient {
     }
   }
 
+  /**
+   * Ask the Host to cancel the tracked compaction for one Session. Returns
+   * undefined when no persisted operation exists (for example a legacy Host or
+   * a command that was never tracked).
+   */
+  async cancelTrackedCompaction(sessionId: string): Promise<RemoteCompactionStatusResult | undefined> {
+    const persistence = this.compactionPersistence
+    if (persistence === undefined) return undefined
+    const record = await safeLoad(persistence.store, persistence.scope, sessionId)
+    if (record?.operationId === undefined) return undefined
+    const status = await this.gateway.cancelCompaction({ sessionId, operationId: record.operationId })
+    await safeSave(persistence.store, persistence.scope, {
+      ...record,
+      state: status.state,
+      updatedAt: Date.now(),
+    })
+    if (isTerminalCompactionState(status.state)) {
+      await safeRemove(persistence.store, persistence.scope, sessionId)
+    }
+    return status
+  }
+
   /** Query every persisted attempt for this Host scope, usually after reconnect. */
   async resumeCompactions(options: {
     signal?: AbortSignal

@@ -279,6 +279,11 @@ export class RemoteCompactionOperations {
     } catch {
       confirmation = { kind: 'unknown' }
     }
+    this.logger?.info('remote compaction confirmation', {
+      operationId: operation.operationId,
+      kind: confirmation.kind,
+      ...(confirmation.kind === 'finished' ? { failed: confirmation.error !== undefined } : {}),
+    })
     if (confirmation.kind === 'finished') {
       operation.confirmation = 'finished'
       operation.confirmError = confirmation.error

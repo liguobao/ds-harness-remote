@@ -44,6 +44,8 @@ type Props = {
   replyActive: boolean
   stopping: boolean
   compactRunning: boolean
+  /** A tracked Host command (for example `/compact`) is running. */
+  commandRunning?: boolean
   hasComposerContent: boolean
   connected: boolean
   /** Text editing is local, so a dropped carrier must not lock this field. */
@@ -62,7 +64,7 @@ type Props = {
   onStop: () => void
 }
 
-export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning,
+export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning, commandRunning,
   hasComposerContent, connected, editable, composerDisabled, sendDisabled, compactComposer,
   composerInputMaxHeight, model, promptsPickerOpen, onExpand, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
@@ -183,7 +185,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
               {model.selecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
             </Pressable>
           )}
-          {replyActive && !hasComposerContent
+          {(replyActive || commandRunning) && !hasComposerContent
             ? <Pressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.stop}
@@ -201,7 +203,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
                 (queueing) button — tapping where Send lives must never stop
                 the running task (official InputBar behaviour). Stop stays
                 available as its own secondary button. */}
-              {replyActive && (
+              {(replyActive || commandRunning) && (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.chat.stop}
