@@ -52,12 +52,11 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 
 | クライアント | 形式 | 状態 | 備考 |
 | --- | --- | --- | --- |
-| DSH Desktop プラグイン | Remote サイドバー | 対応 | `ds-harness-remote@0.6.5` をインストールします。このパソコンを Host としても利用できます |
+| DSH プラグイン | Remote サイドバー | 対応 | 他のデバイスを操作する側にも、操作される Host 側にも自由に使えます！ |
 | Web | ブラウザーページ | 対応 | [https://dsh.r2049.cn](https://dsh.r2049.cn) を開きます。ネイティブの Harness UI を再利用します |
 | Android | ネイティブアプリ | 対応 | [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から APK をダウンロードできます。[Android ガイド](apps/android/README.md)を参照してください |
-| DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: DeepSeek Harness の Android クライアント。スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
+| DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
-| ブラウザー拡張機能 | Chrome | アクセス入口のみ | ログイン済み Web の認可を独立したデバイス認証情報に交換し、オンラインの Host を一覧表示して同一オリジンの Remote Web を開きます。拡張機能自体に会話 UI はありません |
 | dsh-TUI | ターミナル専用 CLI | 予定 | このリリースには統合を含まず、後続バージョンで個別に提供します。インストーラーが自動的に Web サービスを作成することはありません |
 | Linux | クラウドサーバー | 対応 | [公式サイト](https://dsh.r2049.cn/)にログインすると、ワンコマンドでインストールできます。 |
 
@@ -316,16 +315,16 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
   <em>このプロジェクトを支えてくださるすべての素晴らしいコントリビューターに、心から感謝申し上げます！</em>
 </p>
 
-## プロジェクトの位置づけと商標
-
-本プロジェクトは独立したコミュニティプロジェクトであり、DeepSeek の公式製品ではありません。
-DeepSeek および関連する名称・商標は、それぞれの権利者に帰属します。
-
 ## 接続のトラブルシューティング
 
 Android：問題を再現した後、**設定 → 診断 → 接続ログをエクスポート** を開き、保存先のフォルダーを選んで `.txt` ファイルを保存します。ログには現在のアプリプロセスの起動以降、直近 500 件の接続診断が保持されます。アプリを再起動すると消去され、認証情報や会話内容は含まれません。
 
 Host：**プラグイン → Remote 設定** で **Debug ログ** を有効にします。設定は即座に反映され、保存されます。調査後は無効にしてください（`info` レベルに戻ります）。ログには `[ds-harness-remote]` の接頭辞が付き、Desktop では `desktop.log` で確認できます。手動設定では `logLevel: debug` を指定できます。
+
+## プロジェクトの位置づけと商標
+
+本プロジェクトは独立したコミュニティプロジェクトであり、DeepSeek の公式製品ではありません。
+DeepSeek および関連する名称・商標は、それぞれの権利者に帰属します。
 
 ## ライセンス
 
