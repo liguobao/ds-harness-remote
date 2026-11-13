@@ -1259,9 +1259,16 @@ permission id、decision enum 或额外响应状态机。
   固定命令 `/compact`。
 - `harness.remote.compaction.status`，Params `{ sessionId, operationId }`，Result
   `{ operationId, sessionId, state, acceptedAt?, startedAt?, finishedAt?, message? }`，
-  `state` 为 `accepted|running|cancelling|succeeded|failed|cancelled|interrupted`。
-- `harness.remote.compaction.cancel`，Params 与 status 相同；Host 在底层调用实际收尾后才
-  返回终态，未收尾时返回 `cancelling`，Client 继续轮询。
+  `state` 为 `accepted|running|cancelling|succeeded|failed|cancelled|interrupted|unconfirmed`。
+- `harness.remote.compaction.cancel`，Params 与 status 相同。Harness 的
+  `commands/execute` 经 `withAbort()` 在 signal 中止后立即停止等待 handler，而 handler
+  可能仍在压缩、持锁并持久化；因此“命令调用已返回”不等于“压缩已收尾”。Host 在取消后
+  先返回 `cancelling`，再结合 Session 日志中的 `command/run` 与
+  `compaction/end`（同一 `sourceCommandId`）确认收尾：确认失败则返回 `cancelled`；
+  确认成功提交（`compaction/end` 无 error）但取消期间已无法观察持久化结果时返回
+  `unconfirmed`，不得仅凭取消标记覆盖成功；始终无法确认时保持 `cancelling`，
+  Client 继续轮询。预算超时遵循同一规则（确认失败为 `failed`，已提交但不可确认时为
+  `unconfirmed`，未确认时保持 `cancelling`）。
 - 执行归属 Host runtime，不随提交连接关闭而中止；断线只停止观察，重连后可用同一
   `operationId` 继续查询。Host 重启后未知 id 返回 `interrupted`，不自动重放，也不伪造成功。
 - `budgetMs` 是压缩任务自身预算（默认 30 分钟，钳制到 1–120 分钟），与提交/查询 RPC 的
@@ -1269,6 +1276,12 @@ permission id、decision enum 或额外响应状态机。
   不能判定成功，后续保存失败必须报告为 `failed`。
 - 本契约只覆盖 `/compact`。其他命令、插件清单校验、提醒创建等继续使用现有 RPC 超时策略；
   Host 不开放任意后台命令。未声明该能力的旧 Host 保持原 `commands/execute` 行为。
+- 同一 Session 同时只接纳一个未结束的压缩操作（新的 `requestId` 在旧操作结束前返回
+  `AGENT_BUSY`）；Host 最多跟踪 32 个操作，超出返回可重试的 `RATE_LIMITED`。终态在内存
+  保留 10 分钟用于查询与去重；过期后的未知 `operationId` 不证明原压缩失败，也不会被自动重放。
+- 产品客户端（Android）在提交前持久化 `requestId`、收到响应后持久化 `operationId`，按
+  Host 设备与会话隔离；提交响应丢失时用同一 `requestId` 重试，重连后只查询原操作。
+  观察失败返回“暂时无法确认状态”，不得当作压缩失败或再次提交。
 
 #### `harness.remote.transfer.*`
 

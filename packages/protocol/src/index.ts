@@ -753,6 +753,8 @@ export type RemoteCompactionState =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  /** The run committed, but cancellation/timing hid the final persistence result. */
+  | 'unconfirmed'
 
 export interface RemoteCompactionSubmitParams {
   sessionId: string

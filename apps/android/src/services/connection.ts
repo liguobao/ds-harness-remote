@@ -8,6 +8,7 @@ import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
 import { BotRemoteClient } from './bot-catalog'
+import { compactionStore } from './compaction-store'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
 export type CloseHandler = (options?: { retryable: boolean; lastTransport?: 'lan' | 'p2p' | 'turn' | 'relay' }) => void
@@ -187,8 +188,12 @@ export class AndroidRemoteConnection {
             ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
           },
           frame => emitFrame(frame as unknown as MuxStreamFrame),
+          { store: compactionStore, scope: host.deviceId },
         )
         alpha.start()
+        // Reconcile attempts persisted before the disconnect. This only queries
+        // the Host; it never submits a new compaction.
+        void alpha.resumeCompactions().catch(() => undefined)
         this.proxy = alpha
         this.closeMux = async (notifyRemote = true) => { await alpha.close(notifyRemote) }
       } else {

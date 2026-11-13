@@ -10,16 +10,29 @@ capability `remote.compaction.async.v1` 与
 
 Host：`packages/plugin/src/remote-compaction-operations.ts` 的 `RemoteCompactionOperations` 挂在
 `HostPluginRuntime`（不是连接）。后台用独立 owner Peer 执行固定 `/compact`，`requestId` 在
-`(deviceId, sessionId)` 内幂等去重；预算默认 30 分钟且与 RPC 超时分离；显式取消要等底层调用
-收尾；断线只停止观察；Host 重启或丢失的 operationId 返回 `interrupted`，不重放、不伪造成功。
-Client：`client-core` 的 `HarnessAlphaClient.compactSession()` 负责提交+轮询，
-`sessionExecuteCommand('/compact')` 在能力可用时改走该路径；Android 把协商到的 capabilities
-传入 alpha client。未声明能力的旧 Host 完全保持原 `commands/execute` 行为，普通查询、插件
-清单校验、提醒创建等仍用 60s RPC 超时。
+`(deviceId, sessionId)` 内幂等去重；同一 Session 只接纳一个未结束操作（新 requestId 返回
+`AGENT_BUSY`），最多跟踪 32 个操作（超出 `RATE_LIMITED`）；预算默认 30 分钟且与 RPC 超时分离。
 
-验证：`remote-compaction-operations.test.ts`（提交/结算、非成功不伪造成功、requestId 去重、
-跨设备拒绝、取消收尾、预算超时、重启 interrupted、shutdown）；client-core 新增 4 个
-async compaction 测试；protocol capability 全集测试同步。未做真实跨设备长压缩验收。
+取消收尾：Harness `commands/execute` 经 `withAbort()` 在 abort 后立即停止等待 handler，而
+handler 仍会继续压缩/持锁/持久化，所以“命令调用结束”不等于“压缩收尾”。取消或预算中止后，
+Host 读取 `session/events` 中同一 `sourceCommandId` 的 `command/run` 与 `compaction/end`
+确认：确认失败→`cancelled`（取消）/`failed`（预算）；确认已提交但取消期间无法确认持久化
+→`unconfirmed`；仍无法确认→保持 `cancelling` 并继续由状态查询触发确认。成功结果优先于
+取消标记（取消与完成竞争时保留 `succeeded`）。
+
+Client：`client-core` 的 `HarnessAlphaClient.compactSessionTracked()` 在提交前持久化
+`requestId`、响应后持久化 `operationId`，按 Host scope 隔离；提交响应丢失时用同一
+`requestId` 重试，重连后 `resumeCompactions()` 只查询原操作；观察失败返回
+`unconfirmed`，不得当作失败或再次提交。Android 用 `services/compaction-store.ts`
+（SecureStore，懒加载以避开单元测试的 Expo 依赖）接入，`prompt-actions` 对 `/compact`
+走 tracked 路径，连接建立后自动恢复。未声明能力的旧 Host 完全保持原 `commands/execute`
+行为，普通查询、插件清单校验、提醒创建等仍用 60s RPC 超时。
+
+验证：`remote-compaction-operations.test.ts`（提交/结算、不伪造成功、requestId 去重、
+同会话互斥、跨设备拒绝、取消需生命周期确认、取消/成功竞争、committed-but-unconfirmed、
+预算超时、重启 interrupted、shutdown、session/events 解析）；client-core 新增 7 个
+async/tracked 测试（含丢响应同 requestId 重试、断线恢复不重提、过期不重放）；Android
+connection/message-actions 回归通过。未做真实跨设备长压缩验收（需要两台 Spark 的运行环境）。
 
 ## Android coherent transitions (Issue #8, 2026-11-12)
 

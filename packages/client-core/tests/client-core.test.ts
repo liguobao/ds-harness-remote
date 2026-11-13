@@ -1381,3 +1381,106 @@ describe('HarnessAlphaClient async compaction', () => {
     expect(methods).toEqual(['harness.remote.call'])
   })
 })
+
+describe('HarnessAlphaClient tracked compaction', () => {
+  class MemoryStore {
+    records = new Map<string, any>()
+    async load(scope: string, sessionId: string) { return this.records.get(`${scope}:${sessionId}`) }
+    async list(scope: string) {
+      return [...this.records.entries()]
+        .filter(([key]) => key.startsWith(`${scope}:`))
+        .map(([, record]) => record)
+    }
+    async save(scope: string, record: any) { this.records.set(`${scope}:${record.sessionId}`, record) }
+    async remove(scope: string, sessionId: string) { this.records.delete(`${scope}:${sessionId}`) }
+  }
+
+  function trackedCore(handle: (method: string, params: any) => unknown) {
+    const calls: Array<{ method: string; params: any }> = []
+    const core = {
+      rpc: vi.fn(async (method: string, params: any) => {
+        calls.push({ method, params })
+        return handle(method, params)
+      }),
+    } as unknown as RemoteClientCore
+    return { core, calls }
+  }
+
+  it('retries a lost submit response with the same requestId instead of starting twice', async () => {
+    let submits = 0
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') {
+        submits += 1
+        if (submits === 1) throw Object.assign(new Error('response lost'), { code: 'RPC_TIMEOUT' })
+        return { operationId: 'op-1', state: 'accepted' }
+      }
+      if (method === 'harness.remote.compaction.status') {
+        return { operationId: 'op-1', sessionId: 's1', state: 'succeeded', message: 'done' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const outcome = await client.compactSessionTracked('s1', { pollIntervalMs: 1 })
+    expect(outcome.kind).toBe('settled')
+    const requestIds = calls
+      .filter(call => call.method === 'harness.remote.compaction.submit')
+      .map(call => call.params.requestId)
+    expect(requestIds).toHaveLength(2)
+    expect(requestIds[1]).toBe(requestIds[0])
+    expect(store.records.size).toBe(0)
+  })
+
+  it('keeps the operation id across an observation failure and resumes without resubmitting', async () => {
+    let submitCalls = 0
+    let failPolls = 3
+    const { core, calls } = trackedCore((method) => {
+      if (method === 'harness.remote.compaction.submit') {
+        submitCalls += 1
+        return { operationId: 'op-2', state: 'accepted' }
+      }
+      if (method === 'harness.remote.compaction.status') {
+        if (failPolls > 0) {
+          failPolls -= 1
+          throw Object.assign(new Error('offline'), { code: 'TRANSPORT_CLOSED' })
+        }
+        return { operationId: 'op-2', sessionId: 's1', state: 'succeeded' }
+      }
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const first = await client.compactSessionTracked('s1', { pollIntervalMs: 1 })
+    expect(first.kind).toBe('unconfirmed')
+    expect(submitCalls).toBe(1)
+    expect(store.records.get('host-1:s1')).toMatchObject({ operationId: 'op-2' })
+
+    // A reconnect observes the same operation; it never submits again.
+    const resumed = await client.resumeCompactions()
+    expect(resumed).toEqual([{ sessionId: 's1', outcome: expect.objectContaining({ kind: 'settled' }) }])
+    expect(submitCalls).toBe(1)
+    expect(calls.filter(call => call.method === 'harness.remote.compaction.submit')).toHaveLength(1)
+    expect(store.records.size).toBe(0)
+  })
+
+  it('does not replay a stale request that never produced an operation id', async () => {
+    const { core, calls } = trackedCore((method) => {
+      throw new Error(`unexpected ${method}`)
+    })
+    const store = new MemoryStore()
+    await store.save('host-1', {
+      sessionId: 's1', requestId: 'old-request', state: 'accepted', updatedAt: Date.now() - 10 * 60_000,
+    })
+    const client = new HarnessAlphaClient(core, { capabilities: [REMOTE_COMPACTION_CAPABILITY] }, undefined, {
+      store, scope: 'host-1',
+    })
+    const outcome = await client.compactSessionTracked('s1')
+    expect(outcome.kind).toBe('unconfirmed')
+    expect(calls).toHaveLength(0)
+    expect(store.records.size).toBe(0)
+  })
+})

@@ -19,6 +19,8 @@ const { client, proxy } = vi.hoisted(() => ({
     sessionFork: vi.fn(),
     sessionList: vi.fn(),
     workspaceList: vi.fn(),
+    supportsAsyncCompaction: false,
+    compactSessionTracked: vi.fn(),
   },
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: vi.fn(), ImpactFeedbackStyle: { Light: 'light' } }))
@@ -32,6 +34,49 @@ import { SessionRuntime } from '../src/state/session-runtime'
 import { createSessionActions } from '../src/state/session-actions'
 import { createPromptActions } from '../src/state/prompt-actions'
 import { saveCodexPermissionPreset } from '../src/services/storage'
+
+describe('Tracked /compact', () => {
+  it('treats an unconfirmed observation as accepted instead of a failed compaction', async () => {
+    const target = session('h', false)
+    state.sessions = [target]
+    state.selectedSession = target
+    proxy.supportsAsyncCompaction = true
+    proxy.compactSessionTracked.mockResolvedValue({
+      kind: 'unconfirmed',
+      message: '暂时无法确认压缩状态；重连后会继续查询同一操作。',
+    })
+    try {
+      await expect(state.sendMessage('/compact')).resolves.toBe('sent')
+      expect(proxy.compactSessionTracked).toHaveBeenCalledWith(target.sessionId)
+      expect(state.error).toBeUndefined()
+      expect(state.commandResult).toMatchObject({
+        sessionId: target.sessionId,
+        text: '暂时无法确认压缩状态；重连后会继续查询同一操作。',
+      })
+    } finally {
+      proxy.supportsAsyncCompaction = false
+    }
+  })
+
+  it('reports a cancelled/unconfirmed operation without starting a second submission', async () => {
+    const target = session('h2', false)
+    state.sessions = [target]
+    state.selectedSession = target
+    proxy.supportsAsyncCompaction = true
+    proxy.compactSessionTracked.mockResolvedValue({
+      kind: 'settled',
+      status: { operationId: 'op-1', sessionId: target.sessionId, state: 'cancelled', message: 'Compaction cancelled.' },
+    })
+    try {
+      await expect(state.sendMessage('/compact')).resolves.toBe('rejected')
+      expect(proxy.compactSessionTracked).toHaveBeenCalledTimes(1)
+      expect(state.error).toContain('cancelled')
+    } finally {
+      proxy.supportsAsyncCompaction = false
+    }
+  })
+})
+
 
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: Error) => void

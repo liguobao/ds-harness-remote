@@ -27,7 +27,7 @@ import {
 import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { dispatchCommandForHost, HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
-import { RemoteCompactionOperations } from './remote-compaction-operations.js'
+import { readCompactionConfirmation, RemoteCompactionOperations } from './remote-compaction-operations.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
@@ -122,7 +122,25 @@ export class HostPluginRuntime {
       } finally {
         await gateway.dispose?.()
       }
-    }, logger)
+    }, {
+      logger,
+      // `commands/execute` stops waiting on abort while the compaction handler
+      // keeps running, so lifecycle confirmation comes from the Session log.
+      confirm: async (sessionId, acceptedAt, commandId) => {
+        const gateway = this.localGateway?.createPeer?.() ?? this.localGateway
+        if (gateway === undefined) return { kind: 'unknown' }
+        try {
+          const result = await gateway.dispatch('session/events', {
+            args: { request: { address: { kind: 'session', sessionId }, maxMessages: 128 } },
+          }, AbortSignal.timeout(5_000))
+          return readCompactionConfirmation(result, acceptedAt, commandId)
+        } catch {
+          return { kind: 'unknown' }
+        } finally {
+          await gateway.dispose?.()
+        }
+      },
+    })
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
       const harnessRemote = peerGateway?.supportsCarrier === true
