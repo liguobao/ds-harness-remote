@@ -1,0 +1,1502 @@
+import { RemoteClientCore } from './RemoteClientCore';
+import { logInfo, logWarn, logError } from '../util/Log';
+import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
+import { jsonStr, asRecord, asArray, asBool } from '../protocol/Types';
+import { NetTrace } from '../util/NetTrace';
+
+/** 目录项（`host/listDirectory`）。 */
+export class DirectoryEntry {
+  name: string = '';
+  path: string = '';
+  isDirectory: boolean = false;
+  size: number = 0;
+}
+
+/** 一个 Host 工作区（`workspace/list` item）。 */
+export class HarnessWorkspace {
+  workspaceId: string = '';
+  path: string = '';
+  title: string = '';
+  sessionIds: string[] = [];
+  updatedAt: number = 0;
+}
+
+/** 一条自动化定时任务（`schedule/list` 的行，字段按 Host 版本宽容解析）。 */
+export class HarnessSchedule {
+  id: string = '';
+  title: string = '';
+  prompt: string = '';
+  /** after | at | every | daily | weekly | cron（Host 给什么就是什么）。 */
+  kind: string = '';
+  /** 下次/预定触发时间（毫秒；0 表示未知）。 */
+  scheduledAt: number = 0;
+  /** 上次投递时间（毫秒；0 表示没有）。 */
+  lastDeliveredAt: number = 0;
+  timeZone: string = '';
+  expression: string = '';
+  /** true = 已结束/停用；Host 用不同字段表达，这里归一。 */
+  inactive: boolean = false;
+  /** 该任务绑定的会话。 */
+  sessionId: string = '';
+  /** 原始行，排障时打日志用。 */
+  rawKeys: string = '';
+}
+
+/** 一条投递记录（`schedule/history`）。 */
+export class HarnessScheduleDelivery {
+  id: string = '';
+  deliveredAt: number = 0;
+  status: string = '';
+  detail: string = '';
+}
+
+/** `workspace/follow` baseline 里的工作区列表 + 归档/置顶会话集合。 */
+export class HarnessWorkspaceSnapshot {
+  items: HarnessWorkspace[] = [];
+  archivedSessionIds: string[] = [];
+  pinnedSessionIds: string[] = [];
+}
+
+/** One remote Harness session row (`session/list` item). */
+export class HarnessRemoteSession {
+  sessionId: string = '';
+  updatedAt: number = 0;
+  running: boolean = false;
+  blank: boolean = false;
+  title: string = '';
+  cwd: string = '';
+  turns: number = 0;
+  /** Projected context pressure in percent of the context window; 0 when unknown. */
+  contextPercent: number = 0;
+}
+
+/** One aggregated frame delivered to the UI reducer. */
+export class HarnessClientFrame {
+  rpcId: string = '';
+  payload: Record<string, Object> = {};
+}
+
+/** One native Harness session event. */
+/** prompt 里的一段图片：data 是标准 base64 的原始字节。 */
+export class PromptImagePart {
+  mediaType: string = 'image/jpeg';
+  base64: string = '';
+  name: string = '';
+}
+
+export class HarnessSessionEvent {
+  type: string = '';
+  seq: number = 0;
+  time: number = 0;
+  data: Record<string, Object> = {};
+}
+
+export class HarnessHistoryEntry {
+  event: HarnessSessionEvent = new HarnessSessionEvent();
+}
+
+export class HistoryPage {
+  entries: HarnessHistoryEntry[] = [];
+  hasMore: boolean = false;
+  throughSeq: number = -1;
+}
+
+class PendingRemoteEvent {
+  event: string = '';
+  eventId: string = '';
+  sessionId: string = '';
+}
+
+class AssistantStreamState {
+  attemptId: string = '';
+  startedAfterSeq: number = 0;
+  turn: number = 0;
+  step: number = 0;
+  nextIndex: number = 0;
+}
+
+/**
+ * Remote Harness business client (subset of HarnessAlphaClient): session list,
+ * create, prompt, cancel, history paging and the live `session/follow` stream.
+ * Aggregated frames flow to `onFrame` for UI reduction.
+ */
+export class HarnessAlphaClient {
+  private core: RemoteClientCore;
+  private gateway: RemoteGateway;
+  private onFrame: (frame: HarnessClientFrame) => void;
+  private hostSessionFormat: number;
+  private sessionsCache: Map<string, HarnessRemoteSession> = new Map();
+  private followCursors: Map<string, number> = new Map();
+  private pendingEvents: Map<string, PendingRemoteEvent> = new Map();
+  private eventsStream: RemoteGatewayStream | undefined = undefined;
+  private followStream: RemoteGatewayStream | undefined = undefined;
+  private assistantState: AssistantStreamState | undefined = undefined;
+  private followGeneration: number = 0;
+  private eventClientId: string = '';
+
+  constructor(core: RemoteClientCore, hostSessionFormat: number,
+    onFrame: (frame: HarnessClientFrame) => void) {
+    this.core = core;
+    this.gateway = new RemoteGateway(core);
+    this.onFrame = onFrame;
+    this.hostSessionFormat = hostSessionFormat;
+  }
+
+  /** Open the `$events` stream (approval/question waterfalls). */
+  async start(): Promise<void> {
+    if (this.eventsStream !== undefined) {
+      return;
+    }
+    const handler: StreamHandler = new StreamHandler();
+    handler.onFrame = (value: Object) => {
+      this.routeEventFrame(value);
+    };
+    handler.onClosed = (error: RemoteGatewayError | undefined) => {
+      this.eventsStream = undefined;
+      if (error !== undefined) {
+        this.emitStreamFailure(error);
+      }
+    };
+    const args: Record<string, Object> = {};
+    const payload: Record<string, Object> = { 'args': args };
+    this.eventsStream = await this.gateway.open('$events', payload, handler);
+  }
+
+  async close(notifyRemote: boolean): Promise<void> {
+    this.followGeneration += 1;
+    const follow: RemoteGatewayStream | undefined = this.followStream;
+    this.followStream = undefined;
+    this.assistantState = undefined;
+    const events: RemoteGatewayStream | undefined = this.eventsStream;
+    this.eventsStream = undefined;
+    if (follow !== undefined) {
+      follow.close(notifyRemote);
+    }
+    if (events !== undefined) {
+      events.close(notifyRemote);
+    }
+    this.pendingEvents.clear();
+    this.eventClientId = '';
+  }
+
+  async sessionList(timeoutMs?: number): Promise<HarnessRemoteSession[]> {
+    const request: Record<string, Object> = {};
+    const args: Record<string, Object> = { '_request': request };
+    const value: Object = await this.callValue('session/list', args, timeoutMs);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const sessions: HarnessRemoteSession[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const session: HarnessRemoteSession | undefined = normalizeSession(item);
+        if (session !== undefined) {
+          sessions.push(session);
+          this.sessionsCache.set(session.sessionId, session);
+        }
+      }
+    }
+    logInfo('session/list -> ' + sessions.length + ' item(s)');
+    // 安全：会话标题通常来自用户第一句 prompt，按 protocol §25 不变量 12 不得进日志
+    for (const s0 of sessions) { logInfo('  session ' + s0.sessionId + ' blank=' + s0.blank); }
+    return sessions;
+  }
+
+  /**
+   * 新建会话。workspaceId 与 cwd 互斥（Host 侧会拒绝同时传）；
+   * 指定 workspaceId 时由 Host 决定路径。
+   */
+  async sessionCreate(cwd: string, workspaceId: string = ''): Promise<string> {
+    const request: Record<string, Object> = {};
+    if (workspaceId.length > 0) {
+      request['workspaceId'] = workspaceId;
+    } else if (cwd.length > 0) {
+      request['cwd'] = cwd;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/create', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const sessionId: string = root !== undefined ? jsonStr(root, 'sessionId', '') : '';
+    logInfo('session/create -> ' + sessionId);
+    if (sessionId.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid session creation result.');
+    }
+    return sessionId;
+  }
+
+  /**
+   * Send one prompt.
+   * mode='queue' 排在本轮之后，mode='steer' 立刻插话打断当前轮的下一步行动。
+   */
+  async sessionPrompt(sessionId: string, text: string, requestId: string,
+    mode: string = 'queue', images: PromptImagePart[] = []): Promise<void> {
+    // 顺序照 DSH：图片在前、文字在后；空文字时只发图片（协议要求 content 至少一项）
+    const content: Object[] = [];
+    for (const image of images) {
+      const part: Record<string, Object> = {
+        'type': 'image',
+        'mediaType': image.mediaType,
+        'data': image.base64
+      };
+      if (image.name.length > 0) {
+        part['name'] = image.name;
+      }
+      content.push(part);
+    }
+    if (text.length > 0) {
+      const block: Record<string, Object> = { 'type': 'text', 'text': text };
+      content.push(block);
+    }
+    const request: Record<string, Object> = {
+      'requestId': requestId,
+      'sessionId': sessionId,
+      'mode': mode,
+      'content': content
+    };
+    const args: Record<string, Object> = { 'request': request };
+    logInfo('session/prompt -> ' + sessionId + ' len=' + text.length + ' images=' + images.length
+      + ' mode=' + mode + ' req=' + requestId);
+    try {
+      await this.callValue('session/prompt', args);
+      logInfo('session/prompt ok -> ' + sessionId);
+    } catch (error) {
+      // ArkTS 不允许 throw 任意类型（arkts-limited-throw），统一归一成 RemoteGatewayError
+      if (error instanceof RemoteGatewayError) {
+        logError('session/prompt failed: ' + error.code + ' ' + error.message);
+        throw error;
+      }
+      const detail: string = error instanceof Error ? error.message : String(error);
+      logError('session/prompt failed: ' + detail);
+      throw new RemoteGatewayError('PROMPT_FAILED', detail);
+    }
+  }
+
+  /**
+   * 读历史图片字节：`session/attachment` 只允许读该会话日志引用过的附件，
+   * 返回标准 base64（主机会校验归属，不是通用文件读取）。
+   */
+  async sessionAttachment(sessionId: string, attachmentId: string,
+    reference?: Record<string, Object>): Promise<string> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'attachmentId': attachmentId
+    };
+    // 0.2.2+ 的 Host 认完整 `ImageAttachmentRef`（少了 mediaType 等字段会回填失败），
+    // 老 Host 只认 `attachmentId`：两个都带上，两边都能过；回执不完整时也不当失败。
+    if (reference !== undefined) {
+      request['attachment'] = reference;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/attachment', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    if (root === undefined) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid attachment result.');
+    }
+    const data: string = jsonStr(root, 'data', '');
+    if (data.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE',
+        'The Host returned an empty attachment.');
+    }
+    return data;
+  }
+
+  async sessionCancel(sessionId: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/cancel', args);
+  }
+
+  /** 列目录；兼容 entries/items 与 isDirectory/type 两种字段形状。 */
+  async listDirectory(path: string): Promise<DirectoryEntry[]> {
+    // 主机侧对应的是 directoryPicker/list，参数是裸 path（不是 {request:{path}}）
+    const args: Record<string, Object> = { 'path': path };
+    const value: Object = await this.callValue('directoryPicker/list', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    let items: Object[] | undefined = root !== undefined ? asArray(root['entries']) : undefined;
+    if (items === undefined && root !== undefined) {
+      items = asArray(root['items']);
+    }
+    const out: DirectoryEntry[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const entry: DirectoryEntry = new DirectoryEntry();
+        entry.name = jsonStr(record, 'name', '');
+        entry.path = jsonStr(record, 'path', '');
+        const isDir: Object | undefined = record['isDirectory'];
+        if (typeof isDir === 'boolean') {
+          entry.isDirectory = isDir as boolean;
+        } else {
+          entry.isDirectory = jsonStr(record, 'type', '') === 'directory';
+        }
+        const size: Object | undefined = record['size'];
+        entry.size = typeof size === 'number' ? size as number : 0;
+        if (entry.name.length > 0) {
+          out.push(entry);
+        }
+      }
+    }
+    logInfo('listDirectory -> ' + out.length + ' item(s)');
+    return out;
+  }
+
+  /** 新建工作区（Host 侧创建目录并登记）。 */
+  async workspaceCreate(path: string, title: string): Promise<string> {
+    const request: Record<string, Object> = { 'path': path };
+    if (title.length > 0) {
+      request['title'] = title;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/create', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? jsonStr(root, 'workspaceId', '') : '';
+  }
+
+  /** 工作区重命名。 */
+  async workspaceRename(workspaceId: string, title: string): Promise<void> {
+    const request: Record<string, Object> = { 'workspaceId': workspaceId, 'title': title };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('workspace/rename', args);
+    logInfo('workspace/rename ok');
+  }
+
+  /** 删除工作区（不删除磁盘目录，Host 侧只摘除登记）。 */
+  async workspaceDelete(workspaceId: string): Promise<void> {
+    const request: Record<string, Object> = { 'workspaceId': workspaceId };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('workspace/delete', args);
+    logInfo('workspace/delete ok');
+  }
+
+  /**
+   * 列出 Host 上的工作区。
+   *
+   * 主机没有 `workspace/list`（不在 Remote allowlist 里），目录来自
+   * `workspace/follow` 的第一帧 baseline（`{type:'baseline', value:{items:[…]}}`），
+   * 取到就立刻关掉这条流。
+   */
+  async workspaceList(): Promise<HarnessWorkspaceSnapshot> {
+    let items: Object[] | undefined = undefined;
+    let archivedIds: string[] = [];
+    let pinnedIds: string[] = [];
+    let firstFrame: ((value: Object) => void) | undefined = undefined;
+    const first: Promise<Object> = new Promise<Object>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The workspace baseline did not arrive in time.'));
+      }, 15000);
+      firstFrame = (value: Object): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+    });
+    const onFrame: (value: Object) => void = (value: Object) => {
+      const cb = firstFrame;
+      if (cb !== undefined) {
+        firstFrame = undefined;
+        cb(value);
+      }
+    };
+    const handler: StreamHandler = new StreamHandler();
+    handler.onFrame = onFrame;
+    handler.onClosed = () => {
+      return;
+    };
+    // 流的 payload 走 Typert 信封 {args:{…}}（和 session/follow 一致）；workspace/follow 无参数
+    const emptyArgs: Record<string, Object> = {};
+    const payload: Record<string, Object> = { 'args': emptyArgs };
+    const stream: RemoteGatewayStream = await this.gateway.open('workspace/follow', payload, handler);
+    try {
+      const frame: Record<string, Object> | undefined = asRecord(await first);
+      const baseline: Record<string, Object> | undefined =
+        frame !== undefined ? asRecord(frame['value']) : undefined;
+      items = baseline !== undefined ? asArray(baseline['items']) : undefined;
+      archivedIds = baseline !== undefined ? stringListOf(baseline['archivedSessionIds']) : [];
+      pinnedIds = baseline !== undefined ? stringListOf(baseline['pinnedSessionIds']) : [];
+      logInfo('workspace/follow baseline -> ' + (items !== undefined ? items.length : 0) + ' item(s), archived='
+        + archivedIds.length + ' pinned=' + pinnedIds.length);
+    } finally {
+      stream.close(false);
+    }
+    const out: HarnessWorkspace[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const workspace: HarnessWorkspace = new HarnessWorkspace();
+        workspace.workspaceId = jsonStr(record, 'workspaceId', '');
+        workspace.path = jsonStr(record, 'path', '');
+        workspace.title = jsonStr(record, 'title', '');
+        const updated: Object | undefined = record['updatedAt'];
+        workspace.updatedAt = typeof updated === 'number' ? updated : 0;
+        if (workspace.workspaceId.length > 0) {
+          out.push(workspace);
+        }
+      }
+    }
+    logInfo('workspace/list -> ' + out.length + ' item(s)');
+    const snapshot: HarnessWorkspaceSnapshot = new HarnessWorkspaceSnapshot();
+    snapshot.items = out;
+    snapshot.archivedSessionIds = archivedIds;
+    snapshot.pinnedSessionIds = pinnedIds;
+    return snapshot;
+  }
+
+  /** 列出可用斜杠命令；主机返回空时由调用方回退到内置清单。 */
+  async commandsList(sessionId: string): Promise<Record<string, Object>[]> {
+    // commands/list 同样按 agentId 传参，且返回的是数组本身（不是 {items}）
+    const args: Record<string, Object> = { 'agentId': sessionId };
+    const value: Object = await this.callValue('commands/list', args);
+    const direct: Object[] | undefined = asArray(value);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = direct !== undefined ? direct
+      : (root !== undefined ? asArray(root['items']) : undefined);
+    const out: Record<string, Object>[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record !== undefined) {
+          out.push(record);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 执行一条斜杠命令。
+   * 主机不识别时返回 undefined，调用方应回退成普通 prompt 发送。
+   */
+  /**
+   * 执行一条斜杠命令。
+   *
+   * 参数形状按 DSH 的 commands/execute descriptor：`agentId`（= SessionId，lookup 传参）、
+   * `line`、以及必填的 `submittedAttachments`（空数组）。以前包成 {request:{sessionId,line}}
+   * 会被判 "RPC parameters are invalid"，于是 /compact、/permission 全都静默回退成普通消息。
+   */
+  async commandsExecute(sessionId: string, line: string): Promise<Record<string, Object> | undefined> {
+    const attachments: Object[] = [];
+    const args: Record<string, Object> = {
+      'agentId': sessionId,
+      'line': line,
+      'submittedAttachments': attachments
+    };
+    const value: Object = await this.callValue('commands/execute', args);
+    logInfo('commands/execute ok: ' + line.split(' ')[0]);
+    return asRecord(value);
+  }
+
+  /**
+   * 读主机上的图片字节（base64）。路径可以是绝对路径，也可以是相对工作区根目录的路径；
+   * 主机侧 workspaceFiles/readBytes 允许读工作区外的文件，所以 /tmp 这类也能取。
+   */
+  async readFileBase64(sessionId: string, path: string): Promise<string> {
+    const options: Record<string, Object> = {};
+    const args: Record<string, Object> = {
+      'workspaceFileScopeId': sessionId,
+      'path': path,
+      'options': options
+    };
+    const value: Object = await this.callValue('workspaceFiles/readBytes', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const data: string = root !== undefined ? jsonStr(root, 'data', '') : '';
+    logInfo('workspaceFiles/readBytes -> ' + path + ' base64=' + data.length);
+    return data;
+  }
+
+  /** 语音转文字：把手里的 WAV（base64）交给主机上的语音提供商。 */
+  async speechTranscribe(audioBase64: string, language: string): Promise<string> {
+    const request: Record<string, Object> = { 'audioBase64': audioBase64 };
+    if (language.length > 0) {
+      request['language'] = language;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('speech/transcribe', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const text: string = root !== undefined ? jsonStr(root, 'text', '') : '';
+    logInfo('speech/transcribe ok -> ' + text.length + ' chars');
+    return text;
+  }
+
+  /** 重命名会话。 */
+  async sessionRename(sessionId: string, title: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'title': title };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/rename', args);
+    logInfo('session/rename ok -> ' + sessionId);
+  }
+
+  /**
+   * 定时任务列表。协议不放行 `schedule/create`（创建走会话里的官方 `schedule_create` 工具），
+   * 客户端只做列表 / 投递历史 / 修改 / 删除。
+   */
+  async scheduleList(sessionId: string): Promise<HarnessSchedule[]> {
+    const request: Record<string, Object> = {};
+    if (sessionId.length > 0) {
+      request['sessionId'] = sessionId;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('schedule/list', args);
+    const direct: Object[] | undefined = asArray(value);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = direct !== undefined ? direct
+      : (root !== undefined ? asArray(root['items']) : undefined);
+    const out: HarnessSchedule[] = [];
+    if (items !== undefined) {
+      for (const item of items) {
+        const parsed: HarnessSchedule | undefined = normalizeSchedule(item, sessionId);
+        if (parsed !== undefined) {
+          out.push(parsed);
+        }
+      }
+    }
+    logInfo('schedule/list -> ' + out.length + ' item(s)');
+    return out;
+  }
+
+  /** 删除一条定时任务；返回 Host 的业务结果文本（失败时抛出）。 */
+  async scheduleDelete(sessionId: string, id: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'id': id };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('schedule/delete', args);
+    logInfo('schedule/delete ok -> ' + id);
+  }
+
+  /** 投递历史（最近的在前）。 */
+  async scheduleHistory(sessionId: string, id: string, limit: number): Promise<HarnessScheduleDelivery[]> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'id': id,
+      'limit': limit
+    };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('schedule/history', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const records: Object[] | undefined = root !== undefined ? asArray(root['records']) : undefined;
+    const out: HarnessScheduleDelivery[] = [];
+    if (records !== undefined) {
+      for (const item of records) {
+        const record: Record<string, Object> | undefined = asRecord(item);
+        if (record === undefined) {
+          continue;
+        }
+        const delivery: HarnessScheduleDelivery = new HarnessScheduleDelivery();
+        delivery.id = jsonStr(record, 'id', '');
+        delivery.deliveredAt = toMs(record['deliveredAt']);
+        delivery.status = jsonStr(record, 'status', '');
+        delivery.detail = jsonStr(record, 'detail', jsonStr(record, 'message', ''));
+        out.push(delivery);
+      }
+    }
+    logInfo('schedule/history -> ' + out.length + ' record(s)');
+    return out;
+  }
+
+  /** 归档会话；返回主机确认后的完整归档集合。 */
+  async sessionArchive(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'stopActivity': true };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/archiveSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['archivedSessionIds']) : [];
+    logInfo('session/archive ok -> ' + sessionId + ' archived=' + ids.length);
+    return ids;
+  }
+
+  /** 取消归档；返回主机确认后的完整归档集合。 */
+  async sessionUnarchive(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/unarchiveSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['archivedSessionIds']) : [];
+    logInfo('session/unarchive ok -> ' + sessionId + ' archived=' + ids.length);
+    return ids;
+  }
+
+  /** 把会话置顶；返回主机确认后的完整置顶集合。 */
+  async sessionPin(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/pinSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['pinnedSessionIds']) : [];
+    logInfo('session/pin ok -> ' + sessionId + ' pinned=' + ids.length);
+    return ids;
+  }
+
+  /** 取消置顶；返回主机确认后的完整置顶集合。 */
+  async sessionUnpin(sessionId: string): Promise<string[]> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('workspace/unpinSession', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const ids: string[] = root !== undefined ? stringListOf(root['pinnedSessionIds']) : [];
+    logInfo('session/unpin ok -> ' + sessionId + ' pinned=' + ids.length);
+    return ids;
+  }
+
+  /** 全文搜索会话（标题与消息正文）。 */
+  async sessionSearch(query: string): Promise<HarnessRemoteSession[]> {
+    const request: Record<string, Object> = { 'query': query };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/search', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const items: Object[] | undefined = root !== undefined ? asArray(root['items']) : undefined;
+    const sessions: HarnessRemoteSession[] = [];
+    let skipped: number = 0;
+    if (items !== undefined) {
+      for (const item of items) {
+        const normalized: HarnessRemoteSession | undefined = normalizeSearchItem(item);
+        if (normalized !== undefined) {
+          sessions.push(normalized);
+        } else {
+          skipped++;
+        }
+      }
+    }
+    // 搜索结果的字段形状随主机版本变化，记录跳过数量便于排查「搜不到」。
+    logInfo('session/search -> ' + sessions.length + ' item(s), skipped=' + skipped);
+    return sessions;
+  }
+
+  /** 会话的用量与上下文占用等投影值（主机侧观察，不会激活 Agent）。 */
+  async sessionProjections(sessionId: string): Promise<Record<string, Object>> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/projections', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? root : {};
+  }
+
+  /** 可用模型目录（含每个模型的推理等级选项）。 */
+  async modelCatalog(): Promise<Record<string, Object>> {
+    // session/modelCatalog 在主机侧没有参数（descriptor parameters: []），
+    // 包一层 {request:{}} 会被 typert gateway 判成 unexpected "request"。
+    const args: Record<string, Object> = {};
+    const value: Object = await this.callValue('session/modelCatalog', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    return root !== undefined ? root : {};
+  }
+
+  /** 为当前会话切换模型。 */
+  async selectModel(sessionId: string, provider: string, model: string,
+    reasoningEffort: string): Promise<void> {
+    const request: Record<string, Object> = {
+      'sessionId': sessionId,
+      'provider': provider,
+      'model': model
+    };
+    if (reasoningEffort.length > 0) {
+      request['reasoningEffort'] = reasoningEffort;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/selectModel', args);
+    logInfo('session/selectModel ok -> ' + provider + '/' + model);
+  }
+
+  /** 切换当前会话的权限预设（read-only / workspace-write / danger-full-access）。 */
+  async selectPermission(sessionId: string, preset: string): Promise<void> {
+    const request: Record<string, Object> = { 'sessionId': sessionId, 'preset': preset };
+    const args: Record<string, Object> = { 'request': request };
+    await this.callValue('session/selectPermission', args);
+    logInfo('session/selectPermission ok -> ' + preset);
+  }
+
+  /** 从某个消息序号分叉出一个新会话。 */
+  async sessionFork(sessionId: string, atSeq: number): Promise<string> {
+    const request: Record<string, Object> = { 'sessionId': sessionId };
+    if (atSeq >= 0) {
+      request['atSeq'] = atSeq;
+    }
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/fork', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const forkedId: string = root !== undefined ? jsonStr(root, 'sessionId', '') : '';
+    if (forkedId.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid fork result.');
+    }
+    return forkedId;
+  }
+
+  /** Page older history through `session/page` (needs a live follow cursor). */
+  async sessionPage(sessionId: string, beforeSeq: number, maxMessages: number): Promise<HistoryPage> {
+    const cursor: number | undefined = this.followCursors.get(sessionId);
+    const throughSeq: number = cursor !== undefined ? cursor : beforeSeq;
+    const address: Record<string, Object> = { 'kind': 'session', 'sessionId': sessionId };
+    const request: Record<string, Object> = {
+      'address': address,
+      'throughSeq': throughSeq,
+      'beforeSeq': beforeSeq,
+      'maxMessages': maxMessages
+    };
+    const args: Record<string, Object> = { 'request': request };
+    const value: Object = await this.callValue('session/page', args);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    const records: Object[] | undefined = root !== undefined ? asArray(root['records']) : undefined;
+    const page: HistoryPage = new HistoryPage();
+    page.entries = records !== undefined ? entriesFromRecords(records) : [];
+    page.hasMore = root !== undefined ? asBool(root['hasMore']) === true : false;
+    page.throughSeq = throughSeq;
+    return page;
+  }
+
+  /**
+   * Load one session: without `beforeSeq` opens a fresh `session/follow`
+   * stream (snapshot + live events); with `beforeSeq` pages older history.
+   */
+  async sessionHistory(sessionId: string, beforeSeq: number, maxMessages: number): Promise<HistoryPage> {
+    if (beforeSeq >= 0) {
+      return this.sessionPage(sessionId, beforeSeq, maxMessages);
+    }
+    const generation: number = ++this.followGeneration;
+    await this.closeFollowStream();
+    if (generation !== this.followGeneration) {
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+    }
+    let page: HistoryPage;
+    try {
+      page = await this.openFollow(sessionId, maxMessages, generation);
+    } catch (error) {
+      // 偶发的一次「首帧没回来」（切直连的瞬间、主机刚好在回放大快照）不该直接糊用户一脸红条：
+      // 关掉这条流，等 600ms 自动重开一次。只有第二次也失败才往上抛。
+      if (error instanceof RemoteGatewayError && error.code === 'CANCELLED') {
+        throw error;
+      }
+      const detail: string = error instanceof Error ? error.message : String(error);
+      logWarn('openFollow failed once (' + detail + ')，600ms 后自动重开');
+      NetTrace.record('session/follow 自动重开', 0, '首次失败：' + detail, true);
+      await this.closeFollowStream();
+      await delay(600);
+      if (generation !== this.followGeneration) {
+        throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+      }
+      page = await this.openFollow(sessionId, maxMessages, generation);
+    }
+    if (generation !== this.followGeneration) {
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+    }
+    return page;
+  }
+
+  private async openFollow(sessionId: string, maxMessages: number, generation: number): Promise<HistoryPage> {
+    logInfo('openFollow sessionId=' + sessionId + ' maxMessages=' + maxMessages);
+    let firstFrameResolve: ((value: Object) => void) | undefined = undefined;
+    let firstFrameReject: ((error: RemoteGatewayError) => void) | undefined = undefined;
+    const firstFrame: Promise<Object> = new Promise<Object>((resolve, reject) => {
+      firstFrameResolve = resolve;
+      firstFrameReject = reject;
+    });
+    const handler: StreamHandler = new StreamHandler();
+    handler.onFrame = (value: Object) => {
+      const resolveFirst: ((value: Object) => void) | undefined = firstFrameResolve;
+      if (resolveFirst !== undefined) {
+        firstFrameResolve = undefined;
+        firstFrameReject = undefined;
+        resolveFirst(value);
+        return;
+      }
+      if (this.followGeneration !== generation) {
+        return;
+      }
+      for (const entry of this.entriesFromFollowFrame(value)) {
+        const payload: Record<string, Object> = {
+          'type': 'session/event',
+          'sessionId': sessionId,
+          'event': entry.event
+        };
+        this.emitFrame('', payload);
+      }
+    };
+    handler.onClosed = (error: RemoteGatewayError | undefined) => {
+      if (this.followStream !== undefined && this.followStream.isClosed()) {
+        this.followStream = undefined;
+      }
+      const rejectFirst: ((error: RemoteGatewayError) => void) | undefined = firstFrameReject;
+      if (rejectFirst !== undefined) {
+        firstFrameResolve = undefined;
+        firstFrameReject = undefined;
+        rejectFirst(error !== undefined ? error
+          : new RemoteGatewayError('CANCELLED', 'The session follow closed.'));
+        return;
+      }
+      if (error !== undefined) {
+        this.emitStreamFailure(error);
+      }
+    };
+    const address: Record<string, Object> = { 'kind': 'session', 'sessionId': sessionId };
+    const request: Record<string, Object> = {
+      'address': address,
+      'maxMessages': maxMessages
+    };
+    // The Host gateway requires the Typert argument envelope { args: { request } };
+    // `assistantStream` is a response-side snapshot field, never a request flag.
+    const inner: Record<string, Object> = { 'request': request };
+    const payload: Record<string, Object> = { 'args': inner };
+    // 流打开给 12 秒、首帧 20 秒：TURN 半开时干等会让用户以为卡死，
+    // 快速失败才能尽快走「重连并重新打开」。实测（中继下）打开 0.85s、首帧 0.77s，
+    // 留 14 倍以上余量，正常慢也不会误判。
+    // 打点分两段：打开 RPC（谁在拖：链路还是主机）与首帧快照（主机回放历史要多久）。
+    // 打开 RPC 本身的耗时由 RemoteClientCore 以 endpoint 为标签记，这里只补首帧这一段。
+    const openStartedAt: number = Date.now();
+    const stream: RemoteGatewayStream = await this.gateway.open('session/follow', payload, handler, 12000);
+    const openMs: number = Date.now() - openStartedAt;
+    if (generation !== this.followGeneration) {
+      stream.close(false);
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+    }
+    this.followStream = stream;
+    const firstFrameAt: number = Date.now();
+    let first: Object;
+    try {
+      first = await withTimeout(firstFrame, 20000);
+    } catch (error) {
+      // ArkTS 不允许 throw 任意类型（arkts-limited-throw），统一归一成 RemoteGatewayError
+      const detail: string = error instanceof Error ? error.message : String(error);
+      NetTrace.record('session/follow 首帧 ✗', Date.now() - firstFrameAt,
+        '打开 ' + openMs + 'ms · ' + detail, true);
+      if (error instanceof RemoteGatewayError) {
+        throw error;
+      }
+      throw new RemoteGatewayError('FOLLOW_TIMEOUT', 'session/follow 首帧没回来：' + detail);
+    }
+    NetTrace.record('session/follow 首帧', Date.now() - firstFrameAt, '打开 ' + openMs + 'ms', true);
+    if (generation !== this.followGeneration) {
+      throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
+    }
+    const snapshot: Record<string, Object> | undefined = asRecord(first);
+    if (snapshot === undefined || jsonStr(snapshot, 'type', '') !== 'snapshot') {
+      await this.closeFollowStream();
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host returned an invalid session follow snapshot.');
+    }
+    const cursorRaw: Object | undefined = snapshot['cursor'];
+    if (typeof cursorRaw === 'number') {
+      this.followCursors.set(sessionId, cursorRaw);
+    }
+    if (this.hostSessionFormat === 3) {
+      this.assistantState = assistantStreamBaseline(snapshot['assistantStream']);
+    }
+    const records: Object[] | undefined = asArray(snapshot['records']);
+    const page: HistoryPage = new HistoryPage();
+    page.entries = records !== undefined ? entriesFromRecords(records) : [];
+    page.hasMore = asBool(snapshot['hasMore']) === true;
+    if (typeof cursorRaw === 'number') {
+      page.throughSeq = cursorRaw;
+    }
+    return page;
+  }
+
+  /** Answer an `approval/requested` frame ('allowed-once' | 'rejected'). */
+  async respondApproval(frameRpcId: string, sessionId: string, approvalId: string, outcome: string): Promise<void> {
+    const eventId: string = this.pendingEvents.has(frameRpcId) ? frameRpcId : approvalId;
+    await this.respondEvent(eventId, outcome);
+    this.pendingEvents.delete(eventId);
+    const payload: Record<string, Object> = {
+      'type': 'approval/resolved',
+      'sessionId': sessionId,
+      'approvalId': approvalId,
+      'outcome': outcome
+    };
+    this.emitFrame('', payload);
+  }
+
+  /** Answer a `question/requested` frame with `{answers:[{id,selected,custom?}]}`. */
+  async respondQuestion(frameRpcId: string, sessionId: string, answer: Record<string, Object>): Promise<void> {
+    await this.respondEvent(frameRpcId, answer);
+    this.pendingEvents.delete(frameRpcId);
+    const payload: Record<string, Object> = {
+      'type': 'question/resolved',
+      'sessionId': sessionId,
+      'questionRpcId': frameRpcId,
+      'outcome': 'answered'
+    };
+    this.emitFrame('', payload);
+  }
+
+  private async respondEvent(eventId: string, value: Object): Promise<void> {
+    if (this.eventClientId.length === 0) {
+      throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host event stream is not ready.');
+    }
+    const outcome: Record<string, Object> = {
+      'kind': 'result',
+      'value': value
+    };
+    const args: Record<string, Object> = {
+      'clientId': this.eventClientId,
+      'eventId': eventId,
+      'outcome': outcome
+    };
+    const payload: Record<string, Object> = { 'args': args };
+    await this.gateway.call('$events/result', payload);
+  }
+
+  private async callValue(endpoint: string, args: Record<string, Object>, timeoutMs?: number): Promise<Object> {
+    const payload: Record<string, Object> = { 'args': args };
+    const value: Object = await this.gateway.call(endpoint, payload, timeoutMs);
+    const root: Record<string, Object> | undefined = asRecord(value);
+    if (root !== undefined) {
+      const okValue: Object | undefined = root['ok'];
+      if (okValue === true) {
+        const inner: Object | undefined = root['value'];
+        return inner !== undefined ? inner : new Object();
+      }
+      if (okValue === false) {
+        const error: Record<string, Object> | undefined = asRecord(root['error']);
+        if (error !== undefined) {
+          throw new RemoteGatewayError(
+            jsonStr(error, 'code', 'internal'),
+            jsonStr(error, 'message', 'The Host rejected the Remote request.'));
+        }
+      }
+    }
+    return value;
+  }
+
+  private routeEventFrame(value: Object): void {
+    const root: Record<string, Object> | undefined = asRecord(value);
+    if (root === undefined) {
+      return;
+    }
+    const type: string = jsonStr(root, 'type', '');
+    if (type === 'ready') {
+      this.eventClientId = jsonStr(root, 'clientId', '');
+      return;
+    }
+    if (type === 'waterfall') {
+      const eventId: string = jsonStr(root, 'eventId', '');
+      const agentId: string = jsonStr(root, 'agentId', '');
+      const event: string = jsonStr(root, 'event', '');
+      const request: Record<string, Object> | undefined = asRecord(root['request']);
+      if (eventId.length > 0 && agentId.length > 0 && request !== undefined) {
+        this.routeWaterfall(event, eventId, agentId, request);
+      }
+      return;
+    }
+    if (type === 'cancel') {
+      const eventId: string = jsonStr(root, 'eventId', '');
+      if (eventId.length > 0) {
+        this.cancelRemoteEvent(eventId);
+      }
+    }
+  }
+
+  private routeWaterfall(event: string, eventId: string, sessionId: string,
+    request: Record<string, Object>): void {
+    if (event === 'approval/request') {
+      const pending: PendingRemoteEvent = new PendingRemoteEvent();
+      pending.event = event;
+      pending.eventId = eventId;
+      pending.sessionId = sessionId;
+      this.pendingEvents.set(eventId, pending);
+      const payload: Record<string, Object> = {
+        'type': 'approval/requested',
+        'sessionId': sessionId,
+        'approvalId': eventId,
+        'toolName': jsonStr(request, 'toolName', 'Harness tool')
+      };
+      const callId: string = jsonStr(request, 'callId', '');
+      if (callId.length > 0) {
+        payload['callId'] = callId;
+      }
+      const reason: string = jsonStr(request, 'reason', '');
+      if (reason.length > 0) {
+        payload['reason'] = reason;
+      }
+      this.emitFrame(eventId, payload);
+      return;
+    }
+    if (event === 'user-questions/request') {
+      const pending: PendingRemoteEvent = new PendingRemoteEvent();
+      pending.event = event;
+      pending.eventId = eventId;
+      pending.sessionId = sessionId;
+      this.pendingEvents.set(eventId, pending);
+      const questions: Object | undefined = request['questions'];
+      const payload: Record<string, Object> = {
+        'type': 'question/requested',
+        'sessionId': sessionId,
+        'questions': questions !== undefined ? questions : []
+      };
+      this.emitFrame(eventId, payload);
+    }
+  }
+
+  private cancelRemoteEvent(eventId: string): void {
+    const pending: PendingRemoteEvent | undefined = this.pendingEvents.get(eventId);
+    if (pending === undefined) {
+      return;
+    }
+    this.pendingEvents.delete(eventId);
+    if (pending.event === 'approval/request') {
+      const payload: Record<string, Object> = {
+        'type': 'approval/resolved',
+        'sessionId': pending.sessionId,
+        'approvalId': eventId,
+        'outcome': 'cancelled'
+      };
+      this.emitFrame('', payload);
+      return;
+    }
+    const payload: Record<string, Object> = {
+      'type': 'question/resolved',
+      'sessionId': pending.sessionId,
+      'questionRpcId': eventId,
+      'outcome': 'cancelled'
+    };
+    this.emitFrame('', payload);
+  }
+
+  /** Follow frames: `event`/`chunks` records or v3 `assistant-stream` frames. */
+  private entriesFromFollowFrame(value: Object): HarnessHistoryEntry[] {
+    const root: Record<string, Object> | undefined = asRecord(value);
+    if (root === undefined) {
+      return [];
+    }
+    const type: string = jsonStr(root, 'type', '');
+    if (this.hostSessionFormat === 3 && type === 'assistant-stream') {
+      return this.entriesFromAssistantStream(root);
+    }
+    if (type === 'event') {
+      const event: Record<string, Object> | undefined = asRecord(root['event']);
+      return event !== undefined ? historyEntryFromEvent(event) : [];
+    }
+    if (type === 'chunks') {
+      const event: Record<string, Object> | undefined = asRecord(root['event']);
+      return event !== undefined ? entriesFromChunkRun(event) : [];
+    }
+    return [];
+  }
+
+  private entriesFromAssistantStream(frame: Record<string, Object>): HarnessHistoryEntry[] {
+    const inner: Record<string, Object> | undefined = asRecord(frame['frame']);
+    if (inner === undefined) {
+      return [];
+    }
+    const type: string = jsonStr(inner, 'type', '');
+    if (type === 'start') {
+      const attempt: AssistantStreamState | undefined = assistantStreamAttempt(inner, 0);
+      if (attempt !== undefined) {
+        this.assistantState = attempt;
+      }
+      return [];
+    }
+    const attempt: AssistantStreamState | undefined = this.assistantState;
+    if (type === 'end') {
+      if (attempt !== undefined && jsonStr(inner, 'attemptId', '') === attempt.attemptId) {
+        this.assistantState = undefined;
+      }
+      return [];
+    }
+    if (type !== 'chunk' || attempt === undefined
+      || jsonStr(inner, 'attemptId', '') !== attempt.attemptId) {
+      return [];
+    }
+    const indexRaw: Object | undefined = inner['index'];
+    const timeRaw: Object | undefined = inner['time'];
+    const chunk: Record<string, Object> | undefined = asRecord(inner['chunk']);
+    if (typeof indexRaw !== 'number' || indexRaw !== attempt.nextIndex
+      || typeof timeRaw !== 'number' || chunk === undefined) {
+      return [];
+    }
+    attempt.nextIndex += 1;
+    const data: Record<string, Object> = {
+      'turn': attempt.turn,
+      'step': attempt.step,
+      'chunk': chunk
+    };
+    const event: HarnessSessionEvent = new HarnessSessionEvent();
+    event.type = 'assistant/chunk';
+    event.seq = attempt.startedAfterSeq + 1 - 1 / (attempt.nextIndex + 1);
+    event.time = timeRaw;
+    event.data = data;
+    const entry: HarnessHistoryEntry = new HarnessHistoryEntry();
+    entry.event = event;
+    return [entry];
+  }
+
+  private emitStreamFailure(error: RemoteGatewayError): void {
+    const errorObj: Record<string, Object> = {
+      'code': error.code,
+      'message': error.message
+    };
+    const payload: Record<string, Object> = {
+      'type': 'stream/closed',
+      'reason': 'failed',
+      'error': errorObj
+    };
+    this.emitFrame('', payload);
+  }
+
+  private emitFrame(rpcId: string, payload: Record<string, Object>): void {
+    const frame: HarnessClientFrame = new HarnessClientFrame();
+    frame.rpcId = rpcId;
+    frame.payload = payload;
+    this.onFrame(frame);
+  }
+
+  private async closeFollowStream(): Promise<void> {
+    const follow: RemoteGatewayStream | undefined = this.followStream;
+    this.followStream = undefined;
+    this.assistantState = undefined;
+    if (follow !== undefined) {
+      follow.close(true);
+    }
+  }
+}
+
+/** 主机把会话 id 集合放在数组里；只认字符串，别把 undefined 传下去。 */
+function stringListOf(value: Object | undefined): string[] {
+  const out: string[] = [];
+  const raw: Object[] | undefined = asArray(value);
+  if (raw !== undefined) {
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        out.push(item);
+      }
+    }
+  }
+  return out;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setTimeout(() => {
+      resolve();
+    }, ms);
+  });
+}
+
+function withTimeout(work: Promise<Object>, budgetMs: number): Promise<Object> {
+  return new Promise<Object>((resolve, reject) => {
+    const timer: number = setTimeout(() => {
+      reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The session follow did not open in time.'));
+    }, budgetMs);
+    work.then((value: Object) => {
+      clearTimeout(timer);
+      resolve(value);
+    }, (error: Error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+/**
+ * 搜索结果可能有两种形状：
+ *   { sessionId, updatedAt, running, blank, ... }  或  { session: {...}, snippet }
+ * 这里都接受，避免主版本差异导致「搜索永远为空」。
+ */
+function normalizeSearchItem(value: Object): HarnessRemoteSession | undefined {
+  const root: Record<string, Object> | undefined = asRecord(value);
+  if (root === undefined) {
+    return undefined;
+  }
+  const direct: HarnessRemoteSession | undefined = normalizeSession(root);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const nested: Record<string, Object> | undefined = asRecord(root['session']);
+  if (nested !== undefined) {
+    const inner: HarnessRemoteSession | undefined = normalizeSession(nested);
+    if (inner !== undefined) {
+      return inner;
+    }
+  }
+  // 最后兜底：只要有 id 就当成一条可打开的会话，缺省字段按「未知」处理。
+  const id: string = jsonStr(root, 'sessionId', jsonStr(root, 'id',
+    nested !== undefined ? jsonStr(nested, 'sessionId', jsonStr(nested, 'id', '')) : ''));
+  if (id.length === 0) {
+    return undefined;
+  }
+  const session: HarnessRemoteSession = new HarnessRemoteSession();
+  session.sessionId = id;
+  session.title = jsonStr(root, 'title', nested !== undefined ? jsonStr(nested, 'title', '') : '');
+  session.cwd = jsonStr(root, 'cwd', nested !== undefined ? jsonStr(nested, 'cwd', '') : '');
+  const updated: Object | undefined = root['updatedAt'];
+  session.updatedAt = typeof updated === 'number' ? (updated >= 1e12 ? updated : updated * 1000) : 0;
+  return session;
+}
+
+/** 时间字段既可能是毫秒也可能是秒；统一成毫秒。 */
+function toMs(value: Object | undefined): number {
+  if (typeof value !== 'number' || value <= 0) {
+    return 0;
+  }
+  return value >= 1e12 ? value : value * 1000;
+}
+
+/** `schedule/list` 的行：字段名随 Host 版本变，这里按候选名逐个试。 */
+function normalizeSchedule(value: Object, fallbackSessionId: string): HarnessSchedule | undefined {
+  const row: Record<string, Object> | undefined = asRecord(value);
+  if (row === undefined) {
+    return undefined;
+  }
+  const schedule: HarnessSchedule = new HarnessSchedule();
+  schedule.id = jsonStr(row, 'id', '');
+  if (schedule.id.length === 0) {
+    return undefined;
+  }
+  schedule.title = jsonStr(row, 'title', '');
+  schedule.prompt = jsonStr(row, 'prompt', jsonStr(row, 'instructions', ''));
+  schedule.kind = jsonStr(row, 'kind', '');
+  schedule.sessionId = jsonStr(row, 'sessionId', fallbackSessionId);
+  schedule.timeZone = jsonStr(row, 'timeZone', '');
+  schedule.expression = jsonStr(row, 'expression', '');
+  schedule.scheduledAt = toMs(row['scheduledAt']);
+  schedule.lastDeliveredAt = toMs(row['lastDeliveredAt']);
+  const inactive: Object | undefined = row['inactive'];
+  const active: Object | undefined = row['active'];
+  const enabled: Object | undefined = row['enabled'];
+  if (typeof inactive === 'boolean') {
+    schedule.inactive = inactive;
+  } else if (typeof active === 'boolean') {
+    schedule.inactive = !active;
+  } else if (typeof enabled === 'boolean') {
+    schedule.inactive = !enabled;
+  }
+  const keys: string[] = [];
+  for (const key of Object.keys(row)) {
+    keys.push(key);
+  }
+  schedule.rawKeys = keys.join(',');
+  logInfo('schedule row id=' + schedule.id + ' kind=' + schedule.kind + ' keys=' + schedule.rawKeys);
+  return schedule;
+}
+
+function normalizeSession(value: Object): HarnessRemoteSession | undefined {
+  const root: Record<string, Object> | undefined = asRecord(value);
+  if (root === undefined) {
+    return undefined;
+  }
+  const session: HarnessRemoteSession = new HarnessRemoteSession();
+  session.sessionId = jsonStr(root, 'sessionId', '');
+  const updatedAt: Object | undefined = root['updatedAt'];
+  const running: Object | undefined = root['running'];
+  const blank: Object | undefined = root['blank'];
+  if (session.sessionId.length === 0 || typeof updatedAt !== 'number'
+    || typeof running !== 'boolean' || typeof blank !== 'boolean') {
+    return undefined;
+  }
+  session.updatedAt = updatedAt >= 1e12 ? updatedAt : updatedAt * 1000;
+  session.running = running;
+  session.blank = blank;
+  session.title = jsonStr(root, 'title', '');
+  session.cwd = jsonStr(root, 'cwd', '');
+  const projections: Record<string, Object> | undefined = asRecord(root['projections']);
+  const values: Record<string, Object> | undefined = projections !== undefined
+    ? asRecord(projections['values']) : undefined;
+  if (session.title.length === 0 && values !== undefined) {
+    // Hosts surface the display title through the whitelisted projection values
+    // (`title`, `sessionTitle`, `conversationTitle`) rather than the row top level.
+    const candidates: string[] = ['title', 'sessionTitle', 'conversationTitle'];
+    for (const key of candidates) {
+      const projected: string = jsonStr(values, key, '');
+      if (projected.length > 0) {
+        session.title = projected;
+        break;
+      }
+    }
+  }
+  if (values !== undefined) {
+    const stats: Record<string, Object> | undefined = asRecord(values['sessionStats']);
+    const turnsRaw: Object | undefined = stats !== undefined ? stats['turns'] : undefined;
+    if (typeof turnsRaw === 'number' && turnsRaw > 0) {
+      session.turns = Math.floor(turnsRaw);
+    }
+    const pressure: Record<string, Object> | undefined = asRecord(values['contextPressure']);
+    const projectedTokens: Object | undefined = pressure !== undefined ? pressure['projectedTokens'] : undefined;
+    const contextWindow: Object | undefined = pressure !== undefined ? pressure['contextWindow'] : undefined;
+    if (typeof projectedTokens === 'number' && typeof contextWindow === 'number' && contextWindow > 0) {
+      const pct: number = Math.round(projectedTokens * 100 / contextWindow);
+      session.contextPercent = Math.min(100, Math.max(1, pct));
+    }
+  }
+  return session;
+}
+
+function entriesFromRecords(records: Object[]): HarnessHistoryEntry[] {
+  const entries: HarnessHistoryEntry[] = [];
+  for (const record of records) {
+    const root: Record<string, Object> | undefined = asRecord(record);
+    if (root === undefined) {
+      continue;
+    }
+    const type: string = jsonStr(root, 'type', '');
+    const event: Record<string, Object> | undefined = asRecord(root['event']);
+    if (event === undefined) {
+      continue;
+    }
+    if (type === 'event') {
+      const list: HarnessHistoryEntry[] = historyEntryFromEvent(event);
+      for (const entry of list) {
+        entries.push(entry);
+      }
+    } else if (type === 'chunks') {
+      const list: HarnessHistoryEntry[] = entriesFromChunkRun(event);
+      for (const entry of list) {
+        entries.push(entry);
+      }
+    }
+  }
+  return entries;
+}
+
+function historyEntryFromEvent(event: Record<string, Object>): HarnessHistoryEntry[] {
+  const type: string = jsonStr(event, 'type', '');
+  const seqRaw: Object | undefined = event['seq'];
+  const timeRaw: Object | undefined = event['time'];
+  if (type.length === 0 || typeof seqRaw !== 'number' || typeof timeRaw !== 'number') {
+    return [];
+  }
+  const sessionEvent: HarnessSessionEvent = new HarnessSessionEvent();
+  sessionEvent.type = type;
+  sessionEvent.seq = seqRaw;
+  sessionEvent.time = timeRaw;
+  const data: Record<string, Object> | undefined = asRecord(event['data']);
+  sessionEvent.data = data !== undefined ? data : {};
+  const entry: HarnessHistoryEntry = new HarnessHistoryEntry();
+  entry.event = sessionEvent;
+  return [entry];
+}
+
+/** Expand one compact `chunkrow/*` history record into `assistant/chunk` events. */
+function entriesFromChunkRun(event: Record<string, Object>): HarnessHistoryEntry[] {
+  const type: string = jsonStr(event, 'type', '');
+  const seqRaw: Object | undefined = event['seq'];
+  const timeRaw: Object | undefined = event['time'];
+  const data: Record<string, Object> | undefined = asRecord(event['data']);
+  if (type.length === 0 || typeof seqRaw !== 'number' || typeof timeRaw !== 'number'
+    || data === undefined) {
+    return [];
+  }
+  const seq: number = seqRaw;
+  const time: number = timeRaw;
+  const turnRaw: Object | undefined = data['turn'];
+  const stepRaw: Object | undefined = data['step'];
+  const indexRaw: Object | undefined = data['index'];
+  const dt: number[] = [];
+  const dtRaw: Object[] | undefined = asArray(data['dt']);
+  if (dtRaw !== undefined) {
+    for (const item of dtRaw) {
+      if (typeof item === 'number') {
+        dt.push(item);
+      }
+    }
+  }
+  const entries: HarnessHistoryEntry[] = [];
+  if (type === 'chunkrow/text-chunks' || type === 'chunkrow/reasoning-chunks') {
+    const texts: string[] = [];
+    const textsRaw: Object[] | undefined = asArray(data['texts']);
+    if (textsRaw !== undefined) {
+      for (const item of textsRaw) {
+        if (typeof item === 'string') {
+          texts.push(item);
+        }
+      }
+    }
+    let currentTime: number = time;
+    for (let offset = 0; offset < texts.length; offset++) {
+      if (offset > 0 && offset - 1 < dt.length) {
+        currentTime += dt[offset - 1];
+      }
+      const chunk: Record<string, Object> = {
+        'type': type === 'chunkrow/text-chunks' ? 'text-delta' : 'reasoning-delta',
+        'text': texts[offset]
+      };
+      if (typeof indexRaw === 'number') {
+        chunk['index'] = indexRaw;
+      }
+      entries.push(chunkEntry(chunk, seq + offset, currentTime, turnRaw, stepRaw));
+    }
+    return entries;
+  }
+  if (type !== 'chunkrow/tool-call-chunks') {
+    return entries;
+  }
+  const args: string[] = [];
+  const argsRaw: Object[] | undefined = asArray(data['args']);
+  if (argsRaw !== undefined) {
+    for (const item of argsRaw) {
+      if (typeof item === 'string') {
+        args.push(item);
+      }
+    }
+  }
+  let currentTime: number = time;
+  for (let offset = 0; offset < args.length; offset++) {
+    if (offset > 0 && offset - 1 < dt.length) {
+      currentTime += dt[offset - 1];
+    }
+    const chunk: Record<string, Object> = {
+      'type': 'tool-call-delta',
+      'argumentsDelta': args[offset]
+    };
+    if (typeof indexRaw === 'number') {
+      chunk['index'] = indexRaw;
+    }
+    const id: string = jsonStr(data, 'id', '');
+    if (id.length > 0) {
+      chunk['id'] = id;
+    }
+    const name: string = jsonStr(data, 'name', '');
+    if (name.length > 0) {
+      chunk['name'] = name;
+    }
+    entries.push(chunkEntry(chunk, seq + offset, currentTime, turnRaw, stepRaw));
+  }
+  return entries;
+}
+
+function chunkEntry(chunk: Record<string, Object>, seq: number, time: number,
+  turnRaw: Object | undefined, stepRaw: Object | undefined): HarnessHistoryEntry {
+  const data: Record<string, Object> = { 'chunk': chunk };
+  if (typeof turnRaw === 'number') {
+    data['turn'] = turnRaw;
+  }
+  if (typeof stepRaw === 'number') {
+    data['step'] = stepRaw;
+  }
+  const event: HarnessSessionEvent = new HarnessSessionEvent();
+  event.type = 'assistant/chunk';
+  event.seq = seq;
+  event.time = time;
+  event.data = data;
+  const entry: HarnessHistoryEntry = new HarnessHistoryEntry();
+  entry.event = event;
+  return entry;
+}
+
+function assistantStreamBaseline(value: Object | undefined): AssistantStreamState | undefined {
+  const root: Record<string, Object> | undefined = asRecord(value);
+  if (root === undefined) {
+    return undefined;
+  }
+  const attempt: Record<string, Object> | undefined = asRecord(root['activeAttempt']);
+  return attempt !== undefined ? assistantStreamAttempt(attempt, 0) : undefined;
+}
+
+function assistantStreamAttempt(value: Record<string, Object>, defaultNextIndex: number):
+  AssistantStreamState | undefined {
+  const nextIndexRaw: Object | undefined = value['nextIndex'];
+  const nextIndex: number = typeof nextIndexRaw === 'number' ? nextIndexRaw : defaultNextIndex;
+  const startedAfterSeq: Object | undefined = value['startedAfterSeq'];
+  const turnRaw: Object | undefined = value['turn'];
+  const stepRaw: Object | undefined = value['step'];
+  if (typeof startedAfterSeq !== 'number' || typeof turnRaw !== 'number'
+    || typeof stepRaw !== 'number') {
+    return undefined;
+  }
+  const state: AssistantStreamState = new AssistantStreamState();
+  state.attemptId = jsonStr(value, 'attemptId', '');
+  state.startedAfterSeq = startedAfterSeq;
+  state.turn = turnRaw;
+  state.step = stepRaw;
+  state.nextIndex = nextIndex;
+  if (state.attemptId.length === 0) {
+    return undefined;
+  }
+  return state;
+}

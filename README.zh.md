@@ -49,6 +49,50 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
+## 这个仓库是什么（鸿蒙移植版）
+
+本仓库是 [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的 **HarmonyOS 7.0 移植分支**：
+上游的插件、服务端、协议与工具链保持跟进（当前已对齐上游 `v0.6.4`），另加一个**原生鸿蒙客户端**（纯 ArkTS + ArkWeb 内 WebRTC 数据面）。
+
+- **客户端源码**：仓库根 [`harmony/`](harmony/)，HarmonyOS 7.0（API 26）及以上，DevEco Studio 构建
+- **能力**：账号授权登录、多主机列表与别名、端到端加密（Noise IK）、多会话、会话搜索/归档/置顶、
+  图片与语音输入、斜杠命令、插话与中断、模型与推理等级、权限预设、定时任务、工作区分组、
+  断点驱动的双栏/三栏（平板与 PC 2in1）、中英双语、深浅色与主题色、桌宠
+- **稳定性工程**：链路日志落盘（`link.log`，重启保留）、掉线自动重连与会话流重开（含服务器 4009 重启场景）、
+  静默探测、长时任务保活（熄屏不断）、主机未上线时 5 秒快重试、局域网直连（LAN/P2P）优先，中继/TURN 兜底
+- **构建与自测**：
+  ```sh
+  harmony/scripts/build-local.sh                     # 用本机签名构建（签名材料不入库）
+  harmony/scripts/smoke.sh 192.168.3.145:34521       # 构建→装机→拉起→等「已连接 · lan」→崩溃检查
+  node harmony/scripts/check-i18n.mjs                # 校验每个 UI 文案都有英文
+  ```
+- **文档**：[客户端说明](docs/harmony-client.md) · [局域网直连与链路日志](docs/harmony-link-log.md) ·
+  [2026-11-09 里程碑](docs/harmony-milestone-2026-11-09.md) · [发行说明](docs/release-0.17.86.md)
+- **上游同步**：`git remote add upstream https://github.com/liguobao/ds-harness-remote.git` 后 `git fetch upstream && git merge upstream/main`
+
+> 上游与本仓库的关系：上游是通用方案（Android/iOS/Web/桌面插件），本仓库只是多提供了一个鸿蒙原生客户端实现，不改上游协议。
+
+### 为什么有时显示「中继 / TURN」而不是「LAN」
+
+直连（LAN/P2P）要求**客户端与主机连的是同一个中继服务器、并且两端网络可达**。常见情况：
+
+| 现象 | 原因 |
+|---|---|
+| 同网段却显示 TURN | 主机插件连的是公网服务器（`dsh.r2049.cn`），客户端也连公网，走 ICE 时没打通直连候选 |
+| 局域网服务器上有两台同平台主机 | 旧身份没清（后台主机列表里可删除），连错对象就会走远路 |
+| 换服务器后立刻报「授权已失效」 | 凭据按 `deviceId + serverUrl` 绑定，换服务器必须重新登录一次 |
+
+排查入口：点顶栏传输徽标 → **连接详情**（传输、握手分段耗时、回落原因、测延迟）；更细的逐条决策在
+`link.log`（「诊断」面板可看最近行、可一键存文件后用 `hdc file recv` 拉走）。
+
+### 界面预览（手机实机，已脱敏）
+
+| 会话抽屉 | 新会话 · 局域网直连 | 输入坞 |
+| --- | --- | --- |
+| ![会话抽屉](docs/images/harmony/sessions-drawer.jpg) | ![新会话](docs/images/harmony/chat-empty.jpg) | ![输入坞](docs/images/harmony/composer.jpg) |
+
+> 顶栏 `LAN` 徽标表示当前走局域网直连；截图里的会话标题、工作区名、快捷提示词均已模糊处理。
+
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
@@ -58,6 +102,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
 | DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: DeepSeek Harness 的 Android 客户端。手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
+| Harmony&nbsp;7.* | 鸿蒙原生 App | 已支持 | 源码见 [harmony/](harmony/)，用 DevEco Studio 在 HarmonyOS 7.0（API 26）及以上构建；支持账号授权登录、在线主机与设备改名、端到端加密、多会话、断线自愈与局域网直连（LAN/P2P）。构建到装机见 [HarmonyOS 客户端文档](docs/harmony-client.md)，里程碑记录见 [2026-11-09 节点](docs/harmony-milestone-2026-11-09.md) |
 | 浏览器扩展 | Chrome | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
 | dsh-TUI | 纯终端 CLI | 计划中 | 本版本不包含该集成，将在后续版本单独提供；安装脚本不会为它自动创建 Web 服务 |
 | Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后一键安装。

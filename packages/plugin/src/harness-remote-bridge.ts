@@ -191,6 +191,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'userQuestions/attachWait',
   'claudeCodeMods/watchBand',
   'claudeCodeMods/pressBand',
+  'speech/catalog',
+  'speech/transcribe',
   'workspaceFiles/list',
   'workspaceFiles/stat',
   'workspaceFiles/read',

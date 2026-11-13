@@ -48,6 +48,37 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 - Android、iOS、Web、ネイティブ DSH 向けのクライアントを提供しています。
 - 複数のクライアントから同じ Harness Host に同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
 
+## このリポジトリについて（HarmonyOS 移植版）
+
+本リポジトリは [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) の **HarmonyOS 7.0 移植版**です。
+上流のプラグイン・サーバー・プロトコル・ツールチェーンは追随し（現在は上流 `v0.6.4` に整列）、
+その上に**ネイティブな HarmonyOS クライアント**を追加しています（純 ArkTS + ArkWeb 内の WebRTC）。
+
+- **クライアントのソース**: [`harmony/`](harmony/) · HarmonyOS 7.0（API 26）以降、DevEco Studio でビルド
+- **機能**: アカウント認可ログイン、複数ホストと別名、エンドツーエンド暗号化（Noise IK）、複数セッション、
+  セッション検索・アーカイブ・ピン留め、画像と音声入力、スラッシュコマンド、割り込みと中断、
+  モデルと推論レベル、権限プリセット、スケジュールタスク、ワークスペース分類、ブレークポイント駆動の 2/3 ペイン
+  （タブレット・2-in-1）、中国語/英語 UI、ライト/ダークとテーマ色、デスクペット
+- **安定性**: リンクログの永続化（`link.log`、再起動後も保持）、自動再接続とセッションストリーム再開、
+  無音検知、長時間タスクによるキープアライブ（画面オフでも切断しない）、LAN/P2P 直結を優先しリレー/TURN にフォールバック
+- **ビルドとテスト**:
+  ```sh
+  harmony/scripts/build-local.sh                     # ローカル署名でビルド（署名素材はリポジトリに入れない）
+  harmony/scripts/smoke.sh 192.168.3.145:34521       # ビルド → インストール → 起動 → 接続待ち → クラッシュ検査
+  node harmony/scripts/check-i18n.mjs                # UI 文言に英語があるか検証
+  ```
+- **ドキュメント**: [クライアントガイド](docs/harmony-client.md) · [LAN とリンクログ](docs/harmony-link-log.md) ·
+  [2026-11-09 マイルストーン](docs/harmony-milestone-2026-11-09.md) · [リリースノート](docs/release-0.17.86.md)
+- **上流への追随**: `git fetch upstream && git merge upstream/main`
+
+### 画面プレビュー（実機・マスキング済み）
+
+| セッション一覧 | 新規セッション · LAN | 入力ドック |
+| --- | --- | --- |
+| ![sessions drawer](docs/images/harmony/sessions-drawer.jpg) | ![new session](docs/images/harmony/chat-empty.jpg) | ![composer](docs/images/harmony/composer.jpg) |
+
+> `LAN` バッジはローカルネットワーク直結を意味します。セッション名・ワークスペース名・定型プロンプトはぼかし処理済みです。
+
 ## 対応クライアント
 
 | クライアント | 形式 | 状態 | 備考 |
@@ -55,6 +86,7 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 | DSH Desktop プラグイン | Remote サイドバー | 対応 | `ds-harness-remote@0.6.4` をインストールします。このパソコンを Host としても利用できます |
 | Web | ブラウザーページ | 対応 | [https://dsh.r2049.cn](https://dsh.r2049.cn) を開きます。ネイティブの Harness UI を再利用します |
 | Android | ネイティブアプリ | 対応 | [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から APK をダウンロードできます。[Android ガイド](apps/android/README.md)を参照してください |
+| Harmony&nbsp;7.* | ネイティブアプリ | 対応 | ソースは [harmony/](harmony/) です。HarmonyOS 7.0（API 26）以降と DevEco Studio でビルドします。詳細は [HarmonyOS ガイド](docs/harmony-client.md) を参照してください |
 | DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: DeepSeek Harness の Android クライアント。スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
 | ブラウザー拡張機能 | Chrome | アクセス入口のみ | ログイン済み Web の認可を独立したデバイス認証情報に交換し、オンラインの Host を一覧表示して同一オリジンの Remote Web を開きます。拡張機能自体に会話 UI はありません |
