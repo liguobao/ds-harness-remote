@@ -43,6 +43,15 @@ export function harnessSessionGeneration(version: string | undefined): HarnessSe
   // 0.2.0 retains the existing Remote carrier; its on-disk format is unrelated.
   return major === 0 && ((minor === 1 && patch >= 5) || minor === 2) ? 'v3' : 'legacy'
 }
+/** True on DSH 0.2.x+ hosts whose Session Controller emits `api-session/*` events. */
+export function isLiveSessionEventsHarnessVersion(version: string | undefined): boolean {
+  if (version === undefined) return false
+  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim())
+  if (match === null) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 0 || (major === 0 && minor >= 2)
+}
 
 /** Read a candidate manifest, ignoring every package that is not the Harness CLI. */
 async function readHarnessManifestVersion(manifestPath: string): Promise<string | undefined> {

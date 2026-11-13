@@ -4,12 +4,13 @@ import { WorkspaceUploadHost } from './workspace-upload.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
-import { createEvent, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
+import { createEvent, REMOTE_SESSION_EVENTS_CAPABILITY, type RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import { ConnectionController } from './connection-controller.js'
 import type { ResolvedConfig } from './config.js'
 import type { HostIdentity, IdentityStore } from './identity-store.js'
 import {
   harnessSessionGeneration,
+  isLiveSessionEventsHarnessVersion,
   readHarnessDistributionVersion,
 } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
@@ -602,7 +603,12 @@ export class HostPluginRuntime {
     } catch {
       throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
     }
-    if (result.ok) return capabilities
+    if (result.ok) {
+      if (isLiveSessionEventsHarnessVersion(this.harnessVersion) && await this.probeLiveSessionEvents(gateway)) {
+        capabilities.push(REMOTE_SESSION_EVENTS_CAPABILITY)
+      }
+      return capabilities
+    }
     if (result.error.code === 'gateway/service-unavailable') {
       throw new RpcError('CONNECTION_FAILED', 'The Host Session API is not ready.', undefined, true)
     }
@@ -614,6 +620,28 @@ export class HostPluginRuntime {
       this.logger.warn('Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.')
     }
     return capabilities.filter(value => !value.startsWith('harness.remote.') && value !== 'harness.terminal.v1')
+  }
+
+  private async probeLiveSessionEvents(gateway: LocalTypertGateway): Promise<boolean> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2_000)
+    let iterator: AsyncIterator<unknown> | undefined
+    try {
+      const stream = await gateway.open('$events', { args: {} }, controller.signal)
+      iterator = stream[Symbol.asyncIterator]()
+      const first = await iterator.next()
+      return !first.done
+        && typeof first.value === 'object'
+        && first.value !== null
+        && !Array.isArray(first.value)
+        && (first.value as { type?: unknown }).type === 'ready'
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      await iterator?.return?.().catch(() => undefined)
+    }
   }
 
   private hostWorkspaceTypes(): RemoteWorkspaceTypeDescription[] {

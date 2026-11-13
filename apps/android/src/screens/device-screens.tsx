@@ -3,6 +3,7 @@ import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ActivityIndicator, Alert, BackHandler, StyleSheet, Text, View } from 'react-native'
 import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
+import { shouldPollSessionStatus } from '../state/session-catalog-commands'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice } from '../types'
 import {
   BlurHeaderFrame,
@@ -41,15 +42,19 @@ function confirmDeviceUnbind(device: RemoteDevice): Promise<boolean> {
 
 const SWIPE_ACTION_WIDTH = 96
 
-/** Keep visible session lists honest: refresh execution status while mounted. */
+/**
+ * Hosts without `remote.session.events.v1` poll full `session/list` every 8s while mounted.
+ * Event-capable Hosts update running/activity/catalog incrementally from `$events` + `session/control`.
+ */
 export function useLiveSessionStatus(enabled = true): void {
   const phase = useAppStore(state => state.connection.phase)
+  const hostSessionEvents = useAppStore(state => state.hostSessionEvents)
   useEffect(() => {
-    if (!enabled || phase !== 'connected') return
+    if (!shouldPollSessionStatus({ enabled, phase, hostSessionEvents })) return
     void useAppStore.getState().refreshSessionStatus()
     const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
     return () => clearInterval(timer)
-  }, [phase, enabled])
+  }, [phase, enabled, hostSessionEvents])
 }
 
 const connectionStages = ['authenticating', 'transport', 'secure', 'loading'] as const satisfies readonly ConnectionStage[]

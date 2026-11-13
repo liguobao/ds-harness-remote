@@ -1526,3 +1526,147 @@ describe('HarnessAlphaClient file attachments', () => {
     ])
   })
 })
+
+describe('HarnessAlphaClient live session events and control changes', () => {
+  it('recognizes remote.session.events.v1 capability in probeRemoteHostFeatures', async () => {
+    const transport = new LoopbackTransport()
+    const client = new RemoteClientCore(transport)
+    await client.connect()
+    const probing = probeRemoteHostFeatures(client)
+    const request = JSON.parse(new TextDecoder().decode(transport.sent[0]!))
+
+    transport.push(
+      encodeMessage(
+        createRpcResponse(request.id, {
+          capabilities: ['harness.remote.v3', 'remote.session.events.v1'],
+        }),
+      ),
+    )
+
+    await expect(probing).resolves.toMatchObject({
+      remoteGateway: true,
+      sessionFormat: 3,
+      sessionEvents: true,
+    })
+    await cleanupContract1()
+  })
+
+  it('forwards api-session/* emit frames and DSH 0.2.2 projection changes without false initial baseline pulls', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, { capabilities: ['harness.remote.v3', 'remote.session.events.v1'] }, frame => frames.push(frame))
+
+    client.start()
+    await vi.waitFor(() => expect(core.streamIdFor('$events')).toBeTruthy())
+    await vi.waitFor(() => expect(core.streamIdFor('session/control')).toBeTruthy())
+    const eventsStreamId = core.streamIdFor('$events')
+    const controlStreamId = core.streamIdFor('session/control')
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'baseline',
+          value: {
+            projections: {
+              s1: { asOfSeq: 1, values: { title: 'Initial' } },
+            },
+          },
+        },
+      },
+    })
+    await vi.waitFor(() => expect(frames.some(f => f.payload.type === 'session/projection')).toBe(true))
+    expect(frames.some(f => f.payload.type === 'session/catalog-changed')).toBe(false)
+
+    const originalRpc = core.rpc.bind(core)
+    vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+      if (method === 'harness.remote.call' && (params as any).endpoint === 'session/list') {
+        return { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 100, running: false, blank: false }] } }
+      }
+      return await originalRpc(method, params)
+    })
+    await client.sessionList()
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'projection',
+          sessionId: 's1',
+          seq: 2,
+          changes: [{ key: 'title', val: 'Renamed' }],
+        },
+      },
+    })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        rpcId: '',
+        payload: { type: 'session/projection', sessionId: 's1', key: 'title', value: 'Renamed', seq: 2 },
+      })
+    })
+    expect(frames.some(f => f.payload.type === 'session/catalog-changed')).toBe(false)
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: controlStreamId,
+        hasValue: true,
+        value: {
+          type: 'projection',
+          sessionId: 's-unknown',
+          seq: 1,
+          changes: [{ key: 'title', val: 'From Reconnect' }],
+        },
+      },
+    })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        rpcId: '',
+        payload: { type: 'session/catalog-changed', reason: 'control-projection', sessionId: 's-unknown' },
+      })
+    })
+
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId: eventsStreamId,
+        hasValue: true,
+        value: {
+          type: 'emit',
+          event: 'api-session/added',
+          args: [{ sessionId: 's2', updatedAt: 200, running: false, blank: true, projections: { asOfSeq: 0, values: { title: 'Child' } } }],
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/status', args: ['s2', true] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/activity', args: ['s2', 250] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/error', args: ['s2', 'Turn failed'] } },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: { streamId: eventsStreamId, hasValue: true, value: { type: 'emit', event: 'api-session/removed', args: ['s2'] } },
+    })
+
+    await vi.waitFor(() => {
+      expect(frames.some(f => f.payload.type === 'session/added' && (f.payload.session as any).title === 'Child' && f.payload.known === false)).toBe(true)
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/status', sessionId: 's2', running: true } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/activity', sessionId: 's2', updatedAt: 250 } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/error', sessionId: 's2', message: 'Turn failed' } })
+      expect(frames).toContainEqual({ rpcId: '', payload: { type: 'session/removed', sessionId: 's2', existed: true } })
+    })
+
+    await client.close()
+  })
+})

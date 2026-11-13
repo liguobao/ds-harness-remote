@@ -27,6 +27,7 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private sessionEventsSupported = false
   private pluginRouteSupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
@@ -142,7 +143,8 @@ export class AndroidRemoteConnection {
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
-        this.codexAvailable = false
+        this.sessionEventsSupported = false
+    this.codexAvailable = false
         this.cursor = undefined
         this.acpBackends.clear()
         this.sessionTools = undefined
@@ -218,6 +220,7 @@ export class AndroidRemoteConnection {
   }
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
+    this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -306,6 +309,10 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
+  }
+
+  hasSessionEvents(): boolean {
+    return this.sessionEventsSupported
   }
 
   hasCodex(): boolean {
