@@ -332,7 +332,7 @@ export function ChatScreen({
   useEffect(() => {
     if (connection.phase !== 'connected') uploadControllerRef.current?.abort()
   }, [connection.phase])
-  const { canAttachImages, attachmentPicking, pickImages, takePhoto, pickFiles } = useChatAttachments({
+  const { attachmentPicking, pickImages, takePhoto, pickFiles } = useChatAttachments({
     session, memoryKey, images, setImages, stagedFiles, setStagedFiles, sessionGenerationRef,
   })
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -1375,7 +1375,7 @@ export function ChatScreen({
 
       <ChatActionMenu
         visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
-        canAttachImages={canAttachImages} attachmentPicking={attachmentPicking}
+        attachmentPicking={attachmentPicking}
         takePhoto={takePhoto} pickImages={pickImages} pickFiles={pickFiles}
         workspaceLabel={workspaceLabel} modeLabel={modeLabel}
         supportsModeSelection={supportsModeSelection} agentPresetSelecting={agentPresetSelecting}

@@ -1,3 +1,4 @@
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => undefined }))
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdaptiveTransportOptions } from '@dsh-remote/webrtc'

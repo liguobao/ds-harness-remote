@@ -1,3 +1,4 @@
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => undefined }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { RemoteSession, WorkspaceView } from '../src/types'

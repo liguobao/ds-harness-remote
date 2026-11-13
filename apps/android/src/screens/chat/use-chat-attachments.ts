@@ -64,12 +64,11 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
 
   const pickImage = async (source: 'camera' | 'library') => {
     if (session === undefined) return
-    if (source === 'camera' && !canAttachImages) return
 
     const limits = sessionImageLimits(session)
     const maxAllowed = limits?.maxImagesPerMessage ?? 4
     const remaining = Math.max(0, maxAllowed - images.length)
-    if (source === 'camera' && remaining === 0) {
+    if (source === 'camera' && canAttachImages && remaining === 0) {
       Alert.alert(strings.chat.imageLimitTitle, strings.chat.tooManyImages(maxAllowed))
       return
     }
@@ -86,9 +85,9 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
         }
       }
       const result = source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 1, base64: true })
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: false, quality: 1, base64: canAttachImages })
         : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: canAttachImages ? ['images', 'videos'] : ['videos'],
+          mediaTypes: ['images', 'videos'],
           allowsMultipleSelection: true,
           orderedSelection: true,
           allowsEditing: false,
@@ -104,15 +103,17 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
       const direct = isDirectTransportMode(transportMode)
 
       const pickedImages: PromptImage[] = []
-      const pickedVideos: StagedFile[] = []
+      const pickedFiles: StagedFile[] = []
 
       for (const asset of result.assets) {
         const isVideo = asset.type === 'video'
           || (asset.mimeType?.toLowerCase().startsWith('video/') ?? false)
           || (asset.fileName ? isVideoFile(asset.fileName, asset.mimeType) : false)
 
-        if (isVideo) {
-          const name = sanitizeUploadFileName(asset.fileName, asset.mimeType ?? 'video/mp4', asset.uri)
+        // Sessions without direct image input can still receive images as workspace files.
+        if (isVideo || !canAttachImages) {
+          const mimeType = asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg')
+          const name = sanitizeUploadFileName(asset.fileName, mimeType, asset.uri)
           const realSize = resolveDiskFileSize(asset.uri, asset.fileSize)
           if (realSize <= 0) {
             Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.fileSizeUnavailable(name))
@@ -125,22 +126,16 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
             )
             continue
           }
-          pickedVideos.push({
+          pickedFiles.push({
             id: makeStagedId(),
             name,
             size: realSize,
-            mimeType: asset.mimeType ?? 'video/mp4',
+            mimeType,
             uri: asset.uri,
             ...(typeof asset.duration === 'number' && Number.isFinite(asset.duration) && asset.duration > 0
               ? { durationMs: asset.duration }
               : {}),
           })
-          continue
-        }
-
-        if (!canAttachImages) {
-          const label = asset.fileName ?? strings.chat.unnamedImage
-          Alert.alert(strings.chat.imageLimitTitle, strings.chat.unsupportedImage(label))
           continue
         }
 
@@ -179,13 +174,13 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
         }
       }
 
-      if (pickedVideos.length > 0) {
-        setStagedFiles(current => [...current, ...pickedVideos])
+      if (pickedFiles.length > 0) {
+        setStagedFiles(current => [...current, ...pickedFiles])
       }
     } catch {
       Alert.alert(
         strings.chat.imagePickerFailedTitle,
-        canAttachImages ? strings.chat.imagePickerFailedBody : strings.chat.videoPickerFailedBody,
+        strings.chat.imagePickerFailedBody,
       )
     } finally {
       setPickingImages(false)
@@ -225,11 +220,6 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
         const ext = rawName.split(/[?#]/, 1)[0]?.split('.').at(-1)?.toLowerCase()
         const isImage = asset.mimeType?.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext ?? '')
 
-        if (isImage && !canAttachImages) {
-          Alert.alert(strings.chat.imageLimitTitle, strings.chat.unsupportedImage(rawName))
-          continue
-        }
-
         const fileObj = new File(asset.uri)
         const realSize = resolveDiskFileSize(asset.uri, asset.size)
         if (realSize <= 0) {
@@ -237,7 +227,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
           continue
         }
 
-        if (isImage) {
+        if (isImage && canAttachImages) {
           const maxAllowed = limits?.maxImagesPerMessage ?? 4
           if (stagedImagesCount >= maxAllowed) {
             Alert.alert(strings.chat.imageLimitTitle, strings.chat.tooManyImages(maxAllowed))
@@ -336,7 +326,6 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
   }
 
   return {
-    canAttachImages,
     attachmentPicking: pickingImages || pickingFiles,
     pickImages: () => pickImage('library'),
     takePhoto: () => pickImage('camera'),

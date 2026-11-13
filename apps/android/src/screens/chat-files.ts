@@ -148,6 +148,7 @@ async function abortUploadQuietly(rpc: RpcCaller, sessionId: string, uploadId: s
 interface ChunkReader {
   totalBytes: number
   read(offset: number, length: number): Promise<Uint8Array>
+  readBase64?(offset: number, length: number): Promise<string>
   close(): Promise<void> | void
 }
 
@@ -168,11 +169,20 @@ async function openFileChunkReader(file: StagedFile, signal?: AbortSignal): Prom
       const fsMod = await import('expo-file-system')
       if (typeof fsMod.File === 'function' && fsMod.FileMode?.ReadOnly !== undefined) {
         const localFile = new fsMod.File(file.uri)
+        // Native bounded range encoding avoids copying every byte through Hermes.
+        const legacy = file.uri.startsWith('file://')
+          ? await import('expo-file-system/legacy').catch(() => undefined)
+          : undefined
         const handle = localFile.open(fsMod.FileMode.ReadOnly)
         const size = handle.size ?? localFile.size ?? file.size
         if (typeof size === 'number' && Number.isFinite(size) && size >= 0) {
           return {
             totalBytes: size,
+            ...(legacy ? {
+              readBase64: (offset: number, length: number) => legacy.readAsStringAsync(file.uri, {
+                encoding: legacy.EncodingType.Base64, position: offset, length,
+              }),
+            } : {}),
             async read(_offset, length) {
               const chunk = handle.readBytes(length)
               if (chunk.byteLength === 0 && length > 0) {
@@ -247,6 +257,10 @@ export async function uploadStagedFileToWorkspace(
   const uploadId = generateUploadId()
   let committed = false
   let opened = false
+  // Keep at most 256 KiB of decoded payload in flight. Sends remain in offset order.
+  const pending: Promise<{ end: number; error?: unknown; failed: boolean }>[] = []
+  let chunkFailed = false
+  let chunkError: unknown
 
   try {
     throwIfAborted(signal)
@@ -259,32 +273,44 @@ export async function uploadStagedFileToWorkspace(
     opened = true
 
     if (!isRecord(openRes)) throw new Error('workspace.upload.open returned a non-object')
-    const chunkBytes = typeof openRes.chunkBytes === 'number' && openRes.chunkBytes > 0
-      ? openRes.chunkBytes
-      : UPLOAD_CHUNK_BYTES
+    const chunkBytes = openRes.chunkBytes === undefined ? UPLOAD_CHUNK_BYTES : openRes.chunkBytes
+    if (typeof chunkBytes !== 'number' || !Number.isSafeInteger(chunkBytes)
+      || chunkBytes < 1 || chunkBytes > UPLOAD_CHUNK_BYTES) throw new Error('Invalid upload chunk size')
 
     onProgress?.(0, totalBytes)
 
     let offset = 0
-    while (offset < totalBytes) {
-      throwIfAborted(signal)
-      const sliceLength = Math.min(chunkBytes, totalBytes - offset)
-      const chunkBytesView = await reader.read(offset, sliceLength)
-      if (chunkBytesView.byteLength === 0) {
-        throw new Error(`Unexpected empty chunk while reading ${file.name}`)
+    while (offset < totalBytes || pending.length > 0) {
+      // Read serially and enqueue in order; overlap reads/encoding with RPC round trips.
+      while (offset < totalBytes && pending.length < 4) {
+        throwIfAborted(signal)
+        if (chunkFailed) throw chunkError
+        const sliceLength = Math.min(chunkBytes, totalBytes - offset)
+        const data = reader.readBase64
+          ? await reader.readBase64(offset, sliceLength)
+          : bytesToBase64(await reader.read(offset, sliceLength))
+        const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+        const bytesRead = data.length / 4 * 3 - padding
+        if (bytesRead !== sliceLength) throw new Error(`Unexpected chunk length while reading ${file.name}`)
+        throwIfAborted(signal)
+        if (chunkFailed) throw chunkError
+        const end = offset + bytesRead
+        // Attach rejection handling immediately, including for later chunks in the window.
+        const request = rpc('workspace.upload.chunk', { sessionId, uploadId, offset, data }, signal)
+          .then(result => {
+            if (!isRecord(result)) throw new Error('workspace.upload.chunk returned a non-object')
+            return { end, failed: false }
+          }).catch(error => {
+            chunkFailed = true
+            chunkError = error
+            return { end, failed: true, error }
+          })
+        pending.push(request)
+        offset = end
       }
-      throwIfAborted(signal)
-      const chunkData = bytesToBase64(chunkBytesView)
-
-      const chunkRes = await rpc('workspace.upload.chunk', {
-        sessionId,
-        uploadId,
-        offset,
-        data: chunkData,
-      }, signal)
-      if (!isRecord(chunkRes)) throw new Error('workspace.upload.chunk returned a non-object')
-      offset += chunkBytesView.byteLength
-      onProgress?.(offset, totalBytes)
+      const acknowledged = await pending.shift()!
+      if (acknowledged.failed) throw acknowledged.error
+      onProgress?.(acknowledged.end, totalBytes)
     }
 
     throwIfAborted(signal)
@@ -302,6 +328,8 @@ export async function uploadStagedFileToWorkspace(
 
     return { name, path, bytes: bytesCount }
   } catch (error) {
+    // Settle the bounded window before aborting; never commit after a failed chunk.
+    await Promise.all(pending)
     if (opened && !committed) {
       await abortUploadQuietly(rpc, sessionId, uploadId)
     }

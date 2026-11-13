@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => undefined }))
 import { NoiseIkSession, createNoisePrologue, generateKeyPair } from '@dsh-remote/crypto'
 import { SecureMessageCodec } from '@dsh-remote/protocol'
 import type { SecureHandshakeTransport } from '@dsh-remote/webrtc'

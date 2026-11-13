@@ -1,0 +1,11 @@
+{
+  "platforms": [
+    "android"
+  ],
+  "android": {
+    "modules": [
+      "io.github.liguobao.dshremote.transport.RemoteChaChaPolyModule",
+      "io.github.liguobao.dshremote.transport.RemoteWebRtcBinaryModule"
+    ]
+  }
+}

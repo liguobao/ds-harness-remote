@@ -7,6 +7,7 @@ import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
+import { nativeRtcFactory } from './native-rtc-binary'
 import { BotRemoteClient } from './bot-catalog'
 import { compactionStore } from './compaction-store'
 
@@ -73,6 +74,7 @@ export class AndroidRemoteConnection {
     let lastTransport: 'lan' | 'p2p' | 'turn' | 'relay' | undefined
     const createTransport = (relayOnly: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
       role: 'client',
+      rtcFactory: nativeRtcFactory(),
       deviceId: identity.deviceId,
       accessToken,
       refreshAccessToken: options.refreshAccessToken,
