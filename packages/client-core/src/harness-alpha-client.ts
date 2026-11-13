@@ -845,9 +845,15 @@ export class HarnessAlphaClient {
     }
   }
 
-  async sessionPrompt(sessionId: string, text: string, requestId = createRemoteId(), images: HarnessPromptImage[] = []): Promise<void> {
+  /** Stage exact file bytes in the receiving Session; only its receipt may be submitted. */
+  async sessionUploadFile(sessionId: string, data: string, name?: string): Promise<{ receiptId: string; file: unknown }> {
+    return this.callValue('fileUploads/upload', { agentId: sessionId, request: { data, ...(name === undefined ? {} : { name }) } })
+  }
+
+  async sessionPrompt(sessionId: string, text: string, requestId = createRemoteId(), images: HarnessPromptImage[] = [], files: { receiptId: string }[] = []): Promise<void> {
     const timeZone = clientTimeZone()
     const content = [
+      ...files.map(file => ({ type: 'file' as const, receiptId: file.receiptId })),
       ...(text.length === 0 ? [] : [{ type: 'text' as const, text }]),
       ...images.map(image => ({
         type: 'image' as const,

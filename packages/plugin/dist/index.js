@@ -79204,14 +79204,20 @@ var callSchema = external_exports.object({
     }
   })
 }).strict();
+var uploadFields = {
+  sessionId: external_exports.string().min(1).max(512),
+  name: external_exports.string().max(512).optional(),
+  data: external_exports.string().max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine((value) => value.length % 4 === 0)
+};
 var imageUploadCallSchema = external_exports.object({
   route: external_exports.literal("api/session/uploadFileBinary"),
-  body: external_exports.object({ endpoint: external_exports.literal("image"), payload: external_exports.object({
-    sessionId: external_exports.string().min(1).max(512),
-    mediaType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-    name: external_exports.string().max(512).optional(),
-    data: external_exports.string().min(4).max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine((value) => value.length % 4 === 0)
-  }).strict() }).strict()
+  body: external_exports.discriminatedUnion("endpoint", [
+    external_exports.object({ endpoint: external_exports.literal("image"), payload: external_exports.object({
+      ...uploadFields,
+      mediaType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"])
+    }).strict() }).strict(),
+    external_exports.object({ endpoint: external_exports.literal("file"), payload: external_exports.object(uploadFields).strict() }).strict()
+  ])
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
 var PluginRouteBridge = class {
@@ -79506,7 +79512,7 @@ var ClientControl = class {
           throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
         }
         if (value.route === "api/session/uploadFileBinary" && (typeof value.targetDeviceId !== "string" || this.context.activeRemote()?.target.deviceId !== value.targetDeviceId)) {
-          throw new ClientModeError("REMOTE_NOT_CONNECTED", "The selected image upload Host changed. Select the image again.");
+          throw new ClientModeError("REMOTE_NOT_CONNECTED", "The selected upload Host changed. Select the file again.");
         }
         if (!isRecord5(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");
         return ok(await this.context.pluginRoute(value.route, value.body, signal));
@@ -88231,7 +88237,7 @@ var ClientModeRuntime = class {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The connected Host cannot forward plugin routes.");
     }
     if (route === "api/session/uploadFileBinary") {
-      const result = await this.remoteTypertGateway(remote).dispatch("remoteImages/upload", { args: body }, signal);
+      const result = await this.remoteTypertGateway(remote).dispatch("remoteUploads/upload", { args: body }, signal);
       if (!result.ok) throw new ClientModeError(result.error.code, result.error.message);
       return result.value;
     }
@@ -100943,10 +100949,10 @@ var commandExecuteArgsSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
   // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
-  // renamed it to `submittedAttachments`. Only empty arrays are exposed by
-  // the Remote bridge; command attachments are deliberately out of scope.
+  // renamed it to `submittedAttachments`. Current Hosts resolve opaque file
+  // receipts in the receiving Session; legacy image arguments stay empty.
   images: external_exports.array(external_exports.never()).length(0).optional(),
-  submittedAttachments: external_exports.array(external_exports.never()).length(0).optional()
+  submittedAttachments: external_exports.array(external_exports.object({ type: external_exports.literal("file"), receiptId: external_exports.string().min(1).max(512) }).strict()).max(32).optional()
 }).strict().superRefine((value, context) => {
   if (value.images !== void 0 && value.submittedAttachments !== void 0) {
     context.addIssue({
@@ -101025,6 +101031,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "schedule/deliveryLimits",
   "schedule/edit",
   "schedule/run",
+  "fileUploads/upload",
   "session/attachment",
   "session/cancel",
   "session/canOpenWorkspacePath",
@@ -101124,7 +101131,7 @@ var PUBLIC_SCHEDULE_ERRORS = {
 };
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadImage) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadAttachment) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -101133,7 +101140,7 @@ var HarnessRemoteBridge = class {
     this.codexWorkspace = codexWorkspace;
     this.resolveWorkspaceRoot = resolveWorkspaceRoot;
     this.schedule = schedule;
-    this.uploadImage = uploadImage;
+    this.uploadAttachment = uploadAttachment;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
@@ -101144,9 +101151,9 @@ var HarnessRemoteBridge = class {
   terminalCarrier;
   async call(input4) {
     const params = callSchema3.parse(input4);
-    if (params.endpoint === "remoteImages/upload" && this.uploadImage !== void 0) {
+    if ((params.endpoint === "remoteUploads/upload" || params.endpoint === "remoteImages/upload") && this.uploadAttachment !== void 0) {
       const payload = external_exports.object({ args: external_exports.unknown() }).strict().parse(params.payload);
-      return { ok: true, value: await this.uploadImage(payload.args) };
+      return { ok: true, value: await this.uploadAttachment(payload.args) };
     }
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
@@ -101908,6 +101915,9 @@ function requiresWorkspaceChangePath(version2) {
 }
 async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) {
   const parsed = commandExecutePayloadSchema.parse(payload);
+  if (harnessSessionGeneration(harnessVersion) !== "v3" && (parsed.args.submittedAttachments?.length ?? 0) > 0) {
+    throw new RpcError("METHOD_NOT_ALLOWED", "This Host does not support command file receipts.");
+  }
   const legacyPayload = {
     args: {
       agentId: parsed.args.agentId,
@@ -102537,8 +102547,8 @@ var HostPluginRuntime = class {
     });
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
-      const imageDispatcher = this.pluginRoutes?.(peerGateway?.peer);
-      const imageBridge = imageDispatcher === void 0 ? void 0 : new PluginRouteBridge(imageDispatcher, this.logger);
+      const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer);
+      const uploadBridge = uploadDispatcher === void 0 ? void 0 : new PluginRouteBridge(uploadDispatcher, this.logger);
       const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
         peerGateway,
         (event, data2) => send(createEvent(event, data2)),
@@ -102558,7 +102568,7 @@ var HostPluginRuntime = class {
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
         ),
         this.schedule,
-        imageBridge === void 0 ? void 0 : (body) => imageBridge.call({ route: "api/session/uploadFileBinary", body }, true)
+        uploadBridge === void 0 ? void 0 : (body) => uploadBridge.call({ route: "api/session/uploadFileBinary", body }, true)
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -103075,14 +103085,14 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
     signal.throwIfAborted();
     const connection = readConnection();
     const handler = connection?.createSharedFetchHandler?.("/api");
-    const image = route === "api/session/uploadFileBinary" ? body.payload : void 0;
-    const query = image === void 0 ? "" : `?${new URLSearchParams({
-      sessionId: image.sessionId,
-      mediaType: image.mediaType,
-      ...image.name === void 0 ? {} : { name: image.name }
+    const upload = route === "api/session/uploadFileBinary" ? body.payload : void 0;
+    const query = upload === void 0 ? "" : `?${new URLSearchParams({
+      sessionId: upload.sessionId,
+      ...upload.mediaType === void 0 ? {} : { mediaType: upload.mediaType },
+      ...upload.name === void 0 ? {} : { name: upload.name }
     })}`;
-    const contentType2 = image === void 0 ? "application/json" : "application/octet-stream";
-    const requestBody = image === void 0 ? JSON.stringify(body ?? {}) : Buffer.from(image.data, "base64");
+    const contentType2 = upload === void 0 ? "application/json" : "application/octet-stream";
+    const requestBody = upload === void 0 ? JSON.stringify(body ?? {}) : Buffer.from(upload.data, "base64");
     let response;
     if (handler !== void 0) {
       response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}${query}`, {

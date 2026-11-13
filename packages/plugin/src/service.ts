@@ -143,8 +143,8 @@ export class HostPluginRuntime {
     })
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
-      const imageDispatcher = this.pluginRoutes?.(peerGateway?.peer)
-      const imageBridge = imageDispatcher === undefined ? undefined : new PluginRouteBridge(imageDispatcher, this.logger)
+      const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer)
+      const uploadBridge = uploadDispatcher === undefined ? undefined : new PluginRouteBridge(uploadDispatcher, this.logger)
       const harnessRemote = peerGateway?.supportsCarrier === true
         ? new HarnessRemoteBridge(
             peerGateway,
@@ -165,7 +165,7 @@ export class HostPluginRuntime {
               sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
             ),
             this.schedule,
-            imageBridge === undefined ? undefined : body => imageBridge.call({ route: 'api/session/uploadFileBinary', body }, true),
+            uploadBridge === undefined ? undefined : body => uploadBridge.call({ route: 'api/session/uploadFileBinary', body }, true),
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(

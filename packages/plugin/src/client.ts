@@ -1,4 +1,4 @@
-import { createRemoteImageUploadFetch } from './remote-image-upload-client.js'
+import { createRemoteUploadFetch } from './remote-upload-client.js'
 import { renderBodyPortal } from './client/portal.js'
 import type { Translate } from './client-locale.js'
 import { en, localeNamespace, zh } from './client-locale.js'
@@ -76,7 +76,7 @@ if (pluginRouteFetch !== undefined) window.fetch = pluginRouteFetch
 const uploadGlobal = globalThis as typeof globalThis & { __DSH_FILE_UPLOAD__?: { fetch: typeof fetch } }
 const previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__
 const remoteUploadHook = typeof originalPluginFetch === 'function' && typeof document !== 'undefined'
-  ? { fetch: createRemoteImageUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) }
+  ? { fetch: createRemoteUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) }
   : undefined
 if (remoteUploadHook !== undefined) uploadGlobal.__DSH_FILE_UPLOAD__ = remoteUploadHook
 
@@ -368,7 +368,7 @@ window.__ModuleLoader__.load({
         uploadContext.effect(() => {
           service.post = post
           return () => { if (service.post === post) service.post = originalPost }
-        }, 'ds-harness-remote: image upload carrier')
+        }, 'ds-harness-remote: attachment upload carrier')
       })
       ctx.effect(() => () => { window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = false }, 'ds-harness-remote: client singleton')
       ctx.effect(() => () => {

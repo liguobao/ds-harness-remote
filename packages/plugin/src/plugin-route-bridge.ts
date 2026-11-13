@@ -44,15 +44,20 @@ const callSchema = z.object({
   }),
 }).strict()
 
-/** Bounded image intake only; arbitrary files and routes remain unavailable. */
+/** Fixed official attachment intake; caller-selected filesystem paths are forbidden. */
+const uploadFields = {
+  sessionId: z.string().min(1).max(512),
+  name: z.string().max(512).optional(),
+  data: z.string().max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine(value => value.length % 4 === 0),
+}
 const imageUploadCallSchema = z.object({
   route: z.literal('api/session/uploadFileBinary'),
-  body: z.object({ endpoint: z.literal('image'), payload: z.object({
-    sessionId: z.string().min(1).max(512),
-    mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
-    name: z.string().max(512).optional(),
-    data: z.string().min(4).max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine(value => value.length % 4 === 0),
-  }).strict() }).strict(),
+  body: z.discriminatedUnion('endpoint', [
+    z.object({ endpoint: z.literal('image'), payload: z.object({ ...uploadFields,
+      mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+    }).strict() }).strict(),
+    z.object({ endpoint: z.literal('file'), payload: z.object(uploadFields).strict() }).strict(),
+  ]),
 }).strict()
 
 /** Local plugin route call timeout, mirroring the Harness API bridge budget. */

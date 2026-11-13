@@ -885,7 +885,7 @@ export class ClientModeRuntime {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The connected Host cannot forward plugin routes.')
     }
     if (route === 'api/session/uploadFileBinary') {
-      const result = await this.remoteTypertGateway(remote).dispatch('remoteImages/upload', { args: body }, signal)
+      const result = await this.remoteTypertGateway(remote).dispatch('remoteUploads/upload', { args: body }, signal)
       if (!result.ok) throw new ClientModeError(result.error.code, result.error.message)
       return result.value as PluginRouteCallResult
     }

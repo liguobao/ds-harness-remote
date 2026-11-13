@@ -31,6 +31,7 @@ class FakeCore {
     if (method === 'harness.remote.stream.close') return {}
     if (method === 'harness.remote.call') {
       const request = params as { endpoint?: unknown }
+      if (request.endpoint === 'fileUploads/upload') return { ok: true, value: { receiptId: 'file-s1', file: { name: 'report.pdf' } } }
       if (request.endpoint === 'commands/execute') {
         return { ok: true, value: { commandId: 'permission', result: { kind: 'success' } } }
       }
@@ -118,6 +119,19 @@ beforeEach(prepareContract1)
     const call = testState.cores[0]!.rpcCalls.find(call => call.method === 'harness.remote.call' && (call.params as { endpoint?: string }).endpoint === 'session/prompt')
     expect(JSON.stringify(call?.params)).toContain('AID/')
     expect(JSON.stringify(call?.params)).toContain('session-1')
+    await connection.close()
+  })
+
+  it('stages a document and sends its Session receipt instead of raw file content', async () => {
+    testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+    const connection = new RemoteConnection()
+    await connection.connect('https://remote.example', identity, host, 'access-token', true)
+    await connection.prompt('session-1', 'Read PDF', [{ mediaType: 'application/pdf', name: 'report.pdf', data: 'JVBERi0x' }])
+    const requests = testState.cores[0]!.rpcCalls.filter(call => call.method === 'harness.remote.call').map(call => call.params as any)
+    expect(requests.find(request => request.endpoint === 'fileUploads/upload')?.payload.args).toEqual({ agentId: 'session-1', request: { data: 'JVBERi0x', name: 'report.pdf' } })
+    expect(requests.find(request => request.endpoint === 'session/prompt')?.payload.args.request.content).toEqual([
+      { type: 'file', receiptId: 'file-s1' }, { type: 'text', text: 'Read PDF' },
+    ])
     await connection.close()
   })
 

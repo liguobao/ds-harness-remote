@@ -73,10 +73,10 @@ const commandExecuteArgsSchema = z.object({
   agentId: z.string().min(1).max(128),
   line: z.string().min(1).max(2048),
   // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
-  // renamed it to `submittedAttachments`. Only empty arrays are exposed by
-  // the Remote bridge; command attachments are deliberately out of scope.
+  // renamed it to `submittedAttachments`. Current Hosts resolve opaque file
+  // receipts in the receiving Session; legacy image arguments stay empty.
   images: z.array(z.never()).length(0).optional(),
-  submittedAttachments: z.array(z.never()).length(0).optional(),
+  submittedAttachments: z.array(z.object({ type: z.literal('file'), receiptId: z.string().min(1).max(512) }).strict()).max(32).optional(),
 }).strict().superRefine((value, context) => {
   if (value.images !== undefined && value.submittedAttachments !== undefined) {
     context.addIssue({
@@ -158,6 +158,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'schedule/deliveryLimits',
   'schedule/edit',
   'schedule/run',
+  'fileUploads/upload',
   'session/attachment',
   'session/cancel',
   'session/canOpenWorkspacePath',
@@ -304,16 +305,16 @@ export class HarnessRemoteBridge {
     private readonly codexWorkspace?: CodexWorkspaceBridge,
     private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
     private readonly schedule?: ScheduleCreateService,
-    private readonly uploadImage?: (body: unknown) => Promise<unknown>,
+    private readonly uploadAttachment?: (body: unknown) => Promise<unknown>,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
 
   async call(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
-    if (params.endpoint === 'remoteImages/upload' && this.uploadImage !== undefined) {
+    if ((params.endpoint === 'remoteUploads/upload' || params.endpoint === 'remoteImages/upload') && this.uploadAttachment !== undefined) {
       const payload = z.object({ args: z.unknown() }).strict().parse(params.payload)
-      return { ok: true, value: await this.uploadImage(payload.args) }
+      return { ok: true, value: await this.uploadAttachment(payload.args) }
     }
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
@@ -1227,6 +1228,9 @@ export async function dispatchCommandForHost(
   harnessVersion?: string,
 ): Promise<TypertRpcResult> {
   const parsed = commandExecutePayloadSchema.parse(payload)
+  if (harnessSessionGeneration(harnessVersion) !== 'v3' && (parsed.args.submittedAttachments?.length ?? 0) > 0) {
+    throw new RpcError('METHOD_NOT_ALLOWED', 'This Host does not support command file receipts.')
+  }
   const legacyPayload = {
     args: {
       agentId: parsed.args.agentId,

@@ -302,7 +302,7 @@ export class ClientControl {
         }
         if (value.route === 'api/session/uploadFileBinary'
           && (typeof value.targetDeviceId !== 'string' || this.context.activeRemote()?.target.deviceId !== value.targetDeviceId)) {
-          throw new ClientModeError('REMOTE_NOT_CONNECTED', 'The selected image upload Host changed. Select the image again.')
+          throw new ClientModeError('REMOTE_NOT_CONNECTED', 'The selected upload Host changed. Select the file again.')
         }
         if (!isRecord(value.body)) throw new ClientModeError('INVALID_MESSAGE', 'A plugin route body object is required.')
         return ok(await this.context.pluginRoute(value.route, value.body, signal))

@@ -1622,21 +1622,21 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // packages/plugin/src/control-route.ts
   var CONTROL_RPC_PREFIX = "/ds-harness-remote", STATUS_STREAM_ENDPOINT = "status.events", STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 
-  // packages/plugin/src/remote-image-upload-client.ts
-  var REMOTE_IMAGE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024;
-  function createRemoteImageUploadFetch(original, baseUrl) {
+  // packages/plugin/src/remote-upload-client.ts
+  var REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024;
+  function createRemoteUploadFetch(original, baseUrl) {
     let sequence = 0, control = async (method, payload, signal) => {
-      let rpcId = `remote-image-${++sequence}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
+      let rpcId = `remote-upload-${++sequence}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
         signal
       });
-      if (!response.ok) throw new Error(`Remote image control failed (HTTP ${response.status}).`);
+      if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
       let envelope = await response.json();
       if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
-        throw new Error(envelope.result?.error?.message ?? "Remote image upload requires an updated Host plugin.");
+        throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");
       return envelope.result.value;
     };
     return async (input, init) => {
@@ -1646,11 +1646,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
       if (request.method !== "POST") return original(input, init);
       let signal = AbortSignal.any([request.signal, AbortSignal.timeout(6e4)]), status = await control("status", {}, signal);
       if (status.mode === "local") return original(input, init);
-      if (status.mode !== "remote" || !status.connected) throw new Error("Remote Host is disconnected. Reconnect before uploading an image.");
-      if (status.backend !== void 0 && status.backend !== "harness") throw new Error("Remote image receipts require a Harness session.");
+      if (status.mode !== "remote" || !status.connected) throw new Error("Remote Host is disconnected. Reconnect before uploading a file.");
+      if (status.backend !== void 0 && status.backend !== "harness") throw new Error("Remote attachment receipts require a Harness session.");
       let sessionId = url.searchParams.get("sessionId"), mediaType = url.searchParams.get("mediaType");
-      if (!sessionId || !mediaType || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType))
-        throw new Error("Remote upload currently supports prompt images only.");
+      if (!sessionId || mediaType !== null && !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType))
+        throw new Error("A Session and a supported image media type, when provided, are required.");
       let reader = request.body?.getReader(), abortRead = () => {
         reader?.cancel(signal.reason).catch(() => {
         });
@@ -1662,7 +1662,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           signal.throwIfAborted();
           let next = await reader.read();
           if (next.done) break;
-          if (size += next.value.byteLength, size > REMOTE_IMAGE_UPLOAD_MAX_BYTES) throw new Error("Remote image upload exceeds the Remote transfer safety limit.");
+          if (size += next.value.byteLength, size > REMOTE_UPLOAD_MAX_BYTES) throw new Error("Remote upload exceeds the Remote transfer safety limit.");
           chunks.push(next.value);
         }
       } finally {
@@ -1673,10 +1673,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
       let binary = "";
       for (let chunk of chunks) for (let i = 0; i < chunk.length; i += 32768) binary += String.fromCharCode(...chunk.subarray(i, i + 32768));
       let result = await control("plugin.route", { route: "api/session/uploadFileBinary", targetDeviceId: status.target?.deviceId, body: {
-        endpoint: "image",
+        endpoint: mediaType === null ? "file" : "image",
         payload: {
           sessionId,
-          mediaType,
+          ...mediaType === null ? {} : { mediaType },
           data: btoa(binary),
           ...url.searchParams.has("name") ? { name: url.searchParams.get("name") } : {}
         }
@@ -5970,7 +5970,7 @@ If a code was sent, recover the original submission without changing it.`,
     beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions)
   }) : void 0;
   pluginRouteFetch !== void 0 && (window.fetch = pluginRouteFetch);
-  var uploadGlobal = globalThis, previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__, remoteUploadHook = typeof originalPluginFetch == "function" && typeof document < "u" ? { fetch: createRemoteImageUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) } : void 0;
+  var uploadGlobal = globalThis, previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__, remoteUploadHook = typeof originalPluginFetch == "function" && typeof document < "u" ? { fetch: createRemoteUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) } : void 0;
   remoteUploadHook !== void 0 && (uploadGlobal.__DSH_FILE_UPLOAD__ = remoteUploadHook);
   function controlRouteUnavailableStatus() {
     return {
@@ -6183,7 +6183,7 @@ If a code was sent, recover the original submission without changing it.`,
           };
           uploadContext.effect(() => (service.post = post, () => {
             service.post === post && (service.post = originalPost);
-          }), "ds-harness-remote: image upload carrier");
+          }), "ds-harness-remote: attachment upload carrier");
         }), ctx.effect(() => () => {
           window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !1;
         }, "ds-harness-remote: client singleton"), ctx.effect(() => () => {

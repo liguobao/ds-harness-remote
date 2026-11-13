@@ -5,7 +5,7 @@ Android build 72.
 ### English
 
 - Fix prompt-image uploads from Harness Desktop and embedded IDE clients: upload to the selected Remote Host and retain official Session attachment receipts. Large images use the existing chunked encrypted transport; acceptance follows Host image limits.
-- Add an image picker to the standalone VS Code extension.
+- Forward ordinary file uploads from HTTP and IDE RPC carriers, preserve Session file receipts in prompts and supported commands, and add a file/image picker to the standalone VS Code extension.
 - Support tracked asynchronous compaction, including recovery after reconnect and lifecycle-confirmed cancellation, without extending ordinary RPC deadlines.
 - Android: introduce coherent sheet and screen transitions with reduced-motion support.
 - Preserve DS Bot group replies in compact history while bounding projected payloads.
@@ -13,7 +13,7 @@ Android build 72.
 ### 中文
 
 - 修复 Harness Desktop 和内嵌 IDE 的图片上传：图片发送到选中的 Remote Host，保留官方 Session 附件凭证。大图复用加密分块传输，实际接受范围由 Host 图片配置决定。
-- 为独立 VS Code 扩展增加图片选择入口。
+- 支持 HTTP 与 IDE RPC 的普通文件上传，在消息和受支持命令中保留 Session 文件凭证；独立 VS Code 扩展支持选择文件或图片。
 - 支持可追踪的异步压缩、断线恢复和经生命周期确认的取消，普通 RPC 超时保持不变。
 - Android：为 Sheet 和页面切换增加连续过渡，支持系统减少动态效果设置。
 - 保留压缩历史中的 DS Bot 群聊回复，同时限制投影载荷大小。

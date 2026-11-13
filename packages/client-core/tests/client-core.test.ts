@@ -1509,3 +1509,20 @@ describe('HarnessAlphaClient tracked compaction', () => {
     expect(store.records.size).toBe(0)
   })
 })
+
+
+describe('HarnessAlphaClient file attachments', () => {
+  it('uploads into the receiving Agent and submits only the staged receipt', async () => {
+    const rpc = vi.fn(async (_method: string, params: any) => ({ ok: true, value:
+      params.endpoint === 'fileUploads/upload' ? { receiptId: 'receipt-s1', file: { name: 'report.pdf' } } : {} }))
+    const client = new HarnessAlphaClient({ rpc } as any)
+    const uploaded = await client.sessionUploadFile('s1', 'JVBERi0x', 'report.pdf')
+    await client.sessionPrompt('s1', 'Read this', 'request-1', [], [uploaded])
+    expect(rpc.mock.calls[0]?.[1]).toEqual({ endpoint: 'fileUploads/upload', payload: { args: {
+      agentId: 's1', request: { data: 'JVBERi0x', name: 'report.pdf' },
+    } } })
+    expect(rpc.mock.calls[1]?.[1].payload.args.request.content).toEqual([
+      { type: 'file', receiptId: 'receipt-s1' }, { type: 'text', text: 'Read this' },
+    ])
+  })
+})

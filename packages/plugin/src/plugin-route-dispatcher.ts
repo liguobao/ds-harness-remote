@@ -16,12 +16,12 @@ export function createPluginRouteDispatcher(
     signal.throwIfAborted()
     const connection = readConnection()
     const handler = connection?.createSharedFetchHandler?.('/api')
-    const image = route === 'api/session/uploadFileBinary'
-      ? (body as { payload: { sessionId: string; mediaType: string; name?: string; data: string } }).payload : undefined
-    const query = image === undefined ? '' : `?${new URLSearchParams({ sessionId: image.sessionId, mediaType: image.mediaType,
-      ...(image.name === undefined ? {} : { name: image.name }) })}`
-    const contentType = image === undefined ? 'application/json' : 'application/octet-stream'
-    const requestBody = image === undefined ? JSON.stringify(body ?? {}) : Buffer.from(image.data, 'base64')
+    const upload = route === 'api/session/uploadFileBinary'
+      ? (body as { payload: { sessionId: string; mediaType?: string; name?: string; data: string } }).payload : undefined
+    const query = upload === undefined ? '' : `?${new URLSearchParams({ sessionId: upload.sessionId, ...(upload.mediaType === undefined ? {} : { mediaType: upload.mediaType }),
+      ...(upload.name === undefined ? {} : { name: upload.name }) })}`
+    const contentType = upload === undefined ? 'application/json' : 'application/octet-stream'
+    const requestBody = upload === undefined ? JSON.stringify(body ?? {}) : Buffer.from(upload.data, 'base64')
     let response: Response
     if (handler !== undefined) {
       // The authenticated Remote channel has already admitted this peer. Invoke

@@ -156,7 +156,18 @@ export class RemoteConnection {
   }
 
   async prompt(sessionId: string, text: string, images: { mediaType: string; data: string; name?: string }[] = []): Promise<void> {
-    if (this.alpha !== undefined) return this.alpha.sessionPrompt(sessionId, text, undefined, images)
+    const promptImages = images.filter(image => ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(image.mediaType))
+    const attachments = images.filter(image => !promptImages.includes(image))
+    if (this.alpha !== undefined) {
+      const files: { receiptId: string }[] = []
+      for (const file of attachments) {
+        const uploaded = await this.alpha.sessionUploadFile(sessionId, file.data, file.name)
+        if (typeof uploaded.receiptId !== 'string' || uploaded.receiptId.length === 0) throw new Error('Host returned an invalid file receipt.')
+        files.push({ receiptId: uploaded.receiptId })
+      }
+      return this.alpha.sessionPrompt(sessionId, text, undefined, promptImages, files)
+    }
+    if (attachments.length > 0) throw new Error('File attachments require an updated Harness Remote Host.')
     await this.call('session.prompt', { sessionId, mode: 'queue', content: [...(text ? [{ type: 'text', text }] : []), ...images.map(image => ({ type: 'image', ...image }))] })
   }
 
