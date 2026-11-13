@@ -2195,3 +2195,29 @@ legacy control lifetimes remain unchanged unless all three parties negotiate it.
 ## Device pairing v1
 
 The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.
+
+### Remote official prompt-image uploads
+
+The Remote browser client installs the official `__DSH_FILE_UPLOAD__.fetch` hook
+and also replaces the live `fileUpload.post` carrier when the shell has already
+constructed it. This covers the shared Harness Web/Desktop/IDE upload service.
+In local mode the request retains its original destination. In Remote mode,
+`api/session/uploadFileBinary` prompt images are sent through `plugin.route.call`
+with body `{ endpoint: "image", payload: { sessionId, mediaType, name?, data } }`.
+`data` is base64; PNG/JPEG/WebP/GIF are accepted. The client runtime routes
+images through the dedicated `remoteImages/upload` Harness Remote endpoint,
+using the existing ordered `harness.remote.transfer.*` protocol for oversized
+requests. Individual encrypted frames remain below 4 MiB. Image acceptance is
+controlled by the official Host service's `imageLimits` (`maxImageBytes`,
+`maxMessageImageBytes`, dimensions, pixel count and media types), rather than a
+2 MiB Remote image limit. A 192 MiB raw-image transport safety ceiling keeps
+base64 requests within the existing 288 MiB aggregate transfer budget.
+Arbitrary file uploads are not enabled.
+The Host reconstructs the raw-byte request to the fixed official upload route,
+using its authenticated local Connection carrier. Official Session staging and
+attachment receipts are preserved; no client-local attachment reference is
+substituted. Disconnection, unsupported Host versions and non-Harness backends
+fail closed. Upload mutations are never automatically retried. Older Hosts
+reject the new endpoint and must be upgraded on both ends. The standalone
+VS Code extension also accepts one image per message and sends inline image
+content through `session/prompt`, using the existing chunked Remote transport.

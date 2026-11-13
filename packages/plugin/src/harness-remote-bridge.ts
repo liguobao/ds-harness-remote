@@ -304,12 +304,17 @@ export class HarnessRemoteBridge {
     private readonly codexWorkspace?: CodexWorkspaceBridge,
     private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
     private readonly schedule?: ScheduleCreateService,
+    private readonly uploadImage?: (body: unknown) => Promise<unknown>,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
 
   async call(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
+    if (params.endpoint === 'remoteImages/upload' && this.uploadImage !== undefined) {
+      const payload = z.object({ args: z.unknown() }).strict().parse(params.payload)
+      return { ok: true, value: await this.uploadImage(payload.args) }
+    }
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {

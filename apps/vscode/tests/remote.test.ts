@@ -110,6 +110,17 @@ describe('RemoteConnection close state', () => {
   }
 beforeEach(prepareContract1)
 
+  it('sends image content to the remote Session without client-local attachment references', async () => {
+    testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+    const connection = new RemoteConnection()
+    await connection.connect('https://remote.example', identity, host, 'access-token', true)
+    await connection.prompt('session-1', '', [{ mediaType: 'image/png', data: 'AID/' }])
+    const call = testState.cores[0]!.rpcCalls.find(call => call.method === 'harness.remote.call' && (call.params as { endpoint?: string }).endpoint === 'session/prompt')
+    expect(JSON.stringify(call?.params)).toContain('AID/')
+    expect(JSON.stringify(call?.params)).toContain('session-1')
+    await connection.close()
+  })
+
   it('does not advertise control recovery until the VS Code secure transport supports leases', async () => {
     const connection = new RemoteConnection()
     await connection.connect('https://remote.example', identity, host, 'access-token', true)

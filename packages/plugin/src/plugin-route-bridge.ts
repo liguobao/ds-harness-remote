@@ -1,11 +1,11 @@
-import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
+import { MAX_SECURE_MESSAGE_BYTES, MAX_HARNESS_API_TRANSFER_BYTES } from '@dsh-remote/protocol'
 import type { PluginRouteCallParams, PluginRouteCallResult } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { SafeLogger } from './logging.js'
 import { RpcError } from './safe-error.js'
 
 /** Local plugin web routes forwardable over the authenticated channel (POST only). */
-export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot'] as const
+export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot', 'api/session/uploadFileBinary'] as const
 
 /** Reviewed DS Bot operations; new upstream operations stay local by default. */
 export const BOT_REMOTE_OPERATIONS = [
@@ -44,6 +44,17 @@ const callSchema = z.object({
   }),
 }).strict()
 
+/** Bounded image intake only; arbitrary files and routes remain unavailable. */
+const imageUploadCallSchema = z.object({
+  route: z.literal('api/session/uploadFileBinary'),
+  body: z.object({ endpoint: z.literal('image'), payload: z.object({
+    sessionId: z.string().min(1).max(512),
+    mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+    name: z.string().max(512).optional(),
+    data: z.string().min(4).max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine(value => value.length % 4 === 0),
+  }).strict() }).strict(),
+}).strict()
+
 /** Local plugin route call timeout, mirroring the Harness API bridge budget. */
 const PLUGIN_ROUTE_TIMEOUT_MS = 30_000
 
@@ -58,17 +69,19 @@ export class PluginRouteBridge {
     private readonly logger?: SafeLogger,
   ) {}
 
-  async call(input: unknown): Promise<PluginRouteCallResult> {
+  async call(input: unknown, transferred = false): Promise<PluginRouteCallResult> {
     let params: PluginRouteCallParams
     try {
-      params = callSchema.parse(input) as PluginRouteCallParams
+      params = (typeof input === 'object' && input !== null && 'route' in input
+        && input.route === 'api/session/uploadFileBinary'
+        ? imageUploadCallSchema.parse(input) : callSchema.parse(input)) as PluginRouteCallParams
     } catch (error) {
       if (error instanceof z.ZodError) {
         throw new RpcError('INVALID_MESSAGE', 'The plugin route call is invalid for the remote channel.')
       }
       throw error
     }
-    if (serializedBytes(params) > MAX_SECURE_MESSAGE_BYTES) {
+    if (serializedBytes(params) > (transferred && params.route === 'api/session/uploadFileBinary' ? MAX_HARNESS_API_TRANSFER_BYTES : MAX_SECURE_MESSAGE_BYTES)) {
       throw new RpcError('INVALID_MESSAGE', `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`)
     }
     const startedAt = performance.now()

@@ -16,14 +16,20 @@ export function createPluginRouteDispatcher(
     signal.throwIfAborted()
     const connection = readConnection()
     const handler = connection?.createSharedFetchHandler?.('/api')
+    const image = route === 'api/session/uploadFileBinary'
+      ? (body as { payload: { sessionId: string; mediaType: string; name?: string; data: string } }).payload : undefined
+    const query = image === undefined ? '' : `?${new URLSearchParams({ sessionId: image.sessionId, mediaType: image.mediaType,
+      ...(image.name === undefined ? {} : { name: image.name }) })}`
+    const contentType = image === undefined ? 'application/json' : 'application/octet-stream'
+    const requestBody = image === undefined ? JSON.stringify(body ?? {}) : Buffer.from(image.data, 'base64')
     let response: Response
     if (handler !== undefined) {
       // The authenticated Remote channel has already admitted this peer. Invoke
       // the official local Fetch carrier, including on Desktop without HTTP.
-      response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}`, {
+      response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}${query}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body ?? {}),
+        headers: { 'content-type': contentType },
+        body: requestBody,
         signal,
       }), peer), signal)
     } else {
@@ -37,10 +43,10 @@ export function createPluginRouteDispatcher(
         const setCookie = typeof launch.headers.getSetCookie === 'function' ? launch.headers.getSetCookie() : []
         cookie = setCookie.map(item => item.split(';', 1)[0]).join('; ') || undefined
       }
-      response = await fetch(`${origin}/${route}`, {
+      response = await fetch(`${origin}/${route}${query}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cookie === undefined ? {} : { cookie }) },
-        body: JSON.stringify(body ?? {}),
+        headers: { 'content-type': contentType, ...(cookie === undefined ? {} : { cookie }) },
+        body: requestBody,
         signal,
       })
       if (response.status === 401) cookie = undefined

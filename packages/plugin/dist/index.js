@@ -79121,7 +79121,7 @@ var LoopbackPreview = class {
 };
 
 // packages/plugin/src/plugin-route-bridge.ts
-var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
+var PLUGIN_ROUTE_ALLOWLIST = ["api/bot", "api/session/uploadFileBinary"];
 var BOT_REMOTE_OPERATIONS = [
   "state",
   "models",
@@ -79204,23 +79204,32 @@ var callSchema = external_exports.object({
     }
   })
 }).strict();
+var imageUploadCallSchema = external_exports.object({
+  route: external_exports.literal("api/session/uploadFileBinary"),
+  body: external_exports.object({ endpoint: external_exports.literal("image"), payload: external_exports.object({
+    sessionId: external_exports.string().min(1).max(512),
+    mediaType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+    name: external_exports.string().max(512).optional(),
+    data: external_exports.string().min(4).max(256 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine((value) => value.length % 4 === 0)
+  }).strict() }).strict()
+}).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
 var PluginRouteBridge = class {
   constructor(dispatch, logger2) {
     this.dispatch = dispatch;
     this.logger = logger2;
   }
-  async call(input4) {
+  async call(input4, transferred = false) {
     let params;
     try {
-      params = callSchema.parse(input4);
+      params = typeof input4 === "object" && input4 !== null && "route" in input4 && input4.route === "api/session/uploadFileBinary" ? imageUploadCallSchema.parse(input4) : callSchema.parse(input4);
     } catch (error62) {
       if (error62 instanceof external_exports.ZodError) {
         throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
       }
       throw error62;
     }
-    if (serializedBytes(params) > MAX_SECURE_MESSAGE_BYTES) {
+    if (serializedBytes(params) > (transferred && params.route === "api/session/uploadFileBinary" ? MAX_HARNESS_API_TRANSFER_BYTES : MAX_SECURE_MESSAGE_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
     }
     const startedAt = performance.now();
@@ -79495,6 +79504,9 @@ var ClientControl = class {
         const value = record3(payload);
         if (typeof value.route !== "string" || !isAllowedPluginRoute(value.route)) {
           throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
+        }
+        if (value.route === "api/session/uploadFileBinary" && (typeof value.targetDeviceId !== "string" || this.context.activeRemote()?.target.deviceId !== value.targetDeviceId)) {
+          throw new ClientModeError("REMOTE_NOT_CONNECTED", "The selected image upload Host changed. Select the image again.");
         }
         if (!isRecord5(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");
         return ok(await this.context.pluginRoute(value.route, value.body, signal));
@@ -88217,6 +88229,11 @@ var ClientModeRuntime = class {
     }
     if (!remote.features.pluginRoute) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The connected Host cannot forward plugin routes.");
+    }
+    if (route === "api/session/uploadFileBinary") {
+      const result = await this.remoteTypertGateway(remote).dispatch("remoteImages/upload", { args: body }, signal);
+      if (!result.ok) throw new ClientModeError(result.error.code, result.error.message);
+      return result.value;
     }
     return remote.client.rpc("plugin.route.call", { route, body }, signal);
   }
@@ -101107,7 +101124,7 @@ var PUBLIC_SCHEDULE_ERRORS = {
 };
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadImage) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -101116,6 +101133,7 @@ var HarnessRemoteBridge = class {
     this.codexWorkspace = codexWorkspace;
     this.resolveWorkspaceRoot = resolveWorkspaceRoot;
     this.schedule = schedule;
+    this.uploadImage = uploadImage;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
@@ -101126,6 +101144,10 @@ var HarnessRemoteBridge = class {
   terminalCarrier;
   async call(input4) {
     const params = callSchema3.parse(input4);
+    if (params.endpoint === "remoteImages/upload" && this.uploadImage !== void 0) {
+      const payload = external_exports.object({ args: external_exports.unknown() }).strict().parse(params.payload);
+      return { ok: true, value: await this.uploadImage(payload.args) };
+    }
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
@@ -102515,6 +102537,8 @@ var HostPluginRuntime = class {
     });
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
+      const imageDispatcher = this.pluginRoutes?.(peerGateway?.peer);
+      const imageBridge = imageDispatcher === void 0 ? void 0 : new PluginRouteBridge(imageDispatcher, this.logger);
       const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
         peerGateway,
         (event, data2) => send(createEvent(event, data2)),
@@ -102533,7 +102557,8 @@ var HostPluginRuntime = class {
           (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
         ),
-        this.schedule
+        this.schedule,
+        imageBridge === void 0 ? void 0 : (body) => imageBridge.call({ route: "api/session/uploadFileBinary", body }, true)
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -103050,12 +103075,20 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
     signal.throwIfAborted();
     const connection = readConnection();
     const handler = connection?.createSharedFetchHandler?.("/api");
+    const image = route === "api/session/uploadFileBinary" ? body.payload : void 0;
+    const query = image === void 0 ? "" : `?${new URLSearchParams({
+      sessionId: image.sessionId,
+      mediaType: image.mediaType,
+      ...image.name === void 0 ? {} : { name: image.name }
+    })}`;
+    const contentType2 = image === void 0 ? "application/json" : "application/octet-stream";
+    const requestBody = image === void 0 ? JSON.stringify(body ?? {}) : Buffer.from(image.data, "base64");
     let response;
     if (handler !== void 0) {
-      response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}`, {
+      response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}${query}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body ?? {}),
+        headers: { "content-type": contentType2 },
+        body: requestBody,
         signal
       }), peer), signal);
     } else {
@@ -103069,10 +103102,10 @@ function createPluginRouteDispatcher(readConnection, readPort, peer) {
         const setCookie = typeof launch.headers.getSetCookie === "function" ? launch.headers.getSetCookie() : [];
         cookie = setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
       }
-      response = await fetch(`${origin}/${route}`, {
+      response = await fetch(`${origin}/${route}${query}`, {
         method: "POST",
-        headers: { "content-type": "application/json", ...cookie === void 0 ? {} : { cookie } },
-        body: JSON.stringify(body ?? {}),
+        headers: { "content-type": contentType2, ...cookie === void 0 ? {} : { cookie } },
+        body: requestBody,
         signal
       });
       if (response.status === 401) cookie = void 0;

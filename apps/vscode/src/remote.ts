@@ -155,9 +155,9 @@ export class RemoteConnection {
     return this.call('session.create', options.workspaceId ? { workspaceId: options.workspaceId } : options.cwd ? { cwd: options.cwd } : {})
   }
 
-  async prompt(sessionId: string, text: string): Promise<void> {
-    if (this.alpha !== undefined) return this.alpha.sessionPrompt(sessionId, text)
-    await this.call('session.prompt', { sessionId, mode: 'queue', content: [{ type: 'text', text }] })
+  async prompt(sessionId: string, text: string, images: { mediaType: string; data: string; name?: string }[] = []): Promise<void> {
+    if (this.alpha !== undefined) return this.alpha.sessionPrompt(sessionId, text, undefined, images)
+    await this.call('session.prompt', { sessionId, mode: 'queue', content: [...(text ? [{ type: 'text', text }] : []), ...images.map(image => ({ type: 'image', ...image }))] })
   }
 
   async cancelSession(sessionId: string): Promise<void> {
