@@ -134,6 +134,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const claudeWorkspaceListId = 'dsh-remote-claude-workspace-list'
     const hermesWorkspaceListId = 'dsh-remote-hermes-workspace-list'
     const [busy, setBusy] = React.useState(false)
+    const [refreshingHosts, setRefreshingHosts] = React.useState(false)
     // Remain undecided until local credentials or an explicit auth rejection
     // establish that login is required. Network failures are not sign-outs.
     const [needsAuthorization, setNeedsAuthorization] = React.useState<boolean | undefined>(undefined)
@@ -547,6 +548,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
 
     const refreshRemote = async (): Promise<void> => {
       setBusy(true)
+      setRefreshingHosts(true)
       setNotice(undefined)
       setError(undefined)
       try {
@@ -745,6 +747,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       } catch (reason) {
         setError(connectionErrorMessageFor(reason, t))
       } finally {
+        setRefreshingHosts(false)
         setBusy(false)
       }
     }
@@ -1417,7 +1420,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
                   'aria-busy': connectingHost === undefined ? undefined : true,
                 }, listedHosts.length === 0
-                  ? (error !== undefined ? null : React.createElement('p', null, busy ? t('checkingConnection') : t(status?.host?.pairingHostOnly ? 'pairingHostOnly' : 'noRemoteHosts')))
+                  ? (error !== undefined || refreshingHosts ? null : React.createElement('p', null, t(status?.host?.pairingHostOnly ? 'pairingHostOnly' : 'noRemoteHosts')))
                   : listedHosts.map(device => React.createElement('button', {
                     type: 'button',
                     key: device.deviceId,
@@ -1438,6 +1441,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 ? (connectingHost === undefined ? React.createElement(React.Fragment, null,
                   status?.host?.pairingHostOnly ? null : React.createElement('p', { className: 'dshRemoteHint' }, t('selectHostHint')),
                   React.createElement('footer', { className: 'dshRemoteAccountFooter' },
+                    refreshingHosts ? React.createElement('span', { className: 'dshRemoteHostLoading', role: 'status', 'aria-label': t('checkingConnection') },
+                      React.createElement('span', { className: 'dshRemoteLoginSpinner', 'aria-hidden': true })) : null,
                     React.createElement('span', { className: 'dshRemoteHostNameLine' },
                       React.createElement('span', null, status?.target?.name ?? status?.deviceName ?? (status?.host?.account === undefined ? t('account') : displayRemoteAccount(status.host.account))),
                       React.createElement(ServerNotice, {
