@@ -676,6 +676,7 @@ export function ChatScreen({
       <TopBar
         title={strings.chat.newChat}
         titleLines={1}
+        centered={connected ? 48 : 88}
         onBack={tabletSplit ? undefined : openSessionsDrawer}
         backIcon={Menu}
         backLabel={strings.chat.openHostSessions}
@@ -1082,6 +1083,7 @@ export function ChatScreen({
         title={sessionTitle(session)}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
+        centered={88}
         onBack={tabletSplit ? undefined : trajectory ? handleBack : openSessionsDrawer}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
@@ -1089,7 +1091,7 @@ export function ChatScreen({
           <IconButton label={trajectory ? strings.trajectory.close : strings.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
-          <IconButton label={strings.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
+          <IconButton label={strings.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={(sessionBlank && !hasComposerContent) || newSessionPending || busy !== undefined} />
         </>}
       />
       {!connected && (
@@ -1099,15 +1101,15 @@ export function ChatScreen({
           accessibilityLiveRegion="polite" disabled={connectionRetrying}
           onPress={() => void reconnectCurrentSession()}>
           <View style={styles.connectionDot} />
-          <Text style={styles.connectionBannerText}>
+          <Text style={styles.connectionBannerText} numberOfLines={1}>
             {connectionRetrying ? <>{strings.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : strings.chat.offline}
           </Text>
         </Pressable>
       )}
       {connected && busy === `session:${session.sessionId}` && (
-        <View style={styles.connectionBanner} accessibilityRole="summary">
-          <View style={[styles.connectionDot, { backgroundColor: colors.primary }]} />
-          <Text style={styles.connectionBannerText}>
+        <View style={styles.syncBanner} accessibilityRole="summary">
+          <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+          <Text style={styles.connectionBannerText} numberOfLines={1}>
             {strings.chat.syncingHistory}
           </Text>
         </View>

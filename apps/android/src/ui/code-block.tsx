@@ -53,8 +53,8 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
   }, [cleanCode])
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }, style]}>
-      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.surfaceStrong }]}>
+    <View style={[styles.container, { backgroundColor: colors.codeSurface ?? colors.surface, borderColor: colors.separator }, style]}>
+      <View style={[styles.header, { borderBottomColor: colors.separator, backgroundColor: colors.codeHeader ?? colors.surfaceStrong }]}>
         <Text numberOfLines={1} style={[styles.language, { color: colors.muted }]}>
           {label}
         </Text>
@@ -86,7 +86,7 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
             ]}
           >
             {copied ? (
-              <IconCheckOutline size={14} color="#10B981" />
+              <IconCheckOutline size={14} color={colors.success} />
             ) : (
               <IconCopyOutline size={14} color={colors.muted} />
             )}

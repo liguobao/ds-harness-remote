@@ -66,6 +66,13 @@ export interface ThemeColors {
   modalBackdrop: string
   menuDismiss: string
   shadow: string
+  /** Soft neutral user message bubble fill in standard 1:1 chats. */
+  userBubble?: string
+  /** Subtle nested surface for tool cards and reasoning bodies. */
+  toolSurface?: string
+  /** Elevated code block body surface and header fill. */
+  codeSurface?: string
+  codeHeader?: string
 }
 
 // DeepSeek palette: ink #0F0F0F, DeepSeek blue (#4D6BFE) accents, white cards (#FFFFFF)
@@ -102,6 +109,10 @@ export const lightColors: ThemeColors = {
   modalBackdrop: 'rgba(15, 15, 15, 0.42)',
   menuDismiss: 'rgba(15, 15, 15, 0.14)',
   shadow: '#1A2638',
+  userBubble: '#ECEFF5',
+  toolSurface: '#F2F4F8',
+  codeSurface: '#F7F8FB',
+  codeHeader: '#EDF0F6',
 }
 
 export const darkColors: ThemeColors = {
@@ -136,6 +147,10 @@ export const darkColors: ThemeColors = {
   modalBackdrop: 'rgba(0, 0, 0, 0.62)',
   menuDismiss: 'rgba(0, 0, 0, 0.45)',
   shadow: '#000000',
+  userBubble: '#1E2430',
+  toolSurface: '#141820',
+  codeSurface: '#11151D',
+  codeHeader: '#1A202B',
 }
 
 export function colorsForScheme(scheme: ColorScheme): ThemeColors {

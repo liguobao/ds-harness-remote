@@ -4,6 +4,7 @@ import { ArrowUp, Bot, Check, CircleCheck, ChevronDown, ChevronRight, ChevronUp,
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Alert,
   Animated,
   Modal,
@@ -216,19 +217,19 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
       accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
-      hitSlop={dense ? { top: 6, bottom: 6 } : undefined}
+      hitSlop={{ top: 7, bottom: 7 }}
       style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
-      <View style={styles.processIcon}><ActivityIcon size={17} color={colors.muted} /></View>
+      <View style={styles.processIcon}><ActivityIcon size={15} color={running ? colors.primary : colors.muted} /></View>
       <Text style={styles.processLabel} numberOfLines={1} ellipsizeMode="clip">{label}</Text>
-      {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
+      {expanded ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
     </Pressable>
     {(latestTool !== undefined || running) && !expanded && <View style={styles.processCurrent} accessibilityLiveRegion="polite">
       {latestTool === undefined || (!closed && latestTool.state === 'running')
         ? <ReplyStatusDots />
-        : latestTool.state === 'failed' ? <X size={14} color={colors.muted} /> : <CircleCheck size={14} color={colors.muted} />}
+        : latestTool.state === 'failed' ? <X size={13} color={colors.danger} /> : <CircleCheck size={13} color={colors.muted} />}
       <Text style={styles.processCurrentText} numberOfLines={2}>{latestTool ? toolDisplayName(latestTool) : labels.thinking.running}{detail ? ` · ${detail}` : ''}</Text>
     </View>}
-    {expanded && <ScrollView ref={body} style={{ maxHeight: Math.min(400, height / 2) }} nestedScrollEnabled
+    {expanded && <ScrollView ref={body} style={[{ maxHeight: Math.min(400, height / 2) }, styles.processScroll, running && styles.processScrollActive]} nestedScrollEnabled
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={() => { if (running || pending) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
@@ -376,16 +377,18 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
     const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
     const heartbeatBody = heartbeatMessageBody(item.text, 'user')
     const { quotes, body } = parseMessageQuotes(item.text)
+    const hasBubbleText = heartbeatBody !== undefined || quotes.length > 0 || hasVisibleMessageText(body)
     const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
+    const softBubblePalette = { ...colors, surfaceStrong: colors.border }
     return <View style={styles.userBlock}>
-      <View style={[styles.userContent, userBubble && styles.userBubble]}>
+      <View style={[styles.userContent, userBubble ? styles.userBubble : hasBubbleText ? styles.userSoftBubble : styles.userMediaOnly]}>
         {showImages && <ChatImages images={item.images!} alignEnd />}
         {heartbeatBody !== undefined ? <HeartbeatMessage text={item.text} body={heartbeatBody} /> : quotes.length > 0 ? (
           <View style={styles.userMessageInlineWrap}>
             {quotes.map((quoteText, index) => (
               <View key={`quote:${index}`} style={styles.composerInlineQuoteBadge}>
-                <QuoteMarkIcon size={14} color={colors.primary} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 200 }]}>
+                <QuoteMarkIcon size={14} color={userBubble ? colors.onInverse : colors.primary} />
+                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: userBubble ? colors.onInverse : colors.primary, maxWidth: 200 }]}>
                   “{formatQuoteDraftSnippet(quoteText, 16)}”
                 </Text>
               </View>
@@ -395,7 +398,11 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
             )}
           </View>
         ) : (
-          hasVisibleMessageText(body) && <NativeMarkdown text={body} colors={userBubble ? bubblePalette : undefined} />
+          hasVisibleMessageText(body) && (
+            <View style={styles.userMarkdownWrap}>
+              <NativeMarkdown text={body} colors={userBubble ? bubblePalette : softBubblePalette} />
+            </View>
+          )
         )}
       </View>
       {item.sendState === 'canceled'
@@ -441,16 +448,19 @@ function ReasoningDisclosure({ item }: { item: ChatMessage }) {
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel}。${preview}`}
         accessibilityState={{ expanded }}
+        hitSlop={{ top: 7, bottom: 7 }}
         onPress={() => setExpanded(value => !value)}
         style={({ pressed }) => [styles.reasoningHeader, pressed && styles.reasoningHeaderPressed]}
       >
-        <Sparkles size={16} color={active ? colors.accent : colors.muted} />
+        <View style={styles.processIcon}>
+          <Sparkles size={15} color={active ? colors.accent : colors.muted} />
+        </View>
         <Text style={[styles.reasoningLabel, active && styles.reasoningLabelActive]}>{label}</Text>
         <Text style={styles.activitySeparator}>·</Text>
         <Text style={styles.reasoningPreview} numberOfLines={1}>{preview}</Text>
         {expanded
-          ? <ChevronDown size={17} color={colors.muted} />
-          : <ChevronRight size={17} color={colors.muted} />}
+          ? <ChevronDown size={16} color={colors.muted} />
+          : <ChevronRight size={16} color={colors.muted} />}
       </Pressable>
       {expanded && <View style={styles.reasoningBody}><NativeMarkdown text={item.reasoning ?? ''} /></View>}
     </View>
@@ -496,11 +506,11 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
       >
         <View style={styles.toolIcon}>
           {item.toolName === 'todo_write' || (item.toolKey ?? '').endsWith('todo_write') ? (
-            <IconChecklistOutline size={16} color={colors.primary} />
+            <IconChecklistOutline size={15} color={colors.primary} />
           ) : /command|bash|shell|命令|终端/i.test(item.toolName) ? (
-            <Terminal size={16} color={colors.muted} />
+            <Terminal size={15} color={colors.muted} />
           ) : (
-            <Code2 size={16} color={colors.muted} />
+            <Code2 size={15} color={colors.muted} />
           )}
         </View>
         <View style={styles.toolCopy}>
@@ -508,10 +518,13 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
           {detail !== undefined && <Text style={styles.activitySeparator}>·</Text>}
           {detail !== undefined && <Text style={styles.toolSummary} numberOfLines={1}>{detail}</Text>}
         </View>
+        {item.state === 'running' && (
+          <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+        )}
         {item.state === 'failed' && <Text style={styles.toolFailed}>{stateText}</Text>}
         {hasDetail && (expanded
-          ? <ChevronDown size={17} color={colors.muted} />
-          : <ChevronRight size={17} color={colors.muted} />)}
+          ? <ChevronDown size={16} color={colors.muted} />
+          : <ChevronRight size={16} color={colors.muted} />)}
       </Pressable>
       {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} tool />}
       {expanded && hasDetail && (
