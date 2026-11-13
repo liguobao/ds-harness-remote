@@ -2231,3 +2231,19 @@ reject the new endpoint and must be upgraded on both ends. The standalone
 VS Code extension accepts one file or image per message: images use inline
 image content, while other files are staged through `fileUploads/upload` and
 submitted by receipt. Both use the existing chunked Remote transport.
+
+### Client-local `@file` mentions in Remote prompts
+
+When a Desktop client selects a Remote Harness workspace, its local
+Remote plugin intercepts `session/prompt` before forwarding. Standalone native absolute `@file` mentions in user text (for example
+`@C:\\...` on Windows or `@/Users/...` on macOS, with quoted paths for spaces) are
+checked against the selected remote workspace's `fileReferences/list` first.
+An exact remote file candidate remains a text mention for the remote Host.
+Otherwise, an existing client-local file is read by the client machine's Host process, uploaded with the existing
+`fileUploads/upload` call into the selected remote Session, and replaced by
+`{type:"file",receiptId}` content blocks. The client forwards the prompt only
+after each upload returns a valid receipt. Missing, non-regular, symbolic-link,
+or oversized client-local files fail the prompt. Paths absent on the client remain
+text mentions for remote Host resolution.
+At most four files and 192 MiB total are accepted per prompt. Non-absolute and non-native `@` references keep their existing behavior. The remote Host's
+attachment service still controls file acceptance and storage.

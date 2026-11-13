@@ -44701,6 +44701,75 @@ var require_lib = __commonJS({
 // packages/plugin/src/index.ts
 import * as DshConnection from "@deepseek-ai/dsh-client-connection";
 
+// packages/plugin/src/local-mention-upload.ts
+import { lstat, readFile } from "node:fs/promises";
+import { posix, win32 } from "node:path";
+var MAX_MENTION_BYTES = 192 * 1024 * 1024;
+var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
+async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
+  if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
+  const request = payload.args.request;
+  if (typeof request.sessionId !== "string" || !Array.isArray(request.content)) return payload;
+  const content = [];
+  let uploaded = 0;
+  let seen = 0;
+  let staged = 0;
+  for (const block of request.content) {
+    if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
+      content.push(block);
+      continue;
+    }
+    const matches = [...block.text.matchAll(LOCAL_MENTION)].filter((match) => (platform3 === "win32" ? win32 : posix).isAbsolute(match[2] ?? match[3]));
+    if (matches.length === 0) {
+      content.push(block);
+      continue;
+    }
+    let cursor3 = 0;
+    for (const match of matches) {
+      signal.throwIfAborted();
+      const start = match.index + (match[1]?.length ?? 0);
+      if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
+      const path = match[2] ?? match[3];
+      const candidates = await remote.dispatch("fileReferences/list", { args: {
+        agentId: request.sessionId,
+        query: path
+      } }, signal);
+      if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
+      if (++seen > 4) throw new Error("Remote supports at most four absolute local file mentions per message.");
+      let file2;
+      try {
+        file2 = await fileIO.lstat(path);
+      } catch (error62) {
+        if (isMissingFile(error62)) continue;
+        throw error62;
+      }
+      if (!file2.isFile() || file2.isSymbolicLink() || uploaded + file2.size > MAX_MENTION_BYTES) {
+        throw new Error("The selected local file is unavailable or exceeds the Remote transfer limit.");
+      }
+      uploaded += file2.size;
+      const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
+      const result = await remote.dispatch("fileUploads/upload", { args: {
+        agentId: request.sessionId,
+        request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
+      } }, signal);
+      if (!result.ok) throw new Error(result.error.message);
+      const value = result.value;
+      if (typeof value?.receiptId !== "string" || value.receiptId.length === 0) throw new Error("The Remote Host did not return a file receipt.");
+      content.push({ type: "file", receiptId: value.receiptId });
+      staged++;
+      cursor3 = match.index + match[0].length;
+    }
+    if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
+  }
+  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request, content } } };
+}
+function isMentionRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isMissingFile(error62) {
+  return isMentionRecord(error62) && (error62.code === "ENOENT" || error62.code === "ENOTDIR");
+}
+
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -82452,7 +82521,7 @@ function writeText(res, status2, body) {
 }
 
 // packages/plugin/src/harness-version.ts
-import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
+import { readFile as readFile2, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 var HARNESS_PACKAGE_NAME = "@deepseek-ai/dsh";
@@ -82473,7 +82542,7 @@ function harnessSessionGeneration(version2) {
 }
 async function readHarnessManifestVersion(manifestPath) {
   try {
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const manifest = JSON.parse(await readFile2(manifestPath, "utf8"));
     if (manifest.name !== HARNESS_PACKAGE_NAME) return void 0;
     return normalizeHarnessVersion(manifest.version);
   } catch {
@@ -83933,7 +84002,7 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
-import { chmod, link, mkdir as mkdir2, readFile as readFile2, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir as mkdir2, readFile as readFile3, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
 import { basename as basename3, dirname as dirname2, join as join3, sep } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
@@ -83974,7 +84043,7 @@ var ServerCredentialStore = class {
     await assertPrivateMode(this.path);
     let parsed;
     try {
-      parsed = credentialSchema.parse(JSON.parse(await readFile2(this.path, "utf8")));
+      parsed = credentialSchema.parse(JSON.parse(await readFile3(this.path, "utf8")));
     } catch (error62) {
       throw new ServerCredentialsInvalidError(`server credentials are invalid: ${safeMessage(error62)}`);
     }
@@ -84122,7 +84191,7 @@ async function isLockContention(error62, path) {
 }
 async function readLockRecord(path) {
   try {
-    return await readFile2(path, "utf8");
+    return await readFile3(path, "utf8");
   } catch (error62) {
     if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return void 0;
     throw error62;
@@ -84173,7 +84242,7 @@ function safeMessage(error62) {
 async function readPrivateJson(path) {
   if (!await exists(path)) return void 0;
   await assertPrivateMode(path);
-  return JSON.parse(await readFile2(path, "utf8"));
+  return JSON.parse(await readFile3(path, "utf8"));
 }
 
 // packages/plugin/src/config.ts
@@ -88250,7 +88319,21 @@ var ClientModeRuntime = class {
     this.assertRemoteCompatible(remote);
     this.clientAuthRequired = false;
     const target3 = { deviceId: remote.target.deviceId, name: remote.target.name };
-    this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target3);
+    const gateway = this.remoteTypertGateway(remote);
+    const selected = {
+      invoke: async (request) => {
+        if (`${request.namespace}/${request.method}` !== "session/prompt") return gateway.invoke(request);
+        const payload = await uploadLocalMentions({ args: request.args }, gateway, request.signal ?? new AbortController().signal);
+        return gateway.invoke({ ...request, args: payload.args });
+      },
+      dispatch: async (endpoint, payload, signal) => gateway.dispatch(
+        endpoint,
+        endpoint === "session/prompt" ? await uploadLocalMentions(payload, gateway, signal) : payload,
+        signal
+      ),
+      open: (endpoint, payload, signal) => gateway.open(endpoint, payload, signal)
+    };
+    this.gatewaySwitch.selectRemote(selected, void 0, target3);
     this.recoverable = remote;
   }
   remoteTypertGateway(remote) {
@@ -88537,7 +88620,7 @@ var savedPairingSchema = external_exports.object({
 
 // packages/plugin/src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat as lstat2, mkdir as mkdir3, readFile as readFile4, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { basename as basename4, dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -88606,8 +88689,8 @@ var IdentityStore = class {
     }
     await assertPrivateMode2(keyPath);
     try {
-      const record11 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
-      const privateKey = (await readFile3(keyPath, "utf8")).trim();
+      const record11 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
+      const privateKey = (await readFile4(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
       if (regenerated.publicKey !== record11.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
@@ -88661,8 +88744,8 @@ var IdentityStore = class {
   async readIdentity(devicePath, keyPath, deviceName) {
     await assertPrivateMode2(keyPath);
     try {
-      let record11 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
-      const privateKey = (await readFile3(keyPath, "utf8")).trim();
+      let record11 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
+      const privateKey = (await readFile4(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
       if (regenerated.publicKey !== record11.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
@@ -88731,7 +88814,7 @@ var IdentityStore = class {
     if (!await exists2(path)) {
       await atomicJsonWrite(path, { schemaVersion: 1, peers: [] }, 384);
     }
-    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(path, "utf8")));
+    const parsed = trustedPeersSchema.parse(JSON.parse(await readFile4(path, "utf8")));
     const peers = /* @__PURE__ */ new Map();
     for (const peer of parsed.peers) {
       if (peer.fingerprint !== fingerprint2(peer.publicKey)) {
@@ -88787,7 +88870,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, 
   const old = await storageDirectoryStat(source);
   const current = await storageDirectoryStat(target3);
   const pinPath = join5(lockDirectory, "legacy-root.json");
-  const pinMetadata = await lstat(pinPath).catch((error62) => {
+  const pinMetadata = await lstat2(pinPath).catch((error62) => {
     if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
     throw error62;
   });
@@ -88798,7 +88881,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, 
     }
     await assertPrivateMode2(pinPath);
     try {
-      pin = legacyRootPinSchema.parse(JSON.parse(await readFile3(pinPath, "utf8")));
+      pin = legacyRootPinSchema.parse(JSON.parse(await readFile4(pinPath, "utf8")));
     } catch {
       throw new IdentityInvalidError("Remote storage fallback record is invalid; no credentials were changed.", "STORAGE_CONFLICT");
     }
@@ -88902,7 +88985,7 @@ async function assertOwnedRemoteStorage(root2) {
       }
       if (isLockArtifact(entry.name)) {
         const lockPath = join5(directory, entry.name);
-        const metadata2 = await lstat(lockPath);
+        const metadata2 = await lstat2(lockPath);
         if (!entry.isFile() || !metadata2.isFile() || metadata2.isSymbolicLink() || metadata2.nlink !== 1 || metadata2.size > 16 * 1024 * 1024) {
           throw rejected("STORAGE_CONFLICT");
         }
@@ -88916,13 +88999,13 @@ async function assertOwnedRemoteStorage(root2) {
       }
       const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || isBackupArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT", entry.name);
-      const metadata = await lstat(join5(directory, entry.name));
+      const metadata = await lstat2(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024 || metadata.nlink !== 1 && !await isVerifiedRefreshHardlink(directory, entry.name, entries.map((item) => item.name))) {
         throw rejected("STORAGE_CONFLICT", entry.name);
       }
     }
     const names = new Set(entries.map((entry) => entry.name).filter((name2) => !isLockArtifact(name2)));
-    if (names.has("server-credentials.json.refresh-lock") && await readFile3(join5(directory, "server-credentials.json.refresh-lock"), "utf8") !== SERVER_CREDENTIALS_QUEUE_MARKER) {
+    if (names.has("server-credentials.json.refresh-lock") && await readFile4(join5(directory, "server-credentials.json.refresh-lock"), "utf8") !== SERVER_CREDENTIALS_QUEUE_MARKER) {
       throw rejected("STORAGE_CONFLICT");
     }
     if (!names.has("device.json") && !names.has("device.key")) {
@@ -88943,8 +89026,8 @@ async function assertOwnedRemoteStorage(root2) {
     await assertPrivateMode2(join5(directory, "device.key"));
     let record11;
     try {
-      record11 = identitySchema.parse(JSON.parse(await readFile3(join5(directory, "device.json"), "utf8")));
-      const key = (await readFile3(join5(directory, "device.key"), "utf8")).trim();
+      record11 = identitySchema.parse(JSON.parse(await readFile4(join5(directory, "device.json"), "utf8")));
+      const key = (await readFile4(join5(directory, "device.key"), "utf8")).trim();
       if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
@@ -88956,7 +89039,7 @@ async function assertOwnedRemoteStorage(root2) {
       throw rejected("IDENTITY_INVALID");
     }
     if (names.has("trusted-peers.json")) {
-      const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+      const peers = trustedPeersSchema.parse(JSON.parse(await readFile4(join5(directory, "trusted-peers.json"), "utf8"))).peers;
       const ids = /* @__PURE__ */ new Set();
       for (const peer of peers) {
         if (peer.fingerprint !== fingerprint2(peer.publicKey) || ids.has(peer.deviceId)) throw rejected("IDENTITY_INVALID");
@@ -88964,7 +89047,7 @@ async function assertOwnedRemoteStorage(root2) {
       }
     }
     if (names.has("server-credentials.json")) {
-      const raw = JSON.parse(await readFile3(join5(directory, "server-credentials.json"), "utf8"));
+      const raw = JSON.parse(await readFile4(join5(directory, "server-credentials.json"), "utf8"));
       if (typeof raw.serverUrl !== "string") throw rejected("IDENTITY_INVALID");
       const expectedDeviceId = role2 === "client" && typeof raw.deviceId === "string" && external_exports.string().uuid().safeParse(raw.deviceId).success ? raw.deviceId : record11.deviceId;
       const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, expectedDeviceId);
@@ -88977,11 +89060,11 @@ async function assertOwnedRemoteStorage(root2) {
     }
     if (names.has("pairing-host-only.json")) {
       await assertPrivateMode2(join5(directory, "pairing-host-only.json"));
-      external_exports.object({ hostOnly: external_exports.literal(true) }).strict().parse(JSON.parse(await readFile3(join5(directory, "pairing-host-only.json"), "utf8")));
+      external_exports.object({ hostOnly: external_exports.literal(true) }).strict().parse(JSON.parse(await readFile4(join5(directory, "pairing-host-only.json"), "utf8")));
     }
     if (names.has("host-pairing.json")) {
       await assertPrivateMode2(join5(directory, "host-pairing.json"));
-      const pairing = savedPairingSchema.parse(JSON.parse(await readFile3(join5(directory, "host-pairing.json"), "utf8")));
+      const pairing = savedPairingSchema.parse(JSON.parse(await readFile4(join5(directory, "host-pairing.json"), "utf8")));
       if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
       const origin = new URL(pairing.serverUrl);
       if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected("IDENTITY_INVALID");
@@ -89030,7 +89113,7 @@ async function isRepairableLegacyClientDirectory(directory, names) {
     }
   }
   if (names.has("trusted-peers.json")) {
-    const peers = trustedPeersSchema.parse(JSON.parse(await readFile3(join5(directory, "trusted-peers.json"), "utf8"))).peers;
+    const peers = trustedPeersSchema.parse(JSON.parse(await readFile4(join5(directory, "trusted-peers.json"), "utf8"))).peers;
     if (peers.length > 0) return false;
   }
   if (names.has("device.key")) {
@@ -89040,7 +89123,7 @@ async function isRepairableLegacyClientDirectory(directory, names) {
 }
 async function storageDirectoryStat(path) {
   try {
-    const entry = await lstat(path, { bigint: true });
+    const entry = await lstat2(path, { bigint: true });
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.", "STORAGE_CONFLICT");
     }
@@ -89059,7 +89142,7 @@ async function assertStorageIdle(directory) {
     const linkedTemps = [];
     for (const entry of before) {
       if (!isRefreshQueueTemp(entry.name)) continue;
-      const metadata = await lstat(join5(currentDirectory, entry.name));
+      const metadata = await lstat2(join5(currentDirectory, entry.name));
       if (metadata.nlink === 2 && await isVerifiedRefreshHardlink(currentDirectory, entry.name, names)) {
         linkedTemps.push(join5(currentDirectory, entry.name));
       }
@@ -89073,7 +89156,7 @@ async function assertStorageIdle(directory) {
     for (const temporary of linkedTemps) await unlink(temporary);
     for (const entry of await readdir2(currentDirectory, { withFileTypes: true })) {
       const entryPath = join5(currentDirectory, entry.name);
-      if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile3(entryPath, "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
+      if (entry.name === "server-credentials.json.refresh-lock" && entry.isFile() && await readFile4(entryPath, "utf8") === SERVER_CREDENTIALS_QUEUE_MARKER) continue;
       if (entry.isFile() && isRefreshQueueArtifact(entry.name)) continue;
       if (entry.isSymbolicLink()) {
         throw new IdentityInvalidError(
@@ -89147,8 +89230,8 @@ async function isVerifiedRefreshHardlink(directory, name2, names) {
   if (match === null || !names.includes(match[1]) || !ownerExited2(`${match[2]}
 `)) return false;
   const [source, published] = await Promise.all([
-    lstat(join5(directory, temporary[0]), { bigint: true }),
-    lstat(join5(directory, match[1]), { bigint: true })
+    lstat2(join5(directory, temporary[0]), { bigint: true }),
+    lstat2(join5(directory, match[1]), { bigint: true })
   ]);
   return source.isFile() && published.isFile() && source.nlink === 2n && published.nlink === 2n && source.dev === published.dev && source.ino === published.ino;
 }
@@ -89274,7 +89357,7 @@ async function acquireTakeoverClaim(claimPath, depth, reclaimed) {
 }
 async function readLockRecord2(lockPath) {
   try {
-    return await readFile3(lockPath, "utf8");
+    return await readFile4(lockPath, "utf8");
   } catch {
     return void 0;
   }
@@ -89297,7 +89380,7 @@ function isScopedClientDirectory(directory) {
 async function hasVerifiedScopedIdentity(directory) {
   try {
     const serversPath = join5(directory, "servers");
-    const metadata = await lstat(serversPath);
+    const metadata = await lstat2(serversPath);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
     for (const scope2 of await readdir2(serversPath, { withFileTypes: true })) {
       if (!scope2.isDirectory() || scope2.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope2.name)) continue;
@@ -89306,14 +89389,14 @@ async function hasVerifiedScopedIdentity(directory) {
         const roleDir = join5(serversPath, scope2.name, role2.name);
         try {
           for (const fileName of ["device.json", "device.key"]) {
-            const fileStat = await lstat(join5(roleDir, fileName));
+            const fileStat = await lstat2(join5(roleDir, fileName));
             if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.nlink !== 1 || fileStat.size > 16 * 1024 * 1024) {
               throw new Error("invalid identity file metadata");
             }
           }
           await assertPrivateMode2(join5(roleDir, "device.key"));
-          const record11 = identitySchema.parse(JSON.parse(await readFile3(join5(roleDir, "device.json"), "utf8")));
-          const key = (await readFile3(join5(roleDir, "device.key"), "utf8")).trim();
+          const record11 = identitySchema.parse(JSON.parse(await readFile4(join5(roleDir, "device.json"), "utf8")));
+          const key = (await readFile4(join5(roleDir, "device.key"), "utf8")).trim();
           if (generateKeyPair(fromBase64Url2(key)).publicKey === record11.publicKey) return true;
         } catch {
           continue;
@@ -89331,7 +89414,7 @@ async function canAutoHealClientIdentity(directory, allowServersDirectory = fals
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);
-      const metadata = await lstat(entryPath);
+      const metadata = await lstat2(entryPath);
       if (metadata.isSymbolicLink()) return false;
       if (allowServersDirectory && entry.name === "servers" && metadata.isDirectory()) continue;
       if (!metadata.isFile()) return false;
@@ -89339,7 +89422,7 @@ async function canAutoHealClientIdentity(directory, allowServersDirectory = fals
         continue;
       }
       if (entry.name === "trusted-peers.json") {
-        const parsed = trustedPeersSchema.parse(JSON.parse(await readFile3(entryPath, "utf8")));
+        const parsed = trustedPeersSchema.parse(JSON.parse(await readFile4(entryPath, "utf8")));
         if (parsed.peers.length > 0) return false;
         continue;
       }
@@ -89385,7 +89468,7 @@ async function readStorageEntries(directory) {
   const result = [];
   for (const entry of entries) {
     if (isStorageMetadataArtifact(entry.name) && entry.isFile()) {
-      const metadata = await lstat(join5(directory, entry.name));
+      const metadata = await lstat2(join5(directory, entry.name));
       if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue;
     }
     result.push(entry);
@@ -92603,7 +92686,7 @@ var IsolatedAcpClient = class {
 };
 
 // packages/plugin/src/workspace-bridge.ts
-import { realpath as realpath2, lstat as lstat2, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat3, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve4 } from "node:path";
 
 // packages/plugin/src/remote-terminal-controller.ts
@@ -93286,7 +93369,7 @@ var WorkspaceBridge = class {
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
-          const info2 = await lstat2(item);
+          const info2 = await lstat3(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
         }
@@ -93385,7 +93468,7 @@ var WorkspaceBridge = class {
     const rel = relative2(root2, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
-      const info = await lstat2(candidate);
+      const info = await lstat3(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
       const canonicalRel = relative2(root2, canonical);
@@ -97433,7 +97516,7 @@ function isRecord19(value) {
 import { execFile as execFile3, execFileSync } from "node:child_process";
 import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
-import { dirname as dirname5, join as join13, posix, win32 } from "node:path";
+import { dirname as dirname5, join as join13, posix as posix2, win32 as win322 } from "node:path";
 import { promisify as promisify4 } from "node:util";
 var execFileAsync2 = promisify4(execFile3);
 var BUILTIN_ACP_SPECS = Object.freeze({
@@ -97524,7 +97607,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
 }
 function candidateBinaryPaths(id6, options = {}) {
   const platform3 = options.platform ?? process.platform;
-  const pJoin = platform3 === "win32" ? win32.join : posix.join;
+  const pJoin = platform3 === "win32" ? win322.join : posix2.join;
   const env = options.env ?? process.env;
   const home = options.homedir ?? homedir7();
   const localAppData = env.LOCALAPPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Local") : "");
@@ -97672,7 +97755,7 @@ function lookupSystemPath(command, platform3 = process.platform) {
     });
     const firstLine = output2.split(/\r?\n/).find((line) => line.trim().length > 0);
     if (firstLine && defaultCheckExecutable(firstLine.trim(), platform3)) {
-      return platform3 === "win32" ? win32.resolve(firstLine.trim()) : posix.resolve(firstLine.trim());
+      return platform3 === "win32" ? win322.resolve(firstLine.trim()) : posix2.resolve(firstLine.trim());
     }
     return void 0;
   } catch {
@@ -97685,7 +97768,7 @@ function findExistingBinary(id6, options = {}) {
   const candidates = candidateBinaryPaths(id6, options);
   for (const candidate of candidates) {
     if (check2(candidate)) {
-      return platform3 === "win32" ? win32.resolve(candidate) : posix.resolve(candidate);
+      return platform3 === "win32" ? win322.resolve(candidate) : posix2.resolve(candidate);
     }
   }
   const defaultCommands = {
@@ -98690,7 +98773,7 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat3, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
+import { link as link2, lstat as lstat4, open as open5, realpath as realpath6, stat as stat6, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join15 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
@@ -98821,7 +98904,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat3(upload.temp);
+    const temp = await lstat4(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -98893,8 +98976,8 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat3(upload.root);
-      const temp = await lstat3(upload.temp);
+      const root2 = await lstat4(upload.root);
+      const temp = await lstat4(upload.temp);
       if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
@@ -100881,7 +100964,7 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { homedir as homedir9 } from "node:os";
-import { lstat as lstat4, realpath as realpath7, stat as stat8 } from "node:fs/promises";
+import { lstat as lstat5, realpath as realpath7, stat as stat8 } from "node:fs/promises";
 import { dirname as dirname7, isAbsolute as isAbsolute10, join as join16, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
@@ -101703,7 +101786,7 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat4(root2);
+      const rootLstat = await lstat5(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
@@ -101715,7 +101798,7 @@ var HarnessRemoteBridge = class {
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat4(currentPath);
+        const dirLstat = await lstat5(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -101723,7 +101806,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat4(candidate);
+      const targetLstat = await lstat5(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }

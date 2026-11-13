@@ -1,3 +1,4 @@
+import { uploadLocalMentions } from './local-mention-upload.js'
 import type { ControlResult } from './control-result.js'
 import { AgentAcpClient, CodexRemoteClient } from '@dsh-remote/client-core'
 import type { PluginRouteCallResult } from '@dsh-remote/protocol'
@@ -900,7 +901,18 @@ export class ClientModeRuntime {
     this.assertRemoteCompatible(remote)
     this.clientAuthRequired = false
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
-    this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
+    const gateway = this.remoteTypertGateway(remote)
+    const selected = {
+      invoke: async (request: Parameters<typeof gateway.invoke>[0]) => {
+        if (`${request.namespace}/${request.method}` !== 'session/prompt') return gateway.invoke(request)
+        const payload = await uploadLocalMentions({ args: request.args }, gateway, request.signal ?? new AbortController().signal)
+        return gateway.invoke({ ...request, args: (payload as { args: typeof request.args }).args })
+      },
+      dispatch: async (endpoint: string, payload: unknown, signal: AbortSignal) => gateway.dispatch(endpoint,
+        endpoint === 'session/prompt' ? await uploadLocalMentions(payload, gateway, signal) : payload, signal),
+      open: (endpoint: string, payload: unknown, signal: AbortSignal) => gateway.open(endpoint, payload, signal),
+    }
+    this.gatewaySwitch.selectRemote(selected, undefined, target)
     this.recoverable = remote
   }
 
