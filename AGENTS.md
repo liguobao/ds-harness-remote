@@ -1,3 +1,15 @@
+## DS-Bot v0.3.6 Host endpoint forwarding (2026-11-13)
+
+按用户要求，`plugin-route-bridge.ts` 固定白名单覆盖上游 v0.3.6 `channel.js`
+与 `computerEndpoint` 的全部 161 个命名接口，另保留旧 Host 的 btw/btw-cancel/room-continue。
+管理、凭据、更新、电脑控制与审批 choice 交由已认证通道后的 DS-Bot handler 校验；
+旧“本地管理/仅单次审批”限制被本次明确需求取代。路径仍限固定路由，未知 endpoint
+拒绝，消息大小、30 秒预算与不重放 mutation 保持不变。接口快照在
+`packages/plugin/tests/fixtures/ds-bot-v0.3.6-endpoints.json`，Android UI 未在本轮扩展。
+验证：25 项转发测试、Plugin check/build、DSH bundle 校验与 diff check 通过。
+Plugin 全套 698 pass / 3 fail / 3 skipped，另 2 个异步错误，尚未全部排查；
+未做真实 DS-Bot Host 或跨设备验收，不将接口白名单覆盖等同完整产品兼容。
+
 # Repository Guide for Agents
 
 ## Remote async compaction (Issue #416 / PR #420, 2026-11-12)

@@ -827,13 +827,18 @@ Harness RPC 路径、路径规范化变体及 query 均以 `INVALID_MESSAGE` 拒
 Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remote 设置限制或
 终端归属与输入权校验。`body` 只允许 `{ endpoint, payload? }`，`payload` 为普通 JSON
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
-按 `endpoint` 执行以下编译期固定操作白名单，新增上游操作默认拒绝：
+按 `endpoint` 执行编译期固定操作白名单，新增上游操作默认拒绝。
 
-- 查询：`state`、`models`、`efforts`、`exchange`、`exchange-text`、`file-text`、`earlier`、`chat`、`run-stats`、`thinking`、`usage`、`room-progress`、`group-rows`、`schedules`。
-- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`、`resume`、`bot-new-part`、`bot-open-part`。
-- 群聊管理：`create-room`、`update-room`、`delete-room`、`stop-room-work`、`goal-draft`、`goal-control`、`room-continue`。
-- Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`btw`、`btw-cancel`、`btw-delete`、`side-new`、`side-ask`、`side-cancel`、`side-close`、`answer-question`、`dismiss-question`、`dismiss-view`、`view-reply`、`approval-answer`、`stop-member-work`。
+2026-11-13 对齐 [DS-Bot v0.3.6](https://github.com/Fei2411/DS-Bot/tree/v0.3.6)：
+完整暴露其 `channel.js` 的命名 endpoint 与 `computer/index.js` 的 `computer-*` endpoint，
+包括模型供应商、密钥、连接器、IM、手机配对、电脑控制、更新、诊断、头像、分组、记忆编辑与 Side Chat。
+精确清单见 `packages/plugin/src/plugin-route-bridge.ts` 的 `BOT_REMOTE_OPERATIONS`；
+独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.3.6-endpoints.json`。
+旧 Host 的 `btw`、`btw-cancel`、`room-continue` 仍放行。
+`approval-answer` 的 choice 不再限制为单次允许/拒绝，交由 DS-Bot 自身校验。
+这些管理操作仅能通过既有认证 Remote 通道调用；不新增 HTTP 路径或通用 endpoint 通配符。
+原有消息/响应大小与 30 秒调用预算保持不变，超大图片或长操作仍受此边界限制。
+这表示 Host 接口透传覆盖，不表示 Android 原生界面已支持所有功能。
 
 `group-rows { roomId, from, to?, anchor? }` 读取群聊账簿中某轮的行，`open` 表示该轮仍在增长；
 它也是轮次结束后仍能显示成员回复正文的唯一读取入口。该 operation 于 0.6.4 加入白名单：
@@ -859,11 +864,9 @@ DS Bot 0.2.1 旁问：`btw { sessionId, text }` 返回卡片 ID，`btw-cancel { 
 Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本地计算与 SVG 图表；
 HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
-`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批（0.3.0 起同时覆盖群聊与 Bot 自有会话审批）。
-安装/升级、日程增删、凭据和 connector/mail 管理、IM 外部账号配对与登录、本机 CLI Agent 注册（`local-agent-*`）、电脑操控与截屏（`computer-*`）、能力脚本、memory 写入、浏览器控制、诊断
-文件及本机偏好设置等操作均不开放；不允许通过 `api/bot` 间接扩大 Harness Remote 权限。
-被拒绝的操作返回 `INVALID_MESSAGE`，浏览器兼容入口显示安全的
-`remote-plugin/operation-not-allowed` 原生错误封装。
+未知 endpoint 返回 `INVALID_MESSAGE`，浏览器兼容入口显示
+`remote-plugin/operation-not-allowed` 原生错误封装。DS-Bot v0.3.6 的管理接口
+已按上述完整白名单开放，旧版本文档中的“仅单次审批/本地管理”限制不再适用。
 
 ```json
 "params": { "route": "api/bot", "body": { "endpoint": "state", "payload": null } }
