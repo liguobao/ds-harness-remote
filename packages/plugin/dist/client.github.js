@@ -4023,6 +4023,37 @@ If a code was sent, recover the original submission without changing it.`,
     };
   }
 
+  // packages/plugin/src/client/account-entry.ts
+  var NATIVE_ROW_SELECTOR = '[class*="settingsArea"] [class*="triggerRow"]', DS_BOT_ROW_SELECTOR = '[class*="settingsArea"] .bt-settings-row', accountRowSelectors = [NATIVE_ROW_SELECTOR, DS_BOT_ROW_SELECTOR], accountRowRetry = { intervalMs: 50, attempts: 40 }, MISSING_ANCHOR_WARNING = 'ds-harness-remote: Compact sidebar entry found no account row ([class*="settingsArea"] [class*="triggerRow"] or [class*="settingsArea"] .bt-settings-row). This host/DS-Bot combination exposes no Compact slot; the Standard entry stays in the sidebar footer.', warned = /* @__PURE__ */ new Set();
+  function reportMissingAnchor() {
+    warned.has(MISSING_ANCHOR_WARNING) || (warned.add(MISSING_ANCHOR_WARNING), console.warn(MISSING_ANCHOR_WARNING));
+  }
+  function isLaidOut(row) {
+    return typeof row.getClientRects != "function" || row.getClientRects().length > 0;
+  }
+  function findAccountRow(root) {
+    for (let selector of accountRowSelectors)
+      for (let row of Array.from(root.querySelectorAll(selector)))
+        if (isLaidOut(row)) return row;
+    return null;
+  }
+  function mountAccountEntry(attach) {
+    let attempt = 0, timer, host, attached = !1, observer, sync = () => {
+      timer !== void 0 && (window.clearTimeout(timer), timer = void 0);
+      let row = findAccountRow(document);
+      if (row === null) {
+        attached && (attached = !1, attach(null)), attempt < accountRowRetry.attempts ? (attempt += 1, timer = window.setTimeout(sync, accountRowRetry.intervalMs)) : reportMissingAnchor();
+        return;
+      }
+      attempt = 0, host === void 0 && (host = document.createElement("span")), (host.parentElement !== row || !host.isConnected) && row.append(host), attached || (attached = !0, attach(host)), observer === void 0 && document.body !== null && (observer = new MutationObserver(() => {
+        (!attached || host?.isConnected !== !0) && sync();
+      }), observer.observe(document.body, { childList: !0, subtree: !0 }));
+    };
+    return sync(), () => {
+      timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
+    };
+  }
+
   // packages/plugin/src/client/workspaces.ts
   var import_qrcode3 = __toESM(require_browser(), 1);
 
@@ -4067,22 +4098,10 @@ If a code was sent, recover the original submission without changing it.`,
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
-      if (React.useEffect(() => {
-        if (portal2 === void 0) return;
-        let attempt = 0, timer, host, observer, attach = () => {
-          let row = document.querySelector('[class*="settingsArea"] [class*="triggerRow"]');
-          if (row === null) {
-            attempt < 40 && (attempt += 1, timer = window.setTimeout(attach, 50));
-            return;
-          }
-          host = document.createElement("span"), observer = new MutationObserver(() => {
-            host !== void 0 && !host.isConnected && row.append(host);
-          }), observer.observe(row, { childList: !0 }), row.append(host), setContainer(host);
-        };
-        return attach(), () => {
-          timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
-        };
-      }, [portal2]), typeof portal2 != "function" || container === null) return props.fallback;
+      if (React.useEffect(
+        () => portal2 === void 0 ? void 0 : mountAccountEntry(setContainer),
+        [portal2]
+      ), typeof portal2 != "function" || container === null) return props.fallback;
       try {
         return portal2(props.children, container);
       } catch {
