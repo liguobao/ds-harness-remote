@@ -123,6 +123,20 @@ production servers must use HTTPS/WSS.
 
 ## Validation
 
+To build the current checkout as a Release APK and install it on a connected phone:
+
+```bash
+bash scripts/install-android-release.sh
+# With multiple devices:
+bash scripts/install-android-release.sh <adb-serial>
+```
+
+The script prepares workspace dependencies, runs the Android check, syncs native Android
+configuration from Expo, builds for the phone's ABI, and uses `adb install -r` to preserve app
+data. It copies the APK to `apps/android/dsh-remote-latest.apk` and prints the installed version.
+Node, pnpm, a JDK, and the Android SDK must already be installed. The current Gradle Release
+configuration uses the development keystore; this script does not change signing configuration.
+
 ```bash
 pnpm --filter @dsh-remote/android check
 pnpm --filter @dsh-remote/android test
