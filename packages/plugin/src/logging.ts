@@ -8,7 +8,7 @@ export interface LogSink {
 }
 
 const levels: readonly LogLevel[] = ['debug', 'info', 'warn', 'error']
-const secretKey = /authorization|cookie|token|secret|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i
+const secretKey = /authorization|cookie|token|secret|password|passphrase|credential|apiKey|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i
 
 export class SafeLogger {
   constructor(private readonly sink: LogSink, private readonly threshold: LogLevel | (() => LogLevel) = 'info') {}

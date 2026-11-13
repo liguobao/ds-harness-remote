@@ -22,7 +22,7 @@ import {
 } from './identity-store.js'
 import { basename, dirname } from 'node:path'
 import { HostLogStore, resolveHostLogPath } from './host-log-store.js'
-import { SafeLogger } from './logging.js'
+import { SafeLogger, type LogLevel } from './logging.js'
 import { safeStartupError } from './safe-error.js'
 import { HostPluginRuntime } from './service.js'
 import type { ScheduleCreateService } from './harness-remote-bridge.js'
@@ -142,6 +142,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
       } catch (error) {
         storageError = error
       }
+      const pendingLogStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(runtimeContext) }) })
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
@@ -152,11 +153,16 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
           undefined,
           undefined,
           true,
+          pendingLogStore,
         )
         if (storageError !== undefined) {
           control.setStartupFailure(storageError, { storageAvailable: false })
         }
-        return control.register(connection, webServer)
+        const dispose = control.register(connection, webServer)
+        return async () => {
+          await dispose()
+          await pendingLogStore.flush()
+        }
       }, 'ds-harness-remote pending control')
     }
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
@@ -206,12 +212,19 @@ async function activate(
   // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
   // logger: the web process stdout is captured by the Desktop shell into
   // desktop.log, so remote RPC/transport diagnostics stay greppable there.
+  const readSafeLogLevel = (): LogLevel => {
+    try {
+      const raw = (settingsBinding?.get() ?? readConfig()).logLevel
+      if (raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw
+    } catch { /* Keep logging with initial level if live config cannot be read. */ }
+    return config.logLevel
+  }
   const logger = new SafeLogger({
     debug: message => { logStore.record('debug', message); ctx.logger.debug(message); console.debug(message) },
     info: message => { logStore.record('info', message); ctx.logger.info(message); console.info(message) },
     warn: message => { logStore.record('warn', message); ctx.logger.warn(message); console.warn(message) },
     error: message => { logStore.record('error', message); ctx.logger.error(message); console.error(message) },
-  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
+  }, readSafeLogLevel)
   let defaultIdentityDirectory = new IdentityStore().directory
   let initialStorageError: unknown
   try {

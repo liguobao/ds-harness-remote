@@ -434,7 +434,12 @@ export class PluginControlRuntime {
   }
 
   private currentLogLevel(): 'debug' | 'info' | 'warn' | 'error' {
-    return resolveConfig(this.settings === undefined ? this.config : this.settings.get()).logLevel
+    if (this.settings === undefined) return this.config.logLevel
+    try {
+      const raw = this.settings.get()?.logLevel
+      if (raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw
+    } catch { /* Fall back to cached config level when raw settings cannot be read. */ }
+    return this.config.logLevel
   }
 
   private async getLogs(payload: unknown): Promise<PluginLogView> {
@@ -456,6 +461,9 @@ export class PluginControlRuntime {
   }
 
   private async clearLogs(): Promise<PluginLogView> {
+    if (this.settings === undefined) {
+      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
+    }
     const logLevel = this.currentLogLevel()
     if (this.logStore === undefined) {
       return { logLevel, entries: [], totalBuffered: 0 }

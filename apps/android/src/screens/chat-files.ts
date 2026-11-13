@@ -47,6 +47,7 @@ export const MAX_TOTAL_FILES_BYTES = MAX_TOTAL_INLINE_TEXT_BYTES
 export const UPLOAD_CHUNK_BYTES = 64 * 1024 // 64 KiB protocol chunk
 export const MAX_RELAY_UPLOAD_BYTES = 20 * 1024 * 1024 // 20 MiB
 export const MAX_DIRECT_UPLOAD_BYTES = 1024 * 1024 * 1024 // 1 GiB
+export const MAX_FALLBACK_BUFFER_BYTES = 32 * 1024 * 1024 // 32 MiB cap when native File.open is unavailable
 
 // Local memory ceilings also apply when an older Host omits imageLimits.
 const MAX_DOCUMENT_IMAGE_BYTES = 8 * 1024 * 1024
@@ -199,11 +200,22 @@ async function openFileChunkReader(file: StagedFile, signal?: AbortSignal): Prom
       // Fall back to fetch when native FileHandle is unavailable (e.g. tests or non-file URIs).
     }
 
+    if (file.size > MAX_FALLBACK_BUFFER_BYTES) {
+      throw new Error(`File ${file.name} (${file.size} bytes) exceeds safe in-memory fallback limit`)
+    }
     const response = await fetch(file.uri, { signal })
     if (!response.ok) {
       throw new Error(`Failed to read file ${file.name} from ${file.uri}`)
     }
+    const contentLengthHeader = response.headers?.get?.('content-length')
+    const contentLength = contentLengthHeader ? Number(contentLengthHeader) : Number.NaN
+    if (Number.isFinite(contentLength) && contentLength > MAX_FALLBACK_BUFFER_BYTES) {
+      throw new Error(`File ${file.name} (${contentLength} bytes) exceeds safe in-memory fallback limit`)
+    }
     const buffer = await response.arrayBuffer()
+    if (buffer.byteLength > MAX_FALLBACK_BUFFER_BYTES) {
+      throw new Error(`File ${file.name} (${buffer.byteLength} bytes) exceeds safe in-memory fallback limit`)
+    }
     throwIfAborted(signal)
     const bytes = new Uint8Array(buffer)
     return {

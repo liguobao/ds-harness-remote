@@ -10,6 +10,7 @@ import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
+import { HostLogStore } from '../src/host-log-store.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
 const directories: string[] = []
@@ -672,6 +673,29 @@ describe('PluginControlRuntime local log endpoints', () => {
         totalBuffered: 0,
       },
     })
+  })
+
+  it('rejects settings.logs.clear when settings are read-only', async () => {
+    const directory = await temporaryDirectory()
+    const logStore = new HostLogStore()
+    logStore.record('info', '[ds-harness-remote] keep-me')
+    const control = new PluginControlRuntime(
+      resolveConfig({ logLevel: 'info' }),
+      directory,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      logStore,
+    )
+    const handler = register(control)
+    await expect(handler('settings.logs.clear', {}, signal())).resolves.toMatchObject({
+      ok: false,
+      error: { details: { remoteCode: 'SETTINGS_UNAVAILABLE' } },
+    })
+    expect((await logStore.snapshot()).totalBuffered).toBe(1)
   })
 })
 function register(runtime: PluginControlRuntime) {

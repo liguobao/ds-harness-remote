@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { HostLogStore, resolveHostLogPath } from '../src/host-log-store.js'
@@ -97,5 +97,20 @@ describe('HostLogStore', () => {
     expect(snap.fileError).toBeTruthy()
 
     await writeFile(join(dir, 'probe.txt'), 'ok', 'utf8')
+  })
+
+  it('redacts inline Bearer tokens, query secrets, and home paths in file errors', async () => {
+    const store = new HostLogStore({ filePath: join(homedir(), '.dsh-nonexistent-parent', '\0invalid', 'test.log') })
+    store.record('warn', 'Authorization Bearer secret-jwt-123 and https://example.test/cb?token=secret-tok&code=abc')
+    await store.flush()
+    const snap = await store.snapshot()
+    expect(snap.entries[0]?.line).toContain('Bearer [REDACTED]')
+    expect(snap.entries[0]?.line).toContain('token=[REDACTED]')
+    expect(snap.entries[0]?.line).toContain('code=[REDACTED]')
+    expect(snap.entries[0]?.line).not.toContain('secret-jwt-123')
+    expect(snap.entries[0]?.line).not.toContain('secret-tok')
+    if (snap.fileError) {
+      expect(snap.fileError).not.toContain(homedir())
+    }
   })
 })

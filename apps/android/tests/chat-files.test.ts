@@ -397,6 +397,27 @@ describe('chat-files utilities', () => {
         globalThis.fetch = originalFetch
       }
     })
+
+    it('rejects oversized fallback fetch reads before buffering into memory', async () => {
+      const originalFetch = globalThis.fetch
+      const fetchMock = vi.fn()
+      globalThis.fetch = fetchMock as typeof fetch
+      try {
+        const rpc = vi.fn(async () => ({}))
+        const bigFile: StagedFile = {
+          id: 'vid-big',
+          name: 'huge.mp4',
+          size: 40 * 1024 * 1024,
+          mimeType: 'video/mp4',
+          uri: 'file:///cache/huge.mp4',
+        }
+        await expect(uploadStagedFilesToWorkspace(rpc, 'session-big', [bigFile])).rejects.toThrow('exceeds safe in-memory fallback limit')
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(rpc).not.toHaveBeenCalled()
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
   })
 
 })

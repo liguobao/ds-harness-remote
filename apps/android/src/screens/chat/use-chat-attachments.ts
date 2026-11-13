@@ -276,7 +276,7 @@ export function useChatAttachments({ session, memoryKey, images, setImages, stag
           try {
             const textContent = await fileObj.text()
             if (!isValidUtf8Text(textContent)) {
-              Alert.alert(strings.chat.filePickerFailedTitle, `“${rawName}” 包含非有效 UTF-8 字符或控制字符，已跳过。`)
+              Alert.alert(strings.chat.filePickerFailedTitle, strings.chat.invalidTextFileSkipped(rawName))
               continue
             }
             newStagedFiles.push({

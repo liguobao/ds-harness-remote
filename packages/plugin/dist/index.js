@@ -98278,7 +98278,13 @@ var PluginControlRuntime = class {
     return this.settingsView();
   }
   currentLogLevel() {
-    return resolveConfig(this.settings === void 0 ? this.config : this.settings.get()).logLevel;
+    if (this.settings === void 0) return this.config.logLevel;
+    try {
+      const raw = this.settings.get()?.logLevel;
+      if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+    } catch {
+    }
+    return this.config.logLevel;
   }
   async getLogs(payload) {
     const value = payload === void 0 ? {} : record9(payload);
@@ -98298,6 +98304,9 @@ var PluginControlRuntime = class {
     return { logLevel, ...snapshot2 };
   }
   async clearLogs() {
+    if (this.settings === void 0) {
+      throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
+    }
     const logLevel = this.currentLogLevel();
     if (this.logStore === void 0) {
       return { logLevel, entries: [], totalBuffered: 0 };
@@ -98695,6 +98704,9 @@ var HostLogStore = class {
   initPromise;
   clearedBeforeInit = false;
   sizeVerified = false;
+  dirEnsured = false;
+  pendingDiskLines = [];
+  diskFlushScheduled = false;
   constructor(options = {}) {
     this.filePath = options.filePath;
     this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_ENTRIES);
@@ -98716,11 +98728,9 @@ var HostLogStore = class {
     this.liveEntries.push(entry);
     this.trimInMemory();
     if (this.filePath !== void 0) {
-      const payload = `${line}
-`;
-      this.enqueueWrite(async () => {
-        await this.appendToDisk(payload);
-      });
+      this.pendingDiskLines.push(`${line}
+`);
+      this.scheduleDiskFlush();
     }
   }
   async snapshot(options = {}) {
@@ -98741,6 +98751,7 @@ var HostLogStore = class {
     this.clearedBeforeInit = true;
     this.persistedEntries = [];
     this.liveEntries = [];
+    this.pendingDiskLines = [];
     if (this.filePath !== void 0) {
       this.enqueueWrite(async () => {
         await this.clearDisk();
@@ -98758,12 +98769,36 @@ var HostLogStore = class {
   async flush() {
     await this.writeChain;
   }
-  enqueueWrite(task) {
+  scheduleDiskFlush() {
+    if (this.diskFlushScheduled) return;
+    this.diskFlushScheduled = true;
+    this.enqueueWrite(async () => {
+      while (this.pendingDiskLines.length > 0) {
+        let batch = "";
+        let batchBytes = 0;
+        while (this.pendingDiskLines.length > 0) {
+          const next = this.pendingDiskLines[0];
+          const nextBytes = Buffer.byteLength(next, "utf8");
+          if (batch.length > 0 && this.currentBytes + batchBytes + nextBytes > this.maxFileBytes) break;
+          this.pendingDiskLines.shift();
+          batch += next;
+          batchBytes += nextBytes;
+        }
+        await this.appendToDisk(batch);
+      }
+      this.diskFlushScheduled = false;
+    }, () => {
+      this.diskFlushScheduled = false;
+    });
+  }
+  enqueueWrite(task, onError) {
     this.writeChain = this.writeChain.then(async () => {
       try {
         await task();
         this.fileError = void 0;
       } catch (error62) {
+        this.dirEnsured = false;
+        onError?.();
         this.fileError = safeFsErrorMessage(error62);
       }
     });
@@ -98802,7 +98837,10 @@ var HostLogStore = class {
   }
   async appendToDisk(payload) {
     const target3 = this.filePath;
-    await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+    if (!this.dirEnsured) {
+      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      this.dirEnsured = true;
+    }
     if (!this.sizeVerified) {
       const existing = await stat6(target3).catch((err5) => isEnoent(err5) ? void 0 : Promise.reject(err5));
       this.currentBytes = existing?.size ?? 0;
@@ -98837,7 +98875,10 @@ var HostLogStore = class {
   }
   async clearDisk() {
     const target3 = this.filePath;
-    await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+    if (!this.dirEnsured) {
+      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      this.dirEnsured = true;
+    }
     await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
     this.sizeVerified = true;
     for (let index = 1; index <= this.maxBackups; index++) {
@@ -98864,7 +98905,8 @@ var HostLogStore = class {
   }
 };
 function sanitizeLogMessage(message) {
-  const collapsed = message.replace(/[\r\n]+/g, " ").trimEnd();
+  const redacted = message.replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]").replace(/([?&](?:token|access_token|refresh_token|secret|password|authorization|cookie|code)=)[^&\s]+/gi, "$1[REDACTED]");
+  const collapsed = redacted.replace(/[\r\n]+/g, " ").trimEnd();
   if (collapsed.length <= MAX_LINE_CHARS) return collapsed;
   return `${collapsed.slice(0, MAX_LINE_CHARS)}...`;
 }
@@ -98901,13 +98943,17 @@ function isEnoent(error62) {
   return typeof error62 === "object" && error62 !== null && error62.code === "ENOENT";
 }
 function safeFsErrorMessage(error62) {
-  if (error62 instanceof Error && error62.message.trim().length > 0) return error62.message;
+  if (error62 instanceof Error && error62.message.trim().length > 0) {
+    const home = homedir8();
+    const normalized = home.length > 0 ? error62.message.split(home).join("~") : error62.message;
+    return normalized.replace(/[\r\n]+/g, " ").trim();
+  }
   return "Failed to write log file.";
 }
 
 // packages/plugin/src/logging.ts
 var levels = ["debug", "info", "warn", "error"];
-var secretKey = /authorization|cookie|token|secret|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i;
+var secretKey = /authorization|cookie|token|secret|password|passphrase|credential|apiKey|private|shared|ciphertext|payload|prompt|source|workspace|output|registrationCode|deviceCode/i;
 var SafeLogger = class {
   constructor(sink, threshold = "info") {
     this.sink = sink;
@@ -104576,6 +104622,7 @@ function apply(ctx, entry = void 0) {
       } catch (error62) {
         storageError = error62;
       }
+      const pendingLogStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(runtimeContext) }) });
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
@@ -104585,12 +104632,17 @@ function apply(ctx, entry = void 0) {
           void 0,
           void 0,
           void 0,
-          true
+          true,
+          pendingLogStore
         );
         if (storageError !== void 0) {
           control.setStartupFailure(storageError, { storageAvailable: false });
         }
-        return control.register(connection, webServer);
+        const dispose = control.register(connection, webServer);
+        return async () => {
+          await dispose();
+          await pendingLogStore.flush();
+        };
       }, "ds-harness-remote pending control");
     };
     const startActiveRuntime = async (activeContext) => {
@@ -104623,6 +104675,14 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const webServer = ctx.get("webServer");
   const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
   const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
+  const readSafeLogLevel = () => {
+    try {
+      const raw = (settingsBinding?.get() ?? readConfig()).logLevel;
+      if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+    } catch {
+    }
+    return config2.logLevel;
+  };
   const logger2 = new SafeLogger({
     debug: (message) => {
       logStore.record("debug", message);
@@ -104644,7 +104704,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       ctx.logger.error(message);
       console.error(message);
     }
-  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel);
+  }, readSafeLogLevel);
   let defaultIdentityDirectory = new IdentityStore().directory;
   let initialStorageError;
   try {

@@ -781,6 +781,25 @@ export function ChatScreen({
     const targetSessionId = session.sessionId
     const sendSessionGen = sessionGenerationRef.current
     if (submittedFiles.length > 0) {
+      const transportModeAtStart = useAppStore.getState().connection.stats.mode
+      const maxBytesAtStart = workspaceUploadMaxBytes(transportModeAtStart)
+      const oversizedFile = submittedFiles.find(
+        file => !(typeof file.remotePath === 'string' && file.remotePath.trim().length > 0)
+          && typeof file.content !== 'string'
+          && file.size > maxBytesAtStart,
+      )
+      if (oversizedFile) {
+        Alert.alert(
+          strings.messageActions.failed,
+          strings.chat.fileTooLargeForTransport(
+            oversizedFile.name,
+            formatFileBytes(maxBytesAtStart),
+            isDirectTransportMode(transportModeAtStart),
+          ),
+        )
+        return
+      }
+      let failingFile: StagedFile | undefined = submittedFiles[0]
       const controller = new AbortController()
       uploadControllerRef.current?.abort()
       uploadControllerRef.current = controller
@@ -801,6 +820,7 @@ export function ChatScreen({
           submittedFiles,
           controller.signal,
           progress => {
+            failingFile = submittedFiles[progress.fileIndex] ?? failingFile
             if (!controller.signal.aborted && uploadControllerRef.current === controller) {
               setUploadProgress(progress)
             }
@@ -821,15 +841,17 @@ export function ChatScreen({
         // do not surface a cancellation as a failure.
         if (controller.signal.aborted || (uploadError as Error | undefined)?.name === 'AbortError') return
         const code = (uploadError as { code?: string })?.code
-        const activeName = submittedFiles[0]?.name ?? ''
+        const activeFile = failingFile ?? submittedFiles[0]
+        const activeName = activeFile?.name ?? ''
         const transportMode = useAppStore.getState().connection.stats.mode
+        const maxTransportBytes = workspaceUploadMaxBytes(transportMode)
         let errorMsg: string
         if (code === 'FEATURE_NOT_SUPPORTED' || code === 'UPLOAD_WORKSPACE_UNAVAILABLE') {
           errorMsg = strings.chat.uploadUnavailable
-        } else if (code === 'UPLOAD_LIMIT') {
+        } else if (code === 'UPLOAD_LIMIT' && (activeFile?.size ?? 0) > maxTransportBytes) {
           errorMsg = strings.chat.fileTooLargeForTransport(
             activeName,
-            formatFileBytes(workspaceUploadMaxBytes(transportMode)),
+            formatFileBytes(maxTransportBytes),
             isDirectTransportMode(transportMode),
           )
         } else {

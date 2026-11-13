@@ -68,6 +68,9 @@ export class HostLogStore {
   private readonly initPromise: Promise<void>
   private clearedBeforeInit = false
   private sizeVerified = false
+  private dirEnsured = false
+  private pendingDiskLines: string[] = []
+  private diskFlushScheduled = false
 
   constructor(options: HostLogStoreOptions = {}) {
     this.filePath = options.filePath
@@ -92,10 +95,8 @@ export class HostLogStore {
     this.trimInMemory()
 
     if (this.filePath !== undefined) {
-      const payload = `${line}\n`
-      this.enqueueWrite(async () => {
-        await this.appendToDisk(payload)
-      })
+      this.pendingDiskLines.push(`${line}\n`)
+      this.scheduleDiskFlush()
     }
   }
 
@@ -120,6 +121,7 @@ export class HostLogStore {
     this.clearedBeforeInit = true
     this.persistedEntries = []
     this.liveEntries = []
+    this.pendingDiskLines = []
     if (this.filePath !== undefined) {
       this.enqueueWrite(async () => {
         await this.clearDisk()
@@ -139,12 +141,37 @@ export class HostLogStore {
     await this.writeChain
   }
 
-  private enqueueWrite(task: () => Promise<void>): void {
+  private scheduleDiskFlush(): void {
+    if (this.diskFlushScheduled) return
+    this.diskFlushScheduled = true
+    this.enqueueWrite(async () => {
+      while (this.pendingDiskLines.length > 0) {
+        let batch = ''
+        let batchBytes = 0
+        while (this.pendingDiskLines.length > 0) {
+          const next = this.pendingDiskLines[0]!
+          const nextBytes = Buffer.byteLength(next, 'utf8')
+          if (batch.length > 0 && this.currentBytes + batchBytes + nextBytes > this.maxFileBytes) break
+          this.pendingDiskLines.shift()
+          batch += next
+          batchBytes += nextBytes
+        }
+        await this.appendToDisk(batch)
+      }
+      this.diskFlushScheduled = false
+    }, () => {
+      this.diskFlushScheduled = false
+    })
+  }
+
+  private enqueueWrite(task: () => Promise<void>, onError?: () => void): void {
     this.writeChain = this.writeChain.then(async () => {
       try {
         await task()
         this.fileError = undefined
       } catch (error) {
+        this.dirEnsured = false
+        onError?.()
         this.fileError = safeFsErrorMessage(error)
       }
     })
@@ -185,7 +212,10 @@ export class HostLogStore {
 
   private async appendToDisk(payload: string): Promise<void> {
     const target = this.filePath!
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+    if (!this.dirEnsured) {
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+      this.dirEnsured = true
+    }
     if (!this.sizeVerified) {
       const existing = await stat(target).catch(err => (isEnoent(err) ? undefined : Promise.reject(err)))
       this.currentBytes = existing?.size ?? 0
@@ -222,7 +252,10 @@ export class HostLogStore {
 
   private async clearDisk(): Promise<void> {
     const target = this.filePath!
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+    if (!this.dirEnsured) {
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+      this.dirEnsured = true
+    }
     await writeFile(target, '', { encoding: 'utf8', mode: 0o600 })
     this.sizeVerified = true
     for (let index = 1; index <= this.maxBackups; index++) {
@@ -252,7 +285,10 @@ export class HostLogStore {
 }
 
 function sanitizeLogMessage(message: string): string {
-  const collapsed = message.replace(/[\r\n]+/g, ' ').trimEnd()
+  const redacted = message
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/([?&](?:token|access_token|refresh_token|secret|password|authorization|cookie|code)=)[^&\s]+/gi, '$1[REDACTED]')
+  const collapsed = redacted.replace(/[\r\n]+/g, ' ').trimEnd()
   if (collapsed.length <= MAX_LINE_CHARS) return collapsed
   return `${collapsed.slice(0, MAX_LINE_CHARS)}...`
 }
@@ -293,6 +329,10 @@ function isEnoent(error: unknown): boolean {
 }
 
 function safeFsErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) return error.message
+  if (error instanceof Error && error.message.trim().length > 0) {
+    const home = homedir()
+    const normalized = home.length > 0 ? error.message.split(home).join('~') : error.message
+    return normalized.replace(/[\r\n]+/g, ' ').trim()
+  }
   return 'Failed to write log file.'
 }
