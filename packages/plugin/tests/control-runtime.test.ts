@@ -719,6 +719,32 @@ describe('PluginControlRuntime local log endpoints', () => {
     await expect(handler('settings.identity.reset', { role: 'host' }, signal())).resolves.toMatchObject({ ok: true })
     expect(events).toEqual(['client-mode.set', 'client-close', 'host-close', 'switchServer'])
   })
+
+  it('closes live runtimes and requires restart when resetting without switchServer', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const events: string[] = []
+    const host = {
+      hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+      reconnectHost: vi.fn(),
+      clearHostAuthorization: vi.fn(),
+      authorizeHostAsOwned: vi.fn(),
+      authorizeHostWithAccount: vi.fn(),
+      authorizeHostWithCode: vi.fn(),
+      close: vi.fn(async () => { events.push('host-close') }),
+    } as unknown as HostAuthorizationControl
+    const client = {
+      handleControl: vi.fn(async () => ({ ok: true as const, value: {} })),
+      clearClientAuthorization: vi.fn(),
+      close: vi.fn(async () => { events.push('client-close') }),
+    } as unknown as ClientModeRuntime
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), root, settings, client, host))
+    await expect(handler('settings.identity.reset', { role: 'all' }, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { applies: 'restart' },
+    })
+    expect(events).toEqual(['client-close', 'host-close'])
+  })
 })
 function register(runtime: PluginControlRuntime) {
   let handler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<ControlResult<unknown>>) | undefined

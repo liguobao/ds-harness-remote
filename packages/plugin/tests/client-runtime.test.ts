@@ -1596,6 +1596,32 @@ describe('ClientModeRuntime Host account control', () => {
       await runtime.close()
     }
   })
+
+  it('lazily creates Client identity when enabling Host authorization after pairingHostOnly lifts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-host-auth-recover-'))
+    directories.push(directory)
+    let pairingHostOnly = true
+    const identities = new IdentityStore({ directory })
+    const server = {
+      bindIdentity: vi.fn(),
+      authenticate: vi.fn(async () => ({ accessToken: 'tok-1', account: 'user@example.test' })),
+    } as unknown as ClientServerApi
+    const host = {
+      hostStatus: () => ({ pairingHostOnly }),
+      authorizeHostAsOwned: vi.fn(async () => ({ deviceId: 'host-1' })),
+    } as unknown as HostAuthorizationControl
+    const runtime = new ClientModeRuntime(config(), identities, server, gatewayWithCarrier(), logger(), host)
+    await runtime.start()
+    try {
+      await expect(runtime.setHostAuthorization(true)).rejects.toMatchObject({ code: 'DEVICE_SCOPE_REQUIRED' })
+      pairingHostOnly = false
+      await expect(runtime.setHostAuthorization(true)).resolves.toBeDefined()
+      expect(server.bindIdentity).toHaveBeenCalledTimes(1)
+      expect(host.authorizeHostAsOwned).toHaveBeenCalledWith('tok-1', 'user@example.test')
+    } finally {
+      await runtime.close()
+    }
+  })
 })
 
 function config(): ResolvedConfig {

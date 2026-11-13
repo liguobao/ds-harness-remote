@@ -88021,7 +88021,7 @@ var ClientModeRuntime = class {
       await this.host.clearHostAuthorization();
       return this.status();
     }
-    const credentials = await this.server.authenticate(this.requireIdentity());
+    const credentials = await this.server.authenticate(await this.ensureIdentity());
     try {
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account);
     } catch (error62) {
@@ -98260,13 +98260,13 @@ var PluginControlRuntime = class {
     if (this.switchServer !== void 0) {
       await Promise.allSettled([this.client?.close?.(), this.host?.close?.()]);
       try {
-        const nextDirectory2 = await resetDefaultIdentityRoles(
+        const nextDirectory = await resetDefaultIdentityRoles(
           roles,
           config2.serverUrl,
           hostname4(),
           this.useDefaultStorage ? {} : { directory: this.identityDirectory }
         );
-        this.setIdentityDirectory(nextDirectory2);
+        this.setIdentityDirectory(nextDirectory);
         const runtimes = await this.switchServer(config2);
         this.client = runtimes.client;
         this.host = runtimes.host;
@@ -98278,15 +98278,26 @@ var PluginControlRuntime = class {
       }
       return { ...await this.settingsView(), applies: "live" };
     }
-    const nextDirectory = await resetDefaultIdentityRoles(
-      roles,
-      config2.serverUrl,
-      hostname4(),
-      this.useDefaultStorage ? {} : { directory: this.identityDirectory }
-    );
-    this.setIdentityDirectory(nextDirectory);
-    this.clearStartupFailure();
-    return { ...await this.settingsView(), applies: "live" };
+    const hadLiveRuntimes = this.client !== void 0 || this.host !== void 0;
+    if (hadLiveRuntimes) {
+      await Promise.allSettled([this.client?.close?.(), this.host?.close?.()]);
+      this.client = void 0;
+      this.host = void 0;
+    }
+    try {
+      const nextDirectory = await resetDefaultIdentityRoles(
+        roles,
+        config2.serverUrl,
+        hostname4(),
+        this.useDefaultStorage ? {} : { directory: this.identityDirectory }
+      );
+      this.setIdentityDirectory(nextDirectory);
+      this.clearStartupFailure();
+    } catch (error62) {
+      if (hadLiveRuntimes) this.setStartupFailure(error62);
+      throw error62;
+    }
+    return { ...await this.settingsView(), applies: hadLiveRuntimes ? "restart" : "live" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {

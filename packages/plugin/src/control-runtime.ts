@@ -412,15 +412,26 @@ export class PluginControlRuntime {
       }
       return { ...await this.settingsView(), applies: 'live' }
     }
-    const nextDirectory = await resetDefaultIdentityRoles(
-      roles,
-      config.serverUrl,
-      hostname(),
-      this.useDefaultStorage ? {} : { directory: this.identityDirectory },
-    )
-    this.setIdentityDirectory(nextDirectory)
-    this.clearStartupFailure()
-    return { ...await this.settingsView(), applies: 'live' }
+    const hadLiveRuntimes = this.client !== undefined || this.host !== undefined
+    if (hadLiveRuntimes) {
+      await Promise.allSettled([this.client?.close?.(), this.host?.close?.()])
+      this.client = undefined
+      this.host = undefined
+    }
+    try {
+      const nextDirectory = await resetDefaultIdentityRoles(
+        roles,
+        config.serverUrl,
+        hostname(),
+        this.useDefaultStorage ? {} : { directory: this.identityDirectory },
+      )
+      this.setIdentityDirectory(nextDirectory)
+      this.clearStartupFailure()
+    } catch (error) {
+      if (hadLiveRuntimes) this.setStartupFailure(error)
+      throw error
+    }
+    return { ...await this.settingsView(), applies: hadLiveRuntimes ? 'restart' : 'live' }
   }
 
   private async setRole(payload: unknown): Promise<PluginSettingsView> {

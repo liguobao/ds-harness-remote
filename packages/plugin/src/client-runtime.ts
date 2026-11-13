@@ -446,7 +446,7 @@ export class ClientModeRuntime {
       await this.host.clearHostAuthorization()
       return this.status()
     }
-    const credentials = await this.server.authenticate(this.requireIdentity())
+    const credentials = await this.server.authenticate(await this.ensureIdentity())
     try {
       await this.host.authorizeHostAsOwned(credentials.accessToken, credentials.account)
     } catch (error) {
