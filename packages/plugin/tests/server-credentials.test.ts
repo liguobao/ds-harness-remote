@@ -88,7 +88,7 @@ describe('credential refresh process lock', () => {
       import { ServerCredentialStore } from ${JSON.stringify(pathToFileURL(entry).href)};
       await new ServerCredentialStore(process.argv[2]).withRefreshLock(async () => {
         process.stdout.write('locked');
-        await new Promise(() => {});
+        await new Promise(() => setInterval(() => {}, 1000));
       });
     `)
     const child = spawn(process.execPath, [worker, path], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -97,8 +97,9 @@ describe('credential refresh process lock', () => {
       const lock = lockPath(path)
       expect(await readFile(lock, 'utf8')).toBe(marker)
       expect((await readdir(path)).filter(name => name.includes('.refresh-lock.holder-'))).toHaveLength(1)
+      const exited = once(child, 'exit')
       child.kill('SIGKILL')
-      await once(child, 'exit')
+      await exited
       await expect(new ServerCredentialStore(path).withRefreshLock(async () => 'recovered')).resolves.toBe('recovered')
       expect(await readFile(lock, 'utf8')).toBe(marker)
     } finally {

@@ -8,7 +8,16 @@
 `packages/plugin/tests/fixtures/ds-bot-v0.3.6-endpoints.json`，Android UI 未在本轮扩展。
 验证：25 项转发测试、Plugin check/build、DSH bundle 校验与 diff check 通过。
 Plugin 全套 698 pass / 3 fail / 3 skipped，另 2 个异步错误，尚未全部排查；
-未做真实 DS-Bot Host 或跨设备验收，不将接口白名单覆盖等同完整产品兼容。
+这是初次运行记录。WSL 复查先重建过期的 Protocol dist，消除已复现的两项能力断言失败。
+凭据锁测试增加活动句柄，并在杀死子进程前订阅退出事件。Plugin 全套连续 5 轮
+704 pass；check 与 diff check 通过。初次运行的第三项失败和两个异步错误未复现，
+根因仍未确认。
+
+WSL 隔离 profile 运行 DSH 0.2.2-rc.1、DS-Bot 0.3.6 和本插件。
+安装包源码的 161 个接口与仓库快照一致。PluginRouteBridge 经本机 HTTP 路由调用
+真实 DS-Bot handler：state、models、providers、diagnostics 和 computer-system-status
+返回成功；无效 approval-answer 返回 bot/stale；未知 endpoint 在桥接层拒绝。
+本轮未验证加密远程通道、跨设备、真实审批或电脑控制操作，也未扩展 Android UI。
 
 # Repository Guide for Agents
 
