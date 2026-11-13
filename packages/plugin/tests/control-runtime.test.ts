@@ -618,6 +618,62 @@ describe('PluginControlRuntime settings setup', () => {
     await expect(stat(join(hostDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+describe('PluginControlRuntime local log endpoints', () => {
+  it('reads and clears Host logs locally even when startup failed and validates parameters', async () => {
+    const { HostLogStore } = await import('../src/host-log-store.js')
+    const directory = await temporaryDirectory()
+    const logFile = join(directory, 'logs', 'ds-harness-remote', 'web.log')
+    const logStore = new HostLogStore({ filePath: logFile })
+    logStore.record('info', '[ds-harness-remote] boot')
+    logStore.record('warn', '[ds-harness-remote] warning event')
+    logStore.record('error', '[ds-harness-remote] error event')
+
+    const settings = settingsBinding({ logLevel: 'info' })
+    const control = new PluginControlRuntime(
+      resolveConfig(settings.get()),
+      directory,
+      settings,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      logStore,
+    )
+    control.setStartupFailure(new Error('storage locked'))
+    const handler = register(control)
+
+    const all = await handler('settings.logs.get', {}, signal())
+    expect(all).toMatchObject({
+      ok: true,
+      value: {
+        logLevel: 'info',
+        totalBuffered: 3,
+        filePath: logFile,
+      },
+    })
+    expect((all as any).value.entries).toHaveLength(3)
+
+    const warnOnly = await handler('settings.logs.get', { filter: 'warn', limit: 1 }, signal())
+    expect(warnOnly).toMatchObject({ ok: true })
+    expect((warnOnly as any).value.entries).toHaveLength(1)
+    expect((warnOnly as any).value.entries[0].line).toContain('error event')
+
+    expect(await handler('settings.logs.get', { filter: 'debug' }, signal())).toMatchObject({ ok: false })
+    expect(await handler('settings.logs.get', { limit: 0 }, signal())).toMatchObject({ ok: false })
+
+    const cleared = await handler('settings.logs.clear', {}, signal())
+    expect(cleared).toMatchObject({
+      ok: true,
+      value: {
+        logLevel: 'info',
+        entries: [],
+        totalBuffered: 0,
+      },
+    })
+  })
+})
 function register(runtime: PluginControlRuntime) {
   let handler: ((endpoint: string, payload: unknown, signal: AbortSignal) => Promise<ControlResult<unknown>>) | undefined
   let channel: string | undefined

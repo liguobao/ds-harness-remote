@@ -20,6 +20,8 @@ import type {
   OAuthQrPollResult,
   OAuthQrSession,
   PluginAssociation,
+  PluginLogFilter,
+  PluginLogView,
   PluginConfigureResult,
   PluginSettingsView,
   RemoteStatus,
@@ -70,6 +72,16 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [terminalEnabled, setTerminalEnabled] = React.useState(false)
     const [debugBusy, setDebugBusy] = React.useState(false)
     const [debugLogging, setDebugLogging] = React.useState(false)
+    const [logsOpen, setLogsOpen] = React.useState(false)
+    const [logsFilter, setLogsFilter] = React.useState<PluginLogFilter>('all')
+    const [logsLoading, setLogsLoading] = React.useState(false)
+    const [logsClearing, setLogsClearing] = React.useState(false)
+    const [logsSnapshot, setLogsSnapshot] = React.useState<PluginLogView | undefined>(undefined)
+    const [logsError, setLogsError] = React.useState<string | undefined>(undefined)
+    const [logsCopyState, setLogsCopyState] = React.useState<'idle' | 'copied' | 'failed'>('idle')
+    const logsRequestRun = React.useRef(0)
+    const logsCopyTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const logsViewportRef = React.useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
     const [resetBusy, setResetBusy] = React.useState(false)
     const [retryStartupBusy, setRetryStartupBusy] = React.useState(false)
     const [terminalBusy, setTerminalBusy] = React.useState(false)
@@ -538,26 +550,199 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
+    const loadLogs = async (filter: PluginLogFilter = logsFilter): Promise<void> => {
+      const run = ++logsRequestRun.current
+      setLogsLoading(true)
+      setLogsError(undefined)
+      try {
+        const next = await props.control<PluginLogView>('settings.logs.get', { filter, limit: 500 })
+        if (run !== logsRequestRun.current) return
+        setLogsSnapshot(next)
+      } catch (reason) {
+        if (run !== logsRequestRun.current) return
+        setLogsError(messageOf(reason, t))
+      } finally {
+        if (run === logsRequestRun.current) setLogsLoading(false)
+      }
+    }
+
+    const toggleLogsDrawer = (): void => {
+      const nextOpen = !logsOpen
+      setLogsOpen(nextOpen)
+      if (nextOpen) void loadLogs(logsFilter)
+    }
+
+    const changeLogsFilter = (filter: PluginLogFilter): void => {
+      if (filter === logsFilter && logsSnapshot !== undefined) return
+      setLogsFilter(filter)
+      void loadLogs(filter)
+    }
+
+    const copyLogs = async (): Promise<void> => {
+      const lines = logsSnapshot?.entries.map(entry => entry.line).join('\n') ?? ''
+      if (!lines) return
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(lines)
+          setLogsCopyState('copied')
+        } else {
+          setLogsCopyState('failed')
+        }
+      } catch {
+        setLogsCopyState('failed')
+      }
+      if (logsCopyTimer.current !== undefined) clearTimeout(logsCopyTimer.current)
+      logsCopyTimer.current = setTimeout(() => {
+        logsCopyTimer.current = undefined
+        setLogsCopyState('idle')
+      }, 2000)
+    }
+
+    const exportLogs = (): void => {
+      const lines = logsSnapshot?.entries.map(entry => entry.line).join('\n') ?? ''
+      if (!lines || typeof document === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return
+      const blob = new Blob([lines + '\n'], { type: 'text/plain;charset=utf-8' })
+      const href = URL.createObjectURL(blob)
+      try {
+        const link = document.createElement('a')
+        link.href = href
+        link.download = 'ds-harness-remote-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.log'
+        document.body?.appendChild(link)
+        link.click()
+        link.remove()
+      } finally {
+        URL.revokeObjectURL(href)
+      }
+    }
+
+    const clearLogs = async (): Promise<void> => {
+      if (logsClearing) return
+      const run = ++logsRequestRun.current
+      setLogsLoading(false)
+      setLogsClearing(true)
+      setLogsError(undefined)
+      try {
+        const cleared = await props.control<PluginLogView>('settings.logs.clear', {})
+        if (run !== logsRequestRun.current) return
+        setLogsSnapshot(cleared)
+      } catch (reason) {
+        if (run !== logsRequestRun.current) return
+        setLogsError(messageOf(reason, t))
+      } finally {
+        setLogsClearing(false)
+      }
+    }
+
+    React.useEffect(() => () => {
+      if (logsCopyTimer.current !== undefined) clearTimeout(logsCopyTimer.current)
+    }, [])
+
+    React.useEffect(() => {
+      if (!logsOpen) return
+      const viewport = logsViewportRef.current
+      if (viewport && typeof viewport.scrollHeight === 'number') {
+        viewport.scrollTop = viewport.scrollHeight
+      }
+    }, [logsOpen, logsSnapshot])
+
     const setDebug = async (enabled: boolean): Promise<void> => {
       if (debugBusy) return
       setDebugBusy(true)
       setError(undefined)
       try {
         applyView(await props.control<PluginSettingsView>('settings.development.set', { debugLogging: enabled }))
+        if (logsOpen) void loadLogs(logsFilter)
       } catch (reason) { setError(messageOf(reason, t)) }
       finally { setDebugBusy(false) }
     }
 
     const developmentSetting = React.createElement('section', { className: 'dshRemoteDevelopmentSettings' },
-      React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-        React.createElement('div', null,
-          React.createElement('strong', null, t('debugLogging')),
-          React.createElement('p', null, t('debugLoggingHint'))),
-        React.createElement('input', {
-          type: 'checkbox', role: 'switch', checked: debugLogging,
-          disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
-          onChange: (event: Event) => void setDebug((event.target as HTMLInputElement).checked),
-        })),
+      React.createElement('div', { className: 'dshRemoteDebugLogGroup' },
+        React.createElement('div', { className: 'dshRemoteDebugLogHeader' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'dshRemoteDebugLogTrigger',
+            'aria-expanded': logsOpen,
+            onClick: toggleLogsDrawer,
+          },
+            React.createElement('span', { className: 'dshRemoteDebugLogTitleRow' },
+              React.createElement('strong', null, t('debugLogging')),
+              React.createElement('span', {
+                className: debugLogging ? 'dshRemoteDebugLogLevelBadge isDebug' : 'dshRemoteDebugLogLevelBadge',
+              }, debugLogging ? t('debugLoggingLevelDebug') : t('debugLoggingLevelInfo'))),
+            React.createElement('p', null, t('debugLoggingHint'))),
+          React.createElement('div', { className: 'dshRemoteDebugLogControls' },
+            React.createElement('button', {
+              type: 'button',
+              className: 'dshRemoteLogToggleBtn',
+              'aria-expanded': logsOpen,
+              onClick: toggleLogsDrawer,
+            }, logsOpen ? (t('debugLogsToggleClose') + ' ▴') : (t('debugLogsToggleOpen') + ' ▾')),
+            React.createElement('input', {
+              type: 'checkbox', role: 'switch', checked: debugLogging,
+              disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
+              onChange: (event: Event) => void setDebug((event.target as HTMLInputElement).checked),
+            }))),
+        logsOpen && React.createElement('div', { className: 'dshRemoteLogDrawer', role: 'region', 'aria-label': t('debugLogging') },
+          React.createElement('div', { className: 'dshRemoteLogToolbar' },
+            React.createElement('div', { className: 'dshRemoteLogFilterGroup', role: 'group' },
+              React.createElement('button', {
+                type: 'button',
+                className: logsFilter === 'all' ? 'dshRemoteLogFilterBtn isActive' : 'dshRemoteLogFilterBtn',
+                'aria-pressed': logsFilter === 'all',
+                onClick: () => changeLogsFilter('all'),
+              }, t('debugLogsFilterAll')),
+              React.createElement('button', {
+                type: 'button',
+                className: logsFilter === 'warn' ? 'dshRemoteLogFilterBtn isActive' : 'dshRemoteLogFilterBtn',
+                'aria-pressed': logsFilter === 'warn',
+                onClick: () => changeLogsFilter('warn'),
+              }, t('debugLogsFilterWarn'))),
+            React.createElement('div', { className: 'dshRemoteLogActions' },
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: logsLoading,
+                onClick: () => void loadLogs(logsFilter),
+              }, logsLoading ? t('debugLogsRefreshing') : t('debugLogsRefresh')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: !logsSnapshot?.entries.length,
+                onClick: () => void copyLogs(),
+              }, logsCopyState === 'copied' ? t('debugLogsCopied') : logsCopyState === 'failed' ? t('debugLogsCopyFailed') : t('debugLogsCopy')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: !logsSnapshot?.entries.length,
+                onClick: exportLogs,
+              }, t('debugLogsExport')),
+              React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteLogActionBtn',
+                disabled: logsClearing || !logsSnapshot?.totalBuffered,
+                onClick: () => void clearLogs(),
+              }, t('debugLogsClear')))),
+          (logsSnapshot?.filePath || logsSnapshot?.fileError || logsSnapshot) && React.createElement('div', { className: 'dshRemoteLogMeta' },
+            logsSnapshot?.filePath && React.createElement('span', null, t('debugLogsFileLabel'), ' ', React.createElement('code', null, logsSnapshot.filePath)),
+            logsSnapshot?.fileError && React.createElement('span', { className: 'dshRemoteLogFallback' }, t('debugLogsFileFallback', { error: logsSnapshot.fileError })),
+            logsSnapshot && React.createElement('span', null, t('debugLogsCount', { count: logsSnapshot.entries.length }))),
+          logsError && React.createElement('p', { className: 'dshRemoteError', role: 'alert' }, logsError),
+          logsLoading && !logsSnapshot
+            ? React.createElement('p', { className: 'dshRemoteLogEmpty' }, t('debugLogsLoading'))
+            : !logsSnapshot || logsSnapshot.entries.length === 0
+              ? React.createElement('p', { className: 'dshRemoteLogEmpty' }, t('debugLogsEmpty'))
+              : React.createElement('div', { className: 'dshRemoteLogViewport', ref: logsViewportRef },
+                  logsSnapshot.entries.map(entry => React.createElement('span', {
+                    key: entry.seq,
+                    className: entry.level === 'error'
+                      ? 'dshRemoteLogLine isError'
+                      : entry.level === 'warn'
+                        ? 'dshRemoteLogLine isWarn'
+                        : entry.level === 'debug'
+                          ? 'dshRemoteLogLine isDebug'
+                          : 'dshRemoteLogLine',
+                  }, entry.line))))),
       React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
         React.createElement('div', null,
           React.createElement('strong', null, t('terminalRemote')),

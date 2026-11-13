@@ -20,6 +20,8 @@ import {
   resetDefaultIdentityRoles,
   serverStorageDirectory,
 } from './identity-store.js'
+import { basename, dirname } from 'node:path'
+import { HostLogStore, resolveHostLogPath } from './host-log-store.js'
 import { SafeLogger } from './logging.js'
 import { safeStartupError } from './safe-error.js'
 import { HostPluginRuntime } from './service.js'
@@ -199,6 +201,16 @@ async function activate(
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
   const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
+  const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) })
+  // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
+  // logger: the web process stdout is captured by the Desktop shell into
+  // desktop.log, so remote RPC/transport diagnostics stay greppable there.
+  const logger = new SafeLogger({
+    debug: message => { logStore.record('debug', message); ctx.logger.debug(message); console.debug(message) },
+    info: message => { logStore.record('info', message); ctx.logger.info(message); console.info(message) },
+    warn: message => { logStore.record('warn', message); ctx.logger.warn(message); console.warn(message) },
+    error: message => { logStore.record('error', message); ctx.logger.error(message); console.error(message) },
+  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
   let defaultIdentityDirectory = new IdentityStore().directory
   let initialStorageError: unknown
   try {
@@ -217,23 +229,22 @@ async function activate(
         undefined,
         undefined,
         true,
+        logStore,
       )
       if (initialStorageError !== undefined) {
+        logger.error('Remote plugin startup failed', safeStartupError(initialStorageError))
         controlRuntime.setStartupFailure(initialStorageError, { storageAvailable: false })
       }
-      ctx.effect(() => controlRuntime.register(connection, webServer), 'ds-harness-remote disabled control')
+      ctx.effect(() => {
+        const dispose = controlRuntime.register(connection, webServer)
+        return async () => {
+          await dispose()
+          await logStore.flush()
+        }
+      }, 'ds-harness-remote disabled control')
     }
     return
   }
-  // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
-  // logger: the web process stdout is captured by the Desktop shell into
-  // desktop.log, so remote RPC/transport diagnostics stay greppable there.
-  const logger = new SafeLogger({
-    debug: message => { ctx.logger.debug(message); console.debug(message) },
-    info: message => { ctx.logger.info(message); console.info(message) },
-    warn: message => { ctx.logger.warn(message); console.warn(message) },
-    error: message => { ctx.logger.error(message); console.error(message) },
-  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
   const updateChecker = new PluginUpdateChecker(logger)
@@ -411,6 +422,7 @@ async function activate(
         replaceServer,
         updateChecker,
         true,
+        logStore,
       )
   if (initialStorageError !== undefined) {
     controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false })
@@ -461,6 +473,7 @@ async function activate(
       await disposeControl?.()
       await clientRuntime?.close()
       await runtime?.close()
+      await logStore.flush()
     }
   }, 'ds-harness-remote lifecycle')
   if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? undefined : clientRuntime)
@@ -471,6 +484,19 @@ async function activate(
  * {@link EntryConfig} (a live `Volatile` reference); a direct `ctx.plugin()`
  * caller passes the plain composition object instead.
  */
+function resolveLogProfileName(ctx: Context): string | undefined {
+  const envProfile = process.env.DSH_PROFILE?.trim()
+  if (envProfile) return envProfile
+  const baseDir = (ctx.root as { baseDir?: unknown } | undefined)?.baseDir
+  if (typeof baseDir === 'string' && baseDir.trim().length > 0) {
+    const trimmed = baseDir.trim()
+    if (basename(dirname(trimmed)) === 'profiles') {
+      const segment = basename(trimmed)
+      if (segment.length > 0) return segment
+    }
+  }
+  return undefined
+}
 function readEntryConfig(entry: EntryConfig | ConfigShape | undefined): ConfigInput {
   if (entry === undefined) return {}
   return isEntryConfig(entry) ? entry.get() : entry

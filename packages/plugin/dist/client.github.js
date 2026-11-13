@@ -1729,7 +1729,25 @@ If a code was sent, recover the original submission without changing it.`,
     remoteToolsHint: "Expose remote_* tools in sessions. On by default; turn it off when you do not need them. Changes apply after restarting the Host.",
     remoteToolsSaved: "Remote Tools setting saved.",
     debugLogging: "Debug logging",
-    debugLoggingHint: "Write detailed connection diagnostics to the Host log. Applies immediately; turn off after troubleshooting.",
+    debugLoggingHint: "Record detailed connection diagnostics in the Host log (Info and above are recorded by default). Applies immediately; turn off after troubleshooting.",
+    debugLoggingLevelDebug: "Debug",
+    debugLoggingLevelInfo: "Info",
+    debugLogsToggleOpen: "View logs",
+    debugLogsToggleClose: "Hide logs",
+    debugLogsFilterAll: "All",
+    debugLogsFilterWarn: "Warnings & Errors",
+    debugLogsRefresh: "Refresh",
+    debugLogsRefreshing: "Refreshing\u2026",
+    debugLogsCopy: "Copy",
+    debugLogsCopied: "Copied",
+    debugLogsCopyFailed: "Copy failed",
+    debugLogsExport: "Export",
+    debugLogsClear: "Clear",
+    debugLogsLoading: "Loading logs\u2026",
+    debugLogsEmpty: "No matching log entries yet.",
+    debugLogsFileLabel: "Log file:",
+    debugLogsFileFallback: "Memory only ({error})",
+    debugLogsCount: "{count} entries",
     terminalRemote: "Remote terminal",
     terminalRemoteHint: "Allow trusted Remote devices to run an interactive shell as this Host user. On by default; independent of Agent approvals. Toggling saves and applies immediately.",
     terminalRemoteUnavailable: "Remote terminal is unavailable. Enable Remote terminal in the Host Remote settings; the switch applies immediately.",
@@ -2085,7 +2103,25 @@ If a code was sent, recover the original submission without changing it.`,
     remoteToolsHint: "\u5728\u4F1A\u8BDD\u4E2D\u6CE8\u5165 remote_* \u5DE5\u5177\u3002\u9ED8\u8BA4\u5F00\u542F\uFF1B\u4E0D\u9700\u8981\u65F6\u53EF\u5173\u95ED\uFF0C\u91CD\u542F Host \u540E\u751F\u6548\u3002",
     remoteToolsSaved: "Remote Tools \u8BBE\u7F6E\u5DF2\u4FDD\u5B58\u3002",
     debugLogging: "Debug \u65E5\u5FD7",
-    debugLoggingHint: "\u5728 Host \u65E5\u5FD7\u4E2D\u8BB0\u5F55\u8BE6\u7EC6\u8FDE\u63A5\u8BCA\u65AD\uFF0C\u7ACB\u5373\u751F\u6548\uFF1B\u6392\u67E5\u5B8C\u6210\u540E\u53EF\u5173\u95ED\u3002",
+    debugLoggingHint: "\u5F00\u542F\u540E\u8BB0\u5F55\u8BE6\u7EC6\u8FDE\u63A5\u8BCA\u65AD\uFF08\u9ED8\u8BA4\u4E5F\u4F1A\u8BB0\u5F55 Info \u53CA\u4EE5\u4E0A\u65E5\u5FD7\uFF09\uFF0C\u7ACB\u5373\u751F\u6548\uFF1B\u6392\u67E5\u5B8C\u6210\u540E\u53EF\u5173\u95ED\u3002",
+    debugLoggingLevelDebug: "Debug",
+    debugLoggingLevelInfo: "Info",
+    debugLogsToggleOpen: "\u67E5\u770B\u65E5\u5FD7",
+    debugLogsToggleClose: "\u6536\u8D77\u65E5\u5FD7",
+    debugLogsFilterAll: "\u5168\u90E8",
+    debugLogsFilterWarn: "\u8B66\u544A\u4E0E\u9519\u8BEF",
+    debugLogsRefresh: "\u5237\u65B0",
+    debugLogsRefreshing: "\u5237\u65B0\u4E2D\u2026",
+    debugLogsCopy: "\u590D\u5236",
+    debugLogsCopied: "\u5DF2\u590D\u5236",
+    debugLogsCopyFailed: "\u590D\u5236\u5931\u8D25",
+    debugLogsExport: "\u5BFC\u51FA",
+    debugLogsClear: "\u6E05\u7A7A",
+    debugLogsLoading: "\u6B63\u5728\u52A0\u8F7D\u65E5\u5FD7\u2026",
+    debugLogsEmpty: "\u6682\u65E0\u5339\u914D\u65E5\u5FD7\u3002",
+    debugLogsFileLabel: "\u65E5\u5FD7\u6587\u4EF6\uFF1A",
+    debugLogsFileFallback: "\u4EC5\u5185\u5B58\u6A21\u5F0F\uFF08{error}\uFF09",
+    debugLogsCount: "{count} \u6761",
     terminalRemote: "\u8FDC\u7A0B\u7EC8\u7AEF",
     terminalRemoteHint: "\u5141\u8BB8\u53D7\u4FE1\u4EFB\u7684 Remote \u8BBE\u5907\u4EE5\u6B64 Host \u7528\u6237\u8EAB\u4EFD\u8FD0\u884C\u4EA4\u4E92\u5F0F Shell\u3002\u9ED8\u8BA4\u5F00\u542F\uFF0C\u72EC\u7ACB\u4E8E Agent \u5BA1\u6279\uFF1B\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002",
     terminalRemoteUnavailable: "\u8FDC\u7A0B\u7EC8\u7AEF\u4E0D\u53EF\u7528\u3002\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u4F1A\u7ACB\u5373\u751F\u6548\u3002",
@@ -3053,7 +3089,7 @@ If a code was sent, recover the original submission without changing it.`,
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
       React.useEffect(() => {
         association !== void 0 && setSignInOpen(!1);
       }, [association]);
@@ -3295,11 +3331,76 @@ If a code was sent, recover the original submission without changing it.`,
             setAcpInstalling((current) => ({ ...current, [backend]: !1 }));
           }
         }
-      }, setDebug = async (enabled) => {
+      }, loadLogs = async (filter = logsFilter) => {
+        let run = ++logsRequestRun.current;
+        setLogsLoading(!0), setLogsError(void 0);
+        try {
+          let next = await props.control("settings.logs.get", { filter, limit: 500 });
+          if (run !== logsRequestRun.current) return;
+          setLogsSnapshot(next);
+        } catch (reason) {
+          if (run !== logsRequestRun.current) return;
+          setLogsError(messageOf(reason, t));
+        } finally {
+          run === logsRequestRun.current && setLogsLoading(!1);
+        }
+      }, toggleLogsDrawer = () => {
+        let nextOpen = !logsOpen;
+        setLogsOpen(nextOpen), nextOpen && loadLogs(logsFilter);
+      }, changeLogsFilter = (filter) => {
+        filter === logsFilter && logsSnapshot !== void 0 || (setLogsFilter(filter), loadLogs(filter));
+      }, copyLogs = async () => {
+        let lines = logsSnapshot?.entries.map((entry) => entry.line).join(`
+`) ?? "";
+        if (lines) {
+          try {
+            typeof navigator < "u" && navigator.clipboard && typeof navigator.clipboard.writeText == "function" ? (await navigator.clipboard.writeText(lines), setLogsCopyState("copied")) : setLogsCopyState("failed");
+          } catch {
+            setLogsCopyState("failed");
+          }
+          logsCopyTimer.current !== void 0 && clearTimeout(logsCopyTimer.current), logsCopyTimer.current = setTimeout(() => {
+            logsCopyTimer.current = void 0, setLogsCopyState("idle");
+          }, 2e3);
+        }
+      }, exportLogs = () => {
+        let lines = logsSnapshot?.entries.map((entry) => entry.line).join(`
+`) ?? "";
+        if (!lines || typeof document > "u" || typeof Blob > "u" || typeof URL > "u") return;
+        let blob = new Blob([lines + `
+`], { type: "text/plain;charset=utf-8" }), href = URL.createObjectURL(blob);
+        try {
+          let link = document.createElement("a");
+          link.href = href, link.download = "ds-harness-remote-" + (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19) + ".log", document.body?.appendChild(link), link.click(), link.remove();
+        } finally {
+          URL.revokeObjectURL(href);
+        }
+      }, clearLogs = async () => {
+        if (logsClearing) return;
+        let run = ++logsRequestRun.current;
+        setLogsLoading(!1), setLogsClearing(!0), setLogsError(void 0);
+        try {
+          let cleared = await props.control("settings.logs.clear", {});
+          if (run !== logsRequestRun.current) return;
+          setLogsSnapshot(cleared);
+        } catch (reason) {
+          if (run !== logsRequestRun.current) return;
+          setLogsError(messageOf(reason, t));
+        } finally {
+          setLogsClearing(!1);
+        }
+      };
+      React.useEffect(() => () => {
+        logsCopyTimer.current !== void 0 && clearTimeout(logsCopyTimer.current);
+      }, []), React.useEffect(() => {
+        if (!logsOpen) return;
+        let viewport = logsViewportRef.current;
+        viewport && typeof viewport.scrollHeight == "number" && (viewport.scrollTop = viewport.scrollHeight);
+      }, [logsOpen, logsSnapshot]);
+      let setDebug = async (enabled) => {
         if (!debugBusy) {
           setDebugBusy(!0), setError(void 0);
           try {
-            applyView(await props.control("settings.development.set", { debugLogging: enabled }));
+            applyView(await props.control("settings.development.set", { debugLogging: enabled })), logsOpen && loadLogs(logsFilter);
           } catch (reason) {
             setError(messageOf(reason, t));
           } finally {
@@ -3311,21 +3412,115 @@ If a code was sent, recover the original submission without changing it.`,
         { className: "dshRemoteDevelopmentSettings" },
         React.createElement(
           "div",
-          { className: "dshRemoteAuthorizationSetting" },
+          { className: "dshRemoteDebugLogGroup" },
           React.createElement(
             "div",
-            null,
-            React.createElement("strong", null, t("debugLogging")),
-            React.createElement("p", null, t("debugLoggingHint"))
+            { className: "dshRemoteDebugLogHeader" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "dshRemoteDebugLogTrigger",
+                "aria-expanded": logsOpen,
+                onClick: toggleLogsDrawer
+              },
+              React.createElement(
+                "span",
+                { className: "dshRemoteDebugLogTitleRow" },
+                React.createElement("strong", null, t("debugLogging")),
+                React.createElement("span", {
+                  className: debugLogging ? "dshRemoteDebugLogLevelBadge isDebug" : "dshRemoteDebugLogLevelBadge"
+                }, t(debugLogging ? "debugLoggingLevelDebug" : "debugLoggingLevelInfo"))
+              ),
+              React.createElement("p", null, t("debugLoggingHint"))
+            ),
+            React.createElement(
+              "div",
+              { className: "dshRemoteDebugLogControls" },
+              React.createElement("button", {
+                type: "button",
+                className: "dshRemoteLogToggleBtn",
+                "aria-expanded": logsOpen,
+                onClick: toggleLogsDrawer
+              }, logsOpen ? t("debugLogsToggleClose") + " \u25B4" : t("debugLogsToggleOpen") + " \u25BE"),
+              React.createElement("input", {
+                type: "checkbox",
+                role: "switch",
+                checked: debugLogging,
+                disabled: busy || debugBusy || !writable,
+                "aria-label": t("debugLogging"),
+                onChange: (event) => void setDebug(event.target.checked)
+              })
+            )
           ),
-          React.createElement("input", {
-            type: "checkbox",
-            role: "switch",
-            checked: debugLogging,
-            disabled: busy || debugBusy || !writable,
-            "aria-label": t("debugLogging"),
-            onChange: (event) => void setDebug(event.target.checked)
-          })
+          logsOpen && React.createElement(
+            "div",
+            { className: "dshRemoteLogDrawer", role: "region", "aria-label": t("debugLogging") },
+            React.createElement(
+              "div",
+              { className: "dshRemoteLogToolbar" },
+              React.createElement(
+                "div",
+                { className: "dshRemoteLogFilterGroup", role: "group" },
+                React.createElement("button", {
+                  type: "button",
+                  className: logsFilter === "all" ? "dshRemoteLogFilterBtn isActive" : "dshRemoteLogFilterBtn",
+                  "aria-pressed": logsFilter === "all",
+                  onClick: () => changeLogsFilter("all")
+                }, t("debugLogsFilterAll")),
+                React.createElement("button", {
+                  type: "button",
+                  className: logsFilter === "warn" ? "dshRemoteLogFilterBtn isActive" : "dshRemoteLogFilterBtn",
+                  "aria-pressed": logsFilter === "warn",
+                  onClick: () => changeLogsFilter("warn")
+                }, t("debugLogsFilterWarn"))
+              ),
+              React.createElement(
+                "div",
+                { className: "dshRemoteLogActions" },
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteLogActionBtn",
+                  disabled: logsLoading,
+                  onClick: () => void loadLogs(logsFilter)
+                }, t(logsLoading ? "debugLogsRefreshing" : "debugLogsRefresh")),
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteLogActionBtn",
+                  disabled: !logsSnapshot?.entries.length,
+                  onClick: () => void copyLogs()
+                }, t(logsCopyState === "copied" ? "debugLogsCopied" : logsCopyState === "failed" ? "debugLogsCopyFailed" : "debugLogsCopy")),
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteLogActionBtn",
+                  disabled: !logsSnapshot?.entries.length,
+                  onClick: exportLogs
+                }, t("debugLogsExport")),
+                React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteLogActionBtn",
+                  disabled: logsClearing || !logsSnapshot?.totalBuffered,
+                  onClick: () => void clearLogs()
+                }, t("debugLogsClear"))
+              )
+            ),
+            (logsSnapshot?.filePath || logsSnapshot?.fileError || logsSnapshot) && React.createElement(
+              "div",
+              { className: "dshRemoteLogMeta" },
+              logsSnapshot?.filePath && React.createElement("span", null, t("debugLogsFileLabel"), " ", React.createElement("code", null, logsSnapshot.filePath)),
+              logsSnapshot?.fileError && React.createElement("span", { className: "dshRemoteLogFallback" }, t("debugLogsFileFallback", { error: logsSnapshot.fileError })),
+              logsSnapshot && React.createElement("span", null, t("debugLogsCount", { count: logsSnapshot.entries.length }))
+            ),
+            logsError && React.createElement("p", { className: "dshRemoteError", role: "alert" }, logsError),
+            logsLoading && !logsSnapshot ? React.createElement("p", { className: "dshRemoteLogEmpty" }, t("debugLogsLoading")) : !logsSnapshot || logsSnapshot.entries.length === 0 ? React.createElement("p", { className: "dshRemoteLogEmpty" }, t("debugLogsEmpty")) : React.createElement(
+              "div",
+              { className: "dshRemoteLogViewport", ref: logsViewportRef },
+              logsSnapshot.entries.map((entry) => React.createElement("span", {
+                key: entry.seq,
+                className: entry.level === "error" ? "dshRemoteLogLine isError" : entry.level === "warn" ? "dshRemoteLogLine isWarn" : entry.level === "debug" ? "dshRemoteLogLine isDebug" : "dshRemoteLogLine"
+              }, entry.line))
+            )
+          )
         ),
         React.createElement(
           "div",
@@ -4074,10 +4269,12 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteInlineSignIn .dshRemoteClientLogin{max-width:440px}.dshRemoteInlineSignIn .dshRemoteClientLogin>input,.dshRemoteInlineSignIn .dshRemoteClientLogin>button{height:36px;min-height:36px;font-size:13px}.dshRemoteInlineSignIn{width:min(440px,100%);max-width:100%;margin:0 auto 48px;padding-top:0;border-top:0}.dshRemoteInlineSignIn .dshRemoteSettingsServer{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 20px!important}.dshRemoteInlineSignIn .dshRemoteSettingsServer>label{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap}.dshRemoteInlineSignIn .dshRemoteSettingsServer>input{height:34px;min-height:34px;font-size:13px;padding:0 10px;background:transparent;border-radius:6px}.dshRemoteInlineSignIn .dshRemoteSettingsServer>button{height:34px;min-height:34px;padding:0 12px;font-size:12px;border-radius:6px;background:transparent}.dshRemoteInlineSignIn .dshRemoteLoginTabs{width:100%;justify-content:stretch;gap:0}.dshRemoteInlineSignIn .dshRemoteLoginTabs>button{flex:1 0 0;min-width:max-content;min-height:38px;padding:6px 10px;font-size:13px}.dshRemoteInlineSignIn .dshRemotePairing{padding:20px 0 8px;border-bottom:0}.dshRemoteInlineSignIn .dshRemotePairing h3{margin:0 0 12px;font-size:14px}.dshRemoteInlineSignIn .dshRemotePairingInstructions{font-size:13px;line-height:1.8;margin:0 0 12px}.dshRemoteInlineSignIn .dshRemotePairingPolicy{font-size:12px;color:var(--dsw-alias-label-secondary);margin:0 0 20px}.dshRemoteInlineSignIn .dshRemotePairingActions{margin:16px 0 0}.dshRemoteInlineSignIn .dshRemotePairingActions>button{width:100%;min-height:36px;padding:8px 14px;font-size:13px;border-radius:8px}.dshRemoteInlineSignIn .dshRemotePairing .dshRemoteError{font-size:12px;line-height:1.7}",
       ".dshRemoteLoginContent .dshRemotePairingQr{margin:4px auto}.dshRemotePairingActions:empty{display:none}.dshRemotePairingQrActions{display:flex;align-items:center;justify-content:center;gap:16px;min-height:48px}.dshRemotePairingQrActions>.dshRemotePairingCountdown{font-size:18px;line-height:1.4}.dshRemotePairingQrActions>button{min-height:44px;padding:8px 18px;font-size:15px}.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingInstructions{font-size:15px;line-height:1.6}.dshRemotePairingInstructionPrimary{font-size:18px}.dshRemotePairingInstructionSecondary{font-size:15px}.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingInstructions,.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingPolicy{margin-bottom:4px}",
       ".dshRemotePairingHeading{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;margin-bottom:12px}.dshRemotePairingHeading>.dshRemotePairingInstructions{margin:0!important}.dshRemotePairingHeading>.dshRemotePairingCountdown{white-space:nowrap}.dshRemotePairing .dshRemotePairingIdentity{margin:12px 0 20px}.dshRemotePairingIdentity>strong{display:inline-block;margin-bottom:4px}.dshRemotePairingIdentity code{display:inline-block;font-size:11px;line-height:1.6;color:var(--dsw-alias-label-secondary)}.dshRemotePairingCodeForm{display:grid;gap:12px;margin-top:20px}.dshRemotePairingCodeForm>label{font-size:13px;gap:8px}.dshRemotePairingCodeForm input{height:44px;padding:8px 12px;font-size:20px}.dshRemotePairing .dshRemotePairingCodeWarning{margin:0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary)}.dshRemotePairingCodeActions{display:flex;gap:8px;flex-wrap:wrap}.dshRemotePairingCodeActions>button{min-height:36px;font-size:13px}",
-      '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after{transition:none}}',
+      '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input,.dshRemoteDebugLogControls>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked,.dshRemoteDebugLogControls>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after,.dshRemoteDebugLogControls>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible,.dshRemoteDebugLogControls>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled,.dshRemoteDebugLogControls>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input,.dshRemoteDebugLogControls>input::after{transition:none}}',
       ".dshRemoteAssociation{min-width:0;flex:1;display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);align-items:baseline;column-gap:12px;row-gap:4px}.dshRemoteAssociation>span{grid-column:1/-1;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{grid-column:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5;overflow-wrap:anywhere}.dshRemoteAssociation p{grid-column:2;color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
       ".dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect{appearance:none;flex:0 0 auto;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:34px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteReconnect:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}",
       ".dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}",
+      ".dshRemoteDebugLogGroup{border-top:1px solid var(--dsw-alias-border-l2);padding:12px 0}.dshRemoteDebugLogHeader{display:flex;align-items:center;justify-content:space-between;gap:16px}.dshRemoteDebugLogTrigger{appearance:none;border:0!important;border-radius:6px!important;background:transparent!important;padding:0!important;margin:0;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0;flex:1;min-height:unset!important;white-space:normal}.dshRemoteDebugLogTrigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:6px}.dshRemoteDebugLogTitleRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemoteDebugLogTitleRow strong{font-size:13px;font-weight:500}.dshRemoteDebugLogTrigger p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.4;white-space:normal}.dshRemoteDebugLogLevelBadge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:500;line-height:1.5;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2)}.dshRemoteDebugLogLevelBadge.isDebug{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.dshRemoteDebugLogControls{display:flex;align-items:center;gap:10px;flex:0 0 auto}",
+      ".dshRemoteLogToggleBtn,.dshRemoteLogActionBtn,.dshRemoteLogFilterBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);min-height:28px!important;padding:3px 10px!important;font-size:12px!important;line-height:1.4!important;white-space:nowrap}.dshRemoteLogToggleBtn:hover:not(:disabled),.dshRemoteLogActionBtn:hover:not(:disabled),.dshRemoteLogFilterBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogToggleBtn:disabled,.dshRemoteLogActionBtn:disabled,.dshRemoteLogFilterBtn:disabled{opacity:.45;cursor:default}.dshRemoteLogFilterBtn.isActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-label-secondary);font-weight:500}.dshRemoteLogDrawer{margin-top:12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:8px}.dshRemoteLogToolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.dshRemoteLogFilterGroup,.dshRemoteLogActions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dshRemoteLogMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4}.dshRemoteLogMeta code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}.dshRemoteLogFallback{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogViewport{box-sizing:border-box;width:100%;max-height:260px;min-height:120px;overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}.dshRemoteLogLine{display:block;color:var(--dsw-alias-label-primary);margin-bottom:3px}.dshRemoteLogLine:last-child{margin-bottom:0}.dshRemoteLogLine.isDebug{color:var(--dsw-alias-label-tertiary)}.dshRemoteLogLine.isWarn{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogLine.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteLogEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0;padding:16px 0;text-align:center}",
       "@media(max-width:620px){.dshRemotePluginCardStatus{display:none}.dshRemoteSettingsTop{gap:10px}.dshRemoteConnection{align-items:flex-start}.dshRemoteReconnect{min-height:40px}.dshRemotePortsRow{flex-direction:column}.dshRemoteAcpAddForm{grid-template-columns:1fr}.dshRemoteAcpAddForm button{min-height:40px}}"
     ].join(""), document.head.append(style), () => style.remove();
   }

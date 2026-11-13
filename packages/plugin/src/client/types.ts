@@ -261,6 +261,23 @@ export interface PluginSettingsView {
   }
 }
 
+export type PluginLogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type PluginLogFilter = 'all' | 'warn'
+
+export interface PluginLogEntry {
+  seq: number
+  timestamp: string
+  level: PluginLogLevel
+  line: string
+}
+
+export interface PluginLogView {
+  logLevel: PluginLogLevel
+  entries: PluginLogEntry[]
+  totalBuffered: number
+  filePath?: string
+  fileError?: string
+}
 export interface PluginAssociation {
   method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
