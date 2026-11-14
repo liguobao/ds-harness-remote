@@ -12,6 +12,13 @@ export interface ConfirmDialogButton {
 }
 
 /**
+ * How the dialog was closed: `action` picked a button, `dismiss` came from the
+ * backdrop or the Android back button. Callers must keep them apart — React
+ * Native's `Alert.onDismiss` only means "closed without choosing".
+ */
+export type ConfirmDialogCloseCause = 'action' | 'dismiss'
+
+/**
  * Custom themed replacement for `Alert.alert` confirmations: a centered card
  * on a dimmed scrim, title + body + button row. Unlike the system AlertDialog,
  * colors, button order and wording are fully controlled by the app theme.
@@ -27,7 +34,7 @@ export function ConfirmDialog({
   title: string
   message?: string
   buttons: ConfirmDialogButton[]
-  onClose: () => void
+  onClose: (cause: ConfirmDialogCloseCause) => void
 }) {
   const styles = useThemedStyles(createStyles)
   // iOS runs handlers after its dismiss fade. Android does not emit
@@ -45,13 +52,13 @@ export function ConfirmDialog({
       animationType="fade"
       onRequestClose={() => {
         pendingRef.current = undefined
-        onClose()
+        onClose('dismiss')
       }}
       onDismiss={runPending}
       statusBarTranslucent
     >
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={title} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => onClose('dismiss')} accessibilityLabel={title} />
         <View style={styles.card} accessibilityViewIsModal>
           <Text style={styles.title}>{title}</Text>
           {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -63,7 +70,7 @@ export function ConfirmDialog({
                 accessibilityLabel={button.label}
                 onPress={() => {
                   pendingRef.current = button.onPress
-                  onClose()
+                  onClose('action')
                   if (Platform.OS !== 'ios') runPending()
                 }}
                 style={({ pressed }) => [

@@ -45,6 +45,7 @@ export function BotModeScreen({
   onMore,
   splitView = false,
   drawerOpen = false,
+  screenActive = true,
 }: {
   selectedId?: string
   onSelect: (id?: string) => void
@@ -55,6 +56,7 @@ export function BotModeScreen({
   onMore: () => void
   splitView?: boolean
   drawerOpen?: boolean
+  screenActive?: boolean
 }) {
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
@@ -177,13 +179,14 @@ export function BotModeScreen({
     emitOnSelect(id)
   }
 
-  const [active, setActive] = useState(AppState.currentState === 'active')
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active')
+  const active = appActive && screenActive
   const [rosterSearch, setRosterSearch] = useState('')
   const [chatMoreOpen, setChatMoreOpen] = useState(false)
   const enterAnim = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', next => setActive(next === 'active'))
+    const sub = AppState.addEventListener('change', next => setAppActive(next === 'active'))
     return () => sub.remove()
   }, [])
 
@@ -391,6 +394,11 @@ export function BotModeScreen({
   const slideX = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] })
   const fadeOpacity = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1] })
 
+  const conversationReady = session !== undefined
+    && state !== undefined
+    && targetSessionId !== undefined
+    && session.sessionId === targetSessionId
+
   return (
     <KeyboardInset>
       <View style={styles.flex}>
@@ -409,7 +417,7 @@ export function BotModeScreen({
                   <Button label={s.bots.retry} onPress={retry} />
                 </View>
               )}
-              {session && state && clientValue ? (
+              {conversationReady ? (
                 <BotConversation
                   key={`${selectedId}:${session.sessionId}`}
                   bot={bot}
@@ -422,10 +430,17 @@ export function BotModeScreen({
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
                 />
-              ) : (loading && visibleError === undefined) || (targetSessionId && !openError && state !== undefined) ? (
+              ) : (loading && visibleError === undefined) || (connectionPhase === 'connected' && targetSessionId && !openError && state !== undefined) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>
+              ) : connectionPhase !== 'connected' && targetSessionId && state !== undefined ? (
+                <EmptyState
+                  icon={Bot}
+                  title={s.status.offline}
+                  body={visibleError ?? s.workspaces.offlineBody}
+                  action={<Button label={s.bots.back} onPress={() => handleSelect(undefined)} />}
+                />
               ) : state === undefined ? (
                 <ScrollView contentContainerStyle={{ padding: 16 }}>
                   <DsBotInstallCard error={visibleError} loading={loading} onRetry={retry} />

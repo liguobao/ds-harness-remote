@@ -1,5 +1,5 @@
 import { useRef, useSyncExternalStore } from 'react'
-import { ConfirmDialog } from '../screens/chat/confirm-dialog'
+import { ConfirmDialog, type ConfirmDialogCloseCause } from '../screens/chat/confirm-dialog'
 
 /**
  * Drop-in replacement for React Native's `Alert.alert`: same call signature,
@@ -53,10 +53,13 @@ export function AlertHost() {
   const lastRef = useRef<AlertRequest | undefined>(undefined)
   if (request !== undefined) lastRef.current = request
   const shown = request ?? lastRef.current
-  const dismiss = () => {
+  // React Native's Alert only calls `onDismiss` when the alert is closed without
+  // picking a button (backdrop tap or back). Button presses must not settle a
+  // caller's "cancelled" promise before its own action runs.
+  const dismiss = (cause: ConfirmDialogCloseCause) => {
     const current = store.request
     store.request = undefined
-    current?.onDismiss?.()
+    if (cause === 'dismiss') current?.onDismiss?.()
     notify?.()
   }
   return (

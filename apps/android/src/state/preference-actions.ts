@@ -4,6 +4,7 @@ import {
   saveActivityDockMode,
   saveChatAppearance,
   saveDefaultPermissionPreset,
+  saveDrawerLayoutMode,
   saveCompactHistory,
   saveLanguagePreference,
   saveThemePreference,
@@ -15,7 +16,7 @@ import type { AppState } from './store-state'
 import type { SessionAccess } from './session-runtime'
 
 export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setDrawerLayoutMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
@@ -24,6 +25,10 @@ export function createPreferenceActions({ set, get, runtime }: SessionAccess): P
     async setActivityDockMode(activityDockMode) {
       await saveActivityDockMode(activityDockMode)
       set({ activityDockMode })
+    },
+    async setDrawerLayoutMode(drawerLayoutMode) {
+      await saveDrawerLayoutMode(drawerLayoutMode)
+      set({ drawerLayoutMode })
     },
     async setTransportPreference(preference) {
       await saveTransportPreference(preference)

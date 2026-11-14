@@ -1,3 +1,4 @@
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => undefined }))
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdaptiveTransportOptions } from '@dsh-remote/webrtc'
@@ -107,6 +108,17 @@ afterEach(async () => {
   await Promise.all(testState.cores.map(core => core.close()))
   vi.useRealTimers()
 })
+
+  it('scopes binary upload support to the current Host and clears it on close', async () => {
+    const connection = new AndroidRemoteConnection()
+    for (const binary of [false, true, false]) {
+      testState.capabilities = ['harness.remote.v1', 'workspace.upload.v1', ...(binary ? ['workspace.upload.binary.v1'] : [])]
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      expect(connection.supportsBinaryUpload()).toBe(binary)
+    }
+    await connection.close()
+    expect(connection.supportsBinaryUpload()).toBe(false)
+  })
 
   it('gives TURN-only attempts an allocation budget without slowing automatic routing', async () => {
     await runScenarios([

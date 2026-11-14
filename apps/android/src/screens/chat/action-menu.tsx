@@ -1,4 +1,4 @@
-import { Camera, ChevronRight, FileText, Film, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
+import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { IconButton } from '../../ui/components'
@@ -14,7 +14,6 @@ type Props = {
   onClose: () => void
   /** Window rect of the composer the sheet grows out of. */
   anchor?: Rect
-  canAttachImages: boolean
   attachmentPicking: boolean
   takePhoto: () => Promise<void>
   pickImages: () => Promise<void>
@@ -35,7 +34,7 @@ type Props = {
   onOpenPermissions: () => void
 }
 
-export function ChatActionMenu({ visible, onClose, anchor, canAttachImages, attachmentPicking,
+export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
   permissionDisabled, permissionLabel, onReferenceChat, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions }: Props) {
@@ -51,29 +50,27 @@ export function ChatActionMenu({ visible, onClose, anchor, canAttachImages, atta
           nestedScrollEnabled
         >
           <View style={styles.plusCardRow}>
-            {canAttachImages && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.chat.takePhoto}
-                accessibilityState={{ disabled: attachmentPicking }}
-                disabled={attachmentPicking}
-                onPress={() => { onClose(); void takePhoto() }}
-                style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-              >
-                <Camera size={22} color={colors.primary} />
-                <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
-              </Pressable>
-            )}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={canAttachImages ? strings.chat.photos : strings.chat.videos}
+              accessibilityLabel={strings.chat.takePhoto}
+              accessibilityState={{ disabled: attachmentPicking }}
+              disabled={attachmentPicking}
+              onPress={() => { onClose(); void takePhoto() }}
+              style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
+            >
+              <Camera size={22} color={colors.primary} />
+              <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.chat.photos}
               accessibilityState={{ disabled: attachmentPicking }}
               disabled={attachmentPicking}
               onPress={() => { onClose(); void pickImages() }}
               style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
             >
-              {canAttachImages ? <Images size={22} color={colors.primary} /> : <Film size={22} color={colors.primary} />}
-              <Text style={styles.plusCardText}>{canAttachImages ? strings.chat.photos : strings.chat.videos}</Text>
+              <Images size={22} color={colors.primary} />
+              <Text style={styles.plusCardText}>{strings.chat.photos}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"

@@ -3,6 +3,7 @@ import { SecureMessageCodec } from '@dsh-remote/protocol'
 import type { RemoteTransport, SecureHandshakeTransport } from '@dsh-remote/webrtc'
 import { connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
+import { nativeChaChaEncryptor } from './native-chacha-poly'
 import type { DeviceIdentity, RemoteDevice } from '../types'
 
 export class SecureTransport implements RemoteTransport {
@@ -37,6 +38,7 @@ export class SecureTransport implements RemoteTransport {
     this.onHandshakeStarting?.()
     const noise = new NoiseIkSession({
       role: 'initiator',
+      encryptChaChaPoly: nativeChaChaEncryptor(),
       localPrivateKey: this.identity.privateKey,
       localPublicKey: this.identity.publicKey,
       remotePublicKey: this.host.identityKey,

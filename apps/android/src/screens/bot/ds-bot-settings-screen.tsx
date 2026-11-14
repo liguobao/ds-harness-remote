@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
@@ -166,6 +166,7 @@ export function DsBotSettingsModal({
   const { contentMaxWidth, landscape } = useResponsiveLayout()
   const isDark = scheme === 'dark'
 
+  const language = useAppStore(store => store.language)
   const connected = useAppStore(store => store.connection.phase === 'connected')
   const selectedDevice = useAppStore(store => store.selectedDevice)
   const state = useBotTeamStore(store => store.state)
@@ -237,10 +238,27 @@ export function DsBotSettingsModal({
     }
   }, [dsBotBundle, enablingPlugin, handleRetryAll])
 
+  const prevVisibleRef = useRef(false)
+  const prevInitialTabRef = useRef(initialTab)
+  const prevConnectedRef = useRef(connected)
   useEffect(() => {
-    if (!visible) return
-    setSubpage(initialTab ?? null)
-    void checkDsBotPluginStatus()
+    if (!visible) {
+      prevVisibleRef.current = false
+      prevConnectedRef.current = connected
+      return
+    }
+    const justOpened = !prevVisibleRef.current
+    const initialTabChanged = prevInitialTabRef.current !== initialTab
+    const connectionChanged = prevConnectedRef.current !== connected
+    prevVisibleRef.current = true
+    prevInitialTabRef.current = initialTab
+    prevConnectedRef.current = connected
+    if (justOpened || initialTabChanged) {
+      setSubpage(initialTab ?? null)
+    }
+    if (justOpened || connectionChanged) {
+      void checkDsBotPluginStatus()
+    }
     if (connected && !state) {
       void refresh(true)
     }
@@ -297,19 +315,29 @@ export function DsBotSettingsModal({
       { id: 'usage', label: s.bots.tabUsage, detail: s.dsBotSettings.tabDetail.usage, icon: ChartNoAxesColumn },
       { id: 'secrets', label: s.bots.tabSecrets, detail: s.dsBotSettings.tabDetail.secrets, icon: KeyRound },
     ],
-    [],
+    [language],
   )
 
   const usageView = useMemo(
     () => buildDsBotUsageView(usageData, usageRange),
-    [usageData, usageRange],
+    [usageData, usageRange, language],
   )
   const activityYear = useMemo(
     () => buildDsBotActivityYear(usageData, 24),
     [usageData],
   )
 
-  if (!visible) return null
+  const [contentMounted, setContentMounted] = useState(visible)
+  useEffect(() => {
+    if (visible) {
+      setContentMounted(true)
+      return
+    }
+    const timer = setTimeout(() => setContentMounted(false), 320)
+    return () => clearTimeout(timer)
+  }, [visible])
+
+  if (!visible && !contentMounted) return null
 
   const prefs = object(effectiveState.prefs)
   const showThinking = prefs.thinking !== false && prefs.showThinking !== false
@@ -490,7 +518,7 @@ export function DsBotSettingsModal({
   }
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={handleBack} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleBack} statusBarTranslucent>
       <View style={styles.root}>
         <BlurHeaderFrame
           header={
@@ -503,6 +531,9 @@ export function DsBotSettingsModal({
         >
           <Screen key={subpage ?? 'index'}>
             <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+              {isLiveState && visibleError !== undefined && (
+                <Text accessibilityRole="alert" style={styles.errorBanner}>{visibleError}</Text>
+              )}
               {/* ==================== LEVEL 1: SETTINGS-STYLE INDEX PAGE ==================== */}
               {subpage === null && (
                 <>
@@ -1419,5 +1450,14 @@ const createStyles = (colors: ThemeColors) =>
       ...type.heading,
       fontSize: 18,
       color: colors.ink,
+    },
+    errorBanner: {
+      fontSize: 13.5,
+      lineHeight: 19,
+      color: colors.danger,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: radius.md,
+      backgroundColor: colors.dangerSoft,
     },
   })

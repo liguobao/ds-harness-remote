@@ -646,6 +646,7 @@ const ruRU = {
     server: 'Адрес сервера', serverHint: 'Используйте адрес HTTPS.', trustTitle: 'Защитите свои устройства и диалоги', trustBody: 'Данные диалогов шифруются при передаче. Доступ к ним есть только у доверенных устройств, вошедших в тот же аккаунт.',
   },
   settings: {
+    drawerLayoutMode: 'Макет боковой панели', drawerLayoutCompact: 'Компактный', drawerLayoutClassic: 'Развёрнутые карточки', drawerLayoutModeSaveFailed: 'Не удалось сохранить макет боковой панели',
     identityHint: "Нажмите на поле, чтобы посмотреть и скопировать полное значение.",
     copyIdentity: "Копировать",
     identityCopyFailed: "Не удалось скопировать. Повторите попытку.",
@@ -776,6 +777,7 @@ const ruRU = {
     backendDescriptions: { harness: "Официальный фреймворк агентов DeepSeek", codex: "Агент для программирования OpenAI Codex", claude: "Агент Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Интерактивный агент Cursor IDE", antigravity: "Фреймворк разработки Antigravity", opencode: "Агент с открытым кодом OpenCode", pi: "Агент Personal Intelligence" },
   },
   plugins: {
+    connectHostFirst: 'Сначала подключитесь к хосту',
     title: 'Плагины',
     nav: 'Плагины',
     subtitle: 'Включение и настройка плагинов на хосте',
@@ -935,6 +937,7 @@ const ruRU = {
     hermesDirectoryHint: 'Этот каталог используется для диалогов Hermes. Существующие диалоги загружаются с компьютера.', renameTitle: 'Переименовать рабочую область', namePlaceholder: 'Введите название рабочей области', saveName: 'Сохранить', chooseFolder: 'Выберите каталог проекта', loading: 'Загрузка…', loadingDirectory: 'Чтение каталога…', noFolders: 'Здесь нет доступных папок', showHidden: 'Показать скрытые папки', hideHidden: 'Не показывать скрытые папки', chooseThisFolder: 'Использовать этот каталог',
   },
   chat: {
+    invalidTextFileSkipped: (name: string) => `«${name}» содержит некорректный UTF-8 или управляющие символы и был пропущен.`,
     referenceChat: "Сослаться на диалог", referenceChatDetail: "Использовать другой диалог с ботом или сессию DSH как контекст", referenceChatSubtitle: "Выберите другой диалог с ботом или сессию DSH в качестве контекста",
     referencedChat: (label: string) => `Ссылка: ${label}`,
     renderFailed: "Не удалось отобразить этот фрагмент", renderFailedHint: "Остальной диалог и поле ввода работают как обычно.", reloadSession: "Перезагрузить диалог",

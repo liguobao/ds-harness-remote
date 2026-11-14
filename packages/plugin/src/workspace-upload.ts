@@ -1,3 +1,4 @@
+import { BINARY_UPLOAD_CHUNK_BYTES } from '@dsh-remote/protocol'
 import { workspaceUploadMaxBytes } from './workspace-transfer-limits.js'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
@@ -12,13 +13,14 @@ export const WORKSPACE_UPLOAD_CHUNK = 64 * 1024
 export const WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5_000
 export const WORKSPACE_UPLOAD_AUTHORITY_BYTES = 4 * 1024 * 1024
 const scope = z.object({ sessionId: z.string().min(1).max(512), uploadId: z.string().uuid() }).strict()
-const openParams = scope.extend({ name: z.string().min(1), totalBytes: z.number().int().min(0).max(workspaceUploadMaxBytes("LAN")) }).strict()
+const openParams = scope.extend({ name: z.string().min(1), totalBytes: z.number().int().min(0).max(workspaceUploadMaxBytes("LAN")), encoding: z.literal('binary-v1').optional() }).strict()
 const chunkParams = scope.extend({ offset: z.number().int().min(0), data: z.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict()
+const binaryChunkParams = scope.extend({ offset: z.number().int().min(0), data: z.instanceof(Uint8Array).refine(data => data.byteLength > 0 && data.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict()
 type Result = { name: string; path: string; bytes: number }
 type Upload = {
   sessionId: string; name: string; totalBytes: number; received: number; touched: number
   root: string; sourceRoot: string; dev: number; ino: number; temp: string; handle: FileHandle
-  authorityCheckedAt: number; authorityBytes: number
+  authorityCheckedAt: number; authorityBytes: number; encoding?: 'binary-v1'
 }
 
 /** One authenticated peer owns this bounded, ephemeral upload service. */
@@ -48,6 +50,7 @@ export class WorkspaceUploadHost {
         switch (method) {
           case 'workspace.upload.open': return await this.begin(input)
           case 'workspace.upload.chunk': return await this.append(input)
+          case 'workspace.upload.chunk.binary': return await this.append(input, true)
           case 'workspace.upload.commit': return await this.commit(input)
           case 'workspace.upload.abort': {
             const p = scope.parse(input)
@@ -104,14 +107,15 @@ export class WorkspaceUploadHost {
       authorityCheckedAt: 0, authorityBytes: 0 }
     this.uploads.set(p.uploadId, upload)
     await this.validateRoot(upload)
-    return { uploadId: p.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK }
+    return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...(p.encoding ? { encoding: p.encoding } : {}) }
   }
 
-  private async append(input: unknown) {
-    const p = chunkParams.parse(input)
+  private async append(input: unknown, binary = false) {
+    const p = binary ? binaryChunkParams.parse(input) : chunkParams.parse(input)
     const upload = this.requireUpload(p)
-    const data = Buffer.from(p.data, 'base64')
-    if (!data.length || data.length > WORKSPACE_UPLOAD_CHUNK || data.toString('base64') !== p.data
+    if (binary !== (upload.encoding === 'binary-v1')) throw failure('UPLOAD_INVALID_CHUNK')
+    const data = typeof p.data === 'string' ? Buffer.from(p.data, 'base64') : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength)
+    if (!data.length || data.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || (!binary && data.toString('base64') !== p.data)
       || p.offset !== upload.received || upload.received + data.length > upload.totalBytes) throw failure('UPLOAD_INVALID_CHUNK')
     await this.validateRoot(upload, this.authorityExpired(upload))
     let written = 0

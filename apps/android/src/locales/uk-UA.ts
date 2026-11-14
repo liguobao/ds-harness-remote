@@ -649,6 +649,7 @@ const ukUA = {
     server: 'Адреса сервера', serverHint: 'Використовуйте адресу HTTPS.', trustTitle: 'Захистіть свої пристрої та діалоги', trustBody: 'Дані діалогів шифруються під час передавання. Доступ до них мають лише довірені пристрої, на яких виконано вхід у той самий обліковий запис.',
   },
   settings: {
+    drawerLayoutMode: 'Макет бічної панелі', drawerLayoutCompact: 'Компактний', drawerLayoutClassic: 'Розгорнуті картки', drawerLayoutModeSaveFailed: 'Не вдалося зберегти макет бічної панелі',
     identityHint: "Торкніться поля, щоб переглянути й скопіювати повне значення.",
     copyIdentity: "Копіювати",
     identityCopyFailed: "Не вдалося скопіювати. Спробуйте ще раз.",
@@ -779,6 +780,7 @@ const ukUA = {
     backendDescriptions: { harness: "Офіційний фреймворк агентів DeepSeek", codex: "Агент для програмування OpenAI Codex", claude: "Агент Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Інтерактивний агент Cursor IDE", antigravity: "Фреймворк розробки Antigravity", opencode: "Агент із відкритим кодом OpenCode", pi: "Агент Personal Intelligence" },
   },
   plugins: {
+    connectHostFirst: 'Спочатку підключіться до хоста',
     title: 'Плагіни',
     nav: 'Плагіни',
     subtitle: 'Увімкнення й налаштування плагінів на Хості',
@@ -938,6 +940,7 @@ const ukUA = {
     hermesDirectoryHint: 'Цей каталог використовуватиметься для діалогів Hermes. Наявні діалоги завантажуються з компʼютера.', renameTitle: 'Перейменувати робочий простір', namePlaceholder: 'Введіть назву робочого простору', saveName: 'Зберегти', chooseFolder: 'Виберіть каталог проєкту', loading: 'Завантаження…', loadingDirectory: 'Читання каталогу…', noFolders: 'Тут немає доступних тек', showHidden: 'Показати приховані теки', hideHidden: 'Сховати приховані теки', chooseThisFolder: 'Використати цей каталог',
   },
   chat: {
+    invalidTextFileSkipped: (name: string) => `«${name}» містить некоректний UTF-8 або керівні символи, тому його пропущено.`,
     referenceChat: "Послатися на діалог", referenceChatDetail: "Використати інший діалог із ботом або сесію DSH як контекст", referenceChatSubtitle: "Виберіть інший діалог із ботом або сесію DSH як контекст",
     referencedChat: (label: string) => `Посилання: ${label}`,
     renderFailed: "Не вдалося показати цей фрагмент", renderFailedHint: "Решта діалогу та поле введення працюють як зазвичай.", reloadSession: "Перезавантажити діалог",

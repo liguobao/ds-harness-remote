@@ -1,3 +1,4 @@
+vi.mock('expo', () => ({ requireOptionalNativeModule: () => undefined }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { RemoteSession, WorkspaceView } from '../src/types'
@@ -7,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
     'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity',
-    'saveActivityDockMode', 'loadActivityDockMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset',
+    'saveActivityDockMode', 'loadActivityDockMode', 'saveDrawerLayoutMode', 'loadDrawerLayoutMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset',
     'saveFavoriteWorkspaces', 'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
     'saveCodexPermissionPreset',
   ].map(name => [name, vi.fn()])),

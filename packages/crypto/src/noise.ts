@@ -17,6 +17,8 @@ export interface NoiseIkSessionOptions {
   remotePublicKey: string
   prologue: Uint8Array
   random?: (length: number) => Uint8Array
+  /** Optional byte-identical ChaChaPoly accelerator. Nonces remain owned by Noise. */
+  encryptChaChaPoly?: (key: Uint8Array, nonce: bigint, ad: Uint8Array, plaintext: Uint8Array) => Uint8Array | undefined
 }
 
 /**
@@ -41,7 +43,17 @@ export class NoiseIkSession {
       initiator,
       s: { secretKey: localPrivate, publicKey: localPublic },
       ...(initiator ? { rs: Uint8Array.from(this.expectedRemoteStatic) } : {}),
-      cipher: chachaPoly,
+      cipher: options.encryptChaChaPoly ? {
+        ...chachaPoly,
+        encrypt(key, nonce, ad, plaintext, out) {
+          const encrypted = options.encryptChaChaPoly!(key, nonce, ad, plaintext)
+          if (encrypted === undefined) return chachaPoly.encrypt(key, nonce, ad, plaintext, out)
+          if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
+            throw new NoiseSessionError('INVALID_ENCRYPTION_OUTPUT', 'ChaChaPoly accelerator returned an invalid length.')
+          }
+          out.set(encrypted)
+        },
+      } : chachaPoly,
       hash: sha256H,
       rng: options.random ?? randomBytes,
     })

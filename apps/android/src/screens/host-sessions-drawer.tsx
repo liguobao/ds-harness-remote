@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -30,7 +30,6 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Clock,
-  Puzzle,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -39,6 +38,7 @@ import {
   Monitor,
   MoreHorizontal,
   Plus,
+  Puzzle,
   MoreVertical,
   Search,
   Server,
@@ -83,8 +83,8 @@ import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } fro
 
 const SESSION_PAGE_SIZE = 3
 const DRAWER_WIDTH_RATIO = 1
-/** Padding inside the Agent / DS-Bot segmented track. */
-const MODE_SWITCHER_INSET = 3
+/** Padding inside the Agent / DS-Bot underline tab track. */
+const MODE_SWITCHER_INSET = 0
 
 /** 浮窗相对工具栏底部的间距 */
 const POPOVER_OFFSET = 4
@@ -190,6 +190,8 @@ export function HostSessionsDrawer({
   inline = false,
   backLabel,
   dismissible = true,
+  entrance = 'immediate',
+  backRef,
 }: {
   onBack?: () => void
   onClose: () => void
@@ -209,6 +211,10 @@ export function HostSessionsDrawer({
   backLabel?: string
   /** 冷启动停留在侧边栏且尚未选择任何页面时，禁止手势/返回键把侧边栏划走。 */
   dismissible?: boolean
+  /** 默认停留在列表或切换主机时直接就位，避免先露底层对话再滑入；从对话呼出时才滑入。 */
+  entrance?: 'immediate' | 'slide'
+  /** 由 ChatScreen 统一协调硬件返回键顺序。 */
+  backRef?: MutableRefObject<(() => boolean) | undefined>
 }) {
   const language = useAppStore(state => state.language)
   const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
@@ -243,6 +249,8 @@ export function HostSessionsDrawer({
   const moveWorkspace = useAppStore(state => state.workspaceMove)
   const deleteWorkspace = useAppStore(state => state.workspaceDelete)
   const busy = useAppStore(state => state.busyAction)
+  const drawerLayoutMode = useAppStore(state => state.drawerLayoutMode)
+  const isClassicDrawer = drawerLayoutMode === 'classic'
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const error = useAppStore(state => state.error)
   const clearError = useAppStore(state => state.clearError)
@@ -286,8 +294,18 @@ export function HostSessionsDrawer({
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
-    saveHostMode(hostScope, nextMode)
-    onBotModeChange?.(nextMode === 'bot')
+    // In single-pane phone overlay mode, switching tabs only browses the other
+    // roster without mutating the underlying conversation until an item is chosen.
+    if (inline) {
+      saveHostMode(hostScope, nextMode)
+      onBotModeChange?.(nextMode === 'bot')
+    }
+  }
+
+  const activateAgentMode = () => {
+    setDrawerMode('agent')
+    saveHostMode(hostScope, 'agent')
+    onBotModeChange?.(false)
   }
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
@@ -618,7 +636,7 @@ export function HostSessionsDrawer({
     const targetBackend = workspace.backend ?? backend
     const created = await createSession(workspace.workspaceId, targetBackend)
     if (created) {
-      if (drawerMode !== 'agent') handleSwitchMode('agent')
+      activateAgentMode()
       if (!inline) closeDrawer()
     }
   }
@@ -634,7 +652,7 @@ export function HostSessionsDrawer({
         .filter(s => (s.backend ?? 'harness') === favBackend && matchedWs.sessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId))
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       if (wsSessions[0]) {
-        if (drawerMode !== 'agent') handleSwitchMode('agent')
+        activateAgentMode()
         await onSelect(wsSessions[0])
         if (!inline) closeDrawer()
         return
@@ -642,7 +660,7 @@ export function HostSessionsDrawer({
     }
     const created = await createSession(workspaceId, favBackend)
     if (created) {
-      if (drawerMode !== 'agent') handleSwitchMode('agent')
+      activateAgentMode()
       if (!inline) closeDrawer()
     }
   }
@@ -803,8 +821,10 @@ export function HostSessionsDrawer({
   // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
   const drawerWidth = Math.round(screenWidth * DRAWER_WIDTH_RATIO)
-  const translateX = useRef(new Animated.Value(-drawerWidth)).current
-  const overlayOpacity = useRef(new Animated.Value(0)).current
+  const immediateMount = entrance === 'immediate'
+  const translateX = useRef(new Animated.Value(immediateMount ? 0 : -drawerWidth)).current
+  const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
+  const hasSettledOpenRef = useRef(immediateMount)
   const dragStartX = useRef(0)
   const closingRef = useRef(false)
   const animSeq = useRef(0)
@@ -812,13 +832,9 @@ export function HostSessionsDrawer({
   const gestureSeq = useRef(0)
   const dragReady = useRef(false)
   const onCloseRef = useRef(onClose)
-  useEffect(() => {
-    onCloseRef.current = onClose
-  }, [onClose])
+  onCloseRef.current = onClose
   const dismissibleRef = useRef(dismissible)
-  useEffect(() => {
-    dismissibleRef.current = dismissible
-  }, [dismissible])
+  dismissibleRef.current = dismissible
 
   useEffect(() => {
     if (showSearch) setSearchMounted(true)
@@ -884,22 +900,58 @@ export function HostSessionsDrawer({
 
   useEffect(() => {
     if (inline) return
+    if (immediateMount || hasSettledOpenRef.current) {
+      currentAnim.current?.stop()
+      closingRef.current = false
+      translateX.setValue(0)
+      overlayOpacity.setValue(1)
+      hasSettledOpenRef.current = true
+      return
+    }
     const anim = Animated.parallel([
       Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
     ])
     currentAnim.current = anim
-    anim.start()
+    anim.start(({ finished }) => {
+      if (finished) hasSettledOpenRef.current = true
+    })
     return () => currentAnim.current?.stop()
-  }, [inline, drawerWidth, translateX, overlayOpacity])
+  }, [inline, immediateMount, translateX, overlayOpacity])
+
+  useEffect(() => {
+    if (backRef === undefined || inline) return
+    backRef.current = () => {
+      if (showConfigModal) {
+        setShowConfigModal(false)
+        return true
+      }
+      if (showSearch) {
+        setShowSearch(false)
+        setSearchQuery('')
+        return true
+      }
+      if (showBotSearch) {
+        setShowBotSearch(false)
+        setBotSearchQuery('')
+        return true
+      }
+      if (!dismissibleRef.current) return false
+      smoothClose(true)
+      return true
+    }
+    return () => {
+      backRef.current = undefined
+    }
+  })
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           if (closingRef.current) return
@@ -1033,18 +1085,19 @@ export function HostSessionsDrawer({
         disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
         onPress={() => {
           Keyboard.dismiss()
-          if (!inline) closeDrawer()
           onOpenDeviceInfo?.()
         }}
+        hitSlop={6}
         style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedFade]}
       >
-        <FooterHostIcon size={20} color={colors.ink} strokeWidth={1.8} />
+        <FooterHostIcon size={17} color={colors.ink} strokeWidth={1.8} />
       </Pressable>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
         disabled={onOpenHostSwitcher === undefined}
         onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher?.() }}
+        hitSlop={6}
         style={({ pressed }) => [styles.hostFooterInfo, pressed && styles.pressedBg]}
       >
         <View style={styles.hostFooterNameRow}>
@@ -1054,7 +1107,7 @@ export function HostSessionsDrawer({
           <View style={[styles.hostFooterDot, { backgroundColor: hostStatusDotColor }]} />
           <Text numberOfLines={1} style={styles.hostFooterStatusText}>{hostStatusLabel}</Text>
         </View>
-        {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={14} color={colors.muted} strokeWidth={1.8} />}
+        {onOpenHostSwitcher !== undefined && <ChevronsUpDown size={13} color={colors.muted} strokeWidth={1.8} />}
       </Pressable>
     </>
   )
@@ -1069,15 +1122,14 @@ export function HostSessionsDrawer({
           disabled={onOpenAbout === undefined}
           onPress={() => {
             Keyboard.dismiss()
-            if (!inline) closeDrawer()
             onOpenAbout?.()
           }}
           hitSlop={8}
           style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
         >
           <Svg
-            width={20}
-            height={(20 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+            width={22}
+            height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
             viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
             accessible={false}
           >
@@ -1113,7 +1165,7 @@ export function HostSessionsDrawer({
         />
       )}
 
-      {/* 顶部模式切换分段胶囊：智能体 / DS-Bot */}
+      {/* 顶部模式切换底线页签：智能体 / DS-Bot */}
       <View
         style={styles.modeSwitcherWrap}
         onLayout={event => setModeTrackWidth(event.nativeEvent.layout.width)}
@@ -1128,14 +1180,14 @@ export function HostSessionsDrawer({
                 transform: [
                   { translateX: modeIndicator.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [modeStart.x - MODE_SWITCHER_INSET, modeEnd.x - MODE_SWITCHER_INSET],
+                    outputRange: [modeStart.x, modeEnd.x],
                   }) },
-                  { scaleX: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.04, 1] }) },
-                  { scaleY: modeIndicator.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.92, 1] }) },
                 ],
               },
             ]}
-          />
+          >
+            <View style={styles.modeSwitcherIndicatorBar} />
+          </Animated.View>
         )}
         <Pressable
           accessibilityRole="tab"
@@ -1147,7 +1199,7 @@ export function HostSessionsDrawer({
             pressed && styles.pressedFade,
           ]}
         >
-          <LayoutGrid size={15} color={drawerMode === 'agent' ? colors.primary : colors.muted} strokeWidth={2} />
+          <LayoutGrid size={15} color={drawerMode === 'agent' ? colors.ink : colors.muted} strokeWidth={2} />
           <Text style={[styles.modeSwitcherText, drawerMode === 'agent' && styles.modeSwitcherTextActive]}>
             {strings.sessions.agentsTab}
           </Text>
@@ -1162,7 +1214,7 @@ export function HostSessionsDrawer({
             pressed && styles.pressedFade,
           ]}
         >
-          <Bot size={15} color={drawerMode === 'bot' ? colors.primary : colors.muted} strokeWidth={2} />
+          <Bot size={15} color={drawerMode === 'bot' ? colors.ink : colors.muted} strokeWidth={2} />
           <Text style={[styles.modeSwitcherText, drawerMode === 'bot' && styles.modeSwitcherTextActive]}>
             DS-Bot
           </Text>
@@ -1186,45 +1238,58 @@ export function HostSessionsDrawer({
         />
       ) : (
         <>
-          {/* 智能体导航卡片区 (GroupCard / GroupRow 设计风格) */}
-          <View style={styles.navGroupWrap}>
-            <GroupCard>
-              <GroupRow
-                first
-                icon={Bot}
-                label={strings.sessions.agentPlatform}
-                value={harnessDisplayName(backend)}
-                onPress={() => setHarnessPickerOpen(true)}
-              />
-              {onOpenPlugins !== undefined && (
+          {isClassicDrawer && (
+            <View style={styles.navGroupWrap}>
+              <GroupCard>
+                <GroupRow
+                  first
+                  icon={Bot}
+                  label={strings.sessions.agentPlatform}
+                  value={harnessDisplayName(backend)}
+                  onPress={() => setHarnessPickerOpen(true)}
+                />
                 <GroupRow
                   icon={Puzzle}
                   label={strings.plugins.nav}
+                  detail={!connected || onOpenPlugins === undefined ? strings.plugins.connectHostFirst : undefined}
+                  disabled={!connected || onOpenPlugins === undefined}
                   onPress={() => {
-                    if (!inline) closeDrawer()
-                    onOpenPlugins()
+                    onOpenPlugins?.()
                   }}
                 />
-              )}
-              <GroupRow
-                icon={Clock}
-                label={strings.automation.nav}
-                onPress={() => {
-                  if (onOpenAutomationTasks) {
-                    if (!inline) closeDrawer()
-                    onOpenAutomationTasks()
-                  } else {
-                    Alert.alert(strings.automation.title, strings.automation.empty)
-                  }
-                }}
-              />
-            </GroupCard>
-          </View>
+                <GroupRow
+                  icon={Clock}
+                  label={strings.automation.nav}
+                  onPress={() => {
+                    if (onOpenAutomationTasks) {
+                      onOpenAutomationTasks()
+                    } else {
+                      Alert.alert(strings.automation.title, strings.automation.empty)
+                    }
+                  }}
+                />
+              </GroupCard>
+            </View>
+          )}
 
-          {/* Workspaces 标题栏与工具栏 */}
+          {/* Workspaces 标题栏与平台筛选、工具栏 */}
           <View ref={toolbarRef} style={styles.workspacesToolbarArea} collapsable={false}>
             <View style={styles.workspacesToolbar}>
-              <Text style={styles.workspacesTitle}>{strings.sessions.workspaces}</Text>
+              <View style={styles.workspacesTitleGroup}>
+                <Text style={styles.workspacesTitle} numberOfLines={1}>{strings.sessions.workspaces}</Text>
+                {!isClassicDrawer && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${strings.sessions.agentPlatform} · ${harnessDisplayName(backend)}`}
+                    hitSlop={6}
+                    onPress={() => setHarnessPickerOpen(true)}
+                    style={({ pressed }) => [styles.platformChip, pressed && styles.pressedFade]}
+                  >
+                    <Text style={styles.platformChipText} numberOfLines={1}>{harnessDisplayName(backend)}</Text>
+                    <ChevronDown size={13} color={colors.muted} strokeWidth={2.1} />
+                  </Pressable>
+                )}
+              </View>
               <View style={styles.toolbarActions}>
                 <Pressable
                   accessibilityRole="button"
@@ -1589,7 +1654,7 @@ export function HostSessionsDrawer({
         </>
       )}
 
-      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧唯一设置按钮 */}
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧轻量设置按钮 */}
       <View style={styles.hostFooterBar}>
         <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
         {onOpenSettings !== undefined && (
@@ -1598,13 +1663,12 @@ export function HostSessionsDrawer({
             accessibilityLabel={strings.settings.title}
             onPress={() => {
               Keyboard.dismiss()
-              if (!inline) closeDrawer()
               onOpenSettings()
             }}
             hitSlop={8}
-            style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+            style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
           >
-            <Settings size={18} color={colors.ink} strokeWidth={1.9} />
+            <Settings size={17} color={colors.ink} strokeWidth={1.9} />
           </Pressable>
         )}
       </View>
@@ -1957,6 +2021,7 @@ export function HostSessionsDrawer({
           }
           void createSession(workspace.workspaceId, nextBackend).then(ok => {
             if (ok && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+              activateAgentMode()
               closeDrawer()
             }
           })
@@ -2021,14 +2086,25 @@ export function HostSessionsDrawer({
           <HomeActionsMenu
             visible={appMenuOpen}
             onClose={() => setAppMenuOpen(false)}
+            onPlugins={!isClassicDrawer ? () => {
+              setAppMenuOpen(false)
+              onOpenPlugins?.()
+            } : undefined}
+            pluginsDisabled={!connected || onOpenPlugins === undefined}
+            onAutomationTasks={!isClassicDrawer ? () => {
+              setAppMenuOpen(false)
+              if (onOpenAutomationTasks) {
+                onOpenAutomationTasks()
+              } else {
+                Alert.alert(strings.automation.title, strings.automation.empty)
+              }
+            } : undefined}
             onSettings={() => {
               setAppMenuOpen(false)
-              if (!inline) closeDrawer()
               onOpenSettings?.()
             }}
             onAbout={() => {
               setAppMenuOpen(false)
-              if (!inline) closeDrawer()
               onOpenAbout?.()
             }}
           />
@@ -2045,7 +2121,7 @@ export function HostSessionsDrawer({
   }
 
   return (
-    <Modal transparent animationType="none" onRequestClose={() => smoothClose(false)} statusBarTranslucent>
+    <View style={[StyleSheet.absoluteFill, styles.drawerHost]} pointerEvents="box-none">
       <View style={styles.overlayContainer}>
         <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
@@ -2058,12 +2134,13 @@ export function HostSessionsDrawer({
           {content}
         </Animated.View>
       </View>
-    </Modal>
+    </View>
   )
 }
 
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
+    drawerHost: { zIndex: 20, elevation: 20 },
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
     drawer: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background, overflow: 'hidden' },
@@ -2074,13 +2151,14 @@ const createStyles = (colors: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      minHeight: 60,
       paddingLeft: spacing.lg,
       paddingRight: spacing.md,
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
-    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 6 },
-    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, flexShrink: 1 },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
+    brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandBadge: {
       backgroundColor: colors.ink,
       paddingHorizontal: 5,
@@ -2095,61 +2173,51 @@ const createStyles = (colors: ThemeColors) =>
       letterSpacing: 0.5,
     },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    iconBtn: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+    iconBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
 
-    navItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-      paddingHorizontal: spacing.sm,
-      height: 50,
-      marginHorizontal: spacing.xs,
-      borderRadius: radius.lg,
-    },
-    navItemText: { ...type.body, fontSize: 17, color: colors.ink },
     modeSwitcherWrap: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.surfaceStrong,
-      borderRadius: radius.pill,
-      padding: 3,
       marginHorizontal: spacing.md,
-      marginBottom: spacing.sm,
+      marginBottom: spacing.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
     },
     modeSwitcherTab: {
       flex: 1,
-      minHeight: 34,
+      minHeight: 38,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
-      borderRadius: radius.pill,
       paddingHorizontal: spacing.sm,
-    },
-    modeSwitcherTabActive: {
-      backgroundColor: colors.surface,
-      ...floatingShadow(colors),
+      paddingBottom: 2,
     },
     // Deliberately no elevation: the indicator is painted before the tab
     // Pressables, and an elevated sibling would cover their labels on Android.
     modeSwitcherIndicator: {
       position: 'absolute',
-      top: MODE_SWITCHER_INSET,
-      bottom: MODE_SWITCHER_INSET,
-      left: MODE_SWITCHER_INSET,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
+      bottom: 0,
+      left: 0,
+      height: 2.5,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modeSwitcherIndicatorBar: {
+      width: 44,
+      height: 2.5,
+      borderRadius: 2,
+      backgroundColor: colors.primary,
     },
     modeSwitcherText: {
       ...type.smallStrong,
-      fontSize: 13.5,
+      fontSize: 14,
+      fontWeight: '500',
       color: colors.muted,
     },
     modeSwitcherTextActive: {
-      color: colors.primary,
+      color: colors.ink,
       fontWeight: '700',
     },
     navGroupWrap: {
@@ -2169,11 +2237,37 @@ const createStyles = (colors: ThemeColors) =>
       justifyContent: 'space-between',
       paddingLeft: spacing.lg,
       paddingRight: spacing.sm,
-      paddingTop: spacing.md,
+      paddingTop: spacing.sm,
       paddingBottom: spacing.xxs,
     },
-    workspacesTitle: { ...type.small, fontSize: 15, color: colors.muted },
-    toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+    workspacesTitleGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      flex: 1,
+      minWidth: 0,
+      marginRight: spacing.xs,
+    },
+    workspacesTitle: { ...type.small, fontSize: 14.5, color: colors.muted, flexShrink: 0 },
+    platformChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      height: 28,
+      paddingHorizontal: 10,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+      flexShrink: 1,
+      minWidth: 0,
+    },
+    platformChipText: {
+      ...type.caption,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
 
     searchContainer: {
       flexDirection: 'row',
@@ -2190,7 +2284,7 @@ const createStyles = (colors: ThemeColors) =>
 
     listContainer: { paddingBottom: spacing.xl },
 
-    // 底部常驻栏：左侧当前远程主机状态/切换入口，右侧唯一设置圆钮
+    // 底部常驻栏：左侧当前远程主机状态/切换入口，右侧轻量设置按钮
     hostFooterBar: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -2198,9 +2292,9 @@ const createStyles = (colors: ThemeColors) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.separator,
       backgroundColor: colors.background,
-      paddingLeft: spacing.xs,
-      paddingRight: spacing.md,
-      paddingVertical: 10,
+      paddingLeft: spacing.sm,
+      paddingRight: spacing.sm,
+      paddingVertical: 5,
     },
     hostFooterLeft: {
       flexDirection: 'row',
@@ -2208,17 +2302,18 @@ const createStyles = (colors: ThemeColors) =>
       gap: 4,
       flex: 1,
       minWidth: 0,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 6,
-      borderRadius: radius.lg,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 2,
+      borderRadius: radius.md,
     },
-    hostFooterIcon: { width: 48, minHeight: 48, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
-    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xs, borderRadius: radius.lg },
+    hostFooterIcon: { width: 30, height: 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.xs, borderRadius: radius.md },
     hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0, flexShrink: 1 },
-    hostFooterName: { ...type.bodyStrong, fontSize: 15, lineHeight: 20, color: colors.ink, flexShrink: 1 },
-    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+    hostFooterName: { ...type.bodyStrong, fontSize: 13.5, lineHeight: 18, color: colors.ink, flexShrink: 1 },
+    hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
-    hostFooterStatusText: { ...type.caption, color: colors.muted },
+    hostFooterStatusText: { ...type.caption, fontSize: 12, color: colors.muted },
+    footerSettingsBtn: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     sectionList: { flex: 1 },
 
     workspaceRow: {
