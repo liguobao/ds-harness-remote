@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'TUI prerelease version (for example 0.6.4-tui.1); publishes to tui-test'
+        description: 'TUI version: current stable to recover its Release asset, or <base>-tui.N for tui-test'
         required: true
         type: string
-        default: '0.6.4-tui.1'
+        default: '0.6.5'
   push:
     tags:
       - "v*"
@@ -27,7 +27,7 @@ env:
 jobs:
   tui-manual:
     if: github.event_name == 'workflow_dispatch'
-    name: Publish TUI prerelease without a tag
+    name: Publish or recover TUI package
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -49,6 +49,7 @@ jobs:
           const manifest = JSON.parse(readFileSync(file, 'utf8'))
           const base = JSON.parse(readFileSync('packages/plugin/package.json', 'utf8')).version
           const version = process.env.TUI_VERSION
+          if (version === base) process.exit(0)
           if (!version.startsWith(`${base}-tui.`) || !/^\d+\.\d+\.\d+-tui\.[1-9]\d*$/.test(version)) {
             throw new Error(`Expected ${base}-tui.<positive integer>`)
           }
@@ -59,11 +60,32 @@ jobs:
       - name: Verify dependency and publish
         env:
           TUI_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           BASE_VERSION="$(node -p "require('./packages/plugin/package.json').version")"
           npm view "ds-harness-remote@$BASE_VERSION" version
-          npm pack ./packages/tui --dry-run
-          npm publish ./packages/tui --access public --provenance --tag tui-test
+          if npm view "ds-harness-remote-tui@$TUI_VERSION" version >/dev/null 2>&1; then
+            echo "TUI version already published."
+            exit 0
+          fi
+          if [ "$TUI_VERSION" = "$BASE_VERSION" ]; then
+            mkdir -p release-assets
+            gh release download "v$BASE_VERSION" --pattern "ds-harness-remote-tui-$BASE_VERSION.tgz" --pattern SHA256SUMS.txt --dir release-assets
+            (cd release-assets && sha256sum --check --ignore-missing SHA256SUMS.txt)
+            tar -xOf "release-assets/ds-harness-remote-tui-$BASE_VERSION.tgz" package/package.json > release-assets/tui-manifest.json
+            node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          const manifest = JSON.parse(readFileSync('release-assets/tui-manifest.json', 'utf8'))
+          assert.equal(manifest.name, 'ds-harness-remote-tui')
+          assert.equal(manifest.version, process.env.TUI_VERSION)
+          assert.equal(manifest.dependencies['ds-harness-remote'], process.env.TUI_VERSION)
+          NODE
+            npm publish "./release-assets/ds-harness-remote-tui-$BASE_VERSION.tgz" --access public --provenance --tag latest
+          else
+            npm pack ./packages/tui --dry-run
+            npm publish ./packages/tui --access public --provenance --tag tui-test
+          fi
 
   release:
     if: github.event_name == 'push'
@@ -190,7 +212,7 @@ jobs:
             if npm view "ds-harness-remote-tui@$VERSION" >/dev/null 2>&1; then
               echo "TUI version already exists on npm, skip publish."
             else
-              npm publish "release-assets/ds-harness-remote-tui-$VERSION.tgz" --access public --provenance
+              npm publish "./release-assets/ds-harness-remote-tui-$VERSION.tgz" --access public --provenance
             fi
           else
             echo '::warning::Skipping TUI publication because its matching Remote version is unavailable on npm. GitHub Release and Android APK publication will continue.'

@@ -75,3 +75,13 @@
 - TUI npm publishing failures no longer block subsequent GitHub Release and Android APK publication; retry failed npm publication separately.
 - MIX 4 / haru acceptance covered Bot creation, model selection, chat, complete group history after restart, terminal, file preview/download and a hash-verified 2 MiB upload. Additional checks covered cross-device Relay compaction and isolated, hash-verified 200 MiB LAN uploads.
 - Real dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 on haru passed Android 72 session, bidirectional messaging, file, terminal and App-restart recovery checks; see [TUI compatibility](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/compatibility.md). Complete iOS, computer-control, approval and scheduling coverage remains pending. Recovery from an offline cold start may still require refreshing the Host list and selecting a Host.
+
+### 贡献者 / Contributors
+
+感谢以下贡献者为 v0.6.5 提交的代码、翻译、文档与测试改进：
+
+[@dreamfarer-space](https://github.com/dreamfarer-space), [@luojiyin1987](https://github.com/luojiyin1987), [@zzalancelot](https://github.com/zzalancelot), [@greatyingzi](https://github.com/greatyingzi), [@gcnyin](https://github.com/gcnyin), [@vccddd](https://github.com/vccddd), [@smmisha](https://github.com/smmisha), [@xingranya](https://github.com/xingranya), [@Pcject](https://github.com/Pcject)
+
+Thank you to everyone above for the code, translations, documentation and tests included in v0.6.5, and to everyone who reported issues and helped validate this release.
+
+感谢所有提交问题、协助复现和参与真机验证的朋友。
