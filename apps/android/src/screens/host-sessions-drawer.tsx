@@ -1125,8 +1125,8 @@ export function HostSessionsDrawer({
           style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
         >
           <Svg
-            width={20}
-            height={(20 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+            width={22}
+            height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
             viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
             accessible={false}
           >
@@ -2111,13 +2111,14 @@ const createStyles = (colors: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      minHeight: 60,
       paddingLeft: spacing.lg,
       paddingRight: spacing.md,
       paddingTop: spacing.md,
-      paddingBottom: spacing.xs,
+      paddingBottom: spacing.md,
     },
-    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 6 },
-    brandTitle: { ...type.heading, fontSize: 19, lineHeight: 23, fontWeight: '800', letterSpacing: -0.4, color: colors.ink, flexShrink: 1 },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
+    brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandBadge: {
       backgroundColor: colors.ink,
       paddingHorizontal: 5,
