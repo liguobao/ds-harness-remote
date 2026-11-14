@@ -14,6 +14,7 @@ export interface AuthenticatedPeerChannel {
   readonly peerDeviceId: string
   readonly peerIdentityKey: string
   readonly mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+  createUpgradeHost?: (publishEvent: (message: RemoteMessage) => Promise<void>) => import('./transport-upgrade.js').TransportUpgradeHost | undefined
   send(message: RemoteMessage): Promise<void>
   onMessage(handler: (message: RemoteMessage) => void): () => void
   close(code?: string): Promise<void>

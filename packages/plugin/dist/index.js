@@ -90298,6 +90298,7 @@ function compactBotRound(text) {
 var LIMIT = 512;
 var MARKER = "\n[Compact history: output omitted]";
 var ROUND_BUDGET = 128 * 1024;
+var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set(["tool/call", "tool/result", "tool/ptc-dispatch", "tool/ptc-dispatch-start", "tool/code-dispatch", "tool/code-dispatch-start"]);
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 function preservedRound(text, budget) {
   if (budget.remaining < LIMIT) return void 0;
@@ -90316,7 +90317,7 @@ function toolValue(value, budget) {
   if (!object3(value)) return value;
   const result = { ...value };
   for (const [key, child] of Object.entries(value)) {
-    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta"].includes(key)) {
+    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta", "code"].includes(key)) {
       result[key] = typeof child === "string" ? summary2(child, budget) : { summary: summary2(child, budget) };
     } else if (key === "content" && Array.isArray(child)) {
       let previews = 0;
@@ -90335,24 +90336,61 @@ function toolValue(value, budget) {
   }
   return result;
 }
-function messageValue(value, budget) {
-  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget));
+function messageSource(value) {
+  if (!object3(value) || !("replayState" in value)) return value;
+  const { replayState: _replayState, ...rest } = value;
+  return rest;
+}
+function messageValue(value, budget, isInjectedUser = false) {
+  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget, isInjectedUser));
   if (!object3(value)) return value;
   if (value.type === "tool-call" || value.type === "tool-result") return toolValue(value, budget);
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, messageValue(child, budget)]));
+  if (isInjectedUser && value.type === "text" && typeof value.text === "string" && value.text.includes("<system-reminder>")) {
+    return { ...value, text: summary2(value.text, budget) };
+  }
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "stream") continue;
+    if (key === "source") out[key] = messageSource(child);
+    else out[key] = messageValue(child, budget, isInjectedUser);
+  }
+  return out;
+}
+function isInjectedUserEvent(event) {
+  const data2 = object3(event.data) ? event.data : void 0;
+  const msg = data2 && object3(data2.message) ? data2.message : data2;
+  const src = msg && object3(msg.source) ? msg.source : void 0;
+  if (src && src.kind !== "user") return true;
+  const content = msg && Array.isArray(msg.content) ? msg.content : void 0;
+  return Boolean(content?.every((b) => object3(b) && b.type === "text" && typeof b.text === "string" && b.text.trimStart().startsWith("<system-reminder>")));
+}
+function requestHeaderEvent(event) {
+  if (!object3(event.data) || !object3(event.data.header)) return event;
+  const { tools: _tools, system: _system, ...restHeader } = event.data.header;
+  return { ...event, data: { ...event.data, header: restHeader } };
 }
 function project(value, budget) {
   if (Array.isArray(value)) return value.map((item) => project(item, budget));
   if (!object3(value)) return value;
-  if (object3(value.event) && ["tool/call", "tool/result"].includes(String(value.event.type))) {
-    const { view, ...rest } = value;
-    const event = toolValue(value.event, budget);
-    const data2 = object3(event.data) ? event.data : {};
-    const title = object3(view) && object3(view.view) ? view.view.title : void 0;
-    return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+  if (object3(value.event)) {
+    const eventType = String(value.event.type);
+    if (TOOL_EVENT_TYPES.has(eventType)) {
+      const { view, ...rest } = value;
+      const event = toolValue(value.event, budget);
+      const data2 = object3(event.data) ? event.data : {};
+      const title = object3(view) && object3(view.view) ? view.view.title : void 0;
+      return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+    }
+    if (eventType === "request/header") return { ...value, event: requestHeaderEvent(value.event) };
+    if (eventType === "assistant/message") return { ...value, event: messageValue(value.event, budget, false) };
+    if (eventType === "user/message") return { ...value, event: messageValue(value.event, budget, isInjectedUserEvent(value.event)) };
   }
-  if (typeof value.type === "string" && ["tool/call", "tool/result"].includes(value.type)) return toolValue(value, budget);
-  if (typeof value.type === "string" && ["user/message", "assistant/message"].includes(value.type)) return messageValue(value, budget);
+  if (typeof value.type === "string") {
+    if (TOOL_EVENT_TYPES.has(value.type)) return toolValue(value, budget);
+    if (value.type === "request/header") return requestHeaderEvent(value);
+    if (value.type === "assistant/message") return messageValue(value, budget, false);
+    if (value.type === "user/message") return messageValue(value, budget, isInjectedUserEvent(value));
+  }
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, project(child, budget)]));
 }
 function compactHistory(value) {
@@ -99733,7 +99771,13 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode },
+      {
+        connectionId,
+        peerDeviceId: channel.peerDeviceId,
+        peerIdentityKey: channel.peerIdentityKey,
+        transportMode: () => channel.mode,
+        createUpgradeHost: channel.createUpgradeHost?.bind(channel)
+      },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -99909,6 +99953,190 @@ function shortId2(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
 
+// packages/plugin/src/transport-upgrade.ts
+var TRANSPORT_UPGRADE_CAPABILITY = "remote.transport.upgrade.v1";
+var candidateSchema = external_exports.object({
+  candidate: external_exports.string().max(4096).optional(),
+  sdpMid: external_exports.string().max(128).nullable().optional(),
+  sdpMLineIndex: external_exports.number().int().min(0).max(64).nullable().optional(),
+  usernameFragment: external_exports.string().max(256).nullable().optional()
+}).strict();
+var offerSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  sdp: external_exports.string().min(1).max(128 * 1024)
+}).strict();
+var iceSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  candidate: candidateSchema
+}).strict();
+var activateSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  transport: external_exports.enum(["lan", "p2p", "turn"])
+}).strict();
+var abortSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64).optional()
+}).strict();
+function tierRank(mode2) {
+  switch (mode2) {
+    case "LAN":
+      return 3;
+    case "P2P":
+      return 2;
+    case "TURN":
+      return 1;
+    default:
+      return 0;
+  }
+}
+function modeFromWire(transport) {
+  return transport === "lan" ? "LAN" : transport === "p2p" ? "P2P" : "TURN";
+}
+var TransportUpgradeHost = class {
+  constructor(driver, logger2) {
+    this.driver = driver;
+    this.logger = logger2;
+  }
+  candidate;
+  closed = false;
+  async offer(params) {
+    if (this.closed) throw new RpcError("CONNECTION_FAILED", "Connection is closed.");
+    const { attemptId, sdp } = offerSchema.parse(params);
+    await this.disposeCandidate();
+    const factory = await this.driver.loadRtcFactory();
+    if (!factory || this.closed) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "WebRTC backend is unavailable on this Host.");
+    }
+    let iceServers = [];
+    try {
+      iceServers = await this.driver.fetchIceServers(this.driver.connectionId);
+    } catch {
+    }
+    if (this.closed) throw new RpcError("CONNECTION_FAILED", "Connection is closed.");
+    let answerSdp;
+    let resolveAnswer;
+    let rejectAnswer;
+    const answerPromise = new Promise((resolve10, reject) => {
+      resolveAnswer = resolve10;
+      rejectAnswer = reject;
+    });
+    const bufferedIce = [];
+    let answerReturned = false;
+    const rtc = new RtcDataChannelTransport({
+      role: "responder",
+      factory,
+      iceServers,
+      negotiateTimeoutMs: 12e3,
+      label: `upgrade<-${this.driver.peerDeviceId}`,
+      onSignal: (signal) => {
+        if (this.closed || this.candidate?.attemptId !== attemptId) return;
+        if (signal.type === "answer") {
+          answerSdp = signal.sdp;
+          resolveAnswer(signal.sdp);
+          return;
+        }
+        if (signal.type === "ice") {
+          if (!answerReturned) {
+            bufferedIce.push(signal.candidate);
+          } else {
+            void this.driver.publishEvent(createEvent("remote.transport.upgrade.ice", {
+              attemptId,
+              candidate: signal.candidate
+            })).catch(() => void 0);
+          }
+        }
+      }
+    });
+    const attempt = {
+      attemptId,
+      rtc,
+      opened: false,
+      activated: false,
+      closed: false
+    };
+    this.candidate = attempt;
+    rtc.onMessage((data2) => {
+      if (!this.closed && !attempt.closed) this.driver.onReceiveCiphertext(data2);
+    });
+    rtc.onClose(() => {
+      if (!attempt.activated && this.candidate === attempt) {
+        attempt.closed = true;
+        this.candidate = void 0;
+      }
+    });
+    void rtc.connect().then(() => {
+      attempt.opened = true;
+    }).catch((error62) => {
+      rejectAnswer(error62 instanceof Error ? error62 : new Error(String(error62)));
+      if (!attempt.activated && this.candidate === attempt) {
+        attempt.closed = true;
+        this.candidate = void 0;
+        void rtc.close().catch(() => void 0);
+      }
+    });
+    rtc.handleSignal({ type: "offer", sdp });
+    const finalAnswer = answerSdp ?? await answerPromise;
+    answerReturned = true;
+    for (const candidate of bufferedIce) {
+      void this.driver.publishEvent(createEvent("remote.transport.upgrade.ice", {
+        attemptId,
+        candidate
+      })).catch(() => void 0);
+    }
+    return { attemptId, sdp: finalAnswer };
+  }
+  async addIce(params) {
+    const { attemptId, candidate } = iceSchema.parse(params);
+    const current = this.candidate;
+    if (current && current.attemptId === attemptId && !current.closed) {
+      current.rtc.handleSignal({ type: "ice", candidate });
+    }
+    return { ok: true };
+  }
+  async activate(params) {
+    const { attemptId, transport } = activateSchema.parse(params);
+    const current = this.candidate;
+    if (!current || current.attemptId !== attemptId || current.closed) {
+      throw new RpcError("INVALID_MESSAGE", "No matching transport upgrade candidate is open.");
+    }
+    if (!current.opened) {
+      await current.rtc.connect();
+    }
+    const detected = current.rtc.selectedPathMode() ?? modeFromWire(transport);
+    const targetMode = tierRank(detected) >= tierRank(modeFromWire(transport)) ? detected : modeFromWire(transport);
+    if (tierRank(targetMode) <= tierRank(this.driver.currentMode())) {
+      await this.disposeCandidate();
+      return { activated: false, mode: this.driver.currentMode() };
+    }
+    this.candidate = void 0;
+    current.activated = true;
+    await this.driver.adoptRtc(current.rtc, targetMode);
+    this.logger?.info("upgraded live peer transport", {
+      attemptId,
+      mode: targetMode
+    });
+    return { activated: true, mode: targetMode };
+  }
+  async abort(params) {
+    const { attemptId } = abortSchema.parse(params);
+    if (!attemptId || this.candidate?.attemptId === attemptId) {
+      await this.disposeCandidate();
+    }
+    return { ok: true };
+  }
+  async closeAll() {
+    this.closed = true;
+    await this.disposeCandidate();
+  }
+  async disposeCandidate() {
+    const prev = this.candidate;
+    this.candidate = void 0;
+    if (prev && !prev.activated && !prev.closed) {
+      prev.closed = true;
+      await prev.rtc.close().catch(() => void 0);
+    }
+  }
+};
+
 // packages/plugin/src/rpc-router.ts
 var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
 var emptyParamsSchema = external_exports.object({}).strict();
@@ -99963,7 +100191,11 @@ var apiMethods = /* @__PURE__ */ new Set([
   "workspace.upload.chunk",
   "workspace.upload.chunk.binary",
   "workspace.upload.commit",
-  "workspace.upload.abort"
+  "workspace.upload.abort",
+  "remote.transport.upgrade.offer",
+  "remote.transport.upgrade.ice",
+  "remote.transport.upgrade.activate",
+  "remote.transport.upgrade.abort"
 ]);
 var HOST_CAPABILITIES = [
   "harness.remote.v1",
@@ -99976,7 +100208,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -99990,6 +100222,7 @@ var RpcRouter = class {
     this.workspaceUpload = workspaceUpload;
     this.compaction = compaction;
     this.lanUpload = lanUpload;
+    this.transportUpgrade = transportUpgrade;
   }
   active = 0;
   async closePeerStreams() {
@@ -99999,7 +100232,8 @@ var RpcRouter = class {
       this.codex?.closeAll(),
       this.acp?.closeAll(),
       this.workspaceUpload?.closeAll(),
-      this.lanUpload?.closeAll()
+      this.lanUpload?.closeAll(),
+      this.transportUpgrade?.closeAll()
     ]);
   }
   async handle(message) {
@@ -100054,7 +100288,8 @@ var RpcRouter = class {
           "remote.history.compact.v1",
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
-          ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []]
+          ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
+          ...this.transportUpgrade ? [TRANSPORT_UPGRADE_CAPABILITY] : []
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -100164,6 +100399,14 @@ var RpcRouter = class {
       }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
+      case "remote.transport.upgrade.offer":
+        return this.requireTransportUpgrade().offer(params);
+      case "remote.transport.upgrade.ice":
+        return this.requireTransportUpgrade().addIce(params);
+      case "remote.transport.upgrade.activate":
+        return this.requireTransportUpgrade().activate(params);
+      case "remote.transport.upgrade.abort":
+        return this.requireTransportUpgrade().abort(params);
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
@@ -100197,6 +100440,12 @@ var RpcRouter = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host cannot forward local plugin routes.");
     }
     return this.pluginRoute;
+  }
+  requireTransportUpgrade() {
+    if (this.transportUpgrade === void 0) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "In-band transport upgrade is unavailable on this Host.");
+    }
+    return this.transportUpgrade;
   }
 };
 function errorResponse2(requestId, error62) {
@@ -100960,7 +101209,36 @@ var HostServerConnection = class {
       tunnel.dataSocket?.close();
       tunnel.dataSocket = void 0;
       tunnel.dataReady = false;
-    }, mode2);
+    }, mode2, !this.config.forceRelay && this.canUseWebRtc() ? (channel2, publishEvent) => new TransportUpgradeHost({
+      connectionId: tunnel.connectionId,
+      peerDeviceId: tunnel.peer.deviceId,
+      currentMode: () => channel2.mode,
+      loadRtcFactory: async () => {
+        if (this.rtcFactory === void 0 && this.rtcFactoryProvider !== void 0) {
+          this.rtcFactory = await this.rtcFactoryProvider().catch(() => void 0);
+        }
+        return this.rtcFactory;
+      },
+      fetchIceServers: (id6) => this.api.turnCredentials(id6),
+      onReceiveCiphertext: (data2) => channel2.receiveSequencedFrame(data2),
+      adoptRtc: async (nextRtc, nextMode) => {
+        const prevRtc = tunnel.rtc;
+        tunnel.rtc = nextRtc;
+        tunnel.transport = nextMode === "LAN" ? "lan" : nextMode === "TURN" ? "turn" : "p2p";
+        tunnel.transportMode = nextMode;
+        nextRtc.onClose(() => {
+          void this.handleRtcFailed(tunnel, nextRtc, new Error("WebRTC data channel closed."));
+        });
+        channel2.upgrade((ciphertext, counter) => nextRtc.send(wrapSequencedFrame(counter, ciphertext)), nextMode);
+        if (prevRtc !== void 0 && prevRtc !== nextRtc) {
+          const stale = prevRtc;
+          setTimeout(() => {
+            void stale.close().catch(() => void 0);
+          }, 1500).unref?.();
+        }
+      },
+      publishEvent
+    }, this.logger) : void 0);
     tunnel.channel = channel;
     await this.connections.accept(channel);
     this.sendControl("secure.handshake", {
@@ -101433,6 +101711,23 @@ var HostServerConnection = class {
     });
   }
 };
+var UPGRADE_SEQ_MAGIC = [68, 83, 72, 85];
+function wrapSequencedFrame(counter, ciphertext) {
+  const out = new Uint8Array(12 + ciphertext.byteLength);
+  out.set(UPGRADE_SEQ_MAGIC, 0);
+  const view = new DataView(out.buffer, out.byteOffset, 12);
+  view.setBigUint64(4, BigInt(counter), false);
+  out.set(ciphertext, 12);
+  return out;
+}
+function unwrapSequencedFrame(frame) {
+  if (frame.byteLength < 12 || frame[0] !== UPGRADE_SEQ_MAGIC[0] || frame[1] !== UPGRADE_SEQ_MAGIC[1] || frame[2] !== UPGRADE_SEQ_MAGIC[2] || frame[3] !== UPGRADE_SEQ_MAGIC[3]) {
+    throw new ControlConnectionError("INVALID_MESSAGE", "Invalid upgraded transport frame header.");
+  }
+  const view = new DataView(frame.buffer, frame.byteOffset, 12);
+  const counter = Number(view.getBigUint64(4, false));
+  return { counter, ciphertext: frame.subarray(12) };
+}
 var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "CONNECTION_REPLACED",
   "ACCOUNT_AUTH_REQUIRED",
@@ -101442,10 +101737,11 @@ var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "TOKEN_EXPIRED"
 ]);
 var ServerNoiseChannel = class {
-  constructor(tunnel, transmit, onClose, mode2) {
+  constructor(tunnel, transmit, onClose, mode2, upgradeFactory) {
     this.tunnel = tunnel;
     this.transmit = transmit;
     this.onClose = onClose;
+    this.upgradeFactory = upgradeFactory;
     this.mode = mode2;
     this.security = {
       protocol: "Noise_IK_25519_ChaChaPoly_SHA256",
@@ -101463,9 +101759,19 @@ var ServerNoiseChannel = class {
   handlers = /* @__PURE__ */ new Set();
   incoming = new SecureMessageCodec();
   outgoing = new SecureMessageCodec();
+  futureCounterFrames = /* @__PURE__ */ new Map();
+  upgraded = false;
   closed = false;
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
+  createUpgradeHost(publishEvent) {
+    return this.upgradeFactory?.(this, publishEvent);
+  }
+  upgrade(nextTransmit, nextMode) {
+    this.upgraded = true;
+    this.transmit = nextTransmit;
+    this.mode = nextMode;
+  }
   async send(message) {
     const run = this.sendTail.then(() => this.sendNow(message));
     this.sendTail = run.catch(() => void 0);
@@ -101480,7 +101786,8 @@ var ServerNoiseChannel = class {
         if (this.closed) throw new Error("Secure channel closed");
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error("Secure channel closed");
-          await this.transmit(this.tunnel.noise.encrypt(plaintext));
+          const counter = Number(this.tunnel.noise.sendingCounter());
+          await this.transmit(this.tunnel.noise.encrypt(plaintext), counter);
         }
       });
     } catch (error62) {
@@ -101492,24 +101799,51 @@ var ServerNoiseChannel = class {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
   }
+  deliverPlaintext(decrypted) {
+    const plaintext = this.incoming.decode(decrypted);
+    if (plaintext === void 0) return;
+    const message = decodeMessage(plaintext);
+    for (const handler of this.handlers) handler(message);
+  }
+  drainReorderBuffers() {
+    while (!this.closed) {
+      const expected = Number(this.tunnel.noise.receivingCounter());
+      const exact = this.futureCounterFrames.get(expected);
+      if (exact === void 0) break;
+      this.futureCounterFrames.delete(expected);
+      this.deliverPlaintext(this.tunnel.noise.decrypt(exact));
+    }
+  }
+  receiveSequencedFrame(frame) {
+    const parsed = unwrapSequencedFrame(frame);
+    this.receive(parsed.counter, parsed.ciphertext);
+  }
   receive(counter, ciphertext) {
     if (this.tunnel.lease && !this.tunnel.lease.valid()) return;
     if (this.closed) return;
     if (counter !== void 0) {
       const expected = Number(this.tunnel.noise.receivingCounter());
-      if (!Number.isSafeInteger(counter) || counter !== expected) {
+      if (!Number.isSafeInteger(counter) || counter < expected) {
         throw new ControlConnectionError("INVALID_MESSAGE", "Relay counter is duplicated or out of order.");
       }
+      if (counter > expected) {
+        if (this.upgraded && this.futureCounterFrames.size < 256) {
+          this.futureCounterFrames.set(counter, ciphertext);
+          return;
+        }
+        throw new ControlConnectionError("INVALID_MESSAGE", "Relay counter is duplicated or out of order.");
+      }
+      this.deliverPlaintext(this.tunnel.noise.decrypt(ciphertext));
+      this.drainReorderBuffers();
+      return;
     }
-    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext));
-    if (plaintext === void 0) return;
-    const message = decodeMessage(plaintext);
-    for (const handler of this.handlers) handler(message);
+    this.deliverPlaintext(this.tunnel.noise.decrypt(ciphertext));
   }
   async close(_code) {
     if (this.closed) return;
     this.closed = true;
     this.handlers.clear();
+    this.futureCounterFrames.clear();
     this.incoming.reset();
     this.outgoing.reset();
     this.tunnel.noise.destroy();
@@ -103384,7 +103718,8 @@ var HostPluginRuntime = class {
           operations: this.compactionOperations,
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
         },
-        lanUpload
+        lanUpload,
+        context.createUpgradeHost?.(send)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
