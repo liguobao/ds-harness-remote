@@ -34,11 +34,14 @@ import {
   isSessionFilterMode,
   isSessionGroupBy,
   isSessionOrderBy,
+  loadDrawerLayoutMode,
   loadHostSessionsDrawerGroups,
   loadHostSessionsDrawerPreferences,
+  saveDrawerLayoutMode,
   saveHostSessionsDrawerGroup,
   saveHostSessionsDrawerPreferences,
 } from '../src/services/storage'
+import { isDrawerLayoutMode } from '../src/ui/theme'
 
 describe('drawer preferences and view persistence', () => {
   beforeEach(() => {
@@ -168,5 +171,20 @@ describe('drawer preferences and view persistence', () => {
     expect(prefs.orderBy).toBeUndefined()
     expect(prefs.filterMode).toBeUndefined()
     expect(prefs.manualOrders).toBeUndefined()
+  })
+
+  it('validates, persists, and falls back for drawer layout mode', async () => {
+    expect(isDrawerLayoutMode('compact')).toBe(true)
+    expect(isDrawerLayoutMode('classic')).toBe(true)
+    expect(isDrawerLayoutMode('legacy')).toBe(false)
+    expect(isDrawerLayoutMode(null)).toBe(false)
+
+    expect(await loadDrawerLayoutMode()).toBe('compact')
+
+    await saveDrawerLayoutMode('classic')
+    expect(await loadDrawerLayoutMode()).toBe('classic')
+
+    storeData['dshremote.drawer-layout-mode.v1'] = JSON.stringify({ value: 'invalid-mode' })
+    expect(await loadDrawerLayoutMode()).toBe('compact')
   })
 })

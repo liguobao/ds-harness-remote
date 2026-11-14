@@ -94,6 +94,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   typographyDensity: 'compact',
   chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
   activityDockMode: 'compact',
+  drawerLayoutMode: 'compact',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',
