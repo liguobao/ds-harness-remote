@@ -15,7 +15,13 @@ import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { createNodeWebSocket } from '../src/node-websocket.js'
 import type { HostServerApi } from '../src/server-api.js'
-import { HostServerConnection, type WebSocketFactory } from '../src/server-connection.js'
+import type { WebSocketFactory } from '../src/server-connection.js'
+
+// Opt in to exercising the committed release artifact, including its bundled ws.
+const releaseBundle = process.env.DSH_TEST_RELEASE_BUNDLE === '1'
+const { HostServerConnection } = await (releaseBundle
+  ? import(/* @vite-ignore */ new URL('../dist/index.js', import.meta.url).href)
+  : import('../src/server-connection.js')) as typeof import('../src/server-connection.js')
 
 /**
  * #353 Host-only coverage: real bundled `ws` + a local Server that mirrors
@@ -40,6 +46,45 @@ afterEach(() => {
 })
 
 describe('Host WebSocket Origin gate (#353)', () => {
+  it.runIf(releaseBundle)('times out a pending release-bundle ws upgrade and stops cleanly', async () => {
+    const gate = await listenGate({ holdUpgrade: true })
+    const unhandled = trackUnhandled()
+    const host = hostConnection(gate.baseUrl)
+    try {
+      host.server.start()
+      await vi.waitFor(() => expect(gate.upgrades.length).toBe(1))
+      await vi.waitFor(() => expect(host.server.lastError()).toBe('CONNECTION_FAILED'), { timeout: 35_000, interval: 100 })
+      await host.server.stop()
+      await settle()
+      expect(host.server.isOnline()).toBe(false)
+      expect(host.server.isReconnecting()).toBe(false)
+      unhandled.expectClean()
+    } finally {
+      await host.server.stop()
+      unhandled.stop()
+      await gate.close()
+    }
+  }, 40_000)
+
+  it.runIf(releaseBundle)('times out a release-bundle socket without hello.ack and closes it', async () => {
+    const gate = await listenGate({ noHello: true })
+    const unhandled = trackUnhandled()
+    const host = hostConnection(gate.baseUrl)
+    try {
+      host.server.start()
+      await vi.waitFor(() => expect(gate.controlSockets.length).toBe(1))
+      await vi.waitFor(() => expect(host.server.lastError()).toBe('CONNECTION_FAILED'), { timeout: 15_000, interval: 100 })
+      await host.server.stop()
+      await settle()
+      expect(openCount(gate.controlSockets)).toBe(0)
+      unhandled.expectClean()
+    } finally {
+      await host.server.stop()
+      unhandled.stop()
+      await gate.close()
+    }
+  }, 20_000)
+
   it('createNodeWebSocket omits Origin and is accepted when the public URL differs from the page Origin', async () => {
     const gate = await listenGate()
     const unhandled = trackUnhandled()
@@ -361,7 +406,7 @@ function hostConnection(
   return { server, api, identity }
 }
 
-async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolean } = {}) {
+async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolean; noHello?: boolean } = {}) {
   const upgrades: UpgradeRecord[] = []
   const controlSockets: NodeWebSocket[] = []
   const dataSockets: NodeWebSocket[] = []
@@ -408,7 +453,7 @@ async function listenGate(options: { relayAttach?: boolean; holdUpgrade?: boolea
         try {
           const frame = decodeControlFrame(typeof raw === 'string' ? raw : raw.toString())
           hostFrames.push({ type: frame.type })
-          if (frame.type === 'hello') {
+          if (frame.type === 'hello' && !options.noHello) {
             ws.send(JSON.stringify(createControlFrame('hello.ack', {
               protocol: 1,
               serverVersion: 'test',
