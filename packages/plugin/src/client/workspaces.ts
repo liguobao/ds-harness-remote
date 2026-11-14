@@ -1146,6 +1146,15 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const connectedClients = status?.host?.connectedClients ?? []
     const connectedCount = connectedClients.length
     const connectedCountLabel = t('connectedClientCount', { count: connectedCount })
+    // Server-assigned names repeat (every Remote Web browser gets the same default),
+    // so rows with the same name also show the end of their device ID.
+    const clientDisplayName = (client: { name: string }): string => client.name.trim() === '' ? t('unknownDevice') : client.name.trim()
+    const clientNameCounts = new Map<string, number>()
+    for (const client of connectedClients) {
+      const name = clientDisplayName(client)
+      clientNameCounts.set(name, (clientNameCounts.get(name) ?? 0) + 1)
+    }
+    const duplicateClientNames = new Set([...clientNameCounts].filter(([, count]) => count > 1).map(([name]) => name))
     // Remote Web opens this Host by device ID; a paired-only Host has no Web account to sign in with.
     const phoneLinkTarget = status?.serverUrl !== undefined && status.host?.deviceId !== undefined && status.host.authorized
       && !status.host.accountRequired && !status.host.pairingHostOnly
@@ -1191,11 +1200,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               },
                 React.createElement('span', null,
                   React.createElement('span', { className: 'dshRemoteHostNameLine' },
-                    React.createElement('strong', null, client.name.trim() === '' ? t('unknownDevice') : client.name),
+                    React.createElement('strong', null, clientDisplayName(client)),
                     null),
                   React.createElement('small', null, [
                     client.platform === undefined ? undefined : formatPlatform(client.platform),
                     connectedClientModeLabel(client.mode, t),
+                    duplicateClientNames.has(clientDisplayName(client)) ? t('deviceIdShort', { id: client.deviceId.slice(-4) }) : undefined,
                   ].filter(Boolean).join(' · '))),
                 React.createElement('small', { className: 'dshRemoteClientOnline' }, t('connected')))),
             ))
