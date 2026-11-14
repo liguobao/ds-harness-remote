@@ -1,5 +1,6 @@
 import { mountAccountEntry } from './account-entry.js'
 import { createHostPairingPanel } from './pairing.js'
+import { createPhoneLink } from './phone-link.js'
 import { createServerNotice } from './server-notice.js'
 import { renderBodyPortal } from './portal.js'
 import QRCode from 'qrcode'
@@ -31,9 +32,13 @@ import type {
   SidebarEntryStyle,
 } from './types.js'
 
+/** Default device names Remote Web gives a browser, one per site language. */
+const remoteWebDefaultBrowserNames = new Set(['当前浏览器', 'Current browser', 'Navegador actual', '現在のブラウザー', '現在のブラウザ', 'Текущий браузер'])
+
 export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
+  const { PhoneLinkButton, PhoneLinkPanel } = createPhoneLink(React)
   const RemoteProgressView = createRemoteProgressView(React)
 
   /**
@@ -113,6 +118,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [showAllWorkspaces, setShowAllWorkspaces] = React.useState(false)
     const [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(false)
     const [devicesOpen, setDevicesOpen] = React.useState(false)
+    const [phoneLinkOpen, setPhoneLinkOpen] = React.useState(false)
     const [upgradePhase, setUpgradePhase] = React.useState<'idle' | 'running' | 'verifying' | 'started' | 'failed' | 'unknown'>('idle')
     const [upgradeError, setUpgradeError] = React.useState<string | undefined>(undefined)
     const [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(false)
@@ -226,6 +232,18 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     React.useEffect(() => {
       if ((status?.host?.connectedClients?.length ?? 0) === 0) setDevicesOpen(false)
     }, [status?.host?.connectedClients?.length])
+
+    React.useEffect(() => {
+      if (!open) setPhoneLinkOpen(false)
+    }, [open])
+
+    // The QR has done its job once a new device connects to this Host.
+    const connectedClientCount = status?.host?.connectedClients?.length ?? 0
+    const previousConnectedClientCount = React.useRef(connectedClientCount)
+    React.useEffect(() => {
+      if (connectedClientCount > previousConnectedClientCount.current) setPhoneLinkOpen(false)
+      previousConnectedClientCount.current = connectedClientCount
+    }, [connectedClientCount])
 
     React.useEffect(() => {
       void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
@@ -1131,6 +1149,25 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const connectedClients = status?.host?.connectedClients ?? []
     const connectedCount = connectedClients.length
     const connectedCountLabel = t('connectedClientCount', { count: connectedCount })
+    // Server-assigned names repeat (every Remote Web browser gets the same default),
+    // so rows with the same name also show the end of their device ID.
+    const clientDisplayName = (client: { name: string; platform?: string }): string => {
+      const name = client.name.trim()
+      if (name === '') return t('unknownDevice')
+      // Remote Web names each browser with its own default in the site's language at registration.
+      return client.platform === 'web' && remoteWebDefaultBrowserNames.has(name) ? t('webBrowserDevice') : name
+    }
+    const clientNameCounts = new Map<string, number>()
+    for (const client of connectedClients) {
+      const name = clientDisplayName(client)
+      clientNameCounts.set(name, (clientNameCounts.get(name) ?? 0) + 1)
+    }
+    const duplicateClientNames = new Set([...clientNameCounts].filter(([, count]) => count > 1).map(([name]) => name))
+    // Remote Web opens this Host by device ID; a paired-only Host has no Web account to sign in with.
+    const phoneLinkTarget = status?.serverUrl !== undefined && status.host?.deviceId !== undefined && status.host.authorized
+      && !status.host.accountRequired && !status.host.pairingHostOnly
+      ? { serverUrl: status.serverUrl, deviceId: status.host.deviceId }
+      : undefined
     const connectedMenu = !needsAuthorization && status?.hostAuthorizationAvailable === true
       ? React.createElement('div', {
         className: `dshRemoteConnectedMenu${devicesOpen ? ' isOpen' : ''}`,
@@ -1171,11 +1208,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
               },
                 React.createElement('span', null,
                   React.createElement('span', { className: 'dshRemoteHostNameLine' },
-                    React.createElement('strong', null, client.name.trim() === '' ? t('unknownDevice') : client.name),
+                    React.createElement('strong', null, clientDisplayName(client)),
                     null),
                   React.createElement('small', null, [
                     client.platform === undefined ? undefined : formatPlatform(client.platform),
                     connectedClientModeLabel(client.mode, t),
+                    duplicateClientNames.has(clientDisplayName(client)) ? t('deviceIdShort', { id: client.deviceId.slice(-4) }) : undefined,
                   ].filter(Boolean).join(' · '))),
                 React.createElement('small', { className: 'dshRemoteClientOnline' }, t('connected')))),
             ))
@@ -1456,7 +1494,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         checked: status.host?.authorized === true,
                         onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                       })) : null,
+                    phoneLinkTarget === undefined ? null : React.createElement(PhoneLinkButton, {
+                      open: phoneLinkOpen, t, onToggle: () => setPhoneLinkOpen(current => !current),
+                    }),
                     connectedMenu)),
+                phoneLinkOpen && phoneLinkTarget !== undefined
+                  ? React.createElement(PhoneLinkPanel, { ...phoneLinkTarget, t, onClose: () => setPhoneLinkOpen(false) })
+                  : null,
                 React.createElement('div', {
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
                   'aria-busy': connectingHost === undefined ? undefined : true,
