@@ -724,6 +724,7 @@ export function ChatScreen({
           onMore={() => onOpenSettings?.()}
           splitView={tabletSplit}
           drawerOpen={sessionsOpen || tabletSplit}
+          screenActive={active && (!sessionsOpen || tabletSplit)}
         />
       </View>,
     )

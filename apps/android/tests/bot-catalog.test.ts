@@ -5,6 +5,7 @@ import {
   BotRemoteClient,
   botMessageRequest,
   canDeleteBot,
+  formatBotSubmission,
   isScopedKnownBotSessionId,
   parseBotState,
   trackScopedBotStateSessions,
@@ -261,5 +262,100 @@ describe('Android Bot client authority', () => {
     current = true; dispatch.mockClear()
     await expect(client.state(aborted.signal)).rejects.toThrow()
     expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('supports incremental state polling, preview preservation, and /btw submission with staged references', async () => {
+    let stage: 'initial' | 'unchanged' | 'live-update' | 'question-update' = 'initial'
+    const dispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      expect(body.endpoint).toBe('state')
+      if (stage === 'initial') {
+        expect(body.payload).toBeNull()
+        return envelope({
+          ...botState(),
+          revision: 10,
+          liveKey: 'run1:1',
+          modelsKey: 'm1',
+          btwCards: {},
+        })
+      }
+      expect(body.payload).toEqual({ since: 10, models: 'm1', live: 'run1:1' })
+      if (stage === 'unchanged') {
+        return envelope({ revision: 10, unchanged: true, liveKey: 'run1:1' })
+      }
+      if (stage === 'live-update') {
+        return envelope({
+          revision: 10,
+          unchanged: true,
+          liveKey: 'run1:2',
+          work: {
+            bots: { bot: 'thinking' },
+            rooms: {},
+            approvals: [{ id: 'app-1', botId: 'bot', sessionId: 'part-2', tool: 'bash', reason: 'run', answerable: true }],
+            waiting: {},
+            turns: {},
+            steered: {},
+          },
+        })
+      }
+      return envelope({
+        ...botState(),
+        revision: 11,
+        liveKey: 'run1:3',
+        modelsKey: 'm1',
+        // Omit models as DS-Bot does when modelsKey matches.
+        questions: { 'part-2': { id: 'q-1', question: 'Pick one', options: [{ label: 'A' }] } },
+      })
+    })
+    const client = new BotRemoteClient(
+      dispatch,
+      async () => [{ ...session('part-2'), projections: { values: { turnOutline: [{ turn: 1, response: 'Cached preview' }] } } }],
+      () => {},
+    )
+    const initial = await client.state(undefined, true)
+    expect(initial.revision).toBe(10)
+    expect(initial.bots[0]?.preview).toBe('Cached preview')
+
+    // Preserve previous models/defaultModel/modelsKey when Host omits models on a revision bump.
+    const seeded = { ...initial, models: [{ ref: 'deepseek/deepseek-chat' }], defaultModel: 'deepseek/deepseek-chat' }
+
+    stage = 'unchanged'
+    const unchanged = await client.state(undefined, false, seeded)
+    expect(unchanged).toBe(seeded)
+
+    stage = 'live-update'
+    const liveUpdated = await client.state(undefined, false, seeded)
+    expect(liveUpdated).not.toBe(seeded)
+    expect(liveUpdated.liveKey).toBe('run1:2')
+    expect(liveUpdated.approvals).toHaveLength(1)
+    expect(liveUpdated.bots[0]?.preview).toBe('Cached preview')
+
+    stage = 'question-update'
+    const questionUpdated = await client.state(undefined, false, seeded)
+    expect(questionUpdated.revision).toBe(11)
+    expect(questionUpdated.questions['part-2']).toMatchObject({ id: 'q-1' })
+    expect(questionUpdated.models).toEqual([{ ref: 'deepseek/deepseek-chat' }])
+    expect(questionUpdated.defaultModel).toBe('deepseek/deepseek-chat')
+    expect(questionUpdated.bots[0]?.preview).toBe('Cached preview')
+
+    // Legacy Host without liveKey falls back to full query (null) so non-revision updates aren't missed.
+    const legacyDispatch = vi.fn(async (body: { endpoint: BotOperation; payload: Record<string, unknown> | null }) => {
+      expect(body.payload).toBeNull()
+      return envelope({ ...botState(), revision: 5 })
+    })
+    const legacyClient = new BotRemoteClient(legacyDispatch, async () => [], () => {})
+    const legacyInitial = await legacyClient.state()
+    await legacyClient.state(undefined, false, legacyInitial)
+    expect(legacyDispatch).toHaveBeenCalledTimes(2)
+
+    const withRefs = formatBotSubmission('/btw summarize this', ['@[Other](dsh-session:abc)'])
+    expect(withRefs).toBe('/btw @[Other](dsh-session:abc) summarize this')
+    expect(botMessageRequest(initial, 'bot', withRefs)).toEqual({
+      endpoint: 'btw',
+      payload: { sessionId: 'bot', text: '@[Other](dsh-session:abc) summarize this' },
+    })
+    expect(botMessageRequest(initial, 'bot', formatBotSubmission('hello', ['@[Other](dsh-session:abc)']))).toEqual({
+      endpoint: 'send',
+      payload: { sessionId: 'bot', text: '@[Other](dsh-session:abc) hello' },
+    })
   })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Modal,
@@ -237,10 +237,27 @@ export function DsBotSettingsModal({
     }
   }, [dsBotBundle, enablingPlugin, handleRetryAll])
 
+  const prevVisibleRef = useRef(false)
+  const prevInitialTabRef = useRef(initialTab)
+  const prevConnectedRef = useRef(connected)
   useEffect(() => {
-    if (!visible) return
-    setSubpage(initialTab ?? null)
-    void checkDsBotPluginStatus()
+    if (!visible) {
+      prevVisibleRef.current = false
+      prevConnectedRef.current = connected
+      return
+    }
+    const justOpened = !prevVisibleRef.current
+    const initialTabChanged = prevInitialTabRef.current !== initialTab
+    const connectionChanged = prevConnectedRef.current !== connected
+    prevVisibleRef.current = true
+    prevInitialTabRef.current = initialTab
+    prevConnectedRef.current = connected
+    if (justOpened || initialTabChanged) {
+      setSubpage(initialTab ?? null)
+    }
+    if (justOpened || connectionChanged) {
+      void checkDsBotPluginStatus()
+    }
     if (connected && !state) {
       void refresh(true)
     }
@@ -513,6 +530,9 @@ export function DsBotSettingsModal({
         >
           <Screen key={subpage ?? 'index'}>
             <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+              {isLiveState && visibleError !== undefined && (
+                <Text accessibilityRole="alert" style={styles.errorBanner}>{visibleError}</Text>
+              )}
               {/* ==================== LEVEL 1: SETTINGS-STYLE INDEX PAGE ==================== */}
               {subpage === null && (
                 <>
@@ -1429,5 +1449,14 @@ const createStyles = (colors: ThemeColors) =>
       ...type.heading,
       fontSize: 18,
       color: colors.ink,
+    },
+    errorBanner: {
+      fontSize: 13.5,
+      lineHeight: 19,
+      color: colors.danger,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: radius.md,
+      backgroundColor: colors.dangerSoft,
     },
   })
