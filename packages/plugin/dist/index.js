@@ -102445,18 +102445,18 @@ var HarnessRemoteBridge = class {
       if (baseSegments.some((segment) => segment === "..")) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint);
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd);
       const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
       const baseDir = dirname8(baseCandidate);
       const targetCandidate = resolve9(baseDir, path);
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint);
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd);
     } else {
       const path = typeof args.path === "string" ? args.path : ".";
       const pathSegments = process.platform === "win32" ? path.replaceAll("\\", "/").split("/") : path.split("/");
       if (pathSegments.some((segment) => segment === "..")) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint);
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
     let finalArgs = isRecord22(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
     if (isRecord22(finalArgs.options)) {
@@ -102513,8 +102513,10 @@ var HarnessRemoteBridge = class {
    * must not turn an in-root file into a denial. The boundary itself is
    * unchanged: the canonical target must stay inside the canonical root.
    */
-  async verifyWorkspacePathContainment(root2, path, endpoint) {
-    const candidate = isAbsolute10(path) ? resolve9(path) : resolve9(root2, path);
+  async verifyWorkspacePathContainment(root2, path, endpoint, cwd2 = root2) {
+    const supplied = isAbsolute10(path) ? resolve9(path) : resolve9(root2, path);
+    const cwdRelative = relative5(resolve9(cwd2), supplied);
+    const candidate = isAbsolute10(path) && !isPathOutside(cwdRelative) ? resolve9(root2, cwdRelative) : supplied;
     if (process.platform === "win32") {
       const rootDrive = parse4(root2).root.toLowerCase();
       const candDrive = parse4(candidate).root.toLowerCase();

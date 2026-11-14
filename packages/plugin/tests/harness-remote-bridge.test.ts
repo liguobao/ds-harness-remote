@@ -1686,6 +1686,43 @@ describe('HarnessRemoteBridge', () => {
   })
 })
 
+it('accepts absolute file paths through the trusted cwd alias without accepting other symlinks', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'remote-cwd-alias-'))
+  let bridge: HarnessRemoteBridge | undefined
+  try {
+    const workspace = join(fixture, 'workspace')
+    await mkdir(workspace)
+    const root = await realpath(workspace)
+    const cwd = join(fixture, 'trusted-cwd')
+    const otherAlias = join(fixture, 'untrusted-alias')
+    await symlink(root, cwd, process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink(root, otherAlias, process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(join(root, 'inside.txt'), 'inside')
+    await writeFile(join(fixture, 'outside.txt'), 'outside')
+    await symlink(join(root, 'inside.txt'), join(root, 'internal-link.txt'), 'file')
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: {} }))
+    bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined),
+      undefined, undefined, undefined, undefined, async () => cwd)
+    for (const endpoint of ['workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll']) {
+      for (const path of [join(cwd, 'inside.txt'), join(root, 'inside.txt')]) {
+        await expect(bridge.call({ endpoint, payload: { args: { workspaceFileScopeId: 'session-1', path } } }))
+          .resolves.toMatchObject({ ok: true })
+        expect(dispatch).toHaveBeenLastCalledWith(endpoint,
+          expect.objectContaining({ args: expect.objectContaining({ path: 'inside.txt' }) }), expect.any(AbortSignal))
+      }
+      for (const path of [join(fixture, 'outside.txt'), join(otherAlias, 'inside.txt'), join(cwd, 'internal-link.txt')]) {
+        dispatch.mockClear()
+        await expect(bridge.call({ endpoint, payload: { args: { workspaceFileScopeId: 'session-1', path } } }))
+          .rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+        expect(dispatch).not.toHaveBeenCalled()
+      }
+    }
+  } finally {
+    await bridge?.closeAll()
+    await rm(fixture, { recursive: true, force: true })
+  }
+})
+
 function stubTerminalSpawner(): RemoteTerminalSpawner {
   return async (): Promise<RemoteTerminalProcess> => ({
     output: (async function* () { return })(),

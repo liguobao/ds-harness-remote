@@ -182,6 +182,8 @@ jobs:
         run: echo '::warning::npm publish failed; GitHub Packages, GitHub Release, and Android APK publication will continue. Retry this tag after refreshing npm registry credentials.'
 
       - name: Publish npm TUI
+        id: npm-tui-publish
+        continue-on-error: true
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if npm view "ds-harness-remote@$VERSION" >/dev/null 2>&1; then
@@ -191,9 +193,12 @@ jobs:
               npm publish "release-assets/ds-harness-remote-tui-$VERSION.tgz" --access public --provenance
             fi
           else
-            echo '::error::Publish ds-harness-remote before its matching TUI package.'
-            exit 1
+            echo '::warning::Skipping TUI publication because its matching Remote version is unavailable on npm. GitHub Release and Android APK publication will continue.'
           fi
+
+      - name: Report npm TUI publish failure
+        if: steps.npm-tui-publish.outcome == 'failure'
+        run: echo '::warning::TUI npm publish failed; GitHub Packages, GitHub Release, and Android APK publication will continue. Retry after the matching Remote package is available and npm publishing is authorized.'
 
       - name: Publish GitHub Packages plugin
         env:

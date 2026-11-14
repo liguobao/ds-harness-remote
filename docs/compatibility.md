@@ -1,3 +1,7 @@
+# TUI cross-device acceptance (2026-11-15)
+
+Remote 0.6.5 standalone TUI bundle passed core cross-device checks on haru with real `@deepseek-harness-tui/dsh-tui@0.20.1`, Harness 0.2.2-rc.1, Node 24.9.0 and Android 0.6.5 (72), over encrypted Relay. Coverage includes shared sessions, bidirectional messages, files, terminal and App restart recovery. See [evidence and limits](tui-haru-verification.md). Older dated entries below describe their original release scope.
+
 ## Compatibility
 
 ## Current compatibility targets (2026-11-05)

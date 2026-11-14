@@ -1,14 +1,4 @@
-## Unreleased
-
-### English
-
-- Update an npm-installed Remote plugin from the Desktop dialog when Harness can replace that bundle, and keep a releases-page link beside that action. GitHub and local installs still open the releases page directly. A connected device still cannot replace the Host's Remote plugin.
-
-### 中文
-
-- 从 npm 安装的 Remote 插件，可以在 Desktop 弹窗里直接升级（需要 Harness 支持替换该 bundle），「可用」旁边保留发布页链接。GitHub 与本地安装仍直接打开发布页。已连接的远端设备仍然不能替换 Host 上的 Remote 插件。
-
-## 0.6.5 — 2026-11-13
+## 0.6.5 — 2026-11-15
 
 Android build 72.
 
@@ -19,6 +9,17 @@ Android build 72.
 - Support tracked asynchronous compaction, including recovery after reconnect and lifecycle-confirmed cancellation, without extending ordinary RPC deadlines.
 - Android: introduce coherent sheet and screen transitions with reduced-motion support.
 - Preserve DS Bot group replies in compact history while bounding projected payloads.
+- Align Host routes with DS-Bot 0.3.6; restore complete group replies after partial live caches and App restarts, and keep Bot forms usable with the keyboard and in short windows.
+- Keep Android Agent drafts editable offline, without sending or clearing them before reconnect. Improve drawer navigation, blank-conversation reuse, confirmation dialogs, chat appearance and code highlighting; add Russian, Ukrainian and DS-Bot settings translations.
+- Restore Android photo capture and support video/binary file selection. Accelerate eligible LAN binary uploads of at least 1 MiB through a separately authenticated Noise/TCP WebSocket, retaining existing paths elsewhere and never replaying started uploads.
+- Recover credential refresh and interrupted storage migration with a cross-process V2 queue; stop all Harness processes before upgrading or downgrading. See [integration and downgrade guidance](plugin-integration.md).
+- Fix Host control/Relay WebSocket Origin handling under dsh web; retain browser Origin checks. Add Host debug-log storage and an expandable settings drawer.
+- Update an npm-installed Remote from the local Desktop dialog when supported; GitHub/local installs retain the release link, and remote peers still cannot replace their owning Remote plugin.
+- Add the standalone, matching-version `ds-harness-remote-tui` bundle for Harness 0.2.2-rc.1. Real dsh-TUI 0.20.1 / Android 72 core cross-device acceptance passed on haru; see [results](tui-haru-verification.md).
+- Accept valid absolute file paths through the trusted workspace alias while rejecting traversal and internal symlinks. Fix macOS temporary-path normalization in packed-runtime verification.
+- Keep TUI npm publishing failures from blocking subsequent GitHub Release / APK publication. Verify the final release with workspace production builds/checks/tests and packed GitHub/npm WebRTC fallback smokes.
+
+Device acceptance and remaining limits: [haru / MIX 4](android-haru-verification.md), [LAN uploads](android-upload-verification.md), [asynchronous compaction](remote-compaction-verification.md). The final workspace-alias correction has automated regression and packed-runtime coverage; the current bundle was subsequently tested in an isolated haru TUI profile; the original Web service was restored afterward.
 
 ### 中文
 
@@ -27,6 +28,17 @@ Android build 72.
 - 支持可追踪的异步压缩、断线恢复和经生命周期确认的取消，普通 RPC 超时保持不变。
 - Android：为 Sheet 和页面切换增加连续过渡，支持系统减少动态效果设置。
 - 保留压缩历史中的 DS Bot 群聊回复，同时限制投影载荷大小。
+- Host 路由对齐 DS-Bot 0.3.6；修复部分实时缓存覆盖完整群聊回复、重启后漏回复，以及 Bot 表单键盘遮挡和短窗口布局。
+- Android 离线仍可编辑 Agent 草稿，恢复连接前不发送、不清空。改进抽屉导航、空会话复用、确认弹窗、聊天排版配色和代码高亮；补充俄语、乌克兰语及 DS-Bot 设置翻译。
+- 恢复 Android 拍照入口，支持选择视频和二进制文件；至少 1 MiB 的合适 LAN 二进制上传可通过独立认证的 Noise/TCP WebSocket 加速，其他场景保持原路径，已开始的上传不换通道重放。
+- 使用跨进程 V2 队列恢复凭据刷新和中断存储迁移。升级或降级前必须停止所有 Harness 进程，详见[集成与降级指南](plugin-integration.md)。
+- 修复 dsh web 下 Host 控制/Relay WebSocket 的 Origin；保留浏览器校验。新增 Host 调试日志存储与设置中的可展开日志抽屉。
+- Harness 支持时，可从本机 Desktop 弹窗升级 npm 安装的 Remote；GitHub/本地安装保留发布页入口，远程连接仍不能替换拥有它的 Remote 插件。
+- 新增同版本独立 `ds-harness-remote-tui` 组合包，适用于 Harness 0.2.2-rc.1；真实 dsh-TUI 0.20.1 与 Android 72 在 haru 的核心跨设备验收通过，见[记录](tui-haru-verification.md)。
+- 修复可信工作区别名下合法绝对路径误拒绝，继续拒绝越界与内部符号链接；修正 macOS 临时目录在打包运行时校验中的路径规范化。
+- TUI npm 发布失败不再阻断后续 GitHub Release / APK；最终版本通过全仓生产构建、类型检查、测试与 GitHub/npm 打包 WebRTC 回退冒烟。
+
+真机验收和边界见 [haru / MIX 4](android-haru-verification.md)、[LAN 上传](android-upload-verification.md)、[异步压缩](remote-compaction-verification.md)。本次评审补充的工作区别名修复已完成自动回归和打包运行时验证，随后已用当前 bundle 在 haru 独立 TUI profile 完成验收，结束后恢复原 Web 服务。
 
 ## 0.6.3 — 2026-11-05
 

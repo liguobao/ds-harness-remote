@@ -834,18 +834,18 @@ export class HarnessRemoteBridge {
       if (baseSegments.some(segment => segment === '..')) {
         throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
-      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint)
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd)
       const baseCandidate = resolve(sessionWorkspace.root, safeBaseRel)
       const baseDir = dirname(baseCandidate)
       const targetCandidate = resolve(baseDir, path)
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd)
     } else {
       const path = typeof args.path === 'string' ? args.path : '.'
       const pathSegments = process.platform === 'win32' ? path.replaceAll('\\', '/').split('/') : path.split('/')
       if (pathSegments.some(segment => segment === '..')) {
         throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd)
     }
 
     let finalArgs: Record<string, unknown> = isRecord(rootPayload.args)
@@ -915,8 +915,15 @@ export class HarnessRemoteBridge {
     root: string,
     path: string,
     endpoint: string,
+    cwd = root,
   ): Promise<string> {
-    const candidate = isAbsolute(path) ? resolve(path) : resolve(root, path)
+    const supplied = isAbsolute(path) ? resolve(path) : resolve(root, path)
+    const cwdRelative = relative(resolve(cwd), supplied)
+    // Only the Host-authorized cwd is an accepted alias for the canonical root.
+    // Do not realpath arbitrary inputs: internal symlinks must still be denied.
+    const candidate = isAbsolute(path) && !isPathOutside(cwdRelative)
+      ? resolve(root, cwdRelative)
+      : supplied
     if (process.platform === 'win32') {
       const rootDrive = parse(root).root.toLowerCase()
       const candDrive = parse(candidate).root.toLowerCase()

@@ -1,12 +1,13 @@
 // Child process for verify-packed-webrtc.mjs. Requires Node >=22.15.
 import assert from 'node:assert/strict'
+import { realpathSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
 assert.equal(typeof globalThis.require, 'undefined', 'smoke must run in pure ESM')
 assert.equal(process.env.ELECTRON_RUN_AS_NODE, undefined, 'run with the Node runtime, not Electron')
-const [entry, bundle] = process.argv.slice(2).map(path => pathToFileURL(path).href)
+const [entry, bundle] = process.argv.slice(2).map(path => pathToFileURL(realpathSync(path)).href)
 let nativeAttempts = 0
 const hooks = registerHooks({
   resolve(specifier, context, next) {

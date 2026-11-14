@@ -6,7 +6,7 @@ DeepSeek Harness TUI 的独立 Remote Host 组合包，复用同版本 `ds-harne
 
 同一 profile 仅启用一个 Remote Host entry；不要同时启用 Desktop Remote entry，也不要让多个进程共用同一设备身份。首次启动会检查官方 Remote event source，缺失时拒绝启动。
 
-本包随仓库 `v*` release 与主包保持相同版本并发布 npm。真实 TUI / Android 跨设备验收尚待完成。
+本包随仓库 `v*` release 与主包保持相同版本并发布 npm。已在 haru 的真实 dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 与 Android 0.6.5 (72) 间完成核心链路验收，范围与复现见[验收记录](../../docs/tui-haru-verification.md)。
 
 ## npm 自动发布配置
 

@@ -85,3 +85,8 @@
 本轮两个问题已通过上述 MIX 4 真机回归。仍未新增平板、iOS、其他输入法、公网强制 TURN/Relay、LAN TCP、大文件压力或全功能验收；11 月 14 日记录的其他环境限制仍适用。
 
 截图：[键盘打开的表单](images/haru-20261115/bot-keyboard.png)、[大字体与暗色](images/haru-20261115/bot-keyboard-large-dark.png)、[横屏返回表单](images/haru-20261115/bot-landscape.png)、[重启后群聊回复](images/haru-20261115/group-restart.png)。
+
+
+## 2026-11-15：真实 TUI 补充验收
+
+已在 haru 启动独立 profile 的真实 dsh-TUI 0.20.1（Harness 0.2.2-rc.1），使用当前 Remote 0.6.5 构建与手机 Android 72 完成核心链路验收。详细产物、步骤、证据和范围见 [TUI 验收记录](tui-haru-verification.md)。验收后恢复原 Web 服务。

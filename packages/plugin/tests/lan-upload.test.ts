@@ -9,6 +9,10 @@ import { generateKeyPair, NoiseIkSession } from '@dsh-remote/crypto'
 import { SecureMessageCodec, createLanUploadPrologue, createRpcRequest, decodeMessage, encodeMessage, type LanUploadOffer } from '@dsh-remote/protocol'
 import { LanUploadHost } from '../src/lan-upload.js'
 import { WorkspaceUploadHost } from '../src/workspace-upload.js'
+import { ConnectionController } from '../src/connection-controller.js'
+import { RpcRouter } from '../src/rpc-router.js'
+import type { IdentityStore } from '../src/identity-store.js'
+import type { AuthenticatedPeerChannel } from '../src/types.js'
 
 const address='192.168.41.8'
 const hosts:LanUploadHost[]=[],uploads:WorkspaceUploadHost[]=[],roots:string[]=[],sockets:WebSocket[]=[]
@@ -146,4 +150,31 @@ it('rechecks workspace authority at commit and discards files after session revo
  authorized=false
  await expect(client.rpc('workspace.upload.commit',s.scope)).rejects.toThrow()
  await vi.waitFor(async()=>expect(await readdir(root)).toEqual([]))
+})
+
+it('retires real TCP listeners and partial files through controller replacement, disconnect and device revocation',async()=>{
+ for(const cause of ['replacement','disconnect','revocation']){
+  const s=await setup()
+  const controller=new ConnectionController({isTrusted:()=>true} as unknown as IdentityStore,
+   ()=>new RpcRouter(128,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,s.upload,undefined,s.host))
+  const channel=(connectionId:string):AuthenticatedPeerChannel=>({
+   security:{protocol:'Noise_IK_25519_ChaChaPoly_SHA256',connectionId,membershipId:'fixture-membership'},
+   peerDeviceId:'fixture-phone',peerIdentityKey:s.client.publicKey,mode:'LAN',
+   send:async()=>{},close:async()=>{},onMessage:()=>()=>{},
+  })
+  try {
+   await controller.accept(channel('connection-1'))
+   const offer=await s.offer(s.scope),client=await connect(offer,s.client,s.server)
+   await client.rpc('workspace.upload.open',{...s.scope,name:'partial.bin',totalBytes:2,encoding:'binary-v1'})
+   await client.rpc('workspace.upload.chunk.binary',{...s.scope,offset:0,data:Buffer.from('a')})
+   expect((await readdir(s.root)).some(name=>name.endsWith('.part'))).toBe(true)
+   if(cause==='replacement')await controller.accept(channel('connection-2'))
+   if(cause==='disconnect')await controller.closeConnection('connection-1')
+   if(cause==='revocation')await controller.revoke('fixture-phone')
+   expect(await readdir(s.root)).toEqual([])
+   await vi.waitFor(()=>expect(client.socket.readyState).toBe(WebSocket.CLOSED))
+   await expect(connect(offer,s.client,s.server)).rejects.toThrow()
+   await expect(client.rpc('workspace.upload.commit',s.scope)).rejects.toThrow()
+  } finally { await controller.close() }
+ }
 })
