@@ -1,41 +1,125 @@
-# ACP Remote / Agent adapter 技术说明
+# ACP 后端接入与实现
 
-本文记录 Remote 内通用 Agent ACP gateway（#65）与 Cursor backend adapter 的边界。
-线协议以 [Remote Protocol v1](protocol.md) 为准。
+Cursor、Antigravity、Pi、OpenCode、Claude、Hermes 使用独立 `agent.acp.*` 数据面；Codex 使用 [App Server 领域](codex-remote.md)。本篇统一维护后端安装、运行差异与 adapter 接入。RPC/schema/限额统一在[协议](protocol.md#agent-acp-domain)，不在多份指南重复定义。
 
-## 定位
+## 启用已有后端
 
-Host Plugin 提供 backend-neutral 的 **Agent ACP gateway**：
+1. 在 Host 安装对应 CLI，完成其本机授权，并确认命令能运行：Cursor 使用 `agent`，AGY 使用 `agy`，Codex 使用 `codex`。
+2. 打开 Host 的 **Remote 设置 → Agent 后端**，检测对应命令；需要时设置绝对命令路径。
+3. 开启所需后端并保存。配置热生效，仅更新变化的后端，无需重启整个 DSH；CLI 可发现不代表已登录或协议就绪。
+4. 在 Client 登录同账号，选择在线 Host，再选择已就绪的后端工作区。Desktop 与 Android 使用现有工作区/会话界面。
 
-```text
-ACP Client
-  -> 已认证 Remote channel（agent.acp.*）
-  -> Host ACP gateway
-  -> Cursor `agent acp` adapter（本阶段）
+Codex 默认开启，Cursor 默认关闭；AGY 以 Host 配置为准。未就绪的后端不能自动替换为其他后端。
+工作目录须在 Host 上已存在；Codex 新增 Project 仅注册真实目录，不创建目录或写入 Harness 存储。
+
+| 后端 | Host 接入 | 使用范围 |
+| --- | --- | --- |
+| Cursor | `agent acp` stdio，每个会话独立进程 | 文字 Prompt、流式回复、中断、单次审批、真实模型选择 |
+| Claude | `claude-agent-acp` stdio | 工作区/历史、文字、流式工具、中断、单次审批、模型/effort |
+| OpenCode | `opencode acp` stdio | 工作区/历史、文字、流式回复、中断、模型/effort |
+| AGY | `agy --input-format stream-json --output-format stream-json` adapter | 工作区/历史、文字与受限图片、流式回复、模型选择 |
+| Pi Agent | `pi-acp` stdio（内部启动 `pi --mode rpc`） | 工作区/历史、文字、流式工具、中断、模型/Thinking |
+| Hermes | `hermes acp` stdio（Hermes Agent 自带 ACP 服务端） | 工作区/历史、文字与多模态图片、流式思考与工具、中断、单次审批、模型选择 |
+| Codex | `codex app-server` stdio | Project/Thread、历史、文字/图片、模型/权限、中断与审批 |
+
+图片规格对 AGY 与 Hermes 相同：每张最多 8 MiB、每条消息最多 4 张（合计不超过 32 MiB），支持 PNG / JPEG / WebP / GIF，单边不超过 8192 像素且不超过 4000 万像素。AGY 将图片写入 Host 专用私有 tmp 缓存，保留 24 小时，系统提前清理 tmp 后图片可能不可用；Hermes 以 base64 内联透传，不写 tmp 缓存。
+工具可用性以 Host capability 和会话 scope 为准。最新工具、AGY 加密跨设备链路、Windows、APK/真机与长期稳定性仍有待验证项，见 [TODO](TODO.md)。
+
+## 后端说明
+
+### Cursor
+
+Cursor adapter 默认**关闭**。开启前请在 Host 本机完成 `agent login`，或配置
+`CURSOR_API_KEY`。也可在 Desktop 插件设置中切换开关（立即生效）。
+
+```yaml
+ds-harness-remote:
+  cursor:
+    enabled: true
+    binary: agent   # 或 ~/.local/bin/agent 的绝对路径
 ```
 
-- 公共 capability / RPC：`agent.acp.v1`、`agent.acp.*`
-- Host 配置键 `cursor.enabled` / `cursor.binary` 只控制 **Cursor adapter**，不是线协议名
-- 按 Remote connection 隔离；编译期固定 allowlist；未授权 method fail closed
-- 现有 `codex.app.*` 保持不变；**暂不**把 Codex 迁到 ACP adapter
+### Antigravity（AGY）
 
-## 启动与后端配置
+Android 的 `antigravity` 工作区独立使用 AGY catalog/history/prompt 与 ACP stream。首次连接
+和刷新均发现 Host 既有目录与会话；新建会话保持空白，回复后更新标题，重连重新加载历史并
+订阅 stream。图片通过私有 tmp 缓存与有界 ACP transfer；不调用 Harness Prompt 或写入
+SessionStore。批量读取列表不触发预热，选中目录才预热。部署与目标平台限制统一见 [TODO](TODO.md)。
 
-`acp.enabled` 控制 gateway；`acp.backends` 内各后端独立使用 `enabled`、`command`、`args`、
-可选 `cwd`。当前支持 `cursor` / `antigravity` / `pi` / `opencode` / `claude`，不按 binary 名称推测 adapter，也不把不可用后端的
-请求转发到其他后端。仅配置旧 `cursor` 字段时，只启用 Cursor。
+### OpenCode 与原生归档
 
-对于 `opencode`，Host 运行 `opencode acp` 子进程接入标准 ACP 协议，采用标准 `initialize` 握手（避免发送 Cursor 私有 `cursor_login` 鉴权方法）。默认优先探测官方安装位置的 `~/.opencode/bin/opencode`、`~/.local/bin/opencode` 及系统 PATH。独立 capability 声明为 `agent.acp.opencode.v1`。工作区目录来自标准 `session/list` 返回的 cwd，历史通过独立临时进程的 `session/load` 回放生成，不写入 Harness SessionStore。
+Host 通过 `opencode acp` 标准握手接入，优先探测官方安装目录与 PATH。v1 npm 包为 `opencode-ai`，v2 为 `@opencode/cli`；运行前按同一命令的 `--help` 检测参数能力，不凭版本猜测接口。
 
-启动前通过同一命令的 `--help` 检测参数能力，不硬编码主版本号。仅当 CLI 同时声明
-`--hostname`、`--port`、`--mdns` 时追加私有 loopback 参数并启用原生归档；三者均不支持时
-移除这些旧网络参数，仅通过 stdio ACP 工作。检测失败、输出超限或仅支持部分参数时显式
-返回 `OPENCODE_CLI_PROBE_FAILED`，不猜测监听地址或盲目重试另一套参数；关闭后端会取消检测。
-官方 v1 使用 npm `opencode-ai`，v2 使用 `@opencode/cli`。已分别以真实 `1.19.3` / `2.0.32`
-验证 Host 本地 ACP 主流程；v2 的内部私有服务不开放网络端口，详见
-[官方 ACP 文档](https://opencode.ai/v2/docs/cli/acp/)。这不等同于跨设备或 Prompt 验收。
+仅当同时声明 `--hostname`、`--port`、`--mdns` 时，Host 在同一 ACP 进程启用 `127.0.0.1` 临时端口、`--mdns=false` 和每进程随机 Basic auth。三者均不支持时移除旧网络参数，使用纯 stdio；部分支持、检测失败或超限则明确拒绝启动，关闭后端会取消检测。不另起 opencode serve，也不暴露其 HTTP listener。
 
-Cursor/Claude 的 Desktop/Android 模型选择读取真实会话 catalog，并等待上游确认。Cursor 为避免进程级模型设置串会话，每个活动会话使用独立进程。Claude 显示名统一为 Claude，工作区与历史投影见 [接入说明](acp-integration.md)。
+原生归档仅对有私有 HTTP API 的构建可用（已知 v1 1.19.3）；v2 2.0.32 为纯 stdio 路径，归档返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，目录、历史和对话继续工作。Host 先校验原生会话，再仅 PATCH time.archived；不调用删除、不维护 Remote 归档索引，也不改 OpenCode 数据库。
+
+HTTP 目标与认证不接受 Client 输入，禁止重定向，响应最多 64 KiB、单次 20 秒，进程关闭时中止请求。目录按页最多四路 GET 核对归档状态，遍历后再应用 limit；归档会话的可信 cwd 保留给只读历史。原生确认后才更新 Client 目录并发布 catalog.changed；加载、回复、模型修改和待审批与归档互斥。完整请求、错误与事件统一见[协议](protocol.md#agent-acp-domain)。
+
+不提供解除归档或已归档列表；其他后端不能仅移除本地列表就返回归档成功。上游参考：[v1 原生归档](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/app/src/pages/session/session-archive.ts)、[v2 ACP](https://opencode.ai/v2/docs/cli/acp/)。
+
+### Pi Agent（Issue #97，实验性）
+
+在 Host 运行 `npm install -g @earendil-works/pi-coding-agent pi-acp`。先通过 `pi` 配置模型与授权并完成本机对话；Remote 默认自动检测并初始化 Pi Agent，成功后开放工作区。未安装或初始化失败时不可用，不影响其他后端；明确设置 `enabled: false` 或关闭 ACP 总开关时不启动。Remote 设置 → Agent 后端可关闭 Pi Agent。默认命令为 `pi-acp`，参数为空；`pi` 本身的 RPC 模式不是 ACP，不能将命令直接替换为 `pi`。
+
+OpenAI 兼容端点通过 Pi 用户目录的 `models.json` 配置 `baseUrl`、`api`（如 `openai-responses`）和模型；密钥使用 Pi 私有凭据、环境变量或私有 credential command，不放入 Remote 配置。参考 [pi-acp 上游说明](https://github.com/svkozak/pi-acp)。
+
+Pi 工作区使用 `pi:cwd:`，会话展示使用 `pi:`，需要 `agent.acp.pi.v1`。Host 通过标准 ACP `session/list` / `session/load` 发现目录、恢复历史，不读取 Client 本机的 Pi 文件。每个活动会话使用独立 wrapper，历史读取另用临时 wrapper，避免上游加载会话时关闭其他会话。Client 断线只释放订阅及归属，运行中的回复继续；恢复后从 Host 重新读取历史。不写 Harness SessionStore 或 Workspace 数据库。每个 Host Pi adapter 最多保留 30 个活动/已加载会话，另保留 catalog 与一个历史读取槽；达到配额显式失败，可在 Host 关闭后端并重新启用以清理进程。历史最多 8 MiB / 10,000 条 ACP 更新，超限报错而非静默截断。
+
+首版文字 Prompt、流式回复、Tool Call、中断与历史恢复通过 ACP 接入；Pi 工具按 Host 用户权限执行，不承诺额外的 Remote 工具审批隔离。模型与 Thinking 选项只来自适配器的实际 catalog，使用现有 `dsh/sessionModels` / `dsh/selectModel`，不向 Harness/Codex 添加端点。Windows、独立 Remote Web、Android 原生及加密跨设备验收需另行完成。
+
+#### Pi 工具审批与历史读取边界
+
+- Pi 默认使用 Host 用户的 OS 权限，**不会自动对每个内置工具请求审批**。若 Host 的 Pi 扩展在 `tool_call` 中等待 `ctx.ui.confirm`，pi-acp 会转成 `session/request_permission`；Remote 仅允许单次允许、拒绝或取消，按本次上游选项 ID 回传，不提供会话级永久授权。普通 Prompt 不会自动为 Pi 安装审批扩展。Pi 扩展 `select` 若把多个选项都编码为 `allow_once`，当前单次审批契约无法安全区分，保持拒绝，不把选择菜单伪装成工具授权。
+- 历史从 Host 的有界 transfer 读取，用户/助手文本及工具结果映射为原生事件；工具调用和输出分开，保留失败状态、bash terminal 输出，连续文本 chunk 合并。目录/历史读取失败不能当成成功的空列表或空对话，也不能因此偷偷新建会话；并发读取同一会话历史共用一次请求。
+- `pi-acp@0.0.34` 的 `session/load` 不重放原始 thinking、原始消息 ID/时间或完整工具输入。Remote 不读取 Pi 私有文件来绕过协议：使用稳定的投影消息 ID，未知时间记为 `0`，不宣称无损恢复。实时 Pi bash 输出预览最多保留 1,048,576 个字符，超限显式提示通过有界历史重新读取，而不是伪装为完整输出。
+- 标准 catalog 的 `nextCursor: null` 表示正常结束，不应误报协议异常。
+
+#### 恢复与重配的竞态边界
+
+- Pi 初次 `session/load` 的文本、思考和工具通知属于历史回放，不发布至实时 stream；只合并匹配会话、上游确认的模型/Thinking 配置。load 期间的 callback 直接拒绝，加载成功后才接受 live 通知和审批。
+- Android Pi/AGY 打开会话时不复用旧展示缓存作为新订阅的基线；有界历史返回后合并本次订阅期间收到的实时文本、工具及完成 catch-up，不用打开前的 `running` 值覆盖它们。历史失败显式报错；缺少共同 cursor/原始消息 ID 时只做有 ID/工具调用锚点的边界去重，不凭重复短文本猜测消息身份。
+- Claude/Pi catalog 以及缓存 cwd 的目录校验绑定当前后端实例；每次异步读取返回后检查实例仍有效。重配、禁用或关闭期间迟到的旧 catalog 结果不得重建 authority，也不得被当成成功的空列表。
+- Pi 首次准备 Prompt 的 cwd/load 尚未完成时也可取消；取消后不启动 Prompt，旧准备任务结束不会清除后续重试。已运行的回复仍通过上游确认停止，Client 断线本身不视为取消。Desktop 的 turn/assistant finish 区分正常完成、失败、中断与 token 上限；Android 恢复后端标签时独立校验 Pi/AGY 的可用性。
+
+### Claude（Issue #125）
+
+Host 注册后端 ID 为 `claude`，默认关闭，默认命令为 `claude-agent-acp`、参数为空。使用 [Claude ACP adapter](https://github.com/zed-industries/claude-agent-acp)，需用户在 Host 自行安装并完成 Claude 本机授权；Remote 不自动安装、不发起登录，也不发送 Cursor 专属 `cursor_login` 认证。`claude` CLI 本身不是 ACP 服务，不能配置为 `claude acp`。
+
+Host 的 `acp.backends` 可配置 `{ "id": "claude", "enabled": true, "command": "claude-agent-acp", "args": [] }`，也可指定绝对命令路径与 `cwd`。Host 已接通独立 ACP gateway 的初始化、会话、文字 Prompt、中断、上游 catalog 与有界历史恢复，复用连接归属、单次审批和热重配边界；Desktop/Android 已接入 Claude 工作区、历史、文字会话与模型选择，模型与 effort 仅来自上游 catalog 并等待切换确认。工作区前缀为 `claude:cwd:`，会话前缀为 `claude:`；所有投影仅保留内存。支持直接 Files/Terminal 访问，复用 Host 工作区路径隔离与终端权限设置；Claude 图片输入暂不支持；独立 Remote Web、APK/真机及加密跨设备 E2E 仍待验收。
+
+
+#### 审批、中断与历史边界
+
+Host 按上游 `options[].kind` 映射唯一的单次 `optionId`，不硬编码拒绝 ID。审批绑定连接、会话、后端和进程实例；跨连接、持久授权、任意 result、重放、歧义选项及无主请求均拒绝。断线或重配使旧句柄失效。
+
+Claude 会话与目录来自上游标准 `session/list`；无效 envelope、异常/循环 cursor 或超过 100 页仍未完成的分页显式失败，合法空列表保持为空。Host 对其 cwd 执行 realpath/目录校验，`session/load` 不接受 Client 自报 cwd。未知会话历史失败前不预占会话所有权。历史通过独立临时 adapter 的 `session/load` replay 获取，再转换为文本、推理和工具调用/结果事件，不读取 Claude 私有 transcript。每次最多 8 MiB / 10,000 更新，超限或上游错误显式失败；历史请求不参与工具审批，遇到请求直接拒绝/取消。同一 Host 最多保留 30 个 live/loading Session、一个 history reader；同一已加载 Session 重复 load 本地短路，不重放污染 live stream。未知时间用 `0` 和稳定投影 ID，不宣称恢复上游未提供的原始时间/消息 ID。
+
+### Hermes Agent（Nous Research）
+
+Host 注册后端 ID 为 `hermes`，默认**关闭**（未安装 Hermes 的 Host 不会被触发拉起），默认命令 `hermes`、参数 `["acp"]`。
+
+Hermes 自带标准 ACP 服务端（`hermes acp`，另有 `hermes-acp` 兼容入口），因此不需要额外的 adapter 或协议转换：
+
+```yaml
+acp:
+  backends:
+    - id: hermes
+      enabled: true
+      command: hermes   # 或 hermes-acp（此时 args 留空）
+      args: [acp]
+```
+
+- 认证：Hermes 使用 Host 本机已有的 provider 与密钥配置，不向 Client 发起登录；Remote 只在初始化时发送 `initialize`，不发送 `authenticate`。
+- 目录与会话：`session/list` 按 cwd 列出 Hermes 已持久化的会话（标题、更新时间），`session/load` 在响应前回放历史。
+- 历史：由独立进程读取并转换为原生事件，模型来源标记为 `hermes`，不写入 Harness SessionStore。
+- 模型：`session/new`（或 `session/load`）返回的 `models.availableModels` 即 Host 上的 Hermes 模型清单，切换走标准 `session/set_model`。
+- 审批：Hermes 自己的审批策略决定何时请求确认，危险终端操作会通过 `session/request_permission` 交给 Client 单次允许/拒绝。
+- 图片：支持多模态图片 Prompt，图片作为标准 ACP `image` 内容块随文本一起透传至 `hermes acp`，规格与 AGY 一致（PNG / JPEG / WebP / GIF，单张最多 8 MiB、边长不超过 8192、像素不超过 4000 万，每条消息最多 4 张）。与 AGY 不同，Hermes 直接内联 base64，不写 Host tmp 缓存，因此不存在缓存过期问题。
+- 直接 Files/Terminal 使用 Host 共享 ACP workspace tools，受可信 cwd、连接归属、路径隔离与终端开关约束；这与 Agent 自己执行工具相互独立。
+
+
+## 共享运行时与投影
 
 ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册和 Client 初始化。
 能力声明表示已启用的协议支持，`workspaceTypes.available` 表示实际就绪；关闭期间会清理
@@ -46,40 +130,6 @@ ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册
 并立即更新 Host 运行时，适用于 Cursor、AGY、CodeX 和自定义 ACP 条目。
 重新检测通过后可以手动开启，不自动恢复为开启。命令可发现不代表已登录或协议就绪，
 真实 Remote 可用性仍以 `workspaceTypes.available` 为准。
-
-AGY 会话发现按数据库中的 file URI 解码后与项目目录完整匹配，支持编码目录名和
-原生路径分隔符。指定目录缺少数据库归属信息时返回空列表，不把所有 transcript
-推测为该目录的会话。历史读取限制在 AGY brain 内的真实 transcript，拒绝越界 ID
-和符号链接。切换会话后，客户端丢弃迟到的历史与订阅结果。
-
-## 公共方法（allowlist）
-
-| 方法 | 用途 |
-| --- | --- |
-| `initialize` | Gateway 返回能力描述（不转发 Cursor 私有 initialize） |
-| `session/new` | 在 Host 上已存在的绝对目录创建会话（强制 `mcpServers: []`） |
-| `session/load` | 恢复会话 |
-| `session/prompt` | Cursor 文本 Prompt；AGY 文本/受限图片 Prompt |
-| `session/cancel` | 中断 |
-| `dsh/directoryList` | Host 只读单层目录浏览（选 cwd；Remote 扩展） |
-| `dsh/workspaceList` | 指定后端的 Host 工作区发现 |
-| `dsh/sessionList` | AGY 持久化会话发现 |
-| `dsh/sessionHistory` | 历史读取（有界 ACP transfer） |
-| `dsh/sessionArchive` | OpenCode 原生归档；要求独立 capability |
-
-线 RPC：`agent.acp.call|respond|stream.*|transfer.*`<br>
-事件：`agent.acp.frame` / `agent.acp.stream.closed` / `agent.acp.catalog.changed`
-
-## OpenCode 原生归档
-
-Desktop/Android 的 OpenCode 归档经 `dsh/sessionArchive` 直接调用同一个 Host
-`opencode acp` 进程的原生 HTTP API，设置 `time.archived`，原生确认后才移除默认目录成员。
-Host 声明 `agent.acp.opencode.archive.v1`，成功后以 `agent.acp.catalog.changed` 同步其他连接。
-归档状态由 OpenCode 持久保存，Host 重启后仍隐藏；历史保留可读。活动回复、加载、模型写入和
-待审批时拒绝归档，不隐式停止或删除会话。其他 ACP 后端尚无原生归档，不返回本地伪成功。
-纯 stdio ACP 构建没有可用的私有 HTTP API 时返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，
-会话列表与历史直接使用标准 ACP，不尝试访问未启动的 HTTP 端口。
-当前不提供恢复或已归档列表；实现和上游版本边界见[原生归档设计](design/acp-session-archive.md)。
 
 ## Web 兼容边界
 
@@ -98,76 +148,28 @@ Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / e
 `agent.acp.v1` 仅表示公共数据面，不据此推断后端。不提供早期 ACP 配置或工作区 ID 的迁移；该限制不表示 ACP 尚未实现或发布。
 独立 Remote Web runtime 的接入和跨设备 E2E 仍待在独立 Server 仓库验证。
 
-## 配置
+## 新增 ACP 后端
 
-Cursor adapter 默认**关闭**。开启前请在 Host 本机完成 `agent login`，或配置
-`CURSOR_API_KEY`。也可在 Desktop 插件设置中切换开关（立即生效）。
+仅向 `acp.backends` 添加 command/args 不会自动实现 adapter。当前 gateway 明确识别 Cursor / Antigravity / Pi / OpenCode / Claude / Hermes，不按可执行文件名称猜测后端。
 
-```yaml
-ds-harness-remote:
-  cursor:
-    enabled: true
-    binary: agent   # 或 ~/.local/bin/agent 的绝对路径
-```
+1. **实现进程 adapter**：参考 [adapter.ts](../packages/plugin/src/acp/adapter.ts) 的 `start / close / isReady / call / respond / respondError / onInbound / onUnavailable` 契约，在 `acp/adapters/` 实现固定后端 ID、请求关联、通知与退出清理。原生 ACP 可参考 Cursor；其他协议需像 AGY 一样明确适配。
+2. **注册 Host 生命周期**：在 [gateway.ts](../packages/plugin/src/acp/gateway.ts) 接入后端创建、支持列表、后台启动、就绪检测和 reconfigure。关闭时取消启动，迟到初始化不能重新注册；不可用后端不能静默降级。
+3. **定义安全契约**：在 [method-policy.ts](../packages/plugin/src/acp/method-policy.ts)、共享 Protocol 和 [协议](protocol.md) 同步固定方法、字段、backend capability、工作区/会话 ID 和限额。按连接隔离 stream、transfer 和审批；不扩大 Harness 或 Codex allowlist。
+4. **接入工作区与展示**：在 Host 实现 backend 明确的 catalog 和 session scope，Client 只消费 Host 接口。更新 [虚拟 carrier](../packages/plugin/src/acp/virtual-harness.ts)、Client 类型/就绪判断和 Android 内存投影；不引入 Node 依赖到浏览器，不写 Harness 持久化。
+5. **接入可选能力**：历史、图片、模型和只读文件/终端分别声明 capability。工作区工具必须使用 Host 验证的会话根、固定 endpoints 与终端输入权，不能接受任意 Client cwd 或通用文件上传。
+6. **验证核心边界**：覆盖 allowlist、后端/会话归属、权限、RPC/事件顺序、启动中关闭和断线恢复；真实跨设备、目标 runtime 和 CLI 验收单独记录。展示、文案、布局不单独新增测试。
+
+新增后端是源码开发工作，不能把未经实现的注册项列成已支持产品。Codex 继续使用独立领域，当前不迁入 ACP gateway。
 
 ## 实现入口
 
-| 路径 | 作用 |
+| 文件 | 职责 |
 | --- | --- |
-| `packages/plugin/src/acp/gateway.ts` | ACP gateway / 会话归属 / 审批 |
-| `packages/plugin/src/acp/method-policy.ts` | 公共 allowlist |
-| `packages/plugin/src/acp/peer-bridge.ts` | 每连接 stream / transfer |
-| `packages/plugin/src/acp/adapter.ts` | backend adapter 契约 |
-| `packages/plugin/src/acp/adapters/cursor-process.ts` | Cursor `agent acp` stdio |
-| `packages/plugin/src/acp/adapters/cursor.ts` | Cursor adapter 工厂 |
-| `packages/plugin/src/acp/adapters/opencode-process.ts` | OpenCode `opencode acp` stdio |
-| `packages/plugin/src/acp/adapters/opencode.ts` | OpenCode adapter 工厂 |
-| `packages/plugin/src/acp/virtual-harness.ts` | Desktop Virtual Harness（cwd → Workspace / Session / Composer） |
-| `packages/client-core/src/acp-client.ts` | 共享 Client（`AgentAcpClient`） |
-| `packages/plugin/src/client-runtime.ts` | 探测独立后端 capability 和就绪状态、打开 Virtual Harness |
-| `packages/plugin/src/client.ts` | Remote 模态框列出 / 添加 Cursor 工作区 |
+| [gateway.ts](../packages/plugin/src/acp/gateway.ts) | 后端生命周期、归属与审批 |
+| [method-policy.ts](../packages/plugin/src/acp/method-policy.ts) | 固定方法和参数 schema |
+| [adapter.ts](../packages/plugin/src/acp/adapter.ts) / adapters/ | 进程 adapter 契约与实现 |
+| [peer-bridge.ts](../packages/plugin/src/acp/peer-bridge.ts) | 每连接流与 transfer |
+| [virtual-harness.ts](../packages/plugin/src/acp/virtual-harness.ts) | 浏览器/Desktop 内存展示 |
+| [acp-client.ts](../packages/client-core/src/acp-client.ts) | 共享 Client |
 
-## Desktop 使用
-
-1. Host：设置中开启 **Agent 后端 → Cursor**（`acp.backends` 的 `cursor.enabled`），完成本机 `agent login`，保存后立即生效。
-2. Client：侧栏 Remote → 选择在线 Host → 在 **Cursor virtual workspace** 分组点 `+`，浏览并确认 Host 上已有绝对目录。
-3. 打开后复用原生 Workspace / Session / Composer；会话 id 形如 `cursor:<acpSessionId>`，不写入 DSH SessionStore。
-
-## Android Client
-
-内存投影（不写入 SessionStore）：
-
-1. 探测 Host capability `agent.acp.cursor.v1` 并确认工作区类型就绪后启用 Cursor 工作区分组。
-2. 新建 Cursor workspace = 选择 Host 上已有绝对目录；会话经 `AgentAcpClient`（`agent.acp.*`）创建与流式更新。
-3. 文本 Prompt / cancel / approval（`allow-once` | `reject-once`）；暂不支持图片。
-4. Workspace backend id 仍为 `'cursor'`（仅 UI）；线协议为 `agent.acp.*`。
-
-## 验证状态
-
-- [x] Host gateway、capability、RPC 路由（`agent.acp.v1`）
-- [x] Cursor adapter initialize + authenticate（Host 本地）
-- [x] Client `initialize` 公共面（gateway 短路）
-- [x] 方法策略单测
-- [x] Desktop 设置开关 `settings.cursor.set`（adapter）
-- [x] Desktop Virtual Harness（cwd workspace + session/prompt/stream/approval）
-- [x] Android Client 投影（`AgentAcpClient` / 内存 Cursor workspace）
-- [x] Android 真机：文本 Prompt、思考/正文流式帧、`prompt_completed` catch-up、多轮气泡分离
-- [ ] Desktop ↔ 异机 Client 完整 E2E（审批 / cancel / 长工具轮次）
-- [ ] 断线重连后 stream 重建与会话内 History 恢复
-- [x] Android：重连保留 Cursor 会话并自动重建 ACP stream
-- [ ] `session/load` 与跨设备会话列表体验
-
-## 近期后续（不含 Codex→ACP）
-
-1. Android / Desktop：transport 抖动后自动 `stream.open` + `claimSession`
-2. Host 侧按 session 保留可分页的展示用 History（不写 DSH SessionStore）
-3. 审批 / 提问 UI 与 `agent.acp.respond` 真机矩阵
-4. 跨机长时间稳定性与 WebRTC/Relay 丢帧回归
-
-## Android AGY (2026-10-07)
-
-Android 的 `antigravity` 工作区独立使用 AGY catalog/history/prompt 与 ACP stream。首次连接
-和刷新均发现 Host 既有目录与会话；新建会话保持空白，回复后更新标题，重连重新加载历史并
-订阅 stream。图片通过私有 tmp 缓存与有界 ACP transfer；不调用 Harness Prompt 或写入
-SessionStore。批量读取列表不触发预热，选中目录才预热。Hermes 打包及真实 AGY 的
-in-process 数据链路已验证；Android 真机与加密跨设备验收尚未完成。
+核心约束是可信 cwd、后端/会话/连接归属、单次审批、历史与 live 隔离及重配代次校验。剩余平台与长连接工作统一见 [TODO](TODO.md)。

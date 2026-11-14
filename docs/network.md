@@ -36,7 +36,7 @@ LAN -> P2P -> TURN -> Relay
                                +---------+
 ```
 
-Remote Server 负责账号授权、设备在线状态、连接协调、WebRTC signaling、短期 TURN credential 下发和 Relay 路由。本仓库只实现 Plugin、Client 与共享协议；Server runtime 位于独立仓库。
+Remote Server 负责账号授权、设备在线状态、连接协调、WebRTC signaling、短期 TURN credential 下发和 Relay 路由。本仓库另提供单账号最小 `apps/server`；完整多账号 Server、Remote Web 和 Admin 位于独立仓库。
 
 ## 2. 三个网络平面
 
@@ -182,7 +182,7 @@ Relay 通过分配的 WSS data endpoint 转发 Base64URL 编码的 Noise ciphert
 
 ## 8. 断线与恢复
 
-Host 的 Control WebSocket 支持带 jitter 的指数退避重连。单条逻辑 connection 断开时，Host 只清理对应的 Noise/RTC、pending RPC 与 stream，不影响其他已连接 Client。
+Host 的 Control WebSocket 使用配置上限窗口内的 full jitter 重连（默认 0–30 秒）；WebRTC/Relay 控制恢复循环为 0–15 秒。单条逻辑 connection 断开时，Host 只清理对应的 Noise/RTC、pending RPC 与 stream，不影响其他已连接 Client。
 
 业务连接断开后：
 
@@ -192,7 +192,7 @@ Host 的 Control WebSocket 支持带 jitter 的指数退避重连。单条逻辑
 4. 再次连接时重新完成 membership/trust 校验、选路和 Noise 握手；
 5. 由官方 Harness UI 重开 stream 并重新读取 history baseline。
 
-Desktop Harness Remote 使用现有 `reconnect` 配置自动重建断开的连接：默认带 jitter 的指数退避，每次重新校验 membership、固定的 Host key、选路和 Noise 握手。恢复后通知官方 Connection 重开原生订阅，不刷新页面或重发 Prompt、审批、终端输入。退出 Remote、注销、切换 Host 或停止插件会取消等待和在途连接；身份/权限异常、加密校验失败及 `CONNECTION_REPLACED`（WebSocket 4003）停止自动恢复。`reconnect: false` 同时禁用此自动恢复。
+Desktop Harness Remote 使用现有 `reconnect` 配置自动重建断开的连接：默认在最大延迟窗口内 full jitter，每次重新校验 membership、固定的 Host key、选路和 Noise 握手。恢复后通知官方 Connection 重开原生订阅，不刷新页面或重发 Prompt、审批、终端输入。退出 Remote、注销、切换 Host 或停止插件会取消等待和在途连接；身份/权限异常、加密校验失败及 `CONNECTION_REPLACED`（WebSocket 4003）停止自动恢复。`reconnect: false` 同时禁用此自动恢复。
 
 当前项目不维护另一套业务 event replay buffer，也不会自动重放结果未知的 Harness mutation。CodeX/ACP 的独立虚拟工作区仍需手动重新打开，不会在掉线后自动切换到 Harness。完整的网络切换 UI、心跳/RTT，以及真机上的恢复体验仍需验证。
 
@@ -229,15 +229,19 @@ Client 可以把当前模式显示为 `LAN`、`P2P`、`TURN`、`Relay` 或 `Disc
 - Desktop Plugin、Android 和 VS Code Client 的 Adaptive transport 接入；
 - 所有路径上的 Noise E2EE 与按 connection 隔离。
 
-仍需完成或扩大验证：
+当前路径、后端与平台的已知限制统一维护在 [TODO](TODO.md)。已有 P2P/TURN 互操作不保证所有 NAT、代理、休眠和移动网络条件均可用。
 
-- rc.2/alpha.1/alpha.2 真实 Harness 双机与跨网 E2E；
-- Android `react-native-webrtc` 与 Host WebRTC runtime 的真机 P2P/TURN 互操作；
-- 网络切换、休眠/唤醒、长期稳定性和代理环境；
-- control heartbeat、RTT、错误分类和重连后的 stream/history 恢复；
-- 与独立 Server 仓库共享 conformance fixtures。
+### 独立 LAN 上传数据通道
 
-因此，代码已经具备自适应网络基础链路，但不能把尚未完成的真实跨网与长期稳定性验证描述为稳定交付能力。
+具备 `workspace.upload.lan.v1` 时，Android 可为至少 1 MiB 的二进制文件临时打开独立 Noise/TCP WebSocket。入口只绑定实际 LAN 网卡的 RFC1918 IPv4，票据经原认证通道协商，并绑定原连接、设备、会话和上传。小文件、P2P、TURN/Relay、IPv6 或旧客户端继续使用原上传通道。
+
+这不改变聊天或 Control 路径；原连接失效时入口与未提交文件销毁。文件 open 发出后不能换通道重放，详见[上传协议](protocol.md#workspace-upload)。
+
+### 可选控制租约恢复
+
+Server、Host、Client 都声明相应能力且双端确认授权租约后，健康 WebRTC 或独立 Relay 数据连接可在有限时间内跨越 Control 中断。租约不延长到端点/数据 socket 重启，不授权新连接，不重放业务，也不重置 Noise counter。最小自部署 Server 不声明此扩展；未协商或数据面失效时仍按完整重连处理。
+
+详见统一的[控制面恢复设计](design/control-recovery.md)。
 
 ## 11. 实现与规范入口
 

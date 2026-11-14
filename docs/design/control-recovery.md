@@ -1,18 +1,18 @@
-# WebRTC control recovery v1
+# Control-plane recovery v1
 
-Status: implemented in the working tree (2026-11-04); validation and remaining device acceptance are recorded below. Not published or deployed.
+This document describes the optional implemented recovery contract. Publication and deployment status are maintained by the respective releases.
 
-## Scope and compatibility
+## WebRTC eligibility
 
 The optional `transport.webrtc.resume.v1` capability enables bounded control-plane recovery for an already authenticated Noise session over a healthy LAN/P2P/TURN DataChannel. Server, Host and Client must all support the capability. No new frame may be sent to a peer that did not negotiate it. Missing support retains the existing disconnect/reconnect behavior. Relay, provisional ICE/Noise handshakes and process restarts of either endpoint are excluded. Independent coturn allocations are retained; this does not add TURN failover or change credential TTL.
 
-## Lease and recovery
+## Shared authorization lease and recovery
 
 A connection-scoped authorization lease lasts at most 300000 ms, renewed approximately every 25000 ms while both endpoints confirm the same existing connection. Count locally from the start of the confirming request using a monotonic clock, never from receipt of a possibly delayed reply. Only a matched connection confirmation renews the lease; hello, ping, socket reconnect and one-sided claims do not. A lease expiration check must also guard sends/receives after suspended timers. Socket blackholes cannot extend the lease. Explicit logout, cancellation, replacement, revoked membership, invalid identity/protocol, or a failed DataChannel close immediately.
 
 Control frames: `connection.lease.request` carries connectionId, requestId and a Server-signed recovery ticket. `connection.lease.ack` echoes requestId and carries a replacement ticket and leaseMs=300000. Both sides must submit fresh requests on their authenticated control sockets before either receives an ack. Initial tickets are attached only to negotiated connect.incoming/connect.accepted. Start lease requests only after local Noise authentication completes; no first ack means no detached operation. A matching pair must be less than 30 seconds old. Requests are connection-scoped, and an ack with an unknown, superseded or older-than-30-second requestId is ignored. Tickets bind the logical connection, host/client device IDs and identity keys, and expire after five minutes. They are memory-only endpoint secrets and must never be logged. They permit restoration of control routing only, never data decryption, new authority, or resetting Noise counters.
 
-After control loss, retain healthy authenticated RTC/Noise/RPC/stream state until its last confirmed deadline; reconnect control in the background with jitter and bounded delay. Re-authenticate the device (refresh credentials as needed), submit a lease request for the existing connection, and wait for both endpoints. Restoring a socket alone does not extend the deadline. A Server restart validates its signed tickets using the existing persistent signing secret, rechecks current membership, device identity and the durable connection record, and rebinds each side to its exact new socket. Explicitly terminated/replaced records cannot be resurrected. Requests from sibling browser sockets may not steal active routing.
+After control loss, retain healthy authenticated RTC/Noise/RPC/stream state until its last confirmed deadline; reconnect control in the background with full jitter and bounded delay. Re-authenticate the device (refresh credentials as needed), submit a lease request for the existing connection, and wait for both endpoints. Restoring a socket alone does not extend the deadline. A Server restart validates its signed tickets using the existing persistent signing secret, rechecks current membership, device identity and the durable connection record, and rebinds each side to its exact new socket. Explicitly terminated/replaced records cannot be resurrected. Requests from sibling browser sockets may not steal active routing.
 
 Socket cleanup for negotiated resumable connections must stop producing terminal peer-lost errors on ordinary network failure. Preserve the bounded detached state until lease expiry; explicit security/administrative closures remain terminal. Legacy connections retain immediate cleanup. Healthy control sockets must retry lease requests too: the other side may reconnect later. Pending requests and detached state must be bounded and expired. At most 64 resumable connections are issued per Host; additional connections retain legacy lifetimes. Server sweeps expired in-memory leases every five seconds; endpoint send/receive guards enforce their own deadline synchronously. The default 25-second renewal rate leaves approximately 275–300 seconds of outage budget, less request/response latency.
 
@@ -20,9 +20,23 @@ Socket cleanup for negotiated resumable connections must stop producing terminal
 
 The product accepts delayed revocation, replacement and online status during a control outage. The lease bounds that delay, rather than guaranteeing five full minutes of Server downtime: recovery/authorization must finish before the deadline. No new connections, ICE restart, automatic route migration or business-request replay are promised. Server recovery must not emit a new connect.incoming for an existing session. Keep local Host trust validation and connection-scoped security boundaries intact.
 
+## Independent Relay eligibility and differences
+
+`transport.relay.resume.v1` applies only to an already attached independent Relay node. Server, Host, Client and the authenticated live node must support it; the node control session must also offer `relay.session.check.v1`. A stored node row, assignment, selected relay mode or successful TCP connection alone is insufficient. An endpoint may have fallen back to the main Server Relay, which is excluded.
+
+The shared paired lease rules above still apply. Activate only after both original data sockets are ready and Noise authentication has completed. Confirm data-plane health before renewal: a live but blackholed socket must not renew solely from control heartbeats.
+
+The separate `relayRecoveryTicket` binds the connection, both device identities/public keys, node ID, epoch and recovery purpose. It is not an attach ticket, cannot authorize a replacement data socket and never resets Noise or outer Relay counters. Old peers ignore optional ticket/node/epoch fields and retain ordinary disconnect semantics.
+
+A main Server restart can preserve the session only while the node process and both endpoint data sockets survive. Node restart, changed epoch or either socket closing terminates the old session. Admission-ticket expiry alone does not close a previously attached socket; it permits no new attach on a recovery ticket.
+
+Reconstruction must re-establish live node identity/epoch and current device/membership/connection authorization, tolerating node/endpoint reconnection order without allowing sibling sockets to steal routing. Temporary node unavailability must not be mistaken for permanent denial; it also cannot extend the lease. Never convert the retained carrier into main-Server Relay.
+
+Node administration, revocation and drain must enforce retained-session policy. Stopping admissions is not immediate closure of existing sessions. Existing limits, backpressure and peer-detach checks remain in force. Endpoint or node process restart, missing data sockets and unnegotiated capability always require a new connection.
+
 ## Validation
 
-Required: mixed old/new endpoints and Server; LAN/P2P/TURN retained data flow; Server process replacement; unilateral and reordered recovery; blackholed control; lease expiry and late acks; stale generation/socket messages; revocation/replacement/identity mismatch; Relay/handshake immediate failure; logout/dispose cleanup; no replay of RPC or Noise counters. Node fake-runtime tests do not count as native Android or real coturn acceptance. Validate actual TURN allocation refresh across credential expiry separately.
+Required: mixed old/new endpoints and Server; LAN/P2P/TURN retained data flow; Server process replacement; unilateral and reordered recovery; blackholed control; lease expiry and late acks; stale generation/socket messages; revocation/replacement/identity mismatch; Relay/handshake immediate failure; logout/dispose cleanup; no replay of RPC or Noise counters. Node fake-runtime tests do not count as native Android or real coturn acceptance. Validate actual TURN allocation refresh across credential expiry separately. Independent Relay additionally requires attached-vs-fallback, node epoch, either data socket loss, health confirmation, reconnect ordering, preserved counters and revocation/drain checks.
 
 ## Host continuity, disposal and rollout
 
@@ -32,7 +46,7 @@ A recovering Host hello optionally includes `recoveryTickets` (maximum 64), only
 
 Rollout order may be Server first or endpoints first: optional capability intersection and per-connection tickets gate the feature, and no version-number inference is used. New Server + old Host/Client, old Server + new endpoints, and mixed old/new peers retain their existing lifetimes. The self-hosted Server and independent VS Code client do not advertise resume support. Server's integrated Expo Android/iOS client and Remote Web have the same lease contract; Remote's Desktop/Android clients use the shared transport. Existing Server-specific WebRTC budgets, presence feed and Relay attach fallback are retained during source synchronization.
 
-No new UI polling, TURN refresh/TTL change or per-heartbeat database write is added. Lease confirmation rechecks current authorization and open connection records; the Server writes a record when closing/replacing it. Host control reconnection retains configured backoff (default cap 30 seconds); shared Client and Web recovery use jitter with a 15-second nominal cap. Ordinary WebSocket heartbeat remains separate from the connection authorization lease.
+No new UI polling, TURN refresh/TTL change or per-heartbeat database write is added. Lease confirmation rechecks current authorization and open connection records; the Server writes a record when closing/replacing it. Host and Client carrier reconnection use the configured cap (default 30 seconds); WebRTC/Relay control recovery uses a 15-second cap. All use full jitter as specified below. Ordinary WebSocket heartbeat remains separate from the connection authorization lease.
 
 ## Close semantics and retry jitter (2026-11-05)
 

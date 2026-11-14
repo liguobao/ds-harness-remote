@@ -6,7 +6,7 @@
 
 DSH Remote 的 Harness 业务消息始终在 Client 上加密、在 Host 上解密。中间的 Remote Server、WebSocket Relay 和 TURN 只参与账号授权、连接协调或密文转发，不能读取 Harness 会话、Prompt、工具输出、Workspace 路径和文件预览内容。
 
-加密不依赖当前网络路径。无论连接最终使用 LAN、互联网 P2P、TURN 还是 WebSocket Relay，业务层都使用同一条 Noise 安全通道。
+加密不依赖当前网络路径。无论连接最终使用 LAN、互联网 P2P、TURN 还是 WebSocket Relay，业务层都使用 Noise 认证与加密；可选 LAN 上传为独立 Noise 会话，并绑定原连接的身份与上传 scope。
 
 ```text
 Client
@@ -40,12 +40,12 @@ Noise_IK_25519_ChaChaPoly_SHA256
 
 一条连接必须同时通过两层授权：
 
-1. **账号 membership**：Server 只允许同一账号下、尚未撤销的 Host 与 Client 建立连接。
+1. **账号 membership**：Server 只允许同一 owner 下、具有有效 membership 且尚未撤销的 Host 与 Client 建立连接。扫码配对受限设备只获准访问显式绑定的设备对。
 2. **本地 identity pinning**：双方把远端设备的 identity key 固定在本地。已知 `deviceId` 如果突然对应另一个公钥，连接会被拒绝，而不是静默接受新身份。
 
 Client 从受 membership 保护的设备详情获取 Host 公钥。Host 收到连接事件后，还会使用自己的设备凭证重新查询 Client descriptor，交叉校验账号授权、角色、公钥与本地 pinned identity。Server membership 与本地信任缺一不可。
 
-同账号即信任：通过服务端账号归属校验的新设备在首次连接时自动固定公钥，Host 与 Client 均无需额外确认；已知设备公钥变化默认拒绝。服务端是首次授权与公钥分发的信任源，本地 pinning 不构成独立的带外身份核验。
+普通账号设备首次通过 membership 与服务端身份校验后自动固定公钥；配对受限设备还要求显式关系。通过这些校验的新设备在首次连接时固定公钥，Host 与 Client 均无需额外确认；已知设备公钥变化默认拒绝。服务端是首次授权与公钥分发的信任源，本地 pinning 不构成独立的带外身份核验。
 
 这意味着必须信任所用服务端的账号与设备管理：若服务端被攻破或恶意运行，它可能为同账号伪造新设备描述，使首次连接固定攻击者的公钥；E2EE 与既有设备换钥检测不能阻止这种首次身份替换。
 
@@ -130,7 +130,7 @@ Noise 单条 transport message 有 65,535 bytes 上限。编码后的业务消�
 - **远端 static public key**：从受保护的设备 descriptor 获取，并固定在本地 trust store。
 - **连接传输密钥**：由每次 Noise IK 握手产生，只属于绑定的 `connectionId` 与设备对。
 - **连接关闭**：销毁 Noise session、清理接收/发送状态和未完成分片；重新连接会重新握手。
-- **设备撤销**：撤销 device credential 与 membership，并关闭活动 Remote connection。再次授权被撤销角色时需要新的受信任身份流程。
+- **设备撤销**：撤销 device credential 与 membership，在线端观察到撤销后关闭活动 Remote connection；已协商控制租约且控制面中断时，撤销传播可能延迟到租约到期。再次授权被撤销角色时需要新的受信任身份流程。
 
 `fixtures/crypto/v1/noise-ik.json` 提供 Noise IK 跨实现 golden vector。
 长期连接 rekey 和独立密码安全审查仍在路线图中。在这些工作完成前，项目不额外宣称协议规范之外的长期密钥安全性质。

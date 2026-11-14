@@ -35,9 +35,9 @@
 
 ### 验证范围
 
-- MIX 4 + haru（Harness 0.2.2-rc.1、DS-Bot 0.3.6）：Bot 创建、模型选择、单聊、群聊完整回复与重启恢复、终端、文件预览/下载、2 MiB 上传及哈希校验通过。见[真机记录](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/android-haru-verification.md)。
+- MIX 4 + haru（Harness 0.2.2-rc.1、DS-Bot 0.3.6）：Bot 创建、模型选择、单聊、群聊完整回复与重启恢复、终端、文件预览/下载、2 MiB 上传及哈希校验通过。兼容边界见[版本说明](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/compatibility.zh.md)。
 - 异步长压缩、断线恢复与取消已有跨设备 Relay 验收；LAN 原生上传已有隔离认证上下文的两次 200 MiB 哈希验收。这些测试不能等同于所有账号登录、网络路径和设备组合均已覆盖。
-- 真实 dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 已在 haru 与 Android 72 间通过会话、双向消息、文件、终端和 App 重启恢复验收；见 [TUI 验收记录](docs/tui-haru-verification.md)。iOS、电脑控制、真实审批和全部提醒流程尚未完整验收。离线冷启动后恢复网络，部分场景仍需手动刷新主机列表并选择 Host。
+- 真实 dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 已在 haru 与 Android 72 间通过会话、双向消息、文件、终端和 App 重启恢复验收；见 [TUI 兼容范围](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/compatibility.md)。iOS、电脑控制、真实审批和全部提醒流程尚未完整验收。离线冷启动后恢复网络，部分场景仍需手动刷新主机列表并选择 Host。
 
 ## English
 
@@ -73,5 +73,5 @@
 - Add the matching standalone `ds-harness-remote-tui` bundle for Harness 0.2.2-rc.1 TUI profiles. Enable only one Remote Host entry per profile.
 - Node.js >=24.9 remains required. **Stop every Harness process and back up profile/credential storage before upgrading or downgrading.** See the [integration guide](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/plugin-integration.md).
 - TUI npm publishing failures no longer block subsequent GitHub Release and Android APK publication; retry failed npm publication separately.
-- MIX 4 / haru acceptance covered Bot creation, model selection, chat, complete group history after restart, terminal, file preview/download and a hash-verified 2 MiB upload. Separate records cover cross-device Relay compaction and isolated, hash-verified 200 MiB LAN uploads.
-- Real dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 on haru passed Android 72 session, bidirectional messaging, file, terminal and App-restart recovery checks; see [TUI acceptance](docs/tui-haru-verification.md). Complete iOS, computer-control, approval and scheduling coverage remains pending. Recovery from an offline cold start may still require refreshing the Host list and selecting a Host.
+- MIX 4 / haru acceptance covered Bot creation, model selection, chat, complete group history after restart, terminal, file preview/download and a hash-verified 2 MiB upload. Additional checks covered cross-device Relay compaction and isolated, hash-verified 200 MiB LAN uploads.
+- Real dsh-TUI 0.20.1 / Harness 0.2.2-rc.1 on haru passed Android 72 session, bidirectional messaging, file, terminal and App-restart recovery checks; see [TUI compatibility](https://github.com/liguobao/ds-harness-remote/blob/v0.6.5/docs/compatibility.md). Complete iOS, computer-control, approval and scheduling coverage remains pending. Recovery from an offline cold start may still require refreshing the Host list and selecting a Host.

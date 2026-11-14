@@ -1,6 +1,6 @@
 # Remote × DSH-Go 配对协议 v1
 
-状态：服务端已实现；Remote / DSH-Go 需按本文实现，尚未进行双端真机联调或生产部署。
+独立完整 Server 与 Remote Host 已实现此契约；手机侧接入要求见[手机客户端接入](#手机客户端接入)。本仓库最小自部署 Server 不提供此能力。
 
 ## 用户流程与信任边界
 
@@ -78,7 +78,7 @@ message = UTF8("POST\n" + exactPath + "\n" + bodyHash)
 
 `rootJsonText` 是实际发送 JSON 根对象的原始文本，保留内部空白、属性顺序和转义；排除根对象前后的空白。推荐只序列化一次、无外层空白、无 BOM，直接对该字符串签 MAC 并发送相同字节。不能先签一种序列化、再用网络库重新序列化。**这不是 JCS。**
 
-Node / Dart 可直接使用既有 X25519 实现，加 RFC 5869 HKDF-SHA256 和 HMAC-SHA256。不能把 X25519 误用为 Ed25519 签名密钥。固定互操作向量见 `clients/fixtures/pairing/v1/proof.json`。
+Node / Dart 可直接使用既有 X25519 实现，加 RFC 5869 HKDF-SHA256 和 HMAC-SHA256。不能把 X25519 误用为 Ed25519 签名密钥。本仓库固定互操作向量见 `fixtures/pairing/v1/proof.json`；独立 Server 同步维护 `clients/fixtures/pairing/v1/proof.json`。
 
 证明绑定操作和请求内容；不单独签二维码秘密。状态操作的同请求重放没有额外权限；状态迁移、领取及最终提交通过数据库终态和幂等限制。
 
@@ -281,7 +281,7 @@ limit 1～100。DELETE 撤销本设备与目标设备的这一条关系，不删
 
 迁移 `0005-device-pairing.sql`，旧账号默认 standard、旧设备默认不受 pairing_restricted 限制。独立 runtime 仅登记版本。历史 SQL / checksum 不改。
 
-按 `docs/database-migrations.md` 在授权的维护窗口、所有写入者停止后执行原生 --migrate；本任务没有对人工固定数据库或生产数据库执行迁移，也没有部署/重启。
+数据库迁移在独立 Server 仓库维护；遵循其迁移指南，在停止写入者并完成备份后执行。下列 dotnet 检查命令也在独立 Server 仓库运行。
 
 本地隔离检查：
 
@@ -334,4 +334,28 @@ Content-Type: application/json
 
 fragment 不进入 HTTP 请求 URL；但 ticket 依旧是秘密，不得进入日志、分析、崩溃上报、剪贴板或外部浏览器历史。POST 请求体也必须在代理和客户端日志中脱敏。GET `/pair` 仅返回无脚本/外部资源的引导文案，不解析、不 claim；设置 no-store、no-referrer 和严格 CSP，通用相机打开页面不会绑定设备。
 
-DSH Go 实现顺序：识别短格式并确认 origin → resolve → 校验并固定会话/Host 信息 → 展示 Host 并由手机用户确认 → 复用原 claim/验证码/轮询/安全存储/自动连接流程。同时保留下面的旧 JSON 扫码解析，用于旧服务和已显示二维码；未知格式明确拒绝，不猜测协议。Dart/Android 实现和真机扫码尚未完成。
+DSH Go 实现顺序：识别短格式并确认 origin → resolve → 校验并固定会话/Host 信息 → 展示 Host 并由手机用户确认 → 复用原 claim/验证码/轮询/安全存储/自动连接流程。同时保留前述旧 JSON 扫码解析，用于旧服务和已显示二维码；未知格式明确拒绝，不猜测协议。Dart/Android 实现和真机扫码尚未完成。
+
+
+## 手机客户端接入
+
+DSH-Go 或其他手机客户端复用本篇协议，不再维护另一份 API、二维码和 proof 定义。接入按以下职责实现：
+
+- Server API 层校验二维码、响应及同源策略，对实际发送的原始 JSON 计算 proof；先在 Dart / 目标 runtime 执行 `fixtures/pairing/v1/proof.json` 的 mobile 向量。公开向量中的私钥不能用于真实设备。
+- 身份层按 Server origin 隔离 deviceId、X25519 私钥及凭据。重试、恢复和前后台切换不能更换身份；临时配对状态还须绑定 session 和操作代次。
+- 界面只在用户确认 origin、Host ID/完整公钥指纹后 claim。验证码保留前导零，不自动复制、分享、回填或替电脑调用 host/confirm；前后台预览保护不能妨碍无障碍访问。
+- 网络结果未知时保留原 claim 的准确请求字节。后台暂停轮询，恢复时先验证 origin、账号与操作代次；切服务器、取消或退出后，迟到响应不能写入新状态。
+- completed 后核对本手机 ID/公钥/role、Host 固定身份、会话和 token 字段，先安全保存凭据，再发布登录成功并自动连接本次批准的 Host。存储失败可在恢复窗口重取；旧轮询结果不能覆盖已刷新的凭据。
+- 配对直接取得设备凭据，不经过密码/OAuth 注册、Web token 或通用 devices/register。已有账号冲突不能静默注销、覆盖凭据、转移 Host 或合并账号；由用户处理冲突后重新配对。
+
+手机的 API client、账号状态、Host 选择、平台安全存储与界面可以沿用原有分层；不固定外部项目的文件路径或方法名。Dart 向量、真实扫码和原生设备回归仍需在对应客户端执行，Node 模拟手机不替代目标 runtime。
+
+### 隔离互操作检查
+
+本仓库 `scripts/check-device-pairing.ts` 可连接本机隔离的 C# Server API/Gateway，以真实 Remote Host 和模拟手机检查凭据、重启恢复、Noise/Relay 及关系撤销。先在独立 Server 仓库构建脚本所需 C# 项目，再从本仓库以 Node.js >=24.9 运行：
+
+```sh
+DSH_PAIRING_SERVER_ROOT=/absolute/path/to/deepseek-harness-server pnpm exec tsx scripts/check-device-pairing.ts
+```
+
+检查使用隔离临时数据库，不连接生产或代替用户批准真实配对。

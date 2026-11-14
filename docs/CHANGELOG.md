@@ -1,3 +1,7 @@
+# Changelog
+
+版本条目保留发布时的功能和验证范围；当前使用方式与限制见[文档入口](README.md)和[版本兼容](compatibility.zh.md)。
+
 ## 0.6.5 — 2026-11-15
 
 Android build 72.
@@ -15,11 +19,10 @@ Android build 72.
 - Recover credential refresh and interrupted storage migration with a cross-process V2 queue; stop all Harness processes before upgrading or downgrading. See [integration and downgrade guidance](plugin-integration.md).
 - Fix Host control/Relay WebSocket Origin handling under dsh web; retain browser Origin checks. Add Host debug-log storage and an expandable settings drawer.
 - Update an npm-installed Remote from the local Desktop dialog when supported; GitHub/local installs retain the release link, and remote peers still cannot replace their owning Remote plugin.
-- Add the standalone, matching-version `ds-harness-remote-tui` bundle for Harness 0.2.2-rc.1. Real dsh-TUI 0.20.1 / Android 72 core cross-device acceptance passed on haru; see [results](tui-haru-verification.md).
+- Add the standalone, matching-version `ds-harness-remote-tui` bundle for Harness 0.2.2-rc.1. Real dsh-TUI 0.20.1 / Android 72 core cross-device acceptance passed on haru.
 - Accept valid absolute file paths through the trusted workspace alias while rejecting traversal and internal symlinks. Fix macOS temporary-path normalization in packed-runtime verification.
 - Keep TUI npm publishing failures from blocking subsequent GitHub Release / APK publication. Verify the final release with workspace production builds/checks/tests and packed GitHub/npm WebRTC fallback smokes.
 
-Device acceptance and remaining limits: [haru / MIX 4](android-haru-verification.md), [LAN uploads](android-upload-verification.md), [asynchronous compaction](remote-compaction-verification.md). The final workspace-alias correction has automated regression and packed-runtime coverage; the current bundle was subsequently tested in an isolated haru TUI profile; the original Web service was restored afterward.
 
 ### 中文
 
@@ -34,11 +37,34 @@ Device acceptance and remaining limits: [haru / MIX 4](android-haru-verification
 - 使用跨进程 V2 队列恢复凭据刷新和中断存储迁移。升级或降级前必须停止所有 Harness 进程，详见[集成与降级指南](plugin-integration.md)。
 - 修复 dsh web 下 Host 控制/Relay WebSocket 的 Origin；保留浏览器校验。新增 Host 调试日志存储与设置中的可展开日志抽屉。
 - Harness 支持时，可从本机 Desktop 弹窗升级 npm 安装的 Remote；GitHub/本地安装保留发布页入口，远程连接仍不能替换拥有它的 Remote 插件。
-- 新增同版本独立 `ds-harness-remote-tui` 组合包，适用于 Harness 0.2.2-rc.1；真实 dsh-TUI 0.20.1 与 Android 72 在 haru 的核心跨设备验收通过，见[记录](tui-haru-verification.md)。
+- 新增同版本独立 `ds-harness-remote-tui` 组合包，适用于 Harness 0.2.2-rc.1；真实 dsh-TUI 0.20.1 与 Android 72 在 haru 的核心跨设备验收通过。
 - 修复可信工作区别名下合法绝对路径误拒绝，继续拒绝越界与内部符号链接；修正 macOS 临时目录在打包运行时校验中的路径规范化。
 - TUI npm 发布失败不再阻断后续 GitHub Release / APK；最终版本通过全仓生产构建、类型检查、测试与 GitHub/npm 打包 WebRTC 回退冒烟。
 
-真机验收和边界见 [haru / MIX 4](android-haru-verification.md)、[LAN 上传](android-upload-verification.md)、[异步压缩](remote-compaction-verification.md)。本次评审补充的工作区别名修复已完成自动回归和打包运行时验证，随后已用当前 bundle 在 haru 独立 TUI profile 完成验收，结束后恢复原 Web 服务。
+
+## 0.6.4 — 2026-11-08
+
+Android build 71.
+
+### English
+
+- Add DS Bot 0.3.0 conversations, groups, agent badges, settings subpages, schedules and desktop installation guidance.
+- Android: keep the chat input editable and preserve each conversation's local draft while the Host is unreachable; sending still requires a reconnected, user-triggered send.
+- Add offline session instant-open, cached reading while hosts are offline, direct workspace creation, host switching and connection diagnostics.
+- Improve pairing and sign-in with DSH-Go pairing, compact QR, editable server address, clearer account labels and responsive login layouts.
+- Fix session catalogue handling for oversized shared lists, corrupt identity recovery, reconnect behavior and delayed packets on destroyed links.
+- Add Windows Codex CLI discovery and recover lost self-hosted refresh responses without revoking valid credentials.
+- Normalize release bundle paths, add bilingual issue forms, and publish the repository license.
+
+### 中文
+
+- 新增 DS Bot 0.3.0 多会话、群聊、本地 Agent 标识、设置二级页、日程联动和电脑端安装指引。
+- Android：主机断线期间聊天输入框仍可编辑，并按会话保留本地草稿；恢复连接后仍需用户手动发送。
+- 新增离线会话秒开、主机离线缓存阅读、侧栏直接创建工作区、主机切换和连接诊断。
+- 改进 DSH-Go 配对、紧凑二维码、可编辑服务地址、设备账号标签和响应式登录布局。
+- 修复超大共享会话目录、损坏身份恢复、重连行为和已销毁链路延迟包处理问题。
+- 新增 Windows Codex CLI 发现，并在自部署 Server 丢失刷新响应时恢复有效凭据。
+- 统一发布 bundle 路径，新增中英文 Issue 表单并补充仓库许可证。
 
 ## 0.6.3 — 2026-11-05
 
@@ -694,7 +720,6 @@ The following entries retain the implementation and validation milestones record
 - Fixes Remote Web workspace image and Office preview responses by materializing Harness Gateway binary attachments on the Host and restoring them to `Uint8Array` in the client gateway.
 - Rebuilds the Plugin bundle and synchronizes the Android/Plugin release version.
 
-# Changelog
 
 ## 0.5.3 - 2026-10-11
 
@@ -1236,26 +1261,3 @@ Android could display plugin-injected model context as user conversation rows.
 `0.3.17` was withdrawn because its Client could forward `commands.list` and
 register the remote file provider against older Hosts without a compatibility
 fallback.
-## 0.6.4 — 2026-11-08
-
-Android build 71.
-
-### English
-
-- Add DS Bot 0.3.0 conversations, groups, agent badges, settings subpages, schedules and desktop installation guidance.
-- Android: keep the chat input editable and preserve each conversation's local draft while the Host is unreachable; sending still requires a reconnected, user-triggered send.
-- Add offline session instant-open, cached reading while hosts are offline, direct workspace creation, host switching and connection diagnostics.
-- Improve pairing and sign-in with DSH-Go pairing, compact QR, editable server address, clearer account labels and responsive login layouts.
-- Fix session catalogue handling for oversized shared lists, corrupt identity recovery, reconnect behavior and delayed packets on destroyed links.
-- Add Windows Codex CLI discovery and recover lost self-hosted refresh responses without revoking valid credentials.
-- Normalize release bundle paths, add bilingual issue forms, and publish the repository license.
-
-### 中文
-
-- 新增 DS Bot 0.3.0 多会话、群聊、本地 Agent 标识、设置二级页、日程联动和电脑端安装指引。
-- Android：主机断线期间聊天输入框仍可编辑，并按会话保留本地草稿；恢复连接后仍需用户手动发送。
-- 新增离线会话秒开、主机离线缓存阅读、侧栏直接创建工作区、主机切换和连接诊断。
-- 改进 DSH-Go 配对、紧凑二维码、可编辑服务地址、设备账号标签和响应式登录布局。
-- 修复超大共享会话目录、损坏身份恢复、重连行为和已销毁链路延迟包处理问题。
-- 新增 Windows Codex CLI 发现，并在自部署 Server 丢失刷新响应时恢复有效凭据。
-- 统一发布 bundle 路径，新增中英文 Issue 表单并补充仓库许可证。

@@ -98,7 +98,7 @@ This repository includes a minimal, single-account self-hosted Relay Server in [
 
 - [Complete guide](https://github.com/liguobao/ds-harness-remote#readme)
 - [Codex Remote technical notes](https://github.com/liguobao/ds-harness-remote/blob/main/docs/codex-remote.md)
-- [Agent workspace integration guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-integration.md)
+- [Agent workspace integration guide](https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-remote.md)
 - [End-to-end encryption](https://github.com/liguobao/ds-harness-remote/blob/main/docs/end-to-end-encryption.md)
 - [Network and transport](https://github.com/liguobao/ds-harness-remote/blob/main/docs/network.md)
 - [Protocol reference](https://github.com/liguobao/ds-harness-remote/blob/main/docs/protocol.md)

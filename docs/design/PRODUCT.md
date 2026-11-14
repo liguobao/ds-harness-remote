@@ -1,10 +1,10 @@
 # DSH Remote 产品定位
 
-更新时间：2026-10-27。
+产品能力与版本范围分别由根 README 和兼容性文档维护。
 
 ## 用户与目标
 
-面向在工作电脑或服务器运行 Harness / CodeX / Cursor / Antigravity / Pi / OpenCode / Claude，并希望从另一台电脑、手机或浏览器继续工作的人。
+面向在工作电脑或服务器运行 Harness / CodeX / Cursor / Antigravity / Pi / OpenCode / Claude / Hermes，并希望从另一台电脑、手机或浏览器继续工作的人。
 Host 保留工作目录、Agent 运行环境与会话数据，Client 提供安全入口和操作界面；会话不迁移到 Client。
 
 Remote Plugin 同时提供常驻 Host 和本地 Remote 工作区入口。用户选择同账号 Host、后端和工作区后继续会话，无需切换 Client 模式。
@@ -14,10 +14,10 @@ Desktop 复用 Harness 原生 UI；Android 提供适合移动端的工作区、�
 
 - 同账号设备发现、身份固定与端到端加密连接。
 - Harness 官方会话、文字/图片 Prompt、历史、模型、权限与审批。
-- 可选 CodeX App Server 和 Cursor / AGY / Pi / OpenCode / Claude ACP 后端，通过独立数据面展示其会话。
+- 可选 CodeX App Server 和 Cursor / AGY / Pi / OpenCode / Claude / Hermes ACP 后端，通过独立数据面展示其会话。
 - 后端支持范围内的只读工作区文件与交互终端；明确授权的本机开发服务预览。
-- Android 工作区收藏、最近会话快捷入口、跟随系统及英、简中、繁中、日、西、德、法语言与浅色/深色主题。
-- 终端二维码授权通过独立 CLI 提供；dsh-TUI Host 的原生 `/remote` 集成计划在后续版本单独提供。
+- Android 工作区收藏、最近会话快捷入口、跟随系统及英、简中、繁中、日、西、德、法、俄、乌克兰语与浅色/深色主题。
+- 终端授权通过独立 CLI 提供；dsh-TUI Host 使用同版本独立 `ds-harness-remote-tui` 组合包，见[安装说明](../../packages/tui/README.md)。
 - 后端设置保存后热更新，工作区可用性由实际就绪状态决定。
 
 CodeX 默认开启、Cursor 默认关闭；其他 ACP 后端以 Host 配置和实际就绪状态为准。
@@ -59,4 +59,14 @@ TalkBack、IME、大字体和原生设备效果仍需实际验证，不能将设
 团队页和对话页：主 Bot 卡片、团队与群聊列表，以及 Bot/群聊创建和管理。对话保留官方
 Harness 历史、流式内容与审批，DS Bot 问答/交互卡片用原生控件展示，通过固定 Bot 接口提交。
 模式切换仅影响本机导航，按服务器、账号、主机及固定身份记住 Agent/Bot 选择，再次进入主机或重启 App 后恢复；主机未启用 ds-bot 或 Remote 缺少能力时展示错误，不显示本地或
-其他主机数据。记忆、连接器等 Host 本地管理边界不变。源码实现不等于真机/跨设备验收。
+其他主机数据。DS-Bot 管理与电脑操作通过固定路由进入认证后的上游 handler 校验；不开放任意 endpoint。
+
+## 用户路径
+
+1. 在 Desktop 插件管理或指定 profile 安装 Remote；TUI 使用独立组合包。
+2. Host 授权加入账号，Client 使用独立身份登录并选择在线 Host；授权方式取决于 Server 支持。
+3. 固定 Host 身份并建立加密通道，选择 capability 与就绪状态同时满足的后端和工作区。
+4. 打开或新建会话，使用该后端支持的消息、模型、审批、文件和终端。
+5. 断线保留所选 Host authority，离线操作失败；恢复重新读取状态，不重放 mutation。退出 Remote 才回到 Local。
+
+后端设置只热更新变化的进程与能力；其他后端及 Harness 连接保留。Remote 连接不得修改拥有自身的插件访问设置或替换其组合包。

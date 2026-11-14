@@ -17,8 +17,7 @@ P2P、TURN/Relay、IPv6、小文件、旧 Host 和缺少原生模块的 APK 沿�
 新手机经隔离认证上下文完成两次 200 MiB（15.617s / 11.560s），SHA-256 均一致；没有依赖
 账号登录。普通 APK 已安装，Host bundle 已重建；未替换/重启用户现有 DSH profile，未发布。
 这不等同真实登录/Server membership E2E，也未做公网 P2P 或 iOS 真机验收。协议及边界见
-`docs/protocol.md`，详细实测与复现见 `docs/android-upload-verification.md`、
-`scripts/transport-bench/README.md`。
+`docs/protocol.md`，详细实测与复现见 `scripts/transport-bench/README.md`。
 
 ## DS-Bot v0.3.6 Host endpoint forwarding (2026-11-13)
 
@@ -98,7 +97,7 @@ connection/message-actions 回归通过。2026-11-13 已完成跨设备真机验
 profile（Mac，DSH 0.2.2-rc.1 + 本插件 + GLM-5.3），Client 为另一台 DGX Spark-01，经自托管
 Remote Server 以 Relay 连接；600K 字符上下文下长压缩 137.66s 成功、断线重连用同一
 operationId 继续且 accepted/command-run 均 1、显式取消经 compaction/end 确认后 6.18s
-进入 cancelled。详见 docs/remote-compaction-verification.md。
+进入 cancelled。契约与取消边界见 docs/protocol.md 的异步压缩部分。
 
 ## Android coherent transitions (Issue #8, 2026-11-12)
 
@@ -499,7 +498,7 @@ Desktop，探测超时关闭 stdout 后可能触发 `write EPIPE`。探测脚本
 
 当前仓库实现：
 
-- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口；dsh-TUI 集成自 0.6.3 起移除，计划下一版本单独提供；无用户可见的 Client 模式）
+- DeepSeek Harness Plugin（Remote Host + 本地 Remote 工作区入口；dsh-TUI Host 使用同版本独立 `ds-harness-remote-tui` 组合包，授权使用独立 CLI；无用户可见的 Client 模式）
 - Android Client（账号授权 + Adaptive transport + v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote + 可选 CodeX Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
@@ -711,7 +710,7 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 - 调试、验收截图与录屏不提交到仓库；本地留档使用已忽略的 `artifacts/` 或 `docs/screenshots/`。README 使用的 `docs/images/` 展示图与应用运行所需图片资源保留。
 - 对外发布说明与新版本 Changelog 只写用户可感知的功能、修复、兼容性变化和贡献者；不附测试数量、构建命令、bundle 校验、未验收清单或构建警告等验证流水账。内部验证结果与边界保留在 AGENTS.md / TODO。
 - `README.md`：面向用户的默认英文入口，也是 GitHub 默认 README；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
-- `README.en.md`：保留的英文入口，与默认 `README.md` 保持内容一致。
+- 英文入口统一为默认 `README.md`，不另维护同内容的根目录英文副本；包内 locale 详情文件按发布元数据保留。
 - `README.zh.md`：保留的中文入口，与默认 `README.md` 保持功能和版本信息一致。
 - `AGENTS.md`：面向编码 Agent，写仓库结构、进度、命令和实现约束。
 - `docs/TODO.md`：未完成任务与优先级。
@@ -722,7 +721,6 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 - `docs/server.md`：完整 Server 项目的产品/功能设计，并说明本仓库自部署版本的范围。
 - `docs/plugin-integration.md`：Host Plugin 对接 Server 的账号认证、设备认证与凭证状态机，以及最小自部署版本支持的子集。
 - `docs/protocol.md`：跨仓库协议规范。
-- `docs/archive/vibe-coding.md`：原始需求背景，当前边界以 `README.md`、`AGENTS.md` 和 `docs/README.md` 为准。
 
 文档发生范围变化时，应同时检查以上入口，避免 README、TODO、设计文档和实际目录互相冲突。
 
@@ -835,7 +833,7 @@ Plugin 类型检查、42 个测试文件 / 372 个测试和 `git diff --check` �
 
 `docs/design/` 按当前源码更新，不再使用早期 MVP 草案作为当前边界。CodeX 会话只读文件与终端由 `codex-workspace-bridge.ts` 基于 Host 验证的 Thread cwd 提供；ACP 只读文件与终端使用独立 `dsh/toolCall` / tool stream 和 session/backend scope。两者都遵循固定 allowlist、路径/realpath 校验和终端归属/输入权，不扩大 App Server 或 Harness 通用 RPC。上述源码能力不代表已完成 Windows、APK、真机或加密跨设备验收。旧日期的“不对 CodeX 投影开放”记录仅描述当时范围；当前线协议以 `docs/protocol.md` 为准。
 
-界面设计 `docs/design/DESIGN.md` 引用 Android 当前 theme 和 App 导航；Files/Terminal 从输入栏「＋」的工具访问进入，快捷提示词独立展示，轨迹另有标题栏入口。原始需求归档到 `docs/archive/vibe-coding.md`，不作为当前实现任务。
+界面设计 `docs/design/DESIGN.md` 引用 Android 当前 theme 和 App 导航；Files/Terminal 从输入栏「＋」的工具访问进入，快捷提示词独立展示，轨迹另有标题栏入口。原始需求提示词已移除，当前实现边界以 `docs/README.md`、协议和源码为准。
 
 ## Harness 0.2.1 compatibility (2026-10-09)
 
@@ -972,7 +970,7 @@ HTTP API，仅允许经 Host catalog/realpath 验证会话的 GET 与 PATCH `tim
 持久保存，不建立 Host 归档索引；其他 ACP 后端不能返回本地伪归档成功。
 归档与加载/Prompt/模型写入/审批互斥，历史读取不抢 owner；不提供恢复归档或已归档列表。
 真实 v1.19.3 隔离临时目录验证了原生确认、跨连接、幂等、重启隐藏及历史读取；Windows、
-APK/真机、跨设备和独立 Remote Web 尚未验收。详细边界见 `docs/design/acp-session-archive.md`。
+APK/真机、跨设备和独立 Remote Web 尚未验收。详细边界见 `docs/acp-remote.md#opencode-与原生归档`。
 本次 Plugin check/build、359 个测试、client-core 41 个测试、Protocol 78 个测试、Android
 check/132 个测试及 Hermes export、DSH bundle 校验通过；Metro 的 noble/hashes exports
 fallback 警告仍存在。
@@ -1288,8 +1286,7 @@ The phone is simulated in Node: this is not Dart/Android acceptance. The actual
 React pairing component was checked in an isolated desktop/narrow preview; not a
 full Harness UI acceptance. Loopback/isTrusted cannot prove human presence against
 OS automation; a trusted native user-presence primitive would be required.
-Protocol and DSH-Go handoff are docs/device-pairing-v1.md and
-docs/dsh-go-pairing-integration.md. No production deployment/restart or real-user
+Protocol and mobile integration share docs/device-pairing-v1.md. No production deployment/restart or real-user
 pairing approval was performed.
 
 ## Pairing sign-in placement (2026-11-08)

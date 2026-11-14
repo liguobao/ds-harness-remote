@@ -25,8 +25,7 @@ Harness `0.1.1-rc.2` ApiProxy-only Hosts are no longer supported; capability dis
   `expo-secure-store`.
 - List same-account Harness hosts, fetch each host's authorized peer descriptor, verify its
   identity key, and pin it locally; a changed key fails closed and is never silently replaced.
-- Rename an online or offline Host with the pencil button in the device list or **Rename**
-  in device details, without connecting first. The name is saved
+- Rename an online or offline Host from the edit action in device details, without connecting first. The name is saved
   through the hosted Server's account-device API, matching Web management, and updates the
   device list, connected device and saved workspace shortcuts. Servers without this endpoint
   show an error and keep the original name.
@@ -46,8 +45,7 @@ Harness `0.1.1-rc.2` ApiProxy-only Hosts are no longer supported; capability dis
   screen without creating local workspaces, show their allowlisted Threads as conversations, page
   `dsh/sessionHistory`, reduce live reasoning/plan/tool frames, send text or system-picker image
   prompts over `codex.app.*`, switch CodeX model/reasoning and fixed permission presets, interrupt
-  the active turn, and answer one-time command/file approvals. CodeX workspaces remain read-only in
-  Android because the Host's `project/list` is authoritative.
+  the active turn, and answer one-time command/file approvals. New CodeX projects register Host-existing directories through the fixed `project/create` operation; they do not create directories or write Harness stores.
 - Reconnect after Android network/app lifecycle changes. The connection transport can be
   pinned in Settings (Auto / TURN first / Relay only) and is applied on reconnect.
 - Follow the system rotation setting (the app is not locked to portrait). Portrait and landscape
@@ -59,13 +57,12 @@ Harness `0.1.1-rc.2` ApiProxy-only Hosts are no longer supported; capability dis
   after it is tapped; the app renders the same-origin `scanUrl` locally, polls the one-time QR
   session and then registers this Android device with the returned account token. Large screens
   use a larger code; browser OAuth and email/password sign-in remain available.
-- Show the interface in English, Simplified Chinese, Traditional Chinese, Japanese, Spanish, German, or French. Follow Android's current locale by default and persist an explicit in-app language choice across launches. Language settings initially show System default, 简体中文, and English; tap “More ...” to expand all languages. A selected additional language keeps the full list visible.
+- Show the interface in English, Simplified Chinese, Traditional Chinese, Japanese, Spanish, German, French, Russian, or Ukrainian. Follow Android's current locale by default and persist an explicit in-app language choice across launches. Language settings initially show System default, 简体中文, and English; tap “More ...” to expand all languages. A selected additional language keeps the full list visible.
 - Show the installed app/build version and the complete open-source repository and latest-release
   addresses in Settings; both addresses open in the system browser.
 - Open saved prompts directly from **Prompts** beside the composer's `+` button. Tap a
   prompt to send it, or edit the list in the same panel. Built-in translations, saved overrides,
-  deletions, and custom entries use the existing local storage. Files, Terminal, and Trajectory
-  remain under `+` → **Tool access**.
+  deletions, and custom entries use the existing local storage. Files and Terminal remain under `+` → **Tool access**; Trajectory has a chat-header entry.
 
 The app does not run in Expo Go because WebRTC includes native code. Use a development build.
 
@@ -94,9 +91,7 @@ Android permission; the app does not add a push service. Sign-out and local rese
 browsing state. There is no separate conversation-preview cleanup control.
 
 The Host sidebar includes automation tasks: search and filter active/inactive tasks, inspect
-rules and records, delete a task, and open its session. New tasks are created through a
-conversation with the Host's native scheduling tool, not a separate mobile scheduler.
-Native-device and cross-device acceptance of this recently merged interface remains pending.
+rules and records, delete a task, and open its session. Creation and updates use the Host's supported scheduling operations; task execution remains on the Host. Target-platform gaps are tracked in [TODO](../../docs/TODO.md).
 
 ## Development
 
@@ -121,9 +116,9 @@ HTTP is accepted only for `localhost`, `127.0.0.1`, `10.0.2.2`, and private-netw
 (RFC1918 LAN ranges, link-local, and CGNAT such as Tailscale) by the client; public addresses and
 production servers must use HTTPS/WSS.
 
-## Validation
+## Build and checks
 
-To build the current checkout as a Release APK and install it on a connected phone:
+From the repository root, to build the current checkout as a Release APK and install it on a connected phone:
 
 ```bash
 bash scripts/install-android-release.sh
@@ -186,21 +181,10 @@ indicator until the channel is restored. Recovery reuses the existing foreground
 Headless JS task and wake lock across failed attempts, rather than attempting to start a new
 service from the background. Its notification shows connecting, connected or disconnected /
 reconnecting. After the final failed attempt the service and wake lock are released.
-On the attached Xiaomi phone, the rebuilt APK retained its process through roughly four
-minutes screen-off; waking delivered a control-channel error at 16:25:47, followed by a
-verified new connection / connected notification at 16:25:50 and the restored chat. Battery
-settings were unchanged. The system marked the wake lock disabled while asleep, so this
-confirms one wake/recovery path, not uninterrupted networking or long-term background survival.
-Further system logs on that phone identified Xiaomi's `greeze` screen-off freeze: about
-5.7 seconds after sleep, it disabled this foreground-service app's wake lock and explicitly
-destroyed the app's live TCP sockets. The socket error reached JS after waking. A JS heartbeat
-cannot prevent that system action. Xiaomi's per-app unrestricted battery/background policy
-needs separate device verification; the user's existing policy was retained during these tests.
-CodeX stream updates are coalesced in order over a bounded 100 ms window. Completion and
-approval notifications drain preceding deltas, while unchanged projections retain list data
-and retired subscriptions are fenced from reopened sessions. After rebuilding, one complete
-live reply passed on the attached Android phone without the observed VirtualizedList
-update-depth error. Long-running and background validation remains pending.
+Some OEM power managers can freeze a foreground-service app, disable its wake lock and destroy TCP sockets after screen-off. A JS heartbeat cannot prevent this. Wake/reconnect success is different from uninterrupted background networking; remaining platform checks are tracked in [TODO](../../docs/TODO.md).
+
+CodeX stream updates are coalesced in order over a bounded window; completion and approvals drain preceding deltas, unchanged projections retain list data, and retired subscriptions cannot update a reopened session.
+
 The service is stopped when the user disconnects, initial setup fails, recovery is exhausted,
 or the connection is refused/replaced. This does not
 make a force-stopped process reconnect by itself; that remains an explicit recovery path.
@@ -241,13 +225,7 @@ blank conversation. History and live frames use `agent.acp.*`; reconnect reloads
 reopens the stream. Replies refresh the conversation title. AGY supports text and PNG/JPEG/WebP/GIF
 images (8 MiB each, four per message); image prompts and history use bounded ACP transfers. Images
 remain in the Host's private temporary cache for up to 24 hours. The live Android projection stays
-in memory and never writes DSH SessionStore or Workspace data; the separate encrypted text preview
-cache is described above. Cursor remains a separate backend.
-
-Validation: Android typecheck, 286 tests, and production Hermes export passed. An in-process test
-using the real AGY CLI verified image replies and catalog/history/image recovery after Host restart;
-it did not exercise encrypted transport or an Android UI. No Android device or Java runtime was
-available, so this change has not been validated in a newly built APK on a physical device.
+in memory and never writes DSH SessionStore or Workspace data; local navigation preferences and drafts follow the encrypted storage rules above. Cursor remains a separate backend.
 
 ## Bot mode
 
@@ -261,14 +239,11 @@ interactive cards).
 The native team and conversation views provide Main Bots, Bot/group creation and
 editing, duplication/deletion, model/effort selection, group membership, text chat,
 live Harness history, questions, one-time approvals, and declarative interactive
-cards. Usage and schedules are read-only. Memory, connectors, credentials, browser
-control and Host preferences remain Host-local; this does not expose arbitrary
-plugin endpoints. Ordinary Bot messages use DS Bot's own `send` operation; opening a Bot or
+cards. Usage and schedules are read-only. The Host forwards the fixed DS-Bot 0.3.6 route allowlist, including management and computer operations; DS-Bot handlers enforce their own authorization. Android exposes its implemented native pages, not every forwarded endpoint. Ordinary Bot messages use DS Bot's own `send` operation; opening a Bot or
 group resolves its current identity against the official Harness Session catalog.
 Older Host responses, disconnects and replaced connections fail closed. Mutations
 are never automatically retried. Team state remains in memory and polling pauses
-when the app is backgrounded. New Bot labels support Chinese/English (other locales
-currently fall back to English).
+when the app is backgrounded. Settings translations use the App locale dictionaries.
 
 DS Bot 0.2.1 support adds `/btw <question>` in private Bot chats, answer/cancel cards,
 side questions from earlier parts, and **Continue group** when Bot relays reach the
@@ -282,15 +257,7 @@ numbers, choices, toggles and local formulas, with validated input submission.
 Charts also offer an exact data table. HTML views show their summary and a notice
 to open them on the Host; no model HTML or scripts run in Android. Local calculator
 inputs remain usable on display-only history cards, while submissions require a
-current pending card. Validation: Android type checks and 195 tests, Plugin type checks and 19 route tests, shared/Plugin builds, bundle verification and production Hermes export passed. No device was connected; APK/device, TalkBack and encrypted cross-device acceptance remain pending. The existing noble/hashes exports fallback warning remains.
-
-Device smoke checks on Xiaomi 2304FPN6DC against DSH-046 confirmed Bot roster and existing Chief conversation history loading. Full interaction and cross-device acceptance remain pending.
-
-Local validation (2026-10-22): Android type checks, all 32 test files / 189 tests,
-and an arm64 Release APK (including Hermes) pass. Tests cover Bot operation
-allowlisting, one-time approval, current-session authority, rejected Host responses,
-cancellation, and connection replacement/revocation. The existing Metro
-`@noble/hashes/crypto.js` package-exports fallback warning remains. A subsequent device check exposed React Native AbortSignal lacking `throwIfAborted`; cancellation now checks `aborted` directly. Type checks, 14 targeted Bot/connection tests and a rebuilt arm64 release APK passed; the APK was reinstalled and roster/history loading verified on the phone.
+current pending card.
 
 Roster rows show the latest visible official session outline, excluding internal Bot exchanges; group previews use the Host-provided speaker and message. Roles/members remain the fallback for empty conversations.
 
