@@ -13,6 +13,7 @@ import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
 import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, useStartupUpdateCheck } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
+import { useBotTeamStore } from './src/state/bot-store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import { resolveStartupAutoConnect } from './src/lib/auto-connect'
 import {
@@ -472,7 +473,11 @@ function AppNavigator() {
       backgrounded.current = false
       // Keep healthy carriers, but verify an encrypted round trip before
       // trusting a socket that merely remained locally "open" while asleep.
-      void useAppStore.getState().resumeConnection()
+      void useAppStore.getState().resumeConnection().then(() => {
+        if (useAppStore.getState().connection.phase === 'connected' && useBotTeamStore.getState().state !== undefined) {
+          void useBotTeamStore.getState().refreshLive({ forceFull: true })
+        }
+      })
     })
     return () => subscription.remove()
   }, [reconnect])

@@ -54,6 +54,9 @@ export interface BotAgent {
   createdAt?: number
 }
 export interface BotState {
+  revision?: number
+  liveKey?: string
+  modelsKey?: string
   workspaceId?: string
   mainBotId?: string
   mainBotIds?: string[]
@@ -145,16 +148,35 @@ export class BotRemoteClient {
     return envelope.value
   }
 
-  async state(signal?: AbortSignal, withPreviews = false): Promise<BotState> {
-    const state = parseBotState(await this.call('state', null, signal))
+  async state(signal?: AbortSignal, withPreviews = false, previous?: BotState): Promise<BotState> {
+    const canIncremental = previous?.revision !== undefined && previous?.liveKey !== undefined
+    const query = canIncremental
+      ? {
+          since: previous.revision,
+          ...(previous.modelsKey !== undefined ? { models: previous.modelsKey } : {}),
+          live: previous.liveKey,
+        }
+      : null
+    const raw = await this.call('state', query, signal)
+    if (canIncremental) {
+      const merged = mergeBotStateDelta(previous, raw)
+      if (merged !== undefined) {
+        if (!withPreviews) return merged
+        return attachStatePreviews(merged, await this.readSessions(), () => {
+          this.assertCurrent()
+          checkAborted(signal)
+        })
+      }
+    }
+    const parsed = parseBotState(raw)
+    const state = previous !== undefined
+      ? preserveIncrementalFields(parsed, previous, raw, !withPreviews)
+      : parsed
     if (!withPreviews) return state
-    const sessions = await this.readSessions()
-    this.assertCurrent()
-    checkAborted(signal)
-    const catalog = new Map(sessions.filter(entry => (entry.backend ?? 'harness') === 'harness').map(entry => [entry.sessionId, entry]))
-    for (const bot of state.bots) bot.preview = sessionPreview(catalog.get(bot.sessionId), state.exchangeTurns[bot.sessionId])
-    for (const room of state.rooms) room.preview ||= sessionPreview(catalog.get(room.sessionId || room.id))
-    return state
+    return attachStatePreviews(state, await this.readSessions(), () => {
+      this.assertCurrent()
+      checkAborted(signal)
+    })
   }
 
   /** Resolve only a current Bot/group returned by this Host, against its official catalog. */
@@ -247,6 +269,9 @@ export function parseBotState(value: unknown): BotState {
   if (new Set(ids).size !== ids.length) throw new Error(strings.bots.invalid)
   const workObj = object(value.work)
   return {
+    ...(typeof value.revision === 'number' ? { revision: value.revision } : {}),
+    ...(nonempty(value.liveKey) ? { liveKey: value.liveKey } : {}),
+    ...(nonempty(value.modelsKey) ? { modelsKey: value.modelsKey } : {}),
     ...(nonempty(value.workspaceId) ? { workspaceId: value.workspaceId } : {}),
     ...(mainBotId !== undefined ? { mainBotId } : {}),
     ...(mainBotIds.length > 0 ? { mainBotIds } : {}),
@@ -291,6 +316,97 @@ export function parseBotState(value: unknown): BotState {
     ...(typeof value.readOnly === 'string' ? { readOnly: value.readOnly } : {}),
   }
 }
+
+function attachStatePreviews(state: BotState, sessions: RemoteSession[], verify: () => void): BotState {
+  verify()
+  const catalog = new Map(sessions.filter(entry => (entry.backend ?? 'harness') === 'harness').map(entry => [entry.sessionId, entry]))
+  return {
+    ...state,
+    bots: state.bots.map(bot => ({
+      ...bot,
+      preview: sessionPreview(catalog.get(bot.sessionId), state.exchangeTurns[bot.sessionId]),
+    })),
+    rooms: state.rooms.map(room => ({
+      ...room,
+      preview: room.preview || sessionPreview(catalog.get(room.sessionId || room.id)),
+    })),
+  }
+}
+
+function preserveIncrementalFields(
+  next: BotState,
+  previous: BotState,
+  raw: unknown,
+  keepPreviews: boolean,
+): BotState {
+  const rawObj = isBotObject(raw) ? raw : {}
+  const omitModels = !Array.isArray(rawObj.models)
+  const prevBotPreviews = keepPreviews ? new Map(previous.bots.map(b => [b.id, b.preview])) : undefined
+  const prevRoomPreviews = keepPreviews ? new Map(previous.rooms.map(r => [r.id, r.preview])) : undefined
+  return {
+    ...next,
+    ...(omitModels ? {
+      models: previous.models,
+      ...(next.modelsKey === undefined && previous.modelsKey !== undefined ? { modelsKey: previous.modelsKey } : {}),
+      ...(next.defaultModel === undefined && previous.defaultModel !== undefined ? { defaultModel: previous.defaultModel } : {}),
+    } : {}),
+    ...(prevBotPreviews ? {
+      bots: next.bots.map(bot => ({
+        ...bot,
+        preview: bot.preview || prevBotPreviews.get(bot.id),
+      })),
+    } : {}),
+    ...(prevRoomPreviews ? {
+      rooms: next.rooms.map(room => ({
+        ...room,
+        preview: room.preview || prevRoomPreviews.get(room.id),
+      })),
+    } : {}),
+  }
+}
+
+export function mergeBotStateDelta(previous: BotState, raw: unknown): BotState | undefined {
+  if (!isBotObject(raw) || raw.unchanged !== true) return undefined
+  const nextRevision = typeof raw.revision === 'number' ? raw.revision : previous.revision
+  const nextLiveKey = nonempty(raw.liveKey) ? raw.liveKey : previous.liveKey
+  const hasLiveFields =
+    raw.activity !== undefined
+    || raw.work !== undefined
+    || raw.computerLive !== undefined
+    || raw.btwCards !== undefined
+    || raw.sideChats !== undefined
+    || raw.connectors !== undefined
+    || raw.capabilityStatuses !== undefined
+    || raw.imStatus !== undefined
+    || raw.imVia !== undefined
+  if (!hasLiveFields && nextRevision === previous.revision && nextLiveKey === previous.liveKey) {
+    return previous
+  }
+  const nextWorkObj = raw.work !== undefined ? object(raw.work) : undefined
+  return {
+    ...previous,
+    ...(nextRevision !== undefined ? { revision: nextRevision } : {}),
+    ...(nextLiveKey !== undefined ? { liveKey: nextLiveKey } : {}),
+    ...(raw.activity !== undefined ? { activity: object(raw.activity) } : {}),
+    ...(nextWorkObj !== undefined ? {
+      work: {
+        bots: object(nextWorkObj.bots),
+        rooms: object(nextWorkObj.rooms),
+        waiting: object(nextWorkObj.waiting),
+        turns: object(nextWorkObj.turns),
+        steered: object(nextWorkObj.steered),
+      },
+      approvals: objects(nextWorkObj.approvals),
+    } : {}),
+    ...(raw.computerLive !== undefined ? { computerLive: object(raw.computerLive) } : {}),
+    ...(raw.btwCards !== undefined ? { btwCards: object(raw.btwCards), btwSupported: isBotObject(raw.btwCards) } : {}),
+    ...(raw.sideChats !== undefined ? { sideChats: object(raw.sideChats) } : {}),
+    ...(raw.connectors !== undefined ? { connectors: object(raw.connectors) } : {}),
+    ...(raw.capabilityStatuses !== undefined ? { capabilityStatuses: object(raw.capabilityStatuses) } : {}),
+    ...(raw.imStatus !== undefined ? { imStatus: object(raw.imStatus) } : {}),
+    ...(raw.imVia !== undefined ? { imVia: object(raw.imVia) } : {}),
+  }
+}
 export function isBotObject(value: unknown): value is BotObject { return value !== null && typeof value === 'object' && !Array.isArray(value) }
 export function object(value: unknown): BotObject { return isBotObject(value) ? value : {} }
 export function objects(value: unknown): BotObject[] { return Array.isArray(value) ? value.filter(isBotObject) : [] }
@@ -315,6 +431,16 @@ function sessionPreview(session?: RemoteSession, hiddenTurns: unknown = []): str
   return ''
 }
 function compactPreview(value: string): string { return value.replace(/\s+/g, ' ').trim().slice(0, 240) }
+
+/** Combine staged reference mentions with a Bot composer draft without breaking leading /btw commands. */
+export function formatBotSubmission(rawDraft: string, referenceMentions: readonly string[]): string {
+  const trimmed = rawDraft.trim()
+  const prefix = referenceMentions.map(item => item.trim()).filter(Boolean).join(' ')
+  if (/^\/btw(?:\s|$)/.test(trimmed)) {
+    return ['/btw', prefix, trimmed.slice(4).trim()].filter(Boolean).join(' ')
+  }
+  return [prefix, trimmed].filter(Boolean).join(' ')
+}
 
 /** Claim /btw before normal sending; refusals never become queued prompts. */
 export function botMessageRequest(state: BotState, targetId: string, draft: string): { endpoint: BotOperation; payload: BotObject } {

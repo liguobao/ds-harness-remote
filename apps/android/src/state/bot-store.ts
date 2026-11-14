@@ -78,6 +78,7 @@ interface BotTeamStoreState {
   setContextMenu: (target?: BotContextMenuTarget) => void
   clearErrors: () => void
   refresh: (force?: boolean, signal?: AbortSignal) => Promise<void>
+  refreshLive: (options?: { forceFull?: boolean }) => Promise<void>
   syncSelectedSession: (options?: { selectedId?: string; force?: boolean; signal?: AbortSignal }) => Promise<RemoteSession | undefined>
   retryOpenSession: () => Promise<void>
   perform: (operation: BotOperation, payload?: BotObject, signal?: AbortSignal) => Promise<{ ok: boolean; value?: unknown }>
@@ -85,6 +86,11 @@ interface BotTeamStoreState {
 }
 
 let activeRevision = 0
+let activeLiveRevision = 0
+let activeLiveAbort: AbortController | undefined
+let activeLiveKey: string | undefined
+let activeLivePromise: Promise<void> | undefined
+let explicitClearRevision = 0
 let activeOpenRevision = 0
 let activeOpenAbort: AbortController | undefined
 let activeOpenKey: string | undefined
@@ -103,6 +109,14 @@ function resetOpenTracking(): void {
   activeOpenAbort = undefined
   activeOpenKey = undefined
   activeOpenPromise = undefined
+}
+
+function resetLiveTracking(): void {
+  ++activeLiveRevision
+  activeLiveAbort?.abort()
+  activeLiveAbort = undefined
+  activeLiveKey = undefined
+  activeLivePromise = undefined
 }
 
 function observeAppConnection(): { scope: string; connected: boolean; epoch: number } {
@@ -159,6 +173,8 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   ensureScope: (nextScope: string) => {
     if (get().scope === nextScope) return
     ++activeRevision
+    resetLiveTracking()
+    explicitClearRevision = 0
     resetOpenTracking()
     actionLocked = false
     sessionSyncActive = false
@@ -184,6 +200,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
 
   setSelectedId: (id?: string) => {
     if (id === undefined) {
+      ++explicitClearRevision
       resetOpenTracking()
       sessionSyncActive = false
       set({
@@ -210,7 +227,7 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   clearErrors: () => set({ error: undefined, actionError: undefined, openError: undefined }),
 
   refresh: async (force = false, signal?: AbortSignal) => {
-    const scope = currentBotScope()
+    const { scope, connected, epoch } = observeAppConnection()
     get().ensureScope(scope)
     if (actionLocked && !force) {
       set({ loading: false })
@@ -222,10 +239,22 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       return
     }
     const rev = ++activeRevision
+    resetLiveTracking()
+    const clearRevAtStart = explicitClearRevision
     if (get().state === undefined) set({ loading: true })
     try {
       const next = await client.value.state(signal, true)
       if (rev !== activeRevision || get().scope !== scope) return
+      if (connected && (!observeAppConnection().connected || observeAppConnection().epoch !== epoch)) return
+      const currentState = get().state
+      if (
+        currentState?.revision !== undefined
+        && next.revision !== undefined
+        && next.revision < currentState.revision
+      ) {
+        set({ error: undefined, loading: false })
+        return
+      }
       trackBotStateSessions(next, scope)
       const prevState = get().state
       const currentSelected = get().selectedId
@@ -239,16 +268,19 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
         ?? next.bots.find(b => b.main)?.id
         ?? next.bots[0]?.id
         ?? next.rooms[0]?.id
+      const explicitlyCleared = explicitClearRevision !== clearRevAtStart
       const resolvedSelected = currentSelected !== undefined
         ? (validIds.has(currentSelected) ? currentSelected : defaultSelected)
-        : (prevState === undefined ? defaultSelected : undefined)
+        : (!explicitlyCleared && prevState === undefined ? defaultSelected : undefined)
       set({
         state: next,
         error: undefined,
         loading: false,
         selectedId: resolvedSelected,
       })
-      if (sessionSyncActive && resolvedSelected !== undefined) {
+      const targetSessionId = resolveBotTargetSessionId(next, resolvedSelected)
+      if (sessionSyncActive && resolvedSelected !== undefined && targetSessionId !== undefined
+        && get().session?.sessionId !== targetSessionId) {
         await get().syncSelectedSession({ selectedId: resolvedSelected, signal })
       }
     } catch (reason) {
@@ -258,6 +290,87 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
         error: reason instanceof Error ? reason.message : s.bots.unavailable,
       })
     }
+  },
+
+  refreshLive: async (options = {}) => {
+    const { scope, connected, epoch } = observeAppConnection()
+    get().ensureScope(scope)
+    if (!connected || actionLocked) return
+    const prevState = get().state
+    if (prevState === undefined) return
+    const client = getClient()
+    if (!client.value) return
+    const forceFull = options.forceFull === true
+    const flightKey = `${scope}:${epoch}`
+    if (!forceFull && activeLiveKey === flightKey && activeLivePromise !== undefined) {
+      return activeLivePromise
+    }
+    const liveRev = ++activeLiveRevision
+    activeLiveAbort?.abort()
+    const control = new AbortController()
+    activeLiveAbort = control
+    activeLiveKey = flightKey
+    const task = (async () => {
+      try {
+        const next = await client.value!.state(
+          control.signal,
+          false,
+          forceFull ? undefined : prevState,
+        )
+        const after = observeAppConnection()
+        if (
+          control.signal.aborted
+          || liveRev !== activeLiveRevision
+          || get().scope !== scope
+          || !after.connected
+          || after.epoch !== epoch
+          || actionLocked
+        ) {
+          return
+        }
+        const latestState = get().state
+        if (next === latestState) return
+        if (!forceFull && next === prevState && latestState !== prevState) return
+        if (
+          latestState?.revision !== undefined
+          && next.revision !== undefined
+          && next.revision < latestState.revision
+        ) {
+          return
+        }
+        trackBotStateSessions(next, scope)
+        const currentSelected = get().selectedId
+        const validIds = new Set([
+          ...next.bots.map(b => b.id),
+          ...next.rooms.map(r => r.id),
+          ...next.agents.flatMap(a => a.sessions),
+        ])
+        const resolvedSelected = currentSelected !== undefined && !validIds.has(currentSelected)
+          ? (next.mainBotId
+              ?? next.bots.find(b => b.tile)?.id
+              ?? next.bots.find(b => b.main)?.id
+              ?? next.bots[0]?.id
+              ?? next.rooms[0]?.id)
+          : currentSelected
+        set({
+          state: next,
+          error: undefined,
+          ...(resolvedSelected !== currentSelected ? { selectedId: resolvedSelected } : {}),
+        })
+      } catch {
+        // Keep the existing conversation state on transient live-sync errors.
+      } finally {
+        if (activeLiveAbort === control) {
+          activeLiveAbort = undefined
+        }
+        if (activeLiveRevision === liveRev && activeLiveKey === flightKey) {
+          activeLiveKey = undefined
+          activeLivePromise = undefined
+        }
+      }
+    })()
+    activeLivePromise = task
+    return task
   },
 
   syncSelectedSession: async (options = {}) => {
@@ -326,7 +439,14 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
         if (latestSelected !== selectedId) return undefined
         const resolvedKey = botSessionOwnerKey(scope, epoch, selectedId, resolved.session.sessionId)!
         const opened = await useAppStore.getState().openSession(resolved.session)
-        if (control.signal.aborted || openRev !== activeOpenRevision || get().scope !== scope) {
+        const after = observeAppConnection()
+        if (
+          control.signal.aborted
+          || openRev !== activeOpenRevision
+          || get().scope !== scope
+          || !after.connected
+          || after.epoch !== epoch
+        ) {
           return undefined
         }
         if (opened) {
@@ -382,12 +502,13 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   },
 
   perform: async (operation: BotOperation, payload?: BotObject, signal?: AbortSignal) => {
-    const scope = currentBotScope()
+    const { scope, epoch } = observeAppConnection()
     get().ensureScope(scope)
     const client = getClient()
     if (!client.value || actionLocked) return { ok: false }
     actionLocked = true
     ++activeRevision
+    resetLiveTracking()
     set({ busy: true, actionError: undefined })
     let result: { ok: boolean; value?: unknown } = { ok: false }
     try {
@@ -464,7 +585,10 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
     } finally {
       actionLocked = false
       if (get().scope === scope) {
-        await get().refresh(true, signal)
+        const current = observeAppConnection()
+        if (current.connected && current.epoch === epoch) {
+          await get().refresh(true, signal)
+        }
         if (get().scope === scope) set({ busy: false })
       }
     }
@@ -472,11 +596,20 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
   },
 
   loadRunStats: async (botId: string, signal?: AbortSignal) => {
+    const { scope, connected, epoch } = observeAppConnection()
+    if (!connected) return
     const client = getClient()
     if (!client.value) return
     try {
       const value = await client.value.call('run-stats', { botId }, signal)
-      if (!signal?.aborted) {
+      const after = observeAppConnection()
+      if (
+        !signal?.aborted
+        && after.connected
+        && after.epoch === epoch
+        && get().scope === scope
+        && get().selectedId === botId
+      ) {
         set({ runStats: object(value) })
       }
     } catch {

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
-import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
+import { botMessageRequest, formatBotSubmission, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
+import { useBotTeamStore } from '../../state/bot-store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
@@ -31,7 +32,7 @@ import { linkBotMentions, botMentionTarget } from './mentions'
 import { BotMessageActionsContext } from '../message-actions'
 import { SessionToolsPanel } from '../session-tools-panel'
 
-import { browseScope, browseKey, useBrowseMemory, getCachedGroupRound, saveGroupRound } from '../../services/browse-memory'
+import { browseScope, browseKey, updateBrowseEntry, useBrowseMemory, getCachedGroupRound, saveGroupRound } from '../../services/browse-memory'
 
 const EMPTY: ChatItem[] = []
 type BotChatRow =
@@ -41,7 +42,7 @@ type BotChatRow =
   | { kind: 'ui-pointer'; key: string; artifact: UiArtifact }
   | { kind: 'ui-unavailable'; key: string; item: ToolActivity }
 export function BotConversation({ bot, room, state, client, session, busy, active, perform, onSelectBot }: {
-  bot?: BotEntry; room?: BotRoom; state: BotState; client: BotRemoteClient; session: RemoteSession
+  bot?: BotEntry; room?: BotRoom; state: BotState; client?: BotRemoteClient; session: RemoteSession
   busy: boolean; active: boolean; perform: BotPerform; onSelectBot: (id: string) => void
 }) {
   const transformText = useCallback((value: string) => linkBotMentions(value, state.bots, bot?.id), [state.bots, bot?.id])
@@ -58,11 +59,15 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const respondApproval = useAppStore(store => store.respondApproval)
   const respondQuestion = useAppStore(store => store.respondQuestion)
   const stopSession = useAppStore(store => store.stopSession)
-  const [draft, setDraft] = useState('')
+  const refreshLive = useBotTeamStore(store => store.refreshLive)
+  const memoryScope = useAppStore(browseScope)
+  const savedDraft = useBrowseMemory(store => store.entries[browseKey(memoryScope, session.sessionId)]?.draft ?? '')
+  const [draft, setDraft] = useState(savedDraft)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const selectionRef = useRef({ start: 0, end: 0 })
   const inputRef = useRef<TextInput>(null)
+  const sendingRef = useRef(false)
   const [atQuery, setAtQuery] = useState<string | null>(null)
   const atSpanStartRef = useRef(0)
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
@@ -77,6 +82,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const [earlier, setEarlier] = useState<BotObject[]>([])
   const [cursor, setCursor] = useState<unknown>(undefined)
   const [olderBusy, setOlderBusy] = useState(false)
+  const olderBusyRef = useRef(false)
   const [error, setError] = useState<string>()
   const mounted = useRef(true)
   const request = useRef(new AbortController())
@@ -84,10 +90,19 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const atEnd = useRef(true)
   const scrolling = useRef(false)
   const scrollFrame = useRef<number | undefined>(undefined)
+  const cancelFollowEnd = () => {
+    if (scrollFrame.current !== undefined) {
+      cancelAnimationFrame(scrollFrame.current)
+      scrollFrame.current = undefined
+    }
+  }
   const followEnd = () => {
-    if (!atEnd.current) return
-    if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current)
-    scrollFrame.current = requestAnimationFrame(() => { if (atEnd.current) list.current?.scrollToEnd({ animated: false }) })
+    if (!atEnd.current || scrolling.current) return
+    cancelFollowEnd()
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = undefined
+      if (atEnd.current && !scrolling.current) list.current?.scrollToEnd({ animated: false })
+    })
   }
   useEffect(() => () => { if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current) }, [])
   const ready = selected?.sessionId === session.sessionId
@@ -122,16 +137,22 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const path = markdownFilePath(href)
     if (path !== undefined) setFileLinkPath(path)
   }, [state.bots, bot?.id, onSelectBot, ready, connected, sessions, openSession])
+  const applyDraft = useCallback((nextText: string) => {
+    draftRef.current = nextText
+    setDraft(nextText)
+    updateBrowseEntry(memoryScope, session.sessionId, { draft: nextText })
+  }, [memoryScope, session.sessionId])
   useEffect(() => {
-    draftRef.current = ''
-    selectionRef.current = { start: 0, end: 0 }
-    setDraft('')
+    const initialDraft = useBrowseMemory.getState().entries[browseKey(memoryScope, session.sessionId)]?.draft ?? ''
+    draftRef.current = initialDraft
+    selectionRef.current = { start: initialDraft.length, end: initialDraft.length }
+    setDraft(initialDraft)
     setFileLinkPath(undefined)
     setAtQuery(null)
     setPlusMenuOpen(false)
     setReferenceChatOpen(false)
     setStagedReferences([])
-  }, [session.sessionId])
+  }, [memoryScope, session.sessionId])
 
   const updateAtMention = (nextText: string, cursor: number) => {
     const detected = detectMention(nextText, cursor)
@@ -145,8 +166,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const handleDraftChange = (nextText: string) => {
     if (nextText === draftRef.current) return
     const delta = nextText.length - draftRef.current.length
-    draftRef.current = nextText
-    setDraft(nextText)
+    applyDraft(nextText)
     const cursor = Math.max(0, Math.min(nextText.length, selectionRef.current.end + delta))
     selectionRef.current = { start: cursor, end: cursor }
     updateAtMention(nextText, cursor)
@@ -163,8 +183,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const current = draftRef.current
     const nextText = current.slice(0, start) + mentionText + current.slice(end)
     const nextCursor = start + mentionText.length
-    draftRef.current = nextText
-    setDraft(nextText)
+    applyDraft(nextText)
     selectionRef.current = { start: nextCursor, end: nextCursor }
     setAtQuery(null)
     inputRef.current?.focus()
@@ -205,11 +224,15 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     || (bot !== undefined && bot.sessionId !== session.sessionId)
     || (room !== undefined && (room.sessionId || room.id) !== session.sessionId)
     || state.readOnly !== undefined
-  const disabled = busy || inputDisabled
-  useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setSpeaking([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
+  const disabled = busy || inputDisabled || !connected || client === undefined
+  useEffect(() => { olderBusyRef.current = false; setEarlier([]); setCursor(undefined); setProgress([]); setSpeaking([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
   useEffect(() => { mounted.current = true; request.current = new AbortController(); return () => { mounted.current = false; request.current.abort() } }, [session.sessionId])
   useEffect(() => {
-    if (room === undefined || !active) return
+    if (room === undefined || !active || !connected || client === undefined) {
+      setSpeaking([])
+      if (!connected) setProgress([])
+      return
+    }
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async () => {
@@ -226,20 +249,21 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         }
         if (!control.signal.aborted) setProgress(objects(value).filter(entry => {
           const call = (useAppStore.getState().messages[session.sessionId] ?? []).find(item => item.id === entry.callId)
-          return call?.kind !== 'tool' || call.state !== 'finished'
+          return call?.kind !== 'tool' || (call.state !== 'finished' && call.state !== 'failed')
         }).flatMap(entry => objects(entry.replies)))
       } catch { /* The parent state refresh reports connection and Host errors. */ }
       if (!control.signal.aborted) timer = setTimeout(() => void tick(), 2000)
     }
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
-  }, [client, room?.id, session.sessionId, active])
+  }, [client, room?.id, session.sessionId, active, connected])
   const send = async () => {
+    if (sendingRef.current || disabled) return
     const rawDraft = draftRef.current.trim()
     const submittedRefs = stagedReferences
-    const prefix = submittedRefs.map(item => item.mentionText.trim()).join(' ')
-    const submitted = [prefix, rawDraft].filter(Boolean).join(' ')
-    if (!submitted || disabled) return
+    const submitted = formatBotSubmission(rawDraft, submittedRefs.map(item => item.mentionText))
+    if (!submitted) return
+    sendingRef.current = true
     atEnd.current = true
     followEnd()
     setError(undefined)
@@ -247,14 +271,14 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     try {
       message = botMessageRequest(state, bot?.id ?? room?.id ?? session.sessionId, submitted)
     } catch (reason) {
+      sendingRef.current = false
       setError(reason instanceof Error ? reason.message : s.bots.unavailable)
       return
     }
     const sendSessionId = session.sessionId
     const activeRequest = request.current
-    draftRef.current = ''
+    applyDraft('')
     selectionRef.current = { start: 0, end: 0 }
-    setDraft('')
     setAtQuery(null)
     setStagedReferences([])
     const restoreFailedDraft = () => {
@@ -263,9 +287,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       const restoredDraft = typedWhileInFlight
         ? (rawDraft ? `${rawDraft}\n${typedWhileInFlight}` : typedWhileInFlight)
         : rawDraft
-      draftRef.current = restoredDraft
+      applyDraft(restoredDraft)
       selectionRef.current = { start: restoredDraft.length, end: restoredDraft.length }
-      setDraft(restoredDraft)
       if (submittedRefs.length > 0) {
         setStagedReferences(current => {
           const existing = new Set(current.map(item => item.sessionId))
@@ -283,10 +306,13 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         restoreFailedDraft()
         setError(reason instanceof Error ? reason.message : s.bots.unavailable)
       }
+    } finally {
+      sendingRef.current = false
     }
   }
   const earlierPage = async () => {
-    if (olderBusy || bot === undefined || cursor === null) return
+    if (olderBusyRef.current || bot === undefined || !client || cursor === null) return
+    olderBusyRef.current = true
     atEnd.current = false
     setOlderBusy(true)
     setError(undefined)
@@ -295,19 +321,24 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       const value = object(await client.call('earlier', { sessionId: session.sessionId, ...(cursor === undefined ? {} : { cursor }) }, signal))
       if (!mounted.current || signal.aborted) return
       setEarlier(current => {
-        const known = new Set(current.filter(entry => entry.kind === 'btw').map(entry => entry.id))
-        const cards = objects(value.btw).filter(entry => entry.botId === bot.id && !known.has(entry.id)).map(entry => ({ ...entry, kind: 'btw', pageCursor: cursor }))
-        return [...objects(value.items), ...cards.reverse(), ...current]
+        const knownBtw = new Set(current.filter(entry => entry.kind === 'btw').map(entry => entry.id))
+        const cards = objects(value.btw).filter(entry => entry.botId === bot.id && !knownBtw.has(entry.id)).map(entry => ({ ...entry, kind: 'btw', pageCursor: cursor }))
+        const knownItems = new Set(current.filter(entry => typeof entry.id === 'string').map(entry => `${text(entry.kind)}:${text(entry.id)}`))
+        const items = objects(value.items).filter(entry => typeof entry.id !== 'string' || !knownItems.has(`${text(entry.kind)}:${text(entry.id)}`))
+        return [...items, ...cards.reverse(), ...current]
       })
       setCursor(value.cursor ?? null)
     } catch { if (mounted.current && !signal.aborted) setError(s.bots.earlierUnavailable) }
-    finally { if (mounted.current && !signal.aborted) setOlderBusy(false) }
+    finally {
+      olderBusyRef.current = false
+      if (mounted.current && !signal.aborted) setOlderBusy(false)
+    }
   }
   // A part can roll over while its aside is still answering. Current roster polls
   // no longer include it, so refresh only historical pages with a pending aside.
   const pendingAsidePages = JSON.stringify([...new Map(earlier.filter(entry => entry.kind === 'btw' && entry.status === 'answering').map(entry => [JSON.stringify(entry.pageCursor ?? null), entry.pageCursor ?? null])).values()])
   useEffect(() => {
-    if (!active || !bot || pendingAsidePages === '[]') return
+    if (!active || !connected || !client || !bot || pendingAsidePages === '[]') return
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async () => {
@@ -323,7 +354,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     }
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
-  }, [active, bot?.id, client, session.sessionId, pendingAsidePages])
+  }, [active, connected, bot?.id, client, session.sessionId, pendingAsidePages])
   const question = object(state.questions[session.sessionId])
   const view = object(state.views[session.sessionId])
   const closedCards = object(state.closedCards[session.sessionId])
@@ -338,6 +369,75 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     )
     return hasConnector || hasMail || hasComputer
   }, [state.connectorRequests, state.mailRequests, state.computerLive, session.sessionId, bot])
+  const activeBtwCards = useMemo(
+    () => (bot ? objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId) : []),
+    [bot, state.btwCards, session.sessionId],
+  )
+  const hasPendingBtw = activeBtwCards.some(card => card.status === 'answering')
+  const interactiveSignal = useMemo(() => {
+    const parts = [selected?.running === true ? '1' : '0']
+    for (const item of messages) {
+      if (item.kind === 'approval') {
+        parts.push(`a:${item.id}:${item.outcome ?? 'open'}`)
+      } else if (
+        item.kind === 'tool'
+        && (
+          item.toolKey === 'ask_user'
+          || item.toolKey === 'show_view'
+          || item.toolKey === 'request_connector'
+          || item.toolKey === 'mail_send'
+          || item.toolKey?.startsWith('computer_')
+        )
+      ) {
+        parts.push(`t:${item.id}:${item.state}`)
+      }
+    }
+    return parts.join('|')
+  }, [messages, selected?.running])
+  const prevInteractiveSignalRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    prevInteractiveSignalRef.current = undefined
+  }, [session.sessionId])
+  useEffect(() => {
+    if (!active || !connected || !ready) return
+    const prev = prevInteractiveSignalRef.current
+    prevInteractiveSignalRef.current = interactiveSignal
+    if (prev === undefined || prev === interactiveSignal) return
+    void refreshLive({ forceFull: true })
+  }, [active, connected, ready, interactiveSignal, refreshLive])
+  const hasLiveFooterWork = Boolean(
+    selected?.running
+    || hasPendingBtw
+    || text(question.id) !== ''
+    || text(view.id) !== ''
+    || approvals.length > 0
+    || hasDesktopPendingRequest
+    || room !== undefined,
+  )
+  useEffect(() => {
+    if (!active || !connected || !ready) return
+    const control = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const intervalMs = hasLiveFooterWork ? 1500 : 3000
+    const tick = async () => {
+      await refreshLive({ forceFull: hasPendingBtw })
+      if (!control.signal.aborted) {
+        timer = setTimeout(() => void tick(), intervalMs)
+      }
+    }
+    timer = setTimeout(() => void tick(), intervalMs)
+    return () => {
+      control.abort()
+      clearTimeout(timer)
+    }
+  }, [active, connected, ready, session.sessionId, hasLiveFooterWork, hasPendingBtw, refreshLive])
+  const questionId = text(question.id)
+  const viewId = text(view.id)
+  const approvalsKey = approvals.map(entry => text(entry.id)).join(',')
+  const btwKey = activeBtwCards.map(card => `${text(card.id)}:${text(card.status)}`).join(',')
+  useEffect(() => {
+    if (atEnd.current) followEnd()
+  }, [questionId, viewId, approvalsKey, btwKey, room?.paused, hasDesktopPendingRequest])
   const inboxProjection = (session.projections?.values as Record<string, unknown> | undefined)?.inbox
   const queueItems = useMemo(() => {
     const inboxItems = inboxProjection === undefined ? [] : inboxQueuedItems(inboxProjection)
@@ -465,8 +565,26 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
 
     return sectionRows
   })
-  const onApproval: Parameters<typeof ChatItemView>[0]['onApproval'] = async (...args) => { if (!disabled) await respondApproval(...args) }
-  const onQuestion: Parameters<typeof ChatItemView>[0]['onQuestion'] = async (...args) => { if (!disabled) await respondQuestion(...args) }
+  const onApproval: Parameters<typeof ChatItemView>[0]['onApproval'] = async (...args) => {
+    if (disabled) return
+    await respondApproval(...args)
+    void refreshLive({ forceFull: true })
+  }
+  const onQuestion: Parameters<typeof ChatItemView>[0]['onQuestion'] = async (...args) => {
+    if (disabled) return
+    await respondQuestion(...args)
+    void refreshLive({ forceFull: true })
+  }
+  const hasEarlierParts = Boolean(
+    bot
+    && (bot.parts ?? []).some(id => id !== session.sessionId)
+    && bot.parts?.[0] !== session.sessionId,
+  )
+  const showLoadOlder = hasMore || (hasEarlierParts && cursor !== null && client !== undefined)
+  const updateAtEnd = (nativeEvent: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } }) => {
+    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent
+    atEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 90
+  }
   const render = (item: ChatItem, artifacts?: UiArtifact[]) => {
     if (item.kind === 'tool' && item.toolKey === 'ask_user') {
       const closedStatus = text(closedCards[item.id])
@@ -530,28 +648,37 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     )}
       contentContainerStyle={styles.conversation} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={followEnd}
-      onScrollBeginDrag={() => { scrolling.current = true; atEnd.current = false }}
-      onScrollEndDrag={() => { scrolling.current = false }}
-      onMomentumScrollBegin={() => { scrolling.current = true }}
-      onMomentumScrollEnd={() => { scrolling.current = false }}
-      onScroll={event => { if (!scrolling.current) return; const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent; atEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 90 }}
+      onScrollBeginDrag={() => { scrolling.current = true; cancelFollowEnd() }}
+      onScrollEndDrag={event => {
+        updateAtEnd(event.nativeEvent)
+        if (Math.abs(event.nativeEvent.velocity?.y ?? 0) <= 0.05) {
+          scrolling.current = false
+        }
+      }}
+      onMomentumScrollBegin={() => { scrolling.current = true; cancelFollowEnd() }}
+      onMomentumScrollEnd={event => { scrolling.current = false; updateAtEnd(event.nativeEvent) }}
+      onScroll={event => { if (!scrolling.current) return; updateAtEnd(event.nativeEvent) }}
       scrollEventThrottle={32} onContentSizeChange={followEnd}
       ListEmptyComponent={null}
       ListHeaderComponent={<View style={styles.section}>
-        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
-        {hasMore && (
+        {showLoadOlder && (
           <View style={styles.earlierTop}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={s.bots.loadOlder}
-              disabled={olderLoading || !ready}
-              onPress={() => { atEnd.current = false; void loadOlder() }}
+              disabled={olderLoading || olderBusy || !ready || !connected}
+              onPress={() => {
+                atEnd.current = false
+                if (hasMore) void loadOlder()
+                else void earlierPage()
+              }}
               style={({ pressed }) => [styles.earlierPill, pressed && { opacity: 0.72 }]}
             >
               <Text style={styles.earlierPillText}>{s.bots.loadOlder}</Text>
             </Pressable>
           </View>
         )}
+        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} onDelete={() => void perform('btw-delete', { sessionId: bot!.id, cardId: entry.id })} /> : entry.kind === 'closed' ? <BotSettledCard key={i} title={text(entry.title) || text(object(entry.question).question) || s.bots.question} closed={text(entry.closed) || 'dismissed'} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><View style={styles.row}><Text style={[styles.muted, styles.grow]}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text>{text(entry.via) !== '' && <BotViaPill platform={text(entry.via)} />}</View><NativeMarkdown text={text(entry.text)} /></View>)}
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} botOf={botById} mentions={mentions} adminId={text(room?.admin)} />}
@@ -640,6 +767,11 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
           )}
         </View>
       </View>
+      {!connected && (draft.trim().length > 0 || stagedReferences.length > 0) && (
+        <Text accessibilityLiveRegion="polite" style={[styles.muted, { paddingHorizontal: 8, paddingTop: 4, fontSize: 12 }]}>
+          {s.chat.offlineSendBlocked}
+        </Text>
+      )}
     </View>
     <BotPlusMenuModal
       visible={plusMenuOpen}
@@ -662,7 +794,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
 }
 
 function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, adminId, fallback }: {
-  client: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }
+  client?: BotRemoteClient; sessionId: string; callId: string; range: { from: number; to?: number; anchor?: string }
   botOf?: (botId: string) => BotEntry | undefined; mentions?: BotMentionContext; adminId?: string; fallback: React.ReactNode
 }) {
   const scope = useAppStore(browseScope)
@@ -670,14 +802,15 @@ function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, a
   const round = JSON.stringify([range.from, range.to, range.anchor])
   const liveRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[`call:${callId}`] : undefined)
   const [loadError, setLoadError] = useState<string>()
-  const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? [] : [])
+  const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
   const shown = preferredRoomRows(liveRows, rows)
   useEffect(() => {
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
-    let misses = 0
     setLoadError(undefined)
     setRows(canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
+    if (!client) return
+    let misses = 0
     const tick = async () => {
       let poll: RoomRowsPoll
       try {
