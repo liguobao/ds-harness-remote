@@ -45,6 +45,14 @@ describe('sheet visibility state machine', () => {
     }
   })
 
+  it('unmounts a sheet immediately only when superseded by another sheet or route jump', () => {
+    expect(nextSheetPhase('closing', false, true)).toBe('unmounted')
+    expect(nextSheetPhase('closing', false, false)).toBe('closing')
+    expect(nextSheetPhase('open', false, true)).toBe('unmounted')
+    expect(nextSheetPhase('opening', false, true)).toBe('unmounted')
+    expect(nextSheetPhase('closing', true, true)).toBe('opening')
+  })
+
   it('uses a slower entry than exit, and the same 150ms cap for reduced motion', () => {
     expect(sheetPhaseDuration('opening', false)).toBe(motionTokens.duration.sheet)
     expect(sheetPhaseDuration('closing', false)).toBe(motionTokens.duration.sheetExit)

@@ -173,6 +173,7 @@ export function AutomationTasksModal({
       setFormMode(null)
       setEditSnapshot(null)
       setTimingDirty(false)
+      setSubmitting(false)
       formTokenRef.current++
     }
   }, [visible, isNonNativeBackend, loadTasks])
@@ -505,6 +506,7 @@ export function AutomationTasksModal({
 
   const openCreateForm = () => {
     formTokenRef.current++
+    setSubmitting(false)
     setFormTitle('')
     setFormPrompt('')
     const defaultSid = (selectedSession && (selectedSession.backend === undefined || selectedSession.backend === 'harness'))
@@ -532,6 +534,7 @@ export function AutomationTasksModal({
 
   const openEditForm = (task: ScheduleCatalogEntry) => {
     formTokenRef.current++
+    setSubmitting(false)
     const expected = extractExpectedRecord(task)
     const tz = task.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
     setEditSnapshot({
@@ -622,6 +625,7 @@ export function AutomationTasksModal({
         let sid = targetSessionId
         if (formTargetMode === 'new') {
           const created = await createSession(formWorkspaceId || undefined)
+          if (formTokenRef.current !== currentToken) return
           sid = created ? useAppStore.getState().selectedSession?.sessionId ?? '' : ''
         }
         if (!sid) {
@@ -774,10 +778,15 @@ export function AutomationTasksModal({
     )
   }
 
+  const openingLinkedRef = useRef(false)
   const handleOpenLinkedSession = async () => {
-    if (!linkedSession) return
-    onClose()
-    await onOpenSession(linkedSession)
+    if (!linkedSession || openingLinkedRef.current) return
+    openingLinkedRef.current = true
+    try {
+      await onOpenSession(linkedSession)
+    } finally {
+      openingLinkedRef.current = false
+    }
   }
 
   const formatFrequency = (task: ScheduleCatalogEntry): string => {
@@ -851,8 +860,26 @@ export function AutomationTasksModal({
     return { absolute, relative: `(${relative})` }
   }
 
+  const handleRequestClose = () => {
+    if (isNonNativeBackend) {
+      onClose()
+      return
+    }
+    if (formMode !== null) {
+      formTokenRef.current++
+      setSubmitting(false)
+      setFormMode(null)
+      return
+    }
+    if (selectedTask !== undefined) {
+      setSelectedTaskId(null)
+      return
+    }
+    onClose()
+  }
+
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={handleRequestClose}>
       <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         {/* Unsupported Backend View */}
         {isNonNativeBackend ? (
@@ -892,6 +919,7 @@ export function AutomationTasksModal({
                 accessibilityLabel={strings.common.cancel}
                 onPress={() => {
                   formTokenRef.current++
+                  setSubmitting(false)
                   setFormMode(null)
                 }}
                 hitSlop={8}
@@ -1133,6 +1161,7 @@ export function AutomationTasksModal({
                 accessibilityRole="button"
                 onPress={() => {
                   formTokenRef.current++
+                  setSubmitting(false)
                   setFormMode(null)
                 }}
                 style={({ pressed }) => [styles.footerCancelBtn, pressed && styles.pressedBg]}

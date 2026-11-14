@@ -765,6 +765,31 @@ export function BotModalsHost() {
 
   return (
     <>
+      <BotFloatingPopover
+        visible={contextMenu !== undefined && contextActions.length > 0}
+        actions={contextActions}
+        onClose={() => setContextMenu(undefined)}
+        anchor="top-right"
+        topOffset={120}
+      />
+
+      {state !== undefined && (
+        <BotProfilePage
+          visible={detailsOpen && Boolean(detailBot || detailRoom)}
+          covered={editor !== undefined}
+          bot={detailBot}
+          room={detailRoom}
+          state={state}
+          client={clientInstance}
+          busy={busy}
+          error={visibleError}
+          runStats={runStats}
+          onClose={() => setDetailsOpen(false)}
+          onEdit={() => setEditor({ kind: detailBot ? 'bot' : 'room', id: (detailBot ?? detailRoom)?.id ?? selectedId })}
+          perform={performAdapter}
+        />
+      )}
+
       {editor !== undefined && state !== undefined && clientInstance !== undefined && (
         <BotEditor
           key={`${editor.kind}:${editor.id ?? 'new'}`}
@@ -777,30 +802,6 @@ export function BotModalsHost() {
           error={visibleError}
           perform={performAdapter}
           onClose={() => setEditor(undefined)}
-        />
-      )}
-
-      <BotFloatingPopover
-        visible={contextMenu !== undefined && contextActions.length > 0}
-        actions={contextActions}
-        onClose={() => setContextMenu(undefined)}
-        anchor="top-right"
-        topOffset={120}
-      />
-
-      {state !== undefined && (
-        <BotProfilePage
-          visible={detailsOpen && Boolean(detailBot || detailRoom)}
-          bot={detailBot}
-          room={detailRoom}
-          state={state}
-          client={clientInstance}
-          busy={busy}
-          error={visibleError}
-          runStats={runStats}
-          onClose={() => setDetailsOpen(false)}
-          onEdit={() => setEditor({ kind: detailBot ? 'bot' : 'room', id: selectedId })}
-          perform={performAdapter}
         />
       )}
 

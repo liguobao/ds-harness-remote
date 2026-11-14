@@ -275,6 +275,12 @@ export const useBotTeamStore = create<BotTeamStoreState>((set, get) => ({
       return undefined
     }
     if (!connected) {
+      if (get().session?.sessionId !== targetSessionId) {
+        resetOpenTracking()
+        if (get().session !== undefined || get().openedSessionKey !== undefined || get().openError !== undefined) {
+          set({ session: undefined, openedSessionKey: undefined, openError: undefined })
+        }
+      }
       return get().session
     }
     const client = getClient()

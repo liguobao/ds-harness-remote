@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -191,6 +191,8 @@ export function HostSessionsDrawer({
   inline = false,
   backLabel,
   dismissible = true,
+  entrance = 'immediate',
+  backRef,
 }: {
   onBack?: () => void
   onClose: () => void
@@ -210,6 +212,10 @@ export function HostSessionsDrawer({
   backLabel?: string
   /** 冷启动停留在侧边栏且尚未选择任何页面时，禁止手势/返回键把侧边栏划走。 */
   dismissible?: boolean
+  /** 默认停留在列表或切换主机时直接就位，避免先露底层对话再滑入；从对话呼出时才滑入。 */
+  entrance?: 'immediate' | 'slide'
+  /** 由 ChatScreen 统一协调硬件返回键顺序。 */
+  backRef?: MutableRefObject<(() => boolean) | undefined>
 }) {
   const language = useAppStore(state => state.language)
   const deviceId = useAppStore(state => state.selectedDevice?.deviceId)
@@ -287,8 +293,18 @@ export function HostSessionsDrawer({
 
   const handleSwitchMode = (nextMode: 'agent' | 'bot') => {
     setDrawerMode(nextMode)
-    saveHostMode(hostScope, nextMode)
-    onBotModeChange?.(nextMode === 'bot')
+    // In single-pane phone overlay mode, switching tabs only browses the other
+    // roster without mutating the underlying conversation until an item is chosen.
+    if (inline) {
+      saveHostMode(hostScope, nextMode)
+      onBotModeChange?.(nextMode === 'bot')
+    }
+  }
+
+  const activateAgentMode = () => {
+    setDrawerMode('agent')
+    saveHostMode(hostScope, 'agent')
+    onBotModeChange?.(false)
   }
 
   const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
@@ -619,7 +635,7 @@ export function HostSessionsDrawer({
     const targetBackend = workspace.backend ?? backend
     const created = await createSession(workspace.workspaceId, targetBackend)
     if (created) {
-      if (drawerMode !== 'agent') handleSwitchMode('agent')
+      activateAgentMode()
       if (!inline) closeDrawer()
     }
   }
@@ -635,7 +651,7 @@ export function HostSessionsDrawer({
         .filter(s => (s.backend ?? 'harness') === favBackend && matchedWs.sessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId))
         .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       if (wsSessions[0]) {
-        if (drawerMode !== 'agent') handleSwitchMode('agent')
+        activateAgentMode()
         await onSelect(wsSessions[0])
         if (!inline) closeDrawer()
         return
@@ -643,7 +659,7 @@ export function HostSessionsDrawer({
     }
     const created = await createSession(workspaceId, favBackend)
     if (created) {
-      if (drawerMode !== 'agent') handleSwitchMode('agent')
+      activateAgentMode()
       if (!inline) closeDrawer()
     }
   }
@@ -804,8 +820,10 @@ export function HostSessionsDrawer({
   // 手势与抽屉动画
   const { width: screenWidth } = useWindowDimensions()
   const drawerWidth = Math.round(screenWidth * DRAWER_WIDTH_RATIO)
-  const translateX = useRef(new Animated.Value(-drawerWidth)).current
-  const overlayOpacity = useRef(new Animated.Value(0)).current
+  const immediateMount = entrance === 'immediate'
+  const translateX = useRef(new Animated.Value(immediateMount ? 0 : -drawerWidth)).current
+  const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
+  const hasSettledOpenRef = useRef(immediateMount)
   const dragStartX = useRef(0)
   const closingRef = useRef(false)
   const animSeq = useRef(0)
@@ -813,13 +831,9 @@ export function HostSessionsDrawer({
   const gestureSeq = useRef(0)
   const dragReady = useRef(false)
   const onCloseRef = useRef(onClose)
-  useEffect(() => {
-    onCloseRef.current = onClose
-  }, [onClose])
+  onCloseRef.current = onClose
   const dismissibleRef = useRef(dismissible)
-  useEffect(() => {
-    dismissibleRef.current = dismissible
-  }, [dismissible])
+  dismissibleRef.current = dismissible
 
   useEffect(() => {
     if (showSearch) setSearchMounted(true)
@@ -885,22 +899,58 @@ export function HostSessionsDrawer({
 
   useEffect(() => {
     if (inline) return
+    if (immediateMount || hasSettledOpenRef.current) {
+      currentAnim.current?.stop()
+      closingRef.current = false
+      translateX.setValue(0)
+      overlayOpacity.setValue(1)
+      hasSettledOpenRef.current = true
+      return
+    }
     const anim = Animated.parallel([
       Animated.timing(translateX, { toValue: 0, duration: 220, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
     ])
     currentAnim.current = anim
-    anim.start()
+    anim.start(({ finished }) => {
+      if (finished) hasSettledOpenRef.current = true
+    })
     return () => currentAnim.current?.stop()
-  }, [inline, drawerWidth, translateX, overlayOpacity])
+  }, [inline, immediateMount, translateX, overlayOpacity])
+
+  useEffect(() => {
+    if (backRef === undefined || inline) return
+    backRef.current = () => {
+      if (showConfigModal) {
+        setShowConfigModal(false)
+        return true
+      }
+      if (showSearch) {
+        setShowSearch(false)
+        setSearchQuery('')
+        return true
+      }
+      if (showBotSearch) {
+        setShowBotSearch(false)
+        setBotSearchQuery('')
+        return true
+      }
+      if (!dismissibleRef.current) return false
+      smoothClose(true)
+      return true
+    }
+    return () => {
+      backRef.current = undefined
+    }
+  })
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
-        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissible && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponder: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
+        onMoveShouldSetPanResponderCapture: (_e, g) => (!inline && dismissibleRef.current && !closingRef.current ? shouldStartSwipeLeftToClose(g) : false),
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
           if (closingRef.current) return
@@ -1034,7 +1084,6 @@ export function HostSessionsDrawer({
         disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
         onPress={() => {
           Keyboard.dismiss()
-          if (!inline) closeDrawer()
           onOpenDeviceInfo?.()
         }}
         style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedFade]}
@@ -1070,7 +1119,6 @@ export function HostSessionsDrawer({
           disabled={onOpenAbout === undefined}
           onPress={() => {
             Keyboard.dismiss()
-            if (!inline) closeDrawer()
             onOpenAbout?.()
           }}
           hitSlop={8}
@@ -1202,7 +1250,6 @@ export function HostSessionsDrawer({
                   icon={Puzzle}
                   label={strings.plugins.nav}
                   onPress={() => {
-                    if (!inline) closeDrawer()
                     onOpenPlugins()
                   }}
                 />
@@ -1212,7 +1259,6 @@ export function HostSessionsDrawer({
                 label={strings.automation.nav}
                 onPress={() => {
                   if (onOpenAutomationTasks) {
-                    if (!inline) closeDrawer()
                     onOpenAutomationTasks()
                   } else {
                     Alert.alert(strings.automation.title, strings.automation.empty)
@@ -1599,7 +1645,6 @@ export function HostSessionsDrawer({
             accessibilityLabel={strings.settings.title}
             onPress={() => {
               Keyboard.dismiss()
-              if (!inline) closeDrawer()
               onOpenSettings()
             }}
             hitSlop={8}
@@ -1958,6 +2003,7 @@ export function HostSessionsDrawer({
           }
           void createSession(workspace.workspaceId, nextBackend).then(ok => {
             if (ok && useAppStore.getState().selectedDevice?.deviceId === expectedDeviceId) {
+              activateAgentMode()
               closeDrawer()
             }
           })
@@ -2024,12 +2070,10 @@ export function HostSessionsDrawer({
             onClose={() => setAppMenuOpen(false)}
             onSettings={() => {
               setAppMenuOpen(false)
-              if (!inline) closeDrawer()
               onOpenSettings?.()
             }}
             onAbout={() => {
               setAppMenuOpen(false)
-              if (!inline) closeDrawer()
               onOpenAbout?.()
             }}
           />
@@ -2046,7 +2090,7 @@ export function HostSessionsDrawer({
   }
 
   return (
-    <Modal transparent animationType="none" onRequestClose={() => smoothClose(false)} statusBarTranslucent>
+    <View style={[StyleSheet.absoluteFill, styles.drawerHost]} pointerEvents="box-none">
       <View style={styles.overlayContainer}>
         <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
@@ -2059,12 +2103,13 @@ export function HostSessionsDrawer({
           {content}
         </Animated.View>
       </View>
-    </Modal>
+    </View>
   )
 }
 
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
+    drawerHost: { zIndex: 20, elevation: 20 },
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
     drawer: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background, overflow: 'hidden' },

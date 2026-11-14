@@ -608,7 +608,21 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void; onOpenAbout?: () => void }) {
+export function SettingsScreen({
+  active = true,
+  onBack,
+  onReset,
+  onSigningOutChange,
+  onOpenDiagnostics,
+  onOpenAbout,
+}: {
+  active?: boolean
+  onBack: () => void
+  onReset: () => void
+  onSigningOutChange?: (busy: boolean) => void
+  onOpenDiagnostics?: () => void
+  onOpenAbout?: () => void
+}) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -642,6 +656,7 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const chatAppearance = useAppStore(state => state.chatAppearance)
   const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
   useEffect(() => {
@@ -748,12 +763,25 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     } else void save()
   }
 
+  const runSignOutOrReset = async (action: () => Promise<void>) => {
+    if (signingOut) return
+    setSigningOut(true)
+    onSigningOutChange?.(true)
+    try {
+      await action()
+      onReset()
+    } finally {
+      setSigningOut(false)
+      onSigningOutChange?.(false)
+    }
+  }
+
   const confirmReset = () => Alert.alert(
     zhCN.settings.resetTitle,
     zhCN.settings.resetBody,
     [
       { text: zhCN.common.cancel, style: 'cancel' },
-      { text: zhCN.settings.reset, style: 'destructive', onPress: () => void reset().then(onReset) },
+      { text: zhCN.settings.reset, style: 'destructive', onPress: () => void runSignOutOrReset(reset) },
     ],
   )
 
@@ -762,21 +790,12 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     zhCN.settings.signOutBody,
     [
       { text: zhCN.common.cancel, style: 'cancel' },
-      { text: zhCN.settings.signOut, style: 'destructive', onPress: () => void signOut().then(onReset) },
+      { text: zhCN.settings.signOut, style: 'destructive', onPress: () => void runSignOutOrReset(signOut) },
     ],
   )
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
-
-  if (diagnosticsOpen && !onOpenDiagnostics) {
-    return <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
-  }
-  if (aboutOpen && !onOpenAbout) {
-    return <AboutScreen onBack={() => setAboutOpen(false)} />
-  }
-  if (appearanceOpen) {
-    return <ChatAppearanceScreen onBack={() => setAppearanceOpen(false)} />
-  }
+  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || appearanceOpen
 
   const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
     : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
@@ -790,7 +809,13 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
 
   return (
     <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
+      <View
+        style={styles.flex}
+        pointerEvents={inlineSubpageOpen || signingOut ? 'none' : 'auto'}
+        accessibilityElementsHidden={inlineSubpageOpen}
+        importantForAccessibility={inlineSubpageOpen ? 'no-hide-descendants' : 'auto'}
+      >
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={signingOut ? undefined : onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
             <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
@@ -1032,8 +1057,8 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
             </GroupCard>
 
             <GroupCard style={styles.signOutCard}>
-              <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} onPress={confirmSignOut} />
-              <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} onPress={confirmReset} />
+              <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} disabled={signingOut} onPress={confirmSignOut} />
+              <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} disabled={signingOut} onPress={confirmReset} />
             </GroupCard>
           </View>
         </Screen>
@@ -1139,6 +1164,22 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
               </GroupCard>
             </ScrollView>
       </SheetModal>
+      </View>
+      {diagnosticsOpen && !onOpenDiagnostics && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
+        </View>
+      )}
+      {aboutOpen && !onOpenAbout && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <AboutScreen onBack={() => setAboutOpen(false)} />
+        </View>
+      )}
+      {appearanceOpen && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <ChatAppearanceScreen active={active && appearanceOpen} onBack={() => setAppearanceOpen(false)} />
+        </View>
+      )}
     </View>
   )
 }
