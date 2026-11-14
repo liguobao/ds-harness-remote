@@ -97,8 +97,17 @@ describe('group round rows transport', () => {
 })
 
 describe('which rows a ledger line draws', () => {
-  it('prefers a live snapshot that already holds replies', async () => {
-    expect(preferredRoomRows([{ text: 'live' }], [{ text: 'fetched' }])).toEqual([{ text: 'live' }])
+  it('replaces a partial live cache with the complete Host round', () => {
+    const first = { botId: 'first', text: 'HARU_GROUP_OK' }
+    const second = { botId: 'second', text: 'HARU_GROUP_OK' }
+    expect(preferredRoomRows([first], [first, second])).toEqual([first, second])
+  })
+
+  it('keeps cached replies until a read succeeds, but respects an authoritative empty result', () => {
+    const cached = [{ text: 'cached' }]
+    expect(preferredRoomRows(cached, undefined)).toEqual(cached)
+    expect(preferredRoomRows(undefined, undefined)).toEqual([])
+    expect(preferredRoomRows(cached, [])).toEqual([])
   })
 
   it('falls back to the fetched rows when the live snapshot is empty', async () => {

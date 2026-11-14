@@ -32,7 +32,7 @@ import { linkBotMentions, botMentionTarget } from './mentions'
 import { BotMessageActionsContext } from '../message-actions'
 import { SessionToolsPanel } from '../session-tools-panel'
 
-import { browseScope, browseKey, updateBrowseEntry, useBrowseMemory, getCachedGroupRound, saveGroupRound } from '../../services/browse-memory'
+import { browseScope, browseKey, updateBrowseEntry, useBrowseMemory, saveGroupRound } from '../../services/browse-memory'
 
 const EMPTY: ChatItem[] = []
 type BotChatRow =
@@ -801,14 +801,15 @@ function BotLedgerReplies({ client, sessionId, callId, range, botOf, mentions, a
   const canCache = useAppStore(state => Boolean(state.config?.baseUrl && state.selectedDevice?.identityKey))
   const round = JSON.stringify([range.from, range.to, range.anchor])
   const liveRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[`call:${callId}`] : undefined)
+  const cachedRows = useBrowseMemory(state => canCache ? state.entries[browseKey(scope, sessionId)]?.groupRounds?.[round] : undefined)
   const [loadError, setLoadError] = useState<string>()
-  const [rows, setRows] = useState<BotObject[]>(() => canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
-  const shown = preferredRoomRows(liveRows, rows)
+  const [rows, setRows] = useState<BotObject[]>()
+  const shown = preferredRoomRows(liveRows ?? cachedRows, rows)
   useEffect(() => {
     const control = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     setLoadError(undefined)
-    setRows(canCache ? getCachedGroupRound(scope, sessionId, round) ?? getCachedGroupRound(scope, sessionId, `call:${callId}`) ?? [] : [])
+    setRows(undefined)
     if (!client) return
     let misses = 0
     const tick = async () => {

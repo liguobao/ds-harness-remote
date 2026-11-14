@@ -75,7 +75,7 @@ export function SheetModal({
   children: ReactNode
   backdropStyle?: StyleProp<ViewStyle>
   sheetStyle?: StyleProp<ViewStyle>
-  /** Wrap in `KeyboardAvoidingView` for sheets with text inputs (rename dialogs). */
+  /** Keep input sheets and their actions above the soft keyboard. */
   avoidKeyboard?: boolean
   dismissLabel?: string
 }) {
@@ -86,6 +86,7 @@ export function SheetModal({
   const reduceMotion = useReduceMotion()
   const sheetId = useId()
   const [phase, setPhase] = useState<SheetPhase>(() => visible ? 'opening' : 'unmounted')
+  const [availableHeight, setAvailableHeight] = useState<number>()
   const progress = useRef(new Animated.Value(0)).current
   const animationRef = useRef<Animated.CompositeAnimation | null>(null)
   const visibleRef = useRef(visible)
@@ -155,7 +156,11 @@ export function SheetModal({
   const content = visible ? children : retainedChildren.current
 
   const body = (
-    <View style={styles.container} pointerEvents="box-none">
+    <View
+      style={styles.container}
+      pointerEvents="box-none"
+      onLayout={event => setAvailableHeight(event.nativeEvent.layout.height)}
+    >
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle, { opacity: progress }]}
@@ -173,7 +178,9 @@ export function SheetModal({
         style={[
           styles.sheet,
           {
-            maxHeight: sheetMaxHeight,
+            // A resized Modal may be shorter than the normal sheet cap. Leave
+            // the status-bar inset above tall, scrollable input forms too.
+            maxHeight: Math.min(sheetMaxHeight, Math.max(0, (availableHeight ?? windowHeight) - insets.top)),
             paddingLeft: spacing.lg + insets.left,
             paddingRight: spacing.lg + insets.right,
             paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
@@ -198,7 +205,7 @@ export function SheetModal({
       {avoidKeyboard
         ? (
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.container}
           >
             {body}

@@ -66,12 +66,12 @@ export const ROOM_ROWS_LEGACY_INTERVAL_MS = 2000
 export const ROOM_ROWS_LEGACY_MISSES = 2
 
 /**
- * Which rows a ledger line draws. The live snapshot wins only while it holds replies:
- * a list captured just as the round opened is empty and knows nothing the rows fetched
- * for the settled round do not, so letting it win hid the members' replies.
+ * A successful Host read is authoritative, including an empty result. The cached
+ * live snapshot may contain only the first member's reply from an earlier poll.
+ * Keep that snapshot only until the current round has been read successfully.
  */
-export function preferredRoomRows(live: BotObject[] | undefined, fetched: BotObject[]): BotObject[] {
-  return live !== undefined && live.length > 0 ? live : fetched
+export function preferredRoomRows(live: BotObject[] | undefined, fetched: BotObject[] | undefined): BotObject[] {
+  return fetched ?? live ?? []
 }
 
 function isObject(value: unknown): value is BotObject {

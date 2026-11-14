@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Alert } from '../../ui/alert'
 import { strings as s } from '../../locales/i18n'
 import { canDeleteBot, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotOperation, type BotObject, type BotRemoteClient } from '../../services/bot-catalog'
@@ -8,7 +9,8 @@ import { Button, IconButton } from '../../ui/components'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { ModalSurface } from '../chat/modal'
+import { SheetModal } from '../../ui/sheet'
+import { useResponsiveLayout } from '../../ui/responsive'
 import { Toggle } from '../../ui/toggle'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
 import { BotChoice } from './controls'
@@ -150,6 +152,8 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createEditorStyles)
   const { colors } = useTheme()
+  const { compactHeight } = useResponsiveLayout()
+  const insets = useSafeAreaInsets()
   const editing = bot !== undefined || room !== undefined
   const [modelPicker, setModelPicker] = useState(false)
   const [name, setName] = useState(bot?.name ?? room?.name ?? '')
@@ -242,10 +246,28 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
       onClose()
     }
   }
-  return <Modal visible transparent animationType="slide" onRequestClose={() => { if (!busy) onClose() }}>
-    <ModalSurface onClose={() => { if (!busy) onClose() }}>
-      <View style={styles.row}><Text style={[styles.heading, styles.grow]}>{editing ? s.bots.edit : kind === 'bot' ? s.bots.newBot : s.bots.newGroup}</Text><IconButton label={s.common.close} icon={X} disabled={busy} onPress={onClose} /></View>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetContent}>
+  const header = <View style={styles.row}><Text style={[styles.heading, styles.grow]}>{editing ? s.bots.edit : kind === 'bot' ? s.bots.newBot : s.bots.newGroup}</Text><IconButton label={s.common.close} icon={X} disabled={busy} onPress={onClose} /></View>
+  const actions = <View style={styles.actions}>
+    {canDelete && <Button variant="danger" icon={Trash2} label={s.bots.delete} disabled={busy} onPress={confirmDelete} />}
+    <View style={styles.grow} />
+    <Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} />
+    <Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} />
+  </View>
+  return <SheetModal visible avoidKeyboard onClose={() => { if (!busy) onClose() }}
+    sheetStyle={compactHeight ? localStyles.compactSheet : undefined}>
+      {!compactHeight && header}
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[
+        styles.sheetContent,
+        // A landscape IME can leave less room than the fixed header/actions.
+        // Let the whole form (including its padding) scroll in that window.
+        compactHeight && {
+          paddingTop: spacing.lg,
+          paddingLeft: spacing.lg + insets.left,
+          paddingRight: spacing.lg + insets.right,
+          paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
+        },
+      ]}>
+        {compactHeight && header}
 
         {error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
         {field(s.bots.name, name, setName)}
@@ -315,28 +337,16 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
           </>}
         </>}
 
+        {compactHeight && actions}
       </ScrollView>
-      <View style={styles.actions}>
-        {canDelete && (
-          <Button
-            variant="danger"
-            icon={Trash2}
-            label={s.bots.delete}
-            disabled={busy}
-            onPress={confirmDelete}
-          />
-        )}
-        <View style={styles.grow} />
-        <Button variant="quiet" label={s.bots.cancel} disabled={busy} onPress={onClose} />
-        <Button loading={busy} label={bot || room ? s.bots.save : s.bots.create} disabled={busy || !name.trim() || (kind === 'room' && members.length < 2)} onPress={() => void save()} />
-      </View>
+      {!compactHeight && actions}
       <BotFolderPickerModal visible={folderPickerOpen} value={workDir} client={client} onClose={() => setFolderPickerOpen(false)} onPick={setWorkDir} />
-    </ModalSurface>
-  </Modal>
+  </SheetModal>
 }
 
 const createEditorStyles = (colors: ThemeColors) =>
   StyleSheet.create({
+    compactSheet: { padding: 0, paddingLeft: 0, paddingRight: 0, paddingBottom: 0 },
     providerGroup: { gap: 4, marginTop: 4 },
     providerHeader: {
       flexDirection: 'row',
