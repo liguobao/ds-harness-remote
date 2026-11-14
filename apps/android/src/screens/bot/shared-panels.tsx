@@ -472,7 +472,7 @@ export function BotBrowserGrantsSection({
     const ts = Number(untilVal)
     if (!Number.isFinite(ts) || ts <= 0) return s.bots.browserDurAlways
     const diff = ts - Date.now()
-    if (diff <= 0) return '已过期'
+    if (diff <= 0) return s.dsBotSettings.grantExpired
     if (diff <= 3_700_000) return s.bots.browserDurHour
     if (diff <= 86_400_000) return s.bots.browserDurToday
     return s.bots.browserDurWeek
@@ -481,13 +481,13 @@ export function BotBrowserGrantsSection({
   return (
     <View style={{ gap: 14 }}>
       <Text style={styles.helperNote}>
-        Bot 可以自行打开网页、阅读内容和填写表单。发布、上传、下载和删除需要你事先允许；涉及付款的操作始终交给你本人处理。
+        {s.dsBotSettings.browserNote}
       </Text>
 
       <View style={styles.groupCard}>
         {rows.length === 0 ? (
           <View style={styles.emptyCardRow}>
-            <Text style={styles.mutedText}>还没有预授权的操作。</Text>
+            <Text style={styles.mutedText}>{s.dsBotSettings.noBrowserGrantsYet}</Text>
           </View>
         ) : (
           rows.map((row, idx) => {
@@ -519,7 +519,7 @@ export function BotBrowserGrantsSection({
       </View>
 
       <View style={[styles.groupCard, { padding: 16, gap: 14 }]}>
-        <Text style={styles.sectionSubHeader}>允许操作</Text>
+        <Text style={styles.sectionSubHeader}>{s.dsBotSettings.allowActions}</Text>
 
         {!fixedBot && targetBot && (
           <View style={{ gap: 8 }}>
@@ -573,11 +573,11 @@ export function BotBrowserGrantsSection({
         )}
 
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <Text style={[styles.rowSub, { width: 44, marginTop: 0 }]}>网站</Text>
+          <Text style={[styles.rowSub, { minWidth: 44, marginTop: 0 }]}>{s.dsBotSettings.site}</Text>
           <TextInput
             value={site}
             onChangeText={setSite}
-            placeholder="如 x.com, github.com"
+            placeholder={s.dsBotSettings.sitePlaceholder}
             placeholderTextColor={colors.muted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -586,7 +586,7 @@ export function BotBrowserGrantsSection({
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <Text style={[styles.rowSub, { width: 44, marginTop: 6 }]}>动作</Text>
+          <Text style={[styles.rowSub, { minWidth: 44, marginTop: 6 }]}>{s.dsBotSettings.actions}</Text>
           <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {(['post', 'upload', 'download', 'delete'] as const).map(act => {
               const on = actions.includes(act)
@@ -604,7 +604,7 @@ export function BotBrowserGrantsSection({
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <Text style={[styles.rowSub, { width: 44, marginTop: 6 }]}>时限</Text>
+          <Text style={[styles.rowSub, { minWidth: 44, marginTop: 6 }]}>{s.dsBotSettings.duration}</Text>
           <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {([
               ['hour', s.bots.browserDurHour],
@@ -628,7 +628,7 @@ export function BotBrowserGrantsSection({
 
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Button
-            label="添加"
+            label={s.dsBotSettings.add}
             disabled={!site.trim() || actions.length === 0}
             onPress={() => void saveGrant()}
           />
@@ -842,8 +842,8 @@ export function BotSchedulesPanel({
 
       {!available && (
         <View style={[styles.groupCard, { padding: 14, gap: 6 }]}>
-          <Text style={styles.rowTitle}>在 DSH 里打开「自动化任务」</Text>
-          <Text style={styles.rowSub}>在 Harness 设置的插件页启用「自动化任务」。</Text>
+          <Text style={styles.rowTitle}>{s.dsBotSettings.automationUnavailable}</Text>
+          <Text style={styles.rowSub}>{s.dsBotSettings.automationUnavailableDetail}</Text>
         </View>
       )}
 
@@ -927,17 +927,8 @@ export function BotSchedulesPanel({
 
             {kind === 'weekly' && (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                {(
-                  [
-                    [1, '一'],
-                    [2, '二'],
-                    [3, '三'],
-                    [4, '四'],
-                    [5, '五'],
-                    [6, '六'],
-                    [7, '日'],
-                  ] as [number, string][]
-                ).map(([d, label]) => {
+                {s.dsBotSettings.weekdaysShort.map((label, i) => {
+                  const d = i + 1
                   const on = weekdays.includes(d)
                   return (
                     <Pressable key={d} onPress={() => toggleDay(d)} style={[styles.choicePill, on && styles.choicePillActive]}>

@@ -93,6 +93,24 @@ const stringLocales = {
     live_task_status_running: 'Wird ausgeführt',
     live_task_status_waiting: 'Wartend',
   },
+  'values-ru': {
+    ask_agent_process_text: 'Спросить агента',
+    live_task_time_just_now: 'Только что',
+    live_task_time_minutes_ago: '%1$d мин назад',
+    live_task_time_hours_ago: '%1$d ч назад',
+    live_task_time_days_ago: '%1$d дн. назад',
+    live_task_status_running: 'Выполняется',
+    live_task_status_waiting: 'Ожидает',
+  },
+  'values-uk': {
+    ask_agent_process_text: 'Запитати агента',
+    live_task_time_just_now: 'Щойно',
+    live_task_time_minutes_ago: '%1$d хв тому',
+    live_task_time_hours_ago: '%1$d год тому',
+    live_task_time_days_ago: '%1$d дн. тому',
+    live_task_status_running: 'Виконується',
+    live_task_status_waiting: 'Очікує',
+  },
 }
 
 function withRemoteForegroundService(config) {
@@ -175,7 +193,8 @@ function withRemoteForegroundService(config) {
         val intentClass = item.intent?.component?.className ?: ""
         val isAskAgent = intentClass.contains("AskAgent") ||
           title == "询问智能体" || title == "Ask Agent" || title == "詢問智慧體" || title == "エージェントに質問" ||
-          title == "Preguntar al agente" || title.contains("Demander") || title == "Agent fragen"
+          title == "Preguntar al agente" || title.contains("Demander") || title == "Agent fragen" ||
+          title == "Спросить агента" || title == "Запитати агента"
         val isCopy = item.itemId == android.R.id.copy || title == "Copy" || title == "复制" || title == "複製"
 
         if (isAskAgent) {

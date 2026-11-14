@@ -82,10 +82,10 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
         React.createElement('strong', null, 'Remote Host'),
         React.createElement('button', { type: 'button', 'aria-label': t('close'), onClick: () => setHostReference(undefined) }, '×')),
       React.createElement('dl', null,
-        React.createElement('div', null, React.createElement('dt', null, '名称'), React.createElement('dd', null, hostReference.label)),
-        React.createElement('div', null, React.createElement('dt', null, '系统'), React.createElement('dd', null, hostReference.platform)),
-        React.createElement('div', null, React.createElement('dt', null, '设备 ID'), React.createElement('dd', { className: 'isMono' }, hostReference.deviceId)),
-        React.createElement('div', null, React.createElement('dt', null, '调用内容'), React.createElement('dd', { className: 'isMono' }, hostReference.invocation)))))
+        React.createElement('div', null, React.createElement('dt', null, t('hostReferenceName')), React.createElement('dd', null, hostReference.label)),
+        React.createElement('div', null, React.createElement('dt', null, t('hostReferenceSystem')), React.createElement('dd', null, hostReference.platform)),
+        React.createElement('div', null, React.createElement('dt', null, t('hostReferenceDeviceId')), React.createElement('dd', { className: 'isMono' }, hostReference.deviceId)),
+        React.createElement('div', null, React.createElement('dt', null, t('hostReferenceInvocation')), React.createElement('dd', { className: 'isMono' }, hostReference.invocation)))))
     if (status?.mode !== 'remote') return renderHostReference()
     const exit = async (): Promise<void> => {
       setBusy(true)

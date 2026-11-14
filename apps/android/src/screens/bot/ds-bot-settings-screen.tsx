@@ -121,12 +121,12 @@ interface TabItem {
 }
 
 const KNOWN_LOCAL_AGENTS = [
-  { id: 'claude', name: 'Claude Code', cmd: 'claude-agent-acp', desc: 'Anthropic Claude Code 命令行 Agent' },
-  { id: 'codex', name: 'Codex', cmd: 'codex', desc: 'OpenAI Codex 本地编码 Agent' },
-  { id: 'opencode', name: 'OpenCode', cmd: 'opencode', desc: 'OpenCode 终端编码 Agent' },
-  { id: 'hermes', name: 'Hermes Agent', cmd: 'hermes', desc: 'Nous Research Hermes 本地 Agent' },
-  { id: 'cursor', name: 'Cursor Agent', cmd: 'cursor-agent', desc: 'Cursor 命令行编码 Agent' },
-  { id: 'pi', name: 'Pi', cmd: 'pi-acp', desc: 'Pi 极简命令行 Agent' },
+  { id: 'claude', name: 'Claude Code', cmd: 'claude-agent-acp', get desc() { return s.dsBotSettings.localAgentDescriptions.claude } },
+  { id: 'codex', name: 'Codex', cmd: 'codex', get desc() { return s.dsBotSettings.localAgentDescriptions.codex } },
+  { id: 'opencode', name: 'OpenCode', cmd: 'opencode', get desc() { return s.dsBotSettings.localAgentDescriptions.opencode } },
+  { id: 'hermes', name: 'Hermes Agent', cmd: 'hermes', get desc() { return s.dsBotSettings.localAgentDescriptions.hermes } },
+  { id: 'cursor', name: 'Cursor Agent', cmd: 'cursor-agent', get desc() { return s.dsBotSettings.localAgentDescriptions.cursor } },
+  { id: 'pi', name: 'Pi', cmd: 'pi-acp', get desc() { return s.dsBotSettings.localAgentDescriptions.pi } },
 ]
 
 const FALLBACK_PREVIEW_STATE: BotState = parseBotState({
@@ -166,6 +166,7 @@ export function DsBotSettingsModal({
   const { contentMaxWidth, landscape } = useResponsiveLayout()
   const isDark = scheme === 'dark'
 
+  const language = useAppStore(store => store.language)
   const connected = useAppStore(store => store.connection.phase === 'connected')
   const selectedDevice = useAppStore(store => store.selectedDevice)
   const state = useBotTeamStore(store => store.state)
@@ -300,26 +301,26 @@ export function DsBotSettingsModal({
 
   const tabs: TabItem[] = useMemo(
     () => [
-      { id: 'general', label: s.bots.tabGeneral, detail: '默认模型、回复体验与工作文件夹', icon: SlidersHorizontal },
-      { id: 'models', label: s.bots.tabModels, detail: '模型服务商、API 密钥与本地服务', icon: Cpu },
-      { id: 'local-agents', label: s.bots.tabLocalAgents, detail: 'Claude Code、Codex、OpenCode 与原生会话', icon: Terminal },
-      { id: 'bots', label: s.bots.tabBots, detail: '主 Bot、动画风格与团队成员管理', icon: Bot },
-      { id: 'groups', label: s.bots.tabGroups, detail: '多 Bot 协作群聊、管理员与回复模式', icon: Users },
-      { id: 'connectors', label: s.bots.tabConnectors, detail: 'GitHub、邮箱、Notion、Linear 等第三方服务', icon: Plug },
-      { id: 'im', label: s.bots.tabIm, detail: '微信、飞书、钉钉、企微、QQ、Telegram 等平台', icon: MessageSquareShare },
-      { id: 'capabilities', label: s.bots.tabCapabilities, detail: '按 Bot 配置工具权限与共享技能', icon: Sparkles },
-      { id: 'browser', label: s.bots.tabBrowser, detail: '网页自动化与站点敏感操作预授权', icon: Globe },
-      { id: 'computer', label: s.bots.tabComputer, detail: '屏幕查看与键鼠操控权限等级', icon: Monitor },
-      { id: 'schedules', label: s.bots.tabSchedules, detail: '周期性简报、定时提醒与自动任务', icon: CalendarClock },
-      { id: 'usage', label: s.bots.tabUsage, detail: 'Token 走势、缓存命中率与年度活跃度', icon: ChartNoAxesColumn },
-      { id: 'secrets', label: s.bots.tabSecrets, detail: 'Bot 环境变量密钥与访问范围', icon: KeyRound },
+      { id: 'general', label: s.bots.tabGeneral, detail: s.dsBotSettings.tabDetail.general, icon: SlidersHorizontal },
+      { id: 'models', label: s.bots.tabModels, detail: s.dsBotSettings.tabDetail.models, icon: Cpu },
+      { id: 'local-agents', label: s.bots.tabLocalAgents, detail: s.dsBotSettings.tabDetail.localAgents, icon: Terminal },
+      { id: 'bots', label: s.bots.tabBots, detail: s.dsBotSettings.tabDetail.bots, icon: Bot },
+      { id: 'groups', label: s.bots.tabGroups, detail: s.dsBotSettings.tabDetail.groups, icon: Users },
+      { id: 'connectors', label: s.bots.tabConnectors, detail: s.dsBotSettings.tabDetail.connectors, icon: Plug },
+      { id: 'im', label: s.bots.tabIm, detail: s.dsBotSettings.tabDetail.im, icon: MessageSquareShare },
+      { id: 'capabilities', label: s.bots.tabCapabilities, detail: s.dsBotSettings.tabDetail.capabilities, icon: Sparkles },
+      { id: 'browser', label: s.bots.tabBrowser, detail: s.dsBotSettings.tabDetail.browser, icon: Globe },
+      { id: 'computer', label: s.bots.tabComputer, detail: s.dsBotSettings.tabDetail.computer, icon: Monitor },
+      { id: 'schedules', label: s.bots.tabSchedules, detail: s.dsBotSettings.tabDetail.schedules, icon: CalendarClock },
+      { id: 'usage', label: s.bots.tabUsage, detail: s.dsBotSettings.tabDetail.usage, icon: ChartNoAxesColumn },
+      { id: 'secrets', label: s.bots.tabSecrets, detail: s.dsBotSettings.tabDetail.secrets, icon: KeyRound },
     ],
-    [],
+    [language],
   )
 
   const usageView = useMemo(
     () => buildDsBotUsageView(usageData, usageRange),
-    [usageData, usageRange],
+    [usageData, usageRange, language],
   )
   const activityYear = useMemo(
     () => buildDsBotActivityYear(usageData, 24),
@@ -374,40 +375,40 @@ export function DsBotSettingsModal({
           ? folderBasename(effectiveState.workspaceId)
           : defaultBotModel
             ? defaultBotModel.split('/').pop() ?? ''
-            : '默认'
+            : s.dsBotSettings.defaultValue
       case 'models':
-        return configuredProviderCount > 0 ? `${configuredProviderCount} 个服务商` : `${effectiveState.models.length} 个模型`
+        return configuredProviderCount > 0 ? s.dsBotSettings.providersCount(configuredProviderCount) : s.dsBotSettings.modelsCount(effectiveState.models.length)
       case 'local-agents': {
         const det = objects(localAgentsData?.detected).filter(d => d.installed === true || d.available === true).length
         const dshCount = effectiveState.agents.length
-        return det + dshCount > 0 ? `已启用 ${det + dshCount}` : `${KNOWN_LOCAL_AGENTS.length} 项`
+        return det + dshCount > 0 ? s.dsBotSettings.enabledCount(det + dshCount) : s.dsBotSettings.agentsCount(KNOWN_LOCAL_AGENTS.length)
       }
       case 'bots':
-        return `${mainBotName} · ${effectiveState.bots.length} 个`
+        return s.dsBotSettings.botsSummary(mainBotName, effectiveState.bots.length)
       case 'groups':
-        return `${effectiveState.rooms.length} 个`
+        return s.dsBotSettings.groupsCount(effectiveState.rooms.length)
       case 'connectors':
         return connectedConnectorItems.length > 0
-          ? `已连接 ${connectedConnectorItems.length}`
-          : `${DS_BOT_CONNECTOR_CATALOG.length} 个`
+          ? s.dsBotSettings.connectedCount(connectedConnectorItems.length)
+          : s.dsBotSettings.connectorsCount(DS_BOT_CONNECTOR_CATALOG.length)
       case 'im':
-        return connectedImList.length > 0 ? `已连接 ${connectedImList.length}` : '8 个平台'
+        return connectedImList.length > 0 ? s.dsBotSettings.connectedCount(connectedImList.length) : s.dsBotSettings.platformsCount(8)
       case 'capabilities':
         return (effectiveState.capabilities ?? []).length > 0
-          ? `${(effectiveState.capabilities ?? []).length} 项能力`
-          : '按 Bot 授权'
+          ? s.dsBotSettings.capabilitiesCount((effectiveState.capabilities ?? []).length)
+          : s.dsBotSettings.perBotAccess
       case 'browser':
-        return totalBrowserGrants > 0 ? `${totalBrowserGrants} 项预授权` : '无预授权'
+        return totalBrowserGrants > 0 ? s.dsBotSettings.browserGrantsCount(totalBrowserGrants) : s.dsBotSettings.noBrowserGrants
       case 'computer':
-        return effectiveState.computer?.enabled === true ? '已开启' : '关'
+        return effectiveState.computer?.enabled === true ? s.dsBotSettings.on : s.dsBotSettings.off
       case 'schedules':
-        return '管理任务'
+        return s.dsBotSettings.manageTasks
       case 'usage':
         return usageView.current.tokens > 0
           ? `${formatCompactTokens(usageView.current.tokens)} Token`
-          : '查看统计'
+          : s.dsBotSettings.viewStats
       case 'secrets':
-        return `${(effectiveState.secrets ?? []).length} 个`
+        return s.dsBotSettings.secretsCount((effectiveState.secrets ?? []).length)
     }
   }
 
@@ -434,21 +435,21 @@ export function DsBotSettingsModal({
     if (!connected) {
       return (
         <View style={{ gap: spacing.sm }}>
-          <SectionTitle>DS Bot 插件状态</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.pluginStatus}</SectionTitle>
           <GroupCard>
             <GroupRow
               first
               icon={CircleAlert}
-              label="尚未连接远程电脑主机"
+              label={s.dsBotSettings.hostNotConnected}
               detail={
                 selectedDevice
-                  ? `当前主机「${selectedDevice.name}」未连接。连接主机并安装 DS Bot 插件后即可同步全部设置。`
+                  ? s.dsBotSettings.hostOffline(selectedDevice.name)
                   : s.bots.dsBotSettingsDisconnected
               }
               chevron={false}
             />
           </GroupCard>
-          <DsBotInstallCard error="电脑端未连接或尚未安装 DS Bot 插件" onRetry={() => void handleRetryAll()} />
+          <DsBotInstallCard error={s.dsBotSettings.hostOfflineOrMissing} onRetry={() => void handleRetryAll()} />
         </View>
       )
     }
@@ -456,24 +457,24 @@ export function DsBotSettingsModal({
     if (isPluginDisabled) {
       return (
         <View style={{ gap: spacing.sm }}>
-          <SectionTitle>DS Bot 插件状态</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.pluginStatus}</SectionTitle>
           <GroupCard>
             <GroupRow
               first
               icon={CircleAlert}
-              label="DS Bot 插件当前已停用"
-              detail="电脑端已安装 DS Bot，但尚未启用。启用后即可在手机端管理全部 DS Bot 设置。"
+              label={s.dsBotSettings.pluginDisabled}
+              detail={s.dsBotSettings.pluginDisabledDetail}
               chevron={false}
             />
             <GroupRow
               icon={Sparkles}
-              label={enablingPlugin ? '正在启用 DS Bot…' : '一键启用 DS Bot 插件'}
+              label={enablingPlugin ? s.dsBotSettings.enablingPlugin : s.dsBotSettings.enablePlugin}
               disabled={enablingPlugin}
               onPress={() => void handleEnableDsBot()}
             />
             <GroupRow
               icon={Plug}
-              label="打开插件管理"
+              label={s.dsBotSettings.openPluginManager}
               onPress={() => setPluginsModalOpen(true)}
             />
           </GroupCard>
@@ -486,7 +487,7 @@ export function DsBotSettingsModal({
         <GroupCard>
           <View style={styles.loadingCardRow}>
             <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.mutedText}>正在检测电脑端 DS Bot 插件状态…</Text>
+            <Text style={styles.mutedText}>{s.dsBotSettings.checkingPlugin}</Text>
           </View>
         </GroupCard>
       )
@@ -495,7 +496,7 @@ export function DsBotSettingsModal({
     if (isPluginNotInstalled) {
       return (
         <View style={{ gap: spacing.xs }}>
-          <SectionTitle>未检测到 DS Bot 插件</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.pluginNotFound}</SectionTitle>
           <DsBotInstallCard
             error={visibleError ?? s.bots.notInstalled}
             onRetry={() => void handleRetryAll()}
@@ -504,8 +505,8 @@ export function DsBotSettingsModal({
             <GroupRow
               first
               icon={Plug}
-              label="前往插件管理检查状态"
-              detail="查看电脑端已安装插件列表与启用状态"
+              label={s.dsBotSettings.checkPluginManager}
+              detail={s.dsBotSettings.checkPluginManagerDetail}
               onPress={() => setPluginsModalOpen(true)}
             />
           </GroupCard>
@@ -538,7 +539,7 @@ export function DsBotSettingsModal({
                 <>
                   {renderPrerequisiteNotice()}
 
-                  <SectionTitle>基础与模型</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionBasics}</SectionTitle>
                   <GroupCard>
                     {tabs.slice(0, 3).map((item, idx) => (
                       <GroupRow
@@ -554,7 +555,7 @@ export function DsBotSettingsModal({
                     ))}
                   </GroupCard>
 
-                  <SectionTitle>团队与协作</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionTeam}</SectionTitle>
                   <GroupCard>
                     {tabs.slice(3, 5).map((item, idx) => (
                       <GroupRow
@@ -570,7 +571,7 @@ export function DsBotSettingsModal({
                     ))}
                   </GroupCard>
 
-                  <SectionTitle>连接器与消息渠道</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionChannels}</SectionTitle>
                   <GroupCard>
                     {tabs.slice(5, 7).map((item, idx) => (
                       <GroupRow
@@ -586,7 +587,7 @@ export function DsBotSettingsModal({
                     ))}
                   </GroupCard>
 
-                  <SectionTitle>能力与操作授权</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionPermissions}</SectionTitle>
                   <GroupCard>
                     {tabs.slice(7, 10).map((item, idx) => (
                       <GroupRow
@@ -602,7 +603,7 @@ export function DsBotSettingsModal({
                     ))}
                   </GroupCard>
 
-                  <SectionTitle>任务、统计与密钥</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionTasks}</SectionTitle>
                   <GroupCard>
                     {tabs.slice(10, 13).map((item, idx) => (
                       <GroupRow
@@ -626,8 +627,8 @@ export function DsBotSettingsModal({
                   <GroupRow
                     first
                     icon={CircleAlert}
-                    label={connected ? '电脑端尚未安装或启用 DS Bot 插件' : '当前未连接电脑主机'}
-                    detail="当前展示为默认预览配置；在电脑端安装并启用 ds-bot 后可实时读写。"
+                    label={connected ? s.dsBotSettings.previewPluginMissing : s.dsBotSettings.previewNoHost}
+                    detail={s.dsBotSettings.previewDetail}
                     chevron={false}
                   />
                 </GroupCard>
@@ -642,20 +643,20 @@ export function DsBotSettingsModal({
                       first
                       icon={Cpu}
                       label={s.bots.defaultModel}
-                      detail="新建 Bot 时默认使用的模型"
-                      value={defaultBotModel ? defaultBotModel.split('/').pop() : '默认'}
+                      detail={s.dsBotSettings.defaultModelDetail}
+                      value={defaultBotModel ? defaultBotModel.split('/').pop() : s.dsBotSettings.defaultValue}
                       chevron
                       onPress={() => setDefaultModelPickerOpen(true)}
                     />
                   </GroupCard>
 
-                  <SectionTitle>对话与回复</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionConversation}</SectionTitle>
                   <GroupCard>
                     <GroupRow
                       first
                       icon={Sparkles}
                       label={s.bots.showThinking}
-                      detail="在对话中展开模型的推理思考过程"
+                      detail={s.dsBotSettings.showThinkingDetail}
                       chevron={false}
                       accessory={
                         <Toggle
@@ -670,7 +671,7 @@ export function DsBotSettingsModal({
                     <GroupRow
                       icon={MessageSquareShare}
                       label={s.bots.enterToSend}
-                      detail="按回车键直接发送消息"
+                      detail={s.dsBotSettings.enterToSendDetail}
                       chevron={false}
                       accessory={
                         <Toggle
@@ -684,21 +685,21 @@ export function DsBotSettingsModal({
                     />
                   </GroupCard>
 
-                  <SectionTitle>位置</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionLocation}</SectionTitle>
                   <GroupCard>
                     <GroupRow
                       first
                       icon={Folder}
                       label={s.bots.teamWorkspace}
-                      detail="没有单独设置文件夹的 Bot 在这里工作。"
-                      value={effectiveState.workspaceId ? folderBasename(effectiveState.workspaceId) : '默认'}
+                      detail={s.dsBotSettings.teamWorkspaceDetail}
+                      value={effectiveState.workspaceId ? folderBasename(effectiveState.workspaceId) : s.dsBotSettings.defaultValue}
                       chevron
                       disabled={!isLiveState}
                       onPress={() => setTeamFolderPickerOpen(true)}
                     />
                   </GroupCard>
 
-                  <SectionTitle>各 Bot 自己的文件夹</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionBotFolders}</SectionTitle>
                   <GroupCard>
                     {effectiveState.bots.map((bot, idx) => (
                       <GroupRow
@@ -706,7 +707,7 @@ export function DsBotSettingsModal({
                         first={idx === 0}
                         icon={Folder}
                         label={bot.name}
-                        detail={bot.workDir ? folderBasename(bot.workDir) : '跟随总工作区'}
+                        detail={bot.workDir ? folderBasename(bot.workDir) : s.dsBotSettings.followTeamWorkspace}
                         value={bot.private ? s.bots.privateBot : undefined}
                         chevron
                         disabled={!isLiveState}
@@ -717,15 +718,15 @@ export function DsBotSettingsModal({
 
                   {(effectiveState.privateArchives ?? []).length > 0 && (
                     <>
-                      <SectionTitle>{`删除后仍受保护 · ${(effectiveState.privateArchives ?? []).length}`}</SectionTitle>
+                      <SectionTitle>{s.dsBotSettings.protectedArchives((effectiveState.privateArchives ?? []).length)}</SectionTitle>
                       <GroupCard>
                         {(effectiveState.privateArchives ?? []).map((arc, idx) => (
                           <GroupRow
                             key={text(arc.id) || `arc-${idx}`}
                             first={idx === 0}
                             icon={ShieldCheck}
-                            label={text(arc.name) || '已删除的隐私 Bot'}
-                            detail="其他 Bot 不能读取它的文件夹、记忆或对话"
+                            label={text(arc.name) || s.dsBotSettings.deletedPrivateBot}
+                            detail={s.dsBotSettings.protectedArchiveDetail}
                             chevron={false}
                           />
                         ))}
@@ -738,7 +739,7 @@ export function DsBotSettingsModal({
               {/* 2. 模型 (Models / ProvidersPage) */}
               {subpage === 'models' && (
                 <>
-                  <SectionTitle>已配置服务商</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionConfiguredProviders}</SectionTitle>
                   {(() => {
                     const list =
                       providersData && providersData.length > 0
@@ -766,7 +767,7 @@ export function DsBotSettingsModal({
                             first
                             icon={Cpu}
                             label={s.bots.noModel}
-                            detail="请在电脑端 DS Bot 设置中添加模型服务商或配置 API Key"
+                            detail={s.dsBotSettings.noProviderDetail}
                             chevron={false}
                           />
                         </GroupCard>
@@ -784,7 +785,7 @@ export function DsBotSettingsModal({
                             <View style={{ flex: 1 }}>
                               <Text style={styles.rowTitle}>{pname}</Text>
                               <Text style={styles.rowSub}>
-                                {pmodels.length} 个模型 · {configured ? '已配置密钥' : '需要 API Key'}
+                                {`${s.dsBotSettings.modelsCount(pmodels.length)} · ${configured ? s.dsBotSettings.keyConfigured : s.dsBotSettings.apiKeyRequired}`}
                               </Text>
                             </View>
                           </View>
@@ -805,7 +806,7 @@ export function DsBotSettingsModal({
                     })
                   })()}
 
-                  <SectionTitle>常用服务商</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionPopularProviders}</SectionTitle>
                   <GroupCard>
                     {DS_BOT_POPULAR_PROVIDERS.map((prov, idx) => {
                       const isConfigured =
@@ -818,14 +819,14 @@ export function DsBotSettingsModal({
                           icon={Cpu}
                           label={prov.name}
                           detail={prov.desc}
-                          value={isConfigured ? '已就绪' : '在电脑端配置'}
+                          value={isConfigured ? s.dsBotSettings.ready : s.dsBotSettings.configureOnComputer}
                           chevron={false}
                         />
                       )
                     })}
                   </GroupCard>
 
-                  <SectionTitle>本地模型服务</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionLocalServers}</SectionTitle>
                   <GroupCard>
                     {DS_BOT_LOCAL_SERVERS.map((srv, idx) => (
                       <GroupRow
@@ -834,7 +835,7 @@ export function DsBotSettingsModal({
                         icon={Terminal}
                         label={srv.name}
                         detail={srv.endpoint}
-                        value="本地接口"
+                        value={s.dsBotSettings.localEndpoint}
                         chevron={false}
                       />
                     ))}
@@ -846,17 +847,17 @@ export function DsBotSettingsModal({
               {subpage === 'local-agents' && (
                 <>
                   <Text style={styles.helperNote}>
-                    将电脑上已安装的命令行编码 Agent 接入 DS Bot，各 Bot 可直接选用其作为底层运行模型。
+                    {s.dsBotSettings.localAgentsNote}
                   </Text>
 
-                  <SectionTitle>DeepSeek Harness 原生会话</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionNativeSessions}</SectionTitle>
                   <GroupCard>
                     <GroupRow
                       first
                       icon={Bot}
                       label="DSH Agent"
-                      detail="在 Bot 侧栏中直接显示和切换原生 dsh 会话"
-                      value={effectiveState.agents.length > 0 ? '已添加' : '未添加'}
+                      detail={s.dsBotSettings.dshAgentDetail}
+                      value={effectiveState.agents.length > 0 ? s.dsBotSettings.added : s.dsBotSettings.notAdded}
                       disabled={!isLiveState || busy}
                       onPress={() => {
                         if (effectiveState.agents[0]) {
@@ -868,7 +869,7 @@ export function DsBotSettingsModal({
                     />
                   </GroupCard>
 
-                  <SectionTitle>本地编码 Agent</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionLocalAgents}</SectionTitle>
                   <GroupCard>
                     {KNOWN_LOCAL_AGENTS.map((agent, idx) => {
                       const detectedList = objects(localAgentsData?.detected)
@@ -885,7 +886,7 @@ export function DsBotSettingsModal({
                           icon={Terminal}
                           label={agent.name}
                           detail={ver ? `${agent.desc} · ${ver}` : `${agent.desc} (${text(matched?.command) || agent.cmd})`}
-                          value={ready ? '已就绪' : '未检测到'}
+                          value={ready ? s.dsBotSettings.ready : s.dsBotSettings.notDetected}
                           chevron={false}
                         />
                       )
@@ -901,8 +902,8 @@ export function DsBotSettingsModal({
                     <GroupRow
                       first
                       icon={Bot}
-                      label="主 Bot"
-                      detail="群聊默认管理员；外部消息和自动任务默认交给它处理。"
+                      label={s.dsBotSettings.mainBot}
+                      detail={s.dsBotSettings.mainBotDetail}
                       value={mainBotName}
                       chevron
                       disabled={!isLiveState}
@@ -914,7 +915,7 @@ export function DsBotSettingsModal({
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.rowTitle}>{s.bots.botAnimation}</Text>
-                        <Text style={styles.rowSub}>聊天与状态栏中 Bot 头像的呼吸和工作动效。</Text>
+                        <Text style={styles.rowSub}>{s.dsBotSettings.motionDetail}</Text>
                       </View>
                       <View style={styles.inlinePills}>
                         {([
@@ -989,7 +990,7 @@ export function DsBotSettingsModal({
                               )}
                               {(bot.main || bot.id === effectiveState.mainBotId) && (
                                 <View style={[styles.statusBadge, styles.statusBadgeReady]}>
-                                  <Text style={[styles.statusBadgeText, { color: colors.primary }]}>主 Bot</Text>
+                                  <Text style={[styles.statusBadgeText, { color: colors.primary }]}>{s.dsBotSettings.mainBot}</Text>
                                 </View>
                               )}
                               {bot.private && (
@@ -999,7 +1000,7 @@ export function DsBotSettingsModal({
                               )}
                             </View>
                             <Text style={styles.rowSub} numberOfLines={1}>
-                              {bot.instructions || (bot.model || effectiveState.defaultModel) || '点击管理模型、指令与文件夹'}
+                              {bot.instructions || (bot.model || effectiveState.defaultModel) || s.dsBotSettings.botCardHint}
                             </Text>
                           </View>
                           <ChevronRight size={18} color={colors.subtle} />
@@ -1055,14 +1056,14 @@ export function DsBotSettingsModal({
                       </Pressable>
                     }
                   >
-                    {`群聊 · ${effectiveState.rooms.length}`}
+                    {s.dsBotSettings.groupsTitle(effectiveState.rooms.length)}
                   </SectionTitle>
 
                   <GroupCard>
                     {effectiveState.rooms.length === 0 ? (
                       <View style={styles.emptyCardBox}>
-                        <Text style={styles.rowTitle}>还没有群聊。</Text>
-                        <Text style={styles.mutedText}>在群聊里，几个 Bot 和你一起做一件事。</Text>
+                        <Text style={styles.rowTitle}>{s.dsBotSettings.noGroups}</Text>
+                        <Text style={styles.mutedText}>{s.dsBotSettings.noGroupsHint}</Text>
                       </View>
                     ) : (
                       effectiveState.rooms.map((room, idx) => {
@@ -1092,7 +1093,7 @@ export function DsBotSettingsModal({
                                   {memberNames || `${room.members.length} ${s.bots.members}`}
                                 </Text>
                               </View>
-                              <Text style={styles.rowSub}>{`${room.members.length} 成员`}</Text>
+                              <Text style={styles.rowSub}>{s.dsBotSettings.membersCount(room.members.length)}</Text>
                               <ChevronRight size={18} color={colors.subtle} />
                             </Pressable>
                             {isLiveState && !effectiveState.readOnly && (
@@ -1189,7 +1190,7 @@ export function DsBotSettingsModal({
             <ModalSurface onClose={() => setMainBotPickerOpen(false)}>
               <View style={{ gap: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.sheetTitle}>选择主 Bot</Text>
+                  <Text style={styles.sheetTitle}>{s.dsBotSettings.chooseMainBot}</Text>
                   <IconButton label={s.common.close} icon={X} onPress={() => setMainBotPickerOpen(false)} />
                 </View>
                 <GroupCard>
