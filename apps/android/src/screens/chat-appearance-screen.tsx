@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Check, RotateCcw } from 'lucide-react-native'
 import { strings as zhCN } from '../locales/i18n'
@@ -62,21 +62,24 @@ function OptionSegments<T extends string>({
   )
 }
 
-export function ChatAppearanceScreen({ onBack }: { onBack: () => void }) {
+export function ChatAppearanceScreen({ active = true, onBack }: { active?: boolean; onBack: () => void }) {
   const { colors, scheme, density, appearance } = useTheme()
   const setChatAppearance = useAppStore(state => state.setChatAppearance)
   const resetChatAppearance = useAppStore(state => state.resetChatAppearance)
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
   const { contentMaxWidth, landscape } = useResponsiveLayout()
+  const backStateRef = useRef({ active, onBack })
+  backStateRef.current = { active, onBack }
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      onBack()
+      if (!backStateRef.current.active) return false
+      backStateRef.current.onBack()
       return true
     })
     return () => subscription.remove()
-  }, [onBack])
+  }, [])
 
   const isDefault =
     appearance.fontScale === DEFAULT_CHAT_APPEARANCE.fontScale

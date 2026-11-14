@@ -309,7 +309,17 @@ export function DsBotSettingsModal({
     [usageData],
   )
 
-  if (!visible) return null
+  const [contentMounted, setContentMounted] = useState(visible)
+  useEffect(() => {
+    if (visible) {
+      setContentMounted(true)
+      return
+    }
+    const timer = setTimeout(() => setContentMounted(false), 320)
+    return () => clearTimeout(timer)
+  }, [visible])
+
+  if (!visible && !contentMounted) return null
 
   const prefs = object(effectiveState.prefs)
   const showThinking = prefs.thinking !== false && prefs.showThinking !== false
@@ -490,7 +500,7 @@ export function DsBotSettingsModal({
   }
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={handleBack} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleBack} statusBarTranslucent>
       <View style={styles.root}>
         <BlurHeaderFrame
           header={

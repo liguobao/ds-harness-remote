@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics'
 import { ArrowDown, ArrowLeft, FileText, Film, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -44,6 +44,7 @@ import { ChatImageProvider } from '../ui/chat-image'
 import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import { KeyboardInset } from '../ui/keyboard-inset'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, openSafeExternalUrl } from '../ui/markdown'
+import { NavigationFocusProvider } from '../ui/mention-popover'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { useResponsiveLayout } from '../ui/responsive'
 import { spacing } from '../ui/theme'
@@ -120,6 +121,8 @@ const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
 const LONG_DRAFT_MAX = 256_000
 
 export function ChatScreen({
+  active = true,
+  suppressAutoSelect = false,
   onBack = () => {},
   onOpenDevices: _onOpenDevices,
   onNewSession,
@@ -134,6 +137,8 @@ export function ChatScreen({
   onBotModeChange,
   onSelectBot,
 }: {
+  active?: boolean
+  suppressAutoSelect?: boolean
   onBack?: () => void
   onOpenDevices?: () => void
   onNewSession?: () => void
@@ -212,7 +217,12 @@ export function ChatScreen({
   // Enter-only motion for the transcript <-> trajectory swap. Both views keep
   // their own scroll state; only the incoming view moves.
   const trajectoryMotion = useRef(new Animated.Value(1)).current
+  const trajectoryMountedRef = useRef(false)
   useEffect(() => {
+    if (!trajectoryMountedRef.current) {
+      trajectoryMountedRef.current = true
+      return
+    }
     trajectoryMotion.setValue(0)
     const animation = Animated.timing(trajectoryMotion, {
       toValue: 1,
@@ -226,6 +236,8 @@ export function ChatScreen({
   const [composingDuringRun, setComposingDuringRun] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(true)
+  const [drawerEntrance, setDrawerEntrance] = useState<'immediate' | 'slide'>('immediate')
+  const drawerBackRef = useRef<(() => boolean) | undefined>(undefined)
   // Cold start parks the sidebar full-screen before any page is chosen; swiping
   // or pressing back must not drop the user into an arbitrary conversation.
   const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
@@ -235,6 +247,7 @@ export function ChatScreen({
     if (hostId === lastHostIdRef.current) return
     lastHostIdRef.current = hostId
     setDrawerSwipeUnlocked(false)
+    setDrawerEntrance('immediate')
     setSessionsOpen(true)
   }, [hostId])
   // Explicit navigation must also reveal an already selected conversation.
@@ -402,6 +415,7 @@ export function ChatScreen({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined)
     // Reached from a conversation, so the sidebar may be swiped away again.
     setDrawerSwipeUnlocked(true)
+    setDrawerEntrance('slide')
     setSessionsOpen(true)
   }, [setMentionType])
 
@@ -468,20 +482,24 @@ export function ChatScreen({
   // Back inside a subagent child returns to its parent conversation (the
   // official subagent UI's navigation), instead of leaving the chat entirely.
   const backFromChat = () => {
+    if (!tabletSplit && sessionsOpen) {
+      return drawerBackRef.current?.() ?? false
+    }
     const parent = session !== undefined && isSubagentSession(session)
       ? sessions.find(item => item.sessionId === session.parentSessionId)
       : undefined
     if (parent !== undefined) {
       Keyboard.dismiss()
       void openSession(parent)
-      return
+      return true
     }
     if (!tabletSplit && !sessionsOpen) {
       openSessionsDrawer()
-      return
+      return true
     }
     Keyboard.dismiss()
     onBack()
+    return true
   }
   const onBackRef = useRef(backFromChat)
   onBackRef.current = backFromChat
@@ -499,7 +517,7 @@ export function ChatScreen({
     { open: promptsPickerOpen, close: () => setPromptsPickerOpen(false) },
     { open: toolsMode !== undefined, close: () => { setToolsMode(undefined); setFileLinkPath(undefined) } },
     { open: trajectory, close: () => setTrajectory(false) },
-  ])
+  ], active)
 
   const botTeamState = useBotTeamStore(state => state.state)
 
@@ -541,14 +559,7 @@ export function ChatScreen({
     }
   }, [botMode, session, botTeamState, memoryScope])
 
-  const autoSelectingRef = useRef(false)
-  useEffect(() => {
-    if (botMode) return
-    const sessionIsBot = session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)
-    if (sessionIsBot) {
-      useAppStore.setState({ selectedSession: undefined })
-    }
-    if ((session !== undefined && !sessionIsBot) || busy !== undefined || autoSelectingRef.current) return
+  const findPreferredAgentSession = () => {
     const candidates = sessions.filter(
       item => !archivedSessionIds.includes(item.sessionId) && !isKnownBotSessionId(item.sessionId, botTeamState, memoryScope),
     )
@@ -556,19 +567,35 @@ export function ChatScreen({
     const preferred = remembered
       ? candidates.find(item => item.sessionId === remembered.sessionId && (item.backend ?? 'harness') === (remembered.backend ?? 'harness'))
       : undefined
-    const target = preferred ?? [...candidates].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+    return preferred ?? [...candidates].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0]
+  }
+
+  const switchToAgentMode = () => {
+    const target = findPreferredAgentSession()
+    if (target !== undefined) {
+      void openSession(target)
+    } else if (session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)) {
+      useAppStore.setState({ selectedSession: undefined })
+    }
+    onBotModeChange?.(false)
+  }
+
+  const autoSelectingRef = useRef(false)
+  useEffect(() => {
+    if (botMode || suppressAutoSelect) return
+    const sessionIsBot = session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)
+    if (sessionIsBot) {
+      useAppStore.setState({ selectedSession: undefined })
+    }
+    if ((session !== undefined && !sessionIsBot) || busy !== undefined || autoSelectingRef.current) return
+    const target = findPreferredAgentSession()
     if (target) {
-      const capturedScope = memoryScope
       autoSelectingRef.current = true
       void openSession(target).finally(() => {
-        if (browseScope(useAppStore.getState()) === capturedScope) {
-          autoSelectingRef.current = false
-        } else {
-          autoSelectingRef.current = false
-        }
+        autoSelectingRef.current = false
       })
     }
-  }, [botMode, session, connected, busy, sessions, archivedSessionIds, openSession, botTeamState, memoryScope])
+  }, [botMode, suppressAutoSelect, session, connected, busy, sessions, archivedSessionIds, openSession, botTeamState, memoryScope])
 
   useEffect(() => {
     if (!replyActive) setComposingDuringRun(false)
@@ -579,6 +606,8 @@ export function ChatScreen({
       <HostSessionsDrawer
         key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
         inline={inlineMode}
+        entrance={inlineMode ? 'immediate' : drawerEntrance}
+        backRef={inlineMode ? undefined : drawerBackRef}
         botMode={botMode}
         onBotModeChange={onBotModeChange}
         dismissible={inlineMode || drawerSwipeUnlocked}
@@ -622,8 +651,8 @@ export function ChatScreen({
       }}
       onSelect={async next => {
         markConversationChosen()
-        onBotModeChange?.(false)
         const pending = openSession(next)
+        onBotModeChange?.(false)
         const visible = useAppStore.getState().selectedSession?.sessionId === next.sessionId
         if (!inlineMode && visible) {
           setSessionsOpen(false)
@@ -635,49 +664,73 @@ export function ChatScreen({
     />
   )
 
-  if (botMode) {
-    return (
-      <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
-        <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
-          {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
-          <View style={styles.splitMain} {...swipeRightTouchProps}>
-            <BotModeScreen
-              selectedId={botConversationId}
-              onSelect={id => onSelectBot?.(id)}
-              onAgentMode={() => onBotModeChange?.(false)}
-              onOpenDrawer={openSessionsDrawer}
-              onDeviceInfo={() => onOpenDeviceInfo?.()}
-              onMore={() => onOpenSettings?.()}
-              splitView={tabletSplit}
-              drawerOpen={sessionsOpen || tabletSplit}
-            />
-          </View>
+  const defaultTaskWorkspaceId =
+    (session === undefined ? undefined : workspaces.find(w => w.sessionIds.includes(session.sessionId))?.workspaceId)
+    ?? workspaces[0]?.workspaceId
+
+  const wrapChatShell = (mainPane: ReactNode, extraOverlays?: ReactNode) => (
+    <ChatImageProvider value={imageLoader}>
+      <MarkdownLinkProvider onLinkPress={openLink}>
+        <View style={styles.flex}>
+          <NavigationFocusProvider value={active && (!sessionsOpen || tabletSplit) && !composerExpanded}>
+            <KeyboardInset>
+              <View
+                key="chat-layout"
+                style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}
+                pointerEvents={sessionsOpen && !tabletSplit ? 'none' : 'auto'}
+                accessibilityElementsHidden={sessionsOpen && !tabletSplit}
+                importantForAccessibility={sessionsOpen && !tabletSplit ? 'no-hide-descendants' : 'auto'}
+              >
+                {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
+                {mainPane}
+              </View>
+              {extraOverlays}
+            </KeyboardInset>
+          </NavigationFocusProvider>
+          {sessionsOpen && !tabletSplit && drawerElement(false)}
+          <PluginsModal visible={pluginsOpen} onClose={() => setPluginsOpen(false)} />
+          <AutomationTasksModal
+            visible={automationTasksOpen}
+            onClose={() => setAutomationTasksOpen(false)}
+            onOpenSession={async targetSession => {
+              markConversationChosen()
+              const opened = await openSession(targetSession)
+              onBotModeChange?.(false)
+              if (opened && !tabletSplit) setSessionsOpen(false)
+              setAutomationTasksOpen(false)
+            }}
+            onNewTask={async () => {
+              markConversationChosen()
+              const created = await createSession(defaultTaskWorkspaceId)
+              onBotModeChange?.(false)
+              if (created && !tabletSplit) setSessionsOpen(false)
+              setAutomationTasksOpen(false)
+            }}
+          />
         </View>
-        {sessionsOpen && !tabletSplit && drawerElement(false)}
-        <PluginsModal visible={pluginsOpen} onClose={() => setPluginsOpen(false)} />
-        <AutomationTasksModal
-          visible={automationTasksOpen}
-          onClose={() => setAutomationTasksOpen(false)}
-          onOpenSession={async targetSession => {
-            setAutomationTasksOpen(false)
-            markConversationChosen()
-            setSessionsOpen(false)
-            onBotModeChange?.(false)
-            await openSession(targetSession)
-          }}
-          onNewTask={async () => {
-            setAutomationTasksOpen(false)
-            markConversationChosen()
-            setSessionsOpen(false)
-            onBotModeChange?.(false)
-            await createSession(workspaces[0]?.workspaceId)
-          }}
+      </MarkdownLinkProvider>
+    </ChatImageProvider>
+  )
+
+  if (botMode) {
+    return wrapChatShell(
+      <View style={styles.splitMain} {...swipeRightTouchProps}>
+        <BotModeScreen
+          selectedId={botConversationId}
+          onSelect={id => onSelectBot?.(id)}
+          onAgentMode={switchToAgentMode}
+          onOpenDrawer={openSessionsDrawer}
+          onDeviceInfo={() => onOpenDeviceInfo?.()}
+          onMore={() => onOpenSettings?.()}
+          splitView={tabletSplit}
+          drawerOpen={sessionsOpen || tabletSplit}
         />
-      </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
+      </View>,
     )
   }
 
-  if (session === undefined) {
+  const sessionIsBot = session !== undefined && isKnownBotSessionId(session.sessionId, botTeamState, memoryScope)
+  if (session === undefined || sessionIsBot) {
     const emptyHeader = (
       <TopBar
         title={strings.chat.newChat}
@@ -710,45 +763,22 @@ export function ChatScreen({
         }
       />
     )
-    return (
-      <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
-        <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
-          {tabletSplit && <View style={styles.splitSidebar}>{drawerElement(true)}</View>}
-          <View style={styles.splitMain} {...swipeRightTouchProps}>
-            <BlurHeaderFrame header={emptyHeader}>
-              {headerHeight => (
-                <View style={[styles.list, readableColumn, styles.emptyList, { paddingTop: headerHeight + spacing.xl }]}>
-                  {busy !== undefined ? (
-                    <View style={{ padding: spacing.xl, alignItems: 'center' }}>
-                      <ActivityIndicator size="large" color={colors.primary} />
-                    </View>
-                  ) : (
-                    <WelcomeMessage />
-                  )}
+    return wrapChatShell(
+      <View style={styles.splitMain} {...swipeRightTouchProps}>
+        <BlurHeaderFrame header={emptyHeader}>
+          {headerHeight => (
+            <View style={[styles.list, readableColumn, styles.emptyList, { paddingTop: headerHeight + spacing.xl }]}>
+              {busy !== undefined ? (
+                <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
                 </View>
+              ) : (
+                <WelcomeMessage />
               )}
-            </BlurHeaderFrame>
-          </View>
-        </View>
-        {sessionsOpen && !tabletSplit && drawerElement(false)}
-        <PluginsModal visible={pluginsOpen} onClose={() => setPluginsOpen(false)} />
-        <AutomationTasksModal
-          visible={automationTasksOpen}
-          onClose={() => setAutomationTasksOpen(false)}
-          onOpenSession={async targetSession => {
-            setAutomationTasksOpen(false)
-            markConversationChosen()
-            setSessionsOpen(false)
-            await openSession(targetSession)
-          }}
-          onNewTask={async () => {
-            setAutomationTasksOpen(false)
-            markConversationChosen()
-            setSessionsOpen(false)
-            await createSession(workspaces[0]?.workspaceId)
-          }}
-        />
-      </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
+            </View>
+          )}
+        </BlurHeaderFrame>
+      </View>,
     )
   }
 
@@ -1149,16 +1179,9 @@ export function ChatScreen({
         </View>
       )}
     </>
-  return (
-    <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openLink}><KeyboardInset>
+  return wrapChatShell(
+    <View style={styles.splitMain} {...swipeRightTouchProps}>
       {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
-      <View key="chat-layout" style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
-        {tabletSplit && (
-          <View style={styles.splitSidebar}>
-            {drawerElement(true)}
-          </View>
-        )}
-        <View style={styles.splitMain} {...swipeRightTouchProps}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
@@ -1347,8 +1370,8 @@ export function ChatScreen({
         onSubmit={() => void submit()}
         onStop={stopOrCancel}
       />
-        </View>
-      </View>
+        </View>,
+    <>
 
       <ChatActionMenu
         visible={plusMenuOpen} onClose={closePlusMenu} anchor={sheetAnchor}
@@ -1408,7 +1431,6 @@ export function ChatScreen({
           else openSessionsDrawer()
         }}
       />
-      {sessionsOpen && !tabletSplit && drawerElement(false)}
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); openSessionsDrawer() }} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
@@ -1471,20 +1493,7 @@ export function ChatScreen({
           </Pressable>
         </View>
       </Modal>
-      <PluginsModal visible={pluginsOpen} onClose={() => setPluginsOpen(false)} />
-      <AutomationTasksModal
-        visible={automationTasksOpen}
-        onClose={() => setAutomationTasksOpen(false)}
-        onOpenSession={async targetSession => {
-          setAutomationTasksOpen(false)
-          await openSession(targetSession)
-        }}
-        onNewTask={async () => {
-          setAutomationTasksOpen(false)
-          await createSession(currentWorkspace?.workspaceId)
-        }}
-      />
-    </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
+    </>,
   )
 }
 

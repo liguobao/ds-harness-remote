@@ -85,13 +85,15 @@ export function sheetPhaseDuration(phase: SheetPhase, reduceMotion: boolean): nu
 }
 
 /**
- * Pure phase transition. Closing is never skipped: showing again while closing
+ * Pure phase transition. Closing is never skipped unless another sheet
+ * supersedes it during a direct handoff; showing again while closing
  * re-enters `opening` so the animation continues from its current frame.
  */
-export function nextSheetPhase(phase: SheetPhase, visible: boolean): SheetPhase {
+export function nextSheetPhase(phase: SheetPhase, visible: boolean, superseded = false): SheetPhase {
   if (visible) {
     return phase === 'unmounted' || phase === 'closing' ? 'opening' : phase
   }
+  if (superseded) return 'unmounted'
   return phase === 'unmounted' ? 'unmounted' : 'closing'
 }
 
