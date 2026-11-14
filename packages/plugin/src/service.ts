@@ -563,7 +563,7 @@ export class HostPluginRuntime {
       undefined,
       this.config.forceRelay
         ? undefined
-        : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === undefined ? [] : [this.config.serverUrl] }),
+        : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === undefined ? [] : [this.config.serverUrl], iceIpv6: this.config.iceIpv6 }),
       () => this.hostCapabilities(),
       this.harnessVersion,
     )

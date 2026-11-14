@@ -695,6 +695,7 @@ function fakeChannel(
 
 function config(): ResolvedConfig {
   return {
+    iceIpv6: false,
     terminal: { enabled: false },
     httpServerAllowlist: [],
     sidebar: { entry: 'standard' },
