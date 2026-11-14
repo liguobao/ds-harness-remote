@@ -32,6 +32,9 @@ import type {
   SidebarEntryStyle,
 } from './types.js'
 
+/** Default device names Remote Web gives a browser, one per site language. */
+const remoteWebDefaultBrowserNames = new Set(['当前浏览器', 'Current browser', 'Navegador actual', '現在のブラウザー', '現在のブラウザ', 'Текущий браузер'])
+
 export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
@@ -1148,7 +1151,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const connectedCountLabel = t('connectedClientCount', { count: connectedCount })
     // Server-assigned names repeat (every Remote Web browser gets the same default),
     // so rows with the same name also show the end of their device ID.
-    const clientDisplayName = (client: { name: string }): string => client.name.trim() === '' ? t('unknownDevice') : client.name.trim()
+    const clientDisplayName = (client: { name: string; platform?: string }): string => {
+      const name = client.name.trim()
+      if (name === '') return t('unknownDevice')
+      // Remote Web names each browser with its own default in the site's language at registration.
+      return client.platform === 'web' && remoteWebDefaultBrowserNames.has(name) ? t('webBrowserDevice') : name
+    }
     const clientNameCounts = new Map<string, number>()
     for (const client of connectedClients) {
       const name = clientDisplayName(client)

@@ -1889,6 +1889,7 @@ If a code was sent, recover the original submission without changing it.`,
     openOnPhoneHint: "Scan with your phone camera to open this computer in Remote Web. Sign in with the same account as here.",
     openOnPhoneQr: "QR code that opens this computer in Remote Web",
     deviceIdShort: "ID \u2026{id}",
+    webBrowserDevice: "Browser",
     chooseDirectory: "Working directory",
     selectHostHint: "Select an online Host to browse its directories.",
     emptyDirectory: "This directory has no visible subdirectories.",
@@ -2276,6 +2277,7 @@ If a code was sent, recover the original submission without changing it.`,
     openOnPhoneHint: "\u7528\u624B\u673A\u76F8\u673A\u626B\u7801\uFF0C\u5373\u53EF\u5728 Remote Web \u4E2D\u76F4\u63A5\u6253\u5F00\u8FD9\u53F0\u7535\u8111\u3002\u8BF7\u4F7F\u7528\u4E0E\u8FD9\u91CC\u76F8\u540C\u7684\u8D26\u53F7\u767B\u5F55\u3002",
     openOnPhoneQr: "\u5728 Remote Web \u4E2D\u6253\u5F00\u8FD9\u53F0\u7535\u8111\u7684\u4E8C\u7EF4\u7801",
     deviceIdShort: "ID \u2026{id}",
+    webBrowserDevice: "\u6D4F\u89C8\u5668",
     chooseDirectory: "\u5DE5\u4F5C\u76EE\u5F55",
     selectHostHint: "\u9009\u62E9\u4E00\u53F0\u5728\u7EBF\u4E3B\u673A\u4EE5\u6D4F\u89C8\u5176\u76EE\u5F55\u3002",
     emptyDirectory: "\u8FD9\u4E2A\u76EE\u5F55\u4E0B\u6CA1\u6709\u53EF\u89C1\u7684\u5B50\u76EE\u5F55\u3002",
@@ -2662,6 +2664,7 @@ If a code was sent, recover the original submission without changing it.`,
     openOnPhoneHint: "\u041D\u0430\u0432\u0435\u0434\u0438\u0442\u0435 \u043A\u0430\u043C\u0435\u0440\u0443 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u043A\u043E\u0434, \u0438 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440 \u043E\u0442\u043A\u0440\u043E\u0435\u0442\u0441\u044F \u0432 Remote Web. \u0412\u043E\u0439\u0434\u0438\u0442\u0435 \u0432 \u0442\u043E\u0442 \u0436\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442, \u0447\u0442\u043E \u0438 \u0437\u0434\u0435\u0441\u044C.",
     openOnPhoneQr: "QR-\u043A\u043E\u0434, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0449\u0438\u0439 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440 \u0432 Remote Web",
     deviceIdShort: "ID \u2026{id}",
+    webBrowserDevice: "\u0411\u0440\u0430\u0443\u0437\u0435\u0440",
     chooseDirectory: "\u0420\u0430\u0431\u043E\u0447\u0438\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433",
     selectHostHint: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0445\u043E\u0441\u0442 \u0432 \u0441\u0435\u0442\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0435\u0433\u043E \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438.",
     emptyDirectory: "\u0412 \u044D\u0442\u043E\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0435 \u043D\u0435\u0442 \u0432\u0438\u0434\u0438\u043C\u044B\u0445 \u043F\u043E\u0434\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u043E\u0432.",
@@ -3048,6 +3051,7 @@ If a code was sent, recover the original submission without changing it.`,
     openOnPhoneHint: "\u041D\u0430\u0432\u0435\u0434\u0456\u0442\u044C \u043A\u0430\u043C\u0435\u0440\u0443 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u043A\u043E\u0434, \u0456 \u0446\u0435\u0439 \u043A\u043E\u043C\u043F\u02BC\u044E\u0442\u0435\u0440 \u0432\u0456\u0434\u043A\u0440\u0438\u0454\u0442\u044C\u0441\u044F \u0432 Remote Web. \u0423\u0432\u0456\u0439\u0434\u0456\u0442\u044C \u0443 \u0442\u043E\u0439 \u0441\u0430\u043C\u0438\u0439 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0438\u0439 \u0437\u0430\u043F\u0438\u0441, \u0449\u043E \u0439 \u0442\u0443\u0442.",
     openOnPhoneQr: "QR-\u043A\u043E\u0434, \u0449\u043E \u0432\u0456\u0434\u043A\u0440\u0438\u0432\u0430\u0454 \u0446\u0435\u0439 \u043A\u043E\u043C\u043F\u02BC\u044E\u0442\u0435\u0440 \u0443 Remote Web",
     deviceIdShort: "ID \u2026{id}",
+    webBrowserDevice: "\u0411\u0440\u0430\u0443\u0437\u0435\u0440",
     chooseDirectory: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433",
     selectHostHint: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u0445\u043E\u0441\u0442 \u0443 \u043C\u0435\u0440\u0435\u0436\u0456, \u0449\u043E\u0431 \u043F\u0435\u0440\u0435\u0433\u043B\u044F\u043D\u0443\u0442\u0438 \u0439\u043E\u0433\u043E \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438.",
     emptyDirectory: "\u0423 \u0446\u044C\u043E\u043C\u0443 \u043A\u0430\u0442\u0430\u043B\u043E\u0437\u0456 \u043D\u0435\u043C\u0430\u0454 \u0432\u0438\u0434\u0438\u043C\u0438\u0445 \u043F\u0456\u0434\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0456\u0432.",
@@ -5254,6 +5258,7 @@ If a code was sent, recover the original submission without changing it.`,
   }
 
   // packages/plugin/src/client/workspaces.ts
+  var remoteWebDefaultBrowserNames = /* @__PURE__ */ new Set(["\u5F53\u524D\u6D4F\u89C8\u5668", "Current browser", "Navegador actual", "\u73FE\u5728\u306E\u30D6\u30E9\u30A6\u30B6\u30FC", "\u73FE\u5728\u306E\u30D6\u30E9\u30A6\u30B6", "\u0422\u0435\u043A\u0443\u0449\u0438\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440"]);
   function createRemoteWorkspaceAction(React, portal) {
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), { PhoneLinkButton, PhoneLinkPanel } = createPhoneLink(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
@@ -5669,7 +5674,10 @@ If a code was sent, recover the original submission without changing it.`,
         selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
         selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion }),
         deviceUpdateAvailable(selectedHost) ? t("updateAvailableTag") : void 0
-      ].filter(Boolean).join(" \xB7 "), connectedClients = status?.host?.connectedClients ?? [], connectedCount = connectedClients.length, connectedCountLabel = t("connectedClientCount", { count: connectedCount }), clientDisplayName = (client) => client.name.trim() === "" ? t("unknownDevice") : client.name.trim(), clientNameCounts = /* @__PURE__ */ new Map();
+      ].filter(Boolean).join(" \xB7 "), connectedClients = status?.host?.connectedClients ?? [], connectedCount = connectedClients.length, connectedCountLabel = t("connectedClientCount", { count: connectedCount }), clientDisplayName = (client) => {
+        let name = client.name.trim();
+        return name === "" ? t("unknownDevice") : client.platform === "web" && remoteWebDefaultBrowserNames.has(name) ? t("webBrowserDevice") : name;
+      }, clientNameCounts = /* @__PURE__ */ new Map();
       for (let client of connectedClients) {
         let name = clientDisplayName(client);
         clientNameCounts.set(name, (clientNameCounts.get(name) ?? 0) + 1);
