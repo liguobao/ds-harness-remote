@@ -221,6 +221,7 @@ export const remoteEvents = [
   'acp.session.update',
   'acp.session.request_permission',
   'acp.session.closed',
+  'remote.transport.upgrade.ice',
 ] as const
 
 export const errorCodes = [

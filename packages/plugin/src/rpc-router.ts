@@ -1,4 +1,5 @@
 import type { LanUploadHost } from './lan-upload.js'
+import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
 import {
   BINARY_UPLOAD_CAPABILITY,
   LAN_UPLOAD_CAPABILITY,
@@ -79,6 +80,10 @@ const apiMethods = new Set([
   'workspace.upload.chunk.binary',
   'workspace.upload.commit',
   'workspace.upload.abort',
+  'remote.transport.upgrade.offer',
+  'remote.transport.upgrade.ice',
+  'remote.transport.upgrade.activate',
+  'remote.transport.upgrade.abort',
 ])
 
 export const HOST_CAPABILITIES = [
@@ -115,6 +120,7 @@ export class RpcRouter {
     private readonly workspaceUpload?: WorkspaceUploadHost,
     private readonly compaction?: RemoteCompactionRoute,
     private readonly lanUpload?: LanUploadHost,
+    private readonly transportUpgrade?: TransportUpgradeHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -125,6 +131,7 @@ export class RpcRouter {
       this.acp?.closeAll(),
       this.workspaceUpload?.closeAll(),
       this.lanUpload?.closeAll(),
+      this.transportUpgrade?.closeAll(),
     ])
   }
 
@@ -185,6 +192,7 @@ export class RpcRouter {
           ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
+          ...(this.transportUpgrade ? [TRANSPORT_UPGRADE_CAPABILITY] : []),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
@@ -267,6 +275,10 @@ export class RpcRouter {
         return this.workspaceUpload.call(method, params)
       }
       case 'plugin.route.call': return this.requirePluginRoute().call(params)
+      case 'remote.transport.upgrade.offer': return this.requireTransportUpgrade().offer(params)
+      case 'remote.transport.upgrade.ice': return this.requireTransportUpgrade().addIce(params)
+      case 'remote.transport.upgrade.activate': return this.requireTransportUpgrade().activate(params)
+      case 'remote.transport.upgrade.abort': return this.requireTransportUpgrade().abort(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
   }
@@ -304,6 +316,13 @@ export class RpcRouter {
       throw new RpcError('FEATURE_NOT_SUPPORTED', 'This Host cannot forward local plugin routes.')
     }
     return this.pluginRoute
+  }
+
+  private requireTransportUpgrade(): TransportUpgradeHost {
+    if (this.transportUpgrade === undefined) {
+      throw new RpcError('FEATURE_NOT_SUPPORTED', 'In-band transport upgrade is unavailable on this Host.')
+    }
+    return this.transportUpgrade
   }
 }
 

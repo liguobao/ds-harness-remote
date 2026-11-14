@@ -49,6 +49,7 @@ import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.
 import type { SafeLogger } from './logging.js'
 import type { AuthorizedPeerDevice, HostServerApi } from './server-api.js'
 import { ServerApiError } from './server-api.js'
+import { TransportUpgradeHost } from './transport-upgrade.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -805,7 +806,39 @@ export class HostServerConnection {
       tunnel.dataSocket?.close()
       tunnel.dataSocket = undefined
       tunnel.dataReady = false
-    }, mode)
+    }, mode, !this.config.forceRelay && this.canUseWebRtc()
+      ? (channel, publishEvent) => new TransportUpgradeHost({
+          connectionId: tunnel.connectionId,
+          peerDeviceId: tunnel.peer.deviceId,
+          currentMode: () => channel.mode,
+          loadRtcFactory: async () => {
+            if (this.rtcFactory === undefined && this.rtcFactoryProvider !== undefined) {
+              this.rtcFactory = await this.rtcFactoryProvider().catch(() => undefined)
+            }
+            return this.rtcFactory
+          },
+          fetchIceServers: id => this.api.turnCredentials(id),
+          onReceiveCiphertext: data => channel.receiveSequencedFrame(data),
+          adoptRtc: async (nextRtc, nextMode) => {
+            const prevRtc = tunnel.rtc
+            tunnel.rtc = nextRtc
+            tunnel.transport = nextMode === 'LAN' ? 'lan' : nextMode === 'TURN' ? 'turn' : 'p2p'
+            tunnel.transportMode = nextMode
+            nextRtc.onClose(() => {
+              void this.handleRtcFailed(tunnel, nextRtc, new Error('WebRTC data channel closed.'))
+            })
+            channel.upgrade((ciphertext: Uint8Array, counter: number) => nextRtc.send(wrapSequencedFrame(counter, ciphertext)), nextMode)
+            if (prevRtc !== undefined && prevRtc !== nextRtc) {
+              // Let the activate response leave on nextRtc and be processed by
+              // the client before closing the superseded DataChannel, so the
+              // old leg's SCTP close never beats the activate response.
+              const stale = prevRtc
+              setTimeout(() => { void stale.close().catch(() => undefined) }, 1_500).unref?.()
+            }
+          },
+          publishEvent,
+        }, this.logger)
+      : undefined)
     tunnel.channel = channel
     await this.connections.accept(channel)
     // Publish the responder handshake only after the channel is registered.
@@ -1340,6 +1373,30 @@ export class HostServerConnection {
   }
 }
 
+const UPGRADE_SEQ_MAGIC = [0x44, 0x53, 0x48, 0x55] as const // 'DSHU'
+
+function wrapSequencedFrame(counter: number, ciphertext: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + ciphertext.byteLength)
+  out.set(UPGRADE_SEQ_MAGIC, 0)
+  const view = new DataView(out.buffer, out.byteOffset, 12)
+  view.setBigUint64(4, BigInt(counter), false)
+  out.set(ciphertext, 12)
+  return out
+}
+
+function unwrapSequencedFrame(frame: Uint8Array): { counter: number; ciphertext: Uint8Array } {
+  if (frame.byteLength < 12
+    || frame[0] !== UPGRADE_SEQ_MAGIC[0]
+    || frame[1] !== UPGRADE_SEQ_MAGIC[1]
+    || frame[2] !== UPGRADE_SEQ_MAGIC[2]
+    || frame[3] !== UPGRADE_SEQ_MAGIC[3]) {
+    throw new ControlConnectionError('INVALID_MESSAGE', 'Invalid upgraded transport frame header.')
+  }
+  const view = new DataView(frame.buffer, frame.byteOffset, 12)
+  const counter = Number(view.getBigUint64(4, false))
+  return { counter, ciphertext: frame.subarray(12) }
+}
+
 const TERMINAL_AUTH_ERRORS = new Set([
   'CONNECTION_REPLACED',
   'ACCOUNT_AUTH_REQUIRED',
@@ -1354,19 +1411,22 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
   readonly security
   readonly peerDeviceId: string
   readonly peerIdentityKey: string
-  readonly mode: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+  mode: 'LAN' | 'P2P' | 'TURN' | 'Relay'
   private readonly handlers = new Set<(message: RemoteMessage) => void>()
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
+  private readonly futureCounterFrames = new Map<number, Uint8Array>()
+  private upgraded = false
   private closed = false
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   private sendTail: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly tunnel: PendingTunnel,
-    private readonly transmit: (ciphertext: Uint8Array) => Promise<void>,
+    private transmit: (ciphertext: Uint8Array, counter: number) => Promise<void>,
     private readonly onClose: () => Promise<void>,
     mode: 'LAN' | 'P2P' | 'TURN' | 'Relay',
+    private readonly upgradeFactory?: (channel: ServerNoiseChannel, publishEvent: (message: RemoteMessage) => Promise<void>) => TransportUpgradeHost,
   ) {
     this.mode = mode
     this.security = {
@@ -1376,6 +1436,16 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     }
     this.peerDeviceId = tunnel.peer.deviceId
     this.peerIdentityKey = tunnel.peer.publicKey
+  }
+
+  createUpgradeHost(publishEvent: (message: RemoteMessage) => Promise<void>): TransportUpgradeHost | undefined {
+    return this.upgradeFactory?.(this, publishEvent)
+  }
+
+  upgrade(nextTransmit: (ciphertext: Uint8Array, counter: number) => Promise<void>, nextMode: 'LAN' | 'P2P' | 'TURN'): void {
+    this.upgraded = true
+    this.transmit = nextTransmit
+    this.mode = nextMode
   }
 
   async send(message: RemoteMessage): Promise<void> {
@@ -1393,7 +1463,8 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
         if (this.closed) throw new Error('Secure channel closed')
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error('Secure channel closed')
-          await this.transmit(this.tunnel.noise.encrypt(plaintext))
+          const counter = Number(this.tunnel.noise.sendingCounter())
+          await this.transmit(this.tunnel.noise.encrypt(plaintext), counter)
         }
       })
     } catch (error) {
@@ -1407,25 +1478,55 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     return () => this.handlers.delete(handler)
   }
 
+  private deliverPlaintext(decrypted: Uint8Array): void {
+    const plaintext = this.incoming.decode(decrypted)
+    if (plaintext === undefined) return
+    const message = decodeMessage(plaintext)
+    for (const handler of this.handlers) handler(message)
+  }
+
+  private drainReorderBuffers(): void {
+    while (!this.closed) {
+      const expected = Number(this.tunnel.noise.receivingCounter())
+      const exact = this.futureCounterFrames.get(expected)
+      if (exact === undefined) break
+      this.futureCounterFrames.delete(expected)
+      this.deliverPlaintext(this.tunnel.noise.decrypt(exact))
+    }
+  }
+
+  receiveSequencedFrame(frame: Uint8Array): void {
+    const parsed = unwrapSequencedFrame(frame)
+    this.receive(parsed.counter, parsed.ciphertext)
+  }
+
   receive(counter: number | undefined, ciphertext: Uint8Array): void {
     if (this.tunnel.lease && !this.tunnel.lease.valid()) return
     if (this.closed) return
     if (counter !== undefined) {
       const expected = Number(this.tunnel.noise.receivingCounter())
-      if (!Number.isSafeInteger(counter) || counter !== expected) {
+      if (!Number.isSafeInteger(counter) || counter < expected) {
         throw new ControlConnectionError('INVALID_MESSAGE', 'Relay counter is duplicated or out of order.')
       }
+      if (counter > expected) {
+        if (this.upgraded && this.futureCounterFrames.size < 256) {
+          this.futureCounterFrames.set(counter, ciphertext)
+          return
+        }
+        throw new ControlConnectionError('INVALID_MESSAGE', 'Relay counter is duplicated or out of order.')
+      }
+      this.deliverPlaintext(this.tunnel.noise.decrypt(ciphertext))
+      this.drainReorderBuffers()
+      return
     }
-    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext))
-    if (plaintext === undefined) return
-    const message = decodeMessage(plaintext)
-    for (const handler of this.handlers) handler(message)
+    this.deliverPlaintext(this.tunnel.noise.decrypt(ciphertext))
   }
 
   async close(_code?: string): Promise<void> {
     if (this.closed) return
     this.closed = true
     this.handlers.clear()
+    this.futureCounterFrames.clear()
     this.incoming.reset()
     this.outgoing.reset()
     this.tunnel.noise.destroy()

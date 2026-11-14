@@ -192,4 +192,87 @@ describe('compact group round preservation', () => {
     const result = compactHistory({ cursor: 2, throughSeq: 2, hasMore: false, records: [groupResultRecord(9, empty)] }) as { records: unknown[] }
     expect(messageText(result.records[0])).toBe(empty)
   })
+
+  it('strips replayState, stream replay chunks, request/header tool schemas, ptc-dispatch outputs and injected system reminders while keeping human prompts intact', () => {
+    const snapshot = {
+      type: 'snapshot',
+      records: [
+        {
+          type: 'event',
+          event: {
+            type: 'request/header',
+            seq: 1,
+            data: { header: { config: { model: 'm1' }, tools: [{ name: 't', schema: 'S'.repeat(10_000) }], system: 'Y'.repeat(5_000) } },
+          },
+        },
+        {
+          type: 'event',
+          event: {
+            type: 'user/message',
+            seq: 2,
+            data: {
+              message: {
+                role: 'user',
+                source: { kind: 'user', requestId: 'req-1' },
+                content: [{ type: 'text', text: 'A'.repeat(2_000) }],
+              },
+            },
+          },
+        },
+        {
+          type: 'event',
+          event: {
+            type: 'user/message',
+            seq: 3,
+            data: {
+              message: {
+                role: 'user',
+                source: { kind: 'system-reminder' },
+                content: [{ type: 'text', text: '<system-reminder>' + 'R'.repeat(10_000) + '</system-reminder>' }],
+              },
+            },
+          },
+        },
+        {
+          type: 'event',
+          event: {
+            type: 'assistant/message',
+            seq: 4,
+            data: {
+              turn: 1,
+              step: 1,
+              stream: [{ type: 'text-chunks', texts: Array(200).fill('chunk') }],
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Final answer' }],
+                source: { kind: 'model', model: 'm1', replayState: { encrypted_content: 'E'.repeat(20_000) } },
+              },
+            },
+          },
+        },
+        {
+          type: 'event',
+          event: {
+            type: 'tool/ptc-dispatch',
+            seq: 5,
+            data: { code: 'C'.repeat(4_000), output: 'O'.repeat(8_000) },
+          },
+        },
+      ],
+    }
+    const projected = compactHistory(snapshot) as typeof snapshot
+    expect(projected.records[0]!.event.data).toEqual({ header: { config: { model: 'm1' } } })
+    // Human prompt text stays untouched.
+    expect((projected.records[1]!.event.data as { message: { content: Array<{ text: string }> } }).message.content[0]!.text).toHaveLength(2_000)
+    // Injected system-reminder is summarized.
+    expect((projected.records[2]!.event.data as { message: { content: Array<{ text: string }> } }).message.content[0]!.text).toContain(MARKER)
+    // Assistant replayState and stream chunks are omitted, final answer and model remain.
+    const assistantData = projected.records[3]!.event.data as Record<string, unknown>
+    expect(assistantData).not.toHaveProperty('stream')
+    expect((assistantData.message as { source: Record<string, unknown> }).source).toEqual({ kind: 'model', model: 'm1' })
+    // PTC dispatch code & output are summarized.
+    const ptcData = projected.records[4]!.event.data as { code: string; output: string }
+    expect(ptcData.code).toContain(MARKER)
+    expect(ptcData.output).toContain(MARKER)
+  })
 })

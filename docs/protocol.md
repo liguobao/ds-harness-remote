@@ -2257,6 +2257,15 @@ plugin-manager methods and legacy ApiProxy plugin management remain disallowed.
 This adds no new wire format or capability and requires an updated Host plugin.
 
 
+## Optional in-band live transport upgrade (`remote.transport.upgrade.v1`)
+
+When the Host advertises `remote.transport.upgrade.v1` in `harness.transport.describe`, a Client that established its authenticated Noise session immediately over Relay may negotiate higher-tier WebRTC DataChannels (`TURN -> P2P -> LAN`) in-band without rotating Noise keys or interrupting open streams:
+
+- RPCs: `remote.transport.upgrade.offer` (`{ attemptId, sdp } -> { attemptId, sdp }`), `remote.transport.upgrade.ice` (`{ attemptId, candidate } -> { ok: true }`), `remote.transport.upgrade.activate` (`{ attemptId, transport } -> { activated, mode }`), and `remote.transport.upgrade.abort` (`{ attemptId? } -> { ok: true }`).
+- Responder trickle ICE event: `remote.transport.upgrade.ice` (`{ attemptId, candidate }`).
+- Upgraded DataChannel frames prepend a 12-byte big-endian sequence header (`'DSHU' || uint64 noiseCounter`) before RTCH chunking so both peers preserve strict monotonic Noise nonce decryption across concurrent Relay/WebRTC legs during switchover.
+- Tier promotion is strictly monotonic (`Relay < TURN < P2P < LAN`); older Clients and older Hosts without `remote.transport.upgrade.v1` keep pre-handshake transport selection unchanged.
+
 ## Optional WebRTC control recovery (implementation in progress)
 
 The additive `transport.webrtc.resume.v1` contract is specified in
