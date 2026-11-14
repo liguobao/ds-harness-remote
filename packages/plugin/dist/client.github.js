@@ -1582,7 +1582,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // node_modules/qrcode/lib/browser.js
   var require_browser = __commonJS({
     "node_modules/qrcode/lib/browser.js"(exports) {
-      var canPromise = require_can_promise(), QRCode4 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
+      var canPromise = require_can_promise(), QRCode5 = require_qrcode(), CanvasRenderer = require_canvas(), SvgRenderer = require_svg_tag();
       function renderCanvas(renderFunc, canvas, text, opts, cb) {
         let args = [].slice.call(arguments, 1), argsNum = args.length, isLastArgCb = typeof args[argsNum - 1] == "function";
         if (!isLastArgCb && !canPromise())
@@ -1596,7 +1596,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             throw new Error("Too few arguments provided");
           return argsNum === 1 ? (text = canvas, canvas = opts = void 0) : argsNum === 2 && !canvas.getContext && (opts = text, text = canvas, canvas = void 0), new Promise(function(resolve, reject) {
             try {
-              let data = QRCode4.create(text, opts);
+              let data = QRCode5.create(text, opts);
               resolve(renderFunc(data, canvas, opts));
             } catch (e) {
               reject(e);
@@ -1604,13 +1604,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
           });
         }
         try {
-          let data = QRCode4.create(text, opts);
+          let data = QRCode5.create(text, opts);
           cb(null, renderFunc(data, canvas, opts));
         } catch (e) {
           cb(e);
         }
       }
-      exports.create = QRCode4.create;
+      exports.create = QRCode5.create;
       exports.toCanvas = renderCanvas.bind(null, CanvasRenderer.render);
       exports.toDataURL = renderCanvas.bind(null, CanvasRenderer.renderToDataURL);
       exports.toString = renderCanvas.bind(null, function(data, _, opts) {
@@ -1885,6 +1885,9 @@ If a code was sent, recover the original submission without changing it.`,
     starProject: "Open source project, stars welcome~",
     chooseHost: "Host",
     manageHosts: "Manage Hosts",
+    openOnPhone: "Open on phone",
+    openOnPhoneHint: "Scan with your phone camera to open this computer in Remote Web. Sign in with the same account as here.",
+    openOnPhoneQr: "QR code that opens this computer in Remote Web",
     chooseDirectory: "Working directory",
     selectHostHint: "Select an online Host to browse its directories.",
     emptyDirectory: "This directory has no visible subdirectories.",
@@ -2268,6 +2271,9 @@ If a code was sent, recover the original submission without changing it.`,
     starProject: "\u5F00\u6E90\u9879\u76EE\uFF0C\u6B22\u8FCEStar~",
     chooseHost: "\u4E3B\u673A",
     manageHosts: "\u7BA1\u7406\u8BBE\u5907",
+    openOnPhone: "\u5728\u624B\u673A\u4E0A\u6253\u5F00",
+    openOnPhoneHint: "\u7528\u624B\u673A\u76F8\u673A\u626B\u7801\uFF0C\u5373\u53EF\u5728 Remote Web \u4E2D\u76F4\u63A5\u6253\u5F00\u8FD9\u53F0\u7535\u8111\u3002\u8BF7\u4F7F\u7528\u4E0E\u8FD9\u91CC\u76F8\u540C\u7684\u8D26\u53F7\u767B\u5F55\u3002",
+    openOnPhoneQr: "\u5728 Remote Web \u4E2D\u6253\u5F00\u8FD9\u53F0\u7535\u8111\u7684\u4E8C\u7EF4\u7801",
     chooseDirectory: "\u5DE5\u4F5C\u76EE\u5F55",
     selectHostHint: "\u9009\u62E9\u4E00\u53F0\u5728\u7EBF\u4E3B\u673A\u4EE5\u6D4F\u89C8\u5176\u76EE\u5F55\u3002",
     emptyDirectory: "\u8FD9\u4E2A\u76EE\u5F55\u4E0B\u6CA1\u6709\u53EF\u89C1\u7684\u5B50\u76EE\u5F55\u3002",
@@ -2650,6 +2656,9 @@ If a code was sent, recover the original submission without changing it.`,
     starProject: "\u041F\u0440\u043E\u0435\u043A\u0442 \u0441 \u043E\u0442\u043A\u0440\u044B\u0442\u044B\u043C \u043A\u043E\u0434\u043E\u043C \u2014 \u0431\u0443\u0434\u0435\u043C \u0440\u0430\u0434\u044B \u0437\u0432\u0451\u0437\u0434\u0430\u043C~",
     chooseHost: "\u0425\u043E\u0441\u0442",
     manageHosts: "\u0423\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435 \u0445\u043E\u0441\u0442\u0430\u043C\u0438",
+    openOnPhone: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0435",
+    openOnPhoneHint: "\u041D\u0430\u0432\u0435\u0434\u0438\u0442\u0435 \u043A\u0430\u043C\u0435\u0440\u0443 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u043A\u043E\u0434, \u0438 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440 \u043E\u0442\u043A\u0440\u043E\u0435\u0442\u0441\u044F \u0432 Remote Web. \u0412\u043E\u0439\u0434\u0438\u0442\u0435 \u0432 \u0442\u043E\u0442 \u0436\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442, \u0447\u0442\u043E \u0438 \u0437\u0434\u0435\u0441\u044C.",
+    openOnPhoneQr: "QR-\u043A\u043E\u0434, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0449\u0438\u0439 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440 \u0432 Remote Web",
     chooseDirectory: "\u0420\u0430\u0431\u043E\u0447\u0438\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433",
     selectHostHint: "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0445\u043E\u0441\u0442 \u0432 \u0441\u0435\u0442\u0438, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0435\u0433\u043E \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438.",
     emptyDirectory: "\u0412 \u044D\u0442\u043E\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0435 \u043D\u0435\u0442 \u0432\u0438\u0434\u0438\u043C\u044B\u0445 \u043F\u043E\u0434\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u043E\u0432.",
@@ -3032,6 +3041,9 @@ If a code was sent, recover the original submission without changing it.`,
     starProject: "\u041F\u0440\u043E\u0454\u043A\u0442 \u0437 \u0432\u0456\u0434\u043A\u0440\u0438\u0442\u0438\u043C \u043A\u043E\u0434\u043E\u043C \u2014 \u0431\u0443\u0434\u0435\u043C\u043E \u0440\u0430\u0434\u0456 \u0432\u0430\u0448\u0438\u043C \u0437\u0456\u0440\u043A\u0430\u043C~",
     chooseHost: "\u0425\u043E\u0441\u0442",
     manageHosts: "\u041A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0445\u043E\u0441\u0442\u0430\u043C\u0438",
+    openOnPhone: "\u0412\u0456\u0434\u043A\u0440\u0438\u0442\u0438 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0456",
+    openOnPhoneHint: "\u041D\u0430\u0432\u0435\u0434\u0456\u0442\u044C \u043A\u0430\u043C\u0435\u0440\u0443 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u043A\u043E\u0434, \u0456 \u0446\u0435\u0439 \u043A\u043E\u043C\u043F\u02BC\u044E\u0442\u0435\u0440 \u0432\u0456\u0434\u043A\u0440\u0438\u0454\u0442\u044C\u0441\u044F \u0432 Remote Web. \u0423\u0432\u0456\u0439\u0434\u0456\u0442\u044C \u0443 \u0442\u043E\u0439 \u0441\u0430\u043C\u0438\u0439 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0438\u0439 \u0437\u0430\u043F\u0438\u0441, \u0449\u043E \u0439 \u0442\u0443\u0442.",
+    openOnPhoneQr: "QR-\u043A\u043E\u0434, \u0449\u043E \u0432\u0456\u0434\u043A\u0440\u0438\u0432\u0430\u0454 \u0446\u0435\u0439 \u043A\u043E\u043C\u043F\u02BC\u044E\u0442\u0435\u0440 \u0443 Remote Web",
     chooseDirectory: "\u0420\u043E\u0431\u043E\u0447\u0438\u0439 \u043A\u0430\u0442\u0430\u043B\u043E\u0433",
     selectHostHint: "\u0412\u0438\u0431\u0435\u0440\u0456\u0442\u044C \u0445\u043E\u0441\u0442 \u0443 \u043C\u0435\u0440\u0435\u0436\u0456, \u0449\u043E\u0431 \u043F\u0435\u0440\u0435\u0433\u043B\u044F\u043D\u0443\u0442\u0438 \u0439\u043E\u0433\u043E \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438.",
     emptyDirectory: "\u0423 \u0446\u044C\u043E\u043C\u0443 \u043A\u0430\u0442\u0430\u043B\u043E\u0437\u0456 \u043D\u0435\u043C\u0430\u0454 \u0432\u0438\u0434\u0438\u043C\u0438\u0445 \u043F\u0456\u0434\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0456\u0432.",
@@ -4996,6 +5008,7 @@ If a code was sent, recover the original submission without changing it.`,
       '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2);max-height:296px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.dshRemoteHostList.isCollapsed{max-height:none;overflow-y:visible}.dshRemoteHostList>button{min-height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 20px 10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button[aria-current="true"]{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
       '.dshRemoteConnectedMenu{position:relative;flex:0 0 auto;margin-right:4px}.dshRemoteConnectedCount{appearance:none;display:inline-flex;align-items:center;justify-content:center;height:22px;border:0;border-radius:999px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.04) inset;padding:0 10px;font:inherit;font-size:11px;font-weight:500;line-height:17px;white-space:nowrap;cursor:default}.dshRemoteConnectedCount.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemoteConnectedCount.isInteractive{cursor:pointer}.dshRemoteConnectedCount.isInteractive:hover{filter:brightness(1.08)}.dshRemoteConnectedCount:disabled{opacity:1;cursor:default}.dshRemoteConnectedCount:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteConnectedPanel{position:absolute;top:calc(100% + 8px);right:0;z-index:4;width:min(320px,calc(100vw - 48px));max-height:min(280px,40vh);overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.28);padding:10px 12px}.dshRemoteConnectedPanelTitle{display:block;margin:0 0 6px;color:var(--dsw-alias-label-primary);font-size:12px;font-weight:600}.dshRemoteClientList{display:flex;flex-direction:column}.dshRemoteClientRow{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteClientRow:last-child{border-bottom:0}.dshRemoteClientRow>span{min-width:0;display:flex;flex-direction:column;gap:2px}.dshRemoteClientRow strong{font-size:13px;font-weight:500}.dshRemoteClientRow small{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteClientOnline{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-state-success-primary)!important}.dshRemoteClientOnline::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}',
       ".dshRemoteConnectedCount{height:auto;border-radius:0;background:transparent;box-shadow:none;padding:0 4px;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 45%,transparent);text-underline-offset:3px}.dshRemoteConnectedCount.isInteractive:hover{filter:none;text-decoration-color:currentColor}.dshRemoteConnectedCount:focus-visible{outline-offset:3px;border-radius:3px}",
+      ".dshRemoteSectionTitle>.dshRemotePhoneLink{margin-left:auto}.dshRemoteSectionTitle>.dshRemotePhoneLink+.dshRemoteConnectedMenu{margin-left:0}.dshRemotePhoneLink{position:relative;flex:0 0 auto}.dshRemotePhoneLinkButton{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;cursor:pointer}.dshRemotePhoneLinkButton:hover,.dshRemotePhoneLink.isOpen>.dshRemotePhoneLinkButton{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary)}.dshRemotePhoneLinkButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemotePhoneLinkPanel{position:absolute;top:calc(100% + 8px);right:0;z-index:4;box-sizing:border-box;width:min(260px,calc(100vw - 48px));max-height:min(420px,70vh);overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.28);padding:12px;display:flex;flex-direction:column;gap:8px}.dshRemotePhoneLinkTitle{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600}.dshRemotePhoneLinkHint{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;white-space:normal}.dshRemotePhoneLinkQr{box-sizing:border-box;display:block;width:184px;height:184px;margin:4px auto;border-radius:10px;padding:6px;background:#fff}.dshRemotePhoneLinkUrl{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1.4;overflow-wrap:anywhere;white-space:normal;text-decoration:none}.dshRemotePhoneLinkUrl:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}",
       ".dshRemoteProgressStatus{display:inline-flex;align-items:center;gap:8px}",
       '.dshRemoteProgress{display:flex;flex-direction:column;gap:8px;margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dshRemoteProgressHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteProgressHeader strong{font-size:13px;font-weight:600}.dshRemoteProgressHeader span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteProgressBar{height:6px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteProgressBar>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--dsw-alias-brand-primary);transform-origin:left center;transition:transform .22s ease-out}[dir="rtl"] .dshRemoteProgressBar>span{transform-origin:right center}.dshRemoteProgress p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.45}.dshRemoteProgressRoute{font-weight:500}.dshRemoteProgressRoute .isActive{color:var(--dsw-alias-state-success-primary);font-weight:700}.dshRemoteProgressRouteArrow{color:var(--dsw-alias-label-tertiary)}@media(prefers-reduced-motion:reduce){.dshRemoteProgressBar>span{transition:none}}',
       '.dshRemoteBrowser{display:flex;flex-direction:column}.dshRemoteCrumbs{display:flex;align-items:center;gap:4px;overflow:auto;padding:2px 0 10px}.dshRemoteCrumbs>button{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:5px 7px;border-radius:6px;cursor:pointer}.dshRemoteCrumbs>button:not(:last-child)::after{content:" /";color:var(--dsw-alias-label-tertiary)}.dshRemoteCrumbs>button:disabled{color:var(--dsw-alias-label-primary);font-weight:600}',
@@ -5107,8 +5120,76 @@ If a code was sent, recover the original submission without changing it.`,
     };
   }
 
-  // packages/plugin/src/client/workspaces.ts
+  // packages/plugin/src/client/phone-link.ts
   var import_qrcode3 = __toESM(require_browser(), 1);
+  function remoteWebHostUrl(serverUrl, deviceId) {
+    return `${serverUrl.replace(/\/+$/, "")}/app/remote/${encodeURIComponent(deviceId)}`;
+  }
+  function createPhoneLinkMenu(React) {
+    return function(props) {
+      let { t } = props, [open, setOpen] = React.useState(!1), [image, setImage] = React.useState(void 0), url = remoteWebHostUrl(props.serverUrl, props.deviceId);
+      React.useEffect(() => {
+        let current = !0;
+        return setImage(void 0), open && import_qrcode3.default.toDataURL(url, { width: 184, margin: 1, errorCorrectionLevel: "M" }).then((value) => {
+          current && setImage(value);
+        }).catch(() => {
+        }), () => {
+          current = !1;
+        };
+      }, [open, url]), React.useEffect(() => {
+        if (!open) return;
+        let closeOnPointer = (event) => {
+          let target = event.target;
+          target instanceof Element && target.closest(".dshRemotePhoneLink") !== null || setOpen(!1);
+        }, closeOnEscape = (event) => {
+          event.key === "Escape" && (event.stopPropagation(), setOpen(!1));
+        };
+        return window.addEventListener("mousedown", closeOnPointer), window.addEventListener("keydown", closeOnEscape, !0), () => {
+          window.removeEventListener("mousedown", closeOnPointer), window.removeEventListener("keydown", closeOnEscape, !0);
+        };
+      }, [open]);
+      let label = t("openOnPhone");
+      return React.createElement(
+        "div",
+        { className: `dshRemotePhoneLink${open ? " isOpen" : ""}` },
+        React.createElement("button", {
+          type: "button",
+          className: "dshRemotePhoneLinkButton",
+          title: label,
+          "aria-label": label,
+          "aria-expanded": open,
+          "aria-haspopup": "dialog",
+          onClick: () => setOpen((current) => !current)
+        }, React.createElement(
+          "svg",
+          {
+            viewBox: "0 0 24 24",
+            width: 16,
+            height: 16,
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: 1.8,
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            "aria-hidden": !0
+          },
+          React.createElement("rect", { x: 6, y: 2.5, width: 12, height: 19, rx: 2.5 }),
+          React.createElement("path", { d: "M11 18h2" })
+        )),
+        open ? React.createElement(
+          "div",
+          { className: "dshRemotePhoneLinkPanel", role: "dialog", "aria-label": label },
+          React.createElement("strong", { className: "dshRemotePhoneLinkTitle" }, label),
+          React.createElement("p", { className: "dshRemotePhoneLinkHint" }, t("openOnPhoneHint")),
+          image === void 0 ? React.createElement("div", { className: "dshRemotePhoneLinkQr", "aria-busy": !0 }) : React.createElement("img", { src: image, width: 184, height: 184, alt: t("openOnPhoneQr"), className: "dshRemotePhoneLinkQr" }),
+          React.createElement("a", { className: "dshRemotePhoneLinkUrl", href: url, target: "_blank", rel: "noreferrer" }, url)
+        ) : null
+      );
+    };
+  }
+
+  // packages/plugin/src/client/workspaces.ts
+  var import_qrcode4 = __toESM(require_browser(), 1);
 
   // packages/plugin/src/version-compare.ts
   var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -5174,7 +5255,7 @@ If a code was sent, recover the original submission without changing it.`,
 
   // packages/plugin/src/client/workspaces.ts
   function createRemoteWorkspaceAction(React, portal) {
-    let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), RemoteProgressView = createRemoteProgressView(React);
+    let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), PhoneLinkMenu = createPhoneLinkMenu(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       if (React.useEffect(
@@ -5243,7 +5324,7 @@ If a code was sent, recover the original submission without changing it.`,
         let run = ++qrFlowRun.current;
         setBusy(!0), setError(void 0), setQrExpired(!1);
         try {
-          let session = await props.control("client.account.qr.start", { provider }), image = await import_qrcode3.default.toDataURL(session.scanUrl, {
+          let session = await props.control("client.account.qr.start", { provider }), image = await import_qrcode4.default.toDataURL(session.scanUrl, {
             width: 184,
             margin: 1,
             errorCorrectionLevel: "L"
@@ -6034,6 +6115,7 @@ If a code was sent, recover the original submission without changing it.`,
                           onChange: (event) => void setCurrentDeviceControl(event.target.checked)
                         })
                       ) : null,
+                      status?.serverUrl !== void 0 && status.host?.deviceId !== void 0 && status.host.authorized && !status.host.accountRequired && !status.host.pairingHostOnly ? React.createElement(PhoneLinkMenu, { serverUrl: status.serverUrl, deviceId: status.host.deviceId, t }) : null,
                       connectedMenu
                     )
                   ),

@@ -1,5 +1,6 @@
 import { mountAccountEntry } from './account-entry.js'
 import { createHostPairingPanel } from './pairing.js'
+import { createPhoneLinkMenu } from './phone-link.js'
 import { createServerNotice } from './server-notice.js'
 import { renderBodyPortal } from './portal.js'
 import QRCode from 'qrcode'
@@ -34,6 +35,7 @@ import type {
 export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
+  const PhoneLinkMenu = createPhoneLinkMenu(React)
   const RemoteProgressView = createRemoteProgressView(React)
 
   /**
@@ -1456,6 +1458,10 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                         checked: status.host?.authorized === true,
                         onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                       })) : null,
+                    status?.serverUrl !== undefined && status.host?.deviceId !== undefined && status.host.authorized
+                      && !status.host.accountRequired && !status.host.pairingHostOnly
+                      ? React.createElement(PhoneLinkMenu, { serverUrl: status.serverUrl, deviceId: status.host.deviceId, t })
+                      : null,
                     connectedMenu)),
                 React.createElement('div', {
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
