@@ -376,7 +376,7 @@ const esES = {
     codeThemeAuto: "Según app", codeThemeDark: "Siempre oscuro", codeThemeLight: "Siempre claro",
     activityDockMode: "Widgets de actividad", activityDockModeNote: "Controla cómo aparecen las tareas en segundo plano, los subagentes y el equipo de agentes sobre el campo de entrada",
     activityDockCompact: "Barra compacta de píldoras", activityDockCards: "Tarjetas apiladas", activityDockHidden: "Siempre oculto", activityDockModeSaveFailed: "No se pudo guardar la configuración de los widgets de actividad",
-    drawerLayoutMode: "Diseño de la barra lateral", drawerLayoutCompact: "Nuevo (compacto)", drawerLayoutClassic: "Clásico (tarjetas expandidas)", drawerLayoutModeSaveFailed: "No se pudo guardar la configuración del diseño de la barra lateral",
+    drawerLayoutMode: "Diseño de la barra lateral", drawerLayoutCompact: "Compacto", drawerLayoutClassic: "Tarjetas expandidas", drawerLayoutModeSaveFailed: "No se pudo guardar la configuración del diseño de la barra lateral",
     statusBar: "Mostrar barra de estado", statusBarNote: "Muestra la hora, la batería y el estado de la red en la parte superior de la pantalla. Desactívelo para ocultar la barra de estado del sistema.", statusBarSaveFailed: "No se pudo guardar la configuración de la barra de estado", statusBarSaveFailedBody: "No se pudo escribir en el almacenamiento local. Por favor inténtalo de nuevo.",
     theme: "Modo oscuro", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
     chat: "Charlar",

@@ -374,7 +374,7 @@ const zhTW = {
     codeThemeAuto: '跟隨主題', codeThemeDark: '深邃暗色', codeThemeLight: '明亮淺色',
     activityDockMode: '活動組件展示', activityDockModeNote: '控制對話輸入框上方背景工作、子任務與智能體團隊的展示方式',
     activityDockCompact: '緊湊膠囊列', activityDockCards: '獨立摺疊卡片', activityDockHidden: '始終隱藏', activityDockModeSaveFailed: '無法儲存活動組件展示設定',
-    drawerLayoutMode: '側邊欄版面', drawerLayoutCompact: '新版（精簡）', drawerLayoutClassic: '舊版（展開卡片）', drawerLayoutModeSaveFailed: '無法儲存側邊欄版面設定',
+    drawerLayoutMode: '側邊欄版面', drawerLayoutCompact: '精簡', drawerLayoutClassic: '展開卡片', drawerLayoutModeSaveFailed: '無法儲存側邊欄版面設定',
     statusBar: '顯示狀態列', statusBarNote: '顯示螢幕頂部的時間、電量和網路狀態。關閉後隱藏系統狀態列。', statusBarSaveFailed: '無法儲存狀態列設定', statusBarSaveFailedBody: '本地儲存寫入失敗，請重試。',
     theme: '深色模式', themeLight: '淺色', themeDark: '深色', themeSystem: '跟隨系統',
     chat: '對話',

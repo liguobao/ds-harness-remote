@@ -376,7 +376,7 @@ const deDE = {
     codeThemeAuto: "Wie App", codeThemeDark: "Immer dunkel", codeThemeLight: "Immer hell",
     activityDockMode: "Aktivitäts-Widgets", activityDockModeNote: "Steuern Sie, wie Hintergrundaufgaben, Subagenten und das Agenten-Team über dem Eingabefeld angezeigt werden",
     activityDockCompact: "Kompakte Pillenleiste", activityDockCards: "Gestapelte Karten", activityDockHidden: "Immer ausgeblendet", activityDockModeSaveFailed: "Die Einstellung der Aktivitäts-Widgets konnte nicht gespeichert werden",
-    drawerLayoutMode: "Seitenleisten-Layout", drawerLayoutCompact: "Neu (kompakt)", drawerLayoutClassic: "Klassisch (erweiterte Karten)", drawerLayoutModeSaveFailed: "Die Einstellung für das Seitenleisten-Layout konnte nicht gespeichert werden",
+    drawerLayoutMode: "Seitenleisten-Layout", drawerLayoutCompact: "Kompakt", drawerLayoutClassic: "Erweiterte Karten", drawerLayoutModeSaveFailed: "Die Einstellung für das Seitenleisten-Layout konnte nicht gespeichert werden",
     statusBar: "Statusleiste anzeigen", statusBarNote: "Zeigt die Uhrzeit, den Akku- und Netzwerkstatus oben auf dem Bildschirm an. Schalten Sie diese Option aus, um die Systemstatusleiste auszublenden.", statusBarSaveFailed: "Die Einstellung der Statusleiste konnte nicht gespeichert werden", statusBarSaveFailedBody: "Es konnte nicht in den lokalen Speicher geschrieben werden. Bitte versuchen Sie es erneut.",
     theme: "Dunkelmodus", themeLight: "Hell", themeDark: "Dunkel", themeSystem: "System",
     chat: "Chatten",

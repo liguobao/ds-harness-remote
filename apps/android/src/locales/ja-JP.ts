@@ -376,7 +376,7 @@ const jaJP = {
     codeThemeAuto: "テーマに合わせる", codeThemeDark: "常にダーク", codeThemeLight: "常にライト",
     activityDockMode: "アクティビティ ウィジェット", activityDockModeNote: "入力欄の上部に表示されるバックグラウンドタスク、サブエージェント、エージェントチームの表示方法を制御します",
     activityDockCompact: "コンパクト ピルバー", activityDockCards: "スタック カード", activityDockHidden: "常に非表示", activityDockModeSaveFailed: "アクティビティ ウィジェットの設定を保存できませんでした",
-    drawerLayoutMode: "サイドバーレイアウト", drawerLayoutCompact: "新版（コンパクト）", drawerLayoutClassic: "旧版（展開カード）", drawerLayoutModeSaveFailed: "サイドバーレイアウトの設定を保存できませんでした",
+    drawerLayoutMode: "サイドバーレイアウト", drawerLayoutCompact: "コンパクト", drawerLayoutClassic: "展開カード", drawerLayoutModeSaveFailed: "サイドバーレイアウトの設定を保存できませんでした",
     statusBar: "ステータスバーを表示する", statusBarNote: "画面上部に時刻、バッテリー、ネットワークのステータスを表示します。オフにすると、システム ステータス バーが非表示になります。", statusBarSaveFailed: "ステータスバーの設定を保存できませんでした", statusBarSaveFailedBody: "ローカルストレージに書き込めませんでした。もう一度試してください。",
     theme: "ダークモード", themeLight: "ライト", themeDark: "ダーク", themeSystem: "システム設定に従う",
     chat: "チャット",
