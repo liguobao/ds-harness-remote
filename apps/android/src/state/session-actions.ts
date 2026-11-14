@@ -575,6 +575,21 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         try {
           const workspace = workspaceId === undefined ? undefined : get().workspaces.find(item => item.workspaceId === workspaceId)
           const backend = targetBackend ?? workspace?.backend ?? 'harness'
+          // Only an explicitly blank, idle conversation in this workspace is
+          // reusable. Titles are not evidence that a conversation is empty.
+          const state = get()
+          const reusable = workspace === undefined ? undefined : state.sessions
+            .filter(item => workspace.sessionIds.includes(item.sessionId)
+              && (item.backend ?? 'harness') === backend
+              && item.blank === true && !item.running
+              && !state.sessionLifecycles[item.sessionId]?.running
+              && !isSubagentSession(item)
+              && !state.archivedSessionIds.includes(item.sessionId)
+              && !(state.messages[item.sessionId]?.length)
+              && !(state.selectedSession?.sessionId === item.sessionId
+                && (state.selectedSession.blank === false || state.selectedSession.running)))
+            .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+          if (reusable !== undefined) return await get().openSession(reusable)
           const existingPath = workspace?.path || get().workspaces.find(w => !!w.path)?.path
           const isWin = get().selectedDevice?.platform === 'windows'
           const cwd = existingPath || (isWin ? 'C:\\' : '/')

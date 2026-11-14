@@ -1044,6 +1044,37 @@ describe('session restore state machine', () => {
 })
 
 describe('session creation single flight', () => {
+  it('reuses the newest idle blank in the same workspace and backend on repeated new-chat requests', async () => {
+    const older = { ...session, sessionId: 'older', blank: true }
+    const newest = { ...older, sessionId: 'newest', updatedAt: 2 }
+    const foreign = { ...newest, sessionId: 'foreign', updatedAt: 3 }
+    const archived = { ...newest, sessionId: 'archived', updatedAt: 4 }
+    const running = { ...newest, sessionId: 'running', running: true, updatedAt: 5 }
+    const otherBackend = { ...newest, sessionId: 'codex:blank', backend: 'codex' as const, updatedAt: 6 }
+    useAppStore.setState({
+      sessions: [older, newest, foreign, archived, running, otherBackend],
+      archivedSessionIds: ['archived'],
+      workspaces: [{ workspaceId: 'workspace-a', title: 'A', path: '/a', createdAt: '', updatedAt: '',
+        sessionIds: ['older', 'newest', 'archived', 'running', 'codex:blank'] }],
+    })
+    expect(await useAppStore.getState().createSession('workspace-a')).toBe(true)
+    expect(await useAppStore.getState().createSession('workspace-a')).toBe(true)
+    expect(useAppStore.getState().selectedSession?.sessionId).toBe('newest')
+    expect(proxy.sessionCreate).not.toHaveBeenCalled()
+    expect(proxy.sessionSelectPermission).not.toHaveBeenCalled()
+    expect(useAppStore.getState().busyAction).toBeUndefined()
+  })
+
+  it('creates when the workspace only has nonempty conversations, even with a new-chat title', async () => {
+    useAppStore.setState({ sessions: [{ ...session, title: '新对话' }],
+      workspaces: [{ workspaceId: 'workspace-a', title: 'A', path: '/a', createdAt: '', updatedAt: '', sessionIds: ['s1'] }] })
+    const created = { ...session, sessionId: 'new', blank: true }
+    proxy.sessionCreate.mockResolvedValue({ sessionId: 'new' })
+    proxy.sessionList.mockResolvedValue([session, created])
+    expect(await useAppStore.getState().createSession('workspace-a')).toBe(true)
+    expect(proxy.sessionCreate).toHaveBeenCalledOnce()
+  })
+
   it('locks the real creation and opening lifecycle and releases after success or failure', async () => {
     await runScenarios(['success', 'create failure', 'history failure'].map(outcome => ({
       name: outcome,
