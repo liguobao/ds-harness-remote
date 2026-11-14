@@ -109,6 +109,17 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+  it('scopes binary upload support to the current Host and clears it on close', async () => {
+    const connection = new AndroidRemoteConnection()
+    for (const binary of [false, true, false]) {
+      testState.capabilities = ['harness.remote.v1', 'workspace.upload.v1', ...(binary ? ['workspace.upload.binary.v1'] : [])]
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      expect(connection.supportsBinaryUpload()).toBe(binary)
+    }
+    await connection.close()
+    expect(connection.supportsBinaryUpload()).toBe(false)
+  })
+
   it('gives TURN-only attempts an allocation budget without slowing automatic routing', async () => {
     await runScenarios([
       { name: 'automatic', preferred: ['lan', 'p2p', 'turn', 'relay'] as const, timeout: 6000 },

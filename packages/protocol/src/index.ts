@@ -1,3 +1,6 @@
+export { LAN_UPLOAD_CAPABILITY, LAN_UPLOAD_MIN_BYTES, LAN_UPLOAD_TICKET_MS, LAN_UPLOAD_CONNECT_MS, lanUploadScopeSchema, lanUploadRequestSchema, lanUploadOfferSchema, isLanUploadAddress, validateLanUploadOffer, createLanUploadPrologue, type LanUploadOffer } from './lan-upload.js'
+import { encodeBinaryUpload, decodeBinaryUpload } from './binary-upload.js'
+export { BINARY_UPLOAD_CAPABILITY, BINARY_UPLOAD_CHUNK_BYTES } from './binary-upload.js'
 export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
 export { parseWireJson } from './wire-json.js'
@@ -147,8 +150,10 @@ export const controlFrameTypes = [
 ] as const
 
 export const rpcMethods = [
+  'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
+  'workspace.upload.chunk.binary',
   'workspace.upload.commit',
   'workspace.upload.abort',
   'harness.transport.describe',
@@ -499,6 +504,7 @@ export const harnessCapabilityValues = [
   'remote.compaction.async.v1',
   'remote.session.events.v1',
   'workspace.upload.v1',
+  'workspace.upload.binary.v1',
   'harness.api.v1',
   'harness.api.transfer.v1',
   'harness.remote.v1',
@@ -1419,11 +1425,11 @@ function parseRelayDataFrame(input: unknown): RelayDataFrame {
 }
 
 export function encodeMessage(message: RemoteMessage): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(message))
+  return encodeBinaryUpload(message) ?? new TextEncoder().encode(JSON.stringify(message))
 }
 
 export function decodeMessage(data: Uint8Array | string): RemoteMessage {
-  return parseRemoteMessage(parseWireJson(data))
+  return parseRemoteMessage(decodeBinaryUpload(data) ?? parseWireJson(data))
 }
 
 interface FragmentAssembly {

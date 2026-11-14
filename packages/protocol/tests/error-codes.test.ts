@@ -255,6 +255,7 @@ describe('capability constants', () => {
       'remote.compaction.async.v1',
       'remote.session.events.v1',
       'workspace.upload.v1',
+      'workspace.upload.binary.v1',
       'harness.api.v1',
       'harness.api.transfer.v1',
       'harness.remote.v1',

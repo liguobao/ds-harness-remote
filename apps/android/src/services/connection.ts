@@ -1,5 +1,7 @@
+import { LanUploadRoutes } from './lan-upload'
+import { nativeWebSocketSender } from './native-websocket-binary'
 import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
-import { classifyControlClose } from '@dsh-remote/protocol'
+import { LAN_UPLOAD_CAPABILITY, classifyControlClose } from '@dsh-remote/protocol'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { connectionFailure, connectionLog } from './connection-log'
@@ -28,6 +30,8 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private binaryUploads = false
+  private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
   private pluginRouteSupported = false
   private core?: RemoteClientCore
@@ -140,6 +144,8 @@ export class AndroidRemoteConnection {
         // connection that may already be stored on this instance.
         if (this.core !== core) return
         this.clearHealthTimer()
+        void this.lanUploads?.close()
+        this.lanUploads = undefined
         void this.closeMux?.(false)
         this.closeMux = undefined
         this.core = undefined
@@ -177,6 +183,16 @@ export class AndroidRemoteConnection {
         this.muxHandler?.(frame)
       }
       this.compactHistorySupported = features.capabilities.includes('remote.history.compact.v1')
+      this.binaryUploads = features.capabilities.includes('workspace.upload.v1') && features.capabilities.includes('workspace.upload.binary.v1')
+      const sender = this.binaryUploads && features.capabilities.includes(LAN_UPLOAD_CAPABILITY) ? nativeWebSocketSender() : undefined
+      const carrier = this.transport
+      if(sender && carrier) this.lanUploads = new LanUploadRoutes({
+        control: core, identity, host, sender,
+        current: () => this.core === core && this.transport === carrier,
+        mode: () => carrier.getStats().mode,
+        details: () => carrier.connectionDetails(),
+        connectionId: () => carrier.connectionInfo().connectionId,
+      })
       this.applyBackendFeatures(core, features)
       this.unsubscribeArchived = this.cursor?.onSessionArchived(data => {
         if (this.core === core) options.onOpencodeArchived?.(data.sessionId)
@@ -291,9 +307,11 @@ export class AndroidRemoteConnection {
     )
   }
 
+  supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
+
   async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
     if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
-    return this.core.rpc<T>(method, params, signal)
+    return this.lanUploads ? this.lanUploads.rpc<T>(method, params, signal) : this.core.rpc<T>(method, params, signal)
   }
 
   /** Optional CodeX business client; available only when the Host advertises both domain capabilities. */
@@ -457,6 +475,10 @@ export class AndroidRemoteConnection {
     this.closeMux = undefined
     const core = this.core
     this.core = undefined
+    this.binaryUploads = false
+    const lanUploads = this.lanUploads
+    this.lanUploads = undefined
+    await lanUploads?.close()
     // Closing the whole transport makes a remote stream-close redundant.
     // Only remove the local subscription here so a half-open RTC path cannot
     // add another RPC timeout before recovery begins.

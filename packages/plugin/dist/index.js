@@ -2278,7 +2278,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
-    var { randomBytes: randomBytes14, createHash: createHash8 } = __require("crypto");
+    var { randomBytes: randomBytes15, createHash: createHash8 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2816,7 +2816,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort2 = isSecure ? 443 : 80;
-      const key = randomBytes14(16).toString("base64");
+      const key = randomBytes15(16).toString("base64");
       const request = isSecure ? https.request : http.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -64487,6 +64487,76 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// packages/protocol/dist/lan-upload.js
+var LAN_UPLOAD_CAPABILITY = "workspace.upload.lan.v1";
+var LAN_UPLOAD_MIN_BYTES = 1024 * 1024;
+var LAN_UPLOAD_TICKET_MS = 1e4;
+var lanUploadScopeSchema = external_exports.object({
+  sessionId: external_exports.string().min(1).max(512),
+  uploadId: external_exports.string().uuid()
+}).strict();
+var lanUploadRequestSchema = lanUploadScopeSchema.extend({ address: external_exports.string().max(64) }).strict();
+var lanUploadOfferSchema = lanUploadScopeSchema.extend({
+  connectionId: external_exports.string().min(1).max(512),
+  url: external_exports.string().max(512),
+  expiresInMs: external_exports.number().int().positive().max(LAN_UPLOAD_TICKET_MS)
+}).strict();
+function isLanUploadAddress(address2) {
+  const parts = address2.split(".");
+  if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p) || Number(p) > 255 || String(Number(p)) !== p))
+    return false;
+  const [a, b] = parts.map(Number);
+  return a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168;
+}
+function createLanUploadPrologue(offer) {
+  const ticket = new URL(offer.url).pathname.split("/").at(-1);
+  return new TextEncoder().encode(JSON.stringify(["ds-harness-remote/lan-upload/v1", offer.connectionId, offer.sessionId, offer.uploadId, ticket]));
+}
+
+// packages/protocol/dist/binary-upload.js
+var BINARY_UPLOAD_CAPABILITY = "workspace.upload.binary.v1";
+var BINARY_UPLOAD_CHUNK_BYTES = 256 * 1024;
+var BINARY_UPLOAD_MAGIC = new Uint8Array([68, 83, 72, 85, 80, 1, 0, 0]);
+var BINARY_UPLOAD_PREFIX_BYTES = 12;
+var BINARY_UPLOAD_MAX_HEADER_BYTES = 4096;
+var BINARY_UPLOAD_METHOD = "workspace.upload.chunk.binary";
+function encodeBinaryUpload(message) {
+  if (message.type !== "rpc.request" || !isBinaryUploadRecord(message.payload) || message.payload.method !== BINARY_UPLOAD_METHOD)
+    return void 0;
+  const params = message.payload.params;
+  if (!isBinaryUploadRecord(params) || !(params.data instanceof Uint8Array))
+    throw new Error("Binary upload requires bytes");
+  const { data: data2, ...metadata } = params;
+  if (!data2.byteLength || data2.byteLength > BINARY_UPLOAD_CHUNK_BYTES)
+    throw new Error("Binary upload chunk exceeds limit");
+  const header = new TextEncoder().encode(JSON.stringify({ ...message, payload: { method: BINARY_UPLOAD_METHOD, params: metadata } }));
+  if (header.byteLength > BINARY_UPLOAD_MAX_HEADER_BYTES)
+    throw new Error("Binary upload header exceeds limit");
+  const frame = new Uint8Array(BINARY_UPLOAD_PREFIX_BYTES + header.byteLength + data2.byteLength);
+  frame.set(BINARY_UPLOAD_MAGIC);
+  new DataView(frame.buffer).setUint32(8, header.byteLength, false);
+  frame.set(header, BINARY_UPLOAD_PREFIX_BYTES);
+  frame.set(data2, BINARY_UPLOAD_PREFIX_BYTES + header.byteLength);
+  return frame;
+}
+function decodeBinaryUpload(data2) {
+  if (typeof data2 === "string" || data2[0] !== BINARY_UPLOAD_MAGIC[0] || data2[1] !== BINARY_UPLOAD_MAGIC[1] || data2[2] !== BINARY_UPLOAD_MAGIC[2] || data2[3] !== BINARY_UPLOAD_MAGIC[3])
+    return void 0;
+  if (data2.byteLength < BINARY_UPLOAD_PREFIX_BYTES || !BINARY_UPLOAD_MAGIC.every((byte, index) => data2[index] === byte))
+    throw new Error("Invalid binary upload prefix");
+  const headerBytes = new DataView(data2.buffer, data2.byteOffset, data2.byteLength).getUint32(8, false);
+  const chunkBytes = data2.byteLength - BINARY_UPLOAD_PREFIX_BYTES - headerBytes;
+  if (!headerBytes || headerBytes > BINARY_UPLOAD_MAX_HEADER_BYTES || chunkBytes < 1 || chunkBytes > BINARY_UPLOAD_CHUNK_BYTES)
+    throw new Error("Invalid binary upload bounds");
+  const message = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data2.subarray(BINARY_UPLOAD_PREFIX_BYTES, BINARY_UPLOAD_PREFIX_BYTES + headerBytes)));
+  if (!isBinaryUploadRecord(message) || message.type !== "rpc.request" || !isBinaryUploadRecord(message.payload) || message.payload.method !== BINARY_UPLOAD_METHOD || !isBinaryUploadRecord(message.payload.params) || "data" in message.payload.params)
+    throw new Error("Invalid binary upload header");
+  return { ...message, payload: { ...message.payload, params: { ...message.payload.params, data: data2.subarray(BINARY_UPLOAD_PREFIX_BYTES + headerBytes) } } };
+}
+function isBinaryUploadRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // packages/protocol/dist/loopback.js
 var LOOPBACK_CHUNK_BYTES = 64 * 1024;
 var LOOPBACK_MAX_BODY_BYTES = 1024 * 1024;
@@ -64655,8 +64725,10 @@ var controlFrameTypes = [
   "error"
 ];
 var rpcMethods = [
+  "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
+  "workspace.upload.chunk.binary",
   "workspace.upload.commit",
   "workspace.upload.abort",
   "harness.transport.describe",
@@ -65144,10 +65216,10 @@ function parseRelayDataFrame(input4) {
   return frame;
 }
 function encodeMessage(message) {
-  return new TextEncoder().encode(JSON.stringify(message));
+  return encodeBinaryUpload(message) ?? new TextEncoder().encode(JSON.stringify(message));
 }
 function decodeMessage(data2) {
-  return parseRemoteMessage(parseWireJson(data2));
+  return parseRemoteMessage(decodeBinaryUpload(data2) ?? parseWireJson(data2));
 }
 var SecureMessageCodec = class {
   nextMessageId = 1;
@@ -68923,7 +68995,8 @@ function fromBase64Url(value) {
 // packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
-function browserRtcFactory() {
+function browserRtcFactory(options = {}) {
+  const binarySender = options.sendBinary;
   return {
     create(configuration) {
       const raw = new RTCPeerConnection({
@@ -68973,8 +69046,8 @@ function browserRtcFactory() {
         get ondatachannel() {
           return raw.ondatachannel;
         },
-        createDataChannel(label, options) {
-          return adaptDataChannel(raw.createDataChannel(label, options));
+        createDataChannel(label, options2) {
+          return adaptDataChannel(raw.createDataChannel(label, options2), binarySender);
         },
         createOffer() {
           return raw.createOffer();
@@ -69094,7 +69167,7 @@ function summarizeIpv6Scope(address2) {
     return "reserved";
   return "public";
 }
-function adaptDataChannel(raw) {
+function adaptDataChannel(raw, sendBinary) {
   return {
     get label() {
       return raw.label;
@@ -69145,6 +69218,8 @@ function adaptDataChannel(raw) {
       return raw.onbufferedamountlow;
     },
     send(data2) {
+      if (data2 instanceof ArrayBuffer && sendBinary?.(raw, data2))
+        return;
       raw.send(data2);
     },
     close() {
@@ -72757,7 +72832,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes14 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes15 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain2 = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -72839,7 +72914,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes14(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes15(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -75163,18 +75238,18 @@ function validateTableBytes(numPoints, fpBytes) {
   if (bytes > TABLE_BYTES_MAX)
     throw new Error("invalid window size: table would need ~" + Math.ceil(bytes / 2 ** 20) + " MiB, max " + TABLE_BYTES_MAX / 2 ** 20 + " MiB");
 }
-function probeRandomBytes(randomBytes14, length) {
-  if (randomBytes14 === void 0)
+function probeRandomBytes(randomBytes15, length) {
+  if (randomBytes15 === void 0)
     return void 0;
-  afunction(randomBytes14, "randomBytes");
+  afunction(randomBytes15, "randomBytes");
   try {
-    const probe = randomBytes14(length);
+    const probe = randomBytes15(length);
     if (!isBytes3(probe) || probe.length !== length)
       return void 0;
   } catch {
     return void 0;
   }
-  return randomBytes14;
+  return randomBytes15;
 }
 function validateMSMPoints2(points, c) {
   aarray(points, "points");
@@ -75267,9 +75342,9 @@ var ScalarMultiplier = class {
   baseCanBeBlinded;
   bits;
   // Parametrized with a given Point class (not individual point)
-  constructor(Point, randomBytes14) {
+  constructor(Point, randomBytes15) {
     validatePointCons(Point);
-    this.randomBytes = probeRandomBytes(randomBytes14, BLIND_BYTES);
+    this.randomBytes = probeRandomBytes(randomBytes15, BLIND_BYTES);
     this.Point = Point;
     this.BASE = Point.BASE;
     this.ZERO = Point.ZERO;
@@ -75540,7 +75615,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes14 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
+  const randomBytes15 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -75801,7 +75876,7 @@ function edwards2(params, extraOpts = {}) {
     }
   }
   const normalize = (points) => normalizeZ2(Point, points);
-  const wnaf = new ScalarMultiplier(Point, randomBytes14);
+  const wnaf = new ScalarMultiplier(Point, randomBytes15);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
   Object.freeze(Point.prototype);
@@ -78049,7 +78124,18 @@ var NoiseIkSession = class {
       initiator,
       s: { secretKey: localPrivate, publicKey: localPublic },
       ...initiator ? { rs: Uint8Array.from(this.expectedRemoteStatic) } : {},
-      cipher: chachaPoly,
+      cipher: options.encryptChaChaPoly ? {
+        ...chachaPoly,
+        encrypt(key, nonce, ad, plaintext, out) {
+          const encrypted = options.encryptChaChaPoly(key, nonce, ad, plaintext);
+          if (encrypted === void 0)
+            return chachaPoly.encrypt(key, nonce, ad, plaintext, out);
+          if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
+            throw new NoiseSessionError("INVALID_ENCRYPTION_OUTPUT", "ChaChaPoly accelerator returned an invalid length.");
+          }
+          out.set(encrypted);
+        }
+      } : chachaPoly,
       hash: sha256H,
       rng: options.random ?? randomBytes
     });
@@ -88078,7 +88164,7 @@ var ClientModeRuntime = class {
   async discoverToolWorkspaces(targetDeviceId, signal) {
     return this.withToolRemote(targetDeviceId, signal, async (remote, activeSignal) => {
       const workspaces = [];
-      const unavailable3 = [];
+      const unavailable4 = [];
       const read = async (backend, query) => {
         activeSignal.throwIfAborted();
         try {
@@ -88087,7 +88173,7 @@ var ClientModeRuntime = class {
           }
         } catch {
           activeSignal.throwIfAborted();
-          unavailable3.push({ backend, code: "BACKEND_UNAVAILABLE" });
+          unavailable4.push({ backend, code: "BACKEND_UNAVAILABLE" });
         }
       };
       if (remote.features.remoteGateway) {
@@ -88109,7 +88195,7 @@ var ClientModeRuntime = class {
           });
         });
       }
-      return { workspaces, unavailable: unavailable3 };
+      return { workspaces, unavailable: unavailable4 };
     });
   }
   async withToolRemote(targetDeviceId, signal, query) {
@@ -98939,8 +99025,199 @@ function redact(value, key = "") {
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
 
+// packages/plugin/src/lan-upload.ts
+import { randomBytes as randomBytes13 } from "node:crypto";
+import { createServer as createServer4 } from "node:http";
+import { networkInterfaces as networkInterfaces3 } from "node:os";
+var LanUploadHost = class {
+  constructor(upload, owner, localAddresses = () => Object.values(networkInterfaces3()).flatMap((list2) => list2 ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => a.address)) {
+    this.upload = upload;
+    this.owner = owner;
+    this.localAddresses = localAddresses;
+  }
+  closed = false;
+  entries = /* @__PURE__ */ new Set();
+  async open(input4) {
+    const p = lanUploadRequestSchema.parse(input4);
+    if (!this.live() || !isLanUploadAddress(p.address) || !this.localAddresses().includes(p.address) || this.entries.size >= 2) throw unavailable2();
+    if ([...this.entries].some((e) => e.uploadId === p.uploadId)) throw unavailable2();
+    const server = createServer4((_request, response) => {
+      response.writeHead(404).end();
+    });
+    server.maxConnections = 4;
+    server.headersTimeout = 5e3;
+    server.requestTimeout = 5e3;
+    server.keepAliveTimeout = 1e3;
+    const wss = new import_websocket_server.default({ noServer: true, maxPayload: 65535, perMessageDeflate: false });
+    const entry = { server, wss, sessionId: p.sessionId, uploadId: p.uploadId, used: false, opened: false, committed: false, disposed: false, queuedBytes: 0, requests: 0 };
+    this.entries.add(entry);
+    try {
+      await new Promise((resolve10, reject) => {
+        entry.rejectBinding = () => reject(unavailable2());
+        server.once("error", reject);
+        server.listen(0, p.address, () => {
+          server.off("error", reject);
+          entry.rejectBinding = void 0;
+          if (entry.disposed) {
+            server.close();
+            reject(unavailable2());
+          } else resolve10();
+        });
+      });
+      if (!this.live() || entry.disposed) throw unavailable2();
+      const address2 = server.address();
+      if (!address2 || typeof address2 === "string") throw unavailable2();
+      const token = randomBytes13(32).toString("base64url");
+      const path = `/ds-harness-remote/upload/${token}`;
+      const offer = {
+        sessionId: p.sessionId,
+        uploadId: p.uploadId,
+        connectionId: this.owner.connectionId,
+        url: `ws://${p.address}:${address2.port}${path}`,
+        expiresInMs: LAN_UPLOAD_TICKET_MS
+      };
+      entry.timer = setTimeout(() => {
+        void this.dispose(entry);
+      }, LAN_UPLOAD_TICKET_MS);
+      entry.timer.unref();
+      server.on("error", () => {
+        void this.dispose(entry);
+      });
+      server.on("upgrade", (request, socket, head) => {
+        if (!this.live() || entry.disposed || entry.used || request.url !== path) {
+          socket.destroy();
+          return;
+        }
+        entry.used = true;
+        clearTimeout(entry.timer);
+        try {
+          wss.handleUpgrade(request, socket, head, (ws) => this.attach(entry, offer, ws));
+        } catch {
+          socket.destroy();
+          void this.dispose(entry);
+        }
+      });
+      return offer;
+    } catch (error62) {
+      await this.dispose(entry);
+      throw error62 instanceof RpcError ? error62 : unavailable2();
+    }
+  }
+  async closeAll() {
+    this.closed = true;
+    await Promise.all([...this.entries].map((entry) => this.dispose(entry)));
+  }
+  live() {
+    return !this.closed && this.owner.mode() === "LAN";
+  }
+  attach(entry, offer, socket) {
+    if (!this.live() || entry.disposed) {
+      socket.terminate();
+      return;
+    }
+    entry.socket = socket;
+    socket.on("error", () => {
+      void this.dispose(entry);
+    });
+    socket.on("close", () => {
+      void this.dispose(entry);
+    });
+    const identity3 = this.owner.identity();
+    const noise = new NoiseIkSession({
+      role: "responder",
+      localPrivateKey: identity3.privateKey,
+      localPublicKey: identity3.publicKey,
+      remotePublicKey: this.owner.peerIdentityKey,
+      prologue: createLanUploadPrologue(offer)
+    });
+    entry.noise = noise;
+    const incoming = new SecureMessageCodec(), outgoing = new SecureMessageCodec();
+    let tail = Promise.resolve();
+    const send = async (message) => {
+      for (const frame of outgoing.encode(encodeMessage(message))) {
+        if (!this.live() || entry.disposed || socket.readyState !== import_websocket.default.OPEN) throw unavailable2();
+        await new Promise((resolve10, reject) => socket.send(noise.encrypt(frame), { binary: true }, (error62) => error62 ? reject(error62) : resolve10()));
+      }
+    };
+    const touch = () => {
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => {
+        void this.dispose(entry);
+      }, 12e4);
+      entry.timer.unref();
+    };
+    entry.handshakeTimer = setTimeout(() => {
+      void this.dispose(entry);
+    }, 5e3);
+    entry.handshakeTimer.unref();
+    socket.on("message", (raw, binary) => {
+      try {
+        if (!binary || !this.live() || entry.disposed) throw unavailable2();
+        const bytes = raw instanceof Buffer ? raw : Buffer.from(raw);
+        if (!noise.complete) {
+          noise.readHandshake(bytes);
+          socket.send(noise.writeHandshake(), { binary: true });
+          clearTimeout(entry.handshakeTimer);
+          touch();
+          return;
+        }
+        const data2 = incoming.decode(noise.decrypt(bytes));
+        if (!data2) return;
+        if (data2.byteLength > BINARY_UPLOAD_CHUNK_BYTES + 8192 || entry.queuedBytes + data2.byteLength > 2 * 1024 * 1024 || entry.requests >= 8) throw unavailable2();
+        const message = decodeMessage(data2);
+        const payload = message.payload;
+        const params = payload?.params;
+        if (message.type !== "rpc.request" || !params || params.sessionId !== entry.sessionId || params.uploadId !== entry.uploadId || !["workspace.upload.open", "workspace.upload.chunk.binary", "workspace.upload.commit", "workspace.upload.abort"].includes(String(payload.method))) throw unavailable2();
+        entry.queuedBytes += data2.byteLength;
+        entry.requests++;
+        touch();
+        tail = tail.then(async () => {
+          if (!this.live() || entry.disposed) return;
+          const method = payload.method;
+          try {
+            if (entry.committed || (method === "workspace.upload.open" ? entry.opened || params.encoding !== "binary-v1" : !entry.opened)) throw unavailable2();
+            if (method === "workspace.upload.open") entry.opened = true;
+            const result = await this.upload.call(method, params);
+            if (method === "workspace.upload.commit") entry.committed = true;
+            await send(createRpcResponse(message.id, result));
+          } catch (error62) {
+            await send(createRpcError(message.id, safeErrorCode(error62), "The LAN upload could not be completed.")).catch(() => void 0);
+            await this.dispose(entry);
+          } finally {
+            entry.queuedBytes -= data2.byteLength;
+            entry.requests--;
+          }
+        }).catch(() => {
+          void this.dispose(entry);
+        });
+      } catch {
+        void this.dispose(entry);
+      }
+    });
+  }
+  async dispose(entry) {
+    if (entry.disposed) return;
+    entry.disposed = true;
+    entry.rejectBinding?.();
+    entry.rejectBinding = void 0;
+    this.entries.delete(entry);
+    clearTimeout(entry.timer);
+    clearTimeout(entry.handshakeTimer);
+    entry.socket?.terminate();
+    entry.noise?.destroy();
+    for (const socket of entry.wss.clients) socket.terminate();
+    entry.wss.close();
+    entry.server.closeAllConnections();
+    entry.server.close();
+    if (entry.opened && !entry.committed) await this.upload.call("workspace.upload.abort", { sessionId: entry.sessionId, uploadId: entry.uploadId }).catch(() => void 0);
+  }
+};
+function unavailable2() {
+  return new RpcError("FEATURE_NOT_SUPPORTED", "LAN upload is unavailable on this connection.");
+}
+
 // packages/plugin/src/host-pairing.ts
-import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes13, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
 import { join as join15 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
@@ -99150,7 +99427,7 @@ var HostPairing = class {
     const key = createHash7("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
     try {
       if (encrypt) {
-        const iv = randomBytes13(12);
+        const iv = randomBytes14(12);
         const c2 = createCipheriv5("aes-256-gcm", key, iv);
         c2.setAAD(Buffer.from(id6));
         const data2 = Buffer.concat([c2.update(value, "utf8"), c2.final()]);
@@ -99177,8 +99454,9 @@ var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
 var WORKSPACE_UPLOAD_AUTHORITY_BYTES = 4 * 1024 * 1024;
 var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
-var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(workspaceUploadMaxBytes("LAN")) }).strict();
+var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(workspaceUploadMaxBytes("LAN")), encoding: external_exports.literal("binary-v1").optional() }).strict();
 var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
+var binaryChunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
 var WorkspaceUploadHost = class {
   constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now) {
     this.resolveRoot = resolveRoot;
@@ -99206,6 +99484,8 @@ var WorkspaceUploadHost = class {
             return await this.begin(input4);
           case "workspace.upload.chunk":
             return await this.append(input4);
+          case "workspace.upload.chunk.binary":
+            return await this.append(input4, true);
           case "workspace.upload.commit":
             return await this.commit(input4);
           case "workspace.upload.abort": {
@@ -99270,13 +99550,14 @@ var WorkspaceUploadHost = class {
     };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
-    return { uploadId: p.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK };
+    return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...p.encoding ? { encoding: p.encoding } : {} };
   }
-  async append(input4) {
-    const p = chunkParams.parse(input4);
+  async append(input4, binary = false) {
+    const p = binary ? binaryChunkParams.parse(input4) : chunkParams.parse(input4);
     const upload = this.requireUpload(p);
-    const data2 = Buffer.from(p.data, "base64");
-    if (!data2.length || data2.length > WORKSPACE_UPLOAD_CHUNK || data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
+    if (binary !== (upload.encoding === "binary-v1")) throw failure4("UPLOAD_INVALID_CHUNK");
+    const data2 = typeof p.data === "string" ? Buffer.from(p.data, "base64") : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength);
+    if (!data2.length || data2.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || !binary && data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
     await this.validateRoot(upload, this.authorityExpired(upload));
     let written = 0;
     while (written < data2.length) {
@@ -99398,18 +99679,18 @@ function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, ac
     signal.throwIfAborted();
     if (sessionId.startsWith("codex:")) {
       const parsed = parseCodexSessionId(sessionId);
-      if (!parsed) throw unavailable2();
+      if (!parsed) throw unavailable3();
       return codex(parsed.threadId);
     }
     if (/^(acp|cursor|pi|opencode|claude|hermes):/.test(sessionId)) return acp(sessionId);
-    if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable2();
+    if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable3();
     const result = await gateway.dispatch("session/list", { args: { _request: {} } }, signal);
     signal.throwIfAborted();
     const value = result.ok ? result.value : void 0;
     return value?.items?.find((item) => item.sessionId === sessionId)?.cwd;
   };
 }
-function unavailable2() {
+function unavailable3() {
   return new RpcError("UPLOAD_WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.");
 }
 
@@ -99452,7 +99733,7 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, transportMode: () => channel.mode },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -99677,8 +99958,10 @@ var apiMethods = /* @__PURE__ */ new Set([
   "agent.acp.transfer.read",
   "agent.acp.transfer.close",
   "plugin.route.call",
+  "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
+  "workspace.upload.chunk.binary",
   "workspace.upload.commit",
   "workspace.upload.abort"
 ]);
@@ -99693,7 +99976,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -99706,6 +99989,7 @@ var RpcRouter = class {
     this.pluginRoute = pluginRoute;
     this.workspaceUpload = workspaceUpload;
     this.compaction = compaction;
+    this.lanUpload = lanUpload;
   }
   active = 0;
   async closePeerStreams() {
@@ -99714,7 +99998,8 @@ var RpcRouter = class {
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
       this.acp?.closeAll(),
-      this.workspaceUpload?.closeAll()
+      this.workspaceUpload?.closeAll(),
+      this.lanUpload?.closeAll()
     ]);
   }
   async handle(message) {
@@ -99762,13 +100047,14 @@ var RpcRouter = class {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
-        const hostCapabilities = await this.capabilities();
+        const hostCapabilities = (await this.capabilities()).filter((capability) => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY);
         const remoteAvailable = hostCapabilities.includes("harness.remote.v1") || hostCapabilities.includes("harness.remote.v3");
         const capabilities = [.../* @__PURE__ */ new Set([
           ...hostCapabilities,
           "remote.history.compact.v1",
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
-          ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY]
+          ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
+          ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -99864,8 +100150,13 @@ var RpcRouter = class {
         return this.requireAcp().readTransfer(params);
       case "agent.acp.transfer.close":
         return this.requireAcp().closeTransfer(params);
+      case "workspace.upload.lan.open": {
+        if (!this.lanUpload) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN upload is unavailable on this Host.");
+        return this.lanUpload.open(params);
+      }
       case "workspace.upload.open":
       case "workspace.upload.chunk":
+      case "workspace.upload.chunk.binary":
       case "workspace.upload.commit":
       case "workspace.upload.abort": {
         if (!this.workspaceUpload) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace upload is unavailable on this Host.");
@@ -103064,6 +103355,18 @@ var HostPluginRuntime = class {
       );
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer);
       const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
+      const workspaceUpload = new WorkspaceUploadHost(workspaceUploadRootResolver(
+        peerGateway,
+        () => harnessSessionGeneration(this.harnessVersion) === "v3",
+        (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+        (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
+      ), void 0, context.transportMode);
+      const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
+        connectionId: context.connectionId,
+        peerIdentityKey: context.peerIdentityKey,
+        identity: () => this.currentIdentity(),
+        mode: context.transportMode
+      }) : void 0;
       return new RpcRouter(
         void 0,
         this.logger,
@@ -103076,16 +103379,12 @@ var HostPluginRuntime = class {
         this.createLoopbackHost(),
         () => this.hostWorkspaceTypes(),
         pluginRoute,
-        new WorkspaceUploadHost(workspaceUploadRootResolver(
-          peerGateway,
-          () => harnessSessionGeneration(this.harnessVersion) === "v3",
-          (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
-          (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-        ), void 0, context.transportMode),
+        workspaceUpload,
         {
           operations: this.compactionOperations,
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
-        }
+        },
+        lanUpload
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {

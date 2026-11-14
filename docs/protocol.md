@@ -960,6 +960,8 @@ Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 
 `workspace.upload.open|chunk|commit|abort`。Client 必须以加密通道内的
 `harness.transport.describe` 结果确认该能力；它不表示任意目录可写，也不扩展原生
 附件、图片 transfer 或只读预览 allowlist。协议详见 [Workspace upload](#workspace-upload)。
+其可选扩展 `workspace.upload.binary.v1` 只在上传服务实际可用且声明基础能力时，
+通过认证后的 describe 返回；初始协调握手和旧版 JSON 上传不变。
 未声明该能力时不调用上传 RPC；旧 Host 的入口保持禁用。
 
 `remote.session.events.v1` 声明 Host 的 `$events` 流具备真实转发能力（而非缺少 `@deepseek-ai/dsh-api-remotes` 时的空转兜底），会持续推送 `api-session/added|removed|status|activity|error` 事件，且 `session/control` 与 `workspace/list` 语义就绪；Client 据此可停止周期性全量 `session/list` 轮询，改为增量更新并在新建/移除未知根会话时按需同步工作区目录。
@@ -1655,7 +1657,7 @@ ACP 同时要求调用连接的 peer 仍有效、backend 可用、session owner 
 - `open`：`totalBytes` 是非负整数：Host 验证当前连接为 LAN 或直接 P2P 时最大 1 GiB（1,073,741,824 bytes）；TURN、Relay、未知路径最大 20 MiB。Host 在 open、chunk 和 commit 重新检查实际路径；大文件传输回退至中继时拒绝并清理未提交数据。旧 Host 可保留 20 MiB 限额，Client 不得自动重传。`name` 是单个文件名，UTF-8 编码最多
   220 bytes；禁止 `/`、`\`、ASCII 控制字符、DEL、`<>:"|?*`、`.`、`..`、尾部点/空格、
   Windows 保留名，以及 Host 临时文件前缀 `.dsh-upload-`。不能传 `cwd`、目标目录或目标路径。
-  Host 当前返回 `chunkBytes: 65536`，表示后续每块**解码后**最多 64 KiB。
+  未协商二进制扩展时，Host 返回 `chunkBytes: 65536`，表示后续每块**解码后**最多 64 KiB。
 - `chunk`：`offset` 是从 0 开始的非负整数字节偏移，必须等于上一块确认后的
   `receivedBytes`。`data` 使用标准、规范的 Base64（含所需 padding），不使用 Base64URL；
   解码结果不得为空、不得超过 `chunkBytes`，累计不得超过 `totalBytes`。Host 顺序写入，
@@ -1667,6 +1669,26 @@ ACP 同时要求调用连接的 peer 仍有效、backend 可用、session owner 
   `path` 必须严格等于 `./` 加最终 `name`，`bytes` 必须等于 `totalBytes`。
 - `abort`：移除同一会话下尚未提交的上传；不存在或已提交时幂等返回 `{aborted:true}`，
   不删除已经发布的文件。活动句柄属于其他会话时返回 `UPLOAD_NOT_FOUND`，不影响原上传。
+
+#### 可选二进制上传扩展
+
+`workspace.upload.binary.v1` 是 `workspace.upload.v1` 的附加能力，仅在认证后的
+`harness.transport.describe` 同时声明两者时启用。旧 Host 未声明时，Client 保持原有
+open 参数和 64 KiB Base64 chunk；新 Host 对旧 Client 的参数及响应也完全保持原样。
+不得通过发送 mutation 探测支持情况，或在传输失败后换格式重放数据。
+
+Client 在 open 增加 `encoding: "binary-v1"`，Host 回显该字段并返回
+`chunkBytes: 262144`。只有该上传句柄可以调用 `workspace.upload.chunk.binary`，其参数
+仍为 `{sessionId, uploadId, offset, data}`，但 data 是原始 Uint8Array；响应仍为普通
+JSON RPC 的 `{uploadId, receivedBytes}`。同一上传不能混用两种 chunk。Client 校验
+句柄、累计确认偏移与 commit 的完整字节数；最多四块在途，确认后报告进度。
+
+二进制 RPC 位于现有 Noise 加密层内，使用固定 12-byte 前缀：
+`44 53 48 55 50 01 00 00`，随后四字节大端无符号 JSON header 长度。Header 是正常的
+`rpc.request` envelope，但 params 不含 data；紧随其后的是原始 chunk 字节。仅允许
+`workspace.upload.chunk.binary` 使用此格式，header 最多 4096 bytes，正文 1–262144
+bytes；解码后仍通过现有 envelope 校验与 Host 上传授权。普通消息的 JSON 格式、Noise
+suite、nonce 归属、分片、上传总额限制、目录归属检查及原子提交均不变。
 
 例如上传原名 `report.txt` 的三个字节 `abc`，且目录中已有同名文件：
 
@@ -1684,6 +1706,50 @@ workspace.upload.commit
 
 以上 Params/Result 仍使用 §16 的 `rpc.request` / `rpc.response` / `rpc.error` envelope，
 每次调用各有独立 request ID；上传顺序由 `uploadId`、`offset` 和 Host 状态共同约束。
+
+#### 可选 LAN TCP 上传扩展
+
+`workspace.upload.lan.v1` 依赖基础与二进制上传能力，只能通过已认证的
+`harness.transport.describe` 获知。首个客户端为 Android：仅对至少 1 MiB 的二进制上传、
+当前真实路径为 LAN、原生二进制 WebSocket sender 可用时尝试。聊天和控制流不迁移。
+IPv6、P2P、TURN、Relay、旧 Host 和缺少原生模块的客户端沿用现有上传路径。
+
+Client 从当前 WebRTC 选中路径读取 Host 的实际 IPv4 地址，再在**原认证通道**调用：
+
+| RPC | Params | Result |
+| --- | --- | --- |
+| `workspace.upload.lan.open` | `{sessionId, uploadId, address}` | `{sessionId, uploadId, connectionId, url, expiresInMs}` |
+
+此 RPC 只分配临时入口，不创建文件。Host 从认证连接取得设备静态公钥与 connectionId，
+不接受 Client 自报身份；只接受本机网卡实际拥有的 RFC1918 IPv4 字面地址，并且当前
+Host 观测路径必须为 LAN。每个认证连接最多两个入口，分别绑定一个 sessionId/uploadId。
+入口为该地址上的随机 TCP 端口，固定路径
+`/ds-harness-remote/upload/<32-byte base64url ticket>`；票据未使用时 10 秒过期，
+一次 WebSocket upgrade 即消耗，错误路径不消耗。普通 HTTP 请求一律 404。
+
+Client 必须验证返回的 sessionId/uploadId/connectionId 与当前操作完全一致；URL 必须为
+`ws:`，主机字面地址与实际选中的 Host 地址一致，不能含用户信息、query、fragment、
+任意路径或 DNS 名称。新 socket 使用独立的 Noise IK，会话双方仍校验原连接固定的静态
+身份密钥。Prologue 是 UTF-8 编码的 JSON 数组：
+`["ds-harness-remote/lan-upload/v1", connectionId, sessionId, uploadId, ticket]`。
+Host 握手预算 5 秒，Android 从连接开始的总预算 3 秒；握手未成功不能发送上传 RPC。
+
+握手后，每个二进制 WebSocket message 是一个 Noise ciphertext（最多 65,535 bytes）。
+内部继续使用原 `SecureMessageCodec` 和二进制 RPC 格式，不再附加 RTC 的 8 KiB 分片。
+只允许绑定 scope 的 `workspace.upload.open`（encoding 必须是 binary-v1）、
+`workspace.upload.chunk.binary`、`workspace.upload.commit`、`workspace.upload.abort`。
+不转发 Harness、插件路由、终端或其他业务。复用同一个连接所有者的 WorkspaceUploadHost，
+保持真实会话工作区授权、目录身份检查、偏移与完整长度校验、限制、不覆盖原子发布和 fsync。
+Android 仍最多四个 256 KiB chunk 在途，原生 sender 只传递 ciphertext 字节，不拥有密钥、
+nonce、重连或重试逻辑。Host 最多接受 2 MiB / 8 条排队 RPC；空闲 120 秒清理。
+
+入口与 socket 都属于原认证连接；断开、替换或撤销时销毁票据、监听器与 Noise session，
+清理尚未提交的临时文件。切出 LAN 后拒绝后续数据请求。提交已完成时，即使响应丢失也不能
+删除已发布文件；Client 必须把这种结果视为投递不确定，不能换通道重发。
+
+未声明能力时不探测。协商返回不支持或入口不可达、且**尚未发送文件 open RPC**时，可以在
+原通道执行一次正常上传。认证/帧校验失败、取消、连接替换不触发降级；文件 open、chunk、
+commit 任意一次发送后失败，都不能回退重放。abort 是清理请求，可以通过原通道发送。
 
 #### 生命周期、重试与落盘边界
 

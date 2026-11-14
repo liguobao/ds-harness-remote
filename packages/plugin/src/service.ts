@@ -1,3 +1,4 @@
+import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
@@ -186,6 +187,16 @@ export class HostPluginRuntime {
       // plugin is activated.
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer)
       const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(dispatcher, this.logger)
+      const workspaceUpload = new WorkspaceUploadHost(workspaceUploadRootResolver(
+          peerGateway,
+          () => harnessSessionGeneration(this.harnessVersion) === 'v3',
+          threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+          sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
+        ), undefined, context.transportMode)
+      const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
+        connectionId: context.connectionId, peerIdentityKey: context.peerIdentityKey,
+        identity: () => this.currentIdentity(), mode: context.transportMode,
+      }) : undefined
       return new RpcRouter(
         undefined,
         this.logger,
@@ -198,16 +209,12 @@ export class HostPluginRuntime {
         this.createLoopbackHost(),
         () => this.hostWorkspaceTypes(),
         pluginRoute,
-        new WorkspaceUploadHost(workspaceUploadRootResolver(
-          peerGateway,
-          () => harnessSessionGeneration(this.harnessVersion) === 'v3',
-          threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
-          sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        ), undefined, context.transportMode),
+        workspaceUpload,
         {
           operations: this.compactionOperations,
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId },
         },
+        lanUpload,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

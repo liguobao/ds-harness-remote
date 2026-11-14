@@ -1,4 +1,7 @@
+import type { LanUploadHost } from './lan-upload.js'
 import {
+  BINARY_UPLOAD_CAPABILITY,
+  LAN_UPLOAD_CAPABILITY,
   createRpcError,
   createRpcResponse,
   parseRemoteWorkspaceTypes,
@@ -70,8 +73,10 @@ const apiMethods = new Set([
   'agent.acp.transfer.read',
   'agent.acp.transfer.close',
   'plugin.route.call',
+  'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
+  'workspace.upload.chunk.binary',
   'workspace.upload.commit',
   'workspace.upload.abort',
 ])
@@ -109,6 +114,7 @@ export class RpcRouter {
     private readonly pluginRoute?: PluginRouteBridge,
     private readonly workspaceUpload?: WorkspaceUploadHost,
     private readonly compaction?: RemoteCompactionRoute,
+    private readonly lanUpload?: LanUploadHost,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -118,6 +124,7 @@ export class RpcRouter {
       this.codex?.closeAll(),
       this.acp?.closeAll(),
       this.workspaceUpload?.closeAll(),
+      this.lanUpload?.closeAll(),
     ])
   }
 
@@ -172,11 +179,12 @@ export class RpcRouter {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        const hostCapabilities = await this.capabilities()
+        const hostCapabilities = (await this.capabilities()).filter(capability => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY)
         const remoteAvailable = hostCapabilities.includes('harness.remote.v1') || hostCapabilities.includes('harness.remote.v3')
         const capabilities = [...new Set([...hostCapabilities, 'remote.history.compact.v1',
           ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
+          ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
@@ -246,8 +254,13 @@ export class RpcRouter {
       case 'agent.acp.transfer.commit': return this.requireAcp().commitTransfer(params)
       case 'agent.acp.transfer.read': return this.requireAcp().readTransfer(params)
       case 'agent.acp.transfer.close': return this.requireAcp().closeTransfer(params)
+      case 'workspace.upload.lan.open': {
+        if (!this.lanUpload) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN upload is unavailable on this Host.')
+        return this.lanUpload.open(params)
+      }
       case 'workspace.upload.open':
       case 'workspace.upload.chunk':
+      case 'workspace.upload.chunk.binary':
       case 'workspace.upload.commit':
       case 'workspace.upload.abort': {
         if (!this.workspaceUpload) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Workspace upload is unavailable on this Host.')

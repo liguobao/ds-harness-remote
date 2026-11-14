@@ -1,3 +1,25 @@
+## LAN TCP workspace uploads (2026-11-14)
+
+Host 新增 `workspace.upload.lan.v1` 与 `workspace.upload.lan.open`，Android 对至少
+1 MiB、真实路径为 LAN、原生 sender 可用的二进制文件上传启用独立 Noise/TCP WebSocket。
+原认证通道协商的票据绑定 connection/device static key/session/upload；10 秒未使用过期、
+一次 upgrade 消耗，仅绑定本机 RFC1918 IPv4 网卡地址。Client 将入口固定到实际 RTC
+选中的 Host IPv4 地址，不接受 DNS、公共/loopback 地址或任意 URL。握手与普通上传 RPC
+沿用 Noise / SecureMessageCodec，原生 `RemoteWebSocketBinary` 避免 JS Base64 转码。
+数据通道只允许固定 open/binary-chunk/commit/abort，不转发其他业务；仍用原连接拥有的
+WorkspaceUploadHost 校验会话权限、目录、偏移、总量、fsync 与不覆盖发布。原连接关闭、
+替换或撤销会销毁监听器与临时文件；开始上传后出错不得换通道重放。仅文件 open 尚未发送、
+入口不支持或不可达时可回原通道。上传 RPC caller 绑定连接代次，不能跨 Host/重连继续调用。
+P2P、TURN/Relay、IPv6、小文件、旧 Host 和缺少原生模块的 APK 沿用原路径。
+
+验证：Protocol 109 tests；Plugin 724 pass / 3 skipped；Android 680 tests；类型检查、
+全 packages 生产构建、普通 Android APK、DSH bundle 与 diff check 通过。正式上传组件在
+新手机经隔离认证上下文完成两次 200 MiB（15.617s / 11.560s），SHA-256 均一致；没有依赖
+账号登录。普通 APK 已安装，Host bundle 已重建；未替换/重启用户现有 DSH profile，未发布。
+这不等同真实登录/Server membership E2E，也未做公网 P2P 或 iOS 真机验收。协议及边界见
+`docs/protocol.md`，详细实测与复现见 `docs/android-upload-verification.md`、
+`scripts/transport-bench/README.md`。
+
 ## DS-Bot v0.3.6 Host endpoint forwarding (2026-11-13)
 
 按用户要求，`plugin-route-bridge.ts` 固定白名单覆盖上游 v0.3.6 `channel.js`
