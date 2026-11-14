@@ -234,6 +234,14 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       if (!open) setPhoneLinkOpen(false)
     }, [open])
 
+    // The QR has done its job once a new device connects to this Host.
+    const connectedClientCount = status?.host?.connectedClients?.length ?? 0
+    const previousConnectedClientCount = React.useRef(connectedClientCount)
+    React.useEffect(() => {
+      if (connectedClientCount > previousConnectedClientCount.current) setPhoneLinkOpen(false)
+      previousConnectedClientCount.current = connectedClientCount
+    }, [connectedClientCount])
+
     React.useEffect(() => {
       void props.control<RemoteStatus>('status').then(setStatus).catch(() => undefined)
     }, [])

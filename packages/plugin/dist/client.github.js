@@ -5307,7 +5307,11 @@ If a code was sent, recover the original submission without changing it.`,
         (status?.host?.connectedClients?.length ?? 0) === 0 && setDevicesOpen(!1);
       }, [status?.host?.connectedClients?.length]), React.useEffect(() => {
         open || setPhoneLinkOpen(!1);
-      }, [open]), React.useEffect(() => {
+      }, [open]);
+      let connectedClientCount = status?.host?.connectedClients?.length ?? 0, previousConnectedClientCount = React.useRef(connectedClientCount);
+      React.useEffect(() => {
+        connectedClientCount > previousConnectedClientCount.current && setPhoneLinkOpen(!1), previousConnectedClientCount.current = connectedClientCount;
+      }, [connectedClientCount]), React.useEffect(() => {
         props.control("status").then(setStatus).catch(() => {
         });
       }, []), React.useEffect(() => {
