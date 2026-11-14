@@ -5008,7 +5008,7 @@ If a code was sent, recover the original submission without changing it.`,
       '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2);max-height:296px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.dshRemoteHostList.isCollapsed{max-height:none;overflow-y:visible}.dshRemoteHostList>button{min-height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 20px 10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button[aria-current="true"]{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
       '.dshRemoteConnectedMenu{position:relative;flex:0 0 auto;margin-right:4px}.dshRemoteConnectedCount{appearance:none;display:inline-flex;align-items:center;justify-content:center;height:22px;border:0;border-radius:999px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.04) inset;padding:0 10px;font:inherit;font-size:11px;font-weight:500;line-height:17px;white-space:nowrap;cursor:default}.dshRemoteConnectedCount.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemoteConnectedCount.isInteractive{cursor:pointer}.dshRemoteConnectedCount.isInteractive:hover{filter:brightness(1.08)}.dshRemoteConnectedCount:disabled{opacity:1;cursor:default}.dshRemoteConnectedCount:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteConnectedPanel{position:absolute;top:calc(100% + 8px);right:0;z-index:4;width:min(320px,calc(100vw - 48px));max-height:min(280px,40vh);overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.28);padding:10px 12px}.dshRemoteConnectedPanelTitle{display:block;margin:0 0 6px;color:var(--dsw-alias-label-primary);font-size:12px;font-weight:600}.dshRemoteClientList{display:flex;flex-direction:column}.dshRemoteClientRow{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteClientRow:last-child{border-bottom:0}.dshRemoteClientRow>span{min-width:0;display:flex;flex-direction:column;gap:2px}.dshRemoteClientRow strong{font-size:13px;font-weight:500}.dshRemoteClientRow small{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteClientOnline{display:inline-flex;align-items:center;gap:6px;color:var(--dsw-alias-state-success-primary)!important}.dshRemoteClientOnline::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}',
       ".dshRemoteConnectedCount{height:auto;border-radius:0;background:transparent;box-shadow:none;padding:0 4px;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 45%,transparent);text-underline-offset:3px}.dshRemoteConnectedCount.isInteractive:hover{filter:none;text-decoration-color:currentColor}.dshRemoteConnectedCount:focus-visible{outline-offset:3px;border-radius:3px}",
-      ".dshRemoteSectionTitle>.dshRemotePhoneLink{margin-left:auto}.dshRemoteSectionTitle>.dshRemotePhoneLink+.dshRemoteConnectedMenu{margin-left:0}.dshRemotePhoneLink{position:relative;flex:0 0 auto}.dshRemotePhoneLinkButton{appearance:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;cursor:pointer}.dshRemotePhoneLinkButton:hover,.dshRemotePhoneLink.isOpen>.dshRemotePhoneLinkButton{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary)}.dshRemotePhoneLinkButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemotePhoneLinkPanel{position:absolute;top:calc(100% + 8px);right:0;z-index:4;box-sizing:border-box;width:min(260px,calc(100vw - 48px));max-height:min(420px,70vh);overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);box-shadow:0 10px 28px rgba(0,0,0,.28);padding:12px;display:flex;flex-direction:column;gap:8px}.dshRemotePhoneLinkTitle{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600}.dshRemotePhoneLinkHint{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;white-space:normal}.dshRemotePhoneLinkQr{box-sizing:border-box;display:block;width:184px;height:184px;margin:4px auto;border-radius:10px;padding:6px;background:#fff}.dshRemotePhoneLinkUrl{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1.4;overflow-wrap:anywhere;white-space:normal;text-decoration:none}.dshRemotePhoneLinkUrl:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}",
+      ".dshRemoteSectionTitle>.dshRemotePhoneLinkButton{margin-left:auto}.dshRemoteSectionTitle>.dshRemotePhoneLinkButton+.dshRemoteConnectedMenu{margin-left:0}.dshRemotePhoneLinkButton{appearance:none;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;cursor:pointer}.dshRemotePhoneLinkButton:hover,.dshRemotePhoneLinkButton.isOpen{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary)}.dshRemotePhoneLinkButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemotePhoneLinkPanel{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin:0 0 12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2)}.dshRemotePhoneLinkText{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:6px}.dshRemotePhoneLinkText>strong{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600}.dshRemotePhoneLinkText>p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}.dshRemotePhoneLinkQr{box-sizing:border-box;flex:0 0 auto;display:block;width:160px;height:160px;border-radius:10px;padding:6px;background:#fff}.dshRemotePhoneLinkUrl{color:var(--dsw-alias-label-secondary);font-size:11px;line-height:1.4;overflow-wrap:anywhere;white-space:normal;text-decoration:none}.dshRemotePhoneLinkUrl:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}",
       ".dshRemoteProgressStatus{display:inline-flex;align-items:center;gap:8px}",
       '.dshRemoteProgress{display:flex;flex-direction:column;gap:8px;margin:12px 0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}.dshRemoteProgressHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}.dshRemoteProgressHeader strong{font-size:13px;font-weight:600}.dshRemoteProgressHeader span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteProgressBar{height:6px;overflow:hidden;border-radius:999px;background:var(--dsw-alias-bg-layer-3)}.dshRemoteProgressBar>span{display:block;width:100%;height:100%;border-radius:inherit;background:var(--dsw-alias-brand-primary);transform-origin:left center;transition:transform .22s ease-out}[dir="rtl"] .dshRemoteProgressBar>span{transform-origin:right center}.dshRemoteProgress p{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.45}.dshRemoteProgressRoute{font-weight:500}.dshRemoteProgressRoute .isActive{color:var(--dsw-alias-state-success-primary);font-weight:700}.dshRemoteProgressRouteArrow{color:var(--dsw-alias-label-tertiary)}@media(prefers-reduced-motion:reduce){.dshRemoteProgressBar>span{transition:none}}',
       '.dshRemoteBrowser{display:flex;flex-direction:column}.dshRemoteCrumbs{display:flex;align-items:center;gap:4px;overflow:auto;padding:2px 0 10px}.dshRemoteCrumbs>button{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:5px 7px;border-radius:6px;cursor:pointer}.dshRemoteCrumbs>button:not(:last-child)::after{content:" /";color:var(--dsw-alias-label-tertiary)}.dshRemoteCrumbs>button:disabled{color:var(--dsw-alias-label-primary);font-weight:600}',
@@ -5125,67 +5125,63 @@ If a code was sent, recover the original submission without changing it.`,
   function remoteWebHostUrl(serverUrl, deviceId) {
     return `${serverUrl.replace(/\/+$/, "")}/app/remote/${encodeURIComponent(deviceId)}`;
   }
-  function createPhoneLinkMenu(React) {
-    return function(props) {
-      let { t } = props, [open, setOpen] = React.useState(!1), [image, setImage] = React.useState(void 0), url = remoteWebHostUrl(props.serverUrl, props.deviceId);
-      React.useEffect(() => {
+  function createPhoneLink(React) {
+    function PhoneLinkButton(props) {
+      let label = props.t("openOnPhone");
+      return React.createElement("button", {
+        type: "button",
+        className: `dshRemotePhoneLinkButton${props.open ? " isOpen" : ""}`,
+        title: label,
+        "aria-label": label,
+        "aria-expanded": props.open,
+        "aria-controls": "dsh-remote-phone-link",
+        onClick: props.onToggle
+      }, React.createElement(
+        "svg",
+        {
+          viewBox: "0 0 24 24",
+          width: 16,
+          height: 16,
+          fill: "none",
+          stroke: "currentColor",
+          strokeWidth: 1.8,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          "aria-hidden": !0
+        },
+        React.createElement("rect", { x: 6, y: 2.5, width: 12, height: 19, rx: 2.5 }),
+        React.createElement("path", { d: "M11 18h2" })
+      ));
+    }
+    function PhoneLinkPanel(props) {
+      let { t } = props, [image, setImage] = React.useState(void 0), url = remoteWebHostUrl(props.serverUrl, props.deviceId), close = React.useRef(props.onClose);
+      return close.current = props.onClose, React.useEffect(() => {
         let current = !0;
-        return setImage(void 0), open && import_qrcode3.default.toDataURL(url, { width: 184, margin: 1, errorCorrectionLevel: "M" }).then((value) => {
+        return setImage(void 0), import_qrcode3.default.toDataURL(url, { width: 184, margin: 1, errorCorrectionLevel: "M" }).then((value) => {
           current && setImage(value);
         }).catch(() => {
         }), () => {
           current = !1;
         };
-      }, [open, url]), React.useEffect(() => {
-        if (!open) return;
-        let closeOnPointer = (event) => {
-          let target = event.target;
-          target instanceof Element && target.closest(".dshRemotePhoneLink") !== null || setOpen(!1);
-        }, closeOnEscape = (event) => {
-          event.key === "Escape" && (event.stopPropagation(), setOpen(!1));
+      }, [url]), React.useEffect(() => {
+        let closeOnEscape = (event) => {
+          event.key === "Escape" && (event.stopPropagation(), close.current());
         };
-        return window.addEventListener("mousedown", closeOnPointer), window.addEventListener("keydown", closeOnEscape, !0), () => {
-          window.removeEventListener("mousedown", closeOnPointer), window.removeEventListener("keydown", closeOnEscape, !0);
-        };
-      }, [open]);
-      let label = t("openOnPhone");
-      return React.createElement(
-        "div",
-        { className: `dshRemotePhoneLink${open ? " isOpen" : ""}` },
-        React.createElement("button", {
-          type: "button",
-          className: "dshRemotePhoneLinkButton",
-          title: label,
-          "aria-label": label,
-          "aria-expanded": open,
-          "aria-haspopup": "dialog",
-          onClick: () => setOpen((current) => !current)
-        }, React.createElement(
-          "svg",
-          {
-            viewBox: "0 0 24 24",
-            width: 16,
-            height: 16,
-            fill: "none",
-            stroke: "currentColor",
-            strokeWidth: 1.8,
-            strokeLinecap: "round",
-            strokeLinejoin: "round",
-            "aria-hidden": !0
-          },
-          React.createElement("rect", { x: 6, y: 2.5, width: 12, height: 19, rx: 2.5 }),
-          React.createElement("path", { d: "M11 18h2" })
-        )),
-        open ? React.createElement(
+        return window.addEventListener("keydown", closeOnEscape, !0), () => window.removeEventListener("keydown", closeOnEscape, !0);
+      }, []), React.createElement(
+        "section",
+        { className: "dshRemotePhoneLinkPanel", id: "dsh-remote-phone-link", "aria-label": t("openOnPhone") },
+        image === void 0 ? React.createElement("div", { className: "dshRemotePhoneLinkQr", "aria-busy": !0 }) : React.createElement("img", { src: image, width: 160, height: 160, alt: t("openOnPhoneQr"), className: "dshRemotePhoneLinkQr" }),
+        React.createElement(
           "div",
-          { className: "dshRemotePhoneLinkPanel", role: "dialog", "aria-label": label },
-          React.createElement("strong", { className: "dshRemotePhoneLinkTitle" }, label),
-          React.createElement("p", { className: "dshRemotePhoneLinkHint" }, t("openOnPhoneHint")),
-          image === void 0 ? React.createElement("div", { className: "dshRemotePhoneLinkQr", "aria-busy": !0 }) : React.createElement("img", { src: image, width: 184, height: 184, alt: t("openOnPhoneQr"), className: "dshRemotePhoneLinkQr" }),
+          { className: "dshRemotePhoneLinkText" },
+          React.createElement("strong", null, t("openOnPhone")),
+          React.createElement("p", null, t("openOnPhoneHint")),
           React.createElement("a", { className: "dshRemotePhoneLinkUrl", href: url, target: "_blank", rel: "noreferrer" }, url)
-        ) : null
+        )
       );
-    };
+    }
+    return { PhoneLinkButton, PhoneLinkPanel };
   }
 
   // packages/plugin/src/client/workspaces.ts
@@ -5255,7 +5251,7 @@ If a code was sent, recover the original submission without changing it.`,
 
   // packages/plugin/src/client/workspaces.ts
   function createRemoteWorkspaceAction(React, portal) {
-    let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), PhoneLinkMenu = createPhoneLinkMenu(React), RemoteProgressView = createRemoteProgressView(React);
+    let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), { PhoneLinkButton, PhoneLinkPanel } = createPhoneLink(React), RemoteProgressView = createRemoteProgressView(React);
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       if (React.useEffect(
@@ -5275,7 +5271,7 @@ If a code was sent, recover the original submission without changing it.`,
           if (typeof code == "string") return connectionErrorMessage(code, translate);
         }
         return messageOf(reason, translate);
-      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [discoveryUnavailable, setDiscoveryUnavailable] = React.useState(!1), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [upgradePhase, setUpgradePhase] = React.useState("idle"), [upgradeError, setUpgradeError] = React.useState(void 0), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [refreshingHosts, setRefreshingHosts] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === status?.serverUrl, [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
+      }, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [discoveryUnavailable, setDiscoveryUnavailable] = React.useState(!1), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [hermesWorkspaces, setHermesWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [hermesWorkspaceId, setHermesWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [phoneLinkOpen, setPhoneLinkOpen] = React.useState(!1), [upgradePhase, setUpgradePhase] = React.useState("idle"), [upgradeError, setUpgradeError] = React.useState(void 0), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), [showAllHermesWorkspaces, setShowAllHermesWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", hermesWorkspaceHeadingId = "dsh-remote-hermes-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", hermesWorkspaceListId = "dsh-remote-hermes-workspace-list", [busy, setBusy] = React.useState(!1), [refreshingHosts, setRefreshingHosts] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(void 0), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [editingServer, setEditingServer] = React.useState(!1), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), pairingAvailable = pairingServerUrl !== void 0 && pairingServerUrl === status?.serverUrl, [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [hostEmail, setHostEmail] = React.useState(""), [hostPassword, setHostPassword] = React.useState(""), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), pageRef = React.useRef(null), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry.read());
       React.useEffect(
         () => props.sidebarEntry.subscribe(() => setSidebarEntry(props.sidebarEntry.read())),
         [props.sidebarEntry]
@@ -5310,6 +5306,8 @@ If a code was sent, recover the original submission without changing it.`,
       }, [devicesOpen]), React.useEffect(() => {
         (status?.host?.connectedClients?.length ?? 0) === 0 && setDevicesOpen(!1);
       }, [status?.host?.connectedClients?.length]), React.useEffect(() => {
+        open || setPhoneLinkOpen(!1);
+      }, [open]), React.useEffect(() => {
         props.control("status").then(setStatus).catch(() => {
         });
       }, []), React.useEffect(() => {
@@ -5663,7 +5661,7 @@ If a code was sent, recover the original submission without changing it.`,
         selectedHost.harnessVersion === void 0 ? void 0 : t("harnessVersion", { version: selectedHost.harnessVersion }),
         selectedHost.clientVersion === void 0 ? void 0 : t("pluginVersion", { version: selectedHost.clientVersion }),
         deviceUpdateAvailable(selectedHost) ? t("updateAvailableTag") : void 0
-      ].filter(Boolean).join(" \xB7 "), connectedClients = status?.host?.connectedClients ?? [], connectedCount = connectedClients.length, connectedCountLabel = t("connectedClientCount", { count: connectedCount }), connectedMenu = !needsAuthorization && status?.hostAuthorizationAvailable === !0 ? React.createElement(
+      ].filter(Boolean).join(" \xB7 "), connectedClients = status?.host?.connectedClients ?? [], connectedCount = connectedClients.length, connectedCountLabel = t("connectedClientCount", { count: connectedCount }), phoneLinkTarget = status?.serverUrl !== void 0 && status.host?.deviceId !== void 0 && status.host.authorized && !status.host.accountRequired && !status.host.pairingHostOnly ? { serverUrl: status.serverUrl, deviceId: status.host.deviceId } : void 0, connectedMenu = !needsAuthorization && status?.hostAuthorizationAvailable === !0 ? React.createElement(
         "div",
         {
           className: `dshRemoteConnectedMenu${devicesOpen ? " isOpen" : ""}`
@@ -6115,10 +6113,15 @@ If a code was sent, recover the original submission without changing it.`,
                           onChange: (event) => void setCurrentDeviceControl(event.target.checked)
                         })
                       ) : null,
-                      status?.serverUrl !== void 0 && status.host?.deviceId !== void 0 && status.host.authorized && !status.host.accountRequired && !status.host.pairingHostOnly ? React.createElement(PhoneLinkMenu, { serverUrl: status.serverUrl, deviceId: status.host.deviceId, t }) : null,
+                      phoneLinkTarget === void 0 ? null : React.createElement(PhoneLinkButton, {
+                        open: phoneLinkOpen,
+                        t,
+                        onToggle: () => setPhoneLinkOpen((current) => !current)
+                      }),
                       connectedMenu
                     )
                   ),
+                  phoneLinkOpen && phoneLinkTarget !== void 0 ? React.createElement(PhoneLinkPanel, { ...phoneLinkTarget, t, onClose: () => setPhoneLinkOpen(!1) }) : null,
                   React.createElement("div", {
                     className: `dshRemoteHostList${connectingHost === void 0 ? "" : " isCollapsed"}`,
                     "aria-busy": connectingHost === void 0 ? void 0 : !0
