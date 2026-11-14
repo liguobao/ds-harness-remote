@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -1221,7 +1221,7 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer, onPlugins, onAutomationTasks }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
@@ -1229,6 +1229,8 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   onDevices?: () => void
   onRemoteHosts?: () => void
   onSwitchServer?: () => void
+  onPlugins?: () => void
+  onAutomationTasks?: () => void
 }) {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
@@ -1283,6 +1285,15 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         }]}
       >
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+          {onPlugins !== undefined && (
+            <HomeMenuRow icon={Puzzle} label={zhCN.plugins.nav} onPress={onPlugins} />
+          )}
+          {onAutomationTasks !== undefined && (
+            <HomeMenuRow icon={Clock} label={zhCN.automation.nav} onPress={onAutomationTasks} />
+          )}
+          {(onPlugins !== undefined || onAutomationTasks !== undefined) && (
+            <View style={styles.homeMenuDivider} />
+          )}
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
           )}
@@ -1894,6 +1905,7 @@ function createStyles(colors: ThemeColors) {
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
   // capped landscape card scroll instead of clipping its last row.
   homeMenuScroll: { flexGrow: 0, flexShrink: 1 },
+  homeMenuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: spacing.xxs, marginHorizontal: spacing.sm },
   homeMenuRow: { minHeight: 52, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radius.lg },
   homeMenuRowBorder: {},
   homeMenuRowPressed: { backgroundColor: colors.surfaceStrong },
