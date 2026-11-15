@@ -20,7 +20,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
     options: Pick<CursorAcpOptions, 'args' | 'cwd'> = {}, backend: 'claude' | 'hermes' = 'claude') {
-    const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend }
+    const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend }
     super(binary, logger, spawnAcp, config)
     this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config)
     this.modelLabel = backend

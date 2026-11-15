@@ -92167,6 +92167,12 @@ var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
 var ACP_START_TIMEOUT_MS = 2e4;
 var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
+var ADAPTER_LABELS = Object.freeze({
+  cursor: "Cursor",
+  pi: "Pi",
+  claude: "Claude",
+  hermes: "Hermes"
+});
 var CursorAcpError = class extends Error {
   constructor(code, message, options) {
     super(message, options);
@@ -92199,8 +92205,18 @@ var CursorAcpClient = class {
   startPromise;
   modelStates = /* @__PURE__ */ new Map();
   modelBusy = /* @__PURE__ */ new Set();
+  /** Backend that owns this process: failure codes and log lines must name it. */
+  get backend() {
+    return this.options.backend ?? "cursor";
+  }
+  get adapterLabel() {
+    return ADAPTER_LABELS[this.backend];
+  }
+  code(suffix) {
+    return `${this.backend.toUpperCase()}_${suffix}`;
+  }
   start() {
-    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
+    if (this.closed) return Promise.reject(new CursorAcpError(this.code("CLOSED"), `The ${this.adapterLabel} domain is closed.`));
     if (this.ready) return Promise.resolve();
     this.startPromise ??= this.startOnce().finally(() => {
       this.startPromise = void 0;
@@ -92211,7 +92227,7 @@ var CursorAcpClient = class {
     return this.ready;
   }
   async call(method, params, timeoutMs) {
-    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
+    if (!this.ready) throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not ready.`);
     const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
     const id6 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
     if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
@@ -92282,7 +92298,7 @@ var CursorAcpClient = class {
     this.closed = true;
     this.ready = false;
     this.modelStates.clear();
-    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
+    this.failPending(new CursorAcpError(this.code("CLOSED"), `${this.adapterLabel} ACP was closed.`));
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
@@ -92301,7 +92317,7 @@ var CursorAcpClient = class {
   }
   async startOnce() {
     if (this.process !== void 0) {
-      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
+      throw new CursorAcpError(this.code("STARTING"), `${this.adapterLabel} ACP is already starting.`);
     }
     const child = this.spawnAcp(this.binary);
     this.process = child;
@@ -92316,21 +92332,21 @@ var CursorAcpClient = class {
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
     });
     child.on("error", (error62) => {
-      if (this.process === child) this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error62);
+      if (this.process === child) this.handleProcessFailure(this.code("BINARY_UNAVAILABLE"), error62);
     });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
       this.modelStates.clear();
-      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
+      this.failPending(new CursorAcpError(this.code("ACP_EXITED"), `${this.adapterLabel} ACP exited unexpectedly.`));
       if (!this.closed) {
-        this.logger?.warn("Cursor ACP exited", {
+        this.logger?.warn(`${this.adapterLabel} ACP exited`, {
           code: code ?? "none",
           signal: signal ?? "none",
           stderrBytes: this.stderrBytes
         });
-        this.notifyUnavailable("CURSOR_ACP_EXITED");
+        this.notifyUnavailable(this.code("ACP_EXITED"));
       }
     });
     try {
@@ -92351,20 +92367,20 @@ var CursorAcpClient = class {
       }
       this.assertStarting(child);
       this.ready = true;
-      this.logger?.info("Cursor ACP ready");
+      this.logger?.info(`${this.adapterLabel} ACP ready`);
     } catch (error62) {
       this.ready = false;
       this.modelStates.clear();
       if (this.process === child) this.process = void 0;
       child.kill("SIGTERM");
       if (error62 instanceof CursorAcpError) throw error62;
-      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error62 });
+      throw new CursorAcpError(this.code("INITIALIZE_FAILED"), `${this.adapterLabel} ACP initialization failed.`, { cause: error62 });
     }
   }
   assertStarting(child) {
-    if (this.closed) throw new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed.");
+    if (this.closed) throw new CursorAcpError(this.code("CLOSED"), `${this.adapterLabel} ACP was closed.`);
     if (this.process !== child || child.exitCode !== null || child.killed) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+      throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not available.`);
     }
   }
   request(method, params, timeoutMs) {
@@ -92372,7 +92388,7 @@ var CursorAcpClient = class {
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
-        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
+        reject(new CursorAcpError(this.code("REQUEST_TIMEOUT"), `${this.adapterLabel} ACP request timed out.`));
       }, timeoutMs);
       timer2.unref?.();
       this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
@@ -92388,7 +92404,7 @@ var CursorAcpClient = class {
   write(message) {
     const child = this.process;
     if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+      throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not available.`);
     }
     child.stdin.write(`${JSON.stringify(message)}
 `);
@@ -92397,8 +92413,8 @@ var CursorAcpClient = class {
     this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
     if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
       this.handleProcessFailure(
-        "CURSOR_RESPONSE_TOO_LARGE",
-        new Error("Cursor ACP emitted an oversized JSONL message.")
+        this.code("RESPONSE_TOO_LARGE"),
+        new Error(`${this.adapterLabel} ACP emitted an oversized JSONL message.`)
       );
       return;
     }
@@ -92415,18 +92431,18 @@ var CursorAcpClient = class {
     try {
       value = JSON.parse(line.toString("utf8"));
     } catch {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
+      this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted invalid JSON.`));
       return;
     }
     if (!isRecord15(value)) {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
+      this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted an invalid message.`));
       return;
     }
     if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
+        pending.reject(new CursorAcpError(this.code("UPSTREAM_ERROR"), safeUpstreamError2(value.error, this.adapterLabel)));
       } else {
         pending.resolve(value.result);
       }
@@ -92443,11 +92459,11 @@ var CursorAcpClient = class {
   handleProcessFailure(code, cause) {
     this.ready = false;
     this.modelStates.clear();
-    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
+    this.failPending(new CursorAcpError(code, `${this.adapterLabel} ACP communication failed.`, { cause }));
     const child = this.process;
     this.process = void 0;
     child?.kill("SIGTERM");
-    this.logger?.warn("Cursor ACP communication failed", { code });
+    this.logger?.warn(`${this.adapterLabel} ACP communication failed`, { code });
     if (!this.closed) this.notifyUnavailable(code);
   }
   notifyUnavailable(code) {
@@ -92466,14 +92482,14 @@ var CursorAcpClient = class {
     for (const id6 of [...this.pending.keys()]) this.takePending(id6)?.reject(error62);
   }
 };
-function safeUpstreamError2(value) {
-  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+function safeUpstreamError2(value, label = "Cursor") {
+  if (!isRecord15(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
-    return "Cursor ACP authentication failed.";
+    return `${label} ACP authentication failed.`;
   }
-  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
-  return "Cursor ACP rejected the request.";
+  if (message.includes("not initialized")) return `${label} ACP is not initialized.`;
+  return `${label} ACP rejected the request.`;
 }
 function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -92603,7 +92619,7 @@ var IsolatedAcpClient = class {
     binary,
     logger2,
     void 0,
-    { ...options, args: options.args ?? (options.backend === "cursor" ? ["acp"] : []), authenticationMethod: options.backend === "cursor" ? "cursor_login" : null }
+    { ...options, backend: options.backend ?? "pi", args: options.args ?? (options.backend === "cursor" ? ["acp"] : []), authenticationMethod: options.backend === "cursor" ? "cursor_login" : null }
   )) {
     this.binary = binary;
     this.logger = logger2;
@@ -93967,7 +93983,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   shuttingDown = false;
   makeClient;
   constructor(binary = "claude-agent-acp", logger2, spawnAcp, options = {}, backend = "claude") {
-    const config2 = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend };
+    const config2 = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend };
     super(binary, logger2, spawnAcp, config2);
     this.makeClient = () => new CursorAcpClient(binary, logger2, spawnAcp, config2);
     this.modelLabel = backend;
@@ -97418,7 +97434,14 @@ var AcpRemoteGateway = class {
     this.approvalExpiryTimer.unref?.();
   }
   requireAcp(backend) {
-    if (!this.config.enabled || backend !== void 0 && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend)) || !this.isAvailable()) {
+    if (!this.config.enabled) {
+      throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
+    }
+    const configured = backend === void 0 ? void 0 : this.config.backends.find((item) => item.id === backend);
+    if (configured !== void 0 && !configured.enabled) {
+      throw new RpcError("ACP_BACKEND_DISABLED", `The ${backend} ACP backend is disabled by configuration.`);
+    }
+    if (backend !== void 0 && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend)) || !this.isAvailable()) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
     }
     if (backend !== void 0) {
