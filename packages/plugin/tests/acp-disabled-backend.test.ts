@@ -6,6 +6,7 @@ import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
 import { HermesAcpClient } from '../src/acp/adapters/hermes-process.js'
 import type { CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
 /**
  * A backend the profile disabled must never be spawned or probed, and it must not
@@ -134,14 +135,17 @@ describe('shared ACP stdio adapter attribution', () => {
       { name: 'claude', create: (logger: SafeLogger) => new ClaudeAcpClient(`${MISSING}claude-agent-acp`, logger), label: 'Claude', prefix: 'CLAUDE' },
       { name: 'hermes', create: (logger: SafeLogger) => new HermesAcpClient(`${MISSING}hermes`, logger), label: 'Hermes', prefix: 'HERMES' },
     ]
-    for (const scenario of cases) {
-      const logger = silentLogger()
-      const client = scenario.create(logger)
-      try {
-        await expect(client.start(), scenario.name).rejects.toMatchObject({ code: `${scenario.prefix}_BINARY_UNAVAILABLE` })
-        expect(warnMessages(logger), scenario.name).toEqual([`${scenario.label} ACP communication failed`])
-        expect(warnCodes(logger), scenario.name).toEqual([`${scenario.prefix}_BINARY_UNAVAILABLE`])
-      } finally { await client.close() }
-    }
+    await runScenarios(cases.map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const logger = silentLogger()
+        const client = scenario.create(logger)
+        try {
+          await expect(client.start()).rejects.toMatchObject({ code: `${scenario.prefix}_BINARY_UNAVAILABLE` })
+          expect(warnMessages(logger)).toEqual([`${scenario.label} ACP communication failed`])
+          expect(warnCodes(logger)).toEqual([`${scenario.prefix}_BINARY_UNAVAILABLE`])
+        } finally { await client.close() }
+      },
+    })))
   })
 })
