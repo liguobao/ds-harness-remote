@@ -90299,6 +90299,14 @@ function compactBotRound(text) {
 var LIMIT = 512;
 var MARKER = "\n[Compact history: output omitted]";
 var ROUND_BUDGET = 128 * 1024;
+var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set([
+  "tool/call",
+  "tool/result",
+  "tool/ptc-dispatch",
+  "tool/ptc-dispatch-start",
+  "tool/code-dispatch",
+  "tool/code-dispatch-start"
+]);
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 function preservedRound(text, budget) {
   if (budget.remaining < LIMIT) return void 0;
@@ -90317,7 +90325,7 @@ function toolValue(value, budget) {
   if (!object3(value)) return value;
   const result = { ...value };
   for (const [key, child] of Object.entries(value)) {
-    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta"].includes(key)) {
+    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta", "code"].includes(key)) {
       result[key] = typeof child === "string" ? summary2(child, budget) : { summary: summary2(child, budget) };
     } else if (key === "content" && Array.isArray(child)) {
       let previews = 0;
@@ -90336,24 +90344,67 @@ function toolValue(value, budget) {
   }
   return result;
 }
-function messageValue(value, budget) {
-  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget));
+function compactMessageSource(value, isInjectedUser) {
+  if (!object3(value)) return value;
+  let next = value;
+  if ("replayState" in next) {
+    const { replayState: _replayState, ...rest } = next;
+    next = rest;
+  }
+  if (isInjectedUser) {
+    const { entries: _entries, sections: _sections, changes: _changes, baselineIdentity: _baselineIdentity, ...rest } = next;
+    next = rest;
+  }
+  return next;
+}
+function messageValue(value, budget, isInjectedUser = false) {
+  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget, isInjectedUser));
   if (!object3(value)) return value;
   if (value.type === "tool-call" || value.type === "tool-result") return toolValue(value, budget);
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, messageValue(child, budget)]));
+  if (isInjectedUser && value.type === "text" && typeof value.text === "string" && value.text.length > LIMIT) {
+    return { ...value, text: summary2(value.text, budget) };
+  }
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "stream") continue;
+    if (key === "source") out[key] = compactMessageSource(child, isInjectedUser);
+    else out[key] = messageValue(child, budget, isInjectedUser);
+  }
+  return out;
+}
+function isInjectedUserEvent(event) {
+  const data2 = object3(event.data) ? event.data : void 0;
+  const msg = data2 && object3(data2.message) ? data2.message : data2;
+  const src = msg && object3(msg.source) ? msg.source : void 0;
+  return Boolean(src && typeof src.kind === "string" && src.kind !== "user");
+}
+function requestHeaderEvent(event) {
+  if (!object3(event.data) || !object3(event.data.header)) return event;
+  const { tools: _tools, system: _system, ...restHeader } = event.data.header;
+  return { ...event, data: { ...event.data, header: restHeader } };
 }
 function project(value, budget) {
   if (Array.isArray(value)) return value.map((item) => project(item, budget));
   if (!object3(value)) return value;
-  if (object3(value.event) && ["tool/call", "tool/result"].includes(String(value.event.type))) {
-    const { view, ...rest } = value;
-    const event = toolValue(value.event, budget);
-    const data2 = object3(event.data) ? event.data : {};
-    const title = object3(view) && object3(view.view) ? view.view.title : void 0;
-    return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+  if (object3(value.event)) {
+    const eventType = String(value.event.type);
+    if (TOOL_EVENT_TYPES.has(eventType)) {
+      const { view, ...rest } = value;
+      const event = toolValue(value.event, budget);
+      const data2 = object3(event.data) ? event.data : {};
+      const title = object3(view) && object3(view.view) ? view.view.title : void 0;
+      return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+    }
+    if (eventType === "request/header") return { ...value, event: requestHeaderEvent(value.event) };
+    if (eventType === "assistant/message") return { ...value, event: messageValue(value.event, budget, false) };
+    if (eventType === "user/message") return { ...value, event: messageValue(value.event, budget, isInjectedUserEvent(value.event)) };
   }
-  if (typeof value.type === "string" && ["tool/call", "tool/result"].includes(value.type)) return toolValue(value, budget);
-  if (typeof value.type === "string" && ["user/message", "assistant/message"].includes(value.type)) return messageValue(value, budget);
+  if (typeof value.type === "string") {
+    if (TOOL_EVENT_TYPES.has(value.type)) return toolValue(value, budget);
+    if (value.type === "request/header") return requestHeaderEvent(value);
+    if (value.type === "assistant/message") return messageValue(value, budget, false);
+    if (value.type === "user/message") return messageValue(value, budget, isInjectedUserEvent(value));
+  }
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, project(child, budget)]));
 }
 function compactHistory(value) {

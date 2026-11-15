@@ -9,6 +9,14 @@ const MARKER = '\n[Compact history: output omitted]'
  * follow stream has no transfer fallback, so growth has to stay far below it.
  */
 const ROUND_BUDGET = 128 * 1024
+const TOOL_EVENT_TYPES = new Set([
+  'tool/call',
+  'tool/result',
+  'tool/ptc-dispatch',
+  'tool/ptc-dispatch-start',
+  'tool/code-dispatch',
+  'tool/code-dispatch-start',
+])
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 type Budget = { remaining: number }
@@ -33,7 +41,7 @@ function toolValue(value: unknown, budget: Budget): unknown {
   if (!object(value)) return value
   const result: Record<string, unknown> = { ...value }
   for (const [key, child] of Object.entries(value)) {
-    if (['input', 'arguments', 'output', 'result', 'rawInput', 'rawOutput', 'uiResultMeta', 'meta', 'argumentsDelta'].includes(key)) {
+    if (['input', 'arguments', 'output', 'result', 'rawInput', 'rawOutput', 'uiResultMeta', 'meta', 'argumentsDelta', 'code'].includes(key)) {
       result[key] = typeof child === 'string' ? summary(child, budget) : { summary: summary(child, budget) }
     } else if (key === 'content' && Array.isArray(child)) {
       let previews = 0
@@ -59,26 +67,78 @@ function toolValue(value: unknown, budget: Budget): unknown {
   return result
 }
 
-function messageValue(value: unknown, budget: Budget): unknown {
-  if (Array.isArray(value)) return value.map(item => messageValue(item, budget))
+function compactMessageSource(value: unknown, isInjectedUser: boolean): unknown {
+  if (!object(value)) return value
+  let next: Record<string, unknown> = value
+  if ('replayState' in next) {
+    const { replayState: _replayState, ...rest } = next
+    next = rest
+  }
+  if (isInjectedUser) {
+    const { entries: _entries, sections: _sections, changes: _changes, baselineIdentity: _baselineIdentity, ...rest } = next
+    next = rest
+  }
+  return next
+}
+
+function messageValue(value: unknown, budget: Budget, isInjectedUser = false): unknown {
+  if (Array.isArray(value)) return value.map(item => messageValue(item, budget, isInjectedUser))
   if (!object(value)) return value
   if (value.type === 'tool-call' || value.type === 'tool-result') return toolValue(value, budget)
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, messageValue(child, budget)]))
+  if (isInjectedUser && value.type === 'text' && typeof value.text === 'string' && value.text.length > LIMIT) {
+    return { ...value, text: summary(value.text, budget) }
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'stream') continue
+    if (key === 'source') out[key] = compactMessageSource(child, isInjectedUser)
+    else out[key] = messageValue(child, budget, isInjectedUser)
+  }
+  return out
+}
+
+/**
+ * Only non-human context injections carry an explicit `source.kind` other than
+ * `'user'` (e.g. `'agent-instructions'`, `'skill-catalog'`, `'runtime-context'`).
+ * Human prompts (`source.kind === 'user'` or legacy records without `source.kind`)
+ * are never truncated, even when the person pasted `<system-reminder>` literals.
+ */
+function isInjectedUserEvent(event: Record<string, unknown>): boolean {
+  const data = object(event.data) ? event.data : undefined
+  const msg = data && object(data.message) ? data.message : data
+  const src = msg && object(msg.source) ? msg.source : undefined
+  return Boolean(src && typeof src.kind === 'string' && src.kind !== 'user')
+}
+
+function requestHeaderEvent(event: Record<string, unknown>): Record<string, unknown> {
+  if (!object(event.data) || !object(event.data.header)) return event
+  const { tools: _tools, system: _system, ...restHeader } = event.data.header
+  return { ...event, data: { ...event.data, header: restHeader } }
 }
 
 function project(value: unknown, budget: Budget): unknown {
   if (Array.isArray(value)) return value.map(item => project(item, budget))
   if (!object(value)) return value
   // Only history containers and native events are projected. Other RPCs never use this helper.
-  if (object(value.event) && ['tool/call', 'tool/result'].includes(String(value.event.type))) {
-    const { view, ...rest } = value
-    const event = toolValue(value.event, budget) as Record<string, unknown>
-    const data = object(event.data) ? event.data : {}
-    const title = object(view) && object(view.view) ? view.view.title : undefined
-    return { ...rest, event: { ...event, data: { ...data, ...(typeof title === 'string' && !data.name && !data.toolName ? { toolName: title } : {}) } } }
+  if (object(value.event)) {
+    const eventType = String(value.event.type)
+    if (TOOL_EVENT_TYPES.has(eventType)) {
+      const { view, ...rest } = value
+      const event = toolValue(value.event, budget) as Record<string, unknown>
+      const data = object(event.data) ? event.data : {}
+      const title = object(view) && object(view.view) ? view.view.title : undefined
+      return { ...rest, event: { ...event, data: { ...data, ...(typeof title === 'string' && !data.name && !data.toolName ? { toolName: title } : {}) } } }
+    }
+    if (eventType === 'request/header') return { ...value, event: requestHeaderEvent(value.event) }
+    if (eventType === 'assistant/message') return { ...value, event: messageValue(value.event, budget, false) }
+    if (eventType === 'user/message') return { ...value, event: messageValue(value.event, budget, isInjectedUserEvent(value.event)) }
   }
-  if (typeof value.type === 'string' && ['tool/call', 'tool/result'].includes(value.type)) return toolValue(value, budget)
-  if (typeof value.type === 'string' && ['user/message', 'assistant/message'].includes(value.type)) return messageValue(value, budget)
+  if (typeof value.type === 'string') {
+    if (TOOL_EVENT_TYPES.has(value.type)) return toolValue(value, budget)
+    if (value.type === 'request/header') return requestHeaderEvent(value)
+    if (value.type === 'assistant/message') return messageValue(value, budget, false)
+    if (value.type === 'user/message') return messageValue(value, budget, isInjectedUserEvent(value))
+  }
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, project(child, budget)]))
 }
 
