@@ -1,18 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native'
-import { ArrowUp, Plus, Square, Users } from 'lucide-react-native'
+import { AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, Pressable, Text, TextInput, View } from 'react-native'
+import { Users } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
+import { BUILT_IN_PROMPTS, type CustomPrompt } from '../../services/storage'
 import { botMessageRequest, formatBotSubmission, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject, type BotOperation } from '../../services/bot-catalog'
 import { pollRoomRows, preferredRoomRows, ROOM_ROWS_INTERVAL_MS, ROOM_ROWS_LEGACY_INTERVAL_MS, ROOM_ROWS_LEGACY_MISSES, type RoomRowsPoll } from '../../services/bot-room-rows'
 import { useAppStore } from '../../state/store'
 import { useBotTeamStore } from '../../state/bot-store'
 import type { ChatItem, RemoteSession } from '../../types'
-import { Button, IconButton } from '../../ui/components'
+import { Alert } from '../../ui/alert'
+import { Button } from '../../ui/components'
 import { decodeSessionMentionUri, markdownFilePath, MarkdownLinkProvider, NativeMarkdown, openSafeExternalUrl } from '../../ui/markdown'
-import { detectMention, MentionPopover, type MentionGroup } from '../../ui/mention-popover'
+import { detectMention, type MentionGroup } from '../../ui/mention-popover'
+import { useResponsiveLayout } from '../../ui/responsive'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
+import { ChatComposer, type ComposerInputBridge } from '../chat/composer'
+import { applyQuickPromptDraft } from '../chat/composer-gate'
+import { type ExpandedComposerProps } from '../chat/expanded-composer'
 import { ChatActivityGroup, ChatItemView, QueueDock } from '../chat/messages'
+import { PromptEditor, PromptsManager, PromptsPicker } from '../chat/pickers'
+import { createStyles as createChatStyles } from '../chat/styles'
+import { useChatPrompts } from '../chat/use-chat-prompts'
 import { chatSections, inboxQueuedItems, inboxRpcIds, type ChatSection } from '../../state/message-helpers'
 import { processSegments } from '../chat-process'
 import { useSessionUiArtifacts } from '../chat/use-session-ui-artifacts'
@@ -41,18 +50,26 @@ type BotChatRow =
   | { kind: 'ui'; key: string; artifact: UiArtifact }
   | { kind: 'ui-pointer'; key: string; artifact: UiArtifact }
   | { kind: 'ui-unavailable'; key: string; item: ToolActivity }
-export function BotConversation({ bot, room, state, client, session, busy, active, perform, onSelectBot }: {
+export function BotConversation({ bot, room, state, client, session, busy, active, perform, onSelectBot, onExpandedComposerChange }: {
   bot?: BotEntry; room?: BotRoom; state: BotState; client?: BotRemoteClient; session: RemoteSession
   busy: boolean; active: boolean; perform: BotPerform; onSelectBot: (id: string) => void
+  onExpandedComposerChange?: (props: ExpandedComposerProps | null) => void
 }) {
   const transformText = useCallback((value: string) => linkBotMentions(value, state.bots, bot?.id), [state.bots, bot?.id])
   const botById = useCallback((id: string) => state.bots.find(entry => entry.id === id), [state.bots])
   const mentions = useMemo(() => ({ bots: state.bots, selfId: bot?.id, onPress: (id: string) => onSelectBot(id) }), [state.bots, bot?.id, onSelectBot])
   const styles = useThemedStyles(createBotStyles)
+  const chatStyles = useThemedStyles(createChatStyles)
   const { colors } = useTheme()
+  const { compactHeight, height, landscape, contentMaxWidth } = useResponsiveLayout()
+  const compactComposer = landscape || compactHeight
+  const composerInputMaxHeight = compactComposer ? Math.max(48, Math.min(96, Math.round(height * 0.22))) : 126
+  const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
   const messages = useAppStore(store => store.messages[session.sessionId] ?? EMPTY)
   const selected = useAppStore(store => store.selectedSession)
   const storeBusy = useAppStore(store => store.busyAction)
+  const quickPromptActionMode = useAppStore(store => store.quickPromptActionMode)
+  const setQuickPromptActionMode = useAppStore(store => store.setQuickPromptActionMode)
   const hasMore = useAppStore(store => store.historyHasMore)
   const olderLoading = useAppStore(store => store.historyLoadingOlder)
   const loadOlder = useAppStore(store => store.loadOlderHistory)
@@ -71,12 +88,16 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const [atQuery, setAtQuery] = useState<string | null>(null)
   const atSpanStartRef = useRef(0)
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [composerExpanded, setComposerExpanded] = useState(false)
+  const expandedActivatedRef = useRef(false)
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
   const [stagedReferences, setStagedReferences] = useState<ReferenceChatCandidate[]>([])
   const [fileLinkPath, setFileLinkPath] = useState<string>()
   const sessions = useAppStore(store => store.sessions)
   const openSession = useAppStore(store => store.openSession)
   const connected = useAppStore(store => store.connection.phase === 'connected')
+  const { promptsPickerOpen, setPromptsPickerOpen, customPrompts, promptEditing,
+    setPromptEditing, promptsManagerOpen, setPromptsManagerOpen, promptsLoading, savePromptEdit, deletePrompt } = useChatPrompts(connected ? 'connected' : 'disconnected')
   const [progress, setProgress] = useState<BotObject[]>([])
   const [speaking, setSpeaking] = useState<string[]>([])
   const [earlier, setEarlier] = useState<BotObject[]>([])
@@ -150,6 +171,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     setFileLinkPath(undefined)
     setAtQuery(null)
     setPlusMenuOpen(false)
+    setComposerExpanded(false)
+    setPromptsPickerOpen(false)
     setReferenceChatOpen(false)
     setStagedReferences([])
   }, [memoryScope, session.sessionId])
@@ -257,12 +280,12 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     void tick()
     return () => { control.abort(); clearTimeout(timer) }
   }, [client, room?.id, session.sessionId, active, connected])
-  const send = async () => {
-    if (sendingRef.current || disabled) return
-    const rawDraft = draftRef.current.trim()
+  const sendSubmission = async (rawText: string, clearDraft: boolean): Promise<boolean> => {
+    if (sendingRef.current || disabled) return false
+    const rawDraft = rawText.trim()
     const submittedRefs = stagedReferences
     const submitted = formatBotSubmission(rawDraft, submittedRefs.map(item => item.mentionText))
-    if (!submitted) return
+    if (!submitted) return false
     sendingRef.current = true
     atEnd.current = true
     followEnd()
@@ -273,22 +296,26 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     } catch (reason) {
       sendingRef.current = false
       setError(reason instanceof Error ? reason.message : s.bots.unavailable)
-      return
+      return false
     }
     const sendSessionId = session.sessionId
     const activeRequest = request.current
-    applyDraft('')
-    selectionRef.current = { start: 0, end: 0 }
-    setAtQuery(null)
+    if (clearDraft) {
+      applyDraft('')
+      selectionRef.current = { start: 0, end: 0 }
+      setAtQuery(null)
+    }
     setStagedReferences([])
     const restoreFailedDraft = () => {
       if (!mounted.current || activeRequest.signal.aborted || session.sessionId !== sendSessionId) return
-      const typedWhileInFlight = draftRef.current.trim()
-      const restoredDraft = typedWhileInFlight
-        ? (rawDraft ? `${rawDraft}\n${typedWhileInFlight}` : typedWhileInFlight)
-        : rawDraft
-      applyDraft(restoredDraft)
-      selectionRef.current = { start: restoredDraft.length, end: restoredDraft.length }
+      if (clearDraft) {
+        const typedWhileInFlight = draftRef.current.trim()
+        const restoredDraft = typedWhileInFlight
+          ? (rawDraft ? `${rawDraft}\n${typedWhileInFlight}` : typedWhileInFlight)
+          : rawDraft
+        applyDraft(restoredDraft)
+        selectionRef.current = { start: restoredDraft.length, end: restoredDraft.length }
+      }
       if (submittedRefs.length > 0) {
         setStagedReferences(current => {
           const existing = new Set(current.map(item => item.sessionId))
@@ -300,15 +327,41 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       const result = await perform(message.endpoint, message.payload)
       if (!result.ok) {
         restoreFailedDraft()
+        return false
       }
+      return true
     } catch (reason) {
       if (mounted.current && !activeRequest.signal.aborted && session.sessionId === sendSessionId) {
         restoreFailedDraft()
         setError(reason instanceof Error ? reason.message : s.bots.unavailable)
       }
+      return false
     } finally {
       sendingRef.current = false
     }
+  }
+  const send = () => sendSubmission(draftRef.current, true)
+  const pickQuickPrompt = async (prompt: CustomPrompt) => {
+    setPromptsPickerOpen(false)
+    if (quickPromptActionMode === 'fill') {
+      const { draft: nextDraft, cursor } = applyQuickPromptDraft(draftRef.current, prompt.text)
+      applyDraft(nextDraft)
+      selectionRef.current = { start: cursor, end: cursor }
+      updateAtMention(nextDraft, cursor)
+      requestAnimationFrame(() => inputRef.current?.focus())
+      return
+    }
+    if (!connected) {
+      Alert.alert(s.chat.toolPromptSendFailed, s.chat.offlineNotice)
+      return
+    }
+    if (disabled) {
+      Alert.alert(s.chat.toolPromptSendFailed, s.chat.toolPromptSendFailed)
+      return
+    }
+    const sent = await sendSubmission(prompt.text, false)
+    if (sent) AccessibilityInfo.announceForAccessibility(s.chat.toolPromptSent(prompt.title))
+    else Alert.alert(s.chat.toolPromptSendFailed, s.chat.toolPromptSendFailed)
   }
   const earlierPage = async () => {
     if (olderBusyRef.current || bot === undefined || !client || cursor === null) return
@@ -626,6 +679,67 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (item.kind === 'tool') return null
     return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
   }
+  const composerLabel = bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message
+  const hasComposerContent = draft.trim().length > 0 || stagedReferences.length > 0
+  const replyActive = Boolean(selected?.running)
+  const stopping = storeBusy === 'stop-session'
+  const composerSendDisabled = disabled || !hasComposerContent
+
+  const draftChangeRef = useRef(handleDraftChange)
+  draftChangeRef.current = handleDraftChange
+  const selectionChangeRef = useRef(handleSelectionChange)
+  selectionChangeRef.current = handleSelectionChange
+  const sendRef = useRef(send)
+  sendRef.current = send
+  const stopRef = useRef(stopSession)
+  stopRef.current = stopSession
+
+  const composerInputBridge = useMemo<ComposerInputBridge>(() => ({
+    composerInputRef: inputRef,
+    mentionType: atQuery !== null && botAtMentionGroups.length > 0 ? 'context' : null,
+    mentionGroups: botAtMentionGroups,
+    closeMention: () => setAtQuery(null),
+    onChangeText: next => draftChangeRef.current(next),
+    onSelectionChange: event => selectionChangeRef.current(event),
+  }), [atQuery, botAtMentionGroups])
+
+  useEffect(() => {
+    if (composerExpanded) expandedActivatedRef.current = true
+    if (!expandedActivatedRef.current) return
+    onExpandedComposerChange?.({
+      visible: composerExpanded,
+      onClose: () => setComposerExpanded(false),
+      draft,
+      input: {
+        onChangeText: next => draftChangeRef.current(next),
+        onSelectionChange: event => selectionChangeRef.current(event),
+      },
+      accessibilityLabel: composerLabel,
+      placeholder: composerLabel,
+      highlightMentionTokens: false,
+      replyActive,
+      stopping,
+      sending: busy,
+      sendDisabled: composerSendDisabled,
+      onSubmit: () => void sendRef.current(),
+      onStop: () => void stopRef.current(),
+    })
+  }, [
+    onExpandedComposerChange,
+    composerExpanded,
+    draft,
+    composerLabel,
+    replyActive,
+    stopping,
+    busy,
+    composerSendDisabled,
+  ])
+
+  useEffect(() => () => {
+    expandedActivatedRef.current = false
+    onExpandedComposerChange?.(null)
+  }, [onExpandedComposerChange])
+
   return <BotMessageActionsContext.Provider value={true}><MarkdownLinkProvider onLinkPress={onLinkPress} transformText={transformText}><View style={styles.flex}>
     <FlatList ref={list} data={ready ? rows : []} keyExtractor={item => item.key} renderItem={({ item, index }) => (
       <View style={{ paddingTop: index > 0 && rows[index - 1]?.kind !== 'activity' ? 8 : 0 }}>
@@ -696,87 +810,49 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         <QueueDock items={queueItems} />
       </View>
     )}
-    {atQuery !== null && botAtMentionGroups.length > 0 && (
-      <View style={{ paddingHorizontal: 14 }}>
-        <MentionPopover
-          groups={botAtMentionGroups}
-          onDismiss={() => setAtQuery(null)}
-          emptyText={s.mention.noMatches}
-        />
-      </View>
-    )}
-    <View style={styles.composerOuter}>
-      <View style={[styles.composerCard, stagedReferences.length > 0 && styles.composerCardWithPills]}>
+    <View style={chatStyles.composerWrap}>
+      <View style={[chatStyles.composerInner, readableColumn]}>
         <ReferencedChatPills
           items={stagedReferences}
           onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
         />
-        <View style={styles.composerRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={s.chat.moreActions}
-            disabled={disabled}
-            onPress={() => setPlusMenuOpen(true)}
-            style={({ pressed }) => [styles.plusCircle, pressed && { opacity: 0.72 }, disabled && { opacity: 0.4 }]}
-          >
-            <Plus size={18} color={colors.ink} strokeWidth={2.1} />
-          </Pressable>
-          <TextInput
-            ref={inputRef}
-            accessibilityLabel={bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message}
-            placeholder={bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message}
-            placeholderTextColor={colors.muted}
-            style={styles.composerInput}
-            multiline
-            editable={!inputDisabled}
-            value={draft}
-            onChangeText={handleDraftChange}
-            onSelectionChange={handleSelectionChange}
-            selectionColor={colors.accent}
-            cursorColor={colors.accent}
-          />
-          {selected?.running && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.bots.stop}
-              disabled={disabled}
-              onPress={() => void stopSession()}
-              style={({ pressed }) => [styles.stopCircle, pressed && { opacity: 0.78 }]}
-            >
-              <Square size={12} color={colors.surface} fill={colors.surface} />
-            </Pressable>
-          )}
-          {busy ? (
-            <View style={styles.sendCircle}>
-              <ActivityIndicator size="small" color={colors.surface} />
-            </View>
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.bots.send}
-              disabled={disabled || (!draft.trim() && stagedReferences.length === 0)}
-              onPress={() => void send()}
-              style={({ pressed }) => [
-                styles.sendCircle,
-                (disabled || (!draft.trim() && stagedReferences.length === 0)) && styles.sendCircleDisabled,
-                pressed && { opacity: 0.82 },
-              ]}
-            >
-              <ArrowUp size={18} color={colors.surface} strokeWidth={2.4} />
-            </Pressable>
-          )}
-        </View>
+        <ChatComposer
+          draft={draft}
+          input={composerInputBridge}
+          accessibilityLabel={composerLabel}
+          placeholder={composerLabel}
+          highlightMentionTokens={false}
+          replyActive={replyActive}
+          stopping={stopping}
+          sending={busy}
+          hasComposerContent={hasComposerContent}
+          connected={connected}
+          editable={!inputDisabled}
+          composerDisabled={disabled}
+          sendDisabled={composerSendDisabled}
+          compactComposer={compactComposer}
+          composerInputMaxHeight={composerInputMaxHeight}
+          onOpenExpand={() => setComposerExpanded(true)}
+          onOpenActions={() => {
+            Keyboard.dismiss()
+            setAtQuery(null)
+            setPlusMenuOpen(true)
+          }}
+          onOpenPrompts={() => {
+            Keyboard.dismiss()
+            setAtQuery(null)
+            setPromptsPickerOpen(true)
+          }}
+          onSubmit={() => void send()}
+          onStop={() => void stopSession()}
+        />
       </View>
-      {!connected && (draft.trim().length > 0 || stagedReferences.length > 0) && (
-        <Text accessibilityLiveRegion="polite" style={[styles.muted, { paddingHorizontal: 8, paddingTop: 4, fontSize: 12 }]}>
-          {s.chat.offlineSendBlocked}
-        </Text>
-      )}
     </View>
     <BotPlusMenuModal
       visible={plusMenuOpen}
       onClose={() => setPlusMenuOpen(false)}
       onReferenceChat={() => setReferenceChatOpen(true)}
+      onOpenPrompts={() => setPromptsPickerOpen(true)}
       onOpenSchedules={() => void perform('schedules')}
     />
     <ReferenceChatModal
@@ -786,6 +862,42 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       botState={state}
       onClose={() => setReferenceChatOpen(false)}
       onPick={(_mentionText, candidate) => handlePickReferencedChat(_mentionText, candidate)}
+    />
+    <PromptsPicker
+      visible={promptsPickerOpen}
+      prompts={customPrompts ?? BUILT_IN_PROMPTS}
+      actionMode={quickPromptActionMode}
+      onToggleActionMode={mode => {
+        void setQuickPromptActionMode(mode).catch(() => {
+          Alert.alert(s.settings.quickPromptActionMode, s.settings.quickPromptActionSaveFailed)
+        })
+      }}
+      onClose={() => setPromptsPickerOpen(false)}
+      onPick={prompt => void pickQuickPrompt(prompt)}
+      onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
+    />
+    <PromptsManager
+      visible={promptsManagerOpen}
+      prompts={customPrompts ?? BUILT_IN_PROMPTS}
+      promptsLoading={promptsLoading}
+      onBack={() => { setPromptsManagerOpen(false); setPromptsPickerOpen(true) }}
+      onClose={() => setPromptsManagerOpen(false)}
+      onAdd={() => { setPromptsManagerOpen(false); setPromptEditing('new') }}
+      onEdit={prompt => { setPromptsManagerOpen(false); setPromptEditing(prompt) }}
+      onDelete={prompt => {
+        Alert.alert(s.chat.toolPromptDeleteTitle(prompt.title), s.chat.toolPromptDeleteBody, [
+          { text: s.common.cancel, style: 'cancel' },
+          { text: s.common.delete, style: 'destructive', onPress: () => void deletePrompt(prompt) },
+        ])
+      }}
+    />
+    <PromptEditor
+      visible={promptEditing !== null}
+      prompt={promptEditing === 'new' || promptEditing === null ? undefined : promptEditing}
+      promptsLoading={promptsLoading}
+      onBack={() => { setPromptEditing(null); setPromptsManagerOpen(true) }}
+      onClose={() => setPromptEditing(null)}
+      onSave={(title, text) => void savePromptEdit(title, text)}
     />
     {fileLinkPath !== undefined && connected && ready && <SessionToolsPanel
       key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}

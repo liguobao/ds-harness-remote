@@ -34,6 +34,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { QuickPromptActionMode } from '../services/storage'
 
 type BootPhase = 'loading' | 'ready' | 'error'
 
@@ -117,6 +118,7 @@ export interface AppState {
   chatAppearance: ChatAppearance
   activityDockMode: ActivityDockMode
   drawerLayoutMode: DrawerLayoutMode
+  quickPromptActionMode: QuickPromptActionMode
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
@@ -213,6 +215,7 @@ export interface AppState {
   resetChatAppearance(): Promise<void>
   setActivityDockMode(mode: ActivityDockMode): Promise<void>
   setDrawerLayoutMode(mode: DrawerLayoutMode): Promise<void>
+  setQuickPromptActionMode(mode: QuickPromptActionMode): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>

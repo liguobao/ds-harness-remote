@@ -7,6 +7,7 @@ import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
 import { isActivityDockMode, isDrawerLayoutMode, isThemePreference, isTypographyDensity, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type DrawerLayoutMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
+import { isQuickPromptActionMode, type QuickPromptActionMode } from '../screens/chat/composer-gate'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 /** Durable compaction attempt shape shared with `compaction-store`. */
@@ -32,6 +33,7 @@ const KEYS = {
   chatAppearance: 'dshremote.chat-appearance.v1',
   activityDockMode: 'dshremote.activity-dock-mode.v1',
   drawerLayoutMode: 'dshremote.drawer-layout-mode.v1',
+  quickPromptActionMode: 'dshremote.quick-prompt-action-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
@@ -604,6 +606,17 @@ export async function loadDrawerLayoutMode(): Promise<DrawerLayoutMode> {
 
 export async function saveDrawerLayoutMode(value: DrawerLayoutMode): Promise<void> {
   await writeJson(KEYS.drawerLayoutMode, { value })
+}
+
+export { isQuickPromptActionMode, type QuickPromptActionMode }
+
+export async function loadQuickPromptActionMode(): Promise<QuickPromptActionMode> {
+  const stored = await readJson<{ value: unknown }>(KEYS.quickPromptActionMode)
+  return isQuickPromptActionMode(stored?.value) ? stored.value : 'fill'
+}
+
+export async function saveQuickPromptActionMode(value: QuickPromptActionMode): Promise<void> {
+  await writeJson(KEYS.quickPromptActionMode, { value })
 }
 
 export async function loadChatAppearance(): Promise<ChatAppearance> {

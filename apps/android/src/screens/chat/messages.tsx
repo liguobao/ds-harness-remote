@@ -17,7 +17,7 @@ import {
 } from 'react-native'
 import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
-import * as Haptics from 'expo-haptics'
+import { triggerLightHaptic } from '../../ui/haptics'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
@@ -762,7 +762,10 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
             <IconButton label={zhCN.chat.queueSteer} icon={ArrowUp} dense
               onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer', item.rpcId)} />
             <IconButton label={zhCN.chat.queueRemove} icon={X} dense
-              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)} />
+              onPress={() => {
+                triggerLightHaptic()
+                void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)
+              }} />
           </>}
         </View>
       ))}
@@ -770,7 +773,26 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
   )
 }
 
-export function WelcomeMessage() {
+export function ReplyStatusBanner({ label, stopping }: { label: string; stopping: boolean }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View
+      accessible
+      accessibilityLabel={label}
+      accessibilityLiveRegion="polite"
+      style={styles.replyStatus}
+    >
+      <Svg width={15} height={15} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}>
+        <Path d={FISH_LOGO_PATH} fill={colors.accent} />
+      </Svg>
+      <Text style={styles.replyStatusText}>{label}</Text>
+      {!stopping && <ReplyStatusDots />}
+    </View>
+  )
+}
+
+export function WelcomeMessage({ policyHint }: { policyHint?: string } = {}) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
@@ -788,6 +810,9 @@ export function WelcomeMessage() {
           <Text style={styles.welcomeBadgeText}>{zhCN.chat.welcomeBadge}</Text>
         </View>
       </View>
+      {policyHint !== undefined && policyHint.length > 0 && (
+        <Text style={styles.welcomePolicyHint}>{policyHint}</Text>
+      )}
     </View>
   )
 }

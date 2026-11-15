@@ -678,6 +678,7 @@ const zhCN = {
     activityDockMode: '活动组件展示', activityDockModeNote: '控制对话输入框上方后台任务、子任务与智能体团队的展示方式',
     activityDockCompact: '紧凑胶囊栏', activityDockCards: '独立折叠卡片', activityDockHidden: '始终隐藏', activityDockModeSaveFailed: '无法保存活动组件展示设置',
     drawerLayoutMode: '侧边栏布局', drawerLayoutCompact: '精简', drawerLayoutClassic: '展开卡片', drawerLayoutModeSaveFailed: '无法保存侧边栏布局设置',
+    quickPromptActionMode: '快捷提示词点击', quickPromptActionFill: '填入输入框', quickPromptActionSend: '直接发送', quickPromptActionSaveFailed: '无法保存快捷提示词设置',
     statusBar: '显示状态栏', statusBarNote: '显示屏幕顶部的时间、电量和网络状态。关闭后隐藏系统状态栏。', statusBarSaveFailed: '无法保存状态栏设置', statusBarSaveFailedBody: '本地存储写入失败，请重试。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',
