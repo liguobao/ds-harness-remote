@@ -1,3 +1,17 @@
+## Lightweight Host Session API discovery (2026-11-15)
+
+`harness.transport.describe` 不再执行完整 `session/list`。Host 通过同一端点发送未知参数
+`{ args: { __remoteCapabilityProbe: true } }`，利用官方 Gateway 先解析 descriptor、再校验参数、
+最后才执行 handler 的顺序，仅接受 `gateway/arguments-invalid` 作为接口存在的证明。
+未知参数不能换成合法空请求，否则会重新在握手时扫描历史库。5 秒预算保留给轻量探测；
+`gateway/invocation-unavailable` 仍移除 Harness capabilities，其他错误或意外成功仍失败关闭。
+探测只确认接口注册，不承诺 Session 服务或持久化读取已就绪；真实业务调用负责报告其错误。
+`$events` 仍独立探测。官方 Gateway 回归确认有效/缺失接口与 handler 零调用，Host 回归覆盖
+并发 Client、缺失后恢复、超时、内部错误和意外成功。Host 发布 bundle 已同步。
+验证：共享包与 Plugin build、Plugin check、89 文件 / 740 pass / 5 skipped、DSH bundle 与
+diff check 通过。首轮 ACP 文件监听用例失败，单独及全套复跑通过，未确认根因；未做 Windows
+真实大历史库或跨设备验收。
+
 ## LAN TCP workspace uploads (2026-11-14)
 
 Host 新增 `workspace.upload.lan.v1` 与 `workspace.upload.lan.open`，Android 对至少

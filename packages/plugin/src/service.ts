@@ -606,15 +606,21 @@ export class HostPluginRuntime {
     if (gateway?.supportsCarrier !== true) return capabilities
     let result: Awaited<ReturnType<LocalTypertGateway['dispatch']>>
     try {
-      result = await gateway.dispatch('session/list', { args: { _request: {} } }, AbortSignal.timeout(5_000))
+      // The Gateway resolves the endpoint before rejecting unknown arguments, and
+      // rejects them before invoking the Session handler. Never enumerate persisted
+      // sessions during capability discovery: cold history can take minutes to read.
+      result = await gateway.dispatch('session/list', { args: { __remoteCapabilityProbe: true } }, AbortSignal.timeout(5_000))
     } catch {
       throw new RpcError('CONNECTION_FAILED', 'Cannot verify the Host Session API.', undefined, true)
     }
-    if (result.ok) {
+    if (!result.ok && result.error.code === 'gateway/arguments-invalid') {
       if (isLiveSessionEventsHarnessVersion(this.harnessVersion) && await this.probeLiveSessionEvents(gateway)) {
         capabilities.push(REMOTE_SESSION_EVENTS_CAPABILITY)
       }
       return capabilities
+    }
+    if (result.ok) {
+      throw new RpcError('CONNECTION_FAILED', 'The Host Gateway did not reject the Session API probe.', undefined, true)
     }
     if (result.error.code === 'gateway/service-unavailable') {
       throw new RpcError('CONNECTION_FAILED', 'The Host Session API is not ready.', undefined, true)

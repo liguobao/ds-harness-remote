@@ -103819,15 +103819,18 @@ var HostPluginRuntime = class {
     if (gateway?.supportsCarrier !== true) return capabilities;
     let result;
     try {
-      result = await gateway.dispatch("session/list", { args: { _request: {} } }, AbortSignal.timeout(5e3));
+      result = await gateway.dispatch("session/list", { args: { __remoteCapabilityProbe: true } }, AbortSignal.timeout(5e3));
     } catch {
       throw new RpcError("CONNECTION_FAILED", "Cannot verify the Host Session API.", void 0, true);
     }
-    if (result.ok) {
+    if (!result.ok && result.error.code === "gateway/arguments-invalid") {
       if (isLiveSessionEventsHarnessVersion(this.harnessVersion) && await this.probeLiveSessionEvents(gateway)) {
         capabilities.push(REMOTE_SESSION_EVENTS_CAPABILITY);
       }
       return capabilities;
+    }
+    if (result.ok) {
+      throw new RpcError("CONNECTION_FAILED", "The Host Gateway did not reject the Session API probe.", void 0, true);
     }
     if (result.error.code === "gateway/service-unavailable") {
       throw new RpcError("CONNECTION_FAILED", "The Host Session API is not ready.", void 0, true);
