@@ -33,6 +33,11 @@ export const transportUpgradeActivateSchema = z.object({
   previousLegEndCounter: z.number().int().min(0).optional(),
 }).strict()
 
+export const transportUpgradeDrainSchema = z.object({
+  attemptId: z.string().min(1).max(64),
+  previousLegEndCounter: z.number().int().min(0),
+}).strict()
+
 export const transportUpgradeAbortSchema = z.object({
   attemptId: z.string().min(1).max(64).optional(),
 }).strict()
@@ -164,7 +169,7 @@ export class SequencedCiphertextReorderBuffer {
         this.options.onGapTimeout(expectedCounter)
       }
     }, timeoutMs)
-    this.gapTimer.unref?.()
+    ;(this.gapTimer as { unref?: () => void }).unref?.()
   }
 
   private clearGapTimer(): void {

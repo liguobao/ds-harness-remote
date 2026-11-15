@@ -10,7 +10,7 @@ import { request as httpRequest } from 'node:http'
 import { WebSocket } from 'ws'
 import { MAX_CONTROL_FRAME_BYTES, createControlFrame } from '@dsh-remote/protocol'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url, fromBase64Url } from '../../../packages/crypto/src/index.js'
-import { RelayTransport } from '../../../packages/webrtc/src/index.js'
+import { AdaptiveTransport, RelayTransport, stunOnlyIceServers } from '../../../packages/webrtc/src/index.js'
 import { ClientSecureTransport } from '../../../packages/plugin/src/client-secure-transport.js'
 import { ClientServerApi } from '../../../packages/plugin/src/server-api.js'
 import { IdentityStore } from '../../../packages/plugin/src/identity-store.js'
@@ -634,7 +634,15 @@ describe('webrtc signaling and TURN credentials', () => {
     expect((await request('/turn/credentials', 'GET', undefined, ctx.c.accessToken)).status).toBe(400)
 
     await handshake(ctx)
-    expect((await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.c.accessToken)).status).toBe(404)
+    // WebRTC-capable ready links remain eligible for post-authentication in-band upgrades (`remote.transport.upgrade.v1`),
+    // while strangers and strictly relay-only ready links are still rejected.
+    expect((await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.c.accessToken)).status).toBe(200)
+    expect((await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, ctx.h.accessToken)).status).toBe(200)
+    expect((await request(`/turn/credentials?connection_id=${ctx.connectionId}`, 'GET', undefined, stranger.accessToken)).status).toBe(404)
+
+    const relayOnlyCtx = await connection({ hostCapabilities: ['transport.relay'], clientCapabilities: ['transport.relay'], preferredTransports: ['relay'] })
+    await handshake(relayOnlyCtx)
+    expect((await request(`/turn/credentials?connection_id=${relayOnlyCtx.connectionId}`, 'GET', undefined, relayOnlyCtx.c.accessToken)).status).toBe(404)
   })
 
   it('issues configured static TURN credentials', async () => {
@@ -1398,5 +1406,72 @@ describe('stale link frame dropping and configurable rate limit', () => {
     })
     const [closeCode] = await noisyClosed
     expect(closeCode).toBe(4001)
+  })
+
+  it('preserves TURN in preferredTransports under relayFirst and authorizes post-handshake TURN credentials to both peers of the live connection', async () => {
+    await app.close()
+    await start(password, [], {
+      ice: {
+        stunUrls: ['stun:stun.example.test:3478'],
+        turnUrls: ['turn:turn.example.test:3478'],
+        turnSecret: 'test-turn-secret',
+        turnUsername: undefined,
+        turnPassword: undefined,
+        turnTtlSeconds: 120,
+      },
+    })
+    accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+    const h = await device('host')
+    const c = await device('client')
+    const stranger = await device('client')
+    const hostWire = await socket(h)
+    await hostWire.next('hello.ack')
+
+    const prevWs = (globalThis as Record<string, unknown>).WebSocket
+    ;(globalThis as Record<string, unknown>).WebSocket = WebSocket
+    try {
+      const adaptive = new AdaptiveTransport(`${base.replace('http', 'ws')}/ws/v1/connect`, {
+        role: 'client',
+        deviceId: c.deviceId,
+        accessToken: c.accessToken,
+        targetDeviceId: h.deviceId,
+        relayFirst: true,
+        preferredTransports: ['p2p', 'turn', 'relay'],
+      })
+      const connectPromise = adaptive.connect()
+      const incoming = await hostWire.next('connect.incoming')
+      // Relay-first still forwards 'turn' in preferredTransports to the Host!
+      expect(incoming.preferredTransports).toEqual(['p2p', 'turn', 'relay'])
+      hostWire.send('connect.accepted', { connectionId: incoming.connectionId })
+      const selected = await hostWire.next('transport.selected')
+      expect(selected.transport).toBe('relay')
+      await connectPromise
+
+      // Complete full Noise IK handshake -> link enters 'ready' stage on Server
+      const clientNoise = new NoiseIkSession({ role: 'initiator', localPrivateKey: c.keys.privateKey, localPublicKey: c.keys.publicKey, remotePublicKey: h.keys.publicKey, prologue: createNoisePrologue(incoming.connectionId, h.deviceId, c.deviceId) })
+      const hostNoise = new NoiseIkSession({ role: 'responder', localPrivateKey: h.keys.privateKey, localPublicKey: h.keys.publicKey, remotePublicKey: c.keys.publicKey, prologue: createNoisePrologue(incoming.connectionId, h.deviceId, c.deviceId) })
+      noiseSessions.push(clientNoise, hostNoise)
+      const hsDone = new Promise<void>(resolve => {
+        adaptive.onHandshake((step, data) => { if (step === 2) { clientNoise.readHandshake(data); resolve() } })
+      })
+      await adaptive.sendHandshake(1, clientNoise.writeHandshake())
+      const hs1 = await hostWire.next('secure.handshake')
+      hostNoise.readHandshake(fromBase64Url(hs1.data))
+      hostWire.send('secure.handshake', { connectionId: incoming.connectionId, targetDeviceId: c.deviceId, step: 2, data: toBase64Url(hostNoise.writeHandshake()) })
+      await hsDone
+
+      // Post-handshake ICE credentials succeed for both Client and Host, keep TURN servers (not stripped to stunOnly), and reject strangers!
+      const clientTurn = await request(`/turn/credentials?connection_id=${incoming.connectionId}`, 'GET', undefined, c.accessToken)
+      const hostTurn = await request(`/turn/credentials?connection_id=${incoming.connectionId}`, 'GET', undefined, h.accessToken)
+      expect(clientTurn.status).toBe(200)
+      expect(hostTurn.status).toBe(200)
+      const hostFiltered = incoming.preferredTransports.includes('turn') ? hostTurn.data.iceServers : stunOnlyIceServers(hostTurn.data.iceServers)
+      expect(hostFiltered.some((s: { urls: string }) => s.urls.startsWith('turn:'))).toBe(true)
+      expect((await request(`/turn/credentials?connection_id=${incoming.connectionId}`, 'GET', undefined, stranger.accessToken)).status).toBe(404)
+
+      await adaptive.close()
+    } finally {
+      ;(globalThis as Record<string, unknown>).WebSocket = prevWs
+    }
   })
 })

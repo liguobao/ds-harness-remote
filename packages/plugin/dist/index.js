@@ -64540,6 +64540,10 @@ var transportUpgradeActivateSchema = external_exports.object({
   transport: external_exports.enum(["lan", "p2p", "turn"]).optional(),
   previousLegEndCounter: external_exports.number().int().min(0).optional()
 }).strict();
+var transportUpgradeDrainSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  previousLegEndCounter: external_exports.number().int().min(0)
+}).strict();
 var transportUpgradeAbortSchema = external_exports.object({
   attemptId: external_exports.string().min(1).max(64).optional()
 }).strict();
@@ -67892,7 +67896,7 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.connectionId === void 0)
       return;
     const preferred = this.negotiatedTransports();
-    const wantWebRtc = !this.options.forceRelay && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
+    const wantWebRtc = !this.options.forceRelay && !this.options.relayFirst && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
     let selected = "relay";
     this.lastRtcDiagnostics = void 0;
     if (wantWebRtc) {
@@ -100244,7 +100248,7 @@ var TransportUpgradeHost = class {
   async activate(rawParams) {
     if (this.closed) throw new RpcError("INVALID_MESSAGE", "The connection is closed.");
     if (this.activating) throw new RpcError("REQUEST_CONFLICT", "Another transport activation is already in progress.");
-    const { attemptId, previousLegEndCounter } = transportUpgradeActivateSchema.parse(rawParams);
+    const { attemptId } = transportUpgradeActivateSchema.parse(rawParams);
     const attempt = this.candidate;
     if (attempt === void 0 || attempt.attemptId !== attemptId) {
       throw new RpcError("REQUEST_CONFLICT", "Transport upgrade attempt is no longer active.");
@@ -100287,9 +100291,7 @@ var TransportUpgradeHost = class {
       attempt.unsubscribeClose();
       attempt.activated = true;
       this.candidate = void 0;
-      const hostPreviousLegEndCounter = await this.options.adoptRtc(attempt.rtc, verifiedMode, {
-        clientPreviousLegEndCounter: previousLegEndCounter
-      });
+      const hostPreviousLegEndCounter = await this.options.adoptRtc(attempt.rtc, verifiedMode, attemptId);
       this.options.logger?.info("in-band transport upgraded", {
         connectionId: this.options.connectionId.slice(0, 8),
         from: beforeMode,
@@ -100303,6 +100305,13 @@ var TransportUpgradeHost = class {
     } finally {
       this.activating = false;
     }
+  }
+  async drain(rawParams) {
+    const { attemptId, previousLegEndCounter } = transportUpgradeDrainSchema.parse(rawParams);
+    if (!this.closed) {
+      this.options.confirmPreviousLegDrain?.(attemptId, previousLegEndCounter);
+    }
+    return { ok: true };
   }
   async abort(rawParams) {
     const { attemptId } = transportUpgradeAbortSchema.parse(rawParams ?? {});
@@ -100390,6 +100399,7 @@ var apiMethods = /* @__PURE__ */ new Set([
   "remote.transport.upgrade.offer",
   "remote.transport.upgrade.ice",
   "remote.transport.upgrade.activate",
+  "remote.transport.upgrade.drain",
   "remote.transport.upgrade.abort"
 ]);
 var HOST_CAPABILITIES = [
@@ -100600,6 +100610,8 @@ var RpcRouter = class {
         return this.requireTransportUpgrade().addIce(params);
       case "remote.transport.upgrade.activate":
         return this.requireTransportUpgrade().activate(params);
+      case "remote.transport.upgrade.drain":
+        return this.requireTransportUpgrade().drain(params);
       case "remote.transport.upgrade.abort":
         return this.requireTransportUpgrade().abort(params);
       default:
@@ -101434,7 +101446,7 @@ var HostServerConnection = class {
           void this.dropTunnel(tunnel.connectionId, "SECURE_CHANNEL_FAILED");
         }
       },
-      adoptRtc: async (rtc, upgradedMode, opts) => {
+      adoptRtc: async (rtc, upgradedMode, attemptId) => {
         const prevRtc = tunnel.rtc;
         tunnel.rtc = rtc;
         tunnel.transport = wireFromTransportTier(upgradedMode);
@@ -101449,21 +101461,24 @@ var HostServerConnection = class {
             void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
           }
         });
+        if (prevRtc !== void 0 && prevRtc !== rtc) {
+          tunnel.drainingRtcs ??= /* @__PURE__ */ new Set();
+          tunnel.drainingRtcs.add(prevRtc);
+        }
         const endCounter = await channel.upgradeTransport(
           upgradedMode,
           (counter, ciphertext) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
           prevRtc,
-          opts.clientPreviousLegEndCounter,
+          attemptId,
           (stale) => {
             tunnel.drainingRtcs?.delete(stale);
             void stale.close().catch(() => void 0);
           }
         );
-        if (prevRtc !== void 0 && prevRtc !== rtc) {
-          tunnel.drainingRtcs ??= /* @__PURE__ */ new Set();
-          tunnel.drainingRtcs.add(prevRtc);
-        }
         return endCounter;
+      },
+      confirmPreviousLegDrain: (attemptId, clientPreviousLegEndCounter) => {
+        channel.confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter);
       },
       publishEvent,
       logger: this.logger
@@ -101989,35 +102004,43 @@ var ServerNoiseChannel = class {
   get outboundCounter() {
     return Number(this.tunnel.noise.sendingCounter());
   }
-  async upgradeTransport(nextMode, nextTransmit, previousRtc, clientPreviousLegEndCounter, disposePreviousRtc) {
+  async upgradeTransport(nextMode, nextTransmit, previousRtc, attemptId = "", disposePreviousRtc) {
     this.mode = nextMode;
     this.transmitSequenced = nextTransmit;
     const endCounter = Number(this.tunnel.noise.sendingCounter());
-    const run = Promise.resolve().then(() => {
-      if (previousRtc !== void 0 && disposePreviousRtc !== void 0) {
-        const alreadyDrained = clientPreviousLegEndCounter !== void 0 && Number(this.tunnel.noise.receivingCounter()) >= clientPreviousLegEndCounter;
-        if (alreadyDrained) {
-          disposePreviousRtc(previousRtc);
-        } else {
-          const timer2 = setTimeout(() => {
-            const leg = this.drainingLegs.get(previousRtc);
-            if (leg !== void 0) {
-              this.drainingLegs.delete(previousRtc);
-              leg.dispose(previousRtc);
-            }
-          }, DEFAULT_PREVIOUS_LEG_DRAIN_MS);
-          timer2.unref?.();
-          this.drainingLegs.set(previousRtc, {
-            rtc: previousRtc,
-            endCounter: clientPreviousLegEndCounter,
-            timer: timer2,
-            dispose: disposePreviousRtc
-          });
+    if (previousRtc !== void 0 && disposePreviousRtc !== void 0 && previousRtc !== void 0) {
+      const existing = this.drainingLegs.get(previousRtc);
+      if (existing !== void 0) clearTimeout(existing.timer);
+      const timer2 = setTimeout(() => {
+        const leg = this.drainingLegs.get(previousRtc);
+        if (leg !== void 0) {
+          this.drainingLegs.delete(previousRtc);
+          leg.dispose(previousRtc);
         }
+      }, DEFAULT_PREVIOUS_LEG_DRAIN_MS);
+      timer2.unref?.();
+      this.drainingLegs.set(previousRtc, {
+        rtc: previousRtc,
+        attemptId,
+        endCounter: void 0,
+        timer: timer2,
+        dispose: disposePreviousRtc
+      });
+    }
+    return endCounter;
+  }
+  confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter) {
+    if (this.closed) return;
+    const received = Number(this.tunnel.noise.receivingCounter());
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.attemptId !== attemptId) continue;
+      leg.endCounter = clientPreviousLegEndCounter;
+      if (received >= clientPreviousLegEndCounter) {
+        clearTimeout(leg.timer);
+        this.drainingLegs.delete(rtc);
+        leg.dispose(rtc);
       }
-      return endCounter;
-    });
-    return run;
+    }
   }
   async send(message) {
     const run = this.sendTail.then(() => this.sendNow(message));

@@ -836,7 +836,7 @@ export class HostServerConnection {
           void this.dropTunnel(tunnel.connectionId, 'SECURE_CHANNEL_FAILED')
         }
       },
-      adoptRtc: async (rtc, upgradedMode, opts) => {
+      adoptRtc: async (rtc, upgradedMode, attemptId) => {
         const prevRtc = tunnel.rtc
         tunnel.rtc = rtc
         tunnel.transport = wireFromTransportTier(upgradedMode)
@@ -851,21 +851,24 @@ export class HostServerConnection {
             void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
           }
         })
+        if (prevRtc !== undefined && prevRtc !== rtc) {
+          tunnel.drainingRtcs ??= new Set()
+          tunnel.drainingRtcs.add(prevRtc)
+        }
         const endCounter = await channel.upgradeTransport(
           upgradedMode,
           (counter: number, ciphertext: Uint8Array) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
           prevRtc,
-          opts.clientPreviousLegEndCounter,
+          attemptId,
           (stale: RtcDataChannelTransport) => {
             tunnel.drainingRtcs?.delete(stale)
             void stale.close().catch(() => undefined)
           },
         )
-        if (prevRtc !== undefined && prevRtc !== rtc) {
-          tunnel.drainingRtcs ??= new Set()
-          tunnel.drainingRtcs.add(prevRtc)
-        }
         return endCounter
+      },
+      confirmPreviousLegDrain: (attemptId, clientPreviousLegEndCounter) => {
+        channel.confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter)
       },
       publishEvent,
       logger: this.logger,
@@ -1417,6 +1420,7 @@ const TERMINAL_AUTH_ERRORS = new Set([
 
 interface DrainingRtcLeg {
   rtc: RtcDataChannelTransport
+  attemptId: string
   endCounter?: number
   timer: ReturnType<typeof setTimeout>
   dispose: (rtc: RtcDataChannelTransport) => void
@@ -1469,40 +1473,50 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     nextMode: 'LAN' | 'P2P' | 'TURN',
     nextTransmit: (counter: number, ciphertext: Uint8Array) => Promise<void>,
     previousRtc?: RtcDataChannelTransport,
-    clientPreviousLegEndCounter?: number,
+    attemptId = '',
     disposePreviousRtc?: (rtc: RtcDataChannelTransport) => void,
   ): Promise<number> {
-    // Do NOT await this.sendTail here — upgradeTransport is called from inside
-    // the activate RPC handler, which itself awaits send(response) -> sendTail!
+    // Do NOT close previousRtc during activate: the Client is still using
+    // previousRtc as activeOutbound until the activate response arrives and
+    // switchOutboundLeg completes. Retain previousRtc in drainingLegs until
+    // confirmPreviousLegDrain supplies the true final outbound watermark.
     this.mode = nextMode
     this.transmitSequenced = nextTransmit
     const endCounter = Number(this.tunnel.noise.sendingCounter())
-    const run = Promise.resolve().then(() => {
-      if (previousRtc !== undefined && disposePreviousRtc !== undefined) {
-        const alreadyDrained = clientPreviousLegEndCounter !== undefined
-          && Number(this.tunnel.noise.receivingCounter()) >= clientPreviousLegEndCounter
-        if (alreadyDrained) {
-          disposePreviousRtc(previousRtc)
-        } else {
-          const timer = setTimeout(() => {
-            const leg = this.drainingLegs.get(previousRtc)
-            if (leg !== undefined) {
-              this.drainingLegs.delete(previousRtc)
-              leg.dispose(previousRtc)
-            }
-          }, DEFAULT_PREVIOUS_LEG_DRAIN_MS)
-          timer.unref?.()
-          this.drainingLegs.set(previousRtc, {
-            rtc: previousRtc,
-            endCounter: clientPreviousLegEndCounter,
-            timer,
-            dispose: disposePreviousRtc,
-          })
+    if (previousRtc !== undefined && disposePreviousRtc !== undefined && previousRtc !== undefined) {
+      const existing = this.drainingLegs.get(previousRtc)
+      if (existing !== undefined) clearTimeout(existing.timer)
+      const timer = setTimeout(() => {
+        const leg = this.drainingLegs.get(previousRtc)
+        if (leg !== undefined) {
+          this.drainingLegs.delete(previousRtc)
+          leg.dispose(previousRtc)
         }
+      }, DEFAULT_PREVIOUS_LEG_DRAIN_MS)
+      timer.unref?.()
+      this.drainingLegs.set(previousRtc, {
+        rtc: previousRtc,
+        attemptId,
+        endCounter: undefined,
+        timer,
+        dispose: disposePreviousRtc,
+      })
+    }
+    return endCounter
+  }
+
+  confirmPreviousLegDrain(attemptId: string, clientPreviousLegEndCounter: number): void {
+    if (this.closed) return
+    const received = Number(this.tunnel.noise.receivingCounter())
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.attemptId !== attemptId) continue
+      leg.endCounter = clientPreviousLegEndCounter
+      if (received >= clientPreviousLegEndCounter) {
+        clearTimeout(leg.timer)
+        this.drainingLegs.delete(rtc)
+        leg.dispose(rtc)
       }
-      return endCounter
-    })
-    return run
+    }
   }
 
   async send(message: RemoteMessage): Promise<void> {

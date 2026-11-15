@@ -135,7 +135,7 @@ export class ClientLiveTransportUpgrader {
         inFlight,
         new Promise<boolean>(resolve => {
           timer = setTimeout(() => resolve(false), windowMs)
-          timer.unref?.()
+          ;(timer as { unref?: () => void }).unref?.()
         }),
       ])
     } finally {
@@ -262,7 +262,6 @@ export class ClientLiveTransportUpgrader {
         {
           attemptId,
           ...(candidateWire !== undefined ? { transport: candidateWire } : {}),
-          previousLegEndCounter: this.options.channel.outboundCounter,
         },
         undefined,
         6_000,
@@ -280,11 +279,21 @@ export class ClientLiveTransportUpgrader {
       if (authoritativeMode !== upgraded.mode) {
         upgraded.updateMode(authoritativeMode, wireFromTransportTier(authoritativeMode))
       }
+      // Atomically retire the previous outbound leg FIRST so no further frames
+      // can be written to it and its close callback cannot fail the channel.
+      const finalOldLegCounter = await this.options.channel.switchOutboundLeg(upgraded, { closePrevious: true })
       if (typeof activation.previousLegEndCounter === 'number') {
         this.options.channel.markPreviousLegEndCounter?.(activation.previousLegEndCounter)
       }
-      await this.options.channel.switchOutboundLeg(upgraded, { closePrevious: true })
       this.currentLeg = upgraded
+      // Now notify the Host of the true final frame count sent on the retired leg
+      // over the newly active DataChannel so the Host can drain and close it safely.
+      void this.options.rpc.rpc(
+        'remote.transport.upgrade.drain',
+        { attemptId, previousLegEndCounter: finalOldLegCounter },
+        undefined,
+        5_000,
+      ).catch(() => undefined)
       this.options.onUpgraded?.(authoritativeMode, upgraded)
       emitTelemetry('activated', { to: authoritativeMode })
       return true
@@ -323,7 +332,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
       promise,
       new Promise<T>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Operation timed out.')), timeoutMs)
-        timer.unref?.()
+        ;(timer as { unref?: () => void }).unref?.()
       }),
     ])
   } finally {

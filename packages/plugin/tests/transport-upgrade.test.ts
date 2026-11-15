@@ -246,15 +246,17 @@ describe('In-band Transport Upgrade & Reorder / Drain Boundaries', () => {
     expect(channelClosed).toBe(false)
     expect(hostReceived.map(m => m.id)).toEqual(['m0', 'm1', 'm2'])
 
-    // Watermark draining of old WebRTC leg on P2P -> LAN switch:
+    // Two-phase watermark draining of old WebRTC leg on P2P -> LAN switch:
     let oldP2pDisposed = false
     const fakeOldRtc = {} as never
     const c3 = encodeClientMsg('m3') // counter 3 still in flight on old P2P leg
     const c4 = encodeClientMsg('m4') // counter 4 sent on new LAN leg
-    await serverChannel.upgradeTransport('LAN', async () => undefined, fakeOldRtc, 4, () => { oldP2pDisposed = true })
+    await serverChannel.upgradeTransport('LAN', async () => undefined, fakeOldRtc, 'att-lan', () => { oldP2pDisposed = true })
+    // Never closed immediately during activate before Client switches outbound!
     expect(oldP2pDisposed).toBe(false)
 
-    // c4 arrives on LAN first -> old P2P leg still NOT disposed because counter 3 hasn't arrived
+    // Client confirms drain watermark = 4 over new LAN leg, and c4 arrives on LAN before trailing c3:
+    serverChannel.confirmPreviousLegDrain('att-lan', 4)
     serverChannel.receive(4, c4)
     expect(oldP2pDisposed).toBe(false)
 
@@ -298,6 +300,7 @@ describe('In-band Transport Upgrade & Reorder / Drain Boundaries', () => {
             case 'remote.transport.upgrade.offer': result = await hostUpgrade.offer(msg.payload.params); break
             case 'remote.transport.upgrade.ice': result = await hostUpgrade.addIce(msg.payload.params); break
             case 'remote.transport.upgrade.activate': result = await hostUpgrade.activate(msg.payload.params); break
+            case 'remote.transport.upgrade.drain': result = await hostUpgrade.drain(msg.payload.params); break
             case 'remote.transport.upgrade.abort': result = await hostUpgrade.abort(msg.payload.params); break
           }
           const resp = createRpcResponse(msg.id, result)

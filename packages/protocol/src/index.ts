@@ -10,6 +10,7 @@ export {
   transportUpgradeOfferSchema,
   transportUpgradeIceSchema,
   transportUpgradeActivateSchema,
+  transportUpgradeDrainSchema,
   transportUpgradeAbortSchema,
   transportTierRank,
   wireFromTransportTier,

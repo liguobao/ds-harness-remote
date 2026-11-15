@@ -83,6 +83,7 @@ const apiMethods = new Set([
   'remote.transport.upgrade.offer',
   'remote.transport.upgrade.ice',
   'remote.transport.upgrade.activate',
+  'remote.transport.upgrade.drain',
   'remote.transport.upgrade.abort',
 ])
 
@@ -278,6 +279,7 @@ export class RpcRouter {
       case 'remote.transport.upgrade.offer': return this.requireTransportUpgrade().offer(params)
       case 'remote.transport.upgrade.ice': return this.requireTransportUpgrade().addIce(params)
       case 'remote.transport.upgrade.activate': return this.requireTransportUpgrade().activate(params)
+      case 'remote.transport.upgrade.drain': return this.requireTransportUpgrade().drain(params)
       case 'remote.transport.upgrade.abort': return this.requireTransportUpgrade().abort(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }

@@ -4,6 +4,7 @@ import {
   transportTierRank,
   transportUpgradeAbortSchema,
   transportUpgradeActivateSchema,
+  transportUpgradeDrainSchema,
   transportUpgradeIceSchema,
   transportUpgradeOfferSchema,
   unwrapUpgradedTransportFrame,
@@ -42,8 +43,9 @@ export interface TransportUpgradeHostOptions {
   adoptRtc: (
     rtc: RtcDataChannelTransport,
     mode: 'LAN' | 'P2P' | 'TURN',
-    options: { clientPreviousLegEndCounter?: number },
+    attemptId: string,
   ) => Promise<number>
+  confirmPreviousLegDrain?: (attemptId: string, clientPreviousLegEndCounter: number) => void
   publishEvent: (message: RemoteMessage) => Promise<void>
   logger?: SafeLogger
   attemptTtlMs?: number
@@ -187,7 +189,7 @@ export class TransportUpgradeHost {
   async activate(rawParams: unknown): Promise<{ activated: boolean; mode: TransportTier; previousLegEndCounter?: number }> {
     if (this.closed) throw new RpcError('INVALID_MESSAGE', 'The connection is closed.')
     if (this.activating) throw new RpcError('REQUEST_CONFLICT', 'Another transport activation is already in progress.')
-    const { attemptId, previousLegEndCounter } = transportUpgradeActivateSchema.parse(rawParams)
+    const { attemptId } = transportUpgradeActivateSchema.parse(rawParams)
     const attempt = this.candidate
     if (attempt === undefined || attempt.attemptId !== attemptId) {
       throw new RpcError('REQUEST_CONFLICT', 'Transport upgrade attempt is no longer active.')
@@ -235,9 +237,7 @@ export class TransportUpgradeHost {
       attempt.unsubscribeClose()
       attempt.activated = true
       this.candidate = undefined
-      const hostPreviousLegEndCounter = await this.options.adoptRtc(attempt.rtc, verifiedMode, {
-        clientPreviousLegEndCounter: previousLegEndCounter,
-      })
+      const hostPreviousLegEndCounter = await this.options.adoptRtc(attempt.rtc, verifiedMode, attemptId)
       this.options.logger?.info('in-band transport upgraded', {
         connectionId: this.options.connectionId.slice(0, 8),
         from: beforeMode,
@@ -251,6 +251,14 @@ export class TransportUpgradeHost {
     } finally {
       this.activating = false
     }
+  }
+
+  async drain(rawParams: unknown): Promise<{ ok: true }> {
+    const { attemptId, previousLegEndCounter } = transportUpgradeDrainSchema.parse(rawParams)
+    if (!this.closed) {
+      this.options.confirmPreviousLegDrain?.(attemptId, previousLegEndCounter)
+    }
+    return { ok: true }
   }
 
   async abort(rawParams: unknown): Promise<{ ok: true }> {

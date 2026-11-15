@@ -152,7 +152,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
           this.drainingLegs.delete(prev)
           void this.detachLeg(prev)
         }, drainMs)
-        timer.unref?.()
+        ;(timer as { unref?: () => void }).unref?.()
         this.drainingLegs.set(prev, { leg: prev, timer })
       }
       return endCounter

@@ -84,20 +84,21 @@ export class AndroidRemoteConnection {
     let webRtcFallback = false
     let retryableClose = true
     let lastTransport: 'lan' | 'p2p' | 'turn' | 'relay' | undefined
-    const createTransport = (relayOnly: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
+    const createTransport = (relayFirst: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
       role: 'client',
       rtcFactory: nativeRtcFactory(),
       deviceId: identity.deviceId,
       accessToken,
       refreshAccessToken: options.refreshAccessToken,
       targetDeviceId: host.deviceId,
-      forceRelay: options.forceRelay || relayOnly,
-      preferredTransports: options.forceRelay || relayOnly
+      forceRelay: options.forceRelay === true,
+      relayFirst,
+      preferredTransports: options.forceRelay
         ? ['relay']
         : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
       // TURN-only attempts may need extra time for relay allocation and TCP
       // fallback. Keep automatic hole punching on its shorter mobile budget.
-      negotiateTimeoutMs: !options.forceRelay && !relayOnly
+      negotiateTimeoutMs: !options.forceRelay && !relayFirst
         && options.preferredTransports?.includes('turn')
         && !options.preferredTransports.some(transport => transport === 'lan' || transport === 'p2p')
         ? 12_000
