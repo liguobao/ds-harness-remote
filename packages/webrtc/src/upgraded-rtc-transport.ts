@@ -29,11 +29,16 @@ export class UpgradedRtcDataChannelTransport implements SequencedOutboundTranspo
   private unsubscribeError?: () => void
   private closed = false
 
+  private currentModeValue: RtcPathMode
+  private currentSelectedValue: RtcSelectedTransport
+
   constructor(
     readonly rtc: RtcDataChannelTransport,
-    readonly mode: RtcPathMode,
-    readonly selectedTransport: RtcSelectedTransport,
+    mode: RtcPathMode,
+    selectedTransport: RtcSelectedTransport,
   ) {
+    this.currentModeValue = mode
+    this.currentSelectedValue = selectedTransport
     this.unsubscribeMessage = rtc.onMessage(frame => {
       try {
         const parsed = unwrapUpgradedTransportFrame(frame)
@@ -88,9 +93,17 @@ export class UpgradedRtcDataChannelTransport implements SequencedOutboundTranspo
     }
   }
 
+  get mode(): RtcPathMode { return this.currentModeValue }
+  get selectedTransport(): RtcSelectedTransport { return this.currentSelectedValue }
+
+  updateMode(mode: RtcPathMode, selectedTransport: RtcSelectedTransport): void {
+    this.currentModeValue = mode
+    this.currentSelectedValue = selectedTransport
+  }
+
   getStats(): TransportStats {
     const base = this.rtc.getStats()
-    return { ...base, mode: base.connected ? this.mode : 'Disconnected' }
+    return { ...base, mode: base.connected ? this.currentModeValue : 'Disconnected' }
   }
 
   connectionDetails(): Promise<RtcConnectionDetails> {

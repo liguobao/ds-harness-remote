@@ -101,6 +101,7 @@ const DEFAULT_PREFERRED_TRANSPORTS = ['lan', 'p2p', 'turn', 'relay'] as const
  */
 export class AdaptiveTransport extends BaseTransport {
   private readonly handshakeHandlers = new Set<(step: number, data: Uint8Array) => void>()
+  private readonly sequencedHandlers = new Set<(counter: number | undefined, data: Uint8Array) => void>()
   private socket?: WebSocket
   private dataSocket?: WebSocket
   private connectionId?: string
@@ -259,6 +260,11 @@ export class AdaptiveTransport extends BaseTransport {
     return () => this.handshakeHandlers.delete(cb)
   }
 
+  onSequencedMessage(cb: (counter: number | undefined, data: Uint8Array) => void): () => void {
+    this.sequencedHandlers.add(cb)
+    return () => this.sequencedHandlers.delete(cb)
+  }
+
   async close(): Promise<void> {
     this.failConnection(new Error('Adaptive transport closed'))
   }
@@ -403,6 +409,7 @@ export class AdaptiveTransport extends BaseTransport {
     }
     const data = fromBase64Url(payload.ciphertext)
     this.bytesReceived += data.byteLength
+    for (const handler of this.sequencedHandlers) handler(payload.counter as number, data)
     this.emit(data)
   }
 
@@ -518,6 +525,7 @@ export class AdaptiveTransport extends BaseTransport {
     rtc.onMessage(data => {
       if (this.lease && !this.lease.valid()) return
       this.bytesReceived += data.byteLength
+      for (const handler of this.sequencedHandlers) handler(undefined, data)
       this.emit(data)
     })
     rtc.onClose(() => {
@@ -740,6 +748,7 @@ export class AdaptiveTransport extends BaseTransport {
       }
       const data = fromBase64Url(payload.ciphertext)
       this.bytesReceived += data.byteLength
+      for (const handler of this.sequencedHandlers) handler(payload.counter as number, data)
       this.emit(data)
       return
     }

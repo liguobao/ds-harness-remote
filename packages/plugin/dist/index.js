@@ -67575,6 +67575,7 @@ var AdaptiveTransport = class extends BaseTransport {
   url;
   options;
   handshakeHandlers = /* @__PURE__ */ new Set();
+  sequencedHandlers = /* @__PURE__ */ new Set();
   socket;
   dataSocket;
   connectionId;
@@ -67731,6 +67732,10 @@ var AdaptiveTransport = class extends BaseTransport {
     this.handshakeHandlers.add(cb);
     return () => this.handshakeHandlers.delete(cb);
   }
+  onSequencedMessage(cb) {
+    this.sequencedHandlers.add(cb);
+    return () => this.sequencedHandlers.delete(cb);
+  }
   async close() {
     this.failConnection(new Error("Adaptive transport closed"));
   }
@@ -67879,6 +67884,8 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     const data2 = fromBase64Url(payload.ciphertext);
     this.bytesReceived += data2.byteLength;
+    for (const handler of this.sequencedHandlers)
+      handler(payload.counter, data2);
     this.emit(data2);
   }
   async negotiate(signal) {
@@ -67990,6 +67997,8 @@ var AdaptiveTransport = class extends BaseTransport {
       if (this.lease && !this.lease.valid())
         return;
       this.bytesReceived += data2.byteLength;
+      for (const handler of this.sequencedHandlers)
+        handler(void 0, data2);
       this.emit(data2);
     });
     rtc.onClose(() => {
@@ -68224,6 +68233,8 @@ var AdaptiveTransport = class extends BaseTransport {
       }
       const data2 = fromBase64Url(payload.ciphertext);
       this.bytesReceived += data2.byteLength;
+      for (const handler of this.sequencedHandlers)
+        handler(payload.counter, data2);
       this.emit(data2);
       return;
     }
@@ -101967,7 +101978,6 @@ var ServerNoiseChannel = class {
   mode;
   createTransportUpgradeHost;
   transmitSequenced;
-  nextOutboundCounter = 0;
   reorderBuffer;
   drainingLegs = /* @__PURE__ */ new Map();
   handlers = /* @__PURE__ */ new Set();
@@ -101977,13 +101987,13 @@ var ServerNoiseChannel = class {
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
   get outboundCounter() {
-    return this.nextOutboundCounter;
+    return Number(this.tunnel.noise.sendingCounter());
   }
   async upgradeTransport(nextMode, nextTransmit, previousRtc, clientPreviousLegEndCounter, disposePreviousRtc) {
-    const run = this.sendTail.then(() => {
-      this.mode = nextMode;
-      this.transmitSequenced = nextTransmit;
-      const endCounter = this.nextOutboundCounter;
+    this.mode = nextMode;
+    this.transmitSequenced = nextTransmit;
+    const endCounter = Number(this.tunnel.noise.sendingCounter());
+    const run = Promise.resolve().then(() => {
       if (previousRtc !== void 0 && disposePreviousRtc !== void 0) {
         const alreadyDrained = clientPreviousLegEndCounter !== void 0 && Number(this.tunnel.noise.receivingCounter()) >= clientPreviousLegEndCounter;
         if (alreadyDrained) {
@@ -102007,7 +102017,6 @@ var ServerNoiseChannel = class {
       }
       return endCounter;
     });
-    this.sendTail = run.then(() => void 0, () => void 0);
     return run;
   }
   async send(message) {
@@ -102024,8 +102033,8 @@ var ServerNoiseChannel = class {
         if (this.closed) throw new Error("Secure channel closed");
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error("Secure channel closed");
-          const frameCounter = this.nextOutboundCounter++;
           const ciphertext = this.tunnel.noise.encrypt(plaintext);
+          const frameCounter = Number(this.tunnel.noise.sendingCounter() - 1n);
           if (this.transmitSequenced !== void 0) {
             await this.transmitSequenced(frameCounter, ciphertext);
           } else {

@@ -32,7 +32,6 @@ interface DrainingLeg {
 export class SecureTransport implements RemoteTransport, UpgradeableSecureChannel {
   private noise?: NoiseIkSession
   private activeOutbound?: RemoteTransport
-  private nextOutboundCounter = 0
   private relayBytesSent = 0
   private relayBytesReceived = 0
   private unsubscribeInner?: () => void
@@ -65,7 +64,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
     })
   }
 
-  get outboundCounter(): number { return this.nextOutboundCounter }
+  get outboundCounter(): number { return this.noise ? Number(this.noise.sendingCounter()) : 0 }
 
   relayTrafficBytes(): { sent: number; received: number } {
     return { sent: this.relayBytesSent, received: this.relayBytesReceived }
@@ -73,7 +72,6 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
 
   async connect(): Promise<void> {
     this.closed = false
-    this.nextOutboundCounter = 0
     this.relayBytesSent = 0
     this.relayBytesReceived = 0
     this.activeOutbound = this.inner
@@ -112,19 +110,19 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
     })
   }
 
-  attachIncomingLeg(leg: SequencedOutboundTransport, previousLegEndCounter?: number): void {
-    if (this.closed) return
-    if (previousLegEndCounter !== undefined) {
-      for (const [draining, entry] of this.drainingLegs) {
-        entry.endCounter = previousLegEndCounter
-        if (this.noise !== undefined && Number(this.noise.receivingCounter()) >= previousLegEndCounter) {
-          clearTimeout(entry.timer)
-          this.drainingLegs.delete(draining)
-          void this.detachLeg(draining)
-        }
+  markPreviousLegEndCounter(previousLegEndCounter: number): void {
+    for (const [draining, entry] of this.drainingLegs) {
+      entry.endCounter = previousLegEndCounter
+      if (this.noise !== undefined && Number(this.noise.receivingCounter()) >= previousLegEndCounter) {
+        clearTimeout(entry.timer)
+        this.drainingLegs.delete(draining)
+        void this.detachLeg(draining)
       }
     }
-    if (this.attachedLegs.has(leg)) return
+  }
+
+  attachIncomingLeg(leg: SequencedOutboundTransport): void {
+    if (this.closed || this.attachedLegs.has(leg)) return
     const unsubscribeMsg = leg.onSequencedMessage((counter, ciphertext) => {
       this.handleIncomingCiphertext(counter, ciphertext)
     })
@@ -143,11 +141,11 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
     const run = this.sendTail.then(async () => {
       if (this.closed) {
         await this.detachLeg(leg)
-        return this.nextOutboundCounter
+        return this.outboundCounter
       }
       const prev = this.activeOutbound
       this.activeOutbound = leg
-      const endCounter = this.nextOutboundCounter
+      const endCounter = this.outboundCounter
       if (options.closePrevious && prev !== undefined && prev !== leg && prev !== this.inner && isSequencedOutboundTransport(prev)) {
         const drainMs = options.drainMs ?? DEFAULT_PREVIOUS_LEG_DRAIN_MS
         const timer = setTimeout(() => {
@@ -188,8 +186,9 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
     const plaintextFrames = this.outgoing.encode(data)
     try {
       for (const plaintext of plaintextFrames) {
-        const counter = this.nextOutboundCounter++
-        const ciphertext = this.requireNoise().encrypt(plaintext)
+        const noise = this.requireNoise()
+        const ciphertext = noise.encrypt(plaintext)
+        const counter = Number(noise.sendingCounter() - 1n)
         const target = this.activeOutbound ?? this.inner
         if (isSequencedOutboundTransport(target)) {
           await target.sendSequenced(counter, ciphertext)
@@ -208,11 +207,15 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
   onMessage(cb: (data: Uint8Array) => void): () => void {
     this.messageCb = cb
     this.unsubscribeInner?.()
-    this.unsubscribeInner = this.inner.onMessage(data => {
-      this.relayBytesReceived += data.byteLength
-      const expected = this.noise && this.noise.complete ? Number(this.noise.receivingCounter()) : undefined
-      this.handleIncomingCiphertext(expected, data)
-    })
+    this.unsubscribeInner = this.inner.onSequencedMessage
+      ? this.inner.onSequencedMessage((counter, data) => {
+          this.relayBytesReceived += data.byteLength
+          this.handleIncomingCiphertext(counter, data)
+        })
+      : this.inner.onMessage(data => {
+          this.relayBytesReceived += data.byteLength
+          this.handleIncomingCiphertext(undefined, data)
+        })
     return () => {
       if (this.messageCb === cb) this.messageCb = undefined
       this.unsubscribeInner?.()

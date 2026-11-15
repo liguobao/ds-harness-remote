@@ -20,7 +20,8 @@ import type { RemoteClientCore } from './index.js'
 
 export interface UpgradeableSecureChannel {
   readonly outboundCounter: number
-  attachIncomingLeg(leg: SequencedOutboundTransport, previousLegEndCounter?: number): void
+  attachIncomingLeg(leg: SequencedOutboundTransport): void
+  markPreviousLegEndCounter?(previousLegEndCounter: number): void
   switchOutboundLeg(leg: SequencedOutboundTransport, options?: { closePrevious?: boolean; drainMs?: number }): Promise<number>
   detachLeg(leg: SequencedOutboundTransport): Promise<void>
   relayTrafficBytes?(): { sent: number; received: number }
@@ -276,17 +277,15 @@ export class ClientLiveTransportUpgrader {
       const authoritativeMode: RtcPathMode = activation.mode === 'LAN' || activation.mode === 'P2P' || activation.mode === 'TURN'
         ? activation.mode
         : provisionalMode
-      const finalLeg = authoritativeMode === upgraded.mode
-        ? upgraded
-        : new UpgradedRtcDataChannelTransport(rtc, authoritativeMode, wireFromTransportTier(authoritativeMode))
-      if (finalLeg !== upgraded) {
-        this.options.channel.attachIncomingLeg(finalLeg, typeof activation.previousLegEndCounter === 'number' ? activation.previousLegEndCounter : undefined)
-      } else if (typeof activation.previousLegEndCounter === 'number') {
-        this.options.channel.attachIncomingLeg(finalLeg, activation.previousLegEndCounter)
+      if (authoritativeMode !== upgraded.mode) {
+        upgraded.updateMode(authoritativeMode, wireFromTransportTier(authoritativeMode))
       }
-      await this.options.channel.switchOutboundLeg(finalLeg, { closePrevious: true })
-      this.currentLeg = finalLeg
-      this.options.onUpgraded?.(authoritativeMode, finalLeg)
+      if (typeof activation.previousLegEndCounter === 'number') {
+        this.options.channel.markPreviousLegEndCounter?.(activation.previousLegEndCounter)
+      }
+      await this.options.channel.switchOutboundLeg(upgraded, { closePrevious: true })
+      this.currentLeg = upgraded
+      this.options.onUpgraded?.(authoritativeMode, upgraded)
       emitTelemetry('activated', { to: authoritativeMode })
       return true
     } catch (error) {

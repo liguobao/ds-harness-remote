@@ -1430,7 +1430,7 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
   mode: 'LAN' | 'P2P' | 'TURN' | 'Relay'
   readonly createTransportUpgradeHost?: AuthenticatedPeerChannel['createTransportUpgradeHost']
   private transmitSequenced?: (counter: number, ciphertext: Uint8Array) => Promise<void>
-  private nextOutboundCounter = 0
+
   private readonly reorderBuffer: SequencedCiphertextReorderBuffer
   private readonly drainingLegs = new Map<RtcDataChannelTransport, DrainingRtcLeg>()
   private readonly handlers = new Set<(message: RemoteMessage) => void>()
@@ -1463,7 +1463,7 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     this.peerIdentityKey = tunnel.peer.publicKey
   }
 
-  get outboundCounter(): number { return this.nextOutboundCounter }
+  get outboundCounter(): number { return Number(this.tunnel.noise.sendingCounter()) }
 
   async upgradeTransport(
     nextMode: 'LAN' | 'P2P' | 'TURN',
@@ -1472,10 +1472,12 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     clientPreviousLegEndCounter?: number,
     disposePreviousRtc?: (rtc: RtcDataChannelTransport) => void,
   ): Promise<number> {
-    const run = this.sendTail.then(() => {
-      this.mode = nextMode
-      this.transmitSequenced = nextTransmit
-      const endCounter = this.nextOutboundCounter
+    // Do NOT await this.sendTail here — upgradeTransport is called from inside
+    // the activate RPC handler, which itself awaits send(response) -> sendTail!
+    this.mode = nextMode
+    this.transmitSequenced = nextTransmit
+    const endCounter = Number(this.tunnel.noise.sendingCounter())
+    const run = Promise.resolve().then(() => {
       if (previousRtc !== undefined && disposePreviousRtc !== undefined) {
         const alreadyDrained = clientPreviousLegEndCounter !== undefined
           && Number(this.tunnel.noise.receivingCounter()) >= clientPreviousLegEndCounter
@@ -1500,7 +1502,6 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
       }
       return endCounter
     })
-    this.sendTail = run.then(() => undefined, () => undefined)
     return run
   }
 
@@ -1519,8 +1520,8 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
         if (this.closed) throw new Error('Secure channel closed')
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error('Secure channel closed')
-          const frameCounter = this.nextOutboundCounter++
           const ciphertext = this.tunnel.noise.encrypt(plaintext)
+          const frameCounter = Number(this.tunnel.noise.sendingCounter() - 1n)
           if (this.transmitSequenced !== undefined) {
             await this.transmitSequenced(frameCounter, ciphertext)
           } else {

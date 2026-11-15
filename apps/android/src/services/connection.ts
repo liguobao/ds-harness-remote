@@ -25,7 +25,7 @@ export interface AndroidConnectionOptions {
   fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
   /** Enable Relay-first authentication with parallel in-band WebRTC upgrade when available. */
   relayFirstUpgrade?: boolean
-  /** Short bounded wait (ms) before initial history/catalog reads fall back to Relay (default 220ms). */
+  /** Short bounded wait (ms) before initial history/catalog reads fall back to Relay (default 450ms). */
   initialDirectWaitMs?: number
   onTransportUpgraded?: () => void
   onSecureHandshake?: () => void
@@ -224,7 +224,7 @@ export class AndroidRemoteConnection {
         // Give fast direct paths (LAN / low-RTT P2P) a short bounded window so
         // initial history/catalog reads traverse WebRTC without Relay load when
         // available, while weak cellular falls back to Relay without multi-second stalls.
-        await upgrader.waitForInitialWindow(options.initialDirectWaitMs ?? 220)
+        await upgrader.waitForInitialWindow(options.initialDirectWaitMs ?? 450)
         if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
       }
       const emitFrame = (frame: MuxStreamFrame) => {
