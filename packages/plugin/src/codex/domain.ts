@@ -24,6 +24,7 @@ import {
 } from './method-policy.js'
 import { CodexPeerBridge, type PublishCodexFrame } from './peer-bridge.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
+import { CodexThreadLifecycle } from './thread-lifecycle.js'
 import { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual-harness.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
@@ -82,6 +83,15 @@ export class CodexRemoteDomain {
   private unsubscribeInbound?: () => void
   private unsubscribeUnavailable?: () => void
   private readonly peers = new Map<string, CodexPeerBridge>()
+  private readonly peerThreads = new Map<string, Set<string>>()
+  private readonly threadLifecycle = new CodexThreadLifecycle(
+    threadId => this.hasSubscriber(threadId) || [...this.approvals.values()].some(approval => approval.threadId === threadId),
+    threadId => this.callUpstream('thread/unsubscribe', { threadId }),
+    threadId => {
+      for (const threads of this.peerThreads.values()) threads.delete(threadId)
+    },
+    error => this.logger.warn('Codex thread release could not be confirmed', { code: errorCode(error) }),
+  )
   private readonly peerDeviceIds = new Map<string, string>()
   private readonly turnOwners = new Map<string, ActiveTurnOwner>()
   private readonly turnWatchdogs = new Map<string, ReturnType<typeof setTimeout>>()
@@ -185,9 +195,35 @@ export class CodexRemoteDomain {
     const envelope = parseCallEnvelope(input)
     const call = parseCodexCall(envelope.method, envelope.params)
     const assertCurrent = this.captureCallScope(connectionId)
-    const result = await this.callInternal(connectionId, call, assertCurrent)
-    assertCurrent()
-    return result
+    const action = async () => {
+      const result = await this.callInternal(connectionId, call, assertCurrent)
+      assertCurrent()
+      return result
+    }
+    const threadId = threadIdFromParams(call.params)
+    return threadId === undefined ? action() : this.threadLifecycle.use(threadId, action)
+  }
+
+  useThread<T>(threadId: string, action: () => Promise<T>): Promise<T> {
+    return this.threadLifecycle.use(threadId, action)
+  }
+
+  releaseThread(threadId: string): Promise<void> {
+    if (!this.isAvailable() || this.closed) return Promise.resolve()
+    return this.threadLifecycle.release(threadId)
+  }
+
+  private rememberThread(connectionId: string, threadId: string, releaseDetached = false): void {
+    if (!this.peers.has(connectionId)) {
+      if (releaseDetached) void this.releaseThread(threadId)
+      return
+    }
+    let threads = this.peerThreads.get(connectionId)
+    if (threads === undefined) {
+      threads = new Set()
+      this.peerThreads.set(connectionId, threads)
+    }
+    threads.add(threadId)
   }
 
   private captureCallScope(connectionId: string): () => void {
@@ -205,6 +241,7 @@ export class CodexRemoteDomain {
 
   private async callInternal(connectionId: string, call: ReturnType<typeof parseCodexCall>, assertCurrent: () => void): Promise<unknown> {
     assertCurrent()
+    const attached = this.peers.has(connectionId)
 
     if (call.method === 'account/read') {
       return sanitizeAccount(await this.callUpstream(call.method, call.params))
@@ -241,6 +278,8 @@ export class CodexRemoteDomain {
         ...codexThreadPermissionParams(permission),
         serviceName: 'deepseek_harness_remote',
       })
+      const createdId = extractThread(result)?.id
+      if (typeof createdId === 'string') this.rememberThread(connectionId, createdId, attached)
       assertCurrent()
       if (extractThread(result)?.id === undefined) {
         throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid thread.')
@@ -286,6 +325,7 @@ export class CodexRemoteDomain {
 
     const allowedThread = threadId === undefined ? undefined : await this.readKnownThread(threadId)
     assertCurrent()
+    if (threadId !== undefined) this.rememberThread(connectionId, threadId)
 
     if (call.method === 'thread/resume' && call.params.permissionPreset !== undefined) {
       const owner = this.turnOwners.get(threadId!)
@@ -303,8 +343,8 @@ export class CodexRemoteDomain {
     if (call.method === 'thread/unsubscribe') {
       const bridge = this.peers.get(connectionId)
       bridge?.removeThreadSubscriptions(threadId!)
-      if (this.hasSubscriber(threadId!)) return { status: 'unsubscribed' }
-      return this.callUpstream(call.method, call.params)
+      await this.releaseThread(threadId!)
+      return { status: 'unsubscribed' }
     }
 
     let claimed = false
@@ -321,6 +361,9 @@ export class CodexRemoteDomain {
       previousOwner = claim.previous
       claimedOwner = this.turnOwners.get(threadId)
     }
+    const finishStart = call.method === 'turn/start' && threadId !== undefined
+      ? this.threadLifecycle.starting(threadId)
+      : undefined
     try {
       const permission = codexPermission(call.params)
       const upstreamParams = call.method === 'thread/resume' && allowedThread !== undefined
@@ -360,6 +403,11 @@ export class CodexRemoteDomain {
         }
         throw error
       }
+      finishStart?.(true)
+      if (call.method === 'thread/fork') {
+        const createdId = extractThread(result)?.id
+        if (typeof createdId === 'string') this.rememberThread(connectionId, createdId, attached)
+      }
       assertCurrent()
       if (call.method === 'thread/resume' || call.method === 'thread/fork' || call.method === 'thread/unarchive') {
         await this.assertResultThreadAllowed(result)
@@ -381,6 +429,7 @@ export class CodexRemoteDomain {
       }
       return result
     } catch (error) {
+      finishStart?.(errorCode(error) === 'CODEX_REQUEST_TIMEOUT')
       if (claimed && threadId !== undefined && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === undefined) this.turnOwners.delete(threadId)
         else this.turnOwners.set(threadId, previousOwner)
@@ -400,10 +449,13 @@ export class CodexRemoteDomain {
     this.approvals.delete(params.requestHandle)
     this.scheduleApprovalExpiry()
     await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision })
+    await this.threadLifecycle.retry(approval.threadId)
     return { resolved: true }
   }
 
   async detachPeer(connectionId: string): Promise<void> {
+    const threadIds = this.peerThreads.get(connectionId) ?? new Set<string>()
+    this.peerThreads.delete(connectionId)
     const bridge = this.peers.get(connectionId)
     if (bridge !== undefined) this.peers.delete(connectionId)
     this.peerDeviceIds.delete(connectionId)
@@ -419,6 +471,7 @@ export class CodexRemoteDomain {
       await appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
     }
     this.scheduleApprovalExpiry()
+    await Promise.all([...threadIds].map(threadId => this.releaseThread(threadId)))
   }
 
   async reconfigure(config: ResolvedCodexConfig): Promise<void> {
@@ -426,6 +479,8 @@ export class CodexRemoteDomain {
     if (JSON.stringify(this.config) === JSON.stringify(config)) return
     this.config = config
     this.available = false
+    this.threadLifecycle.reset()
+    this.peerThreads.clear()
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
     await this.startPromise?.catch(() => undefined)
@@ -449,6 +504,8 @@ export class CodexRemoteDomain {
     if (this.closed) return
     this.closed = true
     this.available = false
+    this.threadLifecycle.reset()
+    this.peerThreads.clear()
     this.state = this.config.enabled ? 'unavailable' : 'disabled'
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
@@ -521,6 +578,8 @@ export class CodexRemoteDomain {
   private async handleAppServerUnavailable(appServer: CodexAppServerLike, code: string): Promise<void> {
     if (this.closed || this.appServer !== appServer) return
     this.available = false
+    this.threadLifecycle.reset()
+    this.peerThreads.clear()
     this.state = 'restarting'
     this.unavailableCode = code
     this.clearAllTurnWatchdogs()
@@ -588,10 +647,16 @@ export class CodexRemoteDomain {
     if (message.method === 'thread/settings/updated' && threadId !== undefined) {
       this.rememberPermission(threadId, message.params)
     }
-    if (message.method === 'thread/closed' && threadId !== undefined) this.permissionPresets.delete(threadId)
+    if (message.method === 'thread/closed' && threadId !== undefined) {
+      this.permissionPresets.delete(threadId)
+      this.turnOwners.delete(threadId)
+      this.clearTurnWatchdog(threadId)
+      this.threadLifecycle.closed(threadId)
+    }
     if (message.method === 'turn/completed' && threadId !== undefined) {
       this.turnOwners.delete(threadId)
       this.clearTurnWatchdog(threadId)
+      this.threadLifecycle.active(threadId, false)
     }
     if (message.method === 'thread/status/changed' && threadId !== undefined
       && isTerminalThreadStatus(message.params)) {
@@ -607,14 +672,20 @@ export class CodexRemoteDomain {
         void this.appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
       }
       this.scheduleApprovalExpiry()
+      this.threadLifecycle.active(threadId, false)
     }
     if (message.method === 'turn/started' && threadId !== undefined) {
+      this.threadLifecycle.active(threadId, true)
       const owner = this.turnOwners.get(threadId)
       const turnId = extractTurnId(message.params)
       if (owner !== undefined) {
         this.turnOwners.set(threadId, { ...owner, ...(turnId === undefined ? {} : { turnId }) })
       }
       this.armTurnWatchdog(threadId)
+    }
+    if (message.method === 'thread/status/changed' && threadId !== undefined
+      && isRecord(message.params) && isRecord(message.params.status) && message.params.status.type === 'active') {
+      this.threadLifecycle.active(threadId, true)
     }
     if (message.method === 'serverRequest/resolved') this.resolveUpstreamApproval(message.params)
     if (threadId === undefined) return
@@ -960,7 +1031,10 @@ export class CodexRemoteDomain {
   private resolveUpstreamApproval(params: unknown): void {
     if (!isRecord(params) || (typeof params.requestId !== 'string' && typeof params.requestId !== 'number')) return
     for (const [handle, approval] of this.approvals) {
-      if (approval.upstreamId === params.requestId) this.approvals.delete(handle)
+      if (approval.upstreamId === params.requestId) {
+        this.approvals.delete(handle)
+        void this.threadLifecycle.retry(approval.threadId)
+      }
     }
   }
 
@@ -971,6 +1045,7 @@ export class CodexRemoteDomain {
       if (approval.expiresAt > now) continue
       this.approvals.delete(handle)
       await appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
+      await this.threadLifecycle.retry(approval.threadId)
     }
     this.scheduleApprovalExpiry()
   }

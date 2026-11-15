@@ -71,7 +71,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
-    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawn(binary, ['app-server'], {
+    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawn(binary, ['app-server', '-c', 'thread_unload_delay_secs=0'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     }),

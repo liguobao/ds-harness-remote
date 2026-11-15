@@ -25,6 +25,36 @@ Android 会话界面：
 虚拟 Workspace 和 Session 只存在于内存展示层。退出 Codex 模式、切换 Host 或断开连接时，对应
 展示状态、订阅和审批状态都必须销毁。
 
+## 与 Codex 桌面端、CLI 切换同一对话
+
+使用 Remote 时，建议按需完全退出正在使用同一对话的 Codex 桌面端或 CLI，避免写入占用冲突；
+若提示对话正在其他客户端中使用，退出对应客户端并等待占用释放后重试即可。
+
+同一 Thread 同时只能由一个 Codex 进程持有写入占用。Remote 仅查看已有历史不会主动恢复
+Thread；发送消息、新建或恢复 Thread 时可能获取占用。回复完成但仍停留在该 Thread 时，
+Remote 会保留占用。
+
+从 Remote 切回本机时，先切换到另一条对话或关闭远程页面。最后一个观察者离开后，Host
+自动退订并释放空闲 Thread；运行中的 Turn 和未决审批会延后释放，断线不会中断 Turn。
+多个远程客户端观察同一 Thread 时，只关闭其中一个不会释放。
+
+各客户端的释放时机不同：
+
+| 客户端 | 释放时机与使用建议 |
+| --- | --- |
+| Remote | 最后一个观察者离开且 Thread 空闲后自动释放；无需每轮对话退出。 |
+| Codex 桌面端 | 切走不保证释放。本机核对的 `26.1111.21308` 会缓存最多 10 条符合条件的普通非活动 Thread，通常在非活动 3 小时后退订，超量时优先清理最旧的；活动视图、观察者或任务可继续保留。需要立即交接时，可在其他任务结束后完全退出应用。 |
+| 交互式 CLI | `0.167.1` 在成功新建或切换普通会话时主动退订旧 Thread；语音、侧边会话及保留的后台任务等有例外。正常退出本地 CLI 会关闭其内嵌 App Server；仅切换终端标签页不会退出会话。 |
+| `codex exec` | `0.167.1` 正常任务结束时退订并关闭内嵌 App Server。 |
+
+桌面端与 CLI 的策略可能随版本变化。CLI 结论来自对应版本源码核对：
+[切换退订](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/tui/src/app/voice_owner.rs#L123)、
+[退出](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/tui/src/app/event_dispatch.rs#L3856)、
+[exec 收尾](https://github.com/openai/codex/blob/rust-v0.167.1/codex-rs/exec/src/lib.rs#L1390)。
+退订后还需等待原生卸载：本机测得默认约 60 秒，不能与桌面端退订前的缓存时间混淆。
+Remote 仅给自身 App Server 设置零空闲卸载延迟，不改变桌面端或 CLI 配置，也不能替它们释放。
+不要删除 `~/.codex/thread-writer-locks` 中的文件来抢占；真正的锁由进程文件描述符持有。
+
 ## Workspace 来源
 
 可见 Workspace 优先来自 Codex App Server 的 `project/list`。当该接口不可用或没有可用根目录时，
@@ -96,6 +126,15 @@ ds-harness-remote:
 Codex Remote 已完成 Desktop 跨机、Android 真机、Web → Host、多客户端观察、大 History、Prompt、
 approval、interrupt 和图片分块的真实设备验证，但仍以实验功能发布。后续恢复策略、跨平台矩阵和
 长期稳定性以 [TODO](TODO.md) 为准；不应把 TODO 中的目标能力描述为已完成。
+
+Thread 释放修复于 2026-11-14 在 macOS、Codex `0.167.1` / `0.169.0-alpha.11.1` 上通过原生
+writer lock 实测：最后订阅释放、其他 Thread 保留、独立 App Server 接管、快速重开、运行中
+断线完成后释放，以及无 stream 的 resume 在断线时释放。全仓 check、测试（1,742 通过、
+3 项既有跳过）、生产构建与 bundle 校验通过。用户 Web → Desktop 交接成功；反向交接实测
+受桌面端持锁阻挡。CLI 切换/退出仅核对源码；本次修复未新增跨设备、Android/iOS、Windows/Linux 验收。
+
+macOS 全仓测试使用 `TMPDIR=/private/tmp pnpm -r test`，避开既有工作区路径测试的临时目录别名差异。
+释放实现和关闭确认边界见 [协议说明](protocol.md#codex-app-server-domain)。
 
 
 ## Files、Terminal 与生命周期

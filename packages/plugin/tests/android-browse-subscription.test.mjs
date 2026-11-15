@@ -42,6 +42,8 @@ describe('Android browsing through the Host bridge', () => {
         return { thread: thread(input.params.threadId) }
       }),
       detachPeer: vi.fn(async () => undefined),
+      useThread: async (_threadId, action) => action(),
+      releaseThread: vi.fn(async () => undefined),
     }
     const bridge = new CodexPeerBridge(domain,
       { connectionId: 'browse-peer', peerDeviceId: 'phone' }, async () => undefined)
@@ -52,7 +54,7 @@ describe('Android browsing through the Host bridge', () => {
       async send(data) {
         const request = JSON.parse(new TextDecoder().decode(data))
         const result = request.payload.method === 'codex.app.stream.open'
-          ? await bridge.openStream(request.payload.params) : bridge.closeStream(request.payload.params)
+          ? await bridge.openStream(request.payload.params) : await bridge.closeStream(request.payload.params)
         this.emit(encodeMessage(createRpcResponse(request.id, result)))
       }
     }
