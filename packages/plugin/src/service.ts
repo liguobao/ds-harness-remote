@@ -215,6 +215,7 @@ export class HostPluginRuntime {
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId },
         },
         lanUpload,
+        context.createTransportUpgradeHost?.(send),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
