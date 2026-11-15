@@ -104427,7 +104427,7 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord24(row) && row.name === packageName && row.updatable === true);
+  return listed.some((row) => isRecord24(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
   if (!isRecord24(result) || !isRecord24(result.result)) return { status: "failed", message: "update-failed" };

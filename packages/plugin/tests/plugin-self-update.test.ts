@@ -13,6 +13,34 @@ describe('local plugin online upgrade', () => {
   it('updates only an updatable registry install of the checked version', async () => {
     const failures: string[] = []
     const scenarios: Array<{ name: string; run(): Promise<void> }> = [
+      ...[
+        { name: 'RC.3 registry', fields: { update: 'registry' }, allowed: true },
+        { name: 'RC.3 Git', fields: { update: 'git' }, allowed: false },
+        { name: 'missing eligibility', fields: {}, allowed: false },
+        { name: 'Git overrides legacy eligibility', fields: { update: 'git', updatable: true }, allowed: false },
+        { name: 'unknown source overrides legacy eligibility', fields: { update: 'other', updatable: true }, allowed: false },
+        { name: 'invalid source', fields: { update: null, updatable: true }, allowed: false },
+        { name: 'legacy registry', fields: { updatable: true }, allowed: true },
+      ].map(({ name, fields, allowed }) => ({
+        name,
+        async run() {
+          const updateBundle = vi.fn(async () => ({ result: { application: 'applied' } }))
+          const upgrade = new LocalPluginUpgrade(checker(), () => ({
+            listBundles: async () => [
+              { name: 'another-package', update: 'registry', updatable: true },
+              { name: 'ds-harness-remote', ...fields },
+            ],
+            updateBundle,
+          }), () => () => undefined)
+          upgrade.snapshot()
+          // Let the asynchronous eligibility probe settle before checking UI readiness.
+          await Promise.resolve()
+          await Promise.resolve()
+          expect(upgrade.snapshot()?.upgrade).toBe(allowed ? 'ready' : undefined)
+          expect(await upgrade.start(LATEST)).toEqual({ status: allowed ? 'started' : 'manual' })
+          expect(updateBundle).toHaveBeenCalledTimes(allowed ? 1 : 0)
+        },
+      })),
       {
         name: 'registry bundle becomes ready after listBundles',
         async run() {

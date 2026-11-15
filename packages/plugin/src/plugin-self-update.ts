@@ -139,7 +139,10 @@ export class LocalPluginUpgrade {
 /** Whether one `listBundles` row is this package and officially updatable. */
 export function bundleUpdatable(listed: unknown, packageName: string): boolean {
   if (!Array.isArray(listed)) return false
-  return listed.some(row => isRecord(row) && row.name === packageName && row.updatable === true)
+  return listed.some(row => isRecord(row) && row.name === packageName
+    // RC.3 names the update source. Never send a registry version to a Git install;
+    // consult the legacy boolean only when the new field is absent.
+    && (row.update === 'registry' || (row.update === undefined && row.updatable === true)))
 }
 
 function classifyUpdateResult(result: unknown): PluginSelfUpdateResult {

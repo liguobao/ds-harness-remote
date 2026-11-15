@@ -1,3 +1,16 @@
+## RC.3 local plugin upgrade eligibility (Issue #321, 2026-11-15)
+
+官方 `dsh-plugin-manager@0.2.2-rc.3` 的 `listBundles` 将 `updatable` 改为可选
+`update: 'registry' | 'git'`。本机 Remote 自升级接受 `update: 'registry'`，仅当
+`update` 缺失时兼容旧 `updatable: true`；Git、未知值及无资格声明继续手动升级，
+不根据 npm source 自行推断资格。目标仍限本次 registry 检查确认的 latest，执行前
+仍重新读取官方 inventory。Host 发布 bundle 已同步。
+
+验证：升级资格及结算回归、Plugin check、共享包/Plugin 生产 build、Plugin 全套
+89 文件 / 740 pass / 5 skipped、DSH bundle 与 diff check 通过。未执行真实 Windows
+RC.3 自升级；用户返回中 `update` 缺失的原因尚未确认，本次不宣称修复该原因或旧的
+卸载问题。未发布、未改动现有 DSH profile。
+
 ## Lightweight Host Session API discovery (2026-11-15)
 
 `harness.transport.describe` 不再执行完整 `session/list`。Host 通过同一端点发送未知参数
