@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { composerEditable, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
+import { composerEditable, policyHintVisible, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
 import { formatQuoteDraftSnippet, formatQuoteText, formatTokens } from '../src/ui/quote-helpers'
 
 describe('Quote snippet formatting (Figure 3 alignment)', () => {
@@ -154,5 +154,24 @@ describe('Composer expand state and back handler priority', () => {
 
     expect(composerExpanded).toBe(false)
     expect(backNavigated).toBe(false)
+  })
+})
+
+describe('Compact composer footer policy hint and moved controls localization', () => {
+  it('shows the policy hint only on blank sessions with non-compact composer layout', () => {
+    expect(policyHintVisible({ showPolicyHint: true, compactComposer: false })).toBe(true)
+    expect(policyHintVisible({ showPolicyHint: false, compactComposer: false })).toBe(false)
+    expect(policyHintVisible({ showPolicyHint: true, compactComposer: true })).toBe(false)
+    expect(policyHintVisible({ showPolicyHint: false, compactComposer: true })).toBe(false)
+  })
+
+  it('defines quickPrompts and selectModel labels across all locales', async () => {
+    const { messageCatalogs } = await import('../src/locales/i18n')
+    for (const [lang, s] of Object.entries(messageCatalogs)) {
+      expect(typeof s.chat.quickPrompts, "lang: " + lang).toBe('string')
+      expect(s.chat.quickPrompts.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.chat.selectModel, "lang: " + lang).toBe('string')
+      expect(s.chat.selectModel.length, "lang: " + lang).toBeGreaterThan(0)
+    }
   })
 })

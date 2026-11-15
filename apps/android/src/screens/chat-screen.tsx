@@ -736,7 +736,7 @@ export function ChatScreen({
       <TopBar
         title={strings.chat.newChat}
         titleLines={1}
-        centered={connected ? 48 : 88}
+        titleAlign="left"
         onBack={tabletSplit ? undefined : openSessionsDrawer}
         backIcon={Menu}
         backLabel={strings.chat.openHostSessions}
@@ -1168,9 +1168,13 @@ export function ChatScreen({
   const header = <>
       <TopBar
         title={sessionTitle(session)}
+        subtitle={sessionModels !== undefined ? (currentModelLabel || strings.chat.selectModel) : undefined}
+        subtitleLabel={strings.chat.selectModel}
+        subtitleAccessory={modelSelecting ? <ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /> : undefined}
+        onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        centered={88}
+        titleAlign="left"
         onBack={tabletSplit ? undefined : trajectory ? handleBack : openSessionsDrawer}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
@@ -1370,11 +1374,10 @@ export function ChatScreen({
           replyActive={replyActive} stopping={stopping} compactRunning={compactRunning} commandRunning={commandRunning}
           hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
-          compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
-          model={{ available: sessionModels !== undefined, label: currentModelLabel, selecting: modelSelecting, onOpen: () => setModelPickerOpen(true) }}
-          promptsPickerOpen={promptsPickerOpen} onExpand={() => setComposingDuringRun(true)}
+          compactComposer={compactComposer} showPolicyHint={sessionBlank} composerInputMaxHeight={composerInputMaxHeight}
+          onExpand={() => setComposingDuringRun(true)}
           onOpenExpand={() => setComposerExpanded(true)}
-          onOpenActions={openPlusMenu} onOpenPrompts={openPromptsPicker}
+          onOpenActions={openPlusMenu}
           onSubmit={() => void submit()} onStop={stopOrCancel}
         />
         </View>
@@ -1407,6 +1410,7 @@ export function ChatScreen({
         permissionDisabled={permissionSelecting || (replyActive && !hasComposerContent)}
         permissionLabel={permissions === undefined ? undefined : permissionDisplayName(permissions.currentValue, currentPermission?.name)}
         onReferenceChat={(session.backend ?? 'harness') === 'harness' ? () => setReferenceChatOpen(true) : undefined}
+        onOpenPrompts={openPromptsPicker}
         onOpenWorkspace={() => setWorkspacePickerOpen(true)} onOpenMode={() => setModePickerOpen(true)}
         onOpenTools={() => setToolPickerOpen(true)} onOpenPermissions={() => setPermissionPickerOpen(true)}
       />

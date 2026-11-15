@@ -46,3 +46,11 @@ export function submitIntent(input: SubmitGateInput): SubmitIntent {
   if (!input.sendReady || input.permissionSelecting) return 'ignore'
   return 'submit'
 }
+
+/**
+ * Blank sessions retain the data-policy note when vertical space allows,
+ * while active chats keep the bottom bar compact without extra footer lines.
+ */
+export function policyHintVisible(input: { showPolicyHint: boolean; compactComposer: boolean }): boolean {
+  return input.showPolicyHint && !input.compactComposer
+}
