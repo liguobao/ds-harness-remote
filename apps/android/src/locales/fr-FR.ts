@@ -680,6 +680,7 @@ const frFR = {
     activityDockMode: "Widgets d'activité", activityDockModeNote: "Contrôle la manière dont les tâches en arrière-plan, les sous-agents et l'équipe d'agents apparaissent au-dessus de la zone de saisie",
     activityDockCompact: "Barre de pilules compacte", activityDockCards: "Cartes empilées", activityDockHidden: "Toujours masqué", activityDockModeSaveFailed: "Impossible d'enregistrer le paramètre des widgets d'activité",
     drawerLayoutMode: "Disposition de la barre latérale", drawerLayoutCompact: "Compact", drawerLayoutClassic: "Cartes étendues", drawerLayoutModeSaveFailed: "Impossible d'enregistrer le paramètre de disposition de la barre latérale",
+    quickPromptActionMode: "Appui sur une invite rapide", quickPromptActionFill: "Insérer dans la zone de saisie", quickPromptActionSend: "Envoyer immédiatement", quickPromptActionSaveFailed: "Impossible d'enregistrer le paramètre des invites rapides",
     statusBar: "Afficher la barre d'état", statusBarNote: "Affichez l'heure, la batterie et l'état du réseau en haut de l'écran. Désactivez-la pour masquer la barre d'état du système.", statusBarSaveFailed: "Impossible d'enregistrer les paramètres de la barre d'état", statusBarSaveFailedBody: "Impossible d'écrire sur le stockage local. Veuillez réessayer.",
     theme: "Mode sombre", themeLight: "Clair", themeDark: "Sombre", themeSystem: "Système",
     chat: "Chat",

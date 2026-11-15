@@ -650,6 +650,7 @@ const ukUA = {
   },
   settings: {
     drawerLayoutMode: 'Макет бічної панелі', drawerLayoutCompact: 'Компактний', drawerLayoutClassic: 'Розгорнуті картки', drawerLayoutModeSaveFailed: 'Не вдалося зберегти макет бічної панелі',
+    quickPromptActionMode: 'Натискання на швидкий запит', quickPromptActionFill: 'Вставити в поле введення', quickPromptActionSend: 'Надіслати відразу', quickPromptActionSaveFailed: 'Не вдалося зберегти налаштування швидких запитів',
     identityHint: "Торкніться поля, щоб переглянути й скопіювати повне значення.",
     copyIdentity: "Копіювати",
     identityCopyFailed: "Не вдалося скопіювати. Спробуйте ще раз.",

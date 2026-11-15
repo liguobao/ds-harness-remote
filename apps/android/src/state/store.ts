@@ -95,6 +95,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
   activityDockMode: 'compact',
   drawerLayoutMode: 'compact',
+  quickPromptActionMode: 'fill',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',

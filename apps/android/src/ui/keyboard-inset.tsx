@@ -1,8 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AppState, Keyboard, LayoutAnimation, Platform, useWindowDimensions, View } from 'react-native'
+import { Animated, AppState, Keyboard, LayoutAnimation, NativeEventEmitter, NativeModules, Platform, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const KeyboardInsetActiveContext = createContext(false)
+
+type KeyboardInsetsNativeModule = {
+  startObserving?: () => Promise<{ paddingBottom?: number; imeVisible?: boolean } | null>
+  addListener?: (eventName: string) => void
+  removeListeners?: (count: number) => void
+}
+
+function androidNativeKeyboardInsets(): KeyboardInsetsNativeModule | undefined {
+  if (Platform.OS !== 'android') return undefined
+  const mod = NativeModules?.DshRemoteKeyboardInsets as KeyboardInsetsNativeModule | undefined
+  return mod && typeof mod.startObserving === 'function' ? mod : undefined
+}
 
 /**
  * Reserve the band the IME covers so the composer/content clears it,
@@ -26,6 +38,86 @@ const KeyboardInsetActiveContext = createContext(false)
  */
 export function KeyboardInset({ children }: { children: ReactNode }) {
   const parentActive = useContext(KeyboardInsetActiveContext)
+  if (parentActive) {
+    return <View style={{ flex: 1 }}>{children}</View>
+  }
+  const nativeModule = androidNativeKeyboardInsets()
+  if (nativeModule !== undefined) {
+    return (
+      <KeyboardInsetActiveContext.Provider value={true}>
+        <AndroidNativeKeyboardInset nativeModule={nativeModule}>{children}</AndroidNativeKeyboardInset>
+      </KeyboardInsetActiveContext.Provider>
+    )
+  }
+  return (
+    <KeyboardInsetActiveContext.Provider value={true}>
+      <FallbackKeyboardInset>{children}</FallbackKeyboardInset>
+    </KeyboardInsetActiveContext.Provider>
+  )
+}
+
+function AndroidNativeKeyboardInset({
+  nativeModule,
+  children,
+}: {
+  nativeModule: KeyboardInsetsNativeModule
+  children: ReactNode
+}) {
+  const insets = useSafeAreaInsets()
+  const safeBottomRef = useRef(insets.bottom)
+  safeBottomRef.current = insets.bottom
+  const animatedPaddingBottom = useRef(new Animated.Value(insets.bottom)).current
+  const imeVisibleRef = useRef(false)
+  const lastNativeDpRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!imeVisibleRef.current) {
+      const target = lastNativeDpRef.current === null
+        ? insets.bottom
+        : Math.max(insets.bottom, lastNativeDpRef.current)
+      animatedPaddingBottom.setValue(target)
+    }
+  }, [insets.bottom, animatedPaddingBottom])
+
+  useEffect(() => {
+    let active = true
+    const apply = (paddingBottom?: number, imeVisible?: boolean) => {
+      if (!active || typeof paddingBottom !== 'number' || !Number.isFinite(paddingBottom)) return
+      const visible = imeVisible === true
+      imeVisibleRef.current = visible
+      lastNativeDpRef.current = paddingBottom
+      // When the IME is hidden, never dip below the known safe-area bottom inset.
+      animatedPaddingBottom.setValue(visible ? Math.max(0, paddingBottom) : Math.max(safeBottomRef.current, paddingBottom))
+    }
+
+    const emitter = new NativeEventEmitter(nativeModule as NonNullable<typeof NativeModules.DshRemoteKeyboardInsets>)
+    const subscription = emitter.addListener(
+      'remoteKeyboardInsetsChanged',
+      (event: { paddingBottom?: number; imeVisible?: boolean }) => {
+        apply(event?.paddingBottom, event?.imeVisible)
+      },
+    )
+
+    void nativeModule.startObserving?.()
+      .then(initial => {
+        if (initial) apply(initial.paddingBottom, initial.imeVisible)
+      })
+      .catch(() => undefined)
+
+    return () => {
+      active = false
+      subscription.remove()
+    }
+  }, [nativeModule, animatedPaddingBottom])
+
+  return (
+    <Animated.View style={{ flex: 1, paddingBottom: animatedPaddingBottom }}>
+      {children}
+    </Animated.View>
+  )
+}
+
+function FallbackKeyboardInset({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets()
   const { width: windowWidth, height: windowHeight } = useWindowDimensions()
   const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null)
@@ -82,10 +174,6 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
     const previous = windowRef.current
     windowRef.current = { width: windowWidth, height: windowHeight }
     if (previous.width === windowWidth && previous.height === windowHeight) return
-    // Rotation (or a window resize) moves the IME's top edge too, and Android
-    // does not guarantee another keyboardDidShow for the kept-open keyboard.
-    // Re-sync from live metrics so padding is not computed from the old
-    // orientation; fall back to the safe-area inset when metrics are gone.
     if (Keyboard.isVisible()) {
       const metrics = Keyboard.metrics()
       setKeyboardScreenY(metrics && typeof metrics.screenY === 'number' ? metrics.screenY : null)
@@ -97,9 +185,6 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') {
-        // When returning to the foreground, re-sync keyboard coordinates.
-        // If the keyboard remained open without emitting a new show event, restore the coordinate.
-        // If the keyboard closed while in background, clear it so we fall back to insets.bottom.
         if (Keyboard.isVisible()) {
           const metrics = Keyboard.metrics()
           if (metrics && typeof metrics.screenY === 'number') {
@@ -113,22 +198,17 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
     return () => subscription.remove()
   }, [])
 
-  // When keyboard is open:
-  // - If window did not shrink (e.g. Android 15 edge-to-edge): windowHeight - keyboardScreenY gives the exact IME overlap.
-  // - If adjustResize already shrunk the window: windowHeight <= keyboardScreenY, cover collapses to 0 (no extra padding).
-  // When keyboard is closed:
-  // - Reserve insets.bottom so controls clear the navigation/gesture bar.
-  const paddingBottom = parentActive
-    ? 0
-    : keyboardScreenY !== null
-      ? Math.max(0, windowHeight - keyboardScreenY)
-      : insets.bottom
+  // Discard stale coordinates synchronously if the window just grew back after keyboard close.
+  const windowGrew = windowHeight > windowRef.current.height
+  const effectiveKeyboardScreenY = windowGrew && !Keyboard.isVisible() ? null : keyboardScreenY
+
+  const paddingBottom = effectiveKeyboardScreenY !== null
+    ? Math.max(0, windowHeight - effectiveKeyboardScreenY)
+    : insets.bottom
 
   return (
-    <KeyboardInsetActiveContext.Provider value={true}>
-      <View style={[{ flex: 1 }, paddingBottom > 0 ? { paddingBottom } : null]}>
-        {children}
-      </View>
-    </KeyboardInsetActiveContext.Provider>
+    <View style={[{ flex: 1 }, paddingBottom > 0 ? { paddingBottom } : null]}>
+      {children}
+    </View>
   )
 }
