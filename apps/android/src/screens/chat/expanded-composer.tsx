@@ -9,10 +9,10 @@ import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { easingCurve, resolveMotion } from '../../ui/motion'
+import { easingCurve } from '../../ui/motion'
 import { useReduceMotion } from '../../ui/use-reduce-motion'
+import { type ComposerInputBridge } from './composer'
 import { createStyles } from './styles'
-import type { useChatMentions } from './use-chat-mentions'
 
 type BackendChatTextKeys = Record<
   'generating' | 'messageLabel' | 'placeholder' | 'policyHint',
@@ -30,16 +30,20 @@ const BACKEND_CHAT_TEXT_KEYS: Partial<Record<string, BackendChatTextKeys>> & { h
   antigravity: { generating: 'antigravityGenerating', messageLabel: 'antigravityMessageLabel', placeholder: 'antigravityPlaceholder', policyHint: 'antigravityPolicyHint' },
 }
 
-type Props = {
+export type ExpandedComposerProps = {
   visible: boolean
   onClose: () => void
-  backend: RemoteSession['backend']
+  backend?: RemoteSession['backend']
   draft: string
   quotes?: string[]
   onRemoveQuote?: (index: number) => void
-  input: ReturnType<typeof useChatMentions>
+  input: Pick<ComposerInputBridge, 'selection' | 'onChangeText' | 'onSelectionChange'>
+  accessibilityLabel?: string
+  placeholder?: string
+  highlightMentionTokens?: boolean
   replyActive: boolean
   stopping: boolean
+  sending?: boolean
   sendDisabled: boolean
   onSubmit: () => void
   onStop: () => void
@@ -53,17 +57,24 @@ export function ExpandedComposer({
   quotes,
   onRemoveQuote,
   input,
+  accessibilityLabel,
+  placeholder,
+  highlightMentionTokens = true,
   replyActive,
   stopping,
+  sending = false,
   sendDisabled,
   onSubmit,
   onStop,
-}: Props) {
+}: ExpandedComposerProps) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { selection, onChangeText, onSelectionChange } = input
-  const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
+  const showTokenHighlight = highlightMentionTokens !== false
+  const draftSegments = useMemo(() => (showTokenHighlight ? splitDraftSegments(draft) : []), [draft, showTokenHighlight])
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
+  const resolvedLabel = accessibilityLabel ?? strings.chat[backendTextKeys.messageLabel]
+  const resolvedPlaceholder = placeholder ?? strings.chat[backendTextKeys.placeholder]
   const reduceMotion = useReduceMotion()
   const [mounted, setMounted] = useState(visible)
   const entrance = useRef(new Animated.Value(visible ? 1 : 0)).current
@@ -156,25 +167,28 @@ export function ExpandedComposer({
 
         <View style={styles.expandedInputContainer}>
           <TextInput
-            accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
+            accessibilityLabel={resolvedLabel}
             style={styles.expandedTextInput}
+            value={showTokenHighlight ? undefined : draft}
             onChangeText={onChangeText}
             onSelectionChange={onSelectionChange}
             selection={selection}
-            placeholder={strings.chat[backendTextKeys.placeholder]}
+            placeholder={resolvedPlaceholder}
             placeholderTextColor={colors.muted}
             multiline
             autoFocus
             selectionColor={colors.accent}
             cursorColor={colors.accent}
           >
-            <Text>
-              {draftSegments.map((segment, index) => (
-                <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
-                  {segment.text}
-                </Text>
-              ))}
-            </Text>
+            {showTokenHighlight ? (
+              <Text>
+                {draftSegments.map((segment, index) => (
+                  <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>
+                    {segment.text}
+                  </Text>
+                ))}
+              </Text>
+            ) : undefined}
           </TextInput>
         </View>
 
@@ -198,15 +212,19 @@ export function ExpandedComposer({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.send}
-              accessibilityState={{ disabled: sendDisabled }}
+              accessibilityState={{ disabled: sendDisabled, busy: sending }}
               disabled={sendDisabled}
               onPress={() => {
                 onSubmit()
                 onClose()
               }}
-              style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
+              style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, !sending && sendDisabled && styles.sendDisabled]}
             >
-              <ArrowUp size={20} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
+              {sending ? (
+                <ActivityIndicator size="small" color={colors.onInverse ?? colors.white} />
+              ) : (
+                <ArrowUp size={20} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
+              )}
             </Pressable>
           )}
         </View>
