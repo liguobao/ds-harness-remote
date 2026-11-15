@@ -9,6 +9,7 @@ import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
+import { triggerLightHaptic } from '../../ui/haptics'
 import { nextStackedOverflowLength, shouldShowExpandCorner, shouldUseStackedComposer } from './composer-gate'
 import { createStyles } from './styles'
 
@@ -192,7 +193,10 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
               accessibilityLabel={strings.chat.moreActions}
               accessibilityState={{ disabled: composerDisabled }}
               disabled={composerDisabled}
-              onPress={onOpenActions}
+              onPress={() => {
+                triggerLightHaptic()
+                onOpenActions()
+              }}
               hitSlop={6}
               style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
             >
@@ -218,7 +222,10 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
                   accessibilityLabel={strings.chat.stop}
                   accessibilityState={{ disabled: stopping, busy: stopping }}
                   disabled={stopping}
-                  onPress={onStop}
+                  onPress={() => {
+                    triggerLightHaptic()
+                    onStop()
+                  }}
                   hitSlop={6}
                   style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
                 >
@@ -237,7 +244,10 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
                       accessibilityLabel={strings.chat.stop}
                       accessibilityState={{ disabled: stopping, busy: stopping }}
                       disabled={stopping}
-                      onPress={onStop}
+                      onPress={() => {
+                        triggerLightHaptic()
+                        onStop()
+                      }}
                       hitSlop={6}
                       style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
                     >

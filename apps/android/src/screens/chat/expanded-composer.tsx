@@ -4,6 +4,7 @@ import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextI
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { CollapseCornerIcon } from '../../ui/composer-expand-icons'
+import { triggerLightHaptic } from '../../ui/haptics'
 import { splitDraftSegments } from '../../ui/mention-popover'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { QuoteMarkIcon } from '../../ui/quote-preview'
@@ -199,7 +200,10 @@ export function ExpandedComposer({
               accessibilityLabel={strings.chat.stop}
               accessibilityState={{ disabled: stopping, busy: stopping }}
               disabled={stopping}
-              onPress={onStop}
+              onPress={() => {
+                triggerLightHaptic()
+                onStop()
+              }}
               style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
             >
               {stopping ? (

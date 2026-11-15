@@ -51,6 +51,7 @@ import { spacing } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, resolveMotion, type Rect } from '../ui/motion'
+import { triggerLightHaptic } from '../ui/haptics'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { AutomationTasksModal } from './automation-tasks-modal'
 import { ChatErrorBoundary } from './chat-error-boundary'
@@ -1372,7 +1373,10 @@ export function ChatScreen({
               accessibilityRole="button"
               accessibilityLabel={strings.chat.cancelUpload}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => uploadControllerRef.current?.abort()}
+              onPress={() => {
+                triggerLightHaptic()
+                uploadControllerRef.current?.abort()
+              }}
             >
               <Text style={[styles.fileCardSize, { color: colors.primary, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
             </Pressable>

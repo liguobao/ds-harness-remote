@@ -17,7 +17,7 @@ import {
 } from 'react-native'
 import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
-import * as Haptics from 'expo-haptics'
+import { triggerLightHaptic } from '../../ui/haptics'
 import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { foldHistory, hasVisibleMessageText } from '../../state/event-reducer'
@@ -762,7 +762,10 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
             <IconButton label={zhCN.chat.queueSteer} icon={ArrowUp} dense
               onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer', item.rpcId)} />
             <IconButton label={zhCN.chat.queueRemove} icon={X} dense
-              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)} />
+              onPress={() => {
+                triggerLightHaptic()
+                void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)
+              }} />
           </>}
         </View>
       ))}
