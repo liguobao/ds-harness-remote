@@ -1,18 +1,15 @@
-import { ArrowUp, CircleStop, Plus, X } from 'lucide-react-native'
-import { useMemo } from 'react'
+import { ArrowUp, CircleStop, Plus, X, Zap } from 'lucide-react-native'
+import { useMemo, useState } from 'react'
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
-import Svg, { Path } from 'react-native-svg'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
-import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { MentionPopover, splitDraftSegments } from '../../ui/mention-popover'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { ReplyStatusDots } from './messages'
 import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
-import { policyHintVisible } from './composer-gate'
+import { shouldShowExpandCorner } from './composer-gate'
 import { createStyles } from './styles'
 import type { useChatMentions } from './use-chat-mentions'
 
@@ -22,7 +19,7 @@ type BackendChatTextKeys = Record<
 >
 
 // Resolve these keys during rendering so language changes use the current catalog.
-const BACKEND_CHAT_TEXT_KEYS: Partial<Record<string, BackendChatTextKeys>> & { harness: BackendChatTextKeys } = {
+export const BACKEND_CHAT_TEXT_KEYS: Partial<Record<string, BackendChatTextKeys>> & { harness: BackendChatTextKeys } = {
   harness: { generating: 'generating', messageLabel: 'messageLabel', placeholder: 'placeholder', policyHint: 'policyHint' },
   codex: { generating: 'codexGenerating', messageLabel: 'codexMessageLabel', placeholder: 'codexPlaceholder', policyHint: 'codexPolicyHint' },
   cursor: { generating: 'cursorGenerating', messageLabel: 'cursorMessageLabel', placeholder: 'cursorPlaceholder', policyHint: 'cursorPolicyHint' },
@@ -44,7 +41,6 @@ type Props = {
   input: ReturnType<typeof useChatMentions>
   replyActive: boolean
   stopping: boolean
-  compactRunning: boolean
   /** A tracked Host command (for example `/compact`) is running. */
   commandRunning?: boolean
   hasComposerContent: boolean
@@ -54,60 +50,43 @@ type Props = {
   composerDisabled: boolean
   sendDisabled: boolean
   compactComposer: boolean
-  showPolicyHint?: boolean
   composerInputMaxHeight: number
-  onExpand: () => void
   onOpenExpand?: () => void
   onOpenActions: () => void
+  onOpenPrompts?: () => void
   onSubmit: () => void
   onStop: () => void
 }
 
-export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, compactRunning, commandRunning,
-  hasComposerContent, connected, editable, composerDisabled, sendDisabled, compactComposer, showPolicyHint = false,
-  composerInputMaxHeight, onExpand, onOpenExpand, onOpenActions, onSubmit, onStop }: Props) {
+export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, replyActive, stopping, commandRunning,
+  hasComposerContent, connected, editable, composerDisabled, sendDisabled, compactComposer,
+  composerInputMaxHeight, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { composerInputRef, mentionType, mentionGroups, selection, closeMention, onChangeText, onSelectionChange } = input
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
-  const replyStatusLabel = stopping ? strings.chat.stopping : strings.chat[backendTextKeys.generating]
-  const showExpand = draft.length > 0 && !compactRunning && onOpenExpand !== undefined
+  const [contentHeight, setContentHeight] = useState(0)
+  const effectiveContentHeight = draft.length === 0 ? 0 : contentHeight
+  const showExpand = onOpenExpand !== undefined && shouldShowExpandCorner({ draft, contentHeight: effectiveContentHeight })
   const hasQuotes = quotes !== undefined && quotes.length > 0
   return <>
-    {replyActive && (
-      <View
-        accessible
-        accessibilityLabel={replyStatusLabel}
-        accessibilityLiveRegion="polite"
-        style={styles.replyStatus}
-      >
-        <Svg width={15} height={15} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}><Path d={FISH_LOGO_PATH} fill={colors.accent} /></Svg>
-        <Text style={styles.replyStatusText}>{replyStatusLabel}</Text>
-        {!stopping && <ReplyStatusDots />}
-      </View>
-    )}
     <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
       {mentionType !== null && (
         <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={strings.mention.noMatches} />
       )}
-      {compactRunning ? <View style={[styles.composerCard, styles.runningComposer]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.moreActions} onPress={onOpenActions}
-          hitSlop={6}
-          style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed]}>
-          <Plus size={19} color={colors.ink} />
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={strings.sessionActivity.composeRunning}
-          onPress={onExpand} style={styles.runningComposerPrompt}>
-          <Text style={styles.runningComposerText} numberOfLines={1}>{strings.sessionActivity.composeRunning}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={strings.chat.stop} disabled={stopping}
-          accessibilityState={{ disabled: stopping, busy: stopping }} onPress={onStop}
-          hitSlop={6}
-          style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed]}>
-          {stopping ? <ActivityIndicator size="small" color={colors.onInverse} /> : <CircleStop size={18} color={colors.onInverse} />}
-        </Pressable>
-      </View> : <View style={[styles.composerCard, hasQuotes && styles.composerCardWithQuotes]}>
+      <View style={[styles.composerCard, hasQuotes && styles.composerCardWithQuotes]}>
+        {showExpand && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.expandComposer}
+            onPress={onOpenExpand}
+            hitSlop={6}
+            style={({ pressed }) => [styles.composerExpandCorner, pressed && styles.plusPressed]}
+          >
+            <ExpandCornerIcon size={15} color={colors.muted} />
+          </Pressable>
+        )}
         {hasQuotes && (
           <View style={styles.composerQuotesWrap}>
             {quotes.map((quoteText, index) => (
@@ -138,16 +117,17 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             hitSlop={6}
             style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
           >
-            <Plus size={19} color={connected ? colors.ink : colors.disabled} />
+            <Plus size={20} color={connected ? colors.ink : colors.disabled} />
           </Pressable>
           <View style={styles.composerInputWrap}>
-            {/* Native attributed text keeps references blue without an opaque Android value layer. */}
+            {/* Keep one TextInput continuously mounted across idle and streaming states so typing never drops focus or height. */}
             <TextInput
               ref={composerInputRef}
               accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
               style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
               onChangeText={onChangeText}
               onSelectionChange={onSelectionChange}
+              onContentSizeChange={event => setContentHeight(event.nativeEvent.contentSize.height)}
               onKeyPress={({ nativeEvent }) => {
                 if (nativeEvent.key === 'Backspace' && draft.length === 0 && quotes && quotes.length > 0) {
                   onRemoveQuote?.(quotes.length - 1)
@@ -161,19 +141,21 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
               selectionColor={colors.accent}
               cursorColor={colors.accent}
             >
-              <Text>{draftSegments.map((segment, index) => <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>)}</Text>
+              <Text style={{ fontSize: 16, lineHeight: 22 }}>{draftSegments.map((segment, index) => <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>)}</Text>
             </TextInput>
           </View>
           <View style={styles.composerTrailing}>
-            {showExpand && (
+            {onOpenPrompts !== undefined && (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={strings.chat.expandComposer}
-                onPress={onOpenExpand}
+                accessibilityLabel={strings.chat.quickPrompts}
+                accessibilityState={{ disabled: composerDisabled }}
+                disabled={composerDisabled}
+                onPress={onOpenPrompts}
                 hitSlop={6}
-                style={({ pressed }) => [styles.composerExpandButton, pressed && styles.plusPressed]}
+                style={({ pressed }) => [styles.composerShortcutButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
               >
-                <ExpandCornerIcon size={16} color={colors.muted} />
+                <Zap size={19} color={connected ? colors.ink : colors.disabled} />
               </Pressable>
             )}
             {(replyActive || commandRunning) && !hasComposerContent
@@ -219,12 +201,12 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
                   hitSlop={6}
                   style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
                 >
-                  <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onPrimary ?? colors.white)} strokeWidth={2.4} />
+                  <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
                 </Pressable>
               </>}
           </View>
         </View>
-      </View>}
+      </View>
     </View>
     {draft.length > LONG_DRAFT_HINT && (
       <Text style={styles.composerHint}>{strings.chat.draftLong(draft.length)}</Text>
@@ -233,12 +215,6 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
         swallowing an offline send tap (the primary action stays disabled). */}
     {!connected && draft.length > 0 && (
       <Text accessibilityLiveRegion="polite" style={[styles.composerHint, styles.composerHintWarning]}>{strings.chat.offlineSendBlocked}</Text>
-    )}
-    {/* Keep the privacy note for blank/new sessions on roomier windows so active chats stay compact. */}
-    {policyHintVisible({ showPolicyHint, compactComposer }) && (
-      <Text style={styles.composerHint}>
-        {strings.chat[backendTextKeys.policyHint]}
-      </Text>
     )}
   </>
 }

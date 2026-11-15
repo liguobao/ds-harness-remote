@@ -1,8 +1,8 @@
-import { Check, ChevronLeft, ChevronRight, Folder, Pencil, Plus, Terminal, Trash2, X } from 'lucide-react-native'
+import { Check, ChevronLeft, ChevronRight, Folder, Pencil, Plus, Terminal, Trash2, X, Zap } from 'lucide-react-native'
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { strings as zhCN } from '../../locales/i18n'
-import type { CustomPrompt } from '../../services/storage'
+import type { CustomPrompt, QuickPromptActionMode } from '../../services/storage'
 import type {
   AgentPresetOption,
   ModelCatalogModel,
@@ -204,9 +204,11 @@ export function ToolAccessPicker({ visible, onClose, onPick }: {
   )
 }
 
-export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
+export function PromptsPicker({ visible, prompts, actionMode = 'fill', onToggleActionMode, onClose, onPick, onManage }: {
   visible: boolean
   prompts: readonly CustomPrompt[]
+  actionMode?: QuickPromptActionMode
+  onToggleActionMode?: (nextMode: QuickPromptActionMode) => void
   onClose: () => void
   onPick: (prompt: CustomPrompt) => void
   onManage: () => void
@@ -214,6 +216,8 @@ export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
+  const nextMode: QuickPromptActionMode = actionMode === 'send' ? 'fill' : 'send'
+  const modeLabel = actionMode === 'send' ? zhCN.settings.quickPromptActionSend : zhCN.settings.quickPromptActionFill
   return (
     <SheetModal visible={visible} onClose={onClose}>
         <View style={styles.modalHeader}>
@@ -221,7 +225,7 @@ export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView
-          style={{ flexShrink: 1, maxHeight: Math.max(140, listMaxHeight - 56) }}
+          style={{ flexShrink: 1, maxHeight: Math.max(140, listMaxHeight - (onToggleActionMode ? 112 : 56)) }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -247,6 +251,23 @@ export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
             </Pressable>
           ))}
         </ScrollView>
+        {onToggleActionMode !== undefined && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={zhCN.settings.quickPromptActionMode}
+            onPress={() => onToggleActionMode(nextMode)}
+            style={({ pressed }) => [styles.effortRow, pressed && styles.plusMenuOptionPressed]}
+          >
+            <View style={styles.plusMenuOptionValue}>
+              <Zap size={15} color={colors.primary} />
+              <Text style={styles.effortRowLabel}>{zhCN.settings.quickPromptActionMode}</Text>
+            </View>
+            <View style={styles.plusMenuOptionValue}>
+              <Text style={styles.effortRowValue}>{modeLabel}</Text>
+              <ChevronRight size={16} color={colors.muted} />
+            </View>
+          </Pressable>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={zhCN.chat.toolPromptEdit}

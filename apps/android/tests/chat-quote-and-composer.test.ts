@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { composerEditable, policyHintVisible, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
+import { applyQuickPromptDraft, composerEditable, isQuickPromptActionMode, policyHintVisible, shouldShowExpandCorner, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
 import { formatQuoteDraftSnippet, formatQuoteText, formatTokens } from '../src/ui/quote-helpers'
 
 describe('Quote snippet formatting (Figure 3 alignment)', () => {
@@ -165,13 +165,59 @@ describe('Compact composer footer policy hint and moved controls localization', 
     expect(policyHintVisible({ showPolicyHint: false, compactComposer: true })).toBe(false)
   })
 
-  it('defines quickPrompts and selectModel labels across all locales', async () => {
+  it('defines quickPrompts, selectModel, and quickPromptActionMode labels across all locales', async () => {
     const { messageCatalogs } = await import('../src/locales/i18n')
     for (const [lang, s] of Object.entries(messageCatalogs)) {
       expect(typeof s.chat.quickPrompts, "lang: " + lang).toBe('string')
       expect(s.chat.quickPrompts.length, "lang: " + lang).toBeGreaterThan(0)
       expect(typeof s.chat.selectModel, "lang: " + lang).toBe('string')
       expect(s.chat.selectModel.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionMode, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionMode.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionFill, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionFill.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionSend, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionSend.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionSaveFailed, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionSaveFailed.length, "lang: " + lang).toBeGreaterThan(0)
     }
+  })
+
+  it('shows the corner expand trigger only for multiline drafts', () => {
+    expect(shouldShowExpandCorner({ draft: '', contentHeight: 0 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'hello', contentHeight: 36 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'hello', contentHeight: 44 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'hello\nworld', contentHeight: 40 })).toBe(true)
+    expect(shouldShowExpandCorner({ draft: 'long wrapped line', contentHeight: 58 })).toBe(true)
+  })
+
+  it('fills quick prompts into drafts with clean spacing and cursor placement', () => {
+    expect(applyQuickPromptDraft('', '请总结当前进展')).toEqual({
+      draft: '请总结当前进展',
+      cursor: 7,
+    })
+    expect(applyQuickPromptDraft('先看下日志', '/plan')).toEqual({
+      draft: '先看下日志 /plan',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('先看下日志 ', '/plan')).toEqual({
+      draft: '先看下日志 /plan',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('第一行\n第二行', '第三行')).toEqual({
+      draft: '第一行\n第二行\n第三行',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('existing', '')).toEqual({
+      draft: 'existing',
+      cursor: 8,
+    })
+  })
+
+  it('validates persisted quickPromptActionMode values', () => {
+    expect(isQuickPromptActionMode('fill')).toBe(true)
+    expect(isQuickPromptActionMode('send')).toBe(true)
+    expect(isQuickPromptActionMode('auto')).toBe(false)
+    expect(isQuickPromptActionMode(undefined)).toBe(false)
   })
 })

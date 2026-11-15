@@ -142,7 +142,7 @@ export function TopBar({
 }: {
   title: string
   titleAccessory?: ReactNode
-  titleAlign?: 'center' | 'left'
+  titleAlign?: 'center' | 'left' | 'between'
   centered?: boolean | number
   subtitle?: string
   subtitleLabel?: string
@@ -163,9 +163,13 @@ export function TopBar({
   const styles = useThemedStyles(createStyles)
   const hasSubtitle = subtitle !== undefined && subtitle.length > 0
   const leftAligned = titleAlign === 'left'
-  const tallerBar = (!leftAligned && hasSubtitle) || titleLines > 1
-  const showLeadingSide = !leftAligned || onBack !== undefined
-  const showTrailingSide = !leftAligned || (action !== undefined && action !== null)
+  const betweenAligned = titleAlign === 'between'
+  const compactHeader = leftAligned || betweenAligned
+  const tallerBar = (!compactHeader && hasSubtitle) || titleLines > 1
+  const showLeadingSide = !compactHeader || onBack !== undefined
+  const showTrailingSide = !compactHeader || (action !== undefined && action !== null)
+  const titleRowHitSlop = compactHeader && hasSubtitle ? { top: 10, bottom: 2, left: 6, right: 6 } : 4
+  const subtitleRowHitSlop = compactHeader ? { top: 2, bottom: 10, left: 6, right: 6 } : 4
   return (
     <View
       style={[
@@ -196,7 +200,7 @@ export function TopBar({
         />
       )}
       {showLeadingSide && (
-        <View style={[styles.topBarSide, !leftAligned && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
+        <View style={[styles.topBarSide, !compactHeader && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
           {onBack !== undefined && (
             <View style={styles.floatingChip}>
               <FloatingChipContext.Provider value>
@@ -206,44 +210,57 @@ export function TopBar({
           )}
         </View>
       )}
-      <View style={[styles.topBarTitles, leftAligned && styles.topBarTitlesLeft, leftAligned && !showLeadingSide && { paddingLeft: 0 }]}>
+      <View
+        style={[
+          styles.topBarTitles,
+          compactHeader && styles.topBarTitlesCompact,
+          leftAligned && styles.topBarTitlesLeft,
+          leftAligned && !showLeadingSide && { paddingLeft: 0 },
+          betweenAligned && styles.topBarTitlesBetween,
+        ]}
+      >
         {onTitlePress === undefined
-          ? <Text style={[styles.topBarTitle, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+          ? <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
           : (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={title}
               onPress={onTitlePress}
-              hitSlop={leftAligned && hasSubtitle ? { top: 10, bottom: 2, left: 4, right: 8 } : 4}
+              hitSlop={titleRowHitSlop}
               style={({ pressed }) => [
-                leftAligned ? styles.topBarTitleRowLeft : styles.topBarTitleRow,
-                leftAligned && !hasSubtitle && styles.topBarTitleRowLeftSingle,
+                compactHeader ? styles.topBarTitleRowCompact : styles.topBarTitleRow,
+                betweenAligned && styles.topBarTitleRowBetween,
+                compactHeader && !hasSubtitle && styles.topBarTitleRowCompactSingle,
                 pressed && styles.iconButtonPressed,
               ]}
             >
-              <Text style={[styles.topBarTitle, leftAligned && styles.topBarTitleLeft, titleAccessory === undefined && styles.topBarTitleLink, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+              <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft, titleAccessory === undefined && styles.topBarTitleLink, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
               {titleAccessory}
             </Pressable>
           )}
         {hasSubtitle && (
           onSubtitlePress === undefined
-            ? <Text style={[styles.topBarSubtitle, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
+            ? <Text style={[styles.topBarSubtitle, compactHeader && styles.topBarSubtitleCompact, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
             : (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={subtitleLabel ?? subtitle}
                 onPress={onSubtitlePress}
-                hitSlop={leftAligned ? { top: 2, bottom: 10, left: 4, right: 8 } : 4}
-                style={({ pressed }) => [leftAligned ? styles.topBarSubtitleRowLeft : styles.topBarSubtitleRow, pressed && styles.iconButtonPressed]}
+                hitSlop={subtitleRowHitSlop}
+                style={({ pressed }) => [
+                  compactHeader ? styles.topBarSubtitleRowCompact : styles.topBarSubtitleRow,
+                  betweenAligned && styles.topBarSubtitleRowBetween,
+                  pressed && styles.iconButtonPressed,
+                ]}
               >
-                <Text style={[styles.topBarSubtitle, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
-                {subtitleAccessory ?? (leftAligned ? <ChevronDown size={13} color={colors.muted} /> : <ChevronRight size={14} color={colors.subtle} />)}
+                <Text style={[styles.topBarSubtitle, compactHeader && styles.topBarSubtitleCompact, leftAligned && styles.topBarSubtitleLeft]} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
+                {subtitleAccessory ?? (compactHeader ? <ChevronDown size={13} color={colors.muted} /> : <ChevronRight size={14} color={colors.subtle} />)}
               </Pressable>
             )
         )}
       </View>
       {showTrailingSide && (
-        <View style={[styles.topBarSide, styles.topBarTrailing, !leftAligned && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
+        <View style={[styles.topBarSide, styles.topBarTrailing, !compactHeader && !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
           {action !== undefined && action !== null && (
             <View style={[styles.floatingChip, styles.topBarActions]}>
               <FloatingChipContext.Provider value>{action}</FloatingChipContext.Provider>
@@ -602,7 +619,9 @@ function createStyles(colors: ThemeColors) {
     topBarTrailing: { justifyContent: 'flex-end' },
     topBarActions: { paddingHorizontal: 2, gap: 0 },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
-    topBarTitlesLeft: { alignItems: 'flex-start', paddingLeft: spacing.sm, paddingRight: spacing.xs, gap: 2 },
+    topBarTitlesCompact: { gap: 2 },
+    topBarTitlesLeft: { alignItems: 'flex-start', paddingLeft: spacing.sm, paddingRight: spacing.xs },
+    topBarTitlesBetween: { alignItems: 'center', paddingHorizontal: spacing.sm },
     topBarTitle: {
       ...type.heading,
       fontSize: 17,
@@ -612,15 +631,19 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '700',
       letterSpacing: -0.2,
     },
-    topBarTitleLeft: { fontSize: 15.5, lineHeight: 20, textAlign: 'left' },
+    topBarTitleCompact: { fontSize: 15.5, lineHeight: 20 },
+    topBarTitleLeft: { textAlign: 'left' },
     topBarTitleLink: { flexShrink: 1 },
     topBarTitleRow: { alignSelf: 'stretch', minHeight: 48, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
-    topBarTitleRowLeft: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', borderRadius: radius.sm },
-    topBarTitleRowLeftSingle: { minHeight: 40 },
+    topBarTitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', borderRadius: radius.sm },
+    topBarTitleRowBetween: { alignSelf: 'center', justifyContent: 'center' },
+    topBarTitleRowCompactSingle: { minHeight: 40 },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
-    topBarSubtitleRowLeft: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 3, borderRadius: radius.sm },
+    topBarSubtitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 3, borderRadius: radius.sm },
+    topBarSubtitleRowBetween: { alignSelf: 'center', justifyContent: 'center', paddingLeft: 13 },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },
-    topBarSubtitleLeft: { fontSize: 12, lineHeight: 16, textAlign: 'left' },
+    topBarSubtitleCompact: { fontSize: 12, lineHeight: 16 },
+    topBarSubtitleLeft: { textAlign: 'left' },
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconButtonDense: { width: 40, height: 40 },
     iconButtonInChip: { width: 40, height: 40 },

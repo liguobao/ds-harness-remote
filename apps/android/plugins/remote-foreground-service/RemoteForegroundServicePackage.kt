@@ -10,6 +10,7 @@ class RemoteForegroundServicePackage : ReactPackage {
     RemoteForegroundServiceModule(reactContext),
     RemoteDownloadsModule(reactContext),
     RemoteProcessTextModule(reactContext),
+    RemoteKeyboardInsetsModule(reactContext),
   )
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()

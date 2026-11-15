@@ -68,8 +68,8 @@ import {
 } from './chat-files'
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
-import { ChatComposer } from './chat/composer'
-import { composerEditable, submitIntent } from './chat/composer-gate'
+import { BACKEND_CHAT_TEXT_KEYS, ChatComposer } from './chat/composer'
+import { applyQuickPromptDraft, composerEditable, submitIntent } from './chat/composer-gate'
 import { ExpandedComposer } from './chat/expanded-composer'
 import {
   ChatImages,
@@ -77,6 +77,7 @@ import {
   ChatProcessGroup,
   isActiveChatItem,
   QueueDock,
+  ReplyStatusBanner,
   WelcomeMessage
 } from './chat/messages'
 import {
@@ -192,6 +193,8 @@ export function ChatScreen({
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
   const agentPresetLoading = useAppStore(state => state.agentPresetLoading)
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
+  const quickPromptActionMode = useAppStore(state => state.quickPromptActionMode)
+  const setQuickPromptActionMode = useAppStore(state => state.setQuickPromptActionMode)
   const previewImageUri = useAppStore(state => state.previewImageUri)
   const setPreviewImageUri = useAppStore(state => state.setPreviewImageUri)
   // Lightbox grows from the tap instead of a whole-screen cross fade.
@@ -233,7 +236,6 @@ export function ChatScreen({
     animation.start()
     return () => animation.stop()
   }, [trajectory, trajectoryMotion, reduceMotion])
-  const [composingDuringRun, setComposingDuringRun] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(true)
   const [drawerEntrance, setDrawerEntrance] = useState<'immediate' | 'slide'>('immediate')
@@ -597,11 +599,6 @@ export function ChatScreen({
     }
   }, [botMode, suppressAutoSelect, session, connected, busy, sessions, archivedSessionIds, openSession, botTeamState, memoryScope])
 
-  useEffect(() => {
-    if (!replyActive) setComposingDuringRun(false)
-    else if (composingDuringRun) composerInputRef.current?.focus()
-  }, [replyActive, composingDuringRun])
-
   const drawerElement = (inlineMode: boolean) => (
       <HostSessionsDrawer
         key={inlineMode ? 'inline-navigation' : 'navigation-drawer'}
@@ -736,7 +733,7 @@ export function ChatScreen({
       <TopBar
         title={strings.chat.newChat}
         titleLines={1}
-        titleAlign="left"
+        titleAlign="between"
         onBack={tabletSplit ? undefined : openSessionsDrawer}
         backIcon={Menu}
         backLabel={strings.chat.openHostSessions}
@@ -946,13 +943,13 @@ export function ChatScreen({
   }
 
   const openPlusMenu = () => {
-    // The composer TextInput often still owns focus when the user taps +.
-    // Dismissing the IME first gives the transparent Modal the full window and
-    // keeps its sheet (including the close target) out of the keyboard's touch
-    // region on Android.
+    // When the IME is currently open, measuring composerAnchorRef before the
+    // keyboard settles yields a mid-screen y coordinate that would launch the
+    // bottom sheet from an elevated anchor.
+    const imeOpen = typeof Keyboard.isVisible === 'function' && Keyboard.isVisible()
     Keyboard.dismiss()
     const node = composerAnchorRef.current
-    if (node === null) {
+    if (node === null || imeOpen) {
       setSheetAnchor(undefined)
       setPlusMenuOpen(true)
       return
@@ -1020,7 +1017,6 @@ export function ChatScreen({
   const sendReady = connected && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
   const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
-  const compactRunning = replyActive && !hasComposerContent && !composingDuringRun
   const stopping = busy === 'stop-session'
   const commandRunning = busy === 'command'
   const stopOrCancel = () => {
@@ -1102,8 +1098,16 @@ export function ChatScreen({
     }
   }
 
-  const sendPrompt = async (prompt: CustomPrompt) => {
+  const pickQuickPrompt = async (prompt: CustomPrompt) => {
     setPromptsPickerOpen(false)
+    if (quickPromptActionMode === 'fill') {
+      const { draft: nextDraft, cursor } = applyQuickPromptDraft(draftRef.current, prompt.text)
+      applyDraft(nextDraft)
+      mentionInput.setCursor(cursor)
+      setMentionType(null)
+      requestAnimationFrame(() => composerInputRef.current?.focus())
+      return
+    }
     if (!connected) {
       Alert.alert(strings.chat.toolPromptSendFailed, strings.chat.offlineNotice)
       return
@@ -1170,11 +1174,13 @@ export function ChatScreen({
         title={sessionTitle(session)}
         subtitle={sessionModels !== undefined ? (currentModelLabel || strings.chat.selectModel) : undefined}
         subtitleLabel={strings.chat.selectModel}
-        subtitleAccessory={modelSelecting ? <ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /> : undefined}
+        subtitleAccessory={modelSelecting
+          ? <View style={{ width: 13, height: 13, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /></View>
+          : undefined}
         onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        titleAlign="left"
+        titleAlign="between"
         onBack={tabletSplit ? undefined : trajectory ? handleBack : openSessionsDrawer}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
@@ -1241,7 +1247,15 @@ export function ChatScreen({
           onMomentumScrollEnd={onListMomentumEnd}
           ListEmptyComponent={busy === `session:${session.sessionId}`
             ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
-            : <WelcomeMessage />}
+            : <WelcomeMessage policyHint={strings.chat[(BACKEND_CHAT_TEXT_KEYS[session.backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness).policyHint]} />}
+          ListFooterComponent={replyActive ? (
+            <ReplyStatusBanner
+              label={stopping
+                ? strings.chat.stopping
+                : strings.chat[(BACKEND_CHAT_TEXT_KEYS[session.backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness).generating]}
+              stopping={stopping}
+            />
+          ) : undefined}
           ListHeaderComponent={historyHasMore ? (
             <Pressable
               accessibilityRole="button"
@@ -1371,13 +1385,13 @@ export function ChatScreen({
         <ChatComposer
           backend={session.backend} draft={draft} input={mentionInput}
           quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
-          replyActive={replyActive} stopping={stopping} compactRunning={compactRunning} commandRunning={commandRunning}
+          replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
           hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
-          compactComposer={compactComposer} showPolicyHint={sessionBlank} composerInputMaxHeight={composerInputMaxHeight}
-          onExpand={() => setComposingDuringRun(true)}
+          compactComposer={compactComposer} composerInputMaxHeight={composerInputMaxHeight}
           onOpenExpand={() => setComposerExpanded(true)}
           onOpenActions={openPlusMenu}
+          onOpenPrompts={openPromptsPicker}
           onSubmit={() => void submit()} onStop={stopOrCancel}
         />
         </View>
@@ -1463,8 +1477,14 @@ export function ChatScreen({
       <PromptsPicker
         visible={promptsPickerOpen}
         prompts={customPrompts ?? BUILT_IN_PROMPTS}
+        actionMode={quickPromptActionMode}
+        onToggleActionMode={mode => {
+          void setQuickPromptActionMode(mode).catch(() => {
+            Alert.alert(strings.settings.quickPromptActionMode, strings.settings.quickPromptActionSaveFailed)
+          })
+        }}
         onClose={() => setPromptsPickerOpen(false)}
-        onPick={prompt => void sendPrompt(prompt)}
+        onPick={prompt => void pickQuickPrompt(prompt)}
         onManage={() => { setPromptsPickerOpen(false); setPromptsManagerOpen(true) }}
       />
       <PromptsManager

@@ -770,7 +770,26 @@ export function QueueDock({ items }: { items: { id?: string; rpcId?: string; pre
   )
 }
 
-export function WelcomeMessage() {
+export function ReplyStatusBanner({ label, stopping }: { label: string; stopping: boolean }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View
+      accessible
+      accessibilityLabel={label}
+      accessibilityLiveRegion="polite"
+      style={styles.replyStatus}
+    >
+      <Svg width={15} height={15} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}>
+        <Path d={FISH_LOGO_PATH} fill={colors.accent} />
+      </Svg>
+      <Text style={styles.replyStatusText}>{label}</Text>
+      {!stopping && <ReplyStatusDots />}
+    </View>
+  )
+}
+
+export function WelcomeMessage({ policyHint }: { policyHint?: string } = {}) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
@@ -788,6 +807,9 @@ export function WelcomeMessage() {
           <Text style={styles.welcomeBadgeText}>{zhCN.chat.welcomeBadge}</Text>
         </View>
       </View>
+      {policyHint !== undefined && policyHint.length > 0 && (
+        <Text style={styles.welcomePolicyHint}>{policyHint}</Text>
+      )}
     </View>
   )
 }

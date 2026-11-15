@@ -1,6 +1,6 @@
 import { ArrowUp, CircleStop } from 'lucide-react-native'
-import { useEffect, useMemo, useRef } from 'react'
-import { ActivityIndicator, Animated, Easing, Pressable, Text, TextInput, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { CollapseCornerIcon } from '../../ui/composer-expand-icons'
@@ -65,38 +65,62 @@ export function ExpandedComposer({
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
   const reduceMotion = useReduceMotion()
-  // The composer expands in place; it is the same surface growing, not a new
-  // screen arriving from an edge.
-  const entrance = useRef(new Animated.Value(1)).current
+  const [mounted, setMounted] = useState(visible)
+  const entrance = useRef(new Animated.Value(visible ? 1 : 0)).current
+
   useEffect(() => {
-    if (!visible) return
-    entrance.setValue(0)
+    if (visible) {
+      setMounted(true)
+      entrance.stopAnimation()
+      entrance.setValue(0)
+      const animation = Animated.timing(entrance, {
+        toValue: 1,
+        duration: reduceMotion ? 110 : 240,
+        easing: Easing.bezier(...easingCurve('expand')),
+        useNativeDriver: true,
+      })
+      animation.start()
+      return () => animation.stop()
+    }
+    if (!mounted) return
+    entrance.stopAnimation()
     const animation = Animated.timing(entrance, {
-      toValue: 1,
-      duration: resolveMotion('fullscreen', reduceMotion).duration,
-      easing: Easing.bezier(...easingCurve('expand')),
+      toValue: 0,
+      duration: reduceMotion ? 90 : 170,
+      easing: Easing.bezier(...easingCurve('retreat')),
       useNativeDriver: true,
     })
-    animation.start()
+    animation.start(({ finished }) => {
+      if (finished) setMounted(false)
+    })
     return () => animation.stop()
-  }, [visible, entrance, reduceMotion])
+  }, [visible, mounted, entrance, reduceMotion])
 
-  if (!visible) {
+  if (!mounted) {
     return null
   }
 
   return (
     <View style={styles.expandedComposerOverlay} pointerEvents="box-none">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={strings.chat.collapseComposer}
-        onPress={onClose}
-        style={styles.expandedComposerBackdrop}
-      />
+      <Animated.View style={[styles.expandedComposerBackdrop, { opacity: entrance }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={strings.chat.collapseComposer}
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
       <Animated.View
         style={[styles.expandedComposerCard, {
           opacity: entrance,
-          transform: [{ scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+          transform: [
+            {
+              translateY: entrance.interpolate({
+                inputRange: [0, 1],
+                outputRange: [reduceMotion ? 0 : 28, 0],
+              }),
+            },
+          ],
         }]}
       >
         <View style={styles.expandedComposerHeader}>
@@ -182,7 +206,7 @@ export function ExpandedComposer({
               }}
               style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
             >
-              <ArrowUp size={20} color={sendDisabled ? colors.subtle : colors.white} strokeWidth={2.4} />
+              <ArrowUp size={20} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
             </Pressable>
           )}
         </View>

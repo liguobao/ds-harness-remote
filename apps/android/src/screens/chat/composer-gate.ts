@@ -54,3 +54,35 @@ export function submitIntent(input: SubmitGateInput): SubmitIntent {
 export function policyHintVisible(input: { showPolicyHint: boolean; compactComposer: boolean }): boolean {
   return input.showPolicyHint && !input.compactComposer
 }
+
+export type QuickPromptActionMode = 'fill' | 'send'
+
+export function isQuickPromptActionMode(value: unknown): value is QuickPromptActionMode {
+  return value === 'fill' || value === 'send'
+}
+
+/**
+ * Show the top-right corner expand trigger only once a draft spans multiple lines
+ * so single-line typing never squeezes the input width on the first character.
+ */
+export function shouldShowExpandCorner(input: { draft: string; contentHeight: number }): boolean {
+  return input.draft.includes('\n') || input.contentHeight > 44
+}
+
+/**
+ * Insert a quick prompt into an existing or empty draft and place the caret at the end.
+ */
+export function applyQuickPromptDraft(
+  currentDraft: string,
+  promptText: string,
+): { draft: string; cursor: number } {
+  if (promptText.length === 0) {
+    return { draft: currentDraft, cursor: currentDraft.length }
+  }
+  const separator =
+    currentDraft.length === 0 || currentDraft.endsWith('\n') || currentDraft.endsWith(' ')
+      ? ''
+      : (currentDraft.includes('\n') || promptText.includes('\n') ? '\n' : ' ')
+  const draft = `${currentDraft}${separator}${promptText}`
+  return { draft, cursor: draft.length }
+}
