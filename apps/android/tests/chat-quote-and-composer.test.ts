@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { applyQuickPromptDraft, composerEditable, isQuickPromptActionMode, policyHintVisible, shouldShowExpandCorner, submitIntent, type SubmitGateInput } from '../src/screens/chat/composer-gate'
+import {
+  applyQuickPromptDraft,
+  composerEditable,
+  isQuickPromptActionMode,
+  nextStackedOverflowLength,
+  policyHintVisible,
+  shouldShowExpandCorner,
+  shouldUseStackedComposer,
+  submitIntent,
+  type SubmitGateInput,
+} from '../src/screens/chat/composer-gate'
 import { formatQuoteDraftSnippet, formatQuoteText, formatTokens } from '../src/ui/quote-helpers'
 
 describe('Quote snippet formatting (Figure 3 alignment)', () => {
@@ -183,12 +193,50 @@ describe('Compact composer footer policy hint and moved controls localization', 
     }
   })
 
-  it('shows the corner expand trigger only for multiline drafts', () => {
+  it('promotes from inline to stacked composer on overflow/newlines/quotes with hysteresis', () => {
+    expect(shouldUseStackedComposer({ draft: '', hasQuotes: false, overflowLength: null })).toBe(false)
+    expect(shouldUseStackedComposer({ draft: 'hello', hasQuotes: false, overflowLength: null })).toBe(false)
+    expect(shouldUseStackedComposer({ draft: 'hello', hasQuotes: true, overflowLength: null })).toBe(true)
+    expect(shouldUseStackedComposer({ draft: 'a\nb', hasQuotes: false, overflowLength: null })).toBe(true)
+
+    // Inline wraps at length 20 -> remembers overflow point and stays stacked even after
+    // full-width layout shrinks the text back onto 1 line (contentHeight 36).
+    const entered = nextStackedOverflowLength({
+      draft: '12345678901234567890',
+      contentHeight: 58,
+      currentOverflowLength: null,
+    })
+    expect(entered).toBe(20)
+    const afterWidening = nextStackedOverflowLength({
+      draft: '12345678901234567890',
+      contentHeight: 36,
+      currentOverflowLength: entered,
+    })
+    expect(afterWidening).toBe(20)
+    expect(shouldUseStackedComposer({ draft: '12345678901234567890', hasQuotes: false, overflowLength: afterWidening })).toBe(true)
+
+    // Deleting 1 char keeps stacked; deleting past hysteresis threshold (20 - 2) restores inline.
+    const oneBack = nextStackedOverflowLength({
+      draft: '1234567890123456789',
+      contentHeight: 36,
+      currentOverflowLength: afterWidening,
+    })
+    expect(oneBack).toBe(20)
+    const exited = nextStackedOverflowLength({
+      draft: '12345678901234567',
+      contentHeight: 36,
+      currentOverflowLength: oneBack,
+    })
+    expect(exited).toBeNull()
+    expect(shouldUseStackedComposer({ draft: '12345678901234567', hasQuotes: false, overflowLength: exited })).toBe(false)
+  })
+
+  it('shows the corner expand trigger only once a draft reaches five or more lines', () => {
     expect(shouldShowExpandCorner({ draft: '', contentHeight: 0 })).toBe(false)
     expect(shouldShowExpandCorner({ draft: 'hello', contentHeight: 36 })).toBe(false)
-    expect(shouldShowExpandCorner({ draft: 'hello', contentHeight: 44 })).toBe(false)
-    expect(shouldShowExpandCorner({ draft: 'hello\nworld', contentHeight: 40 })).toBe(true)
-    expect(shouldShowExpandCorner({ draft: 'long wrapped line', contentHeight: 58 })).toBe(true)
+    expect(shouldShowExpandCorner({ draft: 'a\nb\nc\nd', contentHeight: 102 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'a\nb\nc\nd\ne', contentHeight: 124 })).toBe(true)
+    expect(shouldShowExpandCorner({ draft: 'long wrapped block', contentHeight: 120 })).toBe(true)
   })
 
   it('fills quick prompts into drafts with clean spacing and cursor placement', () => {

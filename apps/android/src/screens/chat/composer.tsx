@@ -9,7 +9,7 @@ import { QuoteMarkIcon } from '../../ui/quote-preview'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ExpandCornerIcon } from '../../ui/composer-expand-icons'
-import { shouldShowExpandCorner } from './composer-gate'
+import { nextStackedOverflowLength, shouldShowExpandCorner, shouldUseStackedComposer } from './composer-gate'
 import { createStyles } from './styles'
 import type { useChatMentions } from './use-chat-mentions'
 
@@ -65,28 +65,43 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
   const styles = useThemedStyles(createStyles)
   const { composerInputRef, mentionType, mentionGroups, selection, closeMention, onChangeText, onSelectionChange } = input
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
+  const hasTokens = useMemo(() => draftSegments.some(segment => segment.token), [draftSegments])
+  const inputChildren = useMemo(
+    () => (hasTokens
+      ? (
+        <Text style={{ fontSize: 16, lineHeight: 22 }}>
+          {draftSegments.map((segment, index) => (
+            <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>
+          ))}
+        </Text>
+      )
+      : undefined),
+    [colors.ink, colors.primary, draftSegments, hasTokens],
+  )
   const backendTextKeys = BACKEND_CHAT_TEXT_KEYS[backend ?? 'harness'] ?? BACKEND_CHAT_TEXT_KEYS.harness
   const [contentHeight, setContentHeight] = useState(0)
-  const effectiveContentHeight = draft.length === 0 ? 0 : contentHeight
-  const showExpand = onOpenExpand !== undefined && shouldShowExpandCorner({ draft, contentHeight: effectiveContentHeight })
+  const [stackedOverflowLength, setStackedOverflowLength] = useState<number | null>(null)
   const hasQuotes = quotes !== undefined && quotes.length > 0
+  const effectiveContentHeight = draft.length === 0 ? 0 : contentHeight
+  const effectiveOverflowLength = draft.length === 0 ? null : stackedOverflowLength
+  const isStacked = shouldUseStackedComposer({
+    draft,
+    hasQuotes,
+    overflowLength: effectiveOverflowLength,
+  })
+  const showExpand = isStacked && onOpenExpand !== undefined && shouldShowExpandCorner({
+    draft,
+    contentHeight: effectiveContentHeight,
+  })
+  const rightInlineReserve = 40
+    + (onOpenPrompts !== undefined ? 40 : 0)
+    + ((replyActive || commandRunning) && hasComposerContent ? 34 : 0)
   return <>
     <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
       {mentionType !== null && (
         <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={strings.mention.noMatches} />
       )}
       <View style={[styles.composerCard, hasQuotes && styles.composerCardWithQuotes]}>
-        {showExpand && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.chat.expandComposer}
-            onPress={onOpenExpand}
-            hitSlop={6}
-            style={({ pressed }) => [styles.composerExpandCorner, pressed && styles.plusPressed]}
-          >
-            <ExpandCornerIcon size={15} color={colors.muted} />
-          </Pressable>
-        )}
         {hasQuotes && (
           <View style={styles.composerQuotesWrap}>
             {quotes.map((quoteText, index) => (
@@ -107,27 +122,35 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
             ))}
           </View>
         )}
-        <View style={styles.composerRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.chat.moreActions}
-            accessibilityState={{ disabled: composerDisabled }}
-            disabled={composerDisabled}
-            onPress={onOpenActions}
-            hitSlop={6}
-            style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
+        {/* Keep Child 0 (TextInput) and Child 1 (action bar) in fixed React tree positions so inline <-> stacked promotion never unmounts the input or drops IME focus. */}
+        <View style={styles.composerBody}>
+          <View
+            style={[
+              isStacked ? styles.composerInputSlotStacked : [styles.composerInputSlotInline, { marginLeft: 40, marginRight: rightInlineReserve }],
+              showExpand && styles.composerInputSlotExpandPad,
+            ]}
           >
-            <Plus size={20} color={connected ? colors.ink : colors.disabled} />
-          </Pressable>
-          <View style={styles.composerInputWrap}>
-            {/* Keep one TextInput continuously mounted across idle and streaming states so typing never drops focus or height. */}
             <TextInput
               ref={composerInputRef}
               accessibilityLabel={strings.chat[backendTextKeys.messageLabel]}
-              style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
+              style={[
+                styles.composerInput,
+                isStacked && styles.composerInputStacked,
+                draft.length === 0 && styles.composerInputEmpty,
+                compactComposer && { maxHeight: composerInputMaxHeight },
+              ]}
+              value={hasTokens ? undefined : draft}
               onChangeText={onChangeText}
               onSelectionChange={onSelectionChange}
-              onContentSizeChange={event => setContentHeight(event.nativeEvent.contentSize.height)}
+              onContentSizeChange={(event) => {
+                const nextHeight = event.nativeEvent.contentSize.height
+                setContentHeight(nextHeight)
+                setStackedOverflowLength(prev => nextStackedOverflowLength({
+                  draft,
+                  contentHeight: nextHeight,
+                  currentOverflowLength: prev,
+                }))
+              }}
               onKeyPress={({ nativeEvent }) => {
                 if (nativeEvent.key === 'Backspace' && draft.length === 0 && quotes && quotes.length > 0) {
                   onRemoveQuote?.(quotes.length - 1)
@@ -140,71 +163,94 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, rep
               editable={editable}
               selectionColor={colors.accent}
               cursorColor={colors.accent}
-            >
-              <Text style={{ fontSize: 16, lineHeight: 22 }}>{draftSegments.map((segment, index) => <Text key={index} style={{ color: segment.token ? colors.primary : colors.ink }}>{segment.text}</Text>)}</Text>
-            </TextInput>
+              children={inputChildren}
+            />
           </View>
-          <View style={styles.composerTrailing}>
-            {onOpenPrompts !== undefined && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.chat.quickPrompts}
-                accessibilityState={{ disabled: composerDisabled }}
-                disabled={composerDisabled}
-                onPress={onOpenPrompts}
-                hitSlop={6}
-                style={({ pressed }) => [styles.composerShortcutButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
-              >
-                <Zap size={19} color={connected ? colors.ink : colors.disabled} />
-              </Pressable>
-            )}
-            {(replyActive || commandRunning) && !hasComposerContent
-              ? <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.chat.stop}
-                accessibilityState={{ disabled: stopping, busy: stopping }}
-                disabled={stopping}
-                onPress={onStop}
-                hitSlop={6}
-                style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
-              >
-                {stopping
-                  ? <ActivityIndicator size="small" color={colors.onInverse} />
-                  : <CircleStop size={18} color={colors.onInverse} />}
-              </Pressable>
-              : <>
-                {/* With text in the composer the primary action is the send
-                  (queueing) button — tapping where Send lives must never stop
-                  the running task (official InputBar behaviour). Stop stays
-                  available as its own secondary button. */}
-                {(replyActive || commandRunning) && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={strings.chat.stop}
-                    accessibilityState={{ disabled: stopping, busy: stopping }}
-                    disabled={stopping}
-                    onPress={onStop}
-                    hitSlop={6}
-                    style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
-                  >
-                    {stopping
-                      ? <ActivityIndicator size="small" color={colors.onInverse} />
-                      : <CircleStop size={16} color={colors.onInverse} />}
-                  </Pressable>
-                )}
+          <View pointerEvents="box-none" style={isStacked ? styles.composerActionsRow : styles.composerActionsOverlay}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.chat.moreActions}
+              accessibilityState={{ disabled: composerDisabled }}
+              disabled={composerDisabled}
+              onPress={onOpenActions}
+              hitSlop={6}
+              style={({ pressed }) => [styles.plusButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
+            >
+              <Plus size={20} color={connected ? colors.ink : colors.disabled} />
+            </Pressable>
+            <View style={styles.composerTrailing}>
+              {onOpenPrompts !== undefined && (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={strings.chat.send}
-                  accessibilityState={{ disabled: sendDisabled }}
-                  disabled={sendDisabled}
-                  onPress={onSubmit}
+                  accessibilityLabel={strings.chat.quickPrompts}
+                  accessibilityState={{ disabled: composerDisabled }}
+                  disabled={composerDisabled}
+                  onPress={onOpenPrompts}
                   hitSlop={6}
-                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
+                  style={({ pressed }) => [styles.composerShortcutButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
                 >
-                  <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
+                  <Zap size={19} color={connected ? colors.ink : colors.disabled} />
                 </Pressable>
-              </>}
+              )}
+              {(replyActive || commandRunning) && !hasComposerContent
+                ? <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={strings.chat.stop}
+                  accessibilityState={{ disabled: stopping, busy: stopping }}
+                  disabled={stopping}
+                  onPress={onStop}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.stopButton, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
+                >
+                  {stopping
+                    ? <ActivityIndicator size="small" color={colors.onInverse} />
+                    : <CircleStop size={18} color={colors.onInverse} />}
+                </Pressable>
+                : <>
+                  {/* With text in the composer the primary action is the send
+                    (queueing) button — tapping where Send lives must never stop
+                    the running task (official InputBar behaviour). Stop stays
+                    available as its own secondary button. */}
+                  {(replyActive || commandRunning) && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={strings.chat.stop}
+                      accessibilityState={{ disabled: stopping, busy: stopping }}
+                      disabled={stopping}
+                      onPress={onStop}
+                      hitSlop={6}
+                      style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
+                    >
+                      {stopping
+                        ? <ActivityIndicator size="small" color={colors.onInverse} />
+                        : <CircleStop size={16} color={colors.onInverse} />}
+                    </Pressable>
+                  )}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={strings.chat.send}
+                    accessibilityState={{ disabled: sendDisabled }}
+                    disabled={sendDisabled}
+                    onPress={onSubmit}
+                    hitSlop={6}
+                    style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, sendDisabled && styles.sendDisabled]}
+                  >
+                    <ArrowUp size={18} color={sendDisabled ? colors.subtle : (colors.onInverse ?? colors.white)} strokeWidth={2.4} />
+                  </Pressable>
+                </>}
+            </View>
           </View>
+          {showExpand && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.chat.expandComposer}
+              onPress={onOpenExpand}
+              hitSlop={6}
+              style={({ pressed }) => [styles.composerExpandCorner, pressed && styles.plusPressed]}
+            >
+              <ExpandCornerIcon size={15} color={colors.muted} />
+            </Pressable>
+          )}
         </View>
       </View>
     </View>

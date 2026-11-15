@@ -309,26 +309,28 @@ export function createStyles(
       borderRadius: 26,
       minHeight: 52,
       backgroundColor: colors.elevated,
-      paddingHorizontal: 8,
+      paddingHorizontal: 10,
       paddingTop: 8,
       paddingBottom: 8,
-      gap: 6,
       ...floatingShadow(colors, 'low'),
     },
     composerCardWithQuotes: {
       borderRadius: 22,
       paddingTop: 10,
     },
+    composerBody: {
+      position: 'relative',
+    },
     composerExpandCorner: {
       position: 'absolute',
-      top: 6,
-      right: 10,
+      top: 0,
+      right: 0,
       width: 28,
       height: 28,
       borderRadius: radius.pill,
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 2,
+      zIndex: 4,
     },
     expandedComposerOverlay: {
       ...StyleSheet.absoluteFill,
@@ -341,7 +343,7 @@ export function createStyles(
     },
     expandedComposerCard: {
       flex: 1,
-      marginTop: 52,
+      marginTop: 88,
       backgroundColor: colors.elevated,
       borderTopLeftRadius: 28,
       borderTopRightRadius: 28,
@@ -396,8 +398,24 @@ export function createStyles(
     runningComposer: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 6 },
     runningComposerPrompt: { flex: 1, minHeight: 36, justifyContent: 'center', minWidth: 0, paddingHorizontal: 4 },
     runningComposerText: { ...t.small, color: colors.muted },
-    composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-    composerTrailing: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+    composerActionsOverlay: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    composerActionsRow: {
+      marginTop: 6,
+      height: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    composerTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     plusButton: {
       width: 36,
       height: 36,
@@ -435,6 +453,7 @@ export function createStyles(
       gap: 6,
       paddingHorizontal: 4,
       paddingTop: 2,
+      marginBottom: 6,
     },
     composerQuotePill: {
       flexDirection: 'row',
@@ -453,12 +472,18 @@ export function createStyles(
       color: colors.primary,
       flexShrink: 1,
     },
-    composerInputWrap: {
-      flex: 1,
-      minWidth: 0,
+    composerInputSlotInline: {
       minHeight: 36,
       justifyContent: 'center',
       paddingHorizontal: 4,
+    },
+    composerInputSlotStacked: {
+      minHeight: 36,
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    composerInputSlotExpandPad: {
+      paddingRight: 34,
     },
     composerInlineQuoteBadge: {
       flexDirection: 'row',
@@ -484,12 +509,20 @@ export function createStyles(
       lineHeight: 22,
       color: colors.ink,
       minHeight: 36,
-      maxHeight: 126,
+      maxHeight: 136,
       paddingTop: 7,
       paddingBottom: 7,
       paddingHorizontal: 0,
       includeFontPadding: false,
+      textAlignVertical: 'center',
+    },
+    composerInputStacked: {
       textAlignVertical: 'top',
+    },
+    composerInputEmpty: {
+      height: 36,
+      paddingTop: 0,
+      paddingBottom: 0,
     },
 
     sendButton: {

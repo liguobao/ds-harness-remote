@@ -62,11 +62,50 @@ export function isQuickPromptActionMode(value: unknown): value is QuickPromptAct
 }
 
 /**
- * Show the top-right corner expand trigger only once a draft spans multiple lines
- * so single-line typing never squeezes the input width on the first character.
+ * Track whether the composer should promote from inline single-row mode
+ * (`[+] [Input] [⚡] [↑]`) to the two-row stacked layout (`[Input]` above
+ * `[+] ... [⚡] [↑]`). Uses overflow-length hysteresis so expanding to full
+ * pill width does not immediately shrink line height back to 1 line and flip-flop.
+ */
+export function nextStackedOverflowLength(input: {
+  draft: string
+  contentHeight: number
+  currentOverflowLength: number | null
+}): number | null {
+  if (input.draft.length === 0) return null
+  if (input.contentHeight > 44) {
+    if (input.currentOverflowLength === null) {
+      return input.draft.length
+    }
+    return Math.min(input.currentOverflowLength, input.draft.length)
+  }
+  if (input.currentOverflowLength !== null) {
+    const exitThreshold = Math.max(1, input.currentOverflowLength - 2)
+    if (input.draft.length < exitThreshold) {
+      return null
+    }
+  }
+  return input.currentOverflowLength
+}
+
+export function shouldUseStackedComposer(input: {
+  draft: string
+  hasQuotes: boolean
+  overflowLength: number | null
+}): boolean {
+  if (input.hasQuotes) return true
+  if (input.draft.length === 0) return false
+  if (input.draft.includes('\n')) return true
+  return input.overflowLength !== null && input.draft.length >= input.overflowLength
+}
+
+/**
+ * Show the top-right corner expand trigger only once a draft reaches 5+ lines
+ * inside the stacked composer so short 1–4 line pills remain uncluttered and
+ * the trigger stays cleanly separated above the bottom action bar.
  */
 export function shouldShowExpandCorner(input: { draft: string; contentHeight: number }): boolean {
-  return input.draft.includes('\n') || input.contentHeight > 44
+  return input.draft.split('\n').length >= 5 || input.contentHeight > 110
 }
 
 /**
