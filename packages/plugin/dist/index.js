@@ -100009,7 +100009,7 @@ var WorkspaceUploadHost = class {
         if (this.budget.activePaths.has(path)) continue;
         try {
           const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
-          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.getuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
+          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.geteuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
           await unlink2(path);
         } catch {
         }

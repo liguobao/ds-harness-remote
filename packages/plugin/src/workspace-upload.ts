@@ -254,7 +254,7 @@ export class WorkspaceUploadHost {
           const [directory, file] = await Promise.all([lstat(root), lstat(path)])
           if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino
             || !file.isFile() || file.dev !== dev || file.nlink !== 1
-            || file.uid !== process.getuid?.() || (file.mode & 0o777) !== 0o600
+            || file.uid !== process.geteuid?.() || (file.mode & 0o777) !== 0o600
             || file.mtimeMs > cutoff) continue
           await unlink(path)
         } catch { /* A changed entry is not safe to remove. */ }
