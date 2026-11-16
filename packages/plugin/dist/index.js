@@ -100001,17 +100001,21 @@ var WorkspaceUploadHost = class {
     const now = Date.now();
     if (now - (this.budget.scannedRoots.get(root2) ?? 0) < 60 * 60 * 1e3) return;
     const cutoff = now - 24 * 60 * 60 * 1e3;
-    const entries = await opendir(root2);
-    for await (const { name: name2 } of entries) {
-      if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name2)) continue;
-      const path = join16(root2, name2);
-      if (this.budget.activePaths.has(path)) continue;
-      try {
-        const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
-        if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.getuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
-        await unlink2(path);
-      } catch {
+    try {
+      const entries = await opendir(root2);
+      for await (const { name: name2 } of entries) {
+        if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name2)) continue;
+        const path = join16(root2, name2);
+        if (this.budget.activePaths.has(path)) continue;
+        try {
+          const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
+          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.getuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
+          await unlink2(path);
+        } catch {
+        }
       }
+    } catch {
+      return;
     }
     this.budget.scannedRoots.set(root2, now);
     if (this.budget.scannedRoots.size > 1024) this.budget.scannedRoots.delete(this.budget.scannedRoots.keys().next().value);

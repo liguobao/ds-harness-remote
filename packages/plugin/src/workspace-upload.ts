@@ -244,20 +244,22 @@ export class WorkspaceUploadHost {
     const now = Date.now()
     if (now - (this.budget.scannedRoots.get(root) ?? 0) < 60 * 60 * 1000) return
     const cutoff = now - 24 * 60 * 60 * 1000
-    const entries = await opendir(root)
-    for await (const { name } of entries) {
-      if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name)) continue
-      const path = join(root, name)
-      if (this.budget.activePaths.has(path)) continue
-      try {
-        const [directory, file] = await Promise.all([lstat(root), lstat(path)])
-        if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino
-          || !file.isFile() || file.dev !== dev || file.nlink !== 1
-          || file.uid !== process.getuid?.() || (file.mode & 0o777) !== 0o600
-          || file.mtimeMs > cutoff) continue
-        await unlink(path)
-      } catch { /* A changed entry is not safe to remove. */ }
-    }
+    try {
+      const entries = await opendir(root)
+      for await (const { name } of entries) {
+        if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name)) continue
+        const path = join(root, name)
+        if (this.budget.activePaths.has(path)) continue
+        try {
+          const [directory, file] = await Promise.all([lstat(root), lstat(path)])
+          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino
+            || !file.isFile() || file.dev !== dev || file.nlink !== 1
+            || file.uid !== process.getuid?.() || (file.mode & 0o777) !== 0o600
+            || file.mtimeMs > cutoff) continue
+          await unlink(path)
+        } catch { /* A changed entry is not safe to remove. */ }
+      }
+    } catch { /* A failed scan must not block an authorized upload. */ return }
     this.budget.scannedRoots.set(root, now)
     if (this.budget.scannedRoots.size > 1024) this.budget.scannedRoots.delete(this.budget.scannedRoots.keys().next().value!)
   }
