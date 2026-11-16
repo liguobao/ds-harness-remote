@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
   CODEX_THREAD_UNMATERIALIZED,
   CODEX_UNMATERIALIZED_THREAD_MESSAGE,
@@ -10,6 +11,36 @@ import {
 import type { SafeLogger } from '../src/logging.js'
 
 describe('CodexAppServerClient', () => {
+  it('distinguishes unsupported Goal reads from transient failures without exposing upstream details', async () => {
+    await runScenarios([
+      { name: 'disabled', method: 'thread/goal/get', error: { code: -32600, message: 'goals feature is disabled' }, expected: 'CODEX_GOALS_UNAVAILABLE' },
+      { name: 'missing-method', method: 'thread/goal/get', error: { code: -32601, message: 'Method not found' }, expected: 'CODEX_GOALS_UNAVAILABLE' },
+      { name: 'old-protocol', method: 'thread/goal/get', error: { code: -32600, message: 'unknown variant `thread/goal/get`, expected `initialize`' }, expected: 'CODEX_GOALS_UNAVAILABLE' },
+      { name: 'ephemeral', method: 'thread/goal/get', error: { code: -32600, message: 'ephemeral thread does not support goals: private-thread' }, expected: 'CODEX_GOALS_UNAVAILABLE' },
+      { name: 'database-failure', method: 'thread/goal/get', error: { code: -32603, message: 'sqlite state db unavailable: private-path' }, expected: 'CODEX_UPSTREAM_ERROR' },
+      { name: 'other-method', method: 'thread/read', error: { code: -32601, message: 'Method not found' }, expected: 'CODEX_UPSTREAM_ERROR' },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const fake = fakeProcess()
+        fake.child.stdin.on('data', chunk => {
+          for (const line of String(chunk).trim().split('\n')) {
+            const message = JSON.parse(line)
+            if (message.method === 'initialize') fake.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`)
+            else if (message.method === scenario.method) fake.stdout.write(`${JSON.stringify({ id: message.id, error: scenario.error })}\n`)
+          }
+        })
+        const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+        try {
+          await client.start()
+          const result = client.call(scenario.method, { threadId: 'private-thread' })
+          await expect(result).rejects.toMatchObject({ code: scenario.expected })
+          await expect(result).rejects.not.toThrow(/private-thread|private-path/)
+        } finally { await client.close() }
+      },
+    })))
+  })
+
   it('initializes once, correlates responses, and separates inbound events from requests', async () => {
     const fake = fakeProcess()
     const outbound: Array<Record<string, unknown>> = []

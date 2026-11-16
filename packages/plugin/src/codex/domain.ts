@@ -84,10 +84,13 @@ export class CodexRemoteDomain {
   private unsubscribeUnavailable?: () => void
   private readonly peers = new Map<string, CodexPeerBridge>()
   private readonly peerThreads = new Map<string, Set<string>>()
+  private readonly threadGoals = new Map<string, { active: boolean }>()
   private readonly threadLifecycle = new CodexThreadLifecycle(
-    threadId => this.hasSubscriber(threadId) || [...this.approvals.values()].some(approval => approval.threadId === threadId),
+    threadId => this.hasSubscriber(threadId) || this.threadGoals.get(threadId)?.active === true
+      || [...this.approvals.values()].some(approval => approval.threadId === threadId),
     threadId => this.callUpstream('thread/unsubscribe', { threadId }),
     threadId => {
+      this.threadGoals.delete(threadId)
       for (const threads of this.peerThreads.values()) threads.delete(threadId)
     },
     error => this.logger.warn('Codex thread release could not be confirmed', { code: errorCode(error) }),
@@ -210,7 +213,31 @@ export class CodexRemoteDomain {
 
   releaseThread(threadId: string): Promise<void> {
     if (!this.isAvailable() || this.closed) return Promise.resolve()
-    return this.threadLifecycle.release(threadId)
+    const tracked = this.threadGoals.has(threadId)
+    return this.threadLifecycle.use(threadId, async () => {
+      if (tracked && !this.threadGoals.has(threadId)) return
+      if (await this.refreshThreadGoal(threadId)) await this.threadLifecycle.release(threadId)
+    })
+  }
+
+  private async refreshThreadGoal(threadId: string): Promise<boolean> {
+    const appServer = this.requireAppServer()
+    const previous = this.threadGoals.get(threadId) ?? { active: true }
+    this.threadGoals.set(threadId, previous)
+    let active = true
+    try {
+      const result = await this.callUpstream('thread/goal/get', { threadId }, 5_000)
+      if (!isRecord(result) || !('goal' in result)) {
+        throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Goal.')
+      }
+      active = result.goal === null ? false : goalRetainsThread(result.goal, threadId)
+    } catch (error) {
+      if (errorCode(error) === 'CODEX_GOALS_UNAVAILABLE') active = false
+      else this.logger.warn('Codex Goal state could not be confirmed', { code: errorCode(error) })
+    }
+    if (this.closed || this.appServer !== appServer || !this.isAvailable() || !this.threadGoals.has(threadId)) return false
+    if (this.threadGoals.get(threadId) === previous) this.threadGoals.set(threadId, { active })
+    return true
   }
 
   private rememberThread(connectionId: string, threadId: string, releaseDetached = false): void {
@@ -481,6 +508,7 @@ export class CodexRemoteDomain {
     this.available = false
     this.threadLifecycle.reset()
     this.peerThreads.clear()
+    this.threadGoals.clear()
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
     await this.startPromise?.catch(() => undefined)
@@ -506,6 +534,7 @@ export class CodexRemoteDomain {
     this.available = false
     this.threadLifecycle.reset()
     this.peerThreads.clear()
+    this.threadGoals.clear()
     this.state = this.config.enabled ? 'unavailable' : 'disabled'
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
@@ -580,6 +609,7 @@ export class CodexRemoteDomain {
     this.available = false
     this.threadLifecycle.reset()
     this.peerThreads.clear()
+    this.threadGoals.clear()
     this.state = 'restarting'
     this.unavailableCode = code
     this.clearAllTurnWatchdogs()
@@ -644,6 +674,12 @@ export class CodexRemoteDomain {
       return
     }
     const threadId = extractThreadId(message.params)
+    if (threadId !== undefined && (message.method === 'thread/goal/updated' || message.method === 'thread/goal/cleared')) {
+      const active = message.method !== 'thread/goal/cleared'
+        && (!isRecord(message.params) || goalRetainsThread(message.params.goal, threadId))
+      this.threadGoals.set(threadId, { active })
+      await this.threadLifecycle.retry(threadId)
+    }
     if (message.method === 'thread/settings/updated' && threadId !== undefined) {
       this.rememberPermission(threadId, message.params)
     }
@@ -1128,10 +1164,10 @@ export class CodexRemoteDomain {
     return this.appServer
   }
 
-  private async callUpstream(method: string, params: unknown): Promise<unknown> {
+  private async callUpstream(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     const appServer = this.requireAppServer()
     try {
-      const result = await appServer.call(method, params)
+      const result = await appServer.call(method, params, timeoutMs)
       if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
         throw new RpcError('CODEX_UNAVAILABLE', 'The Codex App Server changed while handling the request.')
       }
@@ -1617,6 +1653,11 @@ function extractThreadId(params: unknown): string | undefined {
   if (isRecord(params.thread) && typeof params.thread.id === 'string') return params.thread.id
   if (isRecord(params.turn) && typeof params.turn.threadId === 'string') return params.turn.threadId
   return undefined
+}
+
+function goalRetainsThread(goal: unknown, threadId: string): boolean {
+  if (!isRecord(goal) || goal.threadId !== threadId || typeof goal.status !== 'string') return true
+  return !['complete', 'paused', 'blocked', 'usageLimited', 'budgetLimited'].includes(goal.status)
 }
 
 function isTerminalThreadStatus(params: unknown): boolean {
