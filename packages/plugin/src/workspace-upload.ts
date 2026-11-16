@@ -2,10 +2,11 @@ import { BINARY_UPLOAD_CHUNK_BYTES } from '@dsh-remote/protocol'
 import { workspaceUploadMaxBytes } from './workspace-transfer-limits.js'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { link, lstat, open, realpath, stat, unlink, type FileHandle } from 'node:fs/promises'
+import { link, lstat, open, opendir, realpath, stat, unlink, type FileHandle } from 'node:fs/promises'
 import { extname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { RpcError } from './safe-error.js'
+import { WorkspaceUploadBudget, type UploadReservation } from './workspace-upload-budget.js'
 
 export const WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024
 export const WORKSPACE_UPLOAD_CHUNK = 64 * 1024
@@ -21,6 +22,7 @@ type Upload = {
   sessionId: string; name: string; totalBytes: number; received: number; touched: number
   root: string; sourceRoot: string; dev: number; ino: number; temp: string; handle: FileHandle
   authorityCheckedAt: number; authorityBytes: number; encoding?: 'binary-v1'
+  reservation: UploadReservation
 }
 
 /** One authenticated peer owns this bounded, ephemeral upload service. */
@@ -37,6 +39,7 @@ export class WorkspaceUploadHost {
     private readonly ttlMs = 120_000,
     private readonly transportMode: () => string | undefined = () => undefined,
     private readonly now: () => number = Date.now,
+    private readonly budget: WorkspaceUploadBudget = new WorkspaceUploadBudget(),
   ) {
     this.timer = setInterval(() => { void this.serialize(() => this.expire()).catch(() => undefined) }, Math.min(ttlMs, 30_000))
     this.timer.unref()
@@ -101,11 +104,16 @@ export class WorkspaceUploadHost {
     const root = await realpath(sourceRoot)
     const directory = await stat(root)
     if (!directory.isDirectory()) throw failure('UPLOAD_WORKSPACE_UNAVAILABLE')
+    await this.cleanOrphans(root, directory.dev, directory.ino)
+    const reservation = await this.budget.reserve(root, directory.dev, p.sessionId, p.totalBytes)
     const temp = join(root, `.dsh-upload-${randomUUID()}.part`)
-    const handle = await open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600)
+    let handle: FileHandle
+    try { handle = await open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600) }
+    catch (error) { reservation.release(); throw error }
     const upload: Upload = { ...p, received: 0, touched: this.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle,
-      authorityCheckedAt: 0, authorityBytes: 0 }
+      authorityCheckedAt: 0, authorityBytes: 0, reservation }
     this.uploads.set(p.uploadId, upload)
+    this.budget.activePaths.add(temp)
     await this.validateRoot(upload)
     return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...(p.encoding ? { encoding: p.encoding } : {}) }
   }
@@ -118,6 +126,7 @@ export class WorkspaceUploadHost {
     if (!data.length || data.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || (!binary && data.toString('base64') !== p.data)
       || p.offset !== upload.received || upload.received + data.length > upload.totalBytes) throw failure('UPLOAD_INVALID_CHUNK')
     await this.validateRoot(upload, this.authorityExpired(upload))
+    await upload.reservation.checkDisk()
     let written = 0
     while (written < data.length) {
       const result = await upload.handle.write(data, written, data.length - written, upload.received + written)
@@ -126,6 +135,7 @@ export class WorkspaceUploadHost {
     }
     this.assertLive()
     upload.received += data.length
+    upload.reservation.consume(data.length)
     upload.touched = this.now()
     return { uploadId: p.uploadId, receivedBytes: upload.received }
   }
@@ -160,6 +170,7 @@ export class WorkspaceUploadHost {
       // Publication is the commit point. Abort/disconnect may only remove the temp.
       this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: this.now() })
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value!)
+      upload.reservation.commit()
       await this.discard(p.uploadId, upload)
       return result
     }
@@ -216,6 +227,7 @@ export class WorkspaceUploadHost {
 
   private async discard(id: string, upload: Upload) {
     this.uploads.delete(id)
+    upload.reservation.release()
     const original = await upload.handle.stat().catch(() => undefined)
     await upload.handle.close().catch(() => undefined)
     // Do not follow a replaced root or remove a substituted temporary entry.
@@ -225,6 +237,29 @@ export class WorkspaceUploadHost {
       if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino
         && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink(upload.temp)
     } catch { /* Missing/replaced directories are never followed during cleanup. */ }
+    this.budget.activePaths.delete(upload.temp)
+  }
+
+  private async cleanOrphans(root: string, dev: number, ino: number) {
+    const now = Date.now()
+    if (now - (this.budget.scannedRoots.get(root) ?? 0) < 60 * 60 * 1000) return
+    const cutoff = now - 24 * 60 * 60 * 1000
+    const entries = await opendir(root)
+    for await (const { name } of entries) {
+      if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name)) continue
+      const path = join(root, name)
+      if (this.budget.activePaths.has(path)) continue
+      try {
+        const [directory, file] = await Promise.all([lstat(root), lstat(path)])
+        if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino
+          || !file.isFile() || file.dev !== dev || file.nlink !== 1
+          || file.uid !== process.getuid?.() || (file.mode & 0o777) !== 0o600
+          || file.mtimeMs > cutoff) continue
+        await unlink(path)
+      } catch { /* A changed entry is not safe to remove. */ }
+    }
+    this.budget.scannedRoots.set(root, now)
+    if (this.budget.scannedRoots.size > 1024) this.budget.scannedRoots.delete(this.budget.scannedRoots.keys().next().value!)
   }
 
   private async expire() {

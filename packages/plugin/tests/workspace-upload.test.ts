@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rename, rm, symlink, writeFile, mkdir } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rename, rm, symlink, utimes, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SafeLogger } from '../src/logging.js'
 import { createRpcRequest } from '@dsh-remote/protocol'
 import { WorkspaceUploadHost, WORKSPACE_UPLOAD_AUTHORITY_TTL_MS, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
+import { WorkspaceUploadBudget } from '../src/workspace-upload-budget.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
 const hosts: WorkspaceUploadHost[] = []
@@ -23,6 +24,86 @@ async function setup(resolve?: (id: string, signal: AbortSignal) => Promise<stri
 }
 function request(name = 'report.bin', totalBytes = 3) { return { sessionId: 'session-a', uploadId: randomUUID(), name, totalBytes } }
 const scope = (p: ReturnType<typeof request>) => ({ sessionId: p.sessionId, uploadId: p.uploadId })
+
+it('shares active, byte, and session quotas across peer upload hosts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-shared-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 6, hostDailyBytes: 9, sessionBytes: 6, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  const first = request('first', 3), second = request('second', 3)
+  await Promise.all([a.call('workspace.upload.open', first), b.call('workspace.upload.open', second)])
+  await expect(a.call('workspace.upload.open', request('third', 1))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await a.call('workspace.upload.chunk', { ...scope(first), offset: 0, data: 'YWJj' })
+  await a.call('workspace.upload.commit', scope(first))
+  await expect(a.call('workspace.upload.open', request('fourth', 4))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await b.call('workspace.upload.abort', scope(second))
+  await expect(b.call('workspace.upload.open', request('fifth', 4))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await b.call('workspace.upload.open', request('sixth', 3))
+})
+
+it('reserves free disk space atomically across peers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-disk-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => 15)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  const first = request('first', 4), second = request('second', 4)
+  const results = await Promise.allSettled([a.call('workspace.upload.open', first), b.call('workspace.upload.open', second)])
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+  expect(results.filter(result => result.status === 'rejected').map(result => (result as PromiseRejectedResult).reason.code)).toEqual(['UPLOAD_LIMIT'])
+  if (results[0]?.status === 'fulfilled') await a.call('workspace.upload.abort', scope(first))
+  else await b.call('workspace.upload.abort', scope(second))
+  await b.call('workspace.upload.open', request('third', 4))
+})
+
+it('limits completed bytes across sessions on the same host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-total-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 5, sessionBytes: 100, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  await put(a, request('first', 3))
+  await expect(b.call('workspace.upload.open', { ...request('second', 3), sessionId: 'session-b' })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await b.call('workspace.upload.open', { ...request('second', 2), sessionId: 'session-b' })
+})
+
+it('drops an open upload when disk space falls before a chunk', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-space-'))
+  directories.push(root)
+  let free = 100
+  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => free)
+  const host = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(host)
+  const p = request()
+  await host.call('workspace.upload.open', p)
+  free = 12
+  await expect(host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  expect(await readdir(root)).toEqual([])
+})
+
+it('removes only old, owned upload temporary files on first workspace access', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-orphan-'))
+  directories.push(root)
+  const old = join(root, `.dsh-upload-${randomUUID()}.part`)
+  const fresh = join(root, `.dsh-upload-${randomUUID()}.part`)
+  const linkPath = join(root, `.dsh-upload-${randomUUID()}.part`)
+  await writeFile(old, 'old', { mode: 0o600 })
+  await writeFile(fresh, 'fresh', { mode: 0o600 })
+  await chmod(old, 0o600)
+  await utimes(old, new Date(0), new Date(0))
+  await symlink(old, linkPath)
+  const host = new WorkspaceUploadHost(async () => root)
+  hosts.push(host)
+  const p = request('new', 1)
+  await host.call('workspace.upload.open', p)
+  expect(await readdir(root)).not.toContain(old.split('/').at(-1))
+  await host.call('workspace.upload.abort', scope(p))
+  expect((await readdir(root)).sort()).toEqual([linkPath.split('/').at(-1), fresh.split('/').at(-1)].sort())
+})
 async function put(host: WorkspaceUploadHost, p = request(), bytes = Buffer.from([0, 255, 12])) {
   await host.call('workspace.upload.open', p)
   if (bytes.length) await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: bytes.toString('base64') })

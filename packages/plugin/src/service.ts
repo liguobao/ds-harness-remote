@@ -2,6 +2,7 @@ import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
+import { WorkspaceUploadBudget } from './workspace-upload-budget.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
@@ -70,6 +71,7 @@ export interface HostRemoteStatus {
 export class HostPluginRuntime {
   readonly connections: ConnectionController
   private readonly terminalOwners = new Map<string, string>()
+  private readonly uploadBudget = new WorkspaceUploadBudget()
   private readonly loopbackHosts = new Set<LoopbackHost>()
   private terminalEnabled: boolean
   private loopbackPorts: readonly number[]
@@ -192,7 +194,7 @@ export class HostPluginRuntime {
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        ), undefined, context.transportMode)
+        ), undefined, context.transportMode, Date.now, this.uploadBudget)
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId, peerIdentityKey: context.peerIdentityKey,
         identity: () => this.currentIdentity(), mode: context.transportMode,
