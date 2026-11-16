@@ -70,7 +70,7 @@ export function WorkspaceActionsModal({
 }) {
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
-  const canManage = target !== undefined && (target.backend === undefined || target.backend === 'harness')
+  const canManage = target !== undefined && (target.backend === undefined || target.backend === 'harness' || target.backend === 'cursor')
 
   return (
     <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>

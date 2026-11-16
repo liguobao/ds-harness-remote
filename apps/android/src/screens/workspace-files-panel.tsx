@@ -270,7 +270,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
       <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.readOnly} · {page.offset}–{page.offset + Math.max(0, page.lines - 1)}</Text>
       <ScrollView ref={preview} style={styles.container} contentContainerStyle={markdown ? styles.markdown : undefined}>
         {markdown
-          ? <MarkdownLinkProvider><NativeMarkdown text={page.text} /></MarkdownLinkProvider>
+          ? <MarkdownLinkProvider><NativeMarkdown text={page.text} sourceFile={file} /></MarkdownLinkProvider>
           : <ScrollView horizontal><Text selectable style={[styles.code, { color: colors.ink }]}>{page.text}</Text></ScrollView>}
       </ScrollView>
       <View style={styles.toolbar}>

@@ -95,6 +95,19 @@ describe('werift RTC backend', () => {
     }, ['192.168.50.10'])).toEqual(['192.168.50.10', '10.0.0.7', '192.168.75.58'])
   })
 
+  it('ignores proxy TUN route preferences while retaining physical LAN candidates (#341)', () => {
+    for (const name of ['FlClash', 'Mihomo', 'Clash', 'Meta', 'sing-box', 'tailscale0', 'zerotier', 'ztabcdef', 'wg0', 'wintun', 'ProtonVPN', 'Surge']) {
+      expect(detectHostIpv4Candidates({
+        [name]: [ipv4('10.99.0.1')],
+        wlan0: [ipv4('192.168.31.238')],
+      }, ['10.99.0.1'])).toEqual(['192.168.31.238'])
+    }
+    expect(detectHostIpv4Candidates({
+      unknownProxy: [ipv4('198.18.0.1'), ipv4('198.19.255.254')],
+      wlan0: [ipv4('192.168.31.238')],
+    }, ['198.18.0.1'])).toEqual(['192.168.31.238'])
+  })
+
   it('filters virtual Host candidates while preserving TURN fallback candidates', () => {
     const allowed = new Set(['192.168.50.10'])
 

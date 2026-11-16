@@ -583,7 +583,7 @@ function parseIceCandidate(candidate: RtcIceCandidateInit): WeriftCandidate | un
 
 function physicalInterfaceScore(name: string): number | undefined {
   const value = name.toLowerCase()
-  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo)/.test(value)) {
+  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo|flclash|mihomo|clash|meta|sing-?box|tailscale|zerotier|zt[0-9a-f]|wg\d|wintun|proton|surge)/.test(value)) {
     return undefined
   }
   if (/^(eth|eno|ens|enp)/.test(value)) return 500
@@ -600,6 +600,8 @@ function isUsableIpv4(ip: string): boolean {
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false
   if (parts[0] === 169 && parts[1] === 254) return false
+  // Benchmark addresses are commonly assigned to proxy TUN interfaces.
+  if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false
   return !isCgnat(ip)
 }
 

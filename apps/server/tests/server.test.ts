@@ -119,7 +119,7 @@ async function connection(options: { hostCapabilities?: string[]; clientCapabili
   const host = await socket(h, options.hostCapabilities === undefined ? {} : { capabilities: options.hostCapabilities })
   const client = await socket(c, options.clientCapabilities === undefined ? {} : { capabilities: options.clientCapabilities })
   const ack = await host.next('hello.ack')
-  expect(ack).toMatchObject({ webrtcEnabled: true })
+  expect(ack).toMatchObject({ webrtcEnabled: (options.hostCapabilities ?? fullCapabilities).some(capability => capability === 'transport.lan' || capability === 'transport.p2p') })
   expect(ack.capabilities).toEqual(expect.arrayContaining(['transport.relay']))
   await client.next('hello.ack')
   client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: options.preferredTransports ?? ['relay'] })
@@ -521,6 +521,17 @@ describe('webrtc signaling and TURN credentials', () => {
     accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
     const withTurn = await socket(await device(), { capabilities: fullCapabilities })
     expect(await withTurn.next('hello.ack')).toMatchObject({ capabilities: fullCapabilities })
+  })
+
+  it('disables WebRTC when negotiation leaves only relay (#449)', async () => {
+    for (const capabilities of [['transport.relay'], ['transport.turn', 'transport.relay']]) {
+      const wire = await socket(await device(), { capabilities })
+      expect(await wire.next('hello.ack')).toMatchObject({
+        capabilities: ['transport.relay'], webrtcEnabled: false,
+      })
+    }
+    const lan = await socket(await device(), { capabilities: ['transport.lan', 'transport.relay'] })
+    expect(await lan.next('hello.ack')).toMatchObject({ webrtcEnabled: true })
   })
 
   it('forwards ordered WebRTC signaling and transport selection', async () => {

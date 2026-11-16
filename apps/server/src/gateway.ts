@@ -443,8 +443,9 @@ export class Gateway {
             heartbeatIntervalMs: this.heartbeatIntervalMs,
             maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES,
             maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
-            capabilities: this.negotiatedCapabilities(p.capabilities),
-            webrtcEnabled: true,
+            capabilities: peer.capabilities,
+            webrtcEnabled: peer.capabilities.some(capability =>
+              capability === 'transport.lan' || capability === 'transport.p2p' || capability === 'transport.turn'),
             webrtcFallbackTimeoutMs: WEBRTC_FALLBACK_TIMEOUT_MS,
           }))
           return

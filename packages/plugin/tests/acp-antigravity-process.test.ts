@@ -8,6 +8,41 @@ import { cursorBinaryCandidates } from '../src/acp/gateway.js'
 import type { SafeLogger } from '../src/logging.js'
 
 describe('AntigravityAcpClient', () => {
+  it.each(['startup', 'prompt'] as const)('bounds unterminated stdout during %s and ignores retired output (#461)', async phase => {
+    const fake = fakeProcess()
+    const spawn = vi.fn(() => fake.child)
+    const client = new AntigravityAcpClient('agy', logger(), spawn, { sessionWorker: true })
+    const unavailable = vi.fn()
+    const inbound = vi.fn()
+    client.onUnavailable(unavailable)
+    client.onInbound(inbound)
+    const starting = client.start()
+    const startOutcome = starting.catch(error => error)
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce())
+    let outcome = startOutcome
+    if (phase === 'prompt') {
+      fake.stdout.write('{"event":"init"}\n')
+      await starting
+      outcome = client.call('session/prompt', { sessionId: 'test', prompt: [{ type: 'text', text: 'hello' }] }).catch(error => error)
+      await vi.waitFor(() => expect((client as any).currentPromptPending).toBeDefined())
+    }
+    // The real production limit, split across chunks, without allocating a second combined buffer.
+    fake.stdout.write(Buffer.alloc(288 * 1024 * 1024, 0x20))
+    expect(unavailable).not.toHaveBeenCalled()
+    fake.stdout.write('x')
+    expect(await outcome).toMatchObject({ code: 'ANTIGRAVITY_RESPONSE_TOO_LARGE' })
+    expect(client.isReady()).toBe(false)
+    expect((client as any).stdoutBuffer.length).toBe(0)
+    expect((client as any).currentPromptPending).toBeUndefined()
+    expect(fake.child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(unavailable).toHaveBeenCalledTimes(1)
+    const delivered = inbound.mock.calls.length
+    fake.stdout.write('{"event":"init"}\n')
+    expect(inbound).toHaveBeenCalledTimes(delivered)
+    expect((client as any).stdoutBuffer.length).toBe(0)
+    await client.close()
+  })
+
   it('handles stream-json init, prompt and step_updates', async () => {
     const fake = fakeProcess()
     const outbound: Array<Record<string, unknown>> = []

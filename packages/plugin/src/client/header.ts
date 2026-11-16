@@ -10,6 +10,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
   function RemoteSessionHeaderAction(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
     statusFeed: StatusFeed<RemoteStatus>
+    inline?: boolean
     onSignIn: () => void
     t: Translate
   }): unknown {
@@ -145,7 +146,7 @@ export function createRemoteSessionHeaderAction(React: ClientReact, portal?: Por
     const fact = (label: string, value: string, mono = false): unknown => React.createElement('div', null,
       React.createElement('dt', null, label),
       React.createElement('dd', { className: mono ? 'isMono' : undefined, title: mono ? value : undefined }, value))
-    return React.createElement('div', { className: 'dshRemoteSessionHeader', role: 'status' },
+    return React.createElement('div', { className: `dshRemoteSessionHeader${props.inline ? ' dshRemoteHeaderSeat' : ''}`, role: 'status' },
       React.createElement('svg', {
         viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7,
         strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,

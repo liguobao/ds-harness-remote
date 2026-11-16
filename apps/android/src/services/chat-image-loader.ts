@@ -86,6 +86,26 @@ export function chatImageWorkspacePath(value: string): string | undefined {
   } catch { return undefined }
 }
 
+/** Resolve preview images relative to the Markdown file, keeping Host authority checks. */
+export function markdownImageSource(source: string, file?: string): string | undefined {
+  if (file === undefined || source.startsWith('data:')) return source
+  const path = chatImageWorkspacePath(source)
+  if (path === undefined) return undefined
+  if (/^(?:[A-Za-z]:[\\/]|[\\/])/u.test(path)) return source
+  const base = file.replace(/\\/gu, '/').split('/').slice(0, -1)
+  const absolute = base[0] === '' || /^[A-Za-z]:$/u.test(base[0] ?? '')
+  const floor = absolute ? 1 : 0
+  for (const segment of path.replace(/\\/gu, '/').split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      if (base.length <= floor) return undefined
+      base.pop()
+    } else base.push(segment)
+  }
+  // The loader decodes once more; preserve literal percent/hash/question-mark filenames.
+  return base.map(segment => encodeURIComponent(segment).replace(/%3A/giu, ':')).join('/')
+}
+
 /** Bound compressed bytes and decoded pixels before passing untrusted data to the native decoder. */
 export function validatedImageDataUri(uri: string): string {
   if (uri.length > Math.ceil(MAX_PREVIEW_BYTES / 3) * 4 + 64) throw invalidImage()

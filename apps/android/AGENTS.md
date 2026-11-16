@@ -1,3 +1,18 @@
+## Issue triage fixes (#426 / #447, 2026-11-16)
+
+Markdown 文件预览向 NativeMarkdown 传入 sourceFile，通过 React context 让缓存的图片节点
+按当前文件目录解析相对路径；chat-image-loader 的 markdownImageSource 规范化 dot segments，
+拒绝相对工作区路径越界及无效来源，保留 data/绝对 Host 路径与普通聊天语义。
+百分号等文件名在传给现有 loader 前重新编码，避免二次解码改变路径。Host 文件权限校验不变。
+
+Cursor 工作区管理菜单此前只允许 Harness，现开放 Cursor 已有的本地重命名、排序与删除动作。
+删除回归覆盖关闭选中流、移除会话/消息、刷新本地目录后不恢复；browse-tracking 继续保存目录。
+其他 ACP 后端可从远端重建目录，本次不开放其管理菜单，也未验证重启 App 的真实持久化流程。
+
+验证：Android 82 文件 / 716 tests、check、production Hermes export 与 diff check 通过。
+未构建 APK、未做真机与跨设备验收、未发布。#446 当前已有 session-visibility 实现；
+#455 现有 host-pairing 测试明确要求退出后保留 Host-only 策略，本次未改权限策略。
+
 ## Offline composer drafts (Issue #7 / upstream #409, 2026-11-12)
 
 聊天输入框的 `editable` 不再由连接状态决定：`chat-screen.tsx` 通过

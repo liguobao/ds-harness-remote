@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { AndroidRemoteRuntime } from '../src/services/remote-runtime'
-import type { WorkspaceView } from '../src/types'
+import type { RemoteSession, WorkspaceView } from '../src/types'
 
 const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(), reconcile: vi.fn(), createContext: vi.fn(), signInWith: vi.fn(),
@@ -365,6 +365,22 @@ describe('workspace operation isolation', () => {
         expect(fixture.get().error).toBe('current failure')
       }
     } }))), prepare)
+  })
+
+  it('deletes a Cursor workspace and keeps it removed when its local catalog refreshes (#447)', async () => {
+    const fixture = workspaceFixture()
+    const target = { ...workspace('cursor-root', 'cursor'), sessionIds: ['cursor-session'] }
+    const session = { sessionId: 'cursor-session', backend: 'cursor' } as RemoteSession
+    fixture.set({ workspaces: [target, workspace('other')], sessions: [session], selectedSession: session,
+      messages: { 'cursor-session': [] } })
+    expect(await fixture.get().workspaceDelete('cursor-root')).toBe(true)
+    expect(fixture.close).toHaveBeenCalledOnce()
+    expect(fixture.proxy.workspaceDelete).not.toHaveBeenCalled()
+    expect(fixture.get().selectedSession).toBeUndefined()
+    expect(fixture.get().sessions).toEqual([])
+    expect(fixture.get().messages).toEqual({})
+    await fixture.get().refreshWorkspaces('cursor')
+    expect(fixture.get().workspaces.map(item => item.workspaceId)).toEqual(['other'])
   })
 
   it('ignores retired rename/delete/move/directory and catalog completions, including errors', async () => {

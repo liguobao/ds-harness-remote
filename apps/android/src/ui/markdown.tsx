@@ -1,5 +1,5 @@
 import { ChatImageView } from './chat-image'
-import { chatImageWorkspacePath } from '../services/chat-image-loader'
+import { chatImageWorkspacePath, markdownImageSource } from '../services/chat-image-loader'
 import { createContext, memo, useContext, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
@@ -62,6 +62,14 @@ export function useMarkdownLink(): MarkdownLinkHandler | undefined {
   return useContext(markdownLinkContext)
 }
 
+const markdownFileContext = createContext<string | undefined>(undefined)
+
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const file = useContext(markdownFileContext)
+  const uri = markdownImageSource(src, file)
+  return uri === undefined ? <Text>{`[${alt}]`}</Text> : <ChatImageView image={{ uri, name: alt }} remoteSource />
+}
+
 const markdownTextContext = createContext<((text: string) => string) | undefined>(undefined)
 
 export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
@@ -109,7 +117,7 @@ function extractReferencedFiles(nodes: MarkdownNode[]): { path: string; name?: s
   return files
 }
 
-export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palette }: { text: string; colors?: ThemeColors }) {
+export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palette, sourceFile }: { text: string; colors?: ThemeColors; sourceFile?: string }) {
   const theme = useTheme()
   // A caller can paint one block on a dark surface (a user bubble) without touching the theme.
   const colors = palette ?? theme.colors
@@ -123,10 +131,12 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palet
   const referencedFiles = useMemo(() => extractReferencedFiles(nodes), [nodes])
 
   return (
-    <View style={styles.container}>
-      {nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))}
-      <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />
-    </View>
+    <markdownFileContext.Provider value={sourceFile}>
+      <View style={styles.container}>
+        {nodes.map(node => renderBlockCached(node, styles, colors, onLinkPress))}
+        <PresentedFileGroup files={referencedFiles} onFilePress={onLinkPress} />
+      </View>
+    </markdownFileContext.Provider>
   )
 })
 
@@ -412,7 +422,7 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
       const alt = token.content || token.children?.map(child => child.content).join('') || '图片'
       const src = token.attrGet('src') ?? ''
       output.push(src.startsWith('data:') || chatImageWorkspacePath(src) !== undefined
-        ? <ChatImageView key={key} image={{ uri: src, name: alt }} remoteSource />
+        ? <MarkdownImage key={key} src={src} alt={alt} />
         : <Text key={key} style={styles.imageAlt}>{`[${alt}]`}</Text>)
     } else if (token.nesting === 1) {
       const closing = findClosingToken(tokens, index)

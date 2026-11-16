@@ -87699,7 +87699,7 @@ function parseIceCandidate(candidate) {
 }
 function physicalInterfaceScore(name2) {
   const value = name2.toLowerCase();
-  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo)/.test(value)) {
+  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo|flclash|mihomo|clash|meta|sing-?box|tailscale|zerotier|zt[0-9a-f]|wg\d|wintun|proton|surge)/.test(value)) {
     return void 0;
   }
   if (/^(eth|eno|ens|enp)/.test(value)) return 500;
@@ -87714,6 +87714,7 @@ function isUsableIpv4(ip) {
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false;
   if (parts[0] === 169 && parts[1] === 254) return false;
+  if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false;
   return !isCgnat(ip);
 }
 function isCgnat(ip) {
@@ -94405,6 +94406,7 @@ var TranscriptWatcher = class extends EventEmitter2 {
 // packages/plugin/src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS2 = 2e4;
+var MAX_ACP_LINE_BYTES2 = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
 var AntigravityAcpError = class extends Error {
   constructor(code, message, options) {
@@ -94738,6 +94740,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.process = child;
     this.stdoutBuffer = Buffer6.alloc(0);
     this.stderrBytes = 0;
+    let streamFailure;
     let initResolved = false;
     let rejectInit;
     const initPromise = new Promise((resolve10, reject) => {
@@ -94763,10 +94766,36 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         });
       };
       child.stdout.on("data", (chunk) => {
-        if (!initResolved) {
-          checkInit(Buffer6.from(chunk));
-        } else {
-          this.consumeStdout(Buffer6.from(chunk));
+        if (this.process !== child) return;
+        try {
+          const bytes = Buffer6.isBuffer(chunk) ? chunk : Buffer6.from(chunk);
+          if (!initResolved) checkInit(bytes);
+          else this.consumeStdout(bytes);
+        } catch (error62) {
+          if (!(error62 instanceof AntigravityAcpError) || error62.code !== "ANTIGRAVITY_RESPONSE_TOO_LARGE") throw error62;
+          streamFailure = error62;
+          clearTimeout(timer2);
+          rejectInit?.(error62);
+          this.ready = false;
+          this.process = void 0;
+          this.stdoutBuffer = Buffer6.alloc(0);
+          this.watcher?.stop();
+          this.watcher = void 0;
+          if (this.currentPromptPending) {
+            clearTimeout(this.currentPromptPending.timer);
+            this.currentPromptPending.reject(error62);
+            this.currentPromptPending = void 0;
+          }
+          child.stdout.removeAllListeners("data");
+          child.stdout.resume();
+          const killTimer = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+          }, 1e3);
+          killTimer.unref?.();
+          child.once("exit", () => clearTimeout(killTimer));
+          child.kill("SIGTERM");
+          this.logger?.warn("Antigravity ACP communication failed", { code: error62.code });
+          if (!this.closed) this.notifyUnavailable(error62.code);
         }
       });
     });
@@ -94803,11 +94832,12 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     });
     try {
       await initPromise;
+      if (streamFailure) throw streamFailure;
       this.ready = true;
       this.warmNextSession();
       this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
     } catch (err5) {
-      child.kill("SIGTERM");
+      if (!child.killed) child.kill("SIGTERM");
       throw err5;
     }
   }
@@ -94862,7 +94892,10 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     watcher.start();
   }
   consumeStdout(chunk, onRawEvent) {
-    this.stdoutBuffer = Buffer6.concat([this.stdoutBuffer, chunk]);
+    if (this.stdoutBuffer.length + chunk.length > MAX_ACP_LINE_BYTES2) {
+      throw new AntigravityAcpError("ANTIGRAVITY_RESPONSE_TOO_LARGE", "Antigravity ACP emitted an oversized JSONL message.");
+    }
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer6.concat([this.stdoutBuffer, chunk]);
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(10);
       if (newlineIndex === -1) break;
@@ -95114,7 +95147,7 @@ function unavailable() {
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
-var MAX_ACP_LINE_BYTES2 = 288 * 1024 * 1024;
+var MAX_ACP_LINE_BYTES3 = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES4 = 4 * 1024;
 var OpencodeAcpError = class extends Error {
   constructor(code, message, options) {
@@ -95462,7 +95495,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   consumeStdout(chunk) {
     this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES2) {
+    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES3) {
       this.handleProcessFailure(
         "OPENCODE_RESPONSE_TOO_LARGE",
         new Error("OpenCode ACP emitted an oversized JSONL message.")
