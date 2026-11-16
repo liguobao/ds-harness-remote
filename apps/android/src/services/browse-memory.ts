@@ -2,7 +2,10 @@ import { strings } from '../locales/i18n'
 import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
-import type { ChatImage, ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
+import { acpWorkspaceSuppressionKey, isAcpManagedBackend, isDeletedAcpWorkspace } from '../lib/workspace-key'
+import type { AgentBackend, ChatImage, ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
+
+export { isDeletedAcpWorkspace }
 
 export type ReadingPosition = { key?: string; offset: number; atBottom: boolean }
 export type BrowseEntry = {
@@ -14,12 +17,13 @@ export type BrowseEntry = {
 type Snapshot = {
   entries: Record<string, BrowseEntry>
   catalogs: Record<string, { workspaces: WorkspaceView[]; sessions: RemoteSession[] }>
+  deletedWorkspaces: Record<string, string[]>
   hostModes: Record<string, 'agent' | 'bot'>
   resume: boolean; notifications: boolean; autoConnectHost: boolean
   last?: { scope: string; deviceId: string; sessionId: string }
 }
 type Memory = Snapshot & { ready: boolean; error?: string }
-const empty = (): Snapshot => ({ entries: {}, catalogs: {}, hostModes: {}, resume: false, notifications: true, autoConnectHost: true })
+const empty = (): Snapshot => ({ entries: {}, catalogs: {}, deletedWorkspaces: {}, hostModes: {}, resume: false, notifications: true, autoConnectHost: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
 export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
@@ -35,6 +39,7 @@ const aad = 'dsh-remote-private-browse-v1'
 
 export const MAX_CACHED_MESSAGES_PER_SESSION = 30
 export const MAX_CACHED_SESSIONS = 10
+const MAX_DELETED_WORKSPACES_PER_SCOPE = 500
 const MAX_TEXT_CHARS = 32768
 
 const capText = (text?: string): string | undefined =>
@@ -120,7 +125,53 @@ function safeSession(session: RemoteSession): RemoteSession {
     parentSessionId: session.parentSessionId, running: false,
     projections: {values: {remoteStatusKnown: false, codexStatus: 'unknown'}} }
 }
-function restoreCatalog(catalog: Snapshot['catalogs'][string]): Snapshot['catalogs'][string] {
+function sanitizeDeletedWorkspaces(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, string[]> = {}
+  for (const [scope, items] of Object.entries(value)) {
+    if (!Array.isArray(items)) continue
+    const deduped = [...new Set(items.filter((item): item is string => typeof item === 'string' && item.length > 0))]
+      .slice(-MAX_DELETED_WORKSPACES_PER_SCOPE)
+    if (deduped.length > 0) result[scope] = deduped
+  }
+  return result
+}
+
+function filterCatalogByDeletedKeys(
+  catalog: Snapshot['catalogs'][string],
+  deletedKeys?: ReadonlySet<string>,
+  platform?: string,
+): Snapshot['catalogs'][string] {
+  if (!deletedKeys || deletedKeys.size === 0) return catalog
+  const removedSessionIds = new Set<string>()
+  const keptWorkspaces = catalog.workspaces.filter(workspace => {
+    const suppressed = workspace.backend !== undefined
+      && isAcpManagedBackend(workspace.backend)
+      && isDeletedAcpWorkspace(deletedKeys, workspace.backend, workspace.path, platform)
+    if (suppressed) {
+      for (const id of workspace.sessionIds) removedSessionIds.add(id)
+      return false
+    }
+    return true
+  })
+  const keptSessionIds = new Set(keptWorkspaces.flatMap(workspace => workspace.sessionIds))
+  const keptSessions = catalog.sessions.filter(session => {
+    if (keptSessionIds.has(session.sessionId)) return true
+    if (removedSessionIds.has(session.sessionId)) return false
+    if (
+      session.backend !== undefined
+      && isAcpManagedBackend(session.backend)
+      && session.cwd !== undefined
+      && isDeletedAcpWorkspace(deletedKeys, session.backend, session.cwd, platform)
+    ) {
+      return false
+    }
+    return true
+  })
+  return { workspaces: keptWorkspaces, sessions: keptSessions }
+}
+
+function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: ReadonlySet<string>): Snapshot['catalogs'][string] {
   // Earlier clients may have cached repeated native catalog rows. Keep drafts/stars
   // keyed by the same ID while restoring one preview per backend and thread.
   const sessions = new Map<string, RemoteSession>()
@@ -129,9 +180,16 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string]): Snapshot['catalo
     const previous = sessions.get(id)
     if (previous === undefined || session.updatedAt > previous.updatedAt) sessions.set(id, safeSession(session))
   }
-  return {sessions: [...sessions.values()], workspaces: catalog.workspaces.map(workspace => ({
-    ...workspace, sessionIds: [...new Set(workspace.sessionIds)],
-  }))}
+  return filterCatalogByDeletedKeys(
+    {
+      sessions: [...sessions.values()],
+      workspaces: catalog.workspaces.map(workspace => ({
+        ...workspace,
+        sessionIds: [...new Set(workspace.sessionIds)],
+      })),
+    },
+    deletedKeys,
+  )
 }
 function savedEntry(value: BrowseEntry): BrowseEntry {
   const messages = sanitizeCachedMessages(value.messages)
@@ -145,7 +203,16 @@ function snapshot(): Snapshot {
   const state = useBrowseMemory.getState()
   const entries = Object.fromEntries(Object.entries(state.entries).map(([id, value]) => [id, savedEntry(value)]))
   const limitedEntries = enforceSessionMessageLimits(entries)
-  return {entries: limitedEntries, catalogs: state.catalogs, hostModes: state.hostModes, resume: state.resume, notifications: state.notifications, autoConnectHost: state.autoConnectHost, last: state.last}
+  return {
+    entries: limitedEntries,
+    catalogs: state.catalogs,
+    deletedWorkspaces: sanitizeDeletedWorkspaces(state.deletedWorkspaces),
+    hostModes: state.hostModes,
+    resume: state.resume,
+    notifications: state.notifications,
+    autoConnectHost: state.autoConnectHost,
+    last: state.last,
+  }
 }
 export function flushBrowseMemory(): Promise<void> {
   if (timer !== undefined) {clearTimeout(timer); timer = undefined}
@@ -180,11 +247,25 @@ export async function hydrateBrowseMemory(): Promise<void> {
     if (info.exists) {
       const encrypted = JSON.parse(await FileSystem.readAsStringAsync(file(FileSystem)))
       const data = JSON.parse(new TextDecoder().decode(decryptFrame(key, encrypted, aad))) as Snapshot
-      const catalogs = Object.fromEntries(Object.entries(data.catalogs).map(([scope, catalog]) => [scope, restoreCatalog(catalog)]))
-      const entries = Object.fromEntries(Object.entries(data.entries).map(([id, value]) => [id, savedEntry(value)]))
+      const deletedWorkspaces = sanitizeDeletedWorkspaces(data.deletedWorkspaces)
+      const catalogs = Object.fromEntries(
+        Object.entries(data.catalogs ?? {}).map(([scope, catalog]) => [
+          scope,
+          restoreCatalog(catalog, new Set(deletedWorkspaces[scope] ?? [])),
+        ]),
+      )
+      const entries = Object.fromEntries(Object.entries(data.entries ?? {}).map(([id, value]) => [id, savedEntry(value)]))
       const limitedEntries = enforceSessionMessageLimits(entries)
-      useBrowseMemory.setState({...empty(), ...data, autoConnectHost: typeof data.autoConnectHost === 'boolean' ? data.autoConnectHost : true, entries: limitedEntries, catalogs, ready: true})
-      if (Object.values(data.entries).some(value => value.messages && !value.messages.every(isValidCachedChatItem))) {
+      useBrowseMemory.setState({
+        ...empty(),
+        ...data,
+        autoConnectHost: typeof data.autoConnectHost === 'boolean' ? data.autoConnectHost : true,
+        entries: limitedEntries,
+        catalogs,
+        deletedWorkspaces,
+        ready: true,
+      })
+      if (Object.values(data.entries ?? {}).some(value => value.messages && !value.messages.every(isValidCachedChatItem))) {
         await flushBrowseMemory()
       }
     } else useBrowseMemory.setState({ready: true})
@@ -193,6 +274,43 @@ export async function hydrateBrowseMemory(): Promise<void> {
 export function updateBrowseEntry(scope: string, id: string, patch: Partial<BrowseEntry>): void {
   const entryKey = browseKey(scope, id)
   useBrowseMemory.setState(state => ({entries: {...state.entries, [entryKey]: {...state.entries[entryKey], ...patch}}}))
+  schedule()
+}
+export function getDeletedAcpWorkspaceKeys(scope: string): ReadonlySet<string> {
+  return new Set(useBrowseMemory.getState().deletedWorkspaces?.[scope] ?? [])
+}
+export function markDeletedAcpWorkspace(scope: string, backend: AgentBackend, path: string, platform?: string): void {
+  if (!isAcpManagedBackend(backend)) return
+  const deletionKey = acpWorkspaceSuppressionKey(backend, path, platform)
+  useBrowseMemory.setState(state => {
+    const existing = state.deletedWorkspaces?.[scope] ?? []
+    const nextList = existing.includes(deletionKey)
+      ? existing
+      : [...existing, deletionKey].slice(-MAX_DELETED_WORKSPACES_PER_SCOPE)
+    const nextDeleted = { ...state.deletedWorkspaces, [scope]: nextList }
+    const existingCatalog = state.catalogs?.[scope]
+    const nextCatalog = existingCatalog === undefined
+      ? undefined
+      : filterCatalogByDeletedKeys(existingCatalog, new Set([deletionKey]), platform)
+    return {
+      deletedWorkspaces: nextDeleted,
+      ...(nextCatalog === undefined ? {} : { catalogs: { ...state.catalogs, [scope]: nextCatalog } }),
+    }
+  })
+  schedule()
+}
+export function unmarkDeletedAcpWorkspace(scope: string, backend: AgentBackend, path: string, platform?: string): void {
+  if (!isAcpManagedBackend(backend)) return
+  useBrowseMemory.setState(state => {
+    const existing = state.deletedWorkspaces?.[scope]
+    if (!existing || existing.length === 0) return {}
+    const filtered = existing.filter(item => !isDeletedAcpWorkspace(new Set([item]), backend, path, platform))
+    if (filtered.length === existing.length) return {}
+    const nextDeleted = { ...state.deletedWorkspaces }
+    if (filtered.length === 0) delete nextDeleted[scope]
+    else nextDeleted[scope] = filtered
+    return { deletedWorkspaces: nextDeleted }
+  })
   schedule()
 }
 export function saveBrowseCatalog(scope: string, workspaces: WorkspaceView[], sessions: RemoteSession[]): void {

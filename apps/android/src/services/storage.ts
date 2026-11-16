@@ -467,7 +467,10 @@ function workspaceShortcut(value: unknown): WorkspaceShortcut | undefined {
 }
 
 function agentBackend(value: unknown): AgentBackend {
-  return value === 'codex' ? 'codex' : 'harness'
+  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity'
+    || value === 'pi' || value === 'opencode' || value === 'claude' || value === 'hermes'
+    ? value
+    : 'harness'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -238,7 +238,7 @@ export function createOpencodeSession(input: {
 
 export function createHermesWorkspace(path: string, title?: string): WorkspaceView {
   const now = new Date().toISOString()
-  const label = title?.trim() || path.split(/[\/]/).filter(Boolean).at(-1) || path
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
     workspaceId: hermesWorkspaceId(path),
     backend: 'hermes',
