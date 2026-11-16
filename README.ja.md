@@ -25,6 +25,10 @@
   <a href="https://dshfind.com/ja/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=ja" alt="dshfind ダウンロード数"></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/177732" target="_blank"><img src="https://trendshift.io/api/badge/repositories/177732" alt="liguobao%2Fds-harness-remote | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
+
 ## 一度つなげば、いつでも使える
 
 スマートフォン、パソコン、ブラウザーから、お使いの DeepSeek Harness をそのまま利用できます。どのデバイスからでも、同じ Harness セッションの続きを始められます。
