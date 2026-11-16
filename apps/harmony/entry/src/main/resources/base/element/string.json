@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "DSH 远程"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "语音输入需要使用麦克风录音"
+    }
+  ]
+}

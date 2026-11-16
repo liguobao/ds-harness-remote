@@ -56,6 +56,7 @@ jobs:
 
           echo "android=$android" >> "$GITHUB_OUTPUT"
 
+
   quality:
     name: Check, test, and build
     runs-on: ubuntu-latest
@@ -93,6 +94,16 @@ jobs:
 
       - name: Run tests
         run: pnpm -r test
+
+      # The HarmonyOS client cannot be built on a GitHub-hosted runner (no HarmonyOS SDK),
+      # but its hand-written Noise IK implementation is plain TypeScript and can be verified
+      # against the repository's golden vectors here. See .github/workflows/harmony-hap.yml
+      # for the signed HAP build that runs on a self-hosted runner.
+      - name: Check HarmonyOS client conformance
+        run: |
+          pnpm exec vitest run apps/harmony/tests
+          node apps/harmony/scripts/check-i18n.mjs
+          node apps/harmony/scripts/bump-version.mjs --check
 
       # Android prebuild recompiles shared packages. Serialize workspace builds
       # so Plugin bundling cannot read dist files while tsc rewrites them.

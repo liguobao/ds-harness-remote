@@ -1,0 +1,186 @@
+import { NoiseIkInitiator } from '../crypto/NoiseIk';
+import { SecureMessageCodec } from '../protocol/SecureMessageCodec';
+import { createNoisePrologue } from '../protocol/Protocol';
+import { fromBase64Url, randomBytes } from '../crypto/Bytes';
+import { RelayTransport } from './RelayTransport';
+import { DeviceIdentity, AuthorizedPeerDevice } from '../model/Types';
+import { logInfo, logWarn, logError } from '../util/Log';
+
+export class SecureTransport {
+  private inner: RelayTransport;
+  private identity: DeviceIdentity;
+  private host: AuthorizedPeerDevice;
+  /** Locally pinned Host identity key (protocol §2 / §12.1). Empty when the caller has no
+   *  pin yet; when set it must match the Server-supplied key or the handshake is aborted. */
+  private pinnedHostKey: string;
+  private noise: NoiseIkInitiator | undefined = undefined;
+  private incoming: SecureMessageCodec = new SecureMessageCodec();
+  private outgoing: SecureMessageCodec = new SecureMessageCodec();
+  private closed: boolean = false;
+  private sendTail: Promise<void> = Promise.resolve();
+  public onClosed: (() => void) | undefined = undefined;
+
+  constructor(inner: RelayTransport, identity: DeviceIdentity, host: AuthorizedPeerDevice,
+    pinnedHostKey: string = '') {
+    this.inner = inner;
+    this.identity = identity;
+    this.host = host;
+    this.pinnedHostKey = pinnedHostKey;
+    if (host.identityKey.length === 0) {
+      throw new Error('主机缺少身份公钥');
+    }
+  }
+
+  async connect(): Promise<void> {
+    this.closed = false;
+    this.incoming.reset();
+    this.outgoing.reset();
+    // 中继自己死掉（WS close/error、看门狗判死、静默判死）必须往上报。
+    // 这里以前没人订阅 inner.onClosed —— 于是断线是「无声」的：UI 一直显示已连接，
+    // 只有发消息超时才露馅，用户只能杀进程重进。上层的判词、退避重连全靠这条链。
+    this.inner.onClosed = () => {
+      this.handleInnerClosed();
+    };
+    if (this.pinnedHostKey.length > 0 && this.pinnedHostKey !== this.host.identityKey) {
+      logError('secure transport: host identity key differs from local pin, aborting handshake');
+      this.inner.close();
+      throw new Error('主机身份公钥与本地固定记录不一致，已中断安全握手');
+    }
+    await this.inner.connect();
+    const info = this.inner.connectionInfo();
+    if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
+      this.inner.close();
+      throw new Error('Relay 连接指向了意外的设备');
+    }
+    const noise = new NoiseIkInitiator(
+      fromBase64Url(this.identity.privateKey),
+      fromBase64Url(this.identity.publicKey),
+      fromBase64Url(this.host.identityKey),
+      createNoisePrologue(info.connectionId, this.host.deviceId, this.identity.deviceId),
+      randomBytes);
+    this.noise = noise;
+    try {
+      await this.waitForResponder(noise);
+    } catch (e) {
+      this.noise = undefined;
+      this.inner.close();
+      throw e instanceof Error ? e : new Error('安全握手失败');
+    }
+  }
+
+  private waitForResponder(noise: NoiseIkInitiator): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        logError('noise: timeout waiting msg2 (15s)');
+        finish(new Error('安全握手超时'));
+      }, 15000);
+      logInfo('noise: waiting for msg2, sending msg1');
+      this.inner.onHandshakeStep = (step: number, data: Uint8Array) => {
+        logInfo('noise: got handshake step=' + step + ' len=' + data.length);
+        if (settled) {
+          return;
+        }
+        if (step !== 2) {
+          finish(new Error('安全握手时序错误'));
+          return;
+        }
+        try {
+          noise.readHandshake(data);
+          if (!noise.isComplete()) {
+            finish(new Error('安全握手未完成'));
+            return;
+          }
+          logInfo('noise: handshake complete');
+          finish();
+        } catch (e) {
+          finish(e instanceof Error ? e : new Error('安全握手失败'));
+        }
+      };
+      const finish = (error?: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        this.inner.onHandshakeStep = undefined;
+        if (error === undefined) {
+          resolve();
+        } else {
+          reject(error);
+        }
+      };
+      this.inner.sendHandshake(1, noise.writeHandshake(new Uint8Array(0))).catch((e: Error) => {
+        finish(new Error('安全握手发送失败'));
+      });
+    });
+  }
+
+  send(data: Uint8Array): Promise<void> {
+    const run = this.sendTail.then(() => this.sendNow(data));
+    const swallow = (): void => {
+      return;
+    };
+    this.sendTail = run.then(swallow, swallow);
+    return run;
+  }
+
+  private async sendNow(data: Uint8Array): Promise<void> {
+    const noise = this.noise;
+    if (noise === undefined || this.closed) {
+      throw new Error('安全通道未连接');
+    }
+    const plaintextFrames = this.outgoing.encode(data);
+    for (const plaintext of plaintextFrames) {
+      await this.inner.send(noise.encrypt(plaintext));
+    }
+  }
+
+  setMessageHandler(handler: (data: Uint8Array) => void): void {
+    this.inner.onMessage = (data: Uint8Array) => {
+      const noise = this.noise;
+      if (noise === undefined || !noise.isComplete() || this.closed) {
+        return;
+      }
+      try {
+        const plaintext = noise.decrypt(data);
+        const message = this.incoming.decode(plaintext);
+        if (message !== undefined) {
+          handler(message);
+        }
+      } catch (e) {
+        this.close();
+      }
+    };
+  }
+
+  /** 底层中继没了：清掉噪声状态并把关闭事件往上报（只会报一次）。 */
+  private handleInnerClosed(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.incoming.reset();
+    this.outgoing.reset();
+    this.noise = undefined;
+    const cb = this.onClosed;
+    if (cb !== undefined) {
+      cb();
+    }
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.incoming.reset();
+    this.outgoing.reset();
+    this.noise = undefined;
+    this.inner.close();
+    const cb = this.onClosed;
+    if (cb !== undefined) {
+      cb();
+    }
+  }
+}
