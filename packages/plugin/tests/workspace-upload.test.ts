@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SafeLogger } from '../src/logging.js'
 import { createRpcRequest } from '@dsh-remote/protocol'
 import { WorkspaceUploadHost, WORKSPACE_UPLOAD_AUTHORITY_TTL_MS, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
-import { WorkspaceUploadBudget } from '../src/workspace-upload-budget.js'
+import { WorkspaceUploadBudget, SESSION_UPLOAD_DAILY_RECORDS } from '../src/workspace-upload-budget.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
 const hosts: WorkspaceUploadHost[] = []
@@ -28,7 +28,7 @@ const scope = (p: ReturnType<typeof request>) => ({ sessionId: p.sessionId, uplo
 it('shares active, byte, and session quotas across peer upload hosts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-upload-shared-'))
   directories.push(root)
-  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 6, hostDailyBytes: 9, sessionBytes: 6, diskFreeBytes: 0 }, async () => 100)
+  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 6, hostDailyBytes: 9, sessionBytes: 6, diskFreeBytes: 0, sessions: 1024 }, async () => 100)
   const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   hosts.push(a, b)
@@ -46,7 +46,7 @@ it('shares active, byte, and session quotas across peer upload hosts', async () 
 it('reserves free disk space atomically across peers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-upload-disk-'))
   directories.push(root)
-  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => 15)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10, sessions: 1024 }, async () => 15)
   const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   hosts.push(a, b)
@@ -62,7 +62,7 @@ it('reserves free disk space atomically across peers', async () => {
 it('limits completed bytes across sessions on the same host', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-upload-total-'))
   directories.push(root)
-  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 5, sessionBytes: 100, diskFreeBytes: 0 }, async () => 100)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, hostDailyBytes: 5, sessionBytes: 100, diskFreeBytes: 0, sessions: 1024 }, async () => 100)
   const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   hosts.push(a, b)
@@ -71,11 +71,59 @@ it('limits completed bytes across sessions on the same host', async () => {
   await b.call('workspace.upload.open', { ...request('second', 2), sessionId: 'session-b' })
 })
 
+it('charges an upload to the window in which it commits', async () => {
+  const day = 24 * 60 * 60 * 1000
+  let now = day
+  const host = new WorkspaceUploadBudget({ active: 4, reservedBytes: 10, hostDailyBytes: 6, sessionBytes: 10, diskFreeBytes: 0, sessions: 1024 }, async () => 100, () => now)
+  const session = new WorkspaceUploadBudget({ active: 4, reservedBytes: 10, hostDailyBytes: 10, sessionBytes: 6, diskFreeBytes: 0, sessions: 1024 }, async () => 100, () => now)
+  const initial = await Promise.all([host.reserve('/unused', 1, 'session-a', 5), session.reserve('/unused', 1, 'session-a', 5)])
+  for (const reservation of initial) reservation.commit()
+  now += day - 1
+  const crossing = await Promise.all([host.reserve('/unused', 1, 'session-a', 1), session.reserve('/unused', 1, 'session-a', 1)])
+  now += 2
+  for (const reservation of crossing) reservation.commit()
+  await expect(host.reserve('/unused', 1, 'session-b', 6)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await expect(session.reserve('/unused', 1, 'session-a', 6)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  const hostRemaining = await host.reserve('/unused', 1, 'session-b', 5)
+  const sessionRemaining = await session.reserve('/unused', 1, 'session-a', 5)
+  hostRemaining.release()
+  sessionRemaining.release()
+})
+
+it('bounds distinct session records, including zero-byte uploads', async () => {
+  const day = 24 * 60 * 60 * 1000
+  let now = day
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 10, hostDailyBytes: 10, sessionBytes: 10, diskFreeBytes: 0, sessions: 2 }, async () => 100, () => now)
+  const first = await budget.reserve('/unused', 1, 'session-a', 0)
+  const second = await budget.reserve('/unused', 1, 'session-b', 1)
+  await expect(budget.reserve('/unused', 1, 'session-c', 1)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  first.commit()
+  second.commit()
+  await expect(budget.reserve('/unused', 1, 'session-c', 1)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  const existing = await budget.reserve('/unused', 1, 'session-a', 1)
+  existing.release()
+  now += day + 1
+  const afterExpiry = await budget.reserve('/unused', 1, 'session-c', 1)
+  afterExpiry.release()
+})
+
+it('rejects a new session after the production record limit', async () => {
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 10, hostDailyBytes: 10, sessionBytes: 10, diskFreeBytes: 0,
+    sessions: SESSION_UPLOAD_DAILY_RECORDS }, async () => 100)
+  for (let index = 0; index < SESSION_UPLOAD_DAILY_RECORDS; index++) {
+    const reservation = await budget.reserve('/unused', 1, `session-${index}`, 0)
+    reservation.commit()
+  }
+  await expect(budget.reserve('/unused', 1, 'overflow', 0)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  const existing = await budget.reserve('/unused', 1, 'session-0', 1)
+  existing.release()
+})
+
 it('drops an open upload when disk space falls before a chunk', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-upload-space-'))
   directories.push(root)
   let free = 100
-  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => free)
+  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 100, hostDailyBytes: 100, sessionBytes: 100, diskFreeBytes: 10, sessions: 1024 }, async () => free)
   const host = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
   hosts.push(host)
   const p = request()

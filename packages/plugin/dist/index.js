@@ -99695,6 +99695,7 @@ var HOST_UPLOAD_ACTIVE_LIMIT = 4;
 var HOST_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
 var HOST_UPLOAD_DAILY_BYTES = 4 * 1024 * 1024 * 1024;
 var SESSION_UPLOAD_DAILY_BYTES = 2 * 1024 * 1024 * 1024;
+var SESSION_UPLOAD_DAILY_RECORDS = 1024;
 var UPLOAD_DISK_FREE_BYTES = 256 * 1024 * 1024;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var WorkspaceUploadBudget = class {
@@ -99703,6 +99704,7 @@ var WorkspaceUploadBudget = class {
     reservedBytes: HOST_UPLOAD_RESERVED_BYTES,
     hostDailyBytes: HOST_UPLOAD_DAILY_BYTES,
     sessionBytes: SESSION_UPLOAD_DAILY_BYTES,
+    sessions: SESSION_UPLOAD_DAILY_RECORDS,
     diskFreeBytes: UPLOAD_DISK_FREE_BYTES
   }, freeBytes = async (root2) => {
     const disk = await statfs(root2);
@@ -99714,19 +99716,27 @@ var WorkspaceUploadBudget = class {
   }
   active = /* @__PURE__ */ new Set();
   completed = /* @__PURE__ */ new Map();
-  hostCompleted = { at: 0, bytes: 0 };
+  hostCompleted = { at: null, bytes: 0 };
   activePaths = /* @__PURE__ */ new Set();
   scannedRoots = /* @__PURE__ */ new Map();
+  prune(now) {
+    const cutoff = now - DAY_MS;
+    if (this.hostCompleted.at !== null && this.hostCompleted.at <= cutoff) this.hostCompleted = { at: null, bytes: 0 };
+    for (const [id6, entry] of this.completed) {
+      if (entry.at > cutoff) break;
+      this.completed.delete(id6);
+    }
+  }
   async reserve(root2, dev, sessionId, bytes) {
     const free = await this.freeBytes(root2);
-    const cutoff = this.now() - DAY_MS;
-    if (this.hostCompleted.at <= cutoff) this.hostCompleted = { at: 0, bytes: 0 };
-    for (const [id6, entry2] of this.completed) if (entry2.at <= cutoff) this.completed.delete(id6);
+    this.prune(this.now());
     const active2 = [...this.active];
     const reserved = active2.reduce((sum, entry2) => sum + entry2.remaining, 0);
     const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
     const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0) + (this.completed.get(sessionId)?.bytes ?? 0);
-    if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || this.hostCompleted.bytes + active2.reduce((sum, entry2) => sum + entry2.total, 0) + bytes > this.limits.hostDailyBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+    const pendingSessions = new Set(active2.filter((entry2) => !this.completed.has(entry2.sessionId)).map((entry2) => entry2.sessionId));
+    const newSession = !this.completed.has(sessionId) && !pendingSessions.has(sessionId);
+    if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || this.hostCompleted.bytes + active2.reduce((sum, entry2) => sum + entry2.total, 0) + bytes > this.limits.hostDailyBytes || session2 + bytes > this.limits.sessionBytes || newSession && this.completed.size + pendingSessions.size >= this.limits.sessions || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
     const entry = { sessionId, dev, remaining: bytes, total: bytes };
     this.active.add(entry);
     let done = false;
@@ -99742,13 +99752,13 @@ var WorkspaceUploadBudget = class {
       },
       commit: () => {
         if (done) return;
+        const now = this.now();
+        this.prune(now);
         done = true;
         this.active.delete(entry);
-        if (bytes > 0) {
-          this.hostCompleted = { at: this.hostCompleted.bytes === 0 ? this.now() : this.hostCompleted.at, bytes: this.hostCompleted.bytes + bytes };
-          const prior = this.completed.get(sessionId);
-          this.completed.set(sessionId, { at: prior?.at ?? this.now(), bytes: (prior?.bytes ?? 0) + bytes });
-        }
+        this.hostCompleted = { at: this.hostCompleted.at ?? now, bytes: this.hostCompleted.bytes + bytes };
+        const prior = this.completed.get(sessionId);
+        this.completed.set(sessionId, { at: prior?.at ?? now, bytes: (prior?.bytes ?? 0) + bytes });
       },
       release: () => {
         if (done) return;
