@@ -363,7 +363,11 @@ describe('AcpRemoteGateway', () => {
       await gateway.reconfigure({ ...config, backends: config.backends.map(item => ({ ...item, enabled: item.id !== 'claude' })) })
       expect(claude.close).toHaveBeenCalledTimes(1)
       expect(cursor.close).not.toHaveBeenCalled()
-      await expect(gateway.call('client', { method: 'initialize', params: { backend: 'claude' } })).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+      // A configured-off backend is reported as such instead of as an outage.
+      await expect(gateway.call('client', { method: 'initialize', params: { backend: 'claude' } })).rejects.toMatchObject({
+        code: 'ACP_BACKEND_DISABLED',
+        message: 'The claude ACP backend is disabled by configuration.',
+      })
     } finally { await gateway.close() }
   })
   it('uses PI catalog cwd authority and prevents another connection from stealing loaded sessions', async () => {
@@ -618,7 +622,7 @@ describe('AcpRemoteGateway', () => {
           expect(agy.close).not.toHaveBeenCalled()
           await expect(
             peer.call({ method: 'initialize', params: { backend: 'cursor' } }),
-          ).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+          ).rejects.toMatchObject({ code: 'ACP_BACKEND_DISABLED' })
           await expect(
             peer.call({ method: 'initialize', params: { backend: 'antigravity' } }),
           ).resolves.toMatchObject({ backend: 'antigravity' })
@@ -693,10 +697,10 @@ describe('AcpRemoteGateway', () => {
                 method: 'session/load',
                 params: { sessionId: 'cursor-old', backend: 'cursor' },
               }),
-            ).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+            ).rejects.toMatchObject({ code: 'ACP_BACKEND_DISABLED' })
             await expect(
               gateway.call('owner', { method: 'initialize', params: { backend: 'cursor' } }),
-            ).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+            ).rejects.toMatchObject({ code: 'ACP_BACKEND_DISABLED' })
           } finally {
             await gateway.close()
           }

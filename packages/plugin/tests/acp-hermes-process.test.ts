@@ -161,7 +161,9 @@ describe('HermesAcpClient', () => {
       queueMicrotask(() => child.emit('error', new Error('spawn hermes ENOENT')))
       return child
     })
-    await expect(client.start()).rejects.toMatchObject({ code: 'CURSOR_BINARY_UNAVAILABLE' })
+    // Hermes reuses the Cursor stdio client, but its failures must not be
+    // reported as Cursor ones: a disabled Cursor backend stays silent.
+    await expect(client.start()).rejects.toMatchObject({ code: 'HERMES_BINARY_UNAVAILABLE' })
     expect(client.isReady()).toBe(false)
   })
 })

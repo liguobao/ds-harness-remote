@@ -125,6 +125,18 @@ ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册
 能力声明表示已启用的协议支持，`workspaceTypes.available` 表示实际就绪；关闭期间会清理
 正在启动的 CLI，迟到的初始化结果不得重新注册实例。后端配置保存后立即生效，仅更新发生变化的后端。
 
+`enabled: false` 的后端（包括 `cursor.enabled` 或 `acp.backends` 条目的 `enabled: false`）
+在启动、重试与重新配置后都不会被 spawn，也不进入 capability、`workspaceTypes` 或
+`availableBackends`。Client 显式请求一个被配置关闭的后端时返回
+`ACP_BACKEND_DISABLED`（消息为 `The <backend> ACP backend is disabled by configuration.`），
+而不是把它报告成普通的 `CURSOR_UNAVAILABLE` 故障。
+
+Pi / Claude / Hermes 复用 Cursor 的 stdio adapter，因此它们的进程失败（含二进制缺失、
+初始化失败、退出、超时与通信错误）使用各自的后端前缀，例如 `PI_BINARY_UNAVAILABLE`、
+`CLAUDE_BINARY_UNAVAILABLE`、`HERMES_BINARY_UNAVAILABLE`，日志前缀同样为
+`Pi ACP ...` / `Claude ACP ...` / `Hermes ACP ...`。禁用的 Cursor 后端不会因这些
+后端复用同一 adapter 而出现在启动日志里。
+
 设置页根据 Host 上配置的命令及运行时支持的候选位置检测后端是否可发现。
 检测不可用时工作区开关显示关闭并禁用；手动检测失败会保存该后端的关闭状态，
 并立即更新 Host 运行时，适用于 Cursor、AGY、CodeX 和自定义 ACP 条目。

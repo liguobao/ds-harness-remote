@@ -95,6 +95,7 @@ export class AndroidRemoteRuntime {
   hasHermes() { return this.client.hasHermes() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
+  promoteTransport(options?: { preferLan?: boolean }) { return this.client.promoteTransport?.(options) ?? Promise.resolve(false) }
   checkHealth() { return this.client.checkHealth() }
 
   async close(options: { preserveRecovery?: boolean } = {}): Promise<void> {

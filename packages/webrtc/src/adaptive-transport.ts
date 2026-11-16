@@ -49,6 +49,8 @@ export interface AdaptiveTransportOptions {
   capabilities?: string[]
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   forceRelay?: boolean
+  /** Select Relay immediately for initial setup while keeping WebRTC/TURN in preferredTransports for in-band upgrade. */
+  relayFirst?: boolean
   /** Control authorization only, ending at connect.accepted. */
   handshakeTimeoutMs?: number
   negotiateTimeoutMs?: number
@@ -101,6 +103,7 @@ const DEFAULT_PREFERRED_TRANSPORTS = ['lan', 'p2p', 'turn', 'relay'] as const
  */
 export class AdaptiveTransport extends BaseTransport {
   private readonly handshakeHandlers = new Set<(step: number, data: Uint8Array) => void>()
+  private readonly sequencedHandlers = new Set<(counter: number | undefined, data: Uint8Array) => void>()
   private socket?: WebSocket
   private dataSocket?: WebSocket
   private connectionId?: string
@@ -259,6 +262,11 @@ export class AdaptiveTransport extends BaseTransport {
     return () => this.handshakeHandlers.delete(cb)
   }
 
+  onSequencedMessage(cb: (counter: number | undefined, data: Uint8Array) => void): () => void {
+    this.sequencedHandlers.add(cb)
+    return () => this.sequencedHandlers.delete(cb)
+  }
+
   async close(): Promise<void> {
     this.failConnection(new Error('Adaptive transport closed'))
   }
@@ -403,13 +411,14 @@ export class AdaptiveTransport extends BaseTransport {
     }
     const data = fromBase64Url(payload.ciphertext)
     this.bytesReceived += data.byteLength
+    for (const handler of this.sequencedHandlers) handler(payload.counter as number, data)
     this.emit(data)
   }
 
   private async negotiate(signal: AbortSignal): Promise<void> {
     if (this.connectionId === undefined) return
     const preferred = this.negotiatedTransports()
-    const wantWebRtc = !this.options.forceRelay && this.webrtcEnabled
+    const wantWebRtc = !this.options.forceRelay && !this.options.relayFirst && this.webrtcEnabled
       && (preferred.includes('lan') || preferred.includes('p2p') || preferred.includes('turn'))
     let selected: SelectedTransport = 'relay'
     this.lastRtcDiagnostics = undefined
@@ -518,6 +527,7 @@ export class AdaptiveTransport extends BaseTransport {
     rtc.onMessage(data => {
       if (this.lease && !this.lease.valid()) return
       this.bytesReceived += data.byteLength
+      for (const handler of this.sequencedHandlers) handler(undefined, data)
       this.emit(data)
     })
     rtc.onClose(() => {
@@ -740,6 +750,7 @@ export class AdaptiveTransport extends BaseTransport {
       }
       const data = fromBase64Url(payload.ciphertext)
       this.bytesReceived += data.byteLength
+      for (const handler of this.sequencedHandlers) handler(payload.counter as number, data)
       this.emit(data)
       return
     }

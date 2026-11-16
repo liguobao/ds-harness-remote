@@ -64513,6 +64513,164 @@ function createLanUploadPrologue(offer) {
   return new TextEncoder().encode(JSON.stringify(["ds-harness-remote/lan-upload/v1", offer.connectionId, offer.sessionId, offer.uploadId, ticket]));
 }
 
+// packages/protocol/dist/transport-upgrade.js
+var TRANSPORT_UPGRADE_CAPABILITY = "remote.transport.upgrade.v1";
+var UPGRADE_SEQUENCE_HEADER_BYTES = 12;
+var MAX_REORDER_BUFFERED_FRAMES = 256;
+var MAX_REORDER_BUFFERED_BYTES = 4 * 1024 * 1024;
+var DEFAULT_REORDER_GAP_TIMEOUT_MS = 5e3;
+var DEFAULT_PREVIOUS_LEG_DRAIN_MS = 3e3;
+var UPGRADE_SEQ_MAGIC = [68, 83, 72, 85];
+var transportUpgradeCandidateSchema = external_exports.object({
+  candidate: external_exports.string().max(4096).optional(),
+  sdpMid: external_exports.string().max(128).nullable().optional(),
+  sdpMLineIndex: external_exports.number().int().min(0).max(64).nullable().optional(),
+  usernameFragment: external_exports.string().max(256).nullable().optional()
+}).strict();
+var transportUpgradeOfferSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  sdp: external_exports.string().min(1).max(128 * 1024)
+}).strict();
+var transportUpgradeIceSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  candidate: transportUpgradeCandidateSchema
+}).strict();
+var transportUpgradeActivateSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  transport: external_exports.enum(["lan", "p2p", "turn"]).optional(),
+  previousLegEndCounter: external_exports.number().int().min(0).optional()
+}).strict();
+var transportUpgradeDrainSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64),
+  previousLegEndCounter: external_exports.number().int().min(0)
+}).strict();
+var transportUpgradeAbortSchema = external_exports.object({
+  attemptId: external_exports.string().min(1).max(64).optional()
+}).strict();
+function transportTierRank(mode2) {
+  switch (mode2) {
+    case "LAN":
+      return 3;
+    case "P2P":
+      return 2;
+    case "TURN":
+      return 1;
+    default:
+      return 0;
+  }
+}
+function wireFromTransportTier(mode2) {
+  return mode2 === "LAN" ? "lan" : mode2 === "P2P" ? "p2p" : "turn";
+}
+function wrapUpgradedTransportFrame(counter, ciphertext) {
+  if (!Number.isSafeInteger(counter) || counter < 0) {
+    throw new Error("Upgraded transport counter must be a non-negative safe integer.");
+  }
+  const out = new Uint8Array(UPGRADE_SEQUENCE_HEADER_BYTES + ciphertext.byteLength);
+  out.set(UPGRADE_SEQ_MAGIC, 0);
+  const view = new DataView(out.buffer, out.byteOffset, UPGRADE_SEQUENCE_HEADER_BYTES);
+  view.setBigUint64(4, BigInt(counter), false);
+  out.set(ciphertext, UPGRADE_SEQUENCE_HEADER_BYTES);
+  return out;
+}
+function unwrapUpgradedTransportFrame(frame) {
+  if (frame.byteLength < UPGRADE_SEQUENCE_HEADER_BYTES || frame[0] !== UPGRADE_SEQ_MAGIC[0] || frame[1] !== UPGRADE_SEQ_MAGIC[1] || frame[2] !== UPGRADE_SEQ_MAGIC[2] || frame[3] !== UPGRADE_SEQ_MAGIC[3]) {
+    throw new Error("Invalid upgraded transport frame header.");
+  }
+  const view = new DataView(frame.buffer, frame.byteOffset, UPGRADE_SEQUENCE_HEADER_BYTES);
+  const rawCounter = view.getBigUint64(4, false);
+  if (rawCounter > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Upgraded transport frame counter overflowed.");
+  }
+  return {
+    counter: Number(rawCounter),
+    ciphertext: frame.subarray(UPGRADE_SEQUENCE_HEADER_BYTES)
+  };
+}
+var SequencedCiphertextReorderBuffer = class {
+  options;
+  pending = /* @__PURE__ */ new Map();
+  bufferedBytes = 0;
+  gapTimer;
+  gapCounter;
+  constructor(options) {
+    this.options = options;
+  }
+  get size() {
+    return this.pending.size;
+  }
+  get bytes() {
+    return this.bufferedBytes;
+  }
+  push(counter, expectedCounter, ciphertext) {
+    if (!Number.isSafeInteger(counter) || counter <= expectedCounter) {
+      throw new Error("Ciphertext counter is duplicated or out of order.");
+    }
+    if (this.pending.has(counter)) {
+      throw new Error("Duplicate buffered ciphertext counter.");
+    }
+    const maxFrames = this.options.maxFrames ?? MAX_REORDER_BUFFERED_FRAMES;
+    const maxBytes = this.options.maxBytes ?? MAX_REORDER_BUFFERED_BYTES;
+    if (this.pending.size >= maxFrames || this.bufferedBytes + ciphertext.byteLength > maxBytes) {
+      throw new Error("Cross-transport reorder buffer exceeded its limit.");
+    }
+    const copy = new Uint8Array(ciphertext);
+    this.pending.set(counter, copy);
+    this.bufferedBytes += copy.byteLength;
+    this.armGapTimer(expectedCounter);
+  }
+  takeNext(expectedCounter) {
+    const hit = this.pending.get(expectedCounter);
+    if (hit === void 0) {
+      if (this.pending.size === 0)
+        this.clearGapTimer();
+      else
+        this.armGapTimer(expectedCounter);
+      return void 0;
+    }
+    this.pending.delete(expectedCounter);
+    this.bufferedBytes -= hit.byteLength;
+    if (this.pending.size === 0)
+      this.clearGapTimer();
+    else
+      this.armGapTimer(expectedCounter + 1);
+    return hit;
+  }
+  onExpectedAdvanced(nextExpectedCounter) {
+    if (this.pending.size === 0) {
+      this.clearGapTimer();
+      return;
+    }
+    this.armGapTimer(nextExpectedCounter);
+  }
+  clear() {
+    this.clearGapTimer();
+    this.pending.clear();
+    this.bufferedBytes = 0;
+  }
+  armGapTimer(expectedCounter) {
+    if (this.gapCounter === expectedCounter && this.gapTimer !== void 0)
+      return;
+    this.clearGapTimer();
+    this.gapCounter = expectedCounter;
+    const timeoutMs = this.options.gapTimeoutMs ?? DEFAULT_REORDER_GAP_TIMEOUT_MS;
+    this.gapTimer = setTimeout(() => {
+      this.gapTimer = void 0;
+      if (this.pending.size > 0) {
+        this.options.onGapTimeout(expectedCounter);
+      }
+    }, timeoutMs);
+    this.gapTimer.unref?.();
+  }
+  clearGapTimer() {
+    if (this.gapTimer !== void 0) {
+      clearTimeout(this.gapTimer);
+      this.gapTimer = void 0;
+    }
+    this.gapCounter = void 0;
+  }
+};
+
 // packages/protocol/dist/binary-upload.js
 var BINARY_UPLOAD_CAPABILITY = "workspace.upload.binary.v1";
 var BINARY_UPLOAD_CHUNK_BYTES = 256 * 1024;
@@ -66219,6 +66377,2014 @@ function canonicalBase64ToBytes(value) {
     bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
+
+// packages/webrtc/dist/websocket-backpressure.js
+async function waitForRelayCapacity(socket) {
+  const started = Date.now();
+  while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
+    if (socket.readyState !== 1 || Date.now() - started > 1e4)
+      throw new Error("Relay consumer is too slow or disconnected");
+    await new Promise((resolve10) => setTimeout(resolve10, 10));
+  }
+  if (socket.readyState !== 1)
+    throw new Error("Relay transport closed");
+}
+
+// packages/webrtc/dist/transport.js
+var BaseTransport = class {
+  handlers = /* @__PURE__ */ new Set();
+  closeHandlers = /* @__PURE__ */ new Set();
+  onMessage(cb) {
+    this.handlers.add(cb);
+    return () => this.handlers.delete(cb);
+  }
+  onClose(cb) {
+    this.closeHandlers.add(cb);
+    return () => this.closeHandlers.delete(cb);
+  }
+  emit(data2) {
+    for (const handler of this.handlers)
+      handler(data2);
+  }
+  emitClose(error62) {
+    for (const handler of this.closeHandlers)
+      handler(error62);
+  }
+};
+
+// packages/webrtc/dist/util.js
+function toBase64Url(bytes) {
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
+  return base643.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+function fromBase64Url(value) {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  if (typeof atob === "function")
+    return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+  return new Uint8Array(Buffer.from(padded, "base64"));
+}
+
+// packages/webrtc/dist/rtc-adapter.js
+var RTC_DATA_CHANNEL_LABEL = "dsh";
+var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
+function browserRtcFactory(options = {}) {
+  const binarySender = options.sendBinary;
+  return {
+    create(configuration) {
+      const raw = new RTCPeerConnection({
+        iceServers: configuration.iceServers,
+        iceTransportPolicy: configuration.iceTransportPolicy
+      });
+      return {
+        get connectionState() {
+          return raw.connectionState;
+        },
+        get iceConnectionState() {
+          return raw.iceConnectionState;
+        },
+        get iceGatheringState() {
+          return raw.iceGatheringState;
+        },
+        get signalingState() {
+          return raw.signalingState;
+        },
+        set onconnectionstatechange(value) {
+          raw.onconnectionstatechange = value;
+        },
+        get onconnectionstatechange() {
+          return raw.onconnectionstatechange;
+        },
+        set oniceconnectionstatechange(value) {
+          raw.oniceconnectionstatechange = value;
+        },
+        get oniceconnectionstatechange() {
+          return raw.oniceconnectionstatechange;
+        },
+        set onicegatheringstatechange(value) {
+          raw.onicegatheringstatechange = value;
+        },
+        get onicegatheringstatechange() {
+          return raw.onicegatheringstatechange;
+        },
+        set onicecandidate(value) {
+          raw.onicecandidate = value;
+        },
+        get onicecandidate() {
+          return raw.onicecandidate;
+        },
+        set ondatachannel(value) {
+          raw.ondatachannel = value;
+        },
+        get ondatachannel() {
+          return raw.ondatachannel;
+        },
+        createDataChannel(label, options2) {
+          return adaptDataChannel(raw.createDataChannel(label, options2), binarySender);
+        },
+        createOffer() {
+          return raw.createOffer();
+        },
+        createAnswer() {
+          return raw.createAnswer();
+        },
+        setLocalDescription(description) {
+          return raw.setLocalDescription(description);
+        },
+        setRemoteDescription(description) {
+          return raw.setRemoteDescription(description);
+        },
+        addIceCandidate(candidate) {
+          return raw.addIceCandidate(candidate);
+        },
+        async getStats() {
+          return await raw.getStats();
+        },
+        close() {
+          raw.close();
+        }
+      };
+    }
+  };
+}
+function summarizeIceCandidate(candidate) {
+  const value = candidate?.candidate?.trim();
+  if (value === void 0 || value.length === 0)
+    return emptyCandidateSummary();
+  const parts = value.replace(/^candidate:/, "").split(/\s+/);
+  const typeIndex = parts.indexOf("typ");
+  const relatedAddressIndex = parts.indexOf("raddr");
+  return {
+    candidateType: parseCandidateType(parts[typeIndex + 1]),
+    protocol: normalizeProtocol(parts[2]),
+    ...summarizeAddress(parts[4]),
+    ...relatedAddressIndex < 0 ? {} : relatedAddressSummary(parts[relatedAddressIndex + 1])
+  };
+}
+function summarizeAddress(address2) {
+  if (address2 === void 0 || address2.length === 0)
+    return { addressFamily: "unknown", addressScope: "unknown" };
+  if (address2.includes(":"))
+    return { addressFamily: "ipv6", addressScope: summarizeIpv6Scope(address2) };
+  const parts = address2.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return { addressFamily: "unknown", addressScope: "unknown" };
+  }
+  return { addressFamily: "ipv4", addressScope: summarizeIpv4Scope(parts) };
+}
+function stunOnlyIceServers(iceServers) {
+  const direct = [];
+  for (const server of iceServers) {
+    const sourceUrls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    const urls = sourceUrls.filter(isStunUrl);
+    if (urls.length === 0)
+      continue;
+    direct.push({ urls: Array.isArray(server.urls) ? urls : urls[0] });
+  }
+  return direct;
+}
+function isStunUrl(url2) {
+  const value = url2.trim().toLowerCase();
+  return value.startsWith("stun:") || value.startsWith("stuns:");
+}
+function emptyCandidateSummary() {
+  return { candidateType: "unknown", addressFamily: "unknown", addressScope: "unknown" };
+}
+function parseCandidateType(value) {
+  if (value === "host" || value === "srflx" || value === "prflx" || value === "relay")
+    return value;
+  return "unknown";
+}
+function normalizeProtocol(value) {
+  if (value === void 0 || value.length === 0)
+    return void 0;
+  return value.toLowerCase();
+}
+function relatedAddressSummary(address2) {
+  const summary3 = summarizeAddress(address2);
+  return {
+    relatedAddressFamily: summary3.addressFamily,
+    relatedAddressScope: summary3.addressScope
+  };
+}
+function summarizeIpv4Scope(parts) {
+  if (parts[0] === 0 || parts[0] >= 240)
+    return "reserved";
+  if (parts[0] === 127)
+    return "loopback";
+  if (parts[0] === 169 && parts[1] === 254)
+    return "link-local";
+  if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
+    return "cgnat";
+  if (parts[0] >= 224)
+    return "reserved";
+  if (parts[0] === 10)
+    return "private";
+  if (parts[0] === 192 && parts[1] === 168)
+    return "private";
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    return "private";
+  return "public";
+}
+function summarizeIpv6Scope(address2) {
+  const value = address2.toLowerCase();
+  if (value === "::1")
+    return "loopback";
+  if (value.startsWith("fe80:"))
+    return "link-local";
+  if (value.startsWith("fd7a:115c:a1e0:"))
+    return "cgnat";
+  if (value.startsWith("fc") || value.startsWith("fd"))
+    return "private";
+  if (value.startsWith("ff"))
+    return "reserved";
+  return "public";
+}
+function adaptDataChannel(raw, sendBinary) {
+  return {
+    get label() {
+      return raw.label;
+    },
+    get ordered() {
+      return raw.ordered;
+    },
+    get readyState() {
+      return raw.readyState;
+    },
+    get bufferedAmount() {
+      return raw.bufferedAmount;
+    },
+    get binaryType() {
+      return raw.binaryType;
+    },
+    set binaryType(value) {
+      raw.binaryType = value;
+    },
+    set onopen(value) {
+      raw.onopen = value;
+    },
+    get onopen() {
+      return raw.onopen;
+    },
+    set onmessage(value) {
+      raw.onmessage = value;
+    },
+    get onmessage() {
+      return raw.onmessage;
+    },
+    set onclose(value) {
+      raw.onclose = value;
+    },
+    get onclose() {
+      return raw.onclose;
+    },
+    set onerror(value) {
+      raw.onerror = value;
+    },
+    get onerror() {
+      return raw.onerror;
+    },
+    set onbufferedamountlow(value) {
+      raw.onbufferedamountlow = value;
+    },
+    get onbufferedamountlow() {
+      return raw.onbufferedamountlow;
+    },
+    send(data2) {
+      if (data2 instanceof ArrayBuffer && sendBinary?.(raw, data2))
+        return;
+      raw.send(data2);
+    },
+    close() {
+      raw.close();
+    }
+  };
+}
+
+// packages/webrtc/dist/rtc-chunking.js
+var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
+var RTC_CHUNK_HEADER_BYTES = 12;
+var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
+var RTC_CHUNK_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
+var RTC_CHUNK_MAX_TOTAL = Math.ceil(RTC_CHUNK_MAX_MESSAGE_BYTES / RTC_CHUNK_PAYLOAD_BYTES);
+var MAX_IN_FLIGHT_MESSAGES = 8;
+var MAX_ASSEMBLY_AGE_MS = 3e4;
+var RtcChunkCodec = class {
+  nextMessageId = 1;
+  assemblies = /* @__PURE__ */ new Map();
+  encode(data2) {
+    if (data2.byteLength <= RTC_CHUNK_PAYLOAD_BYTES)
+      return [data2];
+    if (data2.byteLength > RTC_CHUNK_MAX_MESSAGE_BYTES) {
+      throw new Error("WebRTC transport message exceeds the reassembly limit.");
+    }
+    const messageId = this.nextMessageId;
+    this.nextMessageId = messageId === 4294967295 ? 1 : messageId + 1;
+    const total = Math.ceil(data2.byteLength / RTC_CHUNK_PAYLOAD_BYTES);
+    const frames = [];
+    for (let index = 0; index < total; index += 1) {
+      const start = index * RTC_CHUNK_PAYLOAD_BYTES;
+      const chunk = data2.subarray(start, Math.min(data2.byteLength, start + RTC_CHUNK_PAYLOAD_BYTES));
+      const frame = new Uint8Array(RTC_CHUNK_HEADER_BYTES + chunk.byteLength);
+      frame.set(RTC_CHUNK_MAGIC);
+      const view = new DataView(frame.buffer);
+      view.setUint32(4, messageId);
+      view.setUint16(8, index);
+      view.setUint16(10, total);
+      frame.set(chunk, RTC_CHUNK_HEADER_BYTES);
+      frames.push(frame);
+    }
+    return frames;
+  }
+  decode(frame) {
+    if (!isChunk(frame)) {
+      if (frame.byteLength > RTC_CHUNK_MAX_MESSAGE_BYTES) {
+        throw new Error("WebRTC transport message exceeds the reassembly limit.");
+      }
+      return frame;
+    }
+    if (frame.byteLength < RTC_CHUNK_HEADER_BYTES)
+      throw new Error("WebRTC transport chunk header is invalid.");
+    const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+    const messageId = view.getUint32(4);
+    const index = view.getUint16(8);
+    const total = view.getUint16(10);
+    if (messageId === 0 || total < 2 || total > RTC_CHUNK_MAX_TOTAL || index >= total) {
+      throw new Error("WebRTC transport chunk metadata is invalid.");
+    }
+    const chunk = frame.subarray(RTC_CHUNK_HEADER_BYTES);
+    if (chunk.byteLength > RTC_CHUNK_PAYLOAD_BYTES || index < total - 1 && chunk.byteLength !== RTC_CHUNK_PAYLOAD_BYTES || index === total - 1 && chunk.byteLength === 0) {
+      throw new Error("WebRTC transport chunk length is invalid.");
+    }
+    this.pruneStale();
+    let assembly = this.assemblies.get(messageId);
+    if (assembly === void 0) {
+      if (index !== 0 || this.assemblies.size >= MAX_IN_FLIGHT_MESSAGES) {
+        throw new Error("WebRTC transport chunk sequence is invalid.");
+      }
+      assembly = { messageId, total, receivedBytes: 0, chunks: [], updatedAt: Date.now() };
+      this.assemblies.set(messageId, assembly);
+    }
+    if (assembly.total !== total || index !== assembly.chunks.length) {
+      this.assemblies.delete(messageId);
+      throw new Error("WebRTC transport chunk sequence is invalid.");
+    }
+    const receivedBytes = assembly.receivedBytes + chunk.byteLength;
+    if (receivedBytes > RTC_CHUNK_MAX_MESSAGE_BYTES) {
+      this.assemblies.delete(messageId);
+      throw new Error("WebRTC transport message exceeds the reassembly limit.");
+    }
+    assembly.chunks.push(Uint8Array.from(chunk));
+    assembly.receivedBytes = receivedBytes;
+    assembly.updatedAt = Date.now();
+    if (assembly.chunks.length < total)
+      return void 0;
+    this.assemblies.delete(messageId);
+    const message = new Uint8Array(assembly.receivedBytes);
+    let offset = 0;
+    for (const part of assembly.chunks) {
+      message.set(part, offset);
+      offset += part.byteLength;
+    }
+    return message;
+  }
+  reset() {
+    this.nextMessageId = 1;
+    this.assemblies.clear();
+  }
+  pruneStale() {
+    const now = Date.now();
+    for (const [messageId, assembly] of this.assemblies) {
+      if (now - assembly.updatedAt > MAX_ASSEMBLY_AGE_MS)
+        this.assemblies.delete(messageId);
+    }
+  }
+};
+function isChunk(frame) {
+  if (frame.byteLength < RTC_CHUNK_MAGIC.byteLength)
+    return false;
+  for (let index = 0; index < RTC_CHUNK_MAGIC.byteLength; index += 1) {
+    if (frame[index] !== RTC_CHUNK_MAGIC[index])
+      return false;
+  }
+  return true;
+}
+
+// packages/webrtc/dist/rtc-data-channel.js
+var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
+var SELECTED_PATH_RETRY_COUNT = 5;
+var SELECTED_PATH_RETRY_DELAY_MS = 50;
+var RtcDataChannelTransport = class {
+  pc;
+  role;
+  onSignal;
+  negotiateTimeoutMs;
+  channelLabel;
+  sendTimeoutMs;
+  label;
+  onDiagnostic;
+  channel;
+  remoteCandidates = [];
+  remoteDescriptionSet = false;
+  opened = false;
+  closed = false;
+  messageHandlers = /* @__PURE__ */ new Set();
+  closeHandlers = /* @__PURE__ */ new Set();
+  errorHandlers = /* @__PURE__ */ new Set();
+  connectPromise;
+  openResolve;
+  openReject;
+  negotiateTimer;
+  removeAbort;
+  watchdogTimer;
+  outgoing = new RtcChunkCodec();
+  incoming = new RtcChunkCodec();
+  bytesSent = 0;
+  bytesReceived = 0;
+  selected;
+  selectedMode;
+  selectedRelayUrlValue;
+  selectedPathTelemetry;
+  localCandidateTelemetry = emptyCandidateTelemetry();
+  remoteCandidateTelemetry = emptyCandidateTelemetry();
+  candidatePairTelemetry = emptyCandidatePairTelemetry();
+  filteredLocalCandidateTelemetry = emptyCandidateTelemetry();
+  filteredCandidatePairTelemetry = emptyCandidateTelemetry();
+  lastBufferedAmount = 0;
+  constructor(options) {
+    this.role = options.role;
+    this.onSignal = options.onSignal;
+    this.negotiateTimeoutMs = options.negotiateTimeoutMs ?? DEFAULT_NEGOTIATE_TIMEOUT_MS;
+    this.channelLabel = options.channelLabel ?? RTC_DATA_CHANNEL_LABEL;
+    this.sendTimeoutMs = options.sendTimeoutMs;
+    this.label = options.label;
+    this.onDiagnostic = options.onDiagnostic;
+    this.pc = options.factory.create({
+      iceServers: options.iceServers,
+      iceTransportPolicy: options.iceTransportPolicy,
+      onDiagnostic: (event) => this.handlePeerDiagnostic(event)
+    });
+    this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
+    this.pc.onicecandidate = (event) => {
+      if (event.candidate !== null && !this.closed) {
+        const candidate = summarizeIceCandidate(event.candidate);
+        recordCandidate(this.localCandidateTelemetry, candidate);
+        this.emitDiagnostic({ type: "local-candidate", candidate, diagnostics: this.diagnostics() });
+        this.onSignal({ type: "ice", candidate: event.candidate });
+      }
+    };
+    this.pc.onconnectionstatechange = () => {
+      this.emitStateChange();
+      this.checkConnectionState();
+    };
+    this.pc.oniceconnectionstatechange = () => {
+      this.emitStateChange();
+      this.checkConnectionState();
+    };
+    this.pc.onicegatheringstatechange = () => this.emitStateChange();
+  }
+  /** Begin negotiation; resolves when the DataChannel is open. */
+  connect(signal) {
+    if (this.closed)
+      return Promise.reject(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed."));
+    if (signal?.aborted)
+      return Promise.reject(new RtcConnectError("RTC_ABORTED", "WebRTC negotiation was aborted."));
+    if (this.opened)
+      return Promise.resolve();
+    if (this.connectPromise !== void 0)
+      return this.connectPromise;
+    this.armAbort(signal);
+    this.connectPromise = new Promise((resolve10, reject) => {
+      this.openResolve = resolve10;
+      this.openReject = reject;
+      this.negotiateTimer = setTimeout(() => {
+        void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
+      }, this.negotiateTimeoutMs);
+      if (this.role === "initiator") {
+        void this.startInitiator().catch((error62) => this.failOpen(asError(error62)));
+      }
+    });
+    return this.connectPromise;
+  }
+  handleSignal(signal) {
+    if (this.closed)
+      return;
+    if (signal.type === "offer")
+      void this.handleOffer(signal.sdp);
+    else if (signal.type === "answer")
+      void this.handleAnswer(signal.sdp);
+    else
+      void this.handleIce(signal.candidate);
+  }
+  async send(data2) {
+    const channel = this.requireOpenChannel();
+    if (channel.readyState !== "open")
+      throw new Error("WebRTC data channel is not open.");
+    for (const frame of this.outgoing.encode(data2)) {
+      try {
+        channel.send(toArrayBuffer(frame));
+      } catch (error62) {
+        console.error("[rtc-send-error] bytes=" + frame.byteLength, error62 instanceof Error ? error62.message : error62);
+        throw error62;
+      }
+    }
+    this.bytesSent += data2.byteLength;
+    this.armWatchdog(channel);
+  }
+  onMessage(handler) {
+    this.messageHandlers.add(handler);
+    return () => this.messageHandlers.delete(handler);
+  }
+  onClose(handler) {
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
+  }
+  onError(handler) {
+    this.errorHandlers.add(handler);
+    return () => this.errorHandlers.delete(handler);
+  }
+  selectedTransport() {
+    return this.selected;
+  }
+  selectedRelayUrl() {
+    return this.selectedRelayUrlValue;
+  }
+  selectedPathMode() {
+    return this.selectedMode;
+  }
+  diagnostics() {
+    return {
+      role: this.role,
+      ...this.label === void 0 ? {} : { label: this.label },
+      connectionState: this.pc.connectionState,
+      iceConnectionState: this.pc.iceConnectionState,
+      iceGatheringState: this.pc.iceGatheringState,
+      localCandidates: cloneCandidateTelemetry(this.localCandidateTelemetry),
+      remoteCandidates: cloneCandidateTelemetry(this.remoteCandidateTelemetry),
+      candidatePairs: cloneCandidatePairTelemetry(this.candidatePairTelemetry),
+      filteredLocalCandidates: cloneCandidateTelemetry(this.filteredLocalCandidateTelemetry),
+      filteredCandidatePairs: cloneCandidateTelemetry(this.filteredCandidatePairTelemetry),
+      ...this.selectedPathTelemetry === void 0 ? {} : { selectedPath: { ...this.selectedPathTelemetry } }
+    };
+  }
+  async connectionDetails() {
+    let statsDetails = {};
+    try {
+      statsDetails = await this.refreshStatsDiagnostics();
+    } catch {
+    }
+    return {
+      ...statsDetails,
+      mode: statsDetails.mode ?? this.selectedMode,
+      connectionState: this.pc.connectionState,
+      iceConnectionState: this.pc.iceConnectionState,
+      dataChannelState: this.channel?.readyState,
+      diagnostics: this.diagnostics()
+    };
+  }
+  getStats() {
+    const connected = this.channel?.readyState === "open";
+    return {
+      mode: !connected ? "Disconnected" : this.selectedMode ?? (this.selected === "turn" ? "TURN" : this.selected === "lan" ? "LAN" : "P2P"),
+      connected,
+      bytesSent: this.bytesSent,
+      bytesReceived: this.bytesReceived
+    };
+  }
+  /** Idempotent close: releases PeerConnection, DataChannel, timers and listeners. */
+  async close() {
+    if (this.closed)
+      return;
+    this.closed = true;
+    this.clearNegotiation();
+    this.openReject?.(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed during negotiation."));
+    this.openResolve = void 0;
+    this.openReject = void 0;
+    this.clearWatchdog();
+    const channel = this.channel;
+    this.channel = void 0;
+    if (channel !== void 0) {
+      channel.onopen = null;
+      channel.onmessage = null;
+      channel.onclose = null;
+      channel.onerror = null;
+      channel.onbufferedamountlow = null;
+      try {
+        channel.close();
+      } catch {
+      }
+    }
+    this.pc.onicecandidate = null;
+    this.pc.ondatachannel = null;
+    this.pc.onconnectionstatechange = null;
+    this.pc.oniceconnectionstatechange = null;
+    try {
+      this.pc.close();
+    } catch {
+    }
+    if (this.opened) {
+      this.opened = false;
+      for (const handler of this.closeHandlers)
+        handler();
+    }
+  }
+  armAbort(signal) {
+    this.removeAbort?.();
+    this.removeAbort = void 0;
+    if (signal === void 0)
+      return;
+    const onAbort = () => {
+      this.failOpen(new RtcConnectError("RTC_ABORTED", "WebRTC negotiation was aborted."));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    this.removeAbort = () => signal.removeEventListener("abort", onAbort);
+    if (signal.aborted)
+      onAbort();
+  }
+  async startInitiator() {
+    const channel = this.pc.createDataChannel(this.channelLabel, RTC_DATA_CHANNEL_OPTIONS);
+    this.adoptChannel(channel);
+    const offer = await this.pc.createOffer();
+    if (this.closed)
+      return;
+    await this.pc.setLocalDescription(offer);
+    if (this.closed)
+      return;
+    this.onSignal({ type: "offer", sdp: requireSdp(offer) });
+  }
+  async handleOffer(sdp) {
+    if (this.role !== "responder" || this.remoteDescriptionSet) {
+      this.failOpen(new RtcConnectError("RTC_INVALID_STATE", "Received an unexpected WebRTC offer."));
+      return;
+    }
+    try {
+      await this.pc.setRemoteDescription({ type: "offer", sdp });
+      this.remoteDescriptionSet = true;
+      await this.flushRemoteCandidates();
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      this.onSignal({ type: "answer", sdp: requireSdp(answer) });
+    } catch (error62) {
+      this.failOpen(asError(error62));
+    }
+  }
+  async handleAnswer(sdp) {
+    if (this.role !== "initiator" || this.remoteDescriptionSet) {
+      this.failOpen(new RtcConnectError("RTC_INVALID_STATE", "Received an unexpected WebRTC answer."));
+      return;
+    }
+    try {
+      await this.pc.setRemoteDescription({ type: "answer", sdp });
+      this.remoteDescriptionSet = true;
+      await this.flushRemoteCandidates();
+    } catch (error62) {
+      this.failOpen(asError(error62));
+    }
+  }
+  async handleIce(candidate) {
+    const summary3 = summarizeIceCandidate(candidate);
+    if (!this.remoteDescriptionSet) {
+      recordCandidate(this.remoteCandidateTelemetry, summary3);
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "buffered", diagnostics: this.diagnostics() });
+      this.remoteCandidates.push(candidate);
+      return;
+    }
+    try {
+      await this.pc.addIceCandidate(candidate);
+      recordCandidate(this.remoteCandidateTelemetry, summary3);
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "added", diagnostics: this.diagnostics() });
+    } catch {
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "ignored", diagnostics: this.diagnostics() });
+    }
+  }
+  async flushRemoteCandidates() {
+    const buffered = this.remoteCandidates.splice(0, this.remoteCandidates.length);
+    for (const candidate of buffered) {
+      try {
+        await this.pc.addIceCandidate(candidate);
+      } catch {
+      }
+    }
+  }
+  adoptChannel(channel) {
+    if (this.channel !== void 0 && this.channel !== channel) {
+      try {
+        channel.close();
+      } catch {
+      }
+      return;
+    }
+    this.channel = channel;
+    channel.binaryType = "arraybuffer";
+    channel.onopen = () => {
+      if (this.closed || this.opened)
+        return;
+      this.opened = true;
+      const resolve10 = this.openResolve;
+      this.clearNegotiation();
+      void this.resolveSelectedTransport().then(() => {
+        if (this.closed)
+          return;
+        this.openResolve = void 0;
+        this.openReject = void 0;
+        resolve10?.();
+      });
+    };
+    channel.onmessage = (event) => {
+      if (this.closed || !this.opened)
+        return;
+      const data2 = event.data;
+      const frame = typeof data2 === "string" ? new TextEncoder().encode(data2) : new Uint8Array(data2);
+      this.bytesReceived += frame.byteLength;
+      try {
+        const message = this.incoming.decode(frame);
+        if (message === void 0)
+          return;
+        for (const handler of this.messageHandlers)
+          handler(message);
+      } catch {
+        void this.close();
+      }
+    };
+    channel.onclose = () => {
+      if (this.closed)
+        return;
+      this.failOpen(new RtcConnectError("RTC_CLOSED", "WebRTC data channel closed."));
+      if (this.opened) {
+        this.opened = false;
+        for (const handler of this.closeHandlers)
+          handler();
+      }
+    };
+    channel.onerror = () => {
+      const error62 = new RtcConnectError("RTC_FAILED", "WebRTC data channel reported an error.");
+      this.failOpen(error62);
+      for (const handler of this.errorHandlers)
+        handler(error62);
+    };
+  }
+  async resolveSelectedTransport() {
+    try {
+      let selected = await this.refreshStatsDiagnostics();
+      for (let attempt = 0; attempt < SELECTED_PATH_RETRY_COUNT && !this.closed && (selected.transport === void 0 || selected.mode === void 0 || selected.mode === "P2P"); attempt += 1) {
+        await sleep(SELECTED_PATH_RETRY_DELAY_MS);
+        selected = await this.refreshStatsDiagnostics();
+      }
+      this.selected = selected?.transport;
+      this.selectedMode = selected?.mode;
+      this.selectedRelayUrlValue = selected?.relayUrl;
+      this.selectedPathTelemetry = selectedPathTelemetry(selected);
+      this.emitDiagnostic({
+        type: "selected-path",
+        selectedPath: this.selectedPathTelemetry,
+        diagnostics: this.diagnostics()
+      });
+    } catch {
+      this.selected = void 0;
+      this.selectedMode = void 0;
+    }
+  }
+  checkConnectionState() {
+    if (this.closed || this.opened)
+      return;
+    if (this.pc.connectionState === "failed" || this.pc.iceConnectionState === "failed" || this.pc.connectionState === "closed" || this.pc.iceConnectionState === "closed") {
+      void this.failOpenAfterStats(new RtcConnectError("RTC_FAILED", "WebRTC peer connection failed before the data channel opened."));
+    }
+  }
+  async failOpenAfterStats(error62) {
+    await this.refreshStatsDiagnostics().catch(() => void 0);
+    this.failOpen(error62);
+  }
+  failOpen(error62) {
+    if (this.closed || this.opened || this.openReject === void 0)
+      return;
+    const reject = this.openReject;
+    this.clearNegotiation();
+    this.openResolve = void 0;
+    this.openReject = void 0;
+    reject(error62);
+    void this.close();
+  }
+  clearNegotiation() {
+    if (this.negotiateTimer !== void 0)
+      clearTimeout(this.negotiateTimer);
+    this.negotiateTimer = void 0;
+    this.removeAbort?.();
+    this.removeAbort = void 0;
+  }
+  requireOpenChannel() {
+    const channel = this.channel;
+    if (channel === void 0 || channel.readyState !== "open" || this.closed || !this.opened) {
+      throw new Error("WebRTC data channel is not open.");
+    }
+    return channel;
+  }
+  armWatchdog(channel) {
+    if (this.closed || this.sendTimeoutMs === void 0 || this.sendTimeoutMs <= 0)
+      return;
+    if (this.watchdogTimer !== void 0)
+      clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = void 0;
+    const baseline = channel.bufferedAmount;
+    if (baseline <= 0) {
+      this.lastBufferedAmount = 0;
+      return;
+    }
+    this.lastBufferedAmount = baseline;
+    this.watchdogTimer = setTimeout(() => {
+      this.watchdogTimer = void 0;
+      if (this.closed || this.channel !== channel || channel.readyState !== "open")
+        return;
+      const current = channel.bufferedAmount;
+      if (current > 0 && current >= this.lastBufferedAmount) {
+        const error62 = new RtcConnectError("RTC_SEND_TIMEOUT", "DataChannel send stalled.");
+        for (const handler of this.errorHandlers)
+          handler(error62);
+        void this.close();
+        return;
+      }
+      this.lastBufferedAmount = current;
+      if (current > 0)
+        this.armWatchdog(channel);
+    }, this.sendTimeoutMs);
+  }
+  clearWatchdog() {
+    if (this.watchdogTimer !== void 0)
+      clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = void 0;
+    this.lastBufferedAmount = 0;
+  }
+  async refreshStatsDiagnostics() {
+    const stats = [...await new Promise((resolve10, reject) => {
+      const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve10, reject).finally(() => clearTimeout(timer2));
+    })];
+    if (this.closed)
+      return {};
+    this.candidatePairTelemetry = inspectCandidatePairs(stats);
+    return inspectSelectedPath(stats);
+  }
+  handlePeerDiagnostic(event) {
+    if (event.type === "local-candidate-filtered") {
+      recordCandidate(this.filteredLocalCandidateTelemetry, event.candidate);
+      this.emitDiagnostic({
+        type: event.type,
+        candidate: event.candidate,
+        reason: event.reason,
+        diagnostics: this.diagnostics()
+      });
+      return;
+    }
+    if (event.localCandidate !== void 0)
+      recordCandidate(this.filteredCandidatePairTelemetry, event.localCandidate);
+    this.emitDiagnostic({
+      type: event.type,
+      localCandidate: event.localCandidate,
+      reason: event.reason,
+      diagnostics: this.diagnostics()
+    });
+  }
+  emitStateChange() {
+    this.emitDiagnostic({
+      type: "state-change",
+      connectionState: this.pc.connectionState,
+      iceConnectionState: this.pc.iceConnectionState,
+      iceGatheringState: this.pc.iceGatheringState,
+      diagnostics: this.diagnostics()
+    });
+  }
+  emitDiagnostic(event) {
+    try {
+      this.onDiagnostic?.(event);
+    } catch {
+    }
+  }
+};
+var RtcConnectError = class extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
+function inspectSelectedPath(stats) {
+  const candidates = /* @__PURE__ */ new Map();
+  const candidatePairs = /* @__PURE__ */ new Map();
+  const selectedPairs = [];
+  const selectedPairIds = /* @__PURE__ */ new Set();
+  for (const [reportId, entry] of stats) {
+    if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
+      if (typeof entry.candidateType === "string" && entry.id !== void 0) {
+        candidates.set(String(entry.id), entry);
+      }
+    } else if (entry.type === "candidate-pair") {
+      candidatePairs.set(String(entry.id ?? reportId), entry);
+      if (entry.selected === true || entry.nominated === true)
+        selectedPairs.push(entry);
+    } else if (entry.type === "transport" && typeof entry.selectedCandidatePairId === "string") {
+      selectedPairIds.add(entry.selectedCandidatePairId);
+    }
+  }
+  const pairs = [
+    ...[...selectedPairIds].map((id6) => candidatePairs.get(id6)).filter((pair) => pair !== void 0),
+    ...selectedPairs
+  ];
+  for (const pair of pairs) {
+    const local = candidates.get(String(pair.localCandidateId));
+    const remote = candidates.get(String(pair.remoteCandidateId));
+    const localType = local?.candidateType;
+    const remoteType = remote?.candidateType;
+    const localAddressScope = summarizeAddress(candidateAddressValue(local)).addressScope;
+    const remoteAddressScope = summarizeAddress(candidateAddressValue(remote)).addressScope;
+    let selected;
+    if (localType === "relay" || remoteType === "relay")
+      selected = { transport: "turn", mode: "TURN" };
+    const relayUrl = localType === "relay" ? stringStat(local, "url") : void 0;
+    if (local === void 0 && remote === void 0)
+      continue;
+    const lan = isLanCandidatePair(localType, remoteType, localAddressScope, remoteAddressScope);
+    selected ??= { transport: lan ? "lan" : "p2p", mode: lan ? "LAN" : "P2P" };
+    const currentRoundTripTime = numberStat(pair, "currentRoundTripTime");
+    return {
+      ...selected,
+      ...relayUrl === void 0 ? {} : { relayUrl },
+      localCandidateType: stringStat(local, "candidateType"),
+      remoteCandidateType: stringStat(remote, "candidateType"),
+      localAddressScope,
+      remoteAddressScope,
+      localAddress: candidateAddress(local),
+      remoteAddress: candidateAddress(remote),
+      protocol: stringStat(local, "protocol") ?? stringStat(remote, "protocol"),
+      relayProtocol: stringStat(local, "relayProtocol") ?? stringStat(remote, "relayProtocol"),
+      currentRoundTripTimeMs: currentRoundTripTime === void 0 ? void 0 : Math.round(currentRoundTripTime * 1e3),
+      availableOutgoingBitrate: numberStat(pair, "availableOutgoingBitrate"),
+      bytesSent: numberStat(pair, "bytesSent"),
+      bytesReceived: numberStat(pair, "bytesReceived")
+    };
+  }
+  return {};
+}
+function inspectCandidatePairs(stats) {
+  const candidates = /* @__PURE__ */ new Map();
+  const telemetry = emptyCandidatePairTelemetry();
+  const pairs = [];
+  for (const [reportId, entry] of stats) {
+    if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
+      if (typeof entry.candidateType === "string" && entry.id !== void 0) {
+        candidates.set(String(entry.id), entry);
+      }
+    } else if (entry.type === "candidate-pair") {
+      pairs.push({ ...entry, id: entry.id ?? reportId });
+    }
+  }
+  for (const pair of pairs) {
+    telemetry.total += 1;
+    if (pair.nominated === true)
+      telemetry.nominated += 1;
+    if (pair.selected === true)
+      telemetry.selected += 1;
+    increment(telemetry.byState, stringStat(pair, "state") ?? (pair.selected === true ? "selected" : "unknown"));
+    const local = candidates.get(String(pair.localCandidateId));
+    const remote = candidates.get(String(pair.remoteCandidateId));
+    recordCandidateStats(telemetry.byLocalType, telemetry.byLocalFamily, telemetry.byLocalScope, local);
+    recordCandidateStats(telemetry.byRemoteType, telemetry.byRemoteFamily, telemetry.byRemoteScope, remote);
+  }
+  return telemetry;
+}
+function candidateAddress(candidate) {
+  const address2 = stringStat(candidate, "address") ?? stringStat(candidate, "ip");
+  if (address2 === void 0)
+    return void 0;
+  const port = numberStat(candidate, "port");
+  return port === void 0 ? address2 : `${address2}:${port}`;
+}
+function stringStat(entry, key) {
+  const value = entry?.[key];
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function numberStat(entry, key) {
+  const value = entry?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function emptyCandidateTelemetry() {
+  return {
+    total: 0,
+    byType: {},
+    byFamily: {},
+    byScope: {},
+    byProtocol: {}
+  };
+}
+function cloneCandidateTelemetry(value) {
+  return {
+    total: value.total,
+    byType: { ...value.byType },
+    byFamily: { ...value.byFamily },
+    byScope: { ...value.byScope },
+    byProtocol: { ...value.byProtocol }
+  };
+}
+function emptyCandidatePairTelemetry() {
+  return {
+    total: 0,
+    nominated: 0,
+    selected: 0,
+    byState: {},
+    byLocalType: {},
+    byRemoteType: {},
+    byLocalFamily: {},
+    byRemoteFamily: {},
+    byLocalScope: {},
+    byRemoteScope: {}
+  };
+}
+function cloneCandidatePairTelemetry(value) {
+  return {
+    total: value.total,
+    nominated: value.nominated,
+    selected: value.selected,
+    byState: { ...value.byState },
+    byLocalType: { ...value.byLocalType },
+    byRemoteType: { ...value.byRemoteType },
+    byLocalFamily: { ...value.byLocalFamily },
+    byRemoteFamily: { ...value.byRemoteFamily },
+    byLocalScope: { ...value.byLocalScope },
+    byRemoteScope: { ...value.byRemoteScope }
+  };
+}
+function recordCandidate(telemetry, candidate) {
+  telemetry.total += 1;
+  increment(telemetry.byType, candidate.candidateType);
+  increment(telemetry.byFamily, candidate.addressFamily);
+  increment(telemetry.byScope, candidate.addressScope);
+  if (candidate.protocol !== void 0)
+    increment(telemetry.byProtocol, candidate.protocol);
+}
+function recordCandidateStats(byType, byFamily, byScope, candidate) {
+  const candidateType = candidateTypeStat(candidate);
+  const address2 = summarizeAddress(candidateAddressValue(candidate));
+  increment(byType, candidateType);
+  increment(byFamily, address2.addressFamily);
+  increment(byScope, address2.addressScope);
+}
+function candidateTypeStat(candidate) {
+  const value = stringStat(candidate, "candidateType");
+  if (value === "host" || value === "srflx" || value === "prflx" || value === "relay")
+    return value;
+  return "unknown";
+}
+function candidateAddressValue(candidate) {
+  return stringStat(candidate, "address") ?? stringStat(candidate, "ip");
+}
+function isLanCandidatePair(localType, remoteType, localScope, remoteScope) {
+  if (localType === "host" && remoteType === "host") {
+    return !isExplicitlyNonLanScope(localScope) && !isExplicitlyNonLanScope(remoteScope);
+  }
+  const directTypes = /* @__PURE__ */ new Set(["host", "prflx"]);
+  if (!directTypes.has(String(localType)) || !directTypes.has(String(remoteType)))
+    return false;
+  if (isLocalNetworkScope(localScope) && isLocalNetworkScope(remoteScope))
+    return true;
+  return localType === "host" && isLocalNetworkScope(localScope) && remoteType === "prflx" && remoteScope === "unknown" || remoteType === "host" && isLocalNetworkScope(remoteScope) && localType === "prflx" && localScope === "unknown";
+}
+function isLocalNetworkScope(scope2) {
+  return scope2 === "private" || scope2 === "link-local" || scope2 === "loopback";
+}
+function isExplicitlyNonLanScope(scope2) {
+  return scope2 === "public" || scope2 === "cgnat" || scope2 === "reserved";
+}
+function increment(map2, key) {
+  map2[key] = (map2[key] ?? 0) + 1;
+}
+function selectedPathTelemetry(details2) {
+  return {
+    ...details2.transport === void 0 ? {} : { transport: details2.transport },
+    ...details2.mode === void 0 ? {} : { mode: details2.mode },
+    ...details2.relayUrl === void 0 ? {} : { relayUrl: details2.relayUrl },
+    ...details2.localCandidateType === void 0 ? {} : { localCandidateType: details2.localCandidateType },
+    ...details2.remoteCandidateType === void 0 ? {} : { remoteCandidateType: details2.remoteCandidateType },
+    ...details2.localAddressScope === void 0 ? {} : { localAddressScope: details2.localAddressScope },
+    ...details2.remoteAddressScope === void 0 ? {} : { remoteAddressScope: details2.remoteAddressScope },
+    ...details2.protocol === void 0 ? {} : { protocol: details2.protocol },
+    ...details2.relayProtocol === void 0 ? {} : { relayProtocol: details2.relayProtocol },
+    ...details2.currentRoundTripTimeMs === void 0 ? {} : { currentRoundTripTimeMs: details2.currentRoundTripTimeMs },
+    ...details2.availableOutgoingBitrate === void 0 ? {} : { availableOutgoingBitrate: details2.availableOutgoingBitrate }
+  };
+}
+function requireSdp(description) {
+  if (typeof description.sdp !== "string" || description.sdp.length === 0) {
+    throw new RtcConnectError("RTC_FAILED", "The RTC backend produced an empty session description.");
+  }
+  return description.sdp;
+}
+function toArrayBuffer(data2) {
+  if (data2.byteOffset === 0 && data2.byteLength === data2.buffer.byteLength)
+    return data2.buffer;
+  return data2.slice().buffer;
+}
+function asError(error62) {
+  return error62 instanceof Error ? error62 : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
+}
+function sleep(ms) {
+  return new Promise((resolve10) => setTimeout(resolve10, ms));
+}
+
+// packages/webrtc/dist/control-lease.js
+var WEBRTC_LEASE_MS2 = 3e5;
+var ControlLease = class {
+  connectionId;
+  ticket;
+  request;
+  expired;
+  confirmed = false;
+  stopped = false;
+  sent;
+  deadline;
+  sequence = 0;
+  timer;
+  lastRequest = -Infinity;
+  constructor(connectionId, ticket, request, expired) {
+    this.connectionId = connectionId;
+    this.ticket = ticket;
+    this.request = request;
+    this.expired = expired;
+  }
+  start() {
+    this.timer = setInterval(() => this.tick(), 1e3);
+    this.deadline = { mono: performance.now() + WEBRTC_LEASE_MS2, wall: Date.now() + WEBRTC_LEASE_MS2 };
+    this.tick(true);
+  }
+  valid() {
+    if (this.stopped)
+      return false;
+    const d = this.deadline;
+    if (d && (performance.now() >= d.mono || Date.now() >= d.wall)) {
+      this.stop();
+      this.expired();
+      return false;
+    }
+    return true;
+  }
+  remainingMs() {
+    if (!this.confirmed || this.stopped || !this.deadline)
+      return void 0;
+    return Math.max(0, Math.min(this.deadline.mono - performance.now(), this.deadline.wall - Date.now()));
+  }
+  canDetach() {
+    return this.confirmed && this.valid();
+  }
+  recoveryTicket() {
+    return this.canDetach() ? this.ticket : void 0;
+  }
+  tick(force = false) {
+    if (!this.valid())
+      return;
+    const mono = performance.now();
+    if (!force && mono - this.lastRequest < 25e3)
+      return;
+    const sent = { id: String(++this.sequence), mono, wall: Date.now() };
+    this.lastRequest = mono;
+    try {
+      this.request({ connectionId: this.connectionId, requestId: sent.id, ticket: this.ticket });
+      this.sent = sent;
+    } catch {
+    }
+  }
+  acknowledge(ack) {
+    if (!this.valid() || ack.connectionId !== this.connectionId || ack.leaseMs !== WEBRTC_LEASE_MS2)
+      return;
+    const sent = this.sent;
+    if (!sent || sent.id !== ack.requestId)
+      return;
+    if (performance.now() - sent.mono >= 3e4 || Date.now() - sent.wall >= 3e4)
+      return;
+    this.sent = void 0;
+    this.ticket = ack.ticket;
+    this.confirmed = true;
+    this.deadline = { mono: sent.mono + WEBRTC_LEASE_MS2, wall: sent.wall + WEBRTC_LEASE_MS2 };
+  }
+  stop() {
+    this.stopped = true;
+    clearInterval(this.timer);
+    this.timer = void 0;
+    this.sent = void 0;
+  }
+};
+
+// packages/webrtc/dist/adaptive-transport.js
+var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
+var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
+var AdaptiveTransport = class extends BaseTransport {
+  url;
+  options;
+  handshakeHandlers = /* @__PURE__ */ new Set();
+  sequencedHandlers = /* @__PURE__ */ new Set();
+  socket;
+  dataSocket;
+  connectionId;
+  relayCounter = 0;
+  bytesSent = 0;
+  bytesReceived = 0;
+  dataMode = "relay";
+  selected;
+  rtc;
+  readyResolve;
+  readyReject;
+  handshakeTimer;
+  lifetime;
+  removeAbort;
+  webrtcEnabled = true;
+  serverNegotiateTimeoutMs;
+  negotiatedCapabilities = ["transport.relay"];
+  controlFrameLimits = {};
+  connectedAt;
+  heartbeatIntervalMs;
+  lastControlReceivedAt;
+  lastControlSentAt;
+  lastRtcDiagnostics;
+  relayAssignment;
+  dataReady = false;
+  recoveryTicket;
+  relayRecoveryTicket;
+  lease;
+  recoveryTimer;
+  recoveryOpeningTimer;
+  recoveryAttempt = 0;
+  controlReady = false;
+  constructor(url2, options) {
+    super();
+    this.url = url2;
+    this.options = options;
+  }
+  async connect() {
+    if (this.socket !== void 0 || this.connectedAt !== void 0)
+      return;
+    throwIfAborted(this.options.signal);
+    const lifetime = new AbortController();
+    this.lifetime = lifetime;
+    this.webrtcEnabled = true;
+    this.serverNegotiateTimeoutMs = void 0;
+    this.dataMode = "relay";
+    this.selected = void 0;
+    this.connectedAt = void 0;
+    this.relayCounter = 0;
+    this.socket = new WebSocket(this.url);
+    this.controlFrameLimits = {};
+    this.socket.binaryType = "arraybuffer";
+    await new Promise((resolve10, reject) => {
+      this.readyResolve = resolve10;
+      this.readyReject = reject;
+      const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
+      this.options.signal?.addEventListener("abort", onAbort, { once: true });
+      this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
+      this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
+      const socket = this.socket;
+      socket.onmessage = (event) => {
+        if (this.socket === socket)
+          void this.handleSocketMessage(event.data, lifetime);
+      };
+      socket.onopen = () => {
+        if (this.lifetime !== lifetime)
+          return;
+        this.sendControl("hello", {
+          role: this.options.role,
+          deviceId: this.options.deviceId,
+          accessToken: this.options.accessToken,
+          protocols: [PROTOCOL_VERSION],
+          capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
+        });
+      };
+      socket.onerror = () => {
+        if (this.lifetime === lifetime && this.socket === socket)
+          this.controlLost(new Error("Control socket failed"), { reason: "control-error" });
+      };
+      socket.onclose = (event) => {
+        if (this.lifetime === lifetime && this.socket === socket)
+          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
+      };
+    });
+  }
+  async send(data2) {
+    if (this.lease && !this.lease.valid())
+      throw new Error("Control lease expired");
+    if (this.connectionId === void 0)
+      throw new Error("adaptive transport has not been authorized");
+    if (this.dataMode === "webrtc") {
+      const rtc = this.rtc;
+      if (rtc === void 0)
+        throw new Error("webrtc data channel is not available");
+      this.bytesSent += data2.byteLength;
+      await rtc.send(data2);
+      return;
+    }
+    const socket = this.dataSocket ?? this.socket;
+    if (socket?.readyState !== WebSocket.OPEN)
+      throw new Error("adaptive transport is not connected");
+    await waitForRelayCapacity(socket);
+    const payload = {
+      connectionId: this.connectionId,
+      targetDeviceId: this.options.targetDeviceId,
+      counter: this.relayCounter,
+      ciphertext: toBase64Url(data2)
+    };
+    if (this.dataSocket !== void 0) {
+      this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("relay", payload), this.controlFrameLimits));
+    } else
+      this.sendControl("relay", payload);
+    this.bytesSent += data2.byteLength;
+    this.relayCounter += 1;
+  }
+  connectionInfo() {
+    if (this.connectionId === void 0)
+      throw new Error("adaptive transport has not been authorized");
+    return {
+      connectionId: this.connectionId,
+      localDeviceId: this.options.deviceId,
+      remoteDeviceId: this.options.targetDeviceId
+    };
+  }
+  async connectionDetails() {
+    const remainingMs = this.lease?.remainingMs();
+    return {
+      ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
+      ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
+      ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
+      ...this.lastControlReceivedAt === void 0 ? {} : { lastControlReceivedAt: this.lastControlReceivedAt },
+      ...this.lastControlSentAt === void 0 ? {} : { lastControlSentAt: this.lastControlSentAt },
+      recoveryExpiresAt: remainingMs === void 0 ? void 0 : Date.now() + remainingMs,
+      controlChannelUrl: this.url,
+      controlChannelState: socketState(this.socket?.readyState),
+      preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
+      negotiatedCapabilities: [...this.negotiatedCapabilities],
+      webRtcEnabled: this.webrtcEnabled,
+      ...this.rtc === void 0 ? {} : { webRtc: await this.rtc.connectionDetails() }
+    };
+  }
+  async sendHandshake(step, data2) {
+    if (this.socket?.readyState !== WebSocket.OPEN || this.connectionId === void 0) {
+      throw new Error("adaptive transport has not been authorized");
+    }
+    this.sendControl("secure.handshake", {
+      connectionId: this.connectionId,
+      targetDeviceId: this.options.targetDeviceId,
+      step,
+      data: toBase64Url(data2)
+    });
+  }
+  onHandshake(cb) {
+    this.handshakeHandlers.add(cb);
+    return () => this.handshakeHandlers.delete(cb);
+  }
+  onSequencedMessage(cb) {
+    this.sequencedHandlers.add(cb);
+    return () => this.sequencedHandlers.delete(cb);
+  }
+  async close() {
+    this.failConnection(new Error("Adaptive transport closed"));
+  }
+  getStats() {
+    const webrtcConnected = this.dataMode === "webrtc" && this.rtc?.getStats().connected === true;
+    const relayConnected = this.dataMode === "relay" && (this.dataSocket?.readyState === WebSocket.OPEN && this.dataReady || this.socket?.readyState === WebSocket.OPEN) && this.connectionId !== void 0;
+    const connected = webrtcConnected || relayConnected;
+    let mode2 = "Disconnected";
+    if (this.selected === "relay")
+      mode2 = relayConnected ? "Relay" : "Disconnected";
+    else if (this.selected === "lan" || this.selected === "turn" || this.selected === "p2p") {
+      mode2 = webrtcConnected ? this.rtc.getStats().mode : "Disconnected";
+    }
+    return { mode: mode2, connected, bytesSent: this.bytesSent, bytesReceived: this.bytesReceived };
+  }
+  async handleSocketMessage(raw, lifetime) {
+    if (this.lifetime !== lifetime)
+      return;
+    try {
+      if (typeof raw !== "string")
+        throw new Error("Adaptive control frames must be text JSON");
+      const frame = decodeControlFrame(raw, this.controlFrameLimits);
+      this.lastControlReceivedAt = Date.now();
+      if (frame.type === "hello.ack") {
+        this.controlReady = true;
+        const payload = frame.payload;
+        if (payload.protocol !== PROTOCOL_VERSION)
+          throw new Error("Server selected an unsupported protocol version");
+        this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
+        const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES;
+        this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities);
+        this.controlFrameLimits = {
+          maxControlFrameBytes: payload.maxControlFrameBytes,
+          maxRelayFrameBytes: payload.maxRelayFrameBytes
+        };
+        const preferredTransports = this.negotiatedTransports();
+        if (preferredTransports.length === 0) {
+          throw new Error("Server did not negotiate a supported transport capability");
+        }
+        if (payload.webrtcEnabled === false)
+          this.webrtcEnabled = false;
+        if (typeof payload.webrtcFallbackTimeoutMs === "number" && Number.isSafeInteger(payload.webrtcFallbackTimeoutMs) && payload.webrtcFallbackTimeoutMs > 0) {
+          this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs;
+        }
+        if (this.lease) {
+          if (!this.negotiatedCapabilities.includes(this.dataMode === "webrtc" ? WEBRTC_RESUME_CAPABILITY : RELAY_RESUME_CAPABILITY))
+            throw new Error("Server no longer supports control recovery");
+          clearTimeout(this.recoveryOpeningTimer);
+          this.recoveryAttempt = 0;
+          this.lease.tick(true);
+          return;
+        }
+        this.sendControl("connect.request", {
+          hostDeviceId: this.options.targetDeviceId,
+          preferredTransports
+        });
+        return;
+      }
+      if (frame.type === "connect.accepted") {
+        if (this.connectionId !== void 0)
+          throw new Error("Duplicate connect.accepted");
+        const payload = frame.payload;
+        if (typeof payload.connectionId !== "string" || payload.connectionId.length === 0) {
+          throw new Error("connect.accepted did not include a connectionId");
+        }
+        this.connectionId = payload.connectionId;
+        if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
+          this.recoveryTicket = payload.recoveryTicket;
+        if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY))
+          this.relayRecoveryTicket = payload.relayRecoveryTicket;
+        const assignment = payload;
+        if (typeof assignment.relayEndpoint === "string" && typeof assignment.relayTicket === "string") {
+          this.relayAssignment = assignment;
+        }
+        this.clearHandshake();
+        void this.negotiate(lifetime.signal).catch((error62) => {
+          if (this.lifetime === lifetime)
+            this.failConnection(error62 instanceof Error ? error62 : new Error("Adaptive transport negotiation failed"));
+        });
+        return;
+      }
+      if (frame.type === "connection.lease.ack") {
+        if (!this.lease)
+          throw new Error("Unexpected connection lease");
+        this.lease.acknowledge(frame.payload);
+        return;
+      }
+      if (frame.type === "connect.rejected" || frame.type === "error") {
+        const payload = frame.payload;
+        const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
+        const failure5 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
+        const code = errorCodeSchema.safeParse(payload.code);
+        this.failConnection(failure5, {
+          reason: payload.retryable === true ? "control-error" : "invalid-control-frame",
+          ...code.success ? { errorCode: code.data } : {}
+        });
+        return;
+      }
+      if (frame.type === "relay") {
+        if (this.dataSocket !== void 0)
+          return;
+        if (this.dataMode !== "relay")
+          return;
+        this.handleRelay(frame.payload);
+        return;
+      }
+      if (frame.type === "secure.handshake") {
+        const payload = frame.payload;
+        if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.step) || typeof payload.data !== "string") {
+          throw new Error("Received a secure handshake frame for an unknown connection");
+        }
+        const data2 = fromBase64Url(payload.data);
+        for (const handler of this.handshakeHandlers)
+          handler(payload.step, data2);
+        return;
+      }
+      if (frame.type === "signal.answer") {
+        const payload = frame.payload;
+        if (payload.connectionId === this.connectionId && typeof payload.sdp === "string") {
+          this.rtc?.handleSignal({ type: "answer", sdp: payload.sdp });
+        }
+        return;
+      }
+      if (frame.type === "signal.ice") {
+        const payload = frame.payload;
+        if (payload.connectionId === this.connectionId && isObject2(payload.candidate)) {
+          this.rtc?.handleSignal({ type: "ice", candidate: payload.candidate });
+        }
+        return;
+      }
+      if (frame.type === "signal.offer" || frame.type === "transport.selected")
+        return;
+      if (frame.type === "ping")
+        this.sendControl("pong", frame.payload);
+    } catch (error62) {
+      const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
+      if (!("code" in failure5))
+        Object.assign(failure5, { code: "INVALID_MESSAGE" });
+      const code = errorCodeSchema.safeParse(failure5.code);
+      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
+    }
+  }
+  handleRelay(payload) {
+    if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.counter) || typeof payload.ciphertext !== "string") {
+      throw new Error("Received a relay frame for an unknown connection");
+    }
+    const data2 = fromBase64Url(payload.ciphertext);
+    this.bytesReceived += data2.byteLength;
+    for (const handler of this.sequencedHandlers)
+      handler(payload.counter, data2);
+    this.emit(data2);
+  }
+  async negotiate(signal) {
+    if (this.connectionId === void 0)
+      return;
+    const preferred = this.negotiatedTransports();
+    const wantWebRtc = !this.options.forceRelay && !this.options.relayFirst && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
+    let selected = "relay";
+    this.lastRtcDiagnostics = void 0;
+    if (wantWebRtc) {
+      try {
+        const rtcSelected = (await this.tryWebRtc(signal)).transport;
+        throwIfAborted(signal);
+        const wireSelected = rtcSelected === "lan" && !preferred.includes("lan") && preferred.includes("p2p") ? "p2p" : rtcSelected;
+        if (!preferred.includes(wireSelected)) {
+          await this.rtc?.close();
+          throwIfAborted(signal);
+          this.rtc = void 0;
+          if (!preferred.includes("relay")) {
+            throw new Error(`WebRTC selected unnegotiated transport: ${rtcSelected}`);
+          }
+          this.dataMode = "relay";
+          selected = "relay";
+        } else {
+          this.dataMode = "webrtc";
+          selected = wireSelected;
+        }
+      } catch (error62) {
+        throwIfAborted(signal);
+        const reason = error62 instanceof Error ? error62 : new Error("WebRTC negotiation failed.");
+        try {
+          this.options.onWebRtcFallback?.(reason, this.lastRtcDiagnostics);
+        } catch {
+        }
+        await this.rtc?.close();
+        throwIfAborted(signal);
+        this.rtc = void 0;
+        if (!preferred.includes("relay"))
+          throw reason;
+        this.dataMode = "relay";
+        selected = "relay";
+      }
+    } else {
+      if (!preferred.includes("relay"))
+        throw new Error("No negotiated transport is available");
+      this.dataMode = "relay";
+      selected = "relay";
+    }
+    this.selected = selected;
+    if (selected === "relay" && this.relayAssignment !== void 0) {
+      await this.openDataSocket(this.relayAssignment);
+    }
+    const turnNode = selected === "turn" ? this.rtc?.selectedRelayUrl() : void 0;
+    this.sendControl("transport.selected", {
+      connectionId: this.connectionId,
+      targetDeviceId: this.options.targetDeviceId,
+      transport: selected,
+      ...turnNode === void 0 ? {} : { turnNode }
+    });
+    this.finishConnection();
+  }
+  negotiatedTransports() {
+    const preferred = this.options.forceRelay === true ? ["relay"] : this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS;
+    return preferred.filter((transport) => {
+      if (transport === "lan")
+        return this.negotiatedCapabilities.includes("transport.lan");
+      if (transport === "p2p")
+        return this.negotiatedCapabilities.includes("transport.p2p");
+      return this.negotiatedCapabilities.includes(`transport.${transport}`);
+    });
+  }
+  async tryWebRtc(signal) {
+    const connectionId = this.connectionId;
+    if (connectionId === void 0)
+      throw new RtcConnectError("RTC_UNAVAILABLE", "No connection id for WebRTC negotiation.");
+    const factory = this.options.rtcFactory ?? (typeof RTCPeerConnection === "undefined" ? void 0 : browserRtcFactory());
+    if (factory === void 0) {
+      throw new RtcConnectError("RTC_UNAVAILABLE", "No RTC backend is available in this environment.");
+    }
+    let iceServers = [];
+    try {
+      iceServers = await this.fetchIceServers(connectionId, signal);
+    } catch {
+      iceServers = [];
+    }
+    throwIfAborted(signal);
+    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
+    const effectiveNegotiateTimeoutMs = iceServers.length === 0 ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS) : negotiatedMs;
+    const rtc = new RtcDataChannelTransport({
+      role: "initiator",
+      factory,
+      iceServers,
+      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
+      // direct pair wins, then gets rejected as an unnegotiated transport.
+      iceTransportPolicy: this.negotiatedTransports().includes("turn") && !this.negotiatedTransports().some((transport) => transport === "lan" || transport === "p2p") ? "relay" : "all",
+      onSignal: (signal2) => this.sendRtcSignal(signal2),
+      negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
+      label: `client->${this.options.targetDeviceId}`,
+      onDiagnostic: (event) => {
+        this.lastRtcDiagnostics = event.diagnostics;
+        try {
+          this.options.onWebRtcDiagnostic?.(event);
+        } catch {
+        }
+      }
+    });
+    this.rtc = rtc;
+    rtc.onMessage((data2) => {
+      if (this.lease && !this.lease.valid())
+        return;
+      this.bytesReceived += data2.byteLength;
+      for (const handler of this.sequencedHandlers)
+        handler(void 0, data2);
+      this.emit(data2);
+    });
+    rtc.onClose(() => {
+      if (this.rtc === rtc && this.dataMode === "webrtc") {
+        const transport = this.selected;
+        this.failConnection(new Error("Active WebRTC channel closed"), {
+          reason: "webrtc-closed",
+          ...transport === "lan" || transport === "p2p" || transport === "turn" ? { transport } : {}
+        });
+      }
+    });
+    try {
+      await rtc.connect(signal);
+    } catch (error62) {
+      throwIfAborted(signal);
+      this.lastRtcDiagnostics = rtc.diagnostics();
+      await rtc.close();
+      if (this.rtc === rtc)
+        this.rtc = void 0;
+      throwIfAborted(signal);
+      throw error62;
+    }
+    throwIfAborted(signal);
+    this.lastRtcDiagnostics = rtc.diagnostics();
+    return { transport: rtc.selectedTransport() ?? "p2p", relayUrl: rtc.selectedRelayUrl() };
+  }
+  markSecureReady() {
+    const ticket = this.dataMode === "webrtc" ? this.recoveryTicket : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN ? this.relayRecoveryTicket : void 0;
+    if (!ticket || !this.connectionId || this.lease)
+      return;
+    this.lease = new ControlLease(this.connectionId, ticket, (payload) => {
+      if (this.controlReady && this.lastControlReceivedAt !== void 0 && Date.now() - this.lastControlReceivedAt >= 75e3) {
+        this.controlLost(new Error("Control heartbeat timed out"), { reason: "control-error" });
+        throw new Error("Control heartbeat timed out");
+      }
+      this.sendControl("connection.lease.request", payload);
+    }, () => this.failConnection(Object.assign(new Error("Control authorization lease expired"), { code: "TRANSPORT_CLOSED", retryable: true })));
+    this.lease.start();
+  }
+  controlLost(error62, diagnostic) {
+    if (error62.retryable === false || !this.lease?.canDetach() || !(this.dataMode === "webrtc" ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
+      this.failConnection(error62, diagnostic);
+      return;
+    }
+    const socket = this.socket;
+    this.controlReady = false;
+    this.socket = void 0;
+    clearTimeout(this.recoveryOpeningTimer);
+    socket?.close();
+    if (this.recoveryTimer !== void 0)
+      return;
+    const delay2 = recoveryDelayMs(this.recoveryAttempt, diagnostic);
+    this.recoveryAttempt++;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = void 0;
+      void this.reopenControl();
+    }, delay2);
+  }
+  async reopenControl() {
+    const lifetime = this.lifetime;
+    if (!lifetime || !this.lease?.canDetach())
+      return;
+    try {
+      const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken;
+      if (this.lifetime !== lifetime || !this.lease?.canDetach())
+        return;
+      const socket = new WebSocket(this.url);
+      this.socket = socket;
+      socket.binaryType = "arraybuffer";
+      this.recoveryOpeningTimer = setTimeout(() => {
+        if (this.socket === socket)
+          this.controlLost(new Error("Control recovery handshake timed out"), { reason: "control-error" });
+      }, 15e3);
+      socket.onopen = () => {
+        if (this.socket !== socket || this.lifetime !== lifetime)
+          return;
+        this.sendControl("hello", {
+          role: this.options.role,
+          deviceId: this.options.deviceId,
+          accessToken: token,
+          protocols: [PROTOCOL_VERSION],
+          capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
+        });
+      };
+      socket.onmessage = (event) => {
+        if (this.socket === socket && this.lifetime === lifetime)
+          void this.handleSocketMessage(event.data, lifetime);
+      };
+      socket.onerror = () => {
+        if (this.socket === socket)
+          this.controlLost(new Error("Control recovery failed"), { reason: "control-error" });
+      };
+      socket.onclose = (event) => {
+        if (this.socket === socket)
+          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
+      };
+    } catch (error62) {
+      if (this.lifetime !== lifetime)
+        return;
+      if (typeof error62 === "object" && error62 && ("retryable" in error62 && error62.retryable === false || "code" in error62 && ["AUTH_INVALID", "DEVICE_REVOKED", "MEMBERSHIP_REQUIRED", "PEER_IDENTITY_MISMATCH", "DEVICE_NOT_FOUND", "TOKEN_REUSED"].includes(String(error62.code)))) {
+        this.failConnection(error62 instanceof Error ? error62 : new Error("Control recovery authorization failed"));
+      } else
+        this.controlLost(new Error("Control recovery unavailable"), { reason: "control-error" });
+    }
+  }
+  async fetchIceServers(connectionId, signal) {
+    if (this.options.fetchIceServers === void 0)
+      return [];
+    return new Promise((resolve10, reject) => {
+      const request = new AbortController();
+      let settled = false;
+      const finish = (error62, servers = []) => {
+        if (settled)
+          return;
+        settled = true;
+        clearTimeout(timer2);
+        signal.removeEventListener("abort", onAbort);
+        if (error62)
+          reject(error62);
+        else
+          resolve10(servers);
+      };
+      const onAbort = () => {
+        finish(new Error("ICE configuration request was aborted"));
+        request.abort();
+      };
+      const timer2 = setTimeout(() => {
+        finish(new Error("ICE configuration request timed out"));
+        request.abort();
+      }, this.options.iceServersTimeoutMs ?? 1e4);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      Promise.resolve().then(() => {
+        throwIfAborted(request.signal);
+        return this.options.fetchIceServers(connectionId, request.signal);
+      }).then((servers) => finish(void 0, servers), (error62) => finish(error62 instanceof Error ? error62 : new Error("ICE configuration request failed")));
+    });
+  }
+  sendRtcSignal(signal) {
+    if (this.connectionId === void 0)
+      return;
+    if (signal.type === "offer") {
+      this.sendControl("signal.offer", {
+        connectionId: this.connectionId,
+        targetDeviceId: this.options.targetDeviceId,
+        sdp: signal.sdp
+      });
+    } else if (signal.type === "answer") {
+      this.sendControl("signal.answer", {
+        connectionId: this.connectionId,
+        targetDeviceId: this.options.targetDeviceId,
+        sdp: signal.sdp
+      });
+    } else {
+      this.sendControl("signal.ice", {
+        connectionId: this.connectionId,
+        targetDeviceId: this.options.targetDeviceId,
+        candidate: signal.candidate
+      });
+    }
+  }
+  async openDataSocket(assignment) {
+    if (this.connectionId === void 0 || this.dataSocket !== void 0)
+      return;
+    const socket = new WebSocket(assignment.relayEndpoint);
+    socket.binaryType = "arraybuffer";
+    this.dataSocket = socket;
+    await new Promise((resolve10, reject) => {
+      const timer2 = setTimeout(() => {
+        reject(new Error("Relay data attach timed out"));
+        socket.close();
+      }, this.options.handshakeTimeoutMs ?? 15e3);
+      socket.onopen = () => socket.send(encodeRelayDataFrame(createRelayDataFrame("relay.attach", {
+        connectionId: this.connectionId,
+        deviceId: this.options.deviceId,
+        peerDeviceId: this.options.targetDeviceId,
+        ticket: assignment.relayTicket
+      }), this.controlFrameLimits));
+      socket.onmessage = (event) => {
+        try {
+          if (typeof event.data !== "string")
+            throw new Error("Relay data frames must be text JSON");
+          const data2 = decodeRelayDataFrame(event.data, this.controlFrameLimits);
+          if (data2.type === "relay.ready") {
+            if (data2.payload.connectionId !== this.connectionId || assignment.relayEpoch !== void 0 && data2.payload.epoch !== assignment.relayEpoch) {
+              throw new Error("Relay data attach assignment mismatch");
+            }
+            clearTimeout(timer2);
+            this.dataReady = true;
+            resolve10();
+            return;
+          }
+          void this.handleDataSocketFrame(data2.type, data2.payload).catch((error62) => {
+            this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+          });
+        } catch (error62) {
+          clearTimeout(timer2);
+          reject(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+          this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+        }
+      };
+      socket.onerror = () => {
+        clearTimeout(timer2);
+        reject(new Error("Relay data socket failed"));
+      };
+      socket.onclose = () => {
+        clearTimeout(timer2);
+        if (!this.dataReady)
+          reject(new Error("Relay data socket closed before attach"));
+        else
+          this.failConnection(new Error("Relay data socket closed"));
+      };
+    });
+  }
+  async handleDataSocketFrame(type, payload) {
+    if (type === "relay.detach") {
+      this.failConnection(new Error("Relay peer detached"));
+      return;
+    }
+    if (type === "ping") {
+      if (this.dataSocket?.readyState === WebSocket.OPEN) {
+        this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
+      }
+      return;
+    }
+    if (type === "relay") {
+      if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.counter) || typeof payload.ciphertext !== "string") {
+        throw new Error("Received a relay frame for an unknown connection");
+      }
+      const data2 = fromBase64Url(payload.ciphertext);
+      this.bytesReceived += data2.byteLength;
+      for (const handler of this.sequencedHandlers)
+        handler(payload.counter, data2);
+      this.emit(data2);
+      return;
+    }
+    if (type === "secure.handshake") {
+      if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.step) || typeof payload.data !== "string") {
+        throw new Error("Received a secure handshake frame for an unknown connection");
+      }
+      const data2 = fromBase64Url(payload.data);
+      for (const handler of this.handshakeHandlers)
+        handler(payload.step, data2);
+    }
+  }
+  sendControl(type, payload) {
+    if (this.socket?.readyState !== WebSocket.OPEN)
+      throw Object.assign(new Error("adaptive control socket is not open"), { code: "TRANSPORT_CLOSED" });
+    this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
+    this.lastControlSentAt = Date.now();
+  }
+  finishConnection() {
+    this.clearHandshake();
+    this.removeAbort?.();
+    this.removeAbort = void 0;
+    this.connectedAt ??= Date.now();
+    this.readyResolve?.();
+    this.readyResolve = void 0;
+    this.readyReject = void 0;
+  }
+  failConnection(error62, diagnostic) {
+    if (this.lease && this.connectionId && this.socket?.readyState === WebSocket.OPEN) {
+      try {
+        this.sendControl("connection.lease.close", { connectionId: this.connectionId });
+      } catch {
+      }
+    }
+    const established = this.connectedAt !== void 0;
+    this.controlReady = false;
+    this.recoveryAttempt = 0;
+    this.lease?.stop();
+    this.lease = void 0;
+    this.recoveryTicket = void 0;
+    this.relayRecoveryTicket = void 0;
+    clearTimeout(this.recoveryTimer);
+    clearTimeout(this.recoveryOpeningTimer);
+    this.recoveryTimer = void 0;
+    this.clearHandshake();
+    const reject = this.readyReject;
+    this.readyResolve = void 0;
+    this.readyReject = void 0;
+    this.removeAbort?.();
+    this.removeAbort = void 0;
+    const lifetime = this.lifetime;
+    this.lifetime = void 0;
+    const rtc = this.rtc;
+    const socket = this.socket;
+    const dataSocket = this.dataSocket;
+    this.rtc = void 0;
+    this.socket = void 0;
+    this.dataSocket = void 0;
+    this.dataReady = false;
+    this.relayAssignment = void 0;
+    this.connectionId = void 0;
+    this.connectedAt = void 0;
+    lifetime?.abort();
+    reject?.(error62);
+    void rtc?.close();
+    dataSocket?.close();
+    socket?.close();
+    if (established && diagnostic !== void 0) {
+      try {
+        this.options.onDisconnect?.(diagnostic);
+      } catch {
+      }
+    }
+    if (socket !== void 0 || established)
+      this.emitClose(error62);
+  }
+  clearHandshake() {
+    if (this.handshakeTimer !== void 0)
+      clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = void 0;
+  }
+};
+function adaptiveControlCloseError(event) {
+  const serverShutdown = isServerShutdownClose(event.code, event.reason);
+  const heartbeatTimeout = isHeartbeatTimeoutClose(event.code, event.reason);
+  const reason = event.reason.trim().slice(0, 300);
+  const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
+  return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
+    // Preserve the specific self-hosted authorization reasons so the Client
+    // runtime can surface a terminal reauthorization state instead of a generic
+    // transport loss (PR #285). Every other close keeps the shared semantics.
+    code: event.code === 4003 ? "CONNECTION_REPLACED" : event.code === 4001 && ["AUTH_INVALID", "TOKEN_EXPIRED", "DEVICE_REVOKED"].includes(reason) ? reason : "TRANSPORT_CLOSED",
+    retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code)
+  });
+}
+var CONTROL_RECOVERY_MAX_DELAY_MS = 15e3;
+function recoveryDelayMs(_attempt, _diagnostic) {
+  return Math.random() * CONTROL_RECOVERY_MAX_DELAY_MS;
+}
+function isObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function socketState(readyState) {
+  if (readyState === 0)
+    return "connecting";
+  if (readyState === 1)
+    return "open";
+  if (readyState === 2)
+    return "closing";
+  return "closed";
+}
+function negotiateTimeout(serverMs, localMs) {
+  if (localMs !== void 0)
+    return localMs;
+  if (serverMs === void 0)
+    return void 0;
+  return Math.min(SERVER_NEGOTIATE_TIMEOUT_MAX_MS, Math.max(SERVER_NEGOTIATE_TIMEOUT_MIN_MS, serverMs));
+}
+var DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4e3;
+var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6e3;
+var SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12e3;
+function throwIfAborted(signal) {
+  if (signal?.aborted)
+    throw new Error("Adaptive connection was aborted");
+}
+
+// packages/webrtc/dist/serial-send.js
+var SerialSend = class {
+  tail = Promise.resolve();
+  bytes = 0;
+  count = 0;
+  async run(bytes, send) {
+    if (this.bytes + bytes > 8 * 1024 * 1024 || this.count >= 256)
+      throw new Error("Encrypted send queue exceeds its limit");
+    this.bytes += bytes;
+    this.count += 1;
+    const task = this.tail.then(send);
+    this.tail = task.catch(() => void 0);
+    try {
+      await task;
+    } finally {
+      this.bytes -= bytes;
+      this.count -= 1;
+    }
+  }
+};
 
 // packages/client-core/dist/index.js
 var RemoteClientError = class extends Error {
@@ -68941,2003 +71107,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   nextProjectionSeq() {
     this.lastProjectionSeq += 1;
     return this.lastProjectionSeq;
-  }
-};
-
-// packages/webrtc/dist/websocket-backpressure.js
-async function waitForRelayCapacity(socket) {
-  const started = Date.now();
-  while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
-    if (socket.readyState !== 1 || Date.now() - started > 1e4)
-      throw new Error("Relay consumer is too slow or disconnected");
-    await new Promise((resolve10) => setTimeout(resolve10, 10));
-  }
-  if (socket.readyState !== 1)
-    throw new Error("Relay transport closed");
-}
-
-// packages/webrtc/dist/transport.js
-var BaseTransport = class {
-  handlers = /* @__PURE__ */ new Set();
-  closeHandlers = /* @__PURE__ */ new Set();
-  onMessage(cb) {
-    this.handlers.add(cb);
-    return () => this.handlers.delete(cb);
-  }
-  onClose(cb) {
-    this.closeHandlers.add(cb);
-    return () => this.closeHandlers.delete(cb);
-  }
-  emit(data2) {
-    for (const handler of this.handlers)
-      handler(data2);
-  }
-  emitClose(error62) {
-    for (const handler of this.closeHandlers)
-      handler(error62);
-  }
-};
-
-// packages/webrtc/dist/util.js
-function toBase64Url(bytes) {
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-  const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
-  return base643.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-function fromBase64Url(value) {
-  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  if (typeof atob === "function")
-    return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
-  return new Uint8Array(Buffer.from(padded, "base64"));
-}
-
-// packages/webrtc/dist/rtc-adapter.js
-var RTC_DATA_CHANNEL_LABEL = "dsh";
-var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
-function browserRtcFactory(options = {}) {
-  const binarySender = options.sendBinary;
-  return {
-    create(configuration) {
-      const raw = new RTCPeerConnection({
-        iceServers: configuration.iceServers,
-        iceTransportPolicy: configuration.iceTransportPolicy
-      });
-      return {
-        get connectionState() {
-          return raw.connectionState;
-        },
-        get iceConnectionState() {
-          return raw.iceConnectionState;
-        },
-        get iceGatheringState() {
-          return raw.iceGatheringState;
-        },
-        get signalingState() {
-          return raw.signalingState;
-        },
-        set onconnectionstatechange(value) {
-          raw.onconnectionstatechange = value;
-        },
-        get onconnectionstatechange() {
-          return raw.onconnectionstatechange;
-        },
-        set oniceconnectionstatechange(value) {
-          raw.oniceconnectionstatechange = value;
-        },
-        get oniceconnectionstatechange() {
-          return raw.oniceconnectionstatechange;
-        },
-        set onicegatheringstatechange(value) {
-          raw.onicegatheringstatechange = value;
-        },
-        get onicegatheringstatechange() {
-          return raw.onicegatheringstatechange;
-        },
-        set onicecandidate(value) {
-          raw.onicecandidate = value;
-        },
-        get onicecandidate() {
-          return raw.onicecandidate;
-        },
-        set ondatachannel(value) {
-          raw.ondatachannel = value;
-        },
-        get ondatachannel() {
-          return raw.ondatachannel;
-        },
-        createDataChannel(label, options2) {
-          return adaptDataChannel(raw.createDataChannel(label, options2), binarySender);
-        },
-        createOffer() {
-          return raw.createOffer();
-        },
-        createAnswer() {
-          return raw.createAnswer();
-        },
-        setLocalDescription(description) {
-          return raw.setLocalDescription(description);
-        },
-        setRemoteDescription(description) {
-          return raw.setRemoteDescription(description);
-        },
-        addIceCandidate(candidate) {
-          return raw.addIceCandidate(candidate);
-        },
-        async getStats() {
-          return await raw.getStats();
-        },
-        close() {
-          raw.close();
-        }
-      };
-    }
-  };
-}
-function summarizeIceCandidate(candidate) {
-  const value = candidate?.candidate?.trim();
-  if (value === void 0 || value.length === 0)
-    return emptyCandidateSummary();
-  const parts = value.replace(/^candidate:/, "").split(/\s+/);
-  const typeIndex = parts.indexOf("typ");
-  const relatedAddressIndex = parts.indexOf("raddr");
-  return {
-    candidateType: parseCandidateType(parts[typeIndex + 1]),
-    protocol: normalizeProtocol(parts[2]),
-    ...summarizeAddress(parts[4]),
-    ...relatedAddressIndex < 0 ? {} : relatedAddressSummary(parts[relatedAddressIndex + 1])
-  };
-}
-function summarizeAddress(address2) {
-  if (address2 === void 0 || address2.length === 0)
-    return { addressFamily: "unknown", addressScope: "unknown" };
-  if (address2.includes(":"))
-    return { addressFamily: "ipv6", addressScope: summarizeIpv6Scope(address2) };
-  const parts = address2.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return { addressFamily: "unknown", addressScope: "unknown" };
-  }
-  return { addressFamily: "ipv4", addressScope: summarizeIpv4Scope(parts) };
-}
-function stunOnlyIceServers(iceServers) {
-  const direct = [];
-  for (const server of iceServers) {
-    const sourceUrls = Array.isArray(server.urls) ? server.urls : [server.urls];
-    const urls = sourceUrls.filter(isStunUrl);
-    if (urls.length === 0)
-      continue;
-    direct.push({ urls: Array.isArray(server.urls) ? urls : urls[0] });
-  }
-  return direct;
-}
-function isStunUrl(url2) {
-  const value = url2.trim().toLowerCase();
-  return value.startsWith("stun:") || value.startsWith("stuns:");
-}
-function emptyCandidateSummary() {
-  return { candidateType: "unknown", addressFamily: "unknown", addressScope: "unknown" };
-}
-function parseCandidateType(value) {
-  if (value === "host" || value === "srflx" || value === "prflx" || value === "relay")
-    return value;
-  return "unknown";
-}
-function normalizeProtocol(value) {
-  if (value === void 0 || value.length === 0)
-    return void 0;
-  return value.toLowerCase();
-}
-function relatedAddressSummary(address2) {
-  const summary3 = summarizeAddress(address2);
-  return {
-    relatedAddressFamily: summary3.addressFamily,
-    relatedAddressScope: summary3.addressScope
-  };
-}
-function summarizeIpv4Scope(parts) {
-  if (parts[0] === 0 || parts[0] >= 240)
-    return "reserved";
-  if (parts[0] === 127)
-    return "loopback";
-  if (parts[0] === 169 && parts[1] === 254)
-    return "link-local";
-  if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
-    return "cgnat";
-  if (parts[0] >= 224)
-    return "reserved";
-  if (parts[0] === 10)
-    return "private";
-  if (parts[0] === 192 && parts[1] === 168)
-    return "private";
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
-    return "private";
-  return "public";
-}
-function summarizeIpv6Scope(address2) {
-  const value = address2.toLowerCase();
-  if (value === "::1")
-    return "loopback";
-  if (value.startsWith("fe80:"))
-    return "link-local";
-  if (value.startsWith("fd7a:115c:a1e0:"))
-    return "cgnat";
-  if (value.startsWith("fc") || value.startsWith("fd"))
-    return "private";
-  if (value.startsWith("ff"))
-    return "reserved";
-  return "public";
-}
-function adaptDataChannel(raw, sendBinary) {
-  return {
-    get label() {
-      return raw.label;
-    },
-    get ordered() {
-      return raw.ordered;
-    },
-    get readyState() {
-      return raw.readyState;
-    },
-    get bufferedAmount() {
-      return raw.bufferedAmount;
-    },
-    get binaryType() {
-      return raw.binaryType;
-    },
-    set binaryType(value) {
-      raw.binaryType = value;
-    },
-    set onopen(value) {
-      raw.onopen = value;
-    },
-    get onopen() {
-      return raw.onopen;
-    },
-    set onmessage(value) {
-      raw.onmessage = value;
-    },
-    get onmessage() {
-      return raw.onmessage;
-    },
-    set onclose(value) {
-      raw.onclose = value;
-    },
-    get onclose() {
-      return raw.onclose;
-    },
-    set onerror(value) {
-      raw.onerror = value;
-    },
-    get onerror() {
-      return raw.onerror;
-    },
-    set onbufferedamountlow(value) {
-      raw.onbufferedamountlow = value;
-    },
-    get onbufferedamountlow() {
-      return raw.onbufferedamountlow;
-    },
-    send(data2) {
-      if (data2 instanceof ArrayBuffer && sendBinary?.(raw, data2))
-        return;
-      raw.send(data2);
-    },
-    close() {
-      raw.close();
-    }
-  };
-}
-
-// packages/webrtc/dist/rtc-chunking.js
-var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
-var RTC_CHUNK_HEADER_BYTES = 12;
-var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
-var RTC_CHUNK_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
-var RTC_CHUNK_MAX_TOTAL = Math.ceil(RTC_CHUNK_MAX_MESSAGE_BYTES / RTC_CHUNK_PAYLOAD_BYTES);
-var MAX_IN_FLIGHT_MESSAGES = 8;
-var MAX_ASSEMBLY_AGE_MS = 3e4;
-var RtcChunkCodec = class {
-  nextMessageId = 1;
-  assemblies = /* @__PURE__ */ new Map();
-  encode(data2) {
-    if (data2.byteLength <= RTC_CHUNK_PAYLOAD_BYTES)
-      return [data2];
-    if (data2.byteLength > RTC_CHUNK_MAX_MESSAGE_BYTES) {
-      throw new Error("WebRTC transport message exceeds the reassembly limit.");
-    }
-    const messageId = this.nextMessageId;
-    this.nextMessageId = messageId === 4294967295 ? 1 : messageId + 1;
-    const total = Math.ceil(data2.byteLength / RTC_CHUNK_PAYLOAD_BYTES);
-    const frames = [];
-    for (let index = 0; index < total; index += 1) {
-      const start = index * RTC_CHUNK_PAYLOAD_BYTES;
-      const chunk = data2.subarray(start, Math.min(data2.byteLength, start + RTC_CHUNK_PAYLOAD_BYTES));
-      const frame = new Uint8Array(RTC_CHUNK_HEADER_BYTES + chunk.byteLength);
-      frame.set(RTC_CHUNK_MAGIC);
-      const view = new DataView(frame.buffer);
-      view.setUint32(4, messageId);
-      view.setUint16(8, index);
-      view.setUint16(10, total);
-      frame.set(chunk, RTC_CHUNK_HEADER_BYTES);
-      frames.push(frame);
-    }
-    return frames;
-  }
-  decode(frame) {
-    if (!isChunk(frame)) {
-      if (frame.byteLength > RTC_CHUNK_MAX_MESSAGE_BYTES) {
-        throw new Error("WebRTC transport message exceeds the reassembly limit.");
-      }
-      return frame;
-    }
-    if (frame.byteLength < RTC_CHUNK_HEADER_BYTES)
-      throw new Error("WebRTC transport chunk header is invalid.");
-    const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-    const messageId = view.getUint32(4);
-    const index = view.getUint16(8);
-    const total = view.getUint16(10);
-    if (messageId === 0 || total < 2 || total > RTC_CHUNK_MAX_TOTAL || index >= total) {
-      throw new Error("WebRTC transport chunk metadata is invalid.");
-    }
-    const chunk = frame.subarray(RTC_CHUNK_HEADER_BYTES);
-    if (chunk.byteLength > RTC_CHUNK_PAYLOAD_BYTES || index < total - 1 && chunk.byteLength !== RTC_CHUNK_PAYLOAD_BYTES || index === total - 1 && chunk.byteLength === 0) {
-      throw new Error("WebRTC transport chunk length is invalid.");
-    }
-    this.pruneStale();
-    let assembly = this.assemblies.get(messageId);
-    if (assembly === void 0) {
-      if (index !== 0 || this.assemblies.size >= MAX_IN_FLIGHT_MESSAGES) {
-        throw new Error("WebRTC transport chunk sequence is invalid.");
-      }
-      assembly = { messageId, total, receivedBytes: 0, chunks: [], updatedAt: Date.now() };
-      this.assemblies.set(messageId, assembly);
-    }
-    if (assembly.total !== total || index !== assembly.chunks.length) {
-      this.assemblies.delete(messageId);
-      throw new Error("WebRTC transport chunk sequence is invalid.");
-    }
-    const receivedBytes = assembly.receivedBytes + chunk.byteLength;
-    if (receivedBytes > RTC_CHUNK_MAX_MESSAGE_BYTES) {
-      this.assemblies.delete(messageId);
-      throw new Error("WebRTC transport message exceeds the reassembly limit.");
-    }
-    assembly.chunks.push(Uint8Array.from(chunk));
-    assembly.receivedBytes = receivedBytes;
-    assembly.updatedAt = Date.now();
-    if (assembly.chunks.length < total)
-      return void 0;
-    this.assemblies.delete(messageId);
-    const message = new Uint8Array(assembly.receivedBytes);
-    let offset = 0;
-    for (const part of assembly.chunks) {
-      message.set(part, offset);
-      offset += part.byteLength;
-    }
-    return message;
-  }
-  reset() {
-    this.nextMessageId = 1;
-    this.assemblies.clear();
-  }
-  pruneStale() {
-    const now = Date.now();
-    for (const [messageId, assembly] of this.assemblies) {
-      if (now - assembly.updatedAt > MAX_ASSEMBLY_AGE_MS)
-        this.assemblies.delete(messageId);
-    }
-  }
-};
-function isChunk(frame) {
-  if (frame.byteLength < RTC_CHUNK_MAGIC.byteLength)
-    return false;
-  for (let index = 0; index < RTC_CHUNK_MAGIC.byteLength; index += 1) {
-    if (frame[index] !== RTC_CHUNK_MAGIC[index])
-      return false;
-  }
-  return true;
-}
-
-// packages/webrtc/dist/rtc-data-channel.js
-var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
-var SELECTED_PATH_RETRY_COUNT = 5;
-var SELECTED_PATH_RETRY_DELAY_MS = 50;
-var RtcDataChannelTransport = class {
-  pc;
-  role;
-  onSignal;
-  negotiateTimeoutMs;
-  channelLabel;
-  sendTimeoutMs;
-  label;
-  onDiagnostic;
-  channel;
-  remoteCandidates = [];
-  remoteDescriptionSet = false;
-  opened = false;
-  closed = false;
-  messageHandlers = /* @__PURE__ */ new Set();
-  closeHandlers = /* @__PURE__ */ new Set();
-  errorHandlers = /* @__PURE__ */ new Set();
-  connectPromise;
-  openResolve;
-  openReject;
-  negotiateTimer;
-  removeAbort;
-  watchdogTimer;
-  outgoing = new RtcChunkCodec();
-  incoming = new RtcChunkCodec();
-  bytesSent = 0;
-  bytesReceived = 0;
-  selected;
-  selectedMode;
-  selectedRelayUrlValue;
-  selectedPathTelemetry;
-  localCandidateTelemetry = emptyCandidateTelemetry();
-  remoteCandidateTelemetry = emptyCandidateTelemetry();
-  candidatePairTelemetry = emptyCandidatePairTelemetry();
-  filteredLocalCandidateTelemetry = emptyCandidateTelemetry();
-  filteredCandidatePairTelemetry = emptyCandidateTelemetry();
-  lastBufferedAmount = 0;
-  constructor(options) {
-    this.role = options.role;
-    this.onSignal = options.onSignal;
-    this.negotiateTimeoutMs = options.negotiateTimeoutMs ?? DEFAULT_NEGOTIATE_TIMEOUT_MS;
-    this.channelLabel = options.channelLabel ?? RTC_DATA_CHANNEL_LABEL;
-    this.sendTimeoutMs = options.sendTimeoutMs;
-    this.label = options.label;
-    this.onDiagnostic = options.onDiagnostic;
-    this.pc = options.factory.create({
-      iceServers: options.iceServers,
-      iceTransportPolicy: options.iceTransportPolicy,
-      onDiagnostic: (event) => this.handlePeerDiagnostic(event)
-    });
-    this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
-    this.pc.onicecandidate = (event) => {
-      if (event.candidate !== null && !this.closed) {
-        const candidate = summarizeIceCandidate(event.candidate);
-        recordCandidate(this.localCandidateTelemetry, candidate);
-        this.emitDiagnostic({ type: "local-candidate", candidate, diagnostics: this.diagnostics() });
-        this.onSignal({ type: "ice", candidate: event.candidate });
-      }
-    };
-    this.pc.onconnectionstatechange = () => {
-      this.emitStateChange();
-      this.checkConnectionState();
-    };
-    this.pc.oniceconnectionstatechange = () => {
-      this.emitStateChange();
-      this.checkConnectionState();
-    };
-    this.pc.onicegatheringstatechange = () => this.emitStateChange();
-  }
-  /** Begin negotiation; resolves when the DataChannel is open. */
-  connect(signal) {
-    if (this.closed)
-      return Promise.reject(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed."));
-    if (signal?.aborted)
-      return Promise.reject(new RtcConnectError("RTC_ABORTED", "WebRTC negotiation was aborted."));
-    if (this.opened)
-      return Promise.resolve();
-    if (this.connectPromise !== void 0)
-      return this.connectPromise;
-    this.armAbort(signal);
-    this.connectPromise = new Promise((resolve10, reject) => {
-      this.openResolve = resolve10;
-      this.openReject = reject;
-      this.negotiateTimer = setTimeout(() => {
-        void this.failOpenAfterStats(new RtcConnectError("RTC_CONNECT_TIMEOUT", `WebRTC negotiation timed out after ${this.negotiateTimeoutMs}ms.`));
-      }, this.negotiateTimeoutMs);
-      if (this.role === "initiator") {
-        void this.startInitiator().catch((error62) => this.failOpen(asError(error62)));
-      }
-    });
-    return this.connectPromise;
-  }
-  handleSignal(signal) {
-    if (this.closed)
-      return;
-    if (signal.type === "offer")
-      void this.handleOffer(signal.sdp);
-    else if (signal.type === "answer")
-      void this.handleAnswer(signal.sdp);
-    else
-      void this.handleIce(signal.candidate);
-  }
-  async send(data2) {
-    const channel = this.requireOpenChannel();
-    if (channel.readyState !== "open")
-      throw new Error("WebRTC data channel is not open.");
-    for (const frame of this.outgoing.encode(data2)) {
-      try {
-        channel.send(toArrayBuffer(frame));
-      } catch (error62) {
-        console.error("[rtc-send-error] bytes=" + frame.byteLength, error62 instanceof Error ? error62.message : error62);
-        throw error62;
-      }
-    }
-    this.bytesSent += data2.byteLength;
-    this.armWatchdog(channel);
-  }
-  onMessage(handler) {
-    this.messageHandlers.add(handler);
-    return () => this.messageHandlers.delete(handler);
-  }
-  onClose(handler) {
-    this.closeHandlers.add(handler);
-    return () => this.closeHandlers.delete(handler);
-  }
-  onError(handler) {
-    this.errorHandlers.add(handler);
-    return () => this.errorHandlers.delete(handler);
-  }
-  selectedTransport() {
-    return this.selected;
-  }
-  selectedRelayUrl() {
-    return this.selectedRelayUrlValue;
-  }
-  selectedPathMode() {
-    return this.selectedMode;
-  }
-  diagnostics() {
-    return {
-      role: this.role,
-      ...this.label === void 0 ? {} : { label: this.label },
-      connectionState: this.pc.connectionState,
-      iceConnectionState: this.pc.iceConnectionState,
-      iceGatheringState: this.pc.iceGatheringState,
-      localCandidates: cloneCandidateTelemetry(this.localCandidateTelemetry),
-      remoteCandidates: cloneCandidateTelemetry(this.remoteCandidateTelemetry),
-      candidatePairs: cloneCandidatePairTelemetry(this.candidatePairTelemetry),
-      filteredLocalCandidates: cloneCandidateTelemetry(this.filteredLocalCandidateTelemetry),
-      filteredCandidatePairs: cloneCandidateTelemetry(this.filteredCandidatePairTelemetry),
-      ...this.selectedPathTelemetry === void 0 ? {} : { selectedPath: { ...this.selectedPathTelemetry } }
-    };
-  }
-  async connectionDetails() {
-    let statsDetails = {};
-    try {
-      statsDetails = await this.refreshStatsDiagnostics();
-    } catch {
-    }
-    return {
-      ...statsDetails,
-      mode: statsDetails.mode ?? this.selectedMode,
-      connectionState: this.pc.connectionState,
-      iceConnectionState: this.pc.iceConnectionState,
-      dataChannelState: this.channel?.readyState,
-      diagnostics: this.diagnostics()
-    };
-  }
-  getStats() {
-    const connected = this.channel?.readyState === "open";
-    return {
-      mode: !connected ? "Disconnected" : this.selectedMode ?? (this.selected === "turn" ? "TURN" : this.selected === "lan" ? "LAN" : "P2P"),
-      connected,
-      bytesSent: this.bytesSent,
-      bytesReceived: this.bytesReceived
-    };
-  }
-  /** Idempotent close: releases PeerConnection, DataChannel, timers and listeners. */
-  async close() {
-    if (this.closed)
-      return;
-    this.closed = true;
-    this.clearNegotiation();
-    this.openReject?.(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed during negotiation."));
-    this.openResolve = void 0;
-    this.openReject = void 0;
-    this.clearWatchdog();
-    const channel = this.channel;
-    this.channel = void 0;
-    if (channel !== void 0) {
-      channel.onopen = null;
-      channel.onmessage = null;
-      channel.onclose = null;
-      channel.onerror = null;
-      channel.onbufferedamountlow = null;
-      try {
-        channel.close();
-      } catch {
-      }
-    }
-    this.pc.onicecandidate = null;
-    this.pc.ondatachannel = null;
-    this.pc.onconnectionstatechange = null;
-    this.pc.oniceconnectionstatechange = null;
-    try {
-      this.pc.close();
-    } catch {
-    }
-    if (this.opened) {
-      this.opened = false;
-      for (const handler of this.closeHandlers)
-        handler();
-    }
-  }
-  armAbort(signal) {
-    this.removeAbort?.();
-    this.removeAbort = void 0;
-    if (signal === void 0)
-      return;
-    const onAbort = () => {
-      this.failOpen(new RtcConnectError("RTC_ABORTED", "WebRTC negotiation was aborted."));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    this.removeAbort = () => signal.removeEventListener("abort", onAbort);
-    if (signal.aborted)
-      onAbort();
-  }
-  async startInitiator() {
-    const channel = this.pc.createDataChannel(this.channelLabel, RTC_DATA_CHANNEL_OPTIONS);
-    this.adoptChannel(channel);
-    const offer = await this.pc.createOffer();
-    if (this.closed)
-      return;
-    await this.pc.setLocalDescription(offer);
-    if (this.closed)
-      return;
-    this.onSignal({ type: "offer", sdp: requireSdp(offer) });
-  }
-  async handleOffer(sdp) {
-    if (this.role !== "responder" || this.remoteDescriptionSet) {
-      this.failOpen(new RtcConnectError("RTC_INVALID_STATE", "Received an unexpected WebRTC offer."));
-      return;
-    }
-    try {
-      await this.pc.setRemoteDescription({ type: "offer", sdp });
-      this.remoteDescriptionSet = true;
-      await this.flushRemoteCandidates();
-      const answer = await this.pc.createAnswer();
-      await this.pc.setLocalDescription(answer);
-      this.onSignal({ type: "answer", sdp: requireSdp(answer) });
-    } catch (error62) {
-      this.failOpen(asError(error62));
-    }
-  }
-  async handleAnswer(sdp) {
-    if (this.role !== "initiator" || this.remoteDescriptionSet) {
-      this.failOpen(new RtcConnectError("RTC_INVALID_STATE", "Received an unexpected WebRTC answer."));
-      return;
-    }
-    try {
-      await this.pc.setRemoteDescription({ type: "answer", sdp });
-      this.remoteDescriptionSet = true;
-      await this.flushRemoteCandidates();
-    } catch (error62) {
-      this.failOpen(asError(error62));
-    }
-  }
-  async handleIce(candidate) {
-    const summary3 = summarizeIceCandidate(candidate);
-    if (!this.remoteDescriptionSet) {
-      recordCandidate(this.remoteCandidateTelemetry, summary3);
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "buffered", diagnostics: this.diagnostics() });
-      this.remoteCandidates.push(candidate);
-      return;
-    }
-    try {
-      await this.pc.addIceCandidate(candidate);
-      recordCandidate(this.remoteCandidateTelemetry, summary3);
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "added", diagnostics: this.diagnostics() });
-    } catch {
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary3, action: "ignored", diagnostics: this.diagnostics() });
-    }
-  }
-  async flushRemoteCandidates() {
-    const buffered = this.remoteCandidates.splice(0, this.remoteCandidates.length);
-    for (const candidate of buffered) {
-      try {
-        await this.pc.addIceCandidate(candidate);
-      } catch {
-      }
-    }
-  }
-  adoptChannel(channel) {
-    if (this.channel !== void 0 && this.channel !== channel) {
-      try {
-        channel.close();
-      } catch {
-      }
-      return;
-    }
-    this.channel = channel;
-    channel.binaryType = "arraybuffer";
-    channel.onopen = () => {
-      if (this.closed || this.opened)
-        return;
-      this.opened = true;
-      const resolve10 = this.openResolve;
-      this.clearNegotiation();
-      void this.resolveSelectedTransport().then(() => {
-        if (this.closed)
-          return;
-        this.openResolve = void 0;
-        this.openReject = void 0;
-        resolve10?.();
-      });
-    };
-    channel.onmessage = (event) => {
-      if (this.closed || !this.opened)
-        return;
-      const data2 = event.data;
-      const frame = typeof data2 === "string" ? new TextEncoder().encode(data2) : new Uint8Array(data2);
-      this.bytesReceived += frame.byteLength;
-      try {
-        const message = this.incoming.decode(frame);
-        if (message === void 0)
-          return;
-        for (const handler of this.messageHandlers)
-          handler(message);
-      } catch {
-        void this.close();
-      }
-    };
-    channel.onclose = () => {
-      if (this.closed)
-        return;
-      this.failOpen(new RtcConnectError("RTC_CLOSED", "WebRTC data channel closed."));
-      if (this.opened) {
-        this.opened = false;
-        for (const handler of this.closeHandlers)
-          handler();
-      }
-    };
-    channel.onerror = () => {
-      const error62 = new RtcConnectError("RTC_FAILED", "WebRTC data channel reported an error.");
-      this.failOpen(error62);
-      for (const handler of this.errorHandlers)
-        handler(error62);
-    };
-  }
-  async resolveSelectedTransport() {
-    try {
-      let selected = await this.refreshStatsDiagnostics();
-      for (let attempt = 0; attempt < SELECTED_PATH_RETRY_COUNT && !this.closed && (selected.transport === void 0 || selected.mode === void 0 || selected.mode === "P2P"); attempt += 1) {
-        await sleep(SELECTED_PATH_RETRY_DELAY_MS);
-        selected = await this.refreshStatsDiagnostics();
-      }
-      this.selected = selected?.transport;
-      this.selectedMode = selected?.mode;
-      this.selectedRelayUrlValue = selected?.relayUrl;
-      this.selectedPathTelemetry = selectedPathTelemetry(selected);
-      this.emitDiagnostic({
-        type: "selected-path",
-        selectedPath: this.selectedPathTelemetry,
-        diagnostics: this.diagnostics()
-      });
-    } catch {
-      this.selected = void 0;
-      this.selectedMode = void 0;
-    }
-  }
-  checkConnectionState() {
-    if (this.closed || this.opened)
-      return;
-    if (this.pc.connectionState === "failed" || this.pc.iceConnectionState === "failed" || this.pc.connectionState === "closed" || this.pc.iceConnectionState === "closed") {
-      void this.failOpenAfterStats(new RtcConnectError("RTC_FAILED", "WebRTC peer connection failed before the data channel opened."));
-    }
-  }
-  async failOpenAfterStats(error62) {
-    await this.refreshStatsDiagnostics().catch(() => void 0);
-    this.failOpen(error62);
-  }
-  failOpen(error62) {
-    if (this.closed || this.opened || this.openReject === void 0)
-      return;
-    const reject = this.openReject;
-    this.clearNegotiation();
-    this.openResolve = void 0;
-    this.openReject = void 0;
-    reject(error62);
-    void this.close();
-  }
-  clearNegotiation() {
-    if (this.negotiateTimer !== void 0)
-      clearTimeout(this.negotiateTimer);
-    this.negotiateTimer = void 0;
-    this.removeAbort?.();
-    this.removeAbort = void 0;
-  }
-  requireOpenChannel() {
-    const channel = this.channel;
-    if (channel === void 0 || channel.readyState !== "open" || this.closed || !this.opened) {
-      throw new Error("WebRTC data channel is not open.");
-    }
-    return channel;
-  }
-  armWatchdog(channel) {
-    if (this.closed || this.sendTimeoutMs === void 0 || this.sendTimeoutMs <= 0)
-      return;
-    if (this.watchdogTimer !== void 0)
-      clearTimeout(this.watchdogTimer);
-    this.watchdogTimer = void 0;
-    const baseline = channel.bufferedAmount;
-    if (baseline <= 0) {
-      this.lastBufferedAmount = 0;
-      return;
-    }
-    this.lastBufferedAmount = baseline;
-    this.watchdogTimer = setTimeout(() => {
-      this.watchdogTimer = void 0;
-      if (this.closed || this.channel !== channel || channel.readyState !== "open")
-        return;
-      const current = channel.bufferedAmount;
-      if (current > 0 && current >= this.lastBufferedAmount) {
-        const error62 = new RtcConnectError("RTC_SEND_TIMEOUT", "DataChannel send stalled.");
-        for (const handler of this.errorHandlers)
-          handler(error62);
-        void this.close();
-        return;
-      }
-      this.lastBufferedAmount = current;
-      if (current > 0)
-        this.armWatchdog(channel);
-    }, this.sendTimeoutMs);
-  }
-  clearWatchdog() {
-    if (this.watchdogTimer !== void 0)
-      clearTimeout(this.watchdogTimer);
-    this.watchdogTimer = void 0;
-    this.lastBufferedAmount = 0;
-  }
-  async refreshStatsDiagnostics() {
-    const stats = [...await new Promise((resolve10, reject) => {
-      const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
-      Promise.resolve().then(() => this.pc.getStats()).then(resolve10, reject).finally(() => clearTimeout(timer2));
-    })];
-    if (this.closed)
-      return {};
-    this.candidatePairTelemetry = inspectCandidatePairs(stats);
-    return inspectSelectedPath(stats);
-  }
-  handlePeerDiagnostic(event) {
-    if (event.type === "local-candidate-filtered") {
-      recordCandidate(this.filteredLocalCandidateTelemetry, event.candidate);
-      this.emitDiagnostic({
-        type: event.type,
-        candidate: event.candidate,
-        reason: event.reason,
-        diagnostics: this.diagnostics()
-      });
-      return;
-    }
-    if (event.localCandidate !== void 0)
-      recordCandidate(this.filteredCandidatePairTelemetry, event.localCandidate);
-    this.emitDiagnostic({
-      type: event.type,
-      localCandidate: event.localCandidate,
-      reason: event.reason,
-      diagnostics: this.diagnostics()
-    });
-  }
-  emitStateChange() {
-    this.emitDiagnostic({
-      type: "state-change",
-      connectionState: this.pc.connectionState,
-      iceConnectionState: this.pc.iceConnectionState,
-      iceGatheringState: this.pc.iceGatheringState,
-      diagnostics: this.diagnostics()
-    });
-  }
-  emitDiagnostic(event) {
-    try {
-      this.onDiagnostic?.(event);
-    } catch {
-    }
-  }
-};
-var RtcConnectError = class extends Error {
-  code;
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-  }
-};
-function inspectSelectedPath(stats) {
-  const candidates = /* @__PURE__ */ new Map();
-  const candidatePairs = /* @__PURE__ */ new Map();
-  const selectedPairs = [];
-  const selectedPairIds = /* @__PURE__ */ new Set();
-  for (const [reportId, entry] of stats) {
-    if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
-      if (typeof entry.candidateType === "string" && entry.id !== void 0) {
-        candidates.set(String(entry.id), entry);
-      }
-    } else if (entry.type === "candidate-pair") {
-      candidatePairs.set(String(entry.id ?? reportId), entry);
-      if (entry.selected === true || entry.nominated === true)
-        selectedPairs.push(entry);
-    } else if (entry.type === "transport" && typeof entry.selectedCandidatePairId === "string") {
-      selectedPairIds.add(entry.selectedCandidatePairId);
-    }
-  }
-  const pairs = [
-    ...[...selectedPairIds].map((id6) => candidatePairs.get(id6)).filter((pair) => pair !== void 0),
-    ...selectedPairs
-  ];
-  for (const pair of pairs) {
-    const local = candidates.get(String(pair.localCandidateId));
-    const remote = candidates.get(String(pair.remoteCandidateId));
-    const localType = local?.candidateType;
-    const remoteType = remote?.candidateType;
-    const localAddressScope = summarizeAddress(candidateAddressValue(local)).addressScope;
-    const remoteAddressScope = summarizeAddress(candidateAddressValue(remote)).addressScope;
-    let selected;
-    if (localType === "relay" || remoteType === "relay")
-      selected = { transport: "turn", mode: "TURN" };
-    const relayUrl = localType === "relay" ? stringStat(local, "url") : void 0;
-    if (local === void 0 && remote === void 0)
-      continue;
-    const lan = isLanCandidatePair(localType, remoteType, localAddressScope, remoteAddressScope);
-    selected ??= { transport: lan ? "lan" : "p2p", mode: lan ? "LAN" : "P2P" };
-    const currentRoundTripTime = numberStat(pair, "currentRoundTripTime");
-    return {
-      ...selected,
-      ...relayUrl === void 0 ? {} : { relayUrl },
-      localCandidateType: stringStat(local, "candidateType"),
-      remoteCandidateType: stringStat(remote, "candidateType"),
-      localAddressScope,
-      remoteAddressScope,
-      localAddress: candidateAddress(local),
-      remoteAddress: candidateAddress(remote),
-      protocol: stringStat(local, "protocol") ?? stringStat(remote, "protocol"),
-      relayProtocol: stringStat(local, "relayProtocol") ?? stringStat(remote, "relayProtocol"),
-      currentRoundTripTimeMs: currentRoundTripTime === void 0 ? void 0 : Math.round(currentRoundTripTime * 1e3),
-      availableOutgoingBitrate: numberStat(pair, "availableOutgoingBitrate"),
-      bytesSent: numberStat(pair, "bytesSent"),
-      bytesReceived: numberStat(pair, "bytesReceived")
-    };
-  }
-  return {};
-}
-function inspectCandidatePairs(stats) {
-  const candidates = /* @__PURE__ */ new Map();
-  const telemetry = emptyCandidatePairTelemetry();
-  const pairs = [];
-  for (const [reportId, entry] of stats) {
-    if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
-      if (typeof entry.candidateType === "string" && entry.id !== void 0) {
-        candidates.set(String(entry.id), entry);
-      }
-    } else if (entry.type === "candidate-pair") {
-      pairs.push({ ...entry, id: entry.id ?? reportId });
-    }
-  }
-  for (const pair of pairs) {
-    telemetry.total += 1;
-    if (pair.nominated === true)
-      telemetry.nominated += 1;
-    if (pair.selected === true)
-      telemetry.selected += 1;
-    increment(telemetry.byState, stringStat(pair, "state") ?? (pair.selected === true ? "selected" : "unknown"));
-    const local = candidates.get(String(pair.localCandidateId));
-    const remote = candidates.get(String(pair.remoteCandidateId));
-    recordCandidateStats(telemetry.byLocalType, telemetry.byLocalFamily, telemetry.byLocalScope, local);
-    recordCandidateStats(telemetry.byRemoteType, telemetry.byRemoteFamily, telemetry.byRemoteScope, remote);
-  }
-  return telemetry;
-}
-function candidateAddress(candidate) {
-  const address2 = stringStat(candidate, "address") ?? stringStat(candidate, "ip");
-  if (address2 === void 0)
-    return void 0;
-  const port = numberStat(candidate, "port");
-  return port === void 0 ? address2 : `${address2}:${port}`;
-}
-function stringStat(entry, key) {
-  const value = entry?.[key];
-  return typeof value === "string" && value.length > 0 ? value : void 0;
-}
-function numberStat(entry, key) {
-  const value = entry?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-function emptyCandidateTelemetry() {
-  return {
-    total: 0,
-    byType: {},
-    byFamily: {},
-    byScope: {},
-    byProtocol: {}
-  };
-}
-function cloneCandidateTelemetry(value) {
-  return {
-    total: value.total,
-    byType: { ...value.byType },
-    byFamily: { ...value.byFamily },
-    byScope: { ...value.byScope },
-    byProtocol: { ...value.byProtocol }
-  };
-}
-function emptyCandidatePairTelemetry() {
-  return {
-    total: 0,
-    nominated: 0,
-    selected: 0,
-    byState: {},
-    byLocalType: {},
-    byRemoteType: {},
-    byLocalFamily: {},
-    byRemoteFamily: {},
-    byLocalScope: {},
-    byRemoteScope: {}
-  };
-}
-function cloneCandidatePairTelemetry(value) {
-  return {
-    total: value.total,
-    nominated: value.nominated,
-    selected: value.selected,
-    byState: { ...value.byState },
-    byLocalType: { ...value.byLocalType },
-    byRemoteType: { ...value.byRemoteType },
-    byLocalFamily: { ...value.byLocalFamily },
-    byRemoteFamily: { ...value.byRemoteFamily },
-    byLocalScope: { ...value.byLocalScope },
-    byRemoteScope: { ...value.byRemoteScope }
-  };
-}
-function recordCandidate(telemetry, candidate) {
-  telemetry.total += 1;
-  increment(telemetry.byType, candidate.candidateType);
-  increment(telemetry.byFamily, candidate.addressFamily);
-  increment(telemetry.byScope, candidate.addressScope);
-  if (candidate.protocol !== void 0)
-    increment(telemetry.byProtocol, candidate.protocol);
-}
-function recordCandidateStats(byType, byFamily, byScope, candidate) {
-  const candidateType = candidateTypeStat(candidate);
-  const address2 = summarizeAddress(candidateAddressValue(candidate));
-  increment(byType, candidateType);
-  increment(byFamily, address2.addressFamily);
-  increment(byScope, address2.addressScope);
-}
-function candidateTypeStat(candidate) {
-  const value = stringStat(candidate, "candidateType");
-  if (value === "host" || value === "srflx" || value === "prflx" || value === "relay")
-    return value;
-  return "unknown";
-}
-function candidateAddressValue(candidate) {
-  return stringStat(candidate, "address") ?? stringStat(candidate, "ip");
-}
-function isLanCandidatePair(localType, remoteType, localScope, remoteScope) {
-  if (localType === "host" && remoteType === "host") {
-    return !isExplicitlyNonLanScope(localScope) && !isExplicitlyNonLanScope(remoteScope);
-  }
-  const directTypes = /* @__PURE__ */ new Set(["host", "prflx"]);
-  if (!directTypes.has(String(localType)) || !directTypes.has(String(remoteType)))
-    return false;
-  if (isLocalNetworkScope(localScope) && isLocalNetworkScope(remoteScope))
-    return true;
-  return localType === "host" && isLocalNetworkScope(localScope) && remoteType === "prflx" && remoteScope === "unknown" || remoteType === "host" && isLocalNetworkScope(remoteScope) && localType === "prflx" && localScope === "unknown";
-}
-function isLocalNetworkScope(scope2) {
-  return scope2 === "private" || scope2 === "link-local" || scope2 === "loopback";
-}
-function isExplicitlyNonLanScope(scope2) {
-  return scope2 === "public" || scope2 === "cgnat" || scope2 === "reserved";
-}
-function increment(map2, key) {
-  map2[key] = (map2[key] ?? 0) + 1;
-}
-function selectedPathTelemetry(details2) {
-  return {
-    ...details2.transport === void 0 ? {} : { transport: details2.transport },
-    ...details2.mode === void 0 ? {} : { mode: details2.mode },
-    ...details2.relayUrl === void 0 ? {} : { relayUrl: details2.relayUrl },
-    ...details2.localCandidateType === void 0 ? {} : { localCandidateType: details2.localCandidateType },
-    ...details2.remoteCandidateType === void 0 ? {} : { remoteCandidateType: details2.remoteCandidateType },
-    ...details2.localAddressScope === void 0 ? {} : { localAddressScope: details2.localAddressScope },
-    ...details2.remoteAddressScope === void 0 ? {} : { remoteAddressScope: details2.remoteAddressScope },
-    ...details2.protocol === void 0 ? {} : { protocol: details2.protocol },
-    ...details2.relayProtocol === void 0 ? {} : { relayProtocol: details2.relayProtocol },
-    ...details2.currentRoundTripTimeMs === void 0 ? {} : { currentRoundTripTimeMs: details2.currentRoundTripTimeMs },
-    ...details2.availableOutgoingBitrate === void 0 ? {} : { availableOutgoingBitrate: details2.availableOutgoingBitrate }
-  };
-}
-function requireSdp(description) {
-  if (typeof description.sdp !== "string" || description.sdp.length === 0) {
-    throw new RtcConnectError("RTC_FAILED", "The RTC backend produced an empty session description.");
-  }
-  return description.sdp;
-}
-function toArrayBuffer(data2) {
-  if (data2.byteOffset === 0 && data2.byteLength === data2.buffer.byteLength)
-    return data2.buffer;
-  return data2.slice().buffer;
-}
-function asError(error62) {
-  return error62 instanceof Error ? error62 : new RtcConnectError("RTC_FAILED", "WebRTC negotiation failed.");
-}
-function sleep(ms) {
-  return new Promise((resolve10) => setTimeout(resolve10, ms));
-}
-
-// packages/webrtc/dist/control-lease.js
-var WEBRTC_LEASE_MS2 = 3e5;
-var ControlLease = class {
-  connectionId;
-  ticket;
-  request;
-  expired;
-  confirmed = false;
-  stopped = false;
-  sent;
-  deadline;
-  sequence = 0;
-  timer;
-  lastRequest = -Infinity;
-  constructor(connectionId, ticket, request, expired) {
-    this.connectionId = connectionId;
-    this.ticket = ticket;
-    this.request = request;
-    this.expired = expired;
-  }
-  start() {
-    this.timer = setInterval(() => this.tick(), 1e3);
-    this.deadline = { mono: performance.now() + WEBRTC_LEASE_MS2, wall: Date.now() + WEBRTC_LEASE_MS2 };
-    this.tick(true);
-  }
-  valid() {
-    if (this.stopped)
-      return false;
-    const d = this.deadline;
-    if (d && (performance.now() >= d.mono || Date.now() >= d.wall)) {
-      this.stop();
-      this.expired();
-      return false;
-    }
-    return true;
-  }
-  remainingMs() {
-    if (!this.confirmed || this.stopped || !this.deadline)
-      return void 0;
-    return Math.max(0, Math.min(this.deadline.mono - performance.now(), this.deadline.wall - Date.now()));
-  }
-  canDetach() {
-    return this.confirmed && this.valid();
-  }
-  recoveryTicket() {
-    return this.canDetach() ? this.ticket : void 0;
-  }
-  tick(force = false) {
-    if (!this.valid())
-      return;
-    const mono = performance.now();
-    if (!force && mono - this.lastRequest < 25e3)
-      return;
-    const sent = { id: String(++this.sequence), mono, wall: Date.now() };
-    this.lastRequest = mono;
-    try {
-      this.request({ connectionId: this.connectionId, requestId: sent.id, ticket: this.ticket });
-      this.sent = sent;
-    } catch {
-    }
-  }
-  acknowledge(ack) {
-    if (!this.valid() || ack.connectionId !== this.connectionId || ack.leaseMs !== WEBRTC_LEASE_MS2)
-      return;
-    const sent = this.sent;
-    if (!sent || sent.id !== ack.requestId)
-      return;
-    if (performance.now() - sent.mono >= 3e4 || Date.now() - sent.wall >= 3e4)
-      return;
-    this.sent = void 0;
-    this.ticket = ack.ticket;
-    this.confirmed = true;
-    this.deadline = { mono: sent.mono + WEBRTC_LEASE_MS2, wall: sent.wall + WEBRTC_LEASE_MS2 };
-  }
-  stop() {
-    this.stopped = true;
-    clearInterval(this.timer);
-    this.timer = void 0;
-    this.sent = void 0;
-  }
-};
-
-// packages/webrtc/dist/adaptive-transport.js
-var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
-var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
-var AdaptiveTransport = class extends BaseTransport {
-  url;
-  options;
-  handshakeHandlers = /* @__PURE__ */ new Set();
-  socket;
-  dataSocket;
-  connectionId;
-  relayCounter = 0;
-  bytesSent = 0;
-  bytesReceived = 0;
-  dataMode = "relay";
-  selected;
-  rtc;
-  readyResolve;
-  readyReject;
-  handshakeTimer;
-  lifetime;
-  removeAbort;
-  webrtcEnabled = true;
-  serverNegotiateTimeoutMs;
-  negotiatedCapabilities = ["transport.relay"];
-  controlFrameLimits = {};
-  connectedAt;
-  heartbeatIntervalMs;
-  lastControlReceivedAt;
-  lastControlSentAt;
-  lastRtcDiagnostics;
-  relayAssignment;
-  dataReady = false;
-  recoveryTicket;
-  relayRecoveryTicket;
-  lease;
-  recoveryTimer;
-  recoveryOpeningTimer;
-  recoveryAttempt = 0;
-  controlReady = false;
-  constructor(url2, options) {
-    super();
-    this.url = url2;
-    this.options = options;
-  }
-  async connect() {
-    if (this.socket !== void 0 || this.connectedAt !== void 0)
-      return;
-    throwIfAborted(this.options.signal);
-    const lifetime = new AbortController();
-    this.lifetime = lifetime;
-    this.webrtcEnabled = true;
-    this.serverNegotiateTimeoutMs = void 0;
-    this.dataMode = "relay";
-    this.selected = void 0;
-    this.connectedAt = void 0;
-    this.relayCounter = 0;
-    this.socket = new WebSocket(this.url);
-    this.controlFrameLimits = {};
-    this.socket.binaryType = "arraybuffer";
-    await new Promise((resolve10, reject) => {
-      this.readyResolve = resolve10;
-      this.readyReject = reject;
-      const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
-      this.options.signal?.addEventListener("abort", onAbort, { once: true });
-      this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
-      this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
-      const socket = this.socket;
-      socket.onmessage = (event) => {
-        if (this.socket === socket)
-          void this.handleSocketMessage(event.data, lifetime);
-      };
-      socket.onopen = () => {
-        if (this.lifetime !== lifetime)
-          return;
-        this.sendControl("hello", {
-          role: this.options.role,
-          deviceId: this.options.deviceId,
-          accessToken: this.options.accessToken,
-          protocols: [PROTOCOL_VERSION],
-          capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
-        });
-      };
-      socket.onerror = () => {
-        if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(new Error("Control socket failed"), { reason: "control-error" });
-      };
-      socket.onclose = (event) => {
-        if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
-      };
-    });
-  }
-  async send(data2) {
-    if (this.lease && !this.lease.valid())
-      throw new Error("Control lease expired");
-    if (this.connectionId === void 0)
-      throw new Error("adaptive transport has not been authorized");
-    if (this.dataMode === "webrtc") {
-      const rtc = this.rtc;
-      if (rtc === void 0)
-        throw new Error("webrtc data channel is not available");
-      this.bytesSent += data2.byteLength;
-      await rtc.send(data2);
-      return;
-    }
-    const socket = this.dataSocket ?? this.socket;
-    if (socket?.readyState !== WebSocket.OPEN)
-      throw new Error("adaptive transport is not connected");
-    await waitForRelayCapacity(socket);
-    const payload = {
-      connectionId: this.connectionId,
-      targetDeviceId: this.options.targetDeviceId,
-      counter: this.relayCounter,
-      ciphertext: toBase64Url(data2)
-    };
-    if (this.dataSocket !== void 0) {
-      this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("relay", payload), this.controlFrameLimits));
-    } else
-      this.sendControl("relay", payload);
-    this.bytesSent += data2.byteLength;
-    this.relayCounter += 1;
-  }
-  connectionInfo() {
-    if (this.connectionId === void 0)
-      throw new Error("adaptive transport has not been authorized");
-    return {
-      connectionId: this.connectionId,
-      localDeviceId: this.options.deviceId,
-      remoteDeviceId: this.options.targetDeviceId
-    };
-  }
-  async connectionDetails() {
-    const remainingMs = this.lease?.remainingMs();
-    return {
-      ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
-      ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
-      ...this.heartbeatIntervalMs === void 0 ? {} : { heartbeatIntervalMs: this.heartbeatIntervalMs },
-      ...this.lastControlReceivedAt === void 0 ? {} : { lastControlReceivedAt: this.lastControlReceivedAt },
-      ...this.lastControlSentAt === void 0 ? {} : { lastControlSentAt: this.lastControlSentAt },
-      recoveryExpiresAt: remainingMs === void 0 ? void 0 : Date.now() + remainingMs,
-      controlChannelUrl: this.url,
-      controlChannelState: socketState(this.socket?.readyState),
-      preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
-      negotiatedCapabilities: [...this.negotiatedCapabilities],
-      webRtcEnabled: this.webrtcEnabled,
-      ...this.rtc === void 0 ? {} : { webRtc: await this.rtc.connectionDetails() }
-    };
-  }
-  async sendHandshake(step, data2) {
-    if (this.socket?.readyState !== WebSocket.OPEN || this.connectionId === void 0) {
-      throw new Error("adaptive transport has not been authorized");
-    }
-    this.sendControl("secure.handshake", {
-      connectionId: this.connectionId,
-      targetDeviceId: this.options.targetDeviceId,
-      step,
-      data: toBase64Url(data2)
-    });
-  }
-  onHandshake(cb) {
-    this.handshakeHandlers.add(cb);
-    return () => this.handshakeHandlers.delete(cb);
-  }
-  async close() {
-    this.failConnection(new Error("Adaptive transport closed"));
-  }
-  getStats() {
-    const webrtcConnected = this.dataMode === "webrtc" && this.rtc?.getStats().connected === true;
-    const relayConnected = this.dataMode === "relay" && (this.dataSocket?.readyState === WebSocket.OPEN && this.dataReady || this.socket?.readyState === WebSocket.OPEN) && this.connectionId !== void 0;
-    const connected = webrtcConnected || relayConnected;
-    let mode2 = "Disconnected";
-    if (this.selected === "relay")
-      mode2 = relayConnected ? "Relay" : "Disconnected";
-    else if (this.selected === "lan" || this.selected === "turn" || this.selected === "p2p") {
-      mode2 = webrtcConnected ? this.rtc.getStats().mode : "Disconnected";
-    }
-    return { mode: mode2, connected, bytesSent: this.bytesSent, bytesReceived: this.bytesReceived };
-  }
-  async handleSocketMessage(raw, lifetime) {
-    if (this.lifetime !== lifetime)
-      return;
-    try {
-      if (typeof raw !== "string")
-        throw new Error("Adaptive control frames must be text JSON");
-      const frame = decodeControlFrame(raw, this.controlFrameLimits);
-      this.lastControlReceivedAt = Date.now();
-      if (frame.type === "hello.ack") {
-        this.controlReady = true;
-        const payload = frame.payload;
-        if (payload.protocol !== PROTOCOL_VERSION)
-          throw new Error("Server selected an unsupported protocol version");
-        this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
-        const offered = this.options.capabilities ?? DEFAULT_CAPABILITIES;
-        this.negotiatedCapabilities = acceptNegotiatedCapabilities(offered, payload.capabilities);
-        this.controlFrameLimits = {
-          maxControlFrameBytes: payload.maxControlFrameBytes,
-          maxRelayFrameBytes: payload.maxRelayFrameBytes
-        };
-        const preferredTransports = this.negotiatedTransports();
-        if (preferredTransports.length === 0) {
-          throw new Error("Server did not negotiate a supported transport capability");
-        }
-        if (payload.webrtcEnabled === false)
-          this.webrtcEnabled = false;
-        if (typeof payload.webrtcFallbackTimeoutMs === "number" && Number.isSafeInteger(payload.webrtcFallbackTimeoutMs) && payload.webrtcFallbackTimeoutMs > 0) {
-          this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs;
-        }
-        if (this.lease) {
-          if (!this.negotiatedCapabilities.includes(this.dataMode === "webrtc" ? WEBRTC_RESUME_CAPABILITY : RELAY_RESUME_CAPABILITY))
-            throw new Error("Server no longer supports control recovery");
-          clearTimeout(this.recoveryOpeningTimer);
-          this.recoveryAttempt = 0;
-          this.lease.tick(true);
-          return;
-        }
-        this.sendControl("connect.request", {
-          hostDeviceId: this.options.targetDeviceId,
-          preferredTransports
-        });
-        return;
-      }
-      if (frame.type === "connect.accepted") {
-        if (this.connectionId !== void 0)
-          throw new Error("Duplicate connect.accepted");
-        const payload = frame.payload;
-        if (typeof payload.connectionId !== "string" || payload.connectionId.length === 0) {
-          throw new Error("connect.accepted did not include a connectionId");
-        }
-        this.connectionId = payload.connectionId;
-        if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
-          this.recoveryTicket = payload.recoveryTicket;
-        if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY))
-          this.relayRecoveryTicket = payload.relayRecoveryTicket;
-        const assignment = payload;
-        if (typeof assignment.relayEndpoint === "string" && typeof assignment.relayTicket === "string") {
-          this.relayAssignment = assignment;
-        }
-        this.clearHandshake();
-        void this.negotiate(lifetime.signal).catch((error62) => {
-          if (this.lifetime === lifetime)
-            this.failConnection(error62 instanceof Error ? error62 : new Error("Adaptive transport negotiation failed"));
-        });
-        return;
-      }
-      if (frame.type === "connection.lease.ack") {
-        if (!this.lease)
-          throw new Error("Unexpected connection lease");
-        this.lease.acknowledge(frame.payload);
-        return;
-      }
-      if (frame.type === "connect.rejected" || frame.type === "error") {
-        const payload = frame.payload;
-        const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        const failure5 = Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
-        const code = errorCodeSchema.safeParse(payload.code);
-        this.failConnection(failure5, {
-          reason: payload.retryable === true ? "control-error" : "invalid-control-frame",
-          ...code.success ? { errorCode: code.data } : {}
-        });
-        return;
-      }
-      if (frame.type === "relay") {
-        if (this.dataSocket !== void 0)
-          return;
-        if (this.dataMode !== "relay")
-          return;
-        this.handleRelay(frame.payload);
-        return;
-      }
-      if (frame.type === "secure.handshake") {
-        const payload = frame.payload;
-        if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.step) || typeof payload.data !== "string") {
-          throw new Error("Received a secure handshake frame for an unknown connection");
-        }
-        const data2 = fromBase64Url(payload.data);
-        for (const handler of this.handshakeHandlers)
-          handler(payload.step, data2);
-        return;
-      }
-      if (frame.type === "signal.answer") {
-        const payload = frame.payload;
-        if (payload.connectionId === this.connectionId && typeof payload.sdp === "string") {
-          this.rtc?.handleSignal({ type: "answer", sdp: payload.sdp });
-        }
-        return;
-      }
-      if (frame.type === "signal.ice") {
-        const payload = frame.payload;
-        if (payload.connectionId === this.connectionId && isObject2(payload.candidate)) {
-          this.rtc?.handleSignal({ type: "ice", candidate: payload.candidate });
-        }
-        return;
-      }
-      if (frame.type === "signal.offer" || frame.type === "transport.selected")
-        return;
-      if (frame.type === "ping")
-        this.sendControl("pong", frame.payload);
-    } catch (error62) {
-      const failure5 = error62 instanceof Error ? error62 : new Error("Invalid adaptive control frame");
-      if (!("code" in failure5))
-        Object.assign(failure5, { code: "INVALID_MESSAGE" });
-      const code = errorCodeSchema.safeParse(failure5.code);
-      this.failConnection(failure5, { reason: "invalid-control-frame", ...code.success ? { errorCode: code.data } : {} });
-    }
-  }
-  handleRelay(payload) {
-    if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.counter) || typeof payload.ciphertext !== "string") {
-      throw new Error("Received a relay frame for an unknown connection");
-    }
-    const data2 = fromBase64Url(payload.ciphertext);
-    this.bytesReceived += data2.byteLength;
-    this.emit(data2);
-  }
-  async negotiate(signal) {
-    if (this.connectionId === void 0)
-      return;
-    const preferred = this.negotiatedTransports();
-    const wantWebRtc = !this.options.forceRelay && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
-    let selected = "relay";
-    this.lastRtcDiagnostics = void 0;
-    if (wantWebRtc) {
-      try {
-        const rtcSelected = (await this.tryWebRtc(signal)).transport;
-        throwIfAborted(signal);
-        const wireSelected = rtcSelected === "lan" && !preferred.includes("lan") && preferred.includes("p2p") ? "p2p" : rtcSelected;
-        if (!preferred.includes(wireSelected)) {
-          await this.rtc?.close();
-          throwIfAborted(signal);
-          this.rtc = void 0;
-          if (!preferred.includes("relay")) {
-            throw new Error(`WebRTC selected unnegotiated transport: ${rtcSelected}`);
-          }
-          this.dataMode = "relay";
-          selected = "relay";
-        } else {
-          this.dataMode = "webrtc";
-          selected = wireSelected;
-        }
-      } catch (error62) {
-        throwIfAborted(signal);
-        const reason = error62 instanceof Error ? error62 : new Error("WebRTC negotiation failed.");
-        try {
-          this.options.onWebRtcFallback?.(reason, this.lastRtcDiagnostics);
-        } catch {
-        }
-        await this.rtc?.close();
-        throwIfAborted(signal);
-        this.rtc = void 0;
-        if (!preferred.includes("relay"))
-          throw reason;
-        this.dataMode = "relay";
-        selected = "relay";
-      }
-    } else {
-      if (!preferred.includes("relay"))
-        throw new Error("No negotiated transport is available");
-      this.dataMode = "relay";
-      selected = "relay";
-    }
-    this.selected = selected;
-    if (selected === "relay" && this.relayAssignment !== void 0) {
-      await this.openDataSocket(this.relayAssignment);
-    }
-    const turnNode = selected === "turn" ? this.rtc?.selectedRelayUrl() : void 0;
-    this.sendControl("transport.selected", {
-      connectionId: this.connectionId,
-      targetDeviceId: this.options.targetDeviceId,
-      transport: selected,
-      ...turnNode === void 0 ? {} : { turnNode }
-    });
-    this.finishConnection();
-  }
-  negotiatedTransports() {
-    const preferred = this.options.forceRelay === true ? ["relay"] : this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS;
-    return preferred.filter((transport) => {
-      if (transport === "lan")
-        return this.negotiatedCapabilities.includes("transport.lan");
-      if (transport === "p2p")
-        return this.negotiatedCapabilities.includes("transport.p2p");
-      return this.negotiatedCapabilities.includes(`transport.${transport}`);
-    });
-  }
-  async tryWebRtc(signal) {
-    const connectionId = this.connectionId;
-    if (connectionId === void 0)
-      throw new RtcConnectError("RTC_UNAVAILABLE", "No connection id for WebRTC negotiation.");
-    const factory = this.options.rtcFactory ?? (typeof RTCPeerConnection === "undefined" ? void 0 : browserRtcFactory());
-    if (factory === void 0) {
-      throw new RtcConnectError("RTC_UNAVAILABLE", "No RTC backend is available in this environment.");
-    }
-    let iceServers = [];
-    try {
-      iceServers = await this.fetchIceServers(connectionId, signal);
-    } catch {
-      iceServers = [];
-    }
-    throwIfAborted(signal);
-    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
-    const effectiveNegotiateTimeoutMs = iceServers.length === 0 ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS) : negotiatedMs;
-    const rtc = new RtcDataChannelTransport({
-      role: "initiator",
-      factory,
-      iceServers,
-      // A TURN-only attempt must constrain ICE itself. Otherwise a faster
-      // direct pair wins, then gets rejected as an unnegotiated transport.
-      iceTransportPolicy: this.negotiatedTransports().includes("turn") && !this.negotiatedTransports().some((transport) => transport === "lan" || transport === "p2p") ? "relay" : "all",
-      onSignal: (signal2) => this.sendRtcSignal(signal2),
-      negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
-      label: `client->${this.options.targetDeviceId}`,
-      onDiagnostic: (event) => {
-        this.lastRtcDiagnostics = event.diagnostics;
-        try {
-          this.options.onWebRtcDiagnostic?.(event);
-        } catch {
-        }
-      }
-    });
-    this.rtc = rtc;
-    rtc.onMessage((data2) => {
-      if (this.lease && !this.lease.valid())
-        return;
-      this.bytesReceived += data2.byteLength;
-      this.emit(data2);
-    });
-    rtc.onClose(() => {
-      if (this.rtc === rtc && this.dataMode === "webrtc") {
-        const transport = this.selected;
-        this.failConnection(new Error("Active WebRTC channel closed"), {
-          reason: "webrtc-closed",
-          ...transport === "lan" || transport === "p2p" || transport === "turn" ? { transport } : {}
-        });
-      }
-    });
-    try {
-      await rtc.connect(signal);
-    } catch (error62) {
-      throwIfAborted(signal);
-      this.lastRtcDiagnostics = rtc.diagnostics();
-      await rtc.close();
-      if (this.rtc === rtc)
-        this.rtc = void 0;
-      throwIfAborted(signal);
-      throw error62;
-    }
-    throwIfAborted(signal);
-    this.lastRtcDiagnostics = rtc.diagnostics();
-    return { transport: rtc.selectedTransport() ?? "p2p", relayUrl: rtc.selectedRelayUrl() };
-  }
-  markSecureReady() {
-    const ticket = this.dataMode === "webrtc" ? this.recoveryTicket : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN ? this.relayRecoveryTicket : void 0;
-    if (!ticket || !this.connectionId || this.lease)
-      return;
-    this.lease = new ControlLease(this.connectionId, ticket, (payload) => {
-      if (this.controlReady && this.lastControlReceivedAt !== void 0 && Date.now() - this.lastControlReceivedAt >= 75e3) {
-        this.controlLost(new Error("Control heartbeat timed out"), { reason: "control-error" });
-        throw new Error("Control heartbeat timed out");
-      }
-      this.sendControl("connection.lease.request", payload);
-    }, () => this.failConnection(Object.assign(new Error("Control authorization lease expired"), { code: "TRANSPORT_CLOSED", retryable: true })));
-    this.lease.start();
-  }
-  controlLost(error62, diagnostic) {
-    if (error62.retryable === false || !this.lease?.canDetach() || !(this.dataMode === "webrtc" ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
-      this.failConnection(error62, diagnostic);
-      return;
-    }
-    const socket = this.socket;
-    this.controlReady = false;
-    this.socket = void 0;
-    clearTimeout(this.recoveryOpeningTimer);
-    socket?.close();
-    if (this.recoveryTimer !== void 0)
-      return;
-    const delay2 = recoveryDelayMs(this.recoveryAttempt, diagnostic);
-    this.recoveryAttempt++;
-    this.recoveryTimer = setTimeout(() => {
-      this.recoveryTimer = void 0;
-      void this.reopenControl();
-    }, delay2);
-  }
-  async reopenControl() {
-    const lifetime = this.lifetime;
-    if (!lifetime || !this.lease?.canDetach())
-      return;
-    try {
-      const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken;
-      if (this.lifetime !== lifetime || !this.lease?.canDetach())
-        return;
-      const socket = new WebSocket(this.url);
-      this.socket = socket;
-      socket.binaryType = "arraybuffer";
-      this.recoveryOpeningTimer = setTimeout(() => {
-        if (this.socket === socket)
-          this.controlLost(new Error("Control recovery handshake timed out"), { reason: "control-error" });
-      }, 15e3);
-      socket.onopen = () => {
-        if (this.socket !== socket || this.lifetime !== lifetime)
-          return;
-        this.sendControl("hello", {
-          role: this.options.role,
-          deviceId: this.options.deviceId,
-          accessToken: token,
-          protocols: [PROTOCOL_VERSION],
-          capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
-        });
-      };
-      socket.onmessage = (event) => {
-        if (this.socket === socket && this.lifetime === lifetime)
-          void this.handleSocketMessage(event.data, lifetime);
-      };
-      socket.onerror = () => {
-        if (this.socket === socket)
-          this.controlLost(new Error("Control recovery failed"), { reason: "control-error" });
-      };
-      socket.onclose = (event) => {
-        if (this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
-      };
-    } catch (error62) {
-      if (this.lifetime !== lifetime)
-        return;
-      if (typeof error62 === "object" && error62 && ("retryable" in error62 && error62.retryable === false || "code" in error62 && ["AUTH_INVALID", "DEVICE_REVOKED", "MEMBERSHIP_REQUIRED", "PEER_IDENTITY_MISMATCH", "DEVICE_NOT_FOUND", "TOKEN_REUSED"].includes(String(error62.code)))) {
-        this.failConnection(error62 instanceof Error ? error62 : new Error("Control recovery authorization failed"));
-      } else
-        this.controlLost(new Error("Control recovery unavailable"), { reason: "control-error" });
-    }
-  }
-  async fetchIceServers(connectionId, signal) {
-    if (this.options.fetchIceServers === void 0)
-      return [];
-    return new Promise((resolve10, reject) => {
-      const request = new AbortController();
-      let settled = false;
-      const finish = (error62, servers = []) => {
-        if (settled)
-          return;
-        settled = true;
-        clearTimeout(timer2);
-        signal.removeEventListener("abort", onAbort);
-        if (error62)
-          reject(error62);
-        else
-          resolve10(servers);
-      };
-      const onAbort = () => {
-        finish(new Error("ICE configuration request was aborted"));
-        request.abort();
-      };
-      const timer2 = setTimeout(() => {
-        finish(new Error("ICE configuration request timed out"));
-        request.abort();
-      }, this.options.iceServersTimeoutMs ?? 1e4);
-      signal.addEventListener("abort", onAbort, { once: true });
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      Promise.resolve().then(() => {
-        throwIfAborted(request.signal);
-        return this.options.fetchIceServers(connectionId, request.signal);
-      }).then((servers) => finish(void 0, servers), (error62) => finish(error62 instanceof Error ? error62 : new Error("ICE configuration request failed")));
-    });
-  }
-  sendRtcSignal(signal) {
-    if (this.connectionId === void 0)
-      return;
-    if (signal.type === "offer") {
-      this.sendControl("signal.offer", {
-        connectionId: this.connectionId,
-        targetDeviceId: this.options.targetDeviceId,
-        sdp: signal.sdp
-      });
-    } else if (signal.type === "answer") {
-      this.sendControl("signal.answer", {
-        connectionId: this.connectionId,
-        targetDeviceId: this.options.targetDeviceId,
-        sdp: signal.sdp
-      });
-    } else {
-      this.sendControl("signal.ice", {
-        connectionId: this.connectionId,
-        targetDeviceId: this.options.targetDeviceId,
-        candidate: signal.candidate
-      });
-    }
-  }
-  async openDataSocket(assignment) {
-    if (this.connectionId === void 0 || this.dataSocket !== void 0)
-      return;
-    const socket = new WebSocket(assignment.relayEndpoint);
-    socket.binaryType = "arraybuffer";
-    this.dataSocket = socket;
-    await new Promise((resolve10, reject) => {
-      const timer2 = setTimeout(() => {
-        reject(new Error("Relay data attach timed out"));
-        socket.close();
-      }, this.options.handshakeTimeoutMs ?? 15e3);
-      socket.onopen = () => socket.send(encodeRelayDataFrame(createRelayDataFrame("relay.attach", {
-        connectionId: this.connectionId,
-        deviceId: this.options.deviceId,
-        peerDeviceId: this.options.targetDeviceId,
-        ticket: assignment.relayTicket
-      }), this.controlFrameLimits));
-      socket.onmessage = (event) => {
-        try {
-          if (typeof event.data !== "string")
-            throw new Error("Relay data frames must be text JSON");
-          const data2 = decodeRelayDataFrame(event.data, this.controlFrameLimits);
-          if (data2.type === "relay.ready") {
-            if (data2.payload.connectionId !== this.connectionId || assignment.relayEpoch !== void 0 && data2.payload.epoch !== assignment.relayEpoch) {
-              throw new Error("Relay data attach assignment mismatch");
-            }
-            clearTimeout(timer2);
-            this.dataReady = true;
-            resolve10();
-            return;
-          }
-          void this.handleDataSocketFrame(data2.type, data2.payload).catch((error62) => {
-            this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
-          });
-        } catch (error62) {
-          clearTimeout(timer2);
-          reject(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
-          this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
-        }
-      };
-      socket.onerror = () => {
-        clearTimeout(timer2);
-        reject(new Error("Relay data socket failed"));
-      };
-      socket.onclose = () => {
-        clearTimeout(timer2);
-        if (!this.dataReady)
-          reject(new Error("Relay data socket closed before attach"));
-        else
-          this.failConnection(new Error("Relay data socket closed"));
-      };
-    });
-  }
-  async handleDataSocketFrame(type, payload) {
-    if (type === "relay.detach") {
-      this.failConnection(new Error("Relay peer detached"));
-      return;
-    }
-    if (type === "ping") {
-      if (this.dataSocket?.readyState === WebSocket.OPEN) {
-        this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
-      }
-      return;
-    }
-    if (type === "relay") {
-      if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.counter) || typeof payload.ciphertext !== "string") {
-        throw new Error("Received a relay frame for an unknown connection");
-      }
-      const data2 = fromBase64Url(payload.ciphertext);
-      this.bytesReceived += data2.byteLength;
-      this.emit(data2);
-      return;
-    }
-    if (type === "secure.handshake") {
-      if (payload.connectionId !== this.connectionId || payload.targetDeviceId !== this.options.deviceId || !Number.isSafeInteger(payload.step) || typeof payload.data !== "string") {
-        throw new Error("Received a secure handshake frame for an unknown connection");
-      }
-      const data2 = fromBase64Url(payload.data);
-      for (const handler of this.handshakeHandlers)
-        handler(payload.step, data2);
-    }
-  }
-  sendControl(type, payload) {
-    if (this.socket?.readyState !== WebSocket.OPEN)
-      throw Object.assign(new Error("adaptive control socket is not open"), { code: "TRANSPORT_CLOSED" });
-    this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
-    this.lastControlSentAt = Date.now();
-  }
-  finishConnection() {
-    this.clearHandshake();
-    this.removeAbort?.();
-    this.removeAbort = void 0;
-    this.connectedAt ??= Date.now();
-    this.readyResolve?.();
-    this.readyResolve = void 0;
-    this.readyReject = void 0;
-  }
-  failConnection(error62, diagnostic) {
-    if (this.lease && this.connectionId && this.socket?.readyState === WebSocket.OPEN) {
-      try {
-        this.sendControl("connection.lease.close", { connectionId: this.connectionId });
-      } catch {
-      }
-    }
-    const established = this.connectedAt !== void 0;
-    this.controlReady = false;
-    this.recoveryAttempt = 0;
-    this.lease?.stop();
-    this.lease = void 0;
-    this.recoveryTicket = void 0;
-    this.relayRecoveryTicket = void 0;
-    clearTimeout(this.recoveryTimer);
-    clearTimeout(this.recoveryOpeningTimer);
-    this.recoveryTimer = void 0;
-    this.clearHandshake();
-    const reject = this.readyReject;
-    this.readyResolve = void 0;
-    this.readyReject = void 0;
-    this.removeAbort?.();
-    this.removeAbort = void 0;
-    const lifetime = this.lifetime;
-    this.lifetime = void 0;
-    const rtc = this.rtc;
-    const socket = this.socket;
-    const dataSocket = this.dataSocket;
-    this.rtc = void 0;
-    this.socket = void 0;
-    this.dataSocket = void 0;
-    this.dataReady = false;
-    this.relayAssignment = void 0;
-    this.connectionId = void 0;
-    this.connectedAt = void 0;
-    lifetime?.abort();
-    reject?.(error62);
-    void rtc?.close();
-    dataSocket?.close();
-    socket?.close();
-    if (established && diagnostic !== void 0) {
-      try {
-        this.options.onDisconnect?.(diagnostic);
-      } catch {
-      }
-    }
-    if (socket !== void 0 || established)
-      this.emitClose(error62);
-  }
-  clearHandshake() {
-    if (this.handshakeTimer !== void 0)
-      clearTimeout(this.handshakeTimer);
-    this.handshakeTimer = void 0;
-  }
-};
-function adaptiveControlCloseError(event) {
-  const serverShutdown = isServerShutdownClose(event.code, event.reason);
-  const heartbeatTimeout = isHeartbeatTimeoutClose(event.code, event.reason);
-  const reason = event.reason.trim().slice(0, 300);
-  const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
-  return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
-    // Preserve the specific self-hosted authorization reasons so the Client
-    // runtime can surface a terminal reauthorization state instead of a generic
-    // transport loss (PR #285). Every other close keeps the shared semantics.
-    code: event.code === 4003 ? "CONNECTION_REPLACED" : event.code === 4001 && ["AUTH_INVALID", "TOKEN_EXPIRED", "DEVICE_REVOKED"].includes(reason) ? reason : "TRANSPORT_CLOSED",
-    retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code)
-  });
-}
-var CONTROL_RECOVERY_MAX_DELAY_MS = 15e3;
-function recoveryDelayMs(_attempt, _diagnostic) {
-  return Math.random() * CONTROL_RECOVERY_MAX_DELAY_MS;
-}
-function isObject2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function socketState(readyState) {
-  if (readyState === 0)
-    return "connecting";
-  if (readyState === 1)
-    return "open";
-  if (readyState === 2)
-    return "closing";
-  return "closed";
-}
-function negotiateTimeout(serverMs, localMs) {
-  if (localMs !== void 0)
-    return localMs;
-  if (serverMs === void 0)
-    return void 0;
-  return Math.min(SERVER_NEGOTIATE_TIMEOUT_MAX_MS, Math.max(SERVER_NEGOTIATE_TIMEOUT_MIN_MS, serverMs));
-}
-var DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4e3;
-var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6e3;
-var SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12e3;
-function throwIfAborted(signal) {
-  if (signal?.aborted)
-    throw new Error("Adaptive connection was aborted");
-}
-
-// packages/webrtc/dist/serial-send.js
-var SerialSend = class {
-  tail = Promise.resolve();
-  bytes = 0;
-  count = 0;
-  async run(bytes, send) {
-    if (this.bytes + bytes > 8 * 1024 * 1024 || this.count >= 256)
-      throw new Error("Encrypted send queue exceeds its limit");
-    this.bytes += bytes;
-    this.count += 1;
-    const task = this.tail.then(send);
-    this.tail = task.catch(() => void 0);
-    try {
-      await task;
-    } finally {
-      this.bytes -= bytes;
-      this.count -= 1;
-    }
   }
 };
 
@@ -92168,6 +92337,12 @@ var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
 var ACP_START_TIMEOUT_MS = 2e4;
 var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
+var ADAPTER_LABELS = Object.freeze({
+  cursor: "Cursor",
+  pi: "Pi",
+  claude: "Claude",
+  hermes: "Hermes"
+});
 var CursorAcpError = class extends Error {
   constructor(code, message, options) {
     super(message, options);
@@ -92200,8 +92375,18 @@ var CursorAcpClient = class {
   startPromise;
   modelStates = /* @__PURE__ */ new Map();
   modelBusy = /* @__PURE__ */ new Set();
+  /** Backend that owns this process: failure codes and log lines must name it. */
+  get backend() {
+    return this.options.backend ?? "cursor";
+  }
+  get adapterLabel() {
+    return ADAPTER_LABELS[this.backend];
+  }
+  code(suffix) {
+    return `${this.backend.toUpperCase()}_${suffix}`;
+  }
   start() {
-    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
+    if (this.closed) return Promise.reject(new CursorAcpError(this.code("CLOSED"), `The ${this.adapterLabel} domain is closed.`));
     if (this.ready) return Promise.resolve();
     this.startPromise ??= this.startOnce().finally(() => {
       this.startPromise = void 0;
@@ -92212,7 +92397,7 @@ var CursorAcpClient = class {
     return this.ready;
   }
   async call(method, params, timeoutMs) {
-    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
+    if (!this.ready) throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not ready.`);
     const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
     const id6 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
     if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
@@ -92283,7 +92468,7 @@ var CursorAcpClient = class {
     this.closed = true;
     this.ready = false;
     this.modelStates.clear();
-    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
+    this.failPending(new CursorAcpError(this.code("CLOSED"), `${this.adapterLabel} ACP was closed.`));
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) return;
@@ -92302,7 +92487,7 @@ var CursorAcpClient = class {
   }
   async startOnce() {
     if (this.process !== void 0) {
-      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
+      throw new CursorAcpError(this.code("STARTING"), `${this.adapterLabel} ACP is already starting.`);
     }
     const child = this.spawnAcp(this.binary);
     this.process = child;
@@ -92317,21 +92502,21 @@ var CursorAcpClient = class {
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
     });
     child.on("error", (error62) => {
-      if (this.process === child) this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error62);
+      if (this.process === child) this.handleProcessFailure(this.code("BINARY_UNAVAILABLE"), error62);
     });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
       this.modelStates.clear();
-      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
+      this.failPending(new CursorAcpError(this.code("ACP_EXITED"), `${this.adapterLabel} ACP exited unexpectedly.`));
       if (!this.closed) {
-        this.logger?.warn("Cursor ACP exited", {
+        this.logger?.warn(`${this.adapterLabel} ACP exited`, {
           code: code ?? "none",
           signal: signal ?? "none",
           stderrBytes: this.stderrBytes
         });
-        this.notifyUnavailable("CURSOR_ACP_EXITED");
+        this.notifyUnavailable(this.code("ACP_EXITED"));
       }
     });
     try {
@@ -92352,20 +92537,20 @@ var CursorAcpClient = class {
       }
       this.assertStarting(child);
       this.ready = true;
-      this.logger?.info("Cursor ACP ready");
+      this.logger?.info(`${this.adapterLabel} ACP ready`);
     } catch (error62) {
       this.ready = false;
       this.modelStates.clear();
       if (this.process === child) this.process = void 0;
       child.kill("SIGTERM");
       if (error62 instanceof CursorAcpError) throw error62;
-      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error62 });
+      throw new CursorAcpError(this.code("INITIALIZE_FAILED"), `${this.adapterLabel} ACP initialization failed.`, { cause: error62 });
     }
   }
   assertStarting(child) {
-    if (this.closed) throw new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed.");
+    if (this.closed) throw new CursorAcpError(this.code("CLOSED"), `${this.adapterLabel} ACP was closed.`);
     if (this.process !== child || child.exitCode !== null || child.killed) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+      throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not available.`);
     }
   }
   request(method, params, timeoutMs) {
@@ -92373,7 +92558,7 @@ var CursorAcpClient = class {
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
         this.pending.delete(id6);
-        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
+        reject(new CursorAcpError(this.code("REQUEST_TIMEOUT"), `${this.adapterLabel} ACP request timed out.`));
       }, timeoutMs);
       timer2.unref?.();
       this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
@@ -92389,7 +92574,7 @@ var CursorAcpClient = class {
   write(message) {
     const child = this.process;
     if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+      throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not available.`);
     }
     child.stdin.write(`${JSON.stringify(message)}
 `);
@@ -92398,8 +92583,8 @@ var CursorAcpClient = class {
     this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
     if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
       this.handleProcessFailure(
-        "CURSOR_RESPONSE_TOO_LARGE",
-        new Error("Cursor ACP emitted an oversized JSONL message.")
+        this.code("RESPONSE_TOO_LARGE"),
+        new Error(`${this.adapterLabel} ACP emitted an oversized JSONL message.`)
       );
       return;
     }
@@ -92416,18 +92601,18 @@ var CursorAcpClient = class {
     try {
       value = JSON.parse(line.toString("utf8"));
     } catch {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
+      this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted invalid JSON.`));
       return;
     }
     if (!isRecord15(value)) {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
+      this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted an invalid message.`));
       return;
     }
     if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
+        pending.reject(new CursorAcpError(this.code("UPSTREAM_ERROR"), safeUpstreamError2(value.error, this.adapterLabel)));
       } else {
         pending.resolve(value.result);
       }
@@ -92444,11 +92629,11 @@ var CursorAcpClient = class {
   handleProcessFailure(code, cause) {
     this.ready = false;
     this.modelStates.clear();
-    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
+    this.failPending(new CursorAcpError(code, `${this.adapterLabel} ACP communication failed.`, { cause }));
     const child = this.process;
     this.process = void 0;
     child?.kill("SIGTERM");
-    this.logger?.warn("Cursor ACP communication failed", { code });
+    this.logger?.warn(`${this.adapterLabel} ACP communication failed`, { code });
     if (!this.closed) this.notifyUnavailable(code);
   }
   notifyUnavailable(code) {
@@ -92467,14 +92652,14 @@ var CursorAcpClient = class {
     for (const id6 of [...this.pending.keys()]) this.takePending(id6)?.reject(error62);
   }
 };
-function safeUpstreamError2(value) {
-  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+function safeUpstreamError2(value, label = "Cursor") {
+  if (!isRecord15(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
-    return "Cursor ACP authentication failed.";
+    return `${label} ACP authentication failed.`;
   }
-  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
-  return "Cursor ACP rejected the request.";
+  if (message.includes("not initialized")) return `${label} ACP is not initialized.`;
+  return `${label} ACP rejected the request.`;
 }
 function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -92604,7 +92789,7 @@ var IsolatedAcpClient = class {
     binary,
     logger2,
     void 0,
-    { ...options, args: options.args ?? (options.backend === "cursor" ? ["acp"] : []), authenticationMethod: options.backend === "cursor" ? "cursor_login" : null }
+    { ...options, backend: options.backend ?? "pi", args: options.args ?? (options.backend === "cursor" ? ["acp"] : []), authenticationMethod: options.backend === "cursor" ? "cursor_login" : null }
   )) {
     this.binary = binary;
     this.logger = logger2;
@@ -93968,7 +94153,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   shuttingDown = false;
   makeClient;
   constructor(binary = "claude-agent-acp", logger2, spawnAcp, options = {}, backend = "claude") {
-    const config2 = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend };
+    const config2 = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend };
     super(binary, logger2, spawnAcp, config2);
     this.makeClient = () => new CursorAcpClient(binary, logger2, spawnAcp, config2);
     this.modelLabel = backend;
@@ -97451,7 +97636,14 @@ var AcpRemoteGateway = class {
     this.approvalExpiryTimer.unref?.();
   }
   requireAcp(backend) {
-    if (!this.config.enabled || backend !== void 0 && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend)) || !this.isAvailable()) {
+    if (!this.config.enabled) {
+      throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
+    }
+    const configured = backend === void 0 ? void 0 : this.config.backends.find((item) => item.id === backend);
+    if (configured !== void 0 && !configured.enabled) {
+      throw new RpcError("ACP_BACKEND_DISABLED", `The ${backend} ACP backend is disabled by configuration.`);
+    }
+    if (backend !== void 0 && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend)) || !this.isAvailable()) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
     }
     if (backend !== void 0) {
@@ -99813,7 +100005,7 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -99989,6 +100181,222 @@ function shortId2(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
 
+// packages/plugin/src/transport-upgrade.ts
+var TransportUpgradeHost = class {
+  constructor(options) {
+    this.options = options;
+  }
+  candidate;
+  closed = false;
+  offerEpoch = 0;
+  activating = false;
+  async offer(rawParams) {
+    if (this.closed) throw new RpcError("INVALID_MESSAGE", "The connection is closed.");
+    const { attemptId, sdp } = transportUpgradeOfferSchema.parse(rawParams);
+    const current = this.options.currentMode();
+    if (current === "LAN") {
+      throw new RpcError("REQUEST_CONFLICT", "Transport is already at LAN tier.");
+    }
+    const epoch = ++this.offerEpoch;
+    await this.clearCandidate();
+    const factory = await this.options.loadRtcFactory();
+    if (this.closed || epoch !== this.offerEpoch) {
+      throw new RpcError("REQUEST_CONFLICT", "Transport upgrade offer was superseded.");
+    }
+    if (factory === void 0) {
+      throw new RpcError("CAPABILITY_NOT_SUPPORTED", "WebRTC is unavailable on this Host.");
+    }
+    let iceServers = [];
+    try {
+      iceServers = await this.options.fetchIceServers(this.options.connectionId);
+    } catch {
+      iceServers = [];
+    }
+    if (this.closed || epoch !== this.offerEpoch) {
+      throw new RpcError("REQUEST_CONFLICT", "Transport upgrade offer was superseded.");
+    }
+    let answerResolve;
+    let answerReject;
+    const answerReady = new Promise((resolve10, reject) => {
+      answerResolve = resolve10;
+      answerReject = reject;
+    });
+    const rtc = new RtcDataChannelTransport({
+      role: "responder",
+      factory,
+      iceServers,
+      negotiateTimeoutMs: 12e3,
+      onSignal: (signal) => {
+        if (this.closed) return;
+        if (signal.type === "answer") {
+          answerResolve?.(signal.sdp);
+          return;
+        }
+        if (signal.type === "ice" && this.candidate?.attemptId === attemptId && !this.candidate.activated) {
+          void this.options.publishEvent(createEvent("remote.transport.upgrade.ice", {
+            attemptId,
+            candidate: signal.candidate
+          })).catch(() => void 0);
+        }
+      }
+    });
+    const unsubscribeMessage = rtc.onMessage((frame) => {
+      try {
+        const parsed = unwrapUpgradedTransportFrame(frame);
+        this.options.onReceiveSequencedCiphertext(parsed.counter, parsed.ciphertext, rtc);
+      } catch {
+        void rtc.close().catch(() => void 0);
+      }
+    });
+    const unsubscribeClose = rtc.onClose(() => {
+      if (this.candidate?.attemptId === attemptId && !this.candidate.activated) {
+        void this.clearCandidate();
+      }
+    });
+    const expiryTimer = setTimeout(() => {
+      if (this.candidate?.attemptId === attemptId && !this.candidate.activated) {
+        void this.clearCandidate();
+      }
+    }, this.options.attemptTtlMs ?? 2e4);
+    expiryTimer.unref?.();
+    const attempt = {
+      attemptId,
+      rtc,
+      unsubscribeMessage,
+      unsubscribeClose,
+      expiryTimer,
+      activated: false
+    };
+    this.candidate = attempt;
+    void rtc.connect().catch((err5) => {
+      answerReject?.(err5 instanceof Error ? err5 : new Error(String(err5)));
+    });
+    rtc.handleSignal({ type: "offer", sdp });
+    let timer2;
+    try {
+      const answerSdp = await Promise.race([
+        answerReady,
+        new Promise((_, reject) => {
+          timer2 = setTimeout(() => reject(new Error("Timed out creating WebRTC upgrade answer.")), 8e3);
+          timer2.unref?.();
+        })
+      ]);
+      if (this.closed || this.candidate !== attempt) {
+        await this.disposeAttempt(attempt, true);
+        throw new RpcError("REQUEST_CONFLICT", "Transport upgrade offer was superseded.");
+      }
+      return { attemptId, sdp: answerSdp };
+    } catch (error62) {
+      if (this.candidate === attempt) await this.clearCandidate();
+      else await this.disposeAttempt(attempt, true);
+      if (error62 instanceof RpcError) throw error62;
+      throw new RpcError("CONNECTION_FAILED", error62 instanceof Error ? error62.message : "Failed to negotiate WebRTC upgrade.", true);
+    } finally {
+      if (timer2 !== void 0) clearTimeout(timer2);
+    }
+  }
+  async addIce(rawParams) {
+    const { attemptId, candidate } = transportUpgradeIceSchema.parse(rawParams);
+    if (this.closed || this.candidate?.attemptId !== attemptId) return { ok: true };
+    this.candidate.rtc.handleSignal({ type: "ice", candidate });
+    return { ok: true };
+  }
+  async activate(rawParams) {
+    if (this.closed) throw new RpcError("INVALID_MESSAGE", "The connection is closed.");
+    if (this.activating) throw new RpcError("REQUEST_CONFLICT", "Another transport activation is already in progress.");
+    const { attemptId } = transportUpgradeActivateSchema.parse(rawParams);
+    const attempt = this.candidate;
+    if (attempt === void 0 || attempt.attemptId !== attemptId) {
+      throw new RpcError("REQUEST_CONFLICT", "Transport upgrade attempt is no longer active.");
+    }
+    this.activating = true;
+    try {
+      let timer2;
+      try {
+        await Promise.race([
+          attempt.rtc.connect(),
+          new Promise((_, reject) => {
+            timer2 = setTimeout(() => reject(new Error("Timed out waiting for upgraded DataChannel to open.")), 6e3);
+            timer2.unref?.();
+          })
+        ]);
+      } finally {
+        if (timer2 !== void 0) clearTimeout(timer2);
+      }
+      if (this.closed || this.candidate !== attempt) {
+        await this.disposeAttempt(attempt, true);
+        return { activated: false, mode: this.options.currentMode() ?? "Relay" };
+      }
+      let verifiedMode;
+      for (let i = 0; i < 5; i += 1) {
+        const details2 = await attempt.rtc.connectionDetails().catch(() => void 0);
+        verifiedMode = details2?.mode;
+        if (verifiedMode !== void 0) break;
+        if (i < 4) await new Promise((resolve10) => setTimeout(resolve10, 40));
+      }
+      if (this.closed || this.candidate !== attempt) {
+        await this.disposeAttempt(attempt, true);
+        return { activated: false, mode: this.options.currentMode() ?? "Relay" };
+      }
+      const beforeMode = this.options.currentMode() ?? "Relay";
+      if (verifiedMode === void 0 || transportTierRank(verifiedMode) <= transportTierRank(beforeMode)) {
+        await this.clearCandidate();
+        return { activated: false, mode: beforeMode };
+      }
+      clearTimeout(attempt.expiryTimer);
+      attempt.unsubscribeClose();
+      attempt.activated = true;
+      this.candidate = void 0;
+      const hostPreviousLegEndCounter = await this.options.adoptRtc(attempt.rtc, verifiedMode, attemptId);
+      this.options.logger?.info("in-band transport upgraded", {
+        connectionId: this.options.connectionId.slice(0, 8),
+        from: beforeMode,
+        to: verifiedMode
+      });
+      return {
+        activated: true,
+        mode: verifiedMode,
+        previousLegEndCounter: hostPreviousLegEndCounter
+      };
+    } finally {
+      this.activating = false;
+    }
+  }
+  async drain(rawParams) {
+    const { attemptId, previousLegEndCounter } = transportUpgradeDrainSchema.parse(rawParams);
+    if (!this.closed) {
+      this.options.confirmPreviousLegDrain?.(attemptId, previousLegEndCounter);
+    }
+    return { ok: true };
+  }
+  async abort(rawParams) {
+    const { attemptId } = transportUpgradeAbortSchema.parse(rawParams ?? {});
+    if (attemptId === void 0 || this.candidate?.attemptId === attemptId) {
+      await this.clearCandidate();
+    }
+    return { ok: true };
+  }
+  async closeAll() {
+    this.closed = true;
+    this.offerEpoch += 1;
+    await this.clearCandidate();
+  }
+  async clearCandidate() {
+    const current = this.candidate;
+    if (current === void 0) return;
+    this.candidate = void 0;
+    await this.disposeAttempt(current, !current.activated);
+  }
+  async disposeAttempt(attempt, closeRtc) {
+    clearTimeout(attempt.expiryTimer);
+    attempt.unsubscribeClose();
+    if (closeRtc) {
+      attempt.unsubscribeMessage();
+      await attempt.rtc.close().catch(() => void 0);
+    }
+  }
+};
+
 // packages/plugin/src/rpc-router.ts
 var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
 var emptyParamsSchema = external_exports.object({}).strict();
@@ -100043,7 +100451,12 @@ var apiMethods = /* @__PURE__ */ new Set([
   "workspace.upload.chunk",
   "workspace.upload.chunk.binary",
   "workspace.upload.commit",
-  "workspace.upload.abort"
+  "workspace.upload.abort",
+  "remote.transport.upgrade.offer",
+  "remote.transport.upgrade.ice",
+  "remote.transport.upgrade.activate",
+  "remote.transport.upgrade.drain",
+  "remote.transport.upgrade.abort"
 ]);
 var HOST_CAPABILITIES = [
   "harness.remote.v1",
@@ -100056,7 +100469,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -100070,6 +100483,7 @@ var RpcRouter = class {
     this.workspaceUpload = workspaceUpload;
     this.compaction = compaction;
     this.lanUpload = lanUpload;
+    this.transportUpgrade = transportUpgrade;
   }
   active = 0;
   async closePeerStreams() {
@@ -100079,7 +100493,8 @@ var RpcRouter = class {
       this.codex?.closeAll(),
       this.acp?.closeAll(),
       this.workspaceUpload?.closeAll(),
-      this.lanUpload?.closeAll()
+      this.lanUpload?.closeAll(),
+      this.transportUpgrade?.closeAll()
     ]);
   }
   async handle(message) {
@@ -100134,7 +100549,8 @@ var RpcRouter = class {
           "remote.history.compact.v1",
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
-          ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []]
+          ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
+          ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -100244,6 +100660,16 @@ var RpcRouter = class {
       }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
+      case "remote.transport.upgrade.offer":
+        return this.requireTransportUpgrade().offer(params);
+      case "remote.transport.upgrade.ice":
+        return this.requireTransportUpgrade().addIce(params);
+      case "remote.transport.upgrade.activate":
+        return this.requireTransportUpgrade().activate(params);
+      case "remote.transport.upgrade.drain":
+        return this.requireTransportUpgrade().drain(params);
+      case "remote.transport.upgrade.abort":
+        return this.requireTransportUpgrade().abort(params);
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
@@ -100277,6 +100703,12 @@ var RpcRouter = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host cannot forward local plugin routes.");
     }
     return this.pluginRoute;
+  }
+  requireTransportUpgrade() {
+    if (this.transportUpgrade === void 0) {
+      throw new RpcError("CAPABILITY_NOT_SUPPORTED", "In-band transport upgrade is unavailable on this Host.");
+    }
+    return this.transportUpgrade;
   }
 };
 function errorResponse2(requestId, error62) {
@@ -101036,6 +101468,8 @@ var HostServerConnection = class {
       tunnel.lease?.stop();
       try {
         await tunnel.rtc?.close();
+        for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => void 0);
+        tunnel.drainingRtcs?.clear();
       } catch (error62) {
         this.logger.warn("remote connection RTC cleanup failed", {
           connectionId: shortId3(tunnel.connectionId),
@@ -101045,7 +101479,66 @@ var HostServerConnection = class {
       tunnel.dataSocket?.close();
       tunnel.dataSocket = void 0;
       tunnel.dataReady = false;
-    }, mode2);
+    }, mode2, this.rtcFactoryProvider === void 0 || this.config.forceRelay ? void 0 : (publishEvent) => new TransportUpgradeHost({
+      connectionId: tunnel.connectionId,
+      peerDeviceId: tunnel.peer.deviceId,
+      currentMode: () => channel.mode,
+      outboundCounter: () => channel.outboundCounter,
+      loadRtcFactory: async () => {
+        if (this.rtcFactory === void 0 && this.rtcFactoryProvider !== void 0) {
+          this.rtcFactory = await this.rtcFactoryProvider().catch(() => void 0);
+        }
+        return this.rtcFactory;
+      },
+      fetchIceServers: async (id6) => {
+        const servers = await this.api.turnCredentials(id6).catch(() => []);
+        return tunnel.preferredTransports.includes("turn") ? servers : stunOnlyIceServers(servers);
+      },
+      onReceiveSequencedCiphertext: (counter, ciphertext, source) => {
+        if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel !== channel) return;
+        try {
+          channel.receive(counter, ciphertext, source);
+        } catch {
+          void this.dropTunnel(tunnel.connectionId, "SECURE_CHANNEL_FAILED");
+        }
+      },
+      adoptRtc: async (rtc, upgradedMode, attemptId) => {
+        const prevRtc = tunnel.rtc;
+        tunnel.rtc = rtc;
+        tunnel.transport = wireFromTransportTier(upgradedMode);
+        tunnel.transportMode = upgradedMode;
+        rtc.onClose(() => {
+          if (this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.rtc === rtc) {
+            void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+          }
+        });
+        rtc.onError(() => {
+          if (this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.rtc === rtc) {
+            void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+          }
+        });
+        if (prevRtc !== void 0 && prevRtc !== rtc) {
+          tunnel.drainingRtcs ??= /* @__PURE__ */ new Set();
+          tunnel.drainingRtcs.add(prevRtc);
+        }
+        const endCounter = await channel.upgradeTransport(
+          upgradedMode,
+          (counter, ciphertext) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
+          prevRtc,
+          attemptId,
+          (stale) => {
+            tunnel.drainingRtcs?.delete(stale);
+            void stale.close().catch(() => void 0);
+          }
+        );
+        return endCounter;
+      },
+      confirmPreviousLegDrain: (attemptId, clientPreviousLegEndCounter) => {
+        channel.confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter);
+      },
+      publishEvent,
+      logger: this.logger
+    }));
     tunnel.channel = channel;
     await this.connections.accept(channel);
     this.sendControl("secure.handshake", {
@@ -101480,6 +101973,8 @@ var HostServerConnection = class {
     tunnel.lease?.stop();
     try {
       await tunnel.rtc?.close();
+      for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => void 0);
+      tunnel.drainingRtcs?.clear();
     } catch (error62) {
       this.logger.warn("remote connection RTC cleanup failed", {
         connectionId: shortId3(connectionId),
@@ -101527,11 +102022,18 @@ var TERMINAL_AUTH_ERRORS = /* @__PURE__ */ new Set([
   "TOKEN_EXPIRED"
 ]);
 var ServerNoiseChannel = class {
-  constructor(tunnel, transmit, onClose, mode2) {
+  constructor(tunnel, transmit, onClose, mode2, createTransportUpgradeHost, reorderOptions) {
     this.tunnel = tunnel;
     this.transmit = transmit;
     this.onClose = onClose;
     this.mode = mode2;
+    this.createTransportUpgradeHost = createTransportUpgradeHost;
+    this.reorderBuffer = new SequencedCiphertextReorderBuffer({
+      ...reorderOptions,
+      onGapTimeout: () => {
+        void this.close("SECURE_CHANNEL_FAILED");
+      }
+    });
     this.security = {
       protocol: "Noise_IK_25519_ChaChaPoly_SHA256",
       connectionId: tunnel.connectionId,
@@ -101545,12 +102047,57 @@ var ServerNoiseChannel = class {
   peerDeviceId;
   peerIdentityKey;
   mode;
+  createTransportUpgradeHost;
+  transmitSequenced;
+  reorderBuffer;
+  drainingLegs = /* @__PURE__ */ new Map();
   handlers = /* @__PURE__ */ new Set();
   incoming = new SecureMessageCodec();
   outgoing = new SecureMessageCodec();
   closed = false;
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
+  get outboundCounter() {
+    return Number(this.tunnel.noise.sendingCounter());
+  }
+  async upgradeTransport(nextMode, nextTransmit, previousRtc, attemptId = "", disposePreviousRtc) {
+    this.mode = nextMode;
+    this.transmitSequenced = nextTransmit;
+    const endCounter = Number(this.tunnel.noise.sendingCounter());
+    if (previousRtc !== void 0 && disposePreviousRtc !== void 0 && previousRtc !== void 0) {
+      const existing = this.drainingLegs.get(previousRtc);
+      if (existing !== void 0) clearTimeout(existing.timer);
+      const timer2 = setTimeout(() => {
+        const leg = this.drainingLegs.get(previousRtc);
+        if (leg !== void 0) {
+          this.drainingLegs.delete(previousRtc);
+          leg.dispose(previousRtc);
+        }
+      }, DEFAULT_PREVIOUS_LEG_DRAIN_MS);
+      timer2.unref?.();
+      this.drainingLegs.set(previousRtc, {
+        rtc: previousRtc,
+        attemptId,
+        endCounter: void 0,
+        timer: timer2,
+        dispose: disposePreviousRtc
+      });
+    }
+    return endCounter;
+  }
+  confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter) {
+    if (this.closed) return;
+    const received = Number(this.tunnel.noise.receivingCounter());
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.attemptId !== attemptId) continue;
+      leg.endCounter = clientPreviousLegEndCounter;
+      if (received >= clientPreviousLegEndCounter) {
+        clearTimeout(leg.timer);
+        this.drainingLegs.delete(rtc);
+        leg.dispose(rtc);
+      }
+    }
+  }
   async send(message) {
     const run = this.sendTail.then(() => this.sendNow(message));
     this.sendTail = run.catch(() => void 0);
@@ -101565,7 +102112,13 @@ var ServerNoiseChannel = class {
         if (this.closed) throw new Error("Secure channel closed");
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error("Secure channel closed");
-          await this.transmit(this.tunnel.noise.encrypt(plaintext));
+          const ciphertext = this.tunnel.noise.encrypt(plaintext);
+          const frameCounter = Number(this.tunnel.noise.sendingCounter() - 1n);
+          if (this.transmitSequenced !== void 0) {
+            await this.transmitSequenced(frameCounter, ciphertext);
+          } else {
+            await this.transmit(ciphertext);
+          }
         }
       });
     } catch (error62) {
@@ -101577,23 +102130,55 @@ var ServerNoiseChannel = class {
     this.handlers.add(handler);
     return () => this.handlers.delete(handler);
   }
-  receive(counter, ciphertext) {
-    if (this.tunnel.lease && !this.tunnel.lease.valid()) return;
-    if (this.closed) return;
-    if (counter !== void 0) {
-      const expected = Number(this.tunnel.noise.receivingCounter());
-      if (!Number.isSafeInteger(counter) || counter !== expected) {
-        throw new ControlConnectionError("INVALID_MESSAGE", "Relay counter is duplicated or out of order.");
+  deliverDecrypted(ciphertext) {
+    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext));
+    const currentReceiving = Number(this.tunnel.noise.receivingCounter());
+    this.reorderBuffer.onExpectedAdvanced(currentReceiving);
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.endCounter !== void 0 && currentReceiving >= leg.endCounter) {
+        clearTimeout(leg.timer);
+        this.drainingLegs.delete(rtc);
+        leg.dispose(rtc);
       }
     }
-    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext));
     if (plaintext === void 0) return;
     const message = decodeMessage(plaintext);
     for (const handler of this.handlers) handler(message);
   }
+  receive(counter, ciphertext, _source) {
+    if (this.tunnel.lease && !this.tunnel.lease.valid()) return;
+    if (this.closed) return;
+    if (counter !== void 0) {
+      const expected = Number(this.tunnel.noise.receivingCounter());
+      if (!Number.isSafeInteger(counter) || counter < expected) {
+        throw new ControlConnectionError("INVALID_MESSAGE", "Relay counter is duplicated or out of order.");
+      }
+      if (counter > expected) {
+        try {
+          this.reorderBuffer.push(counter, expected, ciphertext);
+        } catch (error62) {
+          throw new ControlConnectionError("INVALID_MESSAGE", error62 instanceof Error ? error62.message : "Reorder buffer overflow.");
+        }
+        return;
+      }
+    }
+    this.deliverDecrypted(ciphertext);
+    while (!this.closed) {
+      const nextExpected = Number(this.tunnel.noise.receivingCounter());
+      const buffered = this.reorderBuffer.takeNext(nextExpected);
+      if (buffered === void 0) break;
+      this.deliverDecrypted(buffered);
+    }
+  }
   async close(_code) {
     if (this.closed) return;
     this.closed = true;
+    this.reorderBuffer.clear();
+    for (const [rtc, leg] of this.drainingLegs) {
+      clearTimeout(leg.timer);
+      leg.dispose(rtc);
+    }
+    this.drainingLegs.clear();
     this.handlers.clear();
     this.incoming.reset();
     this.outgoing.reset();
@@ -103471,7 +104056,8 @@ var HostPluginRuntime = class {
           operations: this.compactionOperations,
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
         },
-        lanUpload
+        lanUpload,
+        context.createTransportUpgradeHost?.(send)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {

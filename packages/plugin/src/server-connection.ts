@@ -7,7 +7,10 @@ import {
 } from '@dsh-remote/crypto'
 import {
   DEFAULT_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_PREVIOUS_LEG_DRAIN_MS,
   PROTOCOL_VERSION,
+  SequencedCiphertextReorderBuffer,
+  wireFromTransportTier,
   WEBRTC_RESUME_CAPABILITY,
   RELAY_RESUME_CAPABILITY,
   classifyControlClose,
@@ -50,6 +53,7 @@ import type { SafeLogger } from './logging.js'
 import type { AuthorizedPeerDevice, HostServerApi } from './server-api.js'
 import { ServerApiError } from './server-api.js'
 import { createNodeWebSocket } from './node-websocket.js'
+import { TransportUpgradeHost, wrapUpgradedTransportFrame } from './transport-upgrade.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -80,6 +84,7 @@ interface PendingTunnel {
   transport: 'negotiating' | SelectedTransport
   transportMode?: 'LAN' | 'P2P' | 'TURN'
   rtc?: RtcDataChannelTransport
+  drainingRtcs?: Set<RtcDataChannelTransport>
   channel?: ServerNoiseChannel
   pendingHandshake?: SecureHandshakePayload
   /** ICE candidates that arrived while the offer handler was still preparing the RTC backend. */
@@ -788,7 +793,7 @@ export class HostServerConnection {
     const transmit = viaWebRtc
       ? (ciphertext: Uint8Array) => tunnel.rtc!.send(ciphertext)
       : (ciphertext: Uint8Array) => this.sendRelay(tunnel, ciphertext)
-    const channel = new ServerNoiseChannel(tunnel, transmit, async () => {
+    const channel: ServerNoiseChannel = new ServerNoiseChannel(tunnel, transmit, async () => {
       // The connection controller may close the channel directly. If it still
       // owns this tunnel, clean up its transport without re-entering the
       // controller's closeConnection path.
@@ -798,6 +803,8 @@ export class HostServerConnection {
       tunnel.lease?.stop()
       try {
         await tunnel.rtc?.close()
+        for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => undefined)
+        tunnel.drainingRtcs?.clear()
       } catch (error) {
         this.logger.warn('remote connection RTC cleanup failed', {
           connectionId: shortId(tunnel.connectionId), reason: diagnosticReason(error),
@@ -806,7 +813,66 @@ export class HostServerConnection {
       tunnel.dataSocket?.close()
       tunnel.dataSocket = undefined
       tunnel.dataReady = false
-    }, mode)
+    }, mode, this.rtcFactoryProvider === undefined || this.config.forceRelay ? undefined : (publishEvent: (message: RemoteMessage) => Promise<void>): TransportUpgradeHost => new TransportUpgradeHost({
+      connectionId: tunnel.connectionId,
+      peerDeviceId: tunnel.peer.deviceId,
+      currentMode: () => channel.mode,
+      outboundCounter: () => channel.outboundCounter,
+      loadRtcFactory: async () => {
+        if (this.rtcFactory === undefined && this.rtcFactoryProvider !== undefined) {
+          this.rtcFactory = await this.rtcFactoryProvider().catch(() => undefined)
+        }
+        return this.rtcFactory
+      },
+      fetchIceServers: async id => {
+        const servers = await this.api.turnCredentials(id).catch(() => [] as RtcIceServer[])
+        return tunnel.preferredTransports.includes('turn') ? servers : stunOnlyIceServers(servers)
+      },
+      onReceiveSequencedCiphertext: (counter, ciphertext, source) => {
+        if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel !== channel) return
+        try {
+          channel.receive(counter, ciphertext, source)
+        } catch {
+          void this.dropTunnel(tunnel.connectionId, 'SECURE_CHANNEL_FAILED')
+        }
+      },
+      adoptRtc: async (rtc, upgradedMode, attemptId) => {
+        const prevRtc = tunnel.rtc
+        tunnel.rtc = rtc
+        tunnel.transport = wireFromTransportTier(upgradedMode)
+        tunnel.transportMode = upgradedMode
+        rtc.onClose(() => {
+          if (this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.rtc === rtc) {
+            void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+          }
+        })
+        rtc.onError(() => {
+          if (this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.rtc === rtc) {
+            void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+          }
+        })
+        if (prevRtc !== undefined && prevRtc !== rtc) {
+          tunnel.drainingRtcs ??= new Set()
+          tunnel.drainingRtcs.add(prevRtc)
+        }
+        const endCounter = await channel.upgradeTransport(
+          upgradedMode,
+          (counter: number, ciphertext: Uint8Array) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
+          prevRtc,
+          attemptId,
+          (stale: RtcDataChannelTransport) => {
+            tunnel.drainingRtcs?.delete(stale)
+            void stale.close().catch(() => undefined)
+          },
+        )
+        return endCounter
+      },
+      confirmPreviousLegDrain: (attemptId, clientPreviousLegEndCounter) => {
+        channel.confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter)
+      },
+      publishEvent,
+      logger: this.logger,
+    }))
     tunnel.channel = channel
     await this.connections.accept(channel)
     // Publish the responder handshake only after the channel is registered.
@@ -1300,6 +1366,8 @@ export class HostServerConnection {
     tunnel.lease?.stop()
     try {
       await tunnel.rtc?.close()
+      for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => undefined)
+      tunnel.drainingRtcs?.clear()
     } catch (error) {
       this.logger.warn('remote connection RTC cleanup failed', {
         connectionId: shortId(connectionId),
@@ -1350,12 +1418,25 @@ const TERMINAL_AUTH_ERRORS = new Set([
   'TOKEN_EXPIRED',
 ])
 
-class ServerNoiseChannel implements AuthenticatedPeerChannel {
+interface DrainingRtcLeg {
+  rtc: RtcDataChannelTransport
+  attemptId: string
+  endCounter?: number
+  timer: ReturnType<typeof setTimeout>
+  dispose: (rtc: RtcDataChannelTransport) => void
+}
+
+export class ServerNoiseChannel implements AuthenticatedPeerChannel {
   private readonly sends = new SerialSend()
   readonly security
   readonly peerDeviceId: string
   readonly peerIdentityKey: string
-  readonly mode: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+  mode: 'LAN' | 'P2P' | 'TURN' | 'Relay'
+  readonly createTransportUpgradeHost?: AuthenticatedPeerChannel['createTransportUpgradeHost']
+  private transmitSequenced?: (counter: number, ciphertext: Uint8Array) => Promise<void>
+
+  private readonly reorderBuffer: SequencedCiphertextReorderBuffer
+  private readonly drainingLegs = new Map<RtcDataChannelTransport, DrainingRtcLeg>()
   private readonly handlers = new Set<(message: RemoteMessage) => void>()
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
@@ -1368,8 +1449,15 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     private readonly transmit: (ciphertext: Uint8Array) => Promise<void>,
     private readonly onClose: () => Promise<void>,
     mode: 'LAN' | 'P2P' | 'TURN' | 'Relay',
+    createTransportUpgradeHost?: AuthenticatedPeerChannel['createTransportUpgradeHost'],
+    reorderOptions?: { maxFrames?: number; maxBytes?: number; gapTimeoutMs?: number },
   ) {
     this.mode = mode
+    this.createTransportUpgradeHost = createTransportUpgradeHost
+    this.reorderBuffer = new SequencedCiphertextReorderBuffer({
+      ...reorderOptions,
+      onGapTimeout: () => { void this.close('SECURE_CHANNEL_FAILED') },
+    })
     this.security = {
       protocol: 'Noise_IK_25519_ChaChaPoly_SHA256' as const,
       connectionId: tunnel.connectionId,
@@ -1377,6 +1465,58 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     }
     this.peerDeviceId = tunnel.peer.deviceId
     this.peerIdentityKey = tunnel.peer.publicKey
+  }
+
+  get outboundCounter(): number { return Number(this.tunnel.noise.sendingCounter()) }
+
+  async upgradeTransport(
+    nextMode: 'LAN' | 'P2P' | 'TURN',
+    nextTransmit: (counter: number, ciphertext: Uint8Array) => Promise<void>,
+    previousRtc?: RtcDataChannelTransport,
+    attemptId = '',
+    disposePreviousRtc?: (rtc: RtcDataChannelTransport) => void,
+  ): Promise<number> {
+    // Do NOT close previousRtc during activate: the Client is still using
+    // previousRtc as activeOutbound until the activate response arrives and
+    // switchOutboundLeg completes. Retain previousRtc in drainingLegs until
+    // confirmPreviousLegDrain supplies the true final outbound watermark.
+    this.mode = nextMode
+    this.transmitSequenced = nextTransmit
+    const endCounter = Number(this.tunnel.noise.sendingCounter())
+    if (previousRtc !== undefined && disposePreviousRtc !== undefined && previousRtc !== undefined) {
+      const existing = this.drainingLegs.get(previousRtc)
+      if (existing !== undefined) clearTimeout(existing.timer)
+      const timer = setTimeout(() => {
+        const leg = this.drainingLegs.get(previousRtc)
+        if (leg !== undefined) {
+          this.drainingLegs.delete(previousRtc)
+          leg.dispose(previousRtc)
+        }
+      }, DEFAULT_PREVIOUS_LEG_DRAIN_MS)
+      timer.unref?.()
+      this.drainingLegs.set(previousRtc, {
+        rtc: previousRtc,
+        attemptId,
+        endCounter: undefined,
+        timer,
+        dispose: disposePreviousRtc,
+      })
+    }
+    return endCounter
+  }
+
+  confirmPreviousLegDrain(attemptId: string, clientPreviousLegEndCounter: number): void {
+    if (this.closed) return
+    const received = Number(this.tunnel.noise.receivingCounter())
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.attemptId !== attemptId) continue
+      leg.endCounter = clientPreviousLegEndCounter
+      if (received >= clientPreviousLegEndCounter) {
+        clearTimeout(leg.timer)
+        this.drainingLegs.delete(rtc)
+        leg.dispose(rtc)
+      }
+    }
   }
 
   async send(message: RemoteMessage): Promise<void> {
@@ -1394,7 +1534,13 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
         if (this.closed) throw new Error('Secure channel closed')
         for (const plaintext of this.outgoing.encode(encoded)) {
           if (this.closed) throw new Error('Secure channel closed')
-          await this.transmit(this.tunnel.noise.encrypt(plaintext))
+          const ciphertext = this.tunnel.noise.encrypt(plaintext)
+          const frameCounter = Number(this.tunnel.noise.sendingCounter() - 1n)
+          if (this.transmitSequenced !== undefined) {
+            await this.transmitSequenced(frameCounter, ciphertext)
+          } else {
+            await this.transmit(ciphertext)
+          }
         }
       })
     } catch (error) {
@@ -1408,24 +1554,57 @@ class ServerNoiseChannel implements AuthenticatedPeerChannel {
     return () => this.handlers.delete(handler)
   }
 
-  receive(counter: number | undefined, ciphertext: Uint8Array): void {
-    if (this.tunnel.lease && !this.tunnel.lease.valid()) return
-    if (this.closed) return
-    if (counter !== undefined) {
-      const expected = Number(this.tunnel.noise.receivingCounter())
-      if (!Number.isSafeInteger(counter) || counter !== expected) {
-        throw new ControlConnectionError('INVALID_MESSAGE', 'Relay counter is duplicated or out of order.')
+  private deliverDecrypted(ciphertext: Uint8Array): void {
+    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext))
+    const currentReceiving = Number(this.tunnel.noise.receivingCounter())
+    this.reorderBuffer.onExpectedAdvanced(currentReceiving)
+    for (const [rtc, leg] of this.drainingLegs) {
+      if (leg.endCounter !== undefined && currentReceiving >= leg.endCounter) {
+        clearTimeout(leg.timer)
+        this.drainingLegs.delete(rtc)
+        leg.dispose(rtc)
       }
     }
-    const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext))
     if (plaintext === undefined) return
     const message = decodeMessage(plaintext)
     for (const handler of this.handlers) handler(message)
   }
 
+  receive(counter: number | undefined, ciphertext: Uint8Array, _source?: RtcDataChannelTransport): void {
+    if (this.tunnel.lease && !this.tunnel.lease.valid()) return
+    if (this.closed) return
+    if (counter !== undefined) {
+      const expected = Number(this.tunnel.noise.receivingCounter())
+      if (!Number.isSafeInteger(counter) || counter < expected) {
+        throw new ControlConnectionError('INVALID_MESSAGE', 'Relay counter is duplicated or out of order.')
+      }
+      if (counter > expected) {
+        try {
+          this.reorderBuffer.push(counter, expected, ciphertext)
+        } catch (error) {
+          throw new ControlConnectionError('INVALID_MESSAGE', error instanceof Error ? error.message : 'Reorder buffer overflow.')
+        }
+        return
+      }
+    }
+    this.deliverDecrypted(ciphertext)
+    while (!this.closed) {
+      const nextExpected = Number(this.tunnel.noise.receivingCounter())
+      const buffered = this.reorderBuffer.takeNext(nextExpected)
+      if (buffered === undefined) break
+      this.deliverDecrypted(buffered)
+    }
+  }
+
   async close(_code?: string): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.reorderBuffer.clear()
+    for (const [rtc, leg] of this.drainingLegs) {
+      clearTimeout(leg.timer)
+      leg.dispose(rtc)
+    }
+    this.drainingLegs.clear()
     this.handlers.clear()
     this.incoming.reset()
     this.outgoing.reset()

@@ -20,7 +20,7 @@ export class IsolatedAcpClient implements CursorAcpLike {
   constructor(private readonly binary: string, private readonly logger?: SafeLogger,
     private readonly options: { args?: string[]; cwd?: string; backend?: 'pi' | 'cursor' } = {},
     private readonly factory: () => CursorAcpLike = () => new CursorAcpClient(binary, logger, undefined,
-      { ...options, args: options.args ?? (options.backend === 'cursor' ? ['acp'] : []), authenticationMethod: options.backend === 'cursor' ? 'cursor_login' : null })) {}
+      { ...options, backend: options.backend ?? 'pi', args: options.args ?? (options.backend === 'cursor' ? ['acp'] : []), authenticationMethod: options.backend === 'cursor' ? 'cursor_login' : null })) {}
 
   private get backend(): 'pi' | 'cursor' { return this.options.backend ?? 'pi' }
   private get label(): string { return this.backend === 'cursor' ? 'Cursor' : 'Pi' }

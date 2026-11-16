@@ -23,6 +23,7 @@ export * from './rtc-adapter.js'
 export * from './rtc-chunking.js'
 export * from './rtc-data-channel.js'
 export * from './adaptive-transport.js'
+export * from './upgraded-rtc-transport.js'
 
 export interface RelayTransportOptions {
   role: 'client'
