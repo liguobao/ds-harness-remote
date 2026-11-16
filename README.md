@@ -12,12 +12,6 @@
 </p>
 
 <p align="center">
-  <strong>本仓库是 HarmonyOS 7.0 移植版</strong>：在上游基础上新增原生鸿蒙客户端（源码在 <a href="harmony/">harmony/</a>）<br>
-  中文说明与移植细节见 <a href="README.zh.md#这个仓库是什么鸿蒙移植版">README.zh.md</a> ·
-  客户端文档 <a href="docs/harmony-client.md">docs/harmony-client.md</a>
-</p>
-
-<p align="center">
   <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation-blue?logo=googledocs&amp;logoColor=white" alt="Documentation"></a>
   <a href="https://dsh.r2049.cn/app"><img src="https://img.shields.io/badge/Web-4D6BFE?logo=googlechrome&amp;logoColor=white" alt="Web"></a>
   <a href="https://github.com/liguobao/ds-harness-remote/releases/latest"><img src="https://img.shields.io/badge/Android-3DDC84?logo=android&amp;logoColor=white" alt="Android"></a>
@@ -31,6 +25,10 @@
   <a href="https://dshfind.com/en/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=en" alt="dshfind downloads"></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/177732" target="_blank"><img src="https://trendshift.io/api/badge/repositories/177732" alt="liguobao%2Fds-harness-remote | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
+
 ## Connect once. Ready whenever you are.
 
 Continue using your DeepSeek Harness instance from a phone, computer, or browser. Return to the same Harness session from whichever device is with you.
@@ -39,7 +37,7 @@ Harness keeps running on your work computer, with the same workspaces, tools, an
 
 The DeepSeek Harness desktop edition is supported. Install the latest release:
 
-`ds-harness-remote@0.6.4`
+`ds-harness-remote@0.6.5`
 
 ## Features
 
@@ -54,49 +52,25 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - Clients are available across Android, iOS, Web, and native DSH.
 - Multiple clients can connect to the same Harness Host simultaneously, with RPC calls and streams isolated per connection.
 
-## What is this repository (HarmonyOS port)
+## Native HarmonyOS client
 
-This repository is a **HarmonyOS 7.0 port** of [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote).
-The upstream plugin, server, protocol and tooling are kept in sync (currently aligned with upstream `v0.6.4`),
-and a **native HarmonyOS client** is added on top (pure ArkTS + WebRTC inside ArkWeb).
+The [HarmonyOS client](apps/harmony/) supports HarmonyOS 7.0 (API 26) and newer. Build it with DevEco Studio; see the [client guide](docs/harmony-client.md) for setup, security, signing and validation.
 
-- **Client source**: [`harmony/`](harmony/) · HarmonyOS 7.0 (API 26) or newer, built with DevEco Studio
-- **Capabilities**: account sign-in, multi-host list with aliases, end-to-end encryption (Noise IK), multi-session,
-  session search / archive / pin, image and voice input, slash commands, steer & interrupt, model and reasoning effort,
-  permission presets, scheduled tasks, workspace grouping, breakpoint-driven two/three-pane layout (tablet & 2-in-1),
-  Chinese/English UI, light/dark plus accent themes, desk pet
-- **Stability work**: link log persisted to disk (`link.log`, survives restarts), auto reconnect with session-stream reopen,
-  silence probing, long-running task keepalive (survives screen-off), LAN/P2P direct path first with relay/TURN fallback
-- **Build & test**:
-  ```sh
-  harmony/scripts/build-local.sh                     # signed locally; signing material never enters the repo
-  harmony/scripts/smoke.sh 192.168.3.145:34521       # build → install → launch → wait for "connected · lan" → crash check
-  node harmony/scripts/check-i18n.mjs                # UI strings must all have English
-  ```
-- **Docs**: [client guide](docs/harmony-client.md) · [LAN & link log](docs/harmony-link-log.md) ·
-  [2026-11-09 milestone](docs/harmony-milestone-2026-11-09.md) · [release notes](docs/release-0.17.86.md)
-- **Upstream sync**: `git fetch upstream && git merge upstream/main`
-
-### Interface preview (real device, redacted)
-
-| Sessions drawer | New session · LAN | Composer dock |
+| Sessions drawer | New session | Composer |
 | --- | --- | --- |
-| ![sessions drawer](docs/images/harmony/sessions-drawer.jpg) | ![new session](docs/images/harmony/chat-empty.jpg) | ![composer](docs/images/harmony/composer.jpg) |
-
-> The `LAN` badge means the direct local-network path is in use. Session titles, workspace names and quick prompts are blurred.
+| ![Sessions drawer](docs/images/harmony/sessions-drawer.jpg) | ![New session](docs/images/harmony/chat-empty.jpg) | ![Composer](docs/images/harmony/composer.jpg) |
 
 ## Supported clients
 
 | Client | Form | Status | Notes |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;plugin | Remote sidebar | Supported | Install `ds-harness-remote@0.6.4`; this computer can also be the Host |
+| DSH plugin | Remote sidebar | Supported | Control other devices or act as a Host—the choice is yours! |
 | Web | Browser page | Supported | Open [https://dsh.r2049.cn](https://dsh.r2049.cn); reuses the native Harness interface |
 | Android | Native app | Supported | Download the APK from [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest); see the [Android guide](apps/android/README.md) |
-| HarmonyOS&nbsp;7.* | Native app | Supported | Source in [harmony/](harmony/); build with DevEco Studio on HarmonyOS 7.0 (API 26) or newer. See the [HarmonyOS guide](docs/harmony-client.md) |
-| DSH Go | A standout app by ccch1mneyyy | Supported | See [ccch1mneyyy/dsh-go: an Android client for DeepSeek Harness. Run it directly on your phone or control DSH on your computer remotely.](https://github.com/ccch1mneyyy/dsh-go) |
+| HarmonyOS | Native app | Source available | HarmonyOS 7.0 (API 26)+; build with DevEco Studio. See the [client guide](docs/harmony-client.md) |
+| DSH Go | A standout app by ccch1mneyyy | Supported | See [ccch1mneyyy/dsh-go: run DSH directly on your phone or control DSH on your computer remotely.](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight beta | Beta | Not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
-| Browser&nbsp;extension | Chrome | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
-| dsh-TUI | Terminal-only CLI | Planned | Integration is not part of this release and returns in a later version; the installer never creates a Web service for it automatically |
+| dsh-TUI | Standalone Host bundle + CLI | Core device checks passed | Install matching `ds-harness-remote-tui`; see [tested versions and limits](docs/compatibility.md). The installer does not create a Web service for it |
 | Linux | Cloud server | Supported | Sign in on the [official website](https://dsh.r2049.cn/) to install with one command. |
 
 Several clients can connect to the same Host at once; RPC calls and streams are isolated per connection.
@@ -108,10 +82,10 @@ Several clients can connect to the same Host at once; RPC calls and streams are 
 Open **Extensions / Plugin management** in DeepSeek Harness Desktop, choose installation
 from npm, and enter this package:
 
-`ds-harness-remote@0.6.4`
+`ds-harness-remote@0.6.5`
 
 Restart Desktop afterward. Its official `dsh` launcher can also install the pinned package
-with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.4`.
+with `dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`.
 
 On DSH 0.2.2+, npm installations support version checks and updates in Plugin management, with an attempt to restore the previous version if hot updating fails. GitHub and local link installations must switch to npm first; see [online updates](docs/installation.md#online-updates-in-dsh-plugin-management).
 
@@ -205,7 +179,7 @@ Supported backends:
 
 Claude and Hermes also support direct file and terminal access, subject to the Host's workspace boundaries and terminal settings.
 
-Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).
+Setup and adapter development: [Agent workspace integration guide](docs/acp-remote.md).
 
 Model selection for Cursor, Claude, Hermes, Pi, OpenCode, and AGY on Desktop/Android uses the Host's actual model catalog as determined by the Agent’s ACP interface.
 
@@ -321,7 +295,7 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
 ## Links
 
 - Friendly link: [DSH Go](https://github.com/ccch1mneyyy/dsh-go) — DeepSeek Harness in your pocket: run it locally on your phone or control your computer remotely. Remote integration is available.
-- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — terminal-first Harness client; Remote integration is planned for a later release.
+- Friendly link: [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) — terminal-first Harness client; Remote Host integration uses the standalone `ds-harness-remote-tui` bundle.
 - Friendly link: [LINUX DO](https://linux.do/)
 - Friendly link: [Cyber Liu Kanshan](https://kanshan.r2049.cn/)
 
@@ -335,10 +309,26 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
  </picture>
 </a>
 
-## Project status and trademarks
+## Contributors
 
-This is an independent community project and is not an official DeepSeek product.
-DeepSeek and related names and marks belong to their respective owners.
+`ds-harness-remote` is proudly community-driven. We believe that great open-source tools are not built by code alone, but by everyone who uses them, explores edge cases, refines explanations, or shares an idea.
+
+No matter your background, your involvement is deeply valued:
+
+- **Submit Issues**: Share bug reports, feature proposals, or user experience thoughts.
+- **Docs & Localization**: Improve guides, polish explanations, or help keep English, Chinese, and Japanese docs in sync.
+- **Testing & Cross-Platform**: Run the project across your devices (Desktop / Web / Android) and tell us how it feels in real environments.
+- **Code & Review**: Tackle open tasks, fix bugs, implement features, or help review community Pull Requests.
+
+<p align="center">
+  <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=liguobao/ds-harness-remote&max=30" alt="Contributors" />
+  </a>
+</p>
+
+<p align="center">
+  <em>Thanks to all the wonderful contributors who make this project possible!</em>
+</p>
 
 ## Connection diagnostics
 
@@ -346,10 +336,11 @@ On Android, reproduce the problem, then open **Settings → Diagnostics → Expo
 
 On the Host, enable **Debug logging** in **Plugins → Remote settings**. The setting is saved and takes effect immediately; turn it off after troubleshooting (restores `info`). Look for `[ds-harness-remote]` in the Host log, or `desktop.log` on Desktop. Manual configuration also accepts `logLevel: debug`.
 
+## Project status and trademarks
+
+This is an independent community project and is not an official DeepSeek product.
+DeepSeek and related names and marks belong to their respective owners.
+
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-### Pair with DSH-Go
-
-Open Sign in → DSH-Go pairing in the local Remote settings and generate a QR code, scan and confirm on a compatible DSH-Go build, then enter the phone code on this computer. A wrong code invalidates the whole pairing. New Hosts accept incoming connections only; Device-only accounts have no Web/Admin access. Requires the full Server pairing v1 API and a DSH-Go build implementing [this integration](docs/dsh-go-pairing-integration.md). The bundled minimal Server does not support this workflow.

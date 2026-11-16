@@ -11,22 +11,45 @@ import type { BotObject } from '../../services/bot-catalog'
  * then salvages complete entries from a truncated array; entries that do not
  * match the plugin contract keep the text on the ordinary tool renderer.
  */
-export function parseBotReplies(raw: string | undefined | null): BotObject[] | undefined {
+export interface BotReplyPayload {
+  rows: BotObject[]
+  /** Whole payload parsed. `false` means `rows` is a prefix recovered from a cut. */
+  complete: boolean
+  /** The Host's compact projection capped this payload itself. */
+  truncated: boolean
+}
+
+export function parseBotReplyPayload(raw: string | undefined | null): BotReplyPayload | undefined {
   if (typeof raw !== 'string' || raw.length === 0) return undefined
   const seen = new Set<string>()
   const queue = [raw]
   while (queue.length > 0) {
     const candidate = queue.shift()!
     const direct = parseReplyArray(candidate)
-    if (direct !== undefined) return direct
+    if (direct !== undefined) return { rows: direct, complete: true, truncated: hostTruncated(candidate) }
     for (const inner of unwrapEnvelopes(candidate, seen)) queue.push(inner)
     const start = candidate.indexOf('{"replies"')
     if (start < 0) continue
     const embedded = candidate.slice(start)
-    const parsed = parseReplyArray(embedded) ?? salvageReplyArray(embedded)
-    if (parsed !== undefined) return parsed
+    const whole = parseReplyArray(embedded)
+    if (whole !== undefined) return { rows: whole, complete: true, truncated: hostTruncated(embedded) }
+    const salvaged = salvageReplyArray(embedded)
+    if (salvaged !== undefined) return { rows: salvaged, complete: false, truncated: hostTruncated(embedded) }
   }
   return undefined
+}
+
+export function parseBotReplies(raw: string | undefined | null): BotObject[] | undefined {
+  return parseBotReplyPayload(raw)?.rows
+}
+
+/** The Host's bounded structural projection flags any reply it had to cut. */
+function hostTruncated(candidate: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(candidate)
+    if (typeof parsed !== 'object' || parsed === null) return false
+    return (parsed as { truncated?: unknown }).truncated === true
+  } catch { return false }
 }
 
 /** Parse a candidate only when it is an object carrying a non-empty replies array. */
@@ -43,7 +66,7 @@ function isReplyEnvelope(parsed: unknown): parsed is { replies: unknown[] } {
     && Array.isArray((parsed as { replies?: unknown }).replies)
 }
 
-const REPLY_KINDS = new Set(['user', 'failed', 'approval', 'working', 'missed', 'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup'])
+const REPLY_KINDS = new Set(['user', 'failed', 'approval', 'working', 'missed', 'done', 'stopped', 'cut', 'resumed', 'schedule', 'lookup', 'folder', 'admin-passed', 'paused'])
 
 /** ds-bot reply entries always carry a spoken text or a known status kind. */
 function isReplyEntry(entry: unknown): entry is BotObject {
@@ -123,4 +146,26 @@ function salvageReplyArray(truncated: string): BotObject[] | undefined {
     } catch { return [] }
   })
   return replies.length > 0 ? replies : undefined
+}
+
+export function parseRelayRange(raw: string | undefined): { from: number; to?: number; anchor?: string } | undefined {
+  try {
+    const value = JSON.parse(raw ?? '')
+    if (!Number.isInteger(value?.from)) return undefined
+    return { from: value.from, ...(Number.isInteger(value.to) ? { to: value.to } : {}), ...(typeof value.anchor === 'string' ? { anchor: value.anchor } : {}) }
+  } catch { return undefined }
+}
+
+/** DS-Bot stacks only adjacent spoken messages by the same identified member. */
+export function stackBotReplies(rows: BotObject[]): { reply: BotObject; texts: string[] }[] {
+  const result: { reply: BotObject; texts: string[] }[] = []
+  for (const reply of rows) {
+    const previous = result.at(-1)
+    if (reply.kind === undefined && typeof reply.botId === 'string'
+      && previous?.reply.kind === undefined && previous?.reply.botId === reply.botId) {
+      previous.texts.push(typeof reply.text === 'string' ? reply.text : '')
+      previous.reply = reply
+    } else result.push({ reply, texts: [typeof reply.text === 'string' ? reply.text : ''] })
+  }
+  return result
 }

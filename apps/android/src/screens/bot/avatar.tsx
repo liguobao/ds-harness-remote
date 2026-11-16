@@ -17,7 +17,10 @@ function hash(id: string) {
   return value >>> 0
 }
 interface Character { body: string; shade: string; light: string; paints?: (string | number)[][]; eyes: [number, number, number, number, number][] }
-export function BotAvatar({ bot, size = 40 }: { bot: Pick<BotEntry, 'id' | 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel'>; size?: number }) {
+export function BotAvatar({ bot, size = 40 }: {
+  bot: Pick<BotEntry, 'id'> & Partial<Pick<BotEntry, 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel'>>
+  size?: number
+}) {
   const { scheme } = useTheme()
   const uid = useId().replace(/:/g, '')
   const [brokenImage, setBrokenImage] = useState('')
@@ -133,3 +136,39 @@ const badgeStyles = StyleSheet.create({
     borderWidth: 2,
   },
 })
+
+/** A group chat's mark: its first members' characters, overlapping like the roster row. */
+export function RoomAvatar({
+  members,
+  bots,
+  size = 26,
+}: {
+  members: string[]
+  bots: Pick<BotEntry, 'id' | 'avatar' | 'color' | 'engine' | 'model' | 'appliedModel'>[]
+  size?: number
+}) {
+  const shown = members.slice(0, 3)
+  if (shown.length === 0) return null
+  const inner = Math.max(16, Math.round(size * 0.72))
+  const step = Math.max(4, Math.round(size * 0.28))
+  return (
+    <View style={{ width: size, height: size }} accessible={false}>
+      {shown.map((id, index) => {
+        const member = bots.find(entry => entry.id === id)
+        if (member === undefined) return null
+        return (
+          <View
+            key={id}
+            style={{
+              position: 'absolute',
+              left: Math.min(step * index, Math.max(0, size - inner)),
+              top: index % 2 === 0 ? 0 : Math.max(0, size - inner),
+            }}
+          >
+            <BotAvatar bot={member} size={inner} />
+          </View>
+        )
+      })}
+    </View>
+  )
+}

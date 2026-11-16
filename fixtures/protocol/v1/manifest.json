@@ -8,6 +8,14 @@
       "path": "control/envelope.json"
     },
     {
+      "name": "control-wire-json",
+      "path": "control/wire-json.json"
+    },
+    {
+      "name": "relay-data-wire-json",
+      "path": "control/relay-data-wire-json.json"
+    },
+    {
       "name": "control-hello",
       "path": "control/hello.json"
     },
@@ -22,6 +30,10 @@
     {
       "name": "control-relay",
       "path": "control/relay.json"
+    },
+    {
+      "name": "remaining-control",
+      "path": "control/remaining-control.json"
     },
     {
       "name": "protocol-errors",

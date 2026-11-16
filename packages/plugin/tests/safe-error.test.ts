@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { IdentityInvalidError } from '../src/identity-store.js'
 import { RpcError } from '../src/rpc-router.js'
-import { safeErrorCode, safeStartupError } from '../src/safe-error.js'
+import { safeErrorCode, safeStartupError, workspaceFileFailure, workspaceFileFailureReason } from '../src/safe-error.js'
 import { ServerCredentialsBusyError, ServerCredentialsInvalidError } from '../src/server-credentials.js'
 
 describe('safeErrorCode', () => {
@@ -32,6 +32,13 @@ describe('safeErrorCode', () => {
       code: 'IDENTITY_LOCKED',
       message: 'device identity is locked by another process; stop other DSH instances and retry',
     })
+    expect(safeStartupError(new IdentityInvalidError(
+      'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. Unexpected entry "server-credentials.json.bak-1793870140999" was found.',
+      'STORAGE_CONFLICT',
+    ))).toEqual({
+      code: 'STORAGE_CONFLICT',
+      message: 'Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually. Unexpected entry "server-credentials.json.bak-1793870140999" was found.',
+    })
     expect(safeStartupError(new ServerCredentialsInvalidError('server credentials are invalid: access-token-secret'))).toEqual({
       code: 'SERVER_CREDENTIALS_INVALID',
       message: 'Local Remote server credentials are invalid.',
@@ -44,5 +51,14 @@ describe('safeErrorCode', () => {
       code: 'INTERNAL_ERROR',
       message: 'Remote plugin failed to start.',
     })
+  })
+
+  it('extracts only known workspace file reasons from error details', () => {
+    const denial = workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.', 'symlink')
+    expect(denial).toMatchObject({ code: 'WORKSPACE_PATH_DENIED', details: { reason: 'symlink' } })
+    expect(workspaceFileFailureReason(denial)).toBe('symlink')
+    expect(workspaceFileFailureReason(Object.assign(denial, { details: { reason: 'C:\\secret\\file.txt' } }))).toBeUndefined()
+    expect(workspaceFileFailureReason(new RpcError('WORKSPACE_PATH_DENIED', 'denied'))).toBeUndefined()
+    expect(workspaceFileFailureReason(null)).toBeUndefined()
   })
 })

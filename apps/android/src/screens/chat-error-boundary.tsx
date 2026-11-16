@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { strings } from '../locales/i18n'
 
 /**
  * Contains a render crash to one row instead of the whole screen.
@@ -58,16 +59,16 @@ export class ChatErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.message === undefined) return this.props.children
     return <View style={styles.container}>
-      <Text style={styles.title}>这段内容渲染失败</Text>
+      <Text style={styles.title}>{strings.chat.renderFailed}</Text>
       <Text style={styles.detail} numberOfLines={4}>{this.state.message}</Text>
-      <Text style={styles.hint}>其余对话和输入框不受影响，可以正常继续。</Text>
+      <Text style={styles.hint}>{strings.chat.renderFailedHint}</Text>
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" style={styles.button} onPress={() => this.setState({ message: undefined })}>
-          <Text style={styles.buttonText}>重试</Text>
+          <Text style={styles.buttonText}>{strings.common.retry}</Text>
         </Pressable>
         {this.props.onRetry === undefined ? null : (
           <Pressable accessibilityRole="button" style={styles.button} onPress={this.props.onRetry}>
-            <Text style={styles.buttonText}>重新加载会话</Text>
+            <Text style={styles.buttonText}>{strings.chat.reloadSession}</Text>
           </Pressable>
         )}
       </View>

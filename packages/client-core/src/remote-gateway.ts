@@ -2,6 +2,7 @@ import {
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_HARNESS_API_TRANSFER_BYTES,
   MAX_REMOTE_CAPABILITY_ENTRIES,
+  REMOTE_SESSION_EVENTS_CAPABILITY,
   parseRemoteWorkspaceTypes,
   type EventPayload,
   type HarnessRemoteFrameData,
@@ -10,6 +11,10 @@ import {
   type HarnessApiTransferCommitResult,
   type HarnessApiTransferReadResult,
   type RemoteWorkspaceTypeDescription,
+  type RemoteCompactionStatusParams,
+  type RemoteCompactionStatusResult,
+  type RemoteCompactionSubmitParams,
+  type RemoteCompactionSubmitResult,
 } from '@dsh-remote/protocol'
 import type { RemoteClientCore, RemoteRpcOptions } from './index.js'
 
@@ -35,6 +40,7 @@ export interface RemoteHostFeatures {
   remoteGateway: boolean
   sessionFormat?: 3
   remoteTransfer: boolean
+  sessionEvents: boolean
   pluginRoute: boolean
   capabilities: readonly string[]
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
@@ -95,6 +101,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     apiTransfer: true,
     remoteGateway: false,
     remoteTransfer: false,
+    sessionEvents: false,
     pluginRoute: false,
     capabilities: ['harness.api.v1'],
   }
@@ -139,6 +146,7 @@ export async function probeRemoteHostFeatures(
     remoteGateway,
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
     remoteTransfer: capabilities.has('harness.remote.transfer.v1'),
+    sessionEvents: capabilities.has(REMOTE_SESSION_EVENTS_CAPABILITY),
     pluginRoute: capabilities.has('plugin.route.v1'),
     capabilities: description.capabilities,
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
@@ -157,6 +165,34 @@ export class RemoteTypertGateway {
     )
     if (result.ok) return result.value
     throw remoteFailure(result.error)
+  }
+
+  /**
+   * Register an asynchronous Host compaction. Resolves as soon as the Host
+   * accepts the operation; the compaction itself keeps running on the Host even
+   * if this client disconnects.
+   */
+  async submitCompaction(
+    params: RemoteCompactionSubmitParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionSubmitResult> {
+    return await this.client.rpc<RemoteCompactionSubmitResult>('harness.remote.compaction.submit', params, signal)
+  }
+
+  /** Read the settled or in-flight state of one compaction operation. */
+  async compactionStatus(
+    params: RemoteCompactionStatusParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.client.rpc<RemoteCompactionStatusResult>('harness.remote.compaction.status', params, signal)
+  }
+
+  /** Ask the Host to cancel; the Host answers only after the command settles. */
+  async cancelCompaction(
+    params: RemoteCompactionStatusParams,
+    signal?: AbortSignal,
+  ): Promise<RemoteCompactionStatusResult> {
+    return await this.client.rpc<RemoteCompactionStatusResult>('harness.remote.compaction.cancel', params, signal)
   }
 
   async call<T = unknown>(

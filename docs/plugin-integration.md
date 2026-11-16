@@ -18,7 +18,7 @@ Host 接入分为两层认证：
 1. **账号密码接入**：插件登录账号后直接注册 Host；
 2. **主机匹配码接入**：用户在已登录网页生成一次性匹配码，再把它输入插件。
 
-两种方式最终得到相同的设备 token，后续刷新和 WebSocket 行为完全一致。主机匹配码只负责把一个 Host 接入账号；Host 与 Web/其他 Client 之间不再有单独的授权流程，同账号归属就是连接授权依据。
+两种方式最终得到相同的设备 token，后续刷新和 WebSocket 行为完全一致。主机匹配码只负责把一个 Host 接入账号；普通账号设备按 membership 派生连接授权；配对受限设备只取得显式绑定关系，见文末配对契约。
 
 ## 2. Server 地址
 
@@ -133,8 +133,7 @@ Web token 不进入二维码、手机回调 URL 或日志，并且只能由发�
 命令行使用 `ds-harness-remote login list` 查看可用条目，
 随后通过 `login <id>` 登录。未指定 ID 时优先选择可用的知乎，否则选择首个扫码提供商。
 
-新增 OAuth 需要在 Server 实现授权、回调与账号绑定，并在 `app/api/auth.py` 的
-`OAUTH_PROVIDERS` 注册展示名称、入口、配置检查和扫码分发函数。部署服务端后，已接入列表
+新增 OAuth 需要在独立 Server 实现授权、回调与账号绑定，并在其 provider discovery 注册展示名称、入口、配置检查和扫码分发。部署服务端后，已接入列表
 协议的插件会自动展示；新增提供商无需再次修改、构建或发布插件。现有旧插件需先更新一次。
 
 账号 token 当前没有 refresh 接口；过期后需要重新登录。持有有效 device refresh token
@@ -254,7 +253,7 @@ Content-Type: application/json
 
 Desktop Client 使用 §3.1 的账号密码取得临时 `accountToken`，再调用
 `POST /api/v1/devices/register`，descriptor 使用 `role=client` 且不携带
-`harnessVersion`。Client 不允许使用主机匹配码，也没有 Host 生成、领取或确认的设备码。
+`harnessVersion`。Client 不允许使用主机匹配码，不使用配对设备码；扫码设备配对是另一条独立流程。
 
 注册成功后只保存 Client 自己的 device token。`GET /api/v1/devices` 返回同账号 Host
 及 membership；Client 随后逐个调用 `GET /api/v1/devices/{hostDeviceId}` 获取 identity
@@ -315,11 +314,29 @@ Content-Type: application/json
 
 Server 每次首次刷新都会轮换 refresh token。插件必须将整组新凭证原子落盘后再废弃旧值。按 [协议 §8.2](protocol.md#82-refresh)，刷新响应丢失可恢复尚未再次轮换、撤销或过期的直接后继；若恢复 pair 的 access 已过期，保存后用其 refresh token 继续正常轮换。过时 token 被拒绝但不会撤销当前有效凭据；旧版 Server 可能仍采用重用即撤销策略。不要并发刷新，同一设备应使用 single-flight/互斥锁。
 
-Plugin 使用凭据文件旁的 `server-credentials.json.refresh-lock` 目录锁，在获得锁后重新
-读取凭据，串行执行读取、刷新与原子落盘。等待 15 秒仍未获得锁时返回
-`SERVER_CREDENTIALS_BUSY`，不按锁龄抢占。进程异常退出后，应停止所有共享该目录的实例，
-移除遗留锁并重新授权，避免重用可能已被 Server 消耗的 refresh token。
+Plugin 在凭据文件旁保存 `server-credentials.json.refresh-lock` 文件。文件内容为
+`DSH_REFRESH_LOCK_V2`。它标记 V2 刷新队列，也阻止 0.6.3 创建同名目录锁。
+每个刷新进程用独立 Holder 文件排队。进程退出后，新进程清理已确认死亡的 Holder。
+获得队列后，Plugin 重新读取凭据，再执行刷新和原子落盘。等待 15 秒后仍未入队时，
+Plugin 返回 `SERVER_CREDENTIALS_BUSY`。进程状态不明时，Plugin 保留 Holder。
+硬链接不可用时，Plugin 返回 `SERVER_CREDENTIALS_LOCK_UNSUPPORTED`，不执行刷新。
+默认目录迁移和刷新共用目录外的闸门。迁移等待活跃刷新，并清理死亡 Holder。
+迁移识别队列写入留下的 `.tmp` 文件；这些文件不授予队列所有权。
 刷新失败日志只标记 `phase: credential_refresh` 与错误码，不记录响应正文或 token。
+
+此锁正式支持 Linux 单机本地 ext4 和 XFS。WSL2 ext4.vhdx 用于开发和测试。
+不要将 `DSH_HOME` 放在 NFS 或 SMB 共享目录。不要让两台主机共用凭据目录。
+Windows Harness Host 的锁恢复仍待目标平台验证。Windows 上不明 PID 状态会保留锁。
+
+升级时先停止所有 Harness Host 和 CLI 进程。确认旧进程退出后再启动新版。
+旧版不能读取 V2 Marker。新版也不能接管旧版的活跃目录锁。
+如需降级到 0.6.3，优先恢复升级前的完整 `$DSH_HOME` 备份。
+没有备份时，先停止全部进程并备份当前 `$DSH_HOME`。
+然后检查每个 `server-credentials.json.refresh-lock*` 文件，确认没有活跃 Holder。
+删除 V2 Marker、Holder 和队列 `.tmp` 文件。将 `$DSH_HOME/ds-harness-remote`
+改名为 `$DSH_HOME/remote`，再安装 0.6.3。不要同时保留两个根目录。
+0.6.3 的凭据 schema 只接受 `account`、`host_registration_code` 和 `owned_device`。
+如凭据使用新字段，保留备份并在 0.6.3 中重新授权。0.6.3 不能直接读取这些凭据。
 
 同一 deviceId 只保留一个控制连接。收到 `4003` 时 Plugin 进入 `CONNECTION_REPLACED`
 并停止自动重连；同时运行的 Host 应使用独立 `DSH_HOME` 并分别授权。
@@ -389,11 +406,11 @@ descriptor 和首次 `hello` 中作为 `harnessVersion` 上报。读取都失败
 
 Server 会发送 `ping`，插件必须及时返回相同 nonce 的 `pong`。同一 deviceId 建立新 WebSocket 时，旧连接会以 `4003 CONNECTION_REPLACED` 关闭，因此插件内部也应保证只有一个连接管理器。
 
-断线重连建议使用带 jitter 的指数退避。认证失败时先刷新设备 access token；设备被撤销时停止重连。
+当前 Host 使用 `[0, reconnect.maxDelayMs]` 的 full jitter 重连；默认上限 30 秒，控制恢复循环另见[恢复契约](design/control-recovery.md)。认证失败时先刷新设备 access token；设备被撤销时停止重连。
 
 ## 8. 账号授权与连接事件
 
-Web 或其他客户端使用同一个账号登录并注册 `role=client` 后，Server 会自动为它与该账号下的 Host 建立授权边。没有创建、领取或确认设备码的接口。
+Web 或其他客户端使用同一个账号登录并注册 `role=client` 后，Server 会自动为它与该账号下的 Host 建立授权边。这条普通账号路径不使用设备码；配对受限设备仍按独立配对契约确认和授权。
 
 Client 发起 `connect.request` 且 Host 在线时，Host WebSocket 收到：
 
@@ -495,4 +512,4 @@ server changed       → NO_SERVER（切换到该 Server 独立的本地状态�
 
 ## Device pairing v1
 
-The full Server and Remote plugin implement phone confirmation followed by one local Host code submission. New Hosts accept incoming connections only. See [the protocol](device-pairing-v1.md) and [DSH-Go integration](dsh-go-pairing-integration.md). This capability is not available in the bundled minimal `apps/server`; unsupported Servers fail closed.
+扫码配对是独立的设备授权入口，电脑本机确认和手机接入要求统一维护在[设备配对协议](device-pairing-v1.md)。Host 接入时按 discovery 能力判断是否提供该入口，不复制另一套 API 或状态定义。

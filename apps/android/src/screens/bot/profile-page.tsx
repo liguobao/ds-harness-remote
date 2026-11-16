@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   BackHandler,
   Dimensions,
@@ -13,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native'
+import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import {
   ArrowLeftRight,
@@ -93,6 +93,7 @@ function groupBotModels(models: BotObject[]): { provider: string; label: string;
 
 export function BotProfilePage({
   visible,
+  covered = false,
   bot,
   room,
   state,
@@ -105,6 +106,7 @@ export function BotProfilePage({
   perform,
 }: {
   visible: boolean
+  covered?: boolean
   bot?: BotEntry
   room?: BotRoom
   state: BotState
@@ -213,10 +215,10 @@ export function BotProfilePage({
   }, [moreOpen, subPage, closeSubPage, onClose])
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || covered) return
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBack)
     return () => sub.remove()
-  }, [visible, handleBack])
+  }, [visible, covered, handleBack])
 
   const reloadSchedules = useCallback(() => {
     if (!visible || !client) return
@@ -464,10 +466,7 @@ export function BotProfilePage({
                 accessibilityRole="button"
                 accessibilityLabel={s.bots.botSettings}
                 disabled={busy || Boolean(state.readOnly)}
-                onPress={() => {
-                  onClose()
-                  onEdit()
-                }}
+                onPress={onEdit}
                 hitSlop={8}
                 style={({ pressed }) => [
                   styles.circleBtn,

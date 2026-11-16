@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Check, RefreshCw, SlidersHorizontal, X } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
@@ -13,6 +13,7 @@ import { useResponsiveLayout } from '../ui/responsive'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { SheetModal } from '../ui/sheet'
 
 export interface HostSwitcherSheetProps {
   visible: boolean
@@ -62,19 +63,12 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   }, [visible, refreshDevices])
 
   return (
-    <Modal visible={visible} transparent animationType='fade' onRequestClose={dismiss} statusBarTranslucent>
-      <View style={styles.backdrop} pointerEvents='box-none'>
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel={strings.common.close}
-          pointerEvents='box-only'
-          style={StyleSheet.absoluteFill}
-          onPress={dismiss}
-        />
-        <View
-          style={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
-          pointerEvents='box-none'
-        >
+    <SheetModal
+      visible={visible}
+      onClose={dismiss}
+      backdropStyle={styles.backdrop}
+      sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
+    >
           <View style={styles.grabber} />
           <View style={styles.sheetHeader}>
             <Text style={styles.title} numberOfLines={1}>{strings.remoteHosts.switchTitle}</Text>
@@ -169,9 +163,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
               />
             </GroupCard>
           </View>}
-        </View>
-      </View>
-    </Modal>
+    </SheetModal>
   )
 }
 
@@ -198,6 +190,9 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
       borderTopLeftRadius: radius.xxl,
       borderTopRightRadius: radius.xxl,
+      // Rows and the footer own their horizontal insets; the sheet itself has
+      // never added any, so keep the shared surface's padding out of the way.
+      paddingHorizontal: 0,
       paddingTop: spacing.sm,
       gap: spacing.md,
     },

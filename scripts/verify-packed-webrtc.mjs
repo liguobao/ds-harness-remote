@@ -15,7 +15,9 @@ function run(command, args, cwd) {
   return execFileSync(command, args, { cwd, encoding: 'utf8', timeout: 180_000, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 function inside(path, directory) {
-  const rel = relative(directory, path)
+  // Resolved dependency files are physical paths. Canonicalize the boundary
+  // too: on macOS tmpdir() may use /var while realpath() returns /private/var.
+  const rel = relative(realpathSync(directory), path)
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
@@ -43,7 +45,7 @@ function verifyClosure(modules, generation, installation) {
       assert.ok(isAbsolute(resolved), `${manifest.name}: ${dependency} resolves to builtin id ${resolved}`)
       const physical = realpathSync(resolved)
       assert.ok(inside(physical, generation) || inside(physical, installation),
-        `${manifest.name}: ${dependency} resolves outside the generation and installation closure`)
+        `${manifest.name}: ${dependency} resolves outside the generation and installation closure: ${physical}`)
     }
     count++
   }

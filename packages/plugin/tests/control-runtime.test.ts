@@ -10,6 +10,7 @@ import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
+import { HostLogStore } from '../src/host-log-store.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
 
 const directories: string[] = []
@@ -476,6 +477,69 @@ describe('PluginControlRuntime settings setup', () => {
     })
   })
 
+  it('retries startup after storage repair without changing settings', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const replace = vi.spyOn(settings, 'replace')
+    let repaired = false
+    const switchServer = vi.fn(async () => {
+      if (!repaired) throw new IdentityInvalidError('Storage still conflicts', 'STORAGE_CONFLICT')
+      return { client: undefined, host: {
+        hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+        reconnectHost: vi.fn(),
+      } as unknown as HostAuthorizationControl }
+    })
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined, switchServer)
+    const handler = register(control)
+    control.setStartupFailure(new IdentityInvalidError('Storage conflicts', 'STORAGE_CONFLICT'))
+
+    await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({
+      ok: false, error: { details: { remoteCode: 'STORAGE_CONFLICT' } },
+    })
+    expect((await handler('status', {}, signal()) as any).value?.startupError?.code).toBe('STORAGE_CONFLICT')
+
+    repaired = true
+    await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({ ok: true })
+    const status = await handler('status', {}, signal())
+    expect((status as any).value?.startupError).toBeUndefined()
+    expect((status as any).value?.host?.online).toBe(true)
+    expect(switchServer).toHaveBeenCalledTimes(2)
+    expect(replace).not.toHaveBeenCalled()
+    expect(settings.get().serverUrl).toBe('https://dsh.r2049.cn')
+  })
+
+  it('rejects a second startup retry while the first Server switch is in progress', async () => {
+    const root = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const ready = new Promise<void>(resolve => { started = resolve })
+    const switchServer = vi.fn(async () => {
+      started()
+      await gate
+      return { client: undefined, host: {
+        hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false }),
+      } as unknown as HostAuthorizationControl }
+    })
+    const control = new PluginControlRuntime(resolveConfig(settings.get()), root, settings, undefined, undefined, switchServer)
+    const handler = register(control)
+    control.setStartupFailure(new IdentityInvalidError('Storage conflicts', 'STORAGE_CONFLICT'))
+
+    const first = handler('settings.startup.retry', {}, signal())
+    await ready
+    try {
+      await expect(handler('settings.startup.retry', {}, signal())).resolves.toMatchObject({
+        ok: false, error: { details: { remoteCode: 'SERVER_SWITCH_BUSY' } },
+      })
+      expect(switchServer).toHaveBeenCalledOnce()
+    } finally {
+      release()
+    }
+    await expect(first).resolves.toMatchObject({ ok: true })
+    expect(switchServer).toHaveBeenCalledOnce()
+  })
+
   it('resets identity, validates role payload, and preserves startupError if restart still fails', async () => {
     const root = await temporaryDirectory()
     const serverUrl = 'https://dsh.r2049.cn'
@@ -553,6 +617,85 @@ describe('PluginControlRuntime settings setup', () => {
     expect(view).toMatchObject({ ok: true, value: { deviceName: expect.any(String) } })
     expect((view as any).value?.associations?.client).toBeUndefined()
     await expect(stat(join(hostDir, 'device.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('PluginControlRuntime local log endpoints', () => {
+  it('reads and clears Host logs locally even when startup failed and validates parameters', async () => {
+    const { HostLogStore } = await import('../src/host-log-store.js')
+    const directory = await temporaryDirectory()
+    const logFile = join(directory, 'logs', 'ds-harness-remote', 'web.log')
+    const logStore = new HostLogStore({ filePath: logFile })
+    logStore.record('info', '[ds-harness-remote] boot')
+    logStore.record('warn', '[ds-harness-remote] warning event')
+    logStore.record('error', '[ds-harness-remote] error event')
+
+    const settings = settingsBinding({ logLevel: 'info' })
+    const control = new PluginControlRuntime(
+      resolveConfig(settings.get()),
+      directory,
+      settings,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      logStore,
+    )
+    control.setStartupFailure(new Error('storage locked'))
+    const handler = register(control)
+
+    const all = await handler('settings.logs.get', {}, signal())
+    expect(all).toMatchObject({
+      ok: true,
+      value: {
+        logLevel: 'info',
+        totalBuffered: 3,
+        filePath: logFile,
+      },
+    })
+    expect((all as any).value.entries).toHaveLength(3)
+
+    const warnOnly = await handler('settings.logs.get', { filter: 'warn', limit: 1 }, signal())
+    expect(warnOnly).toMatchObject({ ok: true })
+    expect((warnOnly as any).value.entries).toHaveLength(1)
+    expect((warnOnly as any).value.entries[0].line).toContain('error event')
+
+    expect(await handler('settings.logs.get', { filter: 'debug' }, signal())).toMatchObject({ ok: false })
+    expect(await handler('settings.logs.get', { limit: 0 }, signal())).toMatchObject({ ok: false })
+
+    const cleared = await handler('settings.logs.clear', {}, signal())
+    expect(cleared).toMatchObject({
+      ok: true,
+      value: {
+        logLevel: 'info',
+        entries: [],
+        totalBuffered: 0,
+      },
+    })
+  })
+
+  it('rejects settings.logs.clear when settings are read-only', async () => {
+    const directory = await temporaryDirectory()
+    const logStore = new HostLogStore()
+    logStore.record('info', '[ds-harness-remote] keep-me')
+    const control = new PluginControlRuntime(
+      resolveConfig({ logLevel: 'info' }),
+      directory,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      logStore,
+    )
+    const handler = register(control)
+    await expect(handler('settings.logs.clear', {}, signal())).resolves.toMatchObject({
+      ok: false,
+      error: { details: { remoteCode: 'SETTINGS_UNAVAILABLE' } },
+    })
+    expect((await logStore.snapshot()).totalBuffered).toBe(1)
   })
 })
 function register(runtime: PluginControlRuntime) {

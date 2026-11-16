@@ -1,0 +1,7 @@
+    // Injected only by the independent benchmark builder; not a production API.
+    Function("sendSocket") { socketId: Int, payload: ByteArray ->
+      require(socketId >= 0 && payload.isNotEmpty() && payload.size <= 65535)
+      val context = appContext.reactContext as? ReactApplicationContext
+      val module = requireNotNull(context?.getNativeModule(com.facebook.react.modules.websocket.WebSocketModule::class.java))
+      module.sendBinary(payload.toByteString(), socketId)
+    }

@@ -22,7 +22,7 @@ For a future npm release that includes `renderer/renderer.js`, alternatively ins
 
 The WebView top page is locally authored and CSP locked; never interpolate Host HTML into the top page. Arbitrary Widget JavaScript remains inside the upstream renderer's opaque-origin sandbox. Android validates a per-card nonce, scopes the action to the currently connected Host and Session, enforces a message length/rate limit, and **requires native confirmation** for every model-directed action, including buttons and forms. An unconfirmed send is reported as such; no automatic retry occurs. The only exposed action is the existing store `sendMessage` / Session Prompt path. A native navigation denylist prevents generated UI links from opening uncontrolled in the WebView.
 
-Host tool event metadata (especially `meta.ok` and `meta.ui` for patches) must survive `session.history` and mux unmodified. The verification record for PR #126 covers a real Host connection, Android WebView rendering, and local chart interactions; screenshots are no longer stored in this repository. This does not establish the native-confirmation → Session Prompt → successive Patch flow, reconnect behavior, or rejection of malicious WebView messages; those device-level checks remain pending.
+Host tool event metadata (especially `meta.ok` and `meta.ui` for patches) must survive `session.history` and mux unmodified. Pending target-device checks are tracked in [TODO](TODO.md).
 
 A successful patch updates the original UI card in place (same uiId/React/WebView instance while mounted); the later Turn shows a version pointer rather than remounting the controls. Android virtualization can still unmount an off-screen card, so purely local input preferences are not a durable cross-device contract.
 

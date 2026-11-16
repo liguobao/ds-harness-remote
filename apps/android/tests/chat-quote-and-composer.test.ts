@@ -1,4 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import {
+  applyQuickPromptDraft,
+  composerEditable,
+  isQuickPromptActionMode,
+  nextStackedOverflowLength,
+  policyHintVisible,
+  shouldShowExpandCorner,
+  shouldUseStackedComposer,
+  submitIntent,
+  type SubmitGateInput,
+} from '../src/screens/chat/composer-gate'
 import { formatQuoteDraftSnippet, formatQuoteText, formatTokens } from '../src/ui/quote-helpers'
 
 describe('Quote snippet formatting (Figure 3 alignment)', () => {
@@ -91,6 +103,39 @@ describe('Chat Action Menu cards boundary', () => {
 })
 
 
+describe('Composer availability while the Host is unreachable', () => {
+  const ready: SubmitGateInput = {
+    connected: true, sendReady: true, permissionSelecting: false, uploading: false, hasContent: true,
+  }
+
+  it('only submits once the channel is authenticated and ready', () => {
+    for (const connected of [true, false]) for (const sendReady of [true, false]) for (const hasContent of [true, false]) {
+      const intent = submitIntent({ ...ready, connected, sendReady, hasContent })
+      expect(intent === 'submit', `connected=${connected} sendReady=${sendReady} hasContent=${hasContent}`)
+        .toBe(connected && sendReady && hasContent)
+    }
+  })
+
+  it('routes an offline tap away from the submit path that clears the draft', async () => {
+    await runScenarios([
+      { name: 'connected and ready', input: ready, expected: 'submit' },
+      { name: 'offline with a draft', input: { ...ready, connected: false, sendReady: false }, expected: 'offline' },
+      { name: 'offline with an empty composer', input: { ...ready, connected: false, sendReady: false, hasContent: false }, expected: 'ignore' },
+      { name: 'offline while a permission switch is in flight', input: { ...ready, connected: false, sendReady: false, permissionSelecting: true }, expected: 'offline' },
+      { name: 'upload already running', input: { ...ready, uploading: true }, expected: 'ignore' },
+      { name: 'history sync window after reconnection', input: { ...ready, sendReady: false }, expected: 'ignore' },
+      { name: 'permission switch while connected', input: { ...ready, permissionSelecting: true }, expected: 'ignore' },
+    ].map(({ name, input, expected }) => ({ name, run: () => { expect(submitIntent(input), name).toBe(expected) } })))
+  })
+
+  it('keeps the text field editable while the Host is unreachable', () => {
+    // Editable is composer-local only: a dropped carrier never locks the field.
+    expect(composerEditable({ permissionSelecting: false, uploading: false })).toBe(true)
+    expect(composerEditable({ permissionSelecting: true, uploading: false })).toBe(false)
+    expect(composerEditable({ permissionSelecting: false, uploading: true })).toBe(false)
+  })
+})
+
 describe('Composer expand state and back handler priority', () => {
   it('defines expandComposer and collapseComposer across all locales', async () => {
     const { messageCatalogs } = await import('../src/locales/i18n')
@@ -119,5 +164,108 @@ describe('Composer expand state and back handler priority', () => {
 
     expect(composerExpanded).toBe(false)
     expect(backNavigated).toBe(false)
+  })
+})
+
+describe('Compact composer footer policy hint and moved controls localization', () => {
+  it('shows the policy hint only on blank sessions with non-compact composer layout', () => {
+    expect(policyHintVisible({ showPolicyHint: true, compactComposer: false })).toBe(true)
+    expect(policyHintVisible({ showPolicyHint: false, compactComposer: false })).toBe(false)
+    expect(policyHintVisible({ showPolicyHint: true, compactComposer: true })).toBe(false)
+    expect(policyHintVisible({ showPolicyHint: false, compactComposer: true })).toBe(false)
+  })
+
+  it('defines quickPrompts, selectModel, and quickPromptActionMode labels across all locales', async () => {
+    const { messageCatalogs } = await import('../src/locales/i18n')
+    for (const [lang, s] of Object.entries(messageCatalogs)) {
+      expect(typeof s.chat.quickPrompts, "lang: " + lang).toBe('string')
+      expect(s.chat.quickPrompts.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.chat.selectModel, "lang: " + lang).toBe('string')
+      expect(s.chat.selectModel.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionMode, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionMode.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionFill, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionFill.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionSend, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionSend.length, "lang: " + lang).toBeGreaterThan(0)
+      expect(typeof s.settings.quickPromptActionSaveFailed, "lang: " + lang).toBe('string')
+      expect(s.settings.quickPromptActionSaveFailed.length, "lang: " + lang).toBeGreaterThan(0)
+    }
+  })
+
+  it('promotes from inline to stacked composer on overflow/newlines/quotes with hysteresis', () => {
+    expect(shouldUseStackedComposer({ draft: '', hasQuotes: false, overflowLength: null })).toBe(false)
+    expect(shouldUseStackedComposer({ draft: 'hello', hasQuotes: false, overflowLength: null })).toBe(false)
+    expect(shouldUseStackedComposer({ draft: 'hello', hasQuotes: true, overflowLength: null })).toBe(true)
+    expect(shouldUseStackedComposer({ draft: 'a\nb', hasQuotes: false, overflowLength: null })).toBe(true)
+
+    // Inline wraps at length 20 -> remembers overflow point and stays stacked even after
+    // full-width layout shrinks the text back onto 1 line (contentHeight 36).
+    const entered = nextStackedOverflowLength({
+      draft: '12345678901234567890',
+      contentHeight: 58,
+      currentOverflowLength: null,
+    })
+    expect(entered).toBe(20)
+    const afterWidening = nextStackedOverflowLength({
+      draft: '12345678901234567890',
+      contentHeight: 36,
+      currentOverflowLength: entered,
+    })
+    expect(afterWidening).toBe(20)
+    expect(shouldUseStackedComposer({ draft: '12345678901234567890', hasQuotes: false, overflowLength: afterWidening })).toBe(true)
+
+    // Deleting 1 char keeps stacked; deleting past hysteresis threshold (20 - 2) restores inline.
+    const oneBack = nextStackedOverflowLength({
+      draft: '1234567890123456789',
+      contentHeight: 36,
+      currentOverflowLength: afterWidening,
+    })
+    expect(oneBack).toBe(20)
+    const exited = nextStackedOverflowLength({
+      draft: '12345678901234567',
+      contentHeight: 36,
+      currentOverflowLength: oneBack,
+    })
+    expect(exited).toBeNull()
+    expect(shouldUseStackedComposer({ draft: '12345678901234567', hasQuotes: false, overflowLength: exited })).toBe(false)
+  })
+
+  it('shows the corner expand trigger only once a draft reaches five or more lines', () => {
+    expect(shouldShowExpandCorner({ draft: '', contentHeight: 0 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'hello', contentHeight: 36 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'a\nb\nc\nd', contentHeight: 102 })).toBe(false)
+    expect(shouldShowExpandCorner({ draft: 'a\nb\nc\nd\ne', contentHeight: 124 })).toBe(true)
+    expect(shouldShowExpandCorner({ draft: 'long wrapped block', contentHeight: 120 })).toBe(true)
+  })
+
+  it('fills quick prompts into drafts with clean spacing and cursor placement', () => {
+    expect(applyQuickPromptDraft('', '请总结当前进展')).toEqual({
+      draft: '请总结当前进展',
+      cursor: 7,
+    })
+    expect(applyQuickPromptDraft('先看下日志', '/plan')).toEqual({
+      draft: '先看下日志 /plan',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('先看下日志 ', '/plan')).toEqual({
+      draft: '先看下日志 /plan',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('第一行\n第二行', '第三行')).toEqual({
+      draft: '第一行\n第二行\n第三行',
+      cursor: 11,
+    })
+    expect(applyQuickPromptDraft('existing', '')).toEqual({
+      draft: 'existing',
+      cursor: 8,
+    })
+  })
+
+  it('validates persisted quickPromptActionMode values', () => {
+    expect(isQuickPromptActionMode('fill')).toBe(true)
+    expect(isQuickPromptActionMode('send')).toBe(true)
+    expect(isQuickPromptActionMode('auto')).toBe(false)
+    expect(isQuickPromptActionMode(undefined)).toBe(false)
   })
 })

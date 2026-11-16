@@ -1,11 +1,22 @@
-import { useEffect, useState } from 'react'
-import type { ComponentType } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { BackHandler, Keyboard, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { radius, spacing, type } from './theme'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 
 export * from './mention-helpers'
+
+const NavigationFocusContext = createContext(true)
+
+/** Tracks whether the subtree is currently interactive and uncovered by higher layers or drawers. */
+export function NavigationFocusProvider({ value, children }: { value: boolean; children: ReactNode }) {
+  return <NavigationFocusContext.Provider value={value}>{children}</NavigationFocusContext.Provider>
+}
+
+export function useNavigationFocused(): boolean {
+  return useContext(NavigationFocusContext)
+}
 
 export interface MentionItem {
   id: string
@@ -26,22 +37,28 @@ export interface MentionGroup {
 }
 
 /** Suggestion surface for the `/` and `@` triggers, mounted above the composer card. */
-export function MentionPopover({ groups, onDismiss, emptyText }: {
+export function MentionPopover({ groups, onDismiss, emptyText, active = true }: {
   groups: MentionGroup[]
   onDismiss: () => void
   emptyText: string
+  active?: boolean
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const routeFocused = useNavigationFocused()
+  const backStateRef = useRef({ active: active && routeFocused, onDismiss })
+  backStateRef.current = { active: active && routeFocused, onDismiss }
 
-  // Android Back closes the popover first instead of leaving the chat screen.
+  // Android Back closes the popover first instead of leaving the chat screen,
+  // but never intercepts when covered by a drawer or another route layer.
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      onDismiss()
+      if (!backStateRef.current.active) return false
+      backStateRef.current.onDismiss()
       return true
     })
     return () => subscription.remove()
-  }, [onDismiss])
+  }, [])
 
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)
   const { width, height } = useWindowDimensions()

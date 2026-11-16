@@ -4,11 +4,17 @@ import { BackHandler, Keyboard, type TextInput } from 'react-native'
 type BackPanel = { open: boolean; close: () => void }
 
 /** Ordered panels keep the existing back priority; the listener always reads current state. */
-export function useChatBackHandler(input: RefObject<TextInput | null>, onBack: () => void, panels: BackPanel[]) {
-  const latest = useRef({ onBack, panels })
-  latest.current = { onBack, panels }
+export function useChatBackHandler(
+  input: RefObject<TextInput | null>,
+  onBack: () => boolean | void,
+  panels: BackPanel[],
+  active = true,
+) {
+  const latest = useRef({ onBack, panels, active })
+  latest.current = { onBack, panels, active }
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!latest.current.active) return false
       const panel = latest.current.panels.find(panel => panel.open)
       if (panel !== undefined) {
         panel.close()
@@ -20,8 +26,7 @@ export function useChatBackHandler(input: RefObject<TextInput | null>, onBack: (
         return true
       }
       Keyboard.dismiss()
-      latest.current.onBack()
-      return true
+      return latest.current.onBack() !== false
     })
     return () => subscription.remove()
   }, [input])

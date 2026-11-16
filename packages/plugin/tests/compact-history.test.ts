@@ -5,11 +5,50 @@ import { RpcRouter } from '../src/rpc-router.js'
 import { CodexPeerBridge } from '../src/codex/peer-bridge.js'
 
 const output = 'sensitive tool output '.repeat(4000)
+const MARKER = '\n[Compact history: output omitted]'
 const page = () => ({ cursor: 91, throughSeq: 91, hasMore: true, activeTurnId: 'turn-2', records: [
   { type: 'event', event: { type: 'user/message', seq: 40, data: { content: [{ type: 'text', text: output }] } } },
   { type: 'event', event: { type: 'tool/result', seq: 41, data: { callId: 'tool-1', turn: 2, failed: true, message: { source: { callId: 'tool-1' }, content: [{ type: 'tool-result', toolCallId: 'tool-1', isError: true, content: [{ type: 'text', text: output }] }] } } }, view: { for: 'result', view: { title: 'Read', output } } },
   { type: 'event', event: { type: 'turn/end', seq: 91, data: { reason: { kind: 'failed' } } } },
 ] })
+
+// ds-bot writes one `{"replies":[...],"passed":N}` text per group round.
+const groupReply = (text: string, name = 'Chief', time = 1) => ({ botId: 'session-1', name, colour: 'deepseek', text, time })
+const groupRound = (replies: unknown[]) => JSON.stringify({ replies, passed: replies.length })
+const groupRecord = (seq: number, content: unknown[]) => ({
+  type: 'event',
+  event: {
+    type: 'tool/result', seq,
+    data: {
+      callId: `tool-${seq}`, turn: 2, name: 'group_relay',
+      message: { source: { callId: `tool-${seq}` }, content },
+    },
+  },
+  view: { for: 'result', view: { title: '群聊接力' } },
+})
+const groupResultRecord = (seq: number, text: string, isError = false) => groupRecord(seq, [
+  { type: 'tool-result', toolCallId: `tool-${seq}`, ...(isError ? { isError: true } : {}), content: [{ type: 'text', text }] },
+])
+/** First text that reached the client inside one record's message content. */
+const textIn = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = textIn(item)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as { text?: unknown; content?: unknown }
+  if (typeof record.text === 'string') return record.text
+  return textIn(record.content)
+}
+const messageText = (record: unknown): string => textIn((record as { event: { data: { message: { content: unknown } } } }).event.data.message.content)!
+/** Plain text block at one position of the message content array. */
+const blockText = (record: unknown, index: number): string =>
+  (record as { event: { data: { message: { content: { text: string }[] } } } }).event.data.message.content[index]!.text
+const parsedRound = (text: string) => JSON.parse(text) as { replies: { name?: string; text?: string; kind?: string }[]; truncated?: boolean }
 
 describe('compact history recovery contract', () => {
   it('preserves cursors, correlation, errors, text and lifecycle without mutating stored history', () => {
@@ -69,4 +108,88 @@ it('compacts Harness snapshots and older pages while forwarding live events unch
   expect(publish.mock.calls[0]).toEqual(['harness.remote.frame', { streamId: 'follow', hasValue: true, value: compactHistory(snapshot) }])
   expect(publish.mock.calls[1]).toEqual(['harness.remote.frame', { streamId: 'follow', hasValue: true, value: live }])
   await bridge.closeAll()
+})
+
+describe('compact group round preservation', () => {
+  it('keeps completed group rounds readable in pages, snapshots and failed results', async () => {
+    const longRound = groupRound([
+      groupReply('甲'.repeat(500), 'Chief'),
+      groupReply('乙'.repeat(500), 'Monitor'),
+      { kind: 'user', text: '丙'.repeat(400), time: 3 },
+    ])
+    const pageWithRounds = (record: unknown) => ({ cursor: 7, throughSeq: 7, hasMore: false, records: [record] })
+    const scenarios = [
+      { name: 'session/page', wrap: (record: unknown) => pageWithRounds(record) },
+      { name: 'session/follow snapshot', wrap: (record: unknown) => ({ type: 'snapshot', ...pageWithRounds(record) }) },
+    ]
+    for (const scenario of scenarios) {
+      const result = compactHistory(scenario.wrap(groupResultRecord(2, longRound))) as { records: unknown[] }
+      const text = messageText(result.records[0])
+      const round = parsedRound(text)
+      expect(round.replies.map(reply => reply.name ?? reply.kind)).toEqual(['Chief', 'Monitor', 'user'])
+      expect(round.replies.map(reply => reply.text?.[0])).toEqual(['甲', '乙', '丙'])
+      expect(round.truncated).toBeUndefined()
+      expect(JSON.stringify(result).length).toBeLessThan(16 * 1024)
+      // No storage mutation and idempotent re-projection.
+      const source = scenario.wrap(groupResultRecord(2, longRound))
+      const snapshot = structuredClone(source)
+      const once = compactHistory(source)
+      expect(source).toEqual(snapshot)
+      expect(compactHistory(once)).toEqual(once)
+    }
+
+    const failed = compactHistory(pageWithRounds(groupResultRecord(3, longRound, true))) as { records: { event: { data: { message: { content: { isError?: boolean }[] } } } }[] }
+    expect(failed.records[0]!.event.data.message.content[0]!.isError).toBe(true)
+    expect(parsedRound(messageText(failed.records[0])).replies).toHaveLength(3)
+  })
+
+  it('keeps a round that falls outside the two-preview budget', () => {
+    const record = groupRecord(4, [
+      { type: 'text', text: 'first preview' },
+      { type: 'text', text: 'second preview' },
+      { type: 'text', text: groupRound([groupReply('丁'.repeat(400), 'Chief'), groupReply('戊'.repeat(400), 'Monitor')]) },
+    ])
+    const result = compactHistory({ cursor: 4, throughSeq: 4, hasMore: false, records: [record] }) as { records: unknown[] }
+    const text = blockText(result.records[0], 2)
+    expect(parsedRound(text).replies.map(reply => reply.name)).toEqual(['Chief', 'Monitor'])
+  })
+
+  it('bounds preserved round growth and keeps the truncation fallback for the rest', () => {
+    const text = '己'.repeat(2000)
+    const records = Array.from({ length: 40 }, (_, index) => groupResultRecord(index + 1, groupRound([
+      groupReply(text, 'Chief', index), groupReply(text, 'Monitor', index),
+      groupReply(text, 'Scribe', index), groupReply(text, 'Reviewer', index),
+    ])))
+    const result = compactHistory({ cursor: 40, throughSeq: 40, hasMore: true, records }) as { records: unknown[] }
+    const texts = result.records.map(record => messageText(record))
+    expect(JSON.stringify(result).length).toBeLessThan(200 * 1024)
+    expect(texts.every(value => value.startsWith('{"replies"'))).toBe(true)
+    const preserved = texts.filter(value => !value.endsWith(MARKER))
+    const fallbacks = texts.filter(value => value.endsWith(MARKER))
+    expect(preserved.length).toBeGreaterThan(5)
+    expect(fallbacks.length).toBeGreaterThan(0)
+    const first = parsedRound(preserved[0]!)
+    expect(first.replies).toHaveLength(3)
+    expect(first.truncated).toBe(true)
+    expect(first.replies.every(reply => reply.text!.length === 2000)).toBe(true)
+  })
+
+  it('leaves ordinary and already truncated tool text on the 512-character fallback', () => {
+    const cases: Array<{ name: string; text: string }> = [
+      { name: 'ordinary output', text: output },
+      { name: 'already truncated source', text: groupRound([groupReply('庚'.repeat(2000))]).slice(0, 600) },
+    ]
+    for (const row of cases) {
+      const result = compactHistory({ cursor: 2, throughSeq: 2, hasMore: false, records: [groupResultRecord(8, row.text)] }) as { records: unknown[] }
+      const text = messageText(result.records[0])
+      expect(text).toBe(row.text.slice(0, 512) + MARKER)
+      expect(JSON.stringify(result).length).toBeLessThan(2000)
+    }
+  })
+
+  it('does not grow an empty replies array', () => {
+    const empty = groupRound([])
+    const result = compactHistory({ cursor: 2, throughSeq: 2, hasMore: false, records: [groupResultRecord(9, empty)] }) as { records: unknown[] }
+    expect(messageText(result.records[0])).toBe(empty)
+  })
 })

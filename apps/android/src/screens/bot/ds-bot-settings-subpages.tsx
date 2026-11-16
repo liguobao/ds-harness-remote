@@ -89,12 +89,12 @@ export function DsBotConnectorsSubpage({
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.rowTitle} numberOfLines={1}>{conn.name}</Text>
           <Text style={styles.rowSub} numberOfLines={1}>
-            {isConnected && toolCount > 0 ? `已连接 · ${toolCount} 个工具` : conn.desc}
+            {isConnected && toolCount > 0 ? s.dsBotSettings.connectedTools(toolCount) : conn.desc}
           </Text>
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${isConnected ? '已连接' : '连接'} ${conn.name}`}
+          accessibilityLabel={isConnected ? s.dsBotSettings.connectedName(conn.name) : s.dsBotSettings.connectName(conn.name)}
           onPress={() => setSelectedConnector(conn)}
           style={({ pressed }) => [
             styles.connectBtn,
@@ -103,7 +103,7 @@ export function DsBotConnectorsSubpage({
           ]}
         >
           <Text style={[styles.connectBtnText, isConnected && { color: colors.primary }]}>
-            {isConnected ? '已连接' : '连接'}
+            {isConnected ? s.dsBotSettings.connected : s.dsBotSettings.connect}
           </Text>
         </Pressable>
       </View>
@@ -120,7 +120,7 @@ export function DsBotConnectorsSubpage({
           <TextInput
             value={connectorQuery}
             onChangeText={setConnectorQuery}
-            placeholder="搜索连接器"
+            placeholder={s.dsBotSettings.searchConnectors}
             placeholderTextColor={colors.muted}
             style={styles.searchInput}
           />
@@ -136,7 +136,7 @@ export function DsBotConnectorsSubpage({
           style={({ pressed }) => [styles.inlineCreateBtn, pressed && { opacity: 0.75 }]}
         >
           <Plus size={15} color={colors.ink} />
-          <Text style={styles.inlineCreateBtnText}>自定义</Text>
+          <Text style={styles.inlineCreateBtnText}>{s.dsBotSettings.custom}</Text>
         </Pressable>
       </View>
 
@@ -163,7 +163,7 @@ export function DsBotConnectorsSubpage({
 
       {connectorCat === 'all' && !q ? (
         <>
-          <SectionTitle>推荐</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.recommended}</SectionTitle>
           <GroupCard>
             {DS_BOT_RECOMMENDED_CONNECTOR_IDS.map(
               id => DS_BOT_CONNECTOR_CATALOG.find(c => c.id === id)!,
@@ -196,7 +196,7 @@ export function DsBotConnectorsSubpage({
             return (
               <GroupCard>
                 <View style={styles.emptyCardBox}>
-                  <Text style={styles.mutedText}>没有匹配的连接器</Text>
+                  <Text style={styles.mutedText}>{s.dsBotSettings.noMatchingConnectors}</Text>
                 </View>
               </GroupCard>
             )
@@ -222,22 +222,22 @@ export function DsBotConnectorsSubpage({
                 <GroupRow
                   first
                   icon={Plug}
-                  label="认证方式"
+                  label={s.dsBotSettings.authMethod}
                   value={
                     selectedConnector.authKind === 'oauth'
-                      ? 'OAuth 浏览器授权'
+                      ? s.dsBotSettings.authOauth
                       : selectedConnector.authKind === 'mail'
-                        ? 'IMAP / SMTP 授权码'
+                        ? s.dsBotSettings.authMail
                         : selectedConnector.authKind === 'key'
-                          ? 'API 密钥'
-                          : '免密直连 MCP'
+                          ? s.dsBotSettings.authKey
+                          : s.dsBotSettings.authNone
                   }
                   chevron={false}
                 />
                 <GroupRow
                   icon={Monitor}
-                  label="配置说明"
-                  detail="为保护第三方账号凭证安全，连接器授权与密钥填写需在电脑端 DS Bot「设置 → 连接器」中操作，连接后所有 Bot 即可在手机端对话中直接调用。"
+                  label={s.dsBotSettings.setupNotes}
+                  detail={s.dsBotSettings.connectorSetupDetail}
                   chevron={false}
                 />
               </GroupCard>
@@ -252,29 +252,29 @@ export function DsBotConnectorsSubpage({
           <ModalSurface onClose={() => setCustomConnectorGuideOpen(false)}>
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.sheetTitle}>添加自定义连接器</Text>
+                <Text style={styles.sheetTitle}>{s.dsBotSettings.addCustomConnector}</Text>
                 <IconButton label={s.common.close} icon={X} onPress={() => setCustomConnectorGuideOpen(false)} />
               </View>
               <Text style={styles.rowSub}>
-                支持接入远程 HTTP MCP 地址、本地命令行 MCP 服务，或从 Claude Desktop、Cursor、VS Code 一键导入。
+                {s.dsBotSettings.customConnectorIntro}
               </Text>
               <GroupCard>
                 <GroupRow
                   first
                   icon={Globe}
-                  label="远程 MCP 地址"
-                  detail="支持 HTTP/SSE MCP 端点与自定义 Header 密钥"
+                  label={s.dsBotSettings.remoteMcp}
+                  detail={s.dsBotSettings.remoteMcpDetail}
                   chevron={false}
                 />
                 <GroupRow
                   icon={Terminal}
-                  label="本地命令行 MCP"
-                  detail="支持标准 stdio 协议的本地 MCP 服务进程"
+                  label={s.dsBotSettings.localMcp}
+                  detail={s.dsBotSettings.localMcpDetail}
                   chevron={false}
                 />
               </GroupCard>
               <Text style={styles.helperNote}>
-                由于自定义 MCP 涉及主机进程与本地配置读取，请在电脑端 DS Bot「设置 → 连接器 → + 自定义」中添加。
+                {s.dsBotSettings.customConnectorNote}
               </Text>
               <Button label={s.common.close} variant="secondary" onPress={() => setCustomConnectorGuideOpen(false)} />
             </View>
@@ -301,7 +301,7 @@ export function DsBotImSubpage({
     <>
       {connectedImList.length > 0 && (
         <>
-          <SectionTitle>{`已连接 · ${connectedImList.length}`}</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.imConnectedTitle(connectedImList.length)}</SectionTitle>
           <GroupCard>
             {connectedImList.map((conn, idx) => {
               const cid = text(conn.id) || `im-${idx}`
@@ -316,8 +316,8 @@ export function DsBotImSubpage({
                   first={idx === 0}
                   icon={MessageSquareShare}
                   label={text(conn.name) || plat?.name || platId}
-                  detail={`消息交给 ${botTarget}`}
-                  value={online ? '运行中' : '已配置'}
+                  detail={s.dsBotSettings.imRoutesTo(botTarget)}
+                  value={online ? s.dsBotSettings.running : s.dsBotSettings.configured}
                   chevron={false}
                 />
               )
@@ -326,7 +326,7 @@ export function DsBotImSubpage({
         </>
       )}
 
-      <SectionTitle>选择平台</SectionTitle>
+      <SectionTitle>{s.dsBotSettings.choosePlatform}</SectionTitle>
       <GroupCard>
         {DS_BOT_IM_PLATFORMS.map((plat, idx) => {
           const configuredCount = connectedImList.filter(b => text(b.platform) === plat.id).length
@@ -341,7 +341,7 @@ export function DsBotImSubpage({
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`连接 ${plat.name}`}
+                accessibilityLabel={s.dsBotSettings.connectName(plat.name)}
                 onPress={() => setSelectedImPlatform(plat)}
                 style={({ pressed }) => [
                   styles.connectBtn,
@@ -350,7 +350,7 @@ export function DsBotImSubpage({
                 ]}
               >
                 <Text style={[styles.connectBtnText, configuredCount > 0 && { color: colors.primary }]}>
-                  {configuredCount > 0 ? `已连接 (${configuredCount})` : '连接'}
+                  {configuredCount > 0 ? s.dsBotSettings.imConnectedCount(configuredCount) : s.dsBotSettings.connect}
                 </Text>
               </Pressable>
             </View>
@@ -363,7 +363,7 @@ export function DsBotImSubpage({
           <ModalSurface onClose={() => setSelectedImPlatform(null)}>
             <View style={{ gap: 12 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Text style={styles.sheetTitle}>{`连接 ${selectedImPlatform.name}`}</Text>
+                <Text style={styles.sheetTitle}>{s.dsBotSettings.connectName(selectedImPlatform.name)}</Text>
                 <IconButton label={s.common.close} icon={X} onPress={() => setSelectedImPlatform(null)} />
               </View>
               <Text style={styles.rowSub}>{selectedImPlatform.sub}</Text>
@@ -371,14 +371,14 @@ export function DsBotImSubpage({
                 <GroupRow
                   first
                   icon={KeyRound}
-                  label="所需凭据"
+                  label={s.dsBotSettings.requiredCredentials}
                   value={selectedImPlatform.fieldsHint}
                   chevron={false}
                 />
                 <GroupRow
                   icon={Monitor}
-                  label="接入方式"
-                  detail={`请在电脑端 DS Bot「设置 → IM → ${selectedImPlatform.name}」中完成绑定与扫码配对；连接后该平台的私聊和群消息将自动转发给对应 Bot。`}
+                  label={s.dsBotSettings.imSetupMethod}
+                  detail={s.dsBotSettings.imSetupDetail(selectedImPlatform.name)}
                   chevron={false}
                 />
               </GroupCard>
@@ -413,7 +413,7 @@ export function DsBotCapabilitiesSubpage({
   return (
     <>
       <Text style={styles.helperNote}>
-        选择目标 Bot，管理其工作区权限预设及可用的内置工具能力。
+        {s.dsBotSettings.capabilitiesNote}
       </Text>
 
       <ScrollView
@@ -436,12 +436,12 @@ export function DsBotCapabilitiesSubpage({
         })}
       </ScrollView>
 
-      <SectionTitle>工具执行权限</SectionTitle>
+      <SectionTitle>{s.dsBotSettings.sectionToolPermissions}</SectionTitle>
       <GroupCard>
         {([
-          { id: 'default', label: '标准权限（敏感操作需确认）', desc: '读写工作区外文件或执行高风险命令时询问你' },
-          { id: 'workspace-write', label: '工作区内自动读写', desc: '允许在 Bot 工作文件夹内直接修改文件' },
-          { id: 'danger-full-access', label: '完全权限（自动批准）', desc: '无需每次询问直接执行终端与文件操作' },
+          { id: 'default', label: s.dsBotSettings.permDefault, desc: s.dsBotSettings.permDefaultDetail },
+          { id: 'workspace-write', label: s.dsBotSettings.permWorkspaceWrite, desc: s.dsBotSettings.permWorkspaceWriteDetail },
+          { id: 'danger-full-access', label: s.dsBotSettings.permFullAccess, desc: s.dsBotSettings.permFullAccessDetail },
         ] as const).map((opt, idx) => {
           const chosen = currentPerm === opt.id
           return (
@@ -465,47 +465,47 @@ export function DsBotCapabilitiesSubpage({
         })}
       </GroupCard>
 
-      <SectionTitle>内置能力模块</SectionTitle>
+      <SectionTitle>{s.dsBotSettings.sectionBuiltinCapabilities}</SectionTitle>
       <GroupCard>
         <GroupRow
           first
           icon={Folder}
-          label="工作区文件与终端"
-          detail="读取、编写代码文件，运行构建与终端命令"
-          value="已启用"
+          label={s.dsBotSettings.capWorkspace}
+          detail={s.dsBotSettings.capWorkspaceDetail}
+          value={s.dsBotSettings.enabled}
           chevron={false}
         />
         <GroupRow
           icon={Globe}
-          label="网络搜索与浏览器"
-          detail="搜索网页、抓取正文及驱动专属浏览器标签页"
-          value={effectiveState.browser !== false ? '已启用' : '已关闭'}
+          label={s.dsBotSettings.capWeb}
+          detail={s.dsBotSettings.capWebDetail}
+          value={effectiveState.browser !== false ? s.dsBotSettings.enabled : s.dsBotSettings.disabled}
           chevron={false}
         />
         <GroupRow
           icon={Users}
-          label="团队协作与群聊"
-          detail="向其他 Bot 委派子任务、读取对话与群聊协作"
-          value={targetBot?.private ? '隐私隔离' : '已启用'}
+          label={s.dsBotSettings.capTeam}
+          detail={s.dsBotSettings.capTeamDetail}
+          value={targetBot?.private ? s.dsBotSettings.privateIsolated : s.dsBotSettings.enabled}
           chevron={false}
         />
         <GroupRow
           icon={CalendarClock}
-          label="定时任务、长期记忆与密钥"
-          detail="创建自动化提醒、跨对话记忆与安全使用环境变量密钥"
-          value={effectiveState.memory !== false ? '已启用' : '仅任务/密钥'}
+          label={s.dsBotSettings.capMemory}
+          detail={s.dsBotSettings.capMemoryDetail}
+          value={effectiveState.memory !== false ? s.dsBotSettings.enabled : s.dsBotSettings.tasksAndSecretsOnly}
           chevron={false}
         />
       </GroupCard>
 
       {(effectiveState.capabilities ?? []).length > 0 && (
         <>
-          <SectionTitle>已安装的共享能力与技能</SectionTitle>
+          <SectionTitle>{s.dsBotSettings.sectionSharedCapabilities}</SectionTitle>
           <GroupCard>
             {(effectiveState.capabilities ?? []).map((cap, idx) => {
               const cid = text(cap.id) || `cap-${idx}`
               const statusObj = object(effectiveState.capabilityStatuses?.[cid])
-              const statusText = text(statusObj.state) || text(cap.kind) || '已就绪'
+              const statusText = text(statusObj.state) || text(cap.kind) || s.dsBotSettings.ready
               return (
                 <GroupRow
                   key={cid}
@@ -537,25 +537,25 @@ export function DsBotComputerSubpage({
         <GroupRow
           first
           icon={Monitor}
-          label="允许 Bot 使用电脑"
+          label={s.dsBotSettings.allowComputerUse}
           detail={s.bots.computerDesc}
-          value={effectiveState.computer?.enabled === true ? s.bots.computerIdle : '已关闭'}
+          value={effectiveState.computer?.enabled === true ? s.bots.computerIdle : s.dsBotSettings.disabled}
           chevron={false}
         />
       </GroupCard>
 
-      <SectionTitle>各 Bot 电脑操控等级</SectionTitle>
+      <SectionTitle>{s.dsBotSettings.sectionComputerLevels}</SectionTitle>
       <GroupCard>
         {effectiveState.bots.map((bot, idx) => {
           const rawLevel = text(object(effectiveState.computer?.levels)[bot.id]) || 'off'
           const levelLabel =
             rawLevel === 'foreground'
-              ? '可以动前台'
+              ? s.dsBotSettings.levelForeground
               : rawLevel === 'background'
-                ? '后台操作'
+                ? s.dsBotSettings.levelBackground
                 : rawLevel === 'view'
-                  ? '只看'
-                  : '关'
+                  ? s.dsBotSettings.levelView
+                  : s.dsBotSettings.off
           return (
             <GroupRow
               key={bot.id}
@@ -570,7 +570,7 @@ export function DsBotComputerSubpage({
         })}
       </GroupCard>
       <Text style={styles.helperNote}>
-        电脑操控开关、系统辅助功能与屏幕录制授权仅限在电脑端 DS Bot 窗口内开启或撤销。
+        {s.dsBotSettings.computerNote}
       </Text>
     </>
   )
@@ -604,14 +604,8 @@ export function DsBotUsageSubpage({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ gap: 8 }}
       >
-        {([
-          ['24h', '24 小时'],
-          ['7d', '7 天'],
-          ['30d', '30 天'],
-          ['12w', '12 周'],
-          ['12m', '12 个月'],
-          ['all', '全部用量'],
-        ] as const).map(([id, label]) => {
+        {(['24h', '7d', '30d', '12w', '12m', 'all'] as const).map(id => {
+          const label = s.dsBotSettings.ranges[id]
           const on = usageRange === id
           return (
             <Pressable
@@ -629,7 +623,7 @@ export function DsBotUsageSubpage({
         <GroupCard>
           <View style={styles.loadingCardRow}>
             <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.mutedText}>正在读取聊天记录…</Text>
+            <Text style={styles.mutedText}>{s.dsBotSettings.loadingUsage}</Text>
           </View>
         </GroupCard>
       ) : (
@@ -637,37 +631,37 @@ export function DsBotUsageSubpage({
           <View style={styles.kpiGrid}>
             <GroupCard style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>
-                {usageRange === 'all' ? '全部用量 · Token' : `最近 ${usageView.rangeLabel} · Token`}
+                {usageRange === 'all' ? s.dsBotSettings.allUsageTokens : s.dsBotSettings.recentTokens(usageView.rangeLabel)}
               </Text>
               <Text style={styles.kpiValue}>{formatCompactTokens(usageView.current.tokens)}</Text>
               <Text style={styles.kpiSub} numberOfLines={1}>
-                {`输入 ${formatCompactTokens(usageView.current.input + usageView.current.cacheRead + usageView.current.cacheWrite)} · 输出 ${formatCompactTokens(usageView.current.output)}`}
+                {s.dsBotSettings.inputOutput(formatCompactTokens(usageView.current.input + usageView.current.cacheRead + usageView.current.cacheWrite), formatCompactTokens(usageView.current.output))}
               </Text>
             </GroupCard>
 
             <GroupCard style={styles.kpiCard}>
-              <Text style={styles.kpiLabel}>缓存命中率</Text>
+              <Text style={styles.kpiLabel}>{s.dsBotSettings.cacheHitRate}</Text>
               <Text style={styles.kpiValue}>{`${usageView.current.hitRate}%`}</Text>
               <Text style={styles.kpiSub} numberOfLines={1}>
-                {`缓存命中 ${formatCompactTokens(usageView.current.cacheRead)} · 输入 ${formatCompactTokens(usageView.current.input)}`}
+                {s.dsBotSettings.cacheHitInput(formatCompactTokens(usageView.current.cacheRead), formatCompactTokens(usageView.current.input))}
               </Text>
             </GroupCard>
 
             <GroupCard style={styles.kpiCard}>
-              <Text style={styles.kpiLabel}>输出</Text>
+              <Text style={styles.kpiLabel}>{s.dsBotSettings.output}</Text>
               <Text style={styles.kpiValue}>{formatCompactTokens(usageView.current.output)}</Text>
               <Text style={styles.kpiSub} numberOfLines={1}>
                 {usageView.current.tokens > 0
-                  ? `占最近 ${usageView.rangeLabel}全部用量的 ${Math.round((usageView.current.output / usageView.current.tokens) * 100)}%`
-                  : '暂无输出 Token'}
+                  ? s.dsBotSettings.outputShare(usageView.rangeLabel, Math.round((usageView.current.output / usageView.current.tokens) * 100))
+                  : s.dsBotSettings.noOutputTokens}
               </Text>
             </GroupCard>
 
             <GroupCard style={styles.kpiCard}>
-              <Text style={styles.kpiLabel}>调用次数</Text>
+              <Text style={styles.kpiLabel}>{s.dsBotSettings.calls}</Text>
               <Text style={styles.kpiValue}>{usageView.current.calls.toLocaleString()}</Text>
               <Text style={styles.kpiSub} numberOfLines={1}>
-                {`${usageView.stepLabel} · 峰值 ${formatCompactTokens(usageView.peakBucketTokens)}`}
+                {s.dsBotSettings.stepPeak(usageView.stepLabel, formatCompactTokens(usageView.peakBucketTokens))}
               </Text>
             </GroupCard>
           </View>
@@ -675,13 +669,13 @@ export function DsBotUsageSubpage({
           <GroupCard style={{ padding: 15, gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                <Text style={styles.rowTitle}>Token 走势</Text>
+                <Text style={styles.rowTitle}>{s.dsBotSettings.tokenTrend}</Text>
                 <Text style={styles.rowSub}>{`${formatCompactTokens(usageView.current.tokens)} Token`}</Text>
               </View>
               <View style={styles.inlinePills}>
                 {([
-                  ['owner', '按 Bot'],
-                  ['model', '按模型'],
+                  ['owner', s.dsBotSettings.byBot],
+                  ['model', s.dsBotSettings.byModel],
                 ] as const).map(([id, label]) => {
                   const on = usageChartGroup === id
                   return (
@@ -741,9 +735,9 @@ export function DsBotUsageSubpage({
           </GroupCard>
 
           <GroupCard style={{ padding: 15, gap: 12 }}>
-            <Text style={styles.rowTitle}>按 Bot</Text>
+            <Text style={styles.rowTitle}>{s.dsBotSettings.byBot}</Text>
             {usageView.byOwner.length === 0 ? (
-              <Text style={styles.rowSub}>这段时间没有用量。</Text>
+              <Text style={styles.rowSub}>{s.dsBotSettings.noUsageInRange}</Text>
             ) : (
               usageView.byOwner.map(item => {
                 const matchedBot = effectiveState.bots.find(b => b.id === item.id || b.name === item.name)
@@ -763,7 +757,7 @@ export function DsBotUsageSubpage({
                           </Text>
                         </View>
                         <Text style={styles.rowSub}>
-                          {`${item.calls} 次调用 · 输入 ${formatCompactTokens(item.input + item.cacheRead + item.cacheWrite)} · 输出 ${formatCompactTokens(item.output)}`}
+                          {s.dsBotSettings.callsInputOutput(item.calls, formatCompactTokens(item.input + item.cacheRead + item.cacheWrite), formatCompactTokens(item.output))}
                         </Text>
                       </View>
                     </View>
@@ -782,9 +776,9 @@ export function DsBotUsageSubpage({
           </GroupCard>
 
           <GroupCard style={{ padding: 15, gap: 12 }}>
-            <Text style={styles.rowTitle}>按模型</Text>
+            <Text style={styles.rowTitle}>{s.dsBotSettings.byModel}</Text>
             {usageView.byModel.length === 0 ? (
-              <Text style={styles.rowSub}>这段时间没有用量。</Text>
+              <Text style={styles.rowSub}>{s.dsBotSettings.noUsageInRange}</Text>
             ) : (
               usageView.byModel.map(item => (
                 <View key={item.key} style={{ gap: 6 }}>
@@ -805,7 +799,7 @@ export function DsBotUsageSubpage({
                         </Text>
                       </View>
                       <Text style={styles.rowSub}>
-                        {`${item.calls} 次调用 · 输入 ${formatCompactTokens(item.input + item.cacheRead + item.cacheWrite)} · 输出 ${formatCompactTokens(item.output)}`}
+                        {s.dsBotSettings.callsInputOutput(item.calls, formatCompactTokens(item.input + item.cacheRead + item.cacheWrite), formatCompactTokens(item.output))}
                       </Text>
                     </View>
                   </View>
@@ -824,8 +818,8 @@ export function DsBotUsageSubpage({
 
           <GroupCard style={{ padding: 15, gap: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={styles.rowTitle}>活跃度</Text>
-              <Text style={styles.rowSub}>{`近一年有 ${activityYear.activeDays} 天在用`}</Text>
+              <Text style={styles.rowTitle}>{s.dsBotSettings.activity}</Text>
+              <Text style={styles.rowSub}>{s.dsBotSettings.activeDays(activityYear.activeDays)}</Text>
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -856,7 +850,7 @@ export function DsBotUsageSubpage({
             </ScrollView>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
-              <Text style={styles.chartAxisLabel}>少</Text>
+              <Text style={styles.chartAxisLabel}>{s.dsBotSettings.less}</Text>
               {[0, 1, 2, 3, 4].map(lvl => {
                 const cellColors = [
                   colors.grouped,
@@ -872,7 +866,7 @@ export function DsBotUsageSubpage({
                   />
                 )
               })}
-              <Text style={styles.chartAxisLabel}>多</Text>
+              <Text style={styles.chartAxisLabel}>{s.dsBotSettings.more}</Text>
             </View>
           </GroupCard>
         </>
@@ -890,15 +884,15 @@ export function DsBotSecretsSubpage({
   return (
     <>
       <Text style={styles.helperNote}>
-        你的 Bot 请求过的密钥。Bot 永远看不到明文值：它们在 shell 里通过 $DSH_SECRET_NAME 使用，而且发给模型之前，每个值都会被替换成 [secret:NAME]。
+        {s.dsBotSettings.secretsNote}
       </Text>
 
-      <SectionTitle>{`密钥 · ${(effectiveState.secrets ?? []).length}`}</SectionTitle>
+      <SectionTitle>{s.dsBotSettings.secretsTitle((effectiveState.secrets ?? []).length)}</SectionTitle>
       <GroupCard>
         {(effectiveState.secrets ?? []).length === 0 ? (
           <View style={styles.emptyCardBox}>
             <Text style={styles.mutedText}>
-              还没有密钥。Bot 需要时，会在对话里弹出一张卡片，也可在电脑端 DS Bot 设置中添加。
+              {s.dsBotSettings.noSecrets}
             </Text>
           </View>
         ) : (
@@ -906,8 +900,8 @@ export function DsBotSecretsSubpage({
             const name = text(sec.name) || `SECRET_${idx}`
             const scopeText =
               Array.isArray(sec.bots) && sec.bots.length > 0
-                ? `仅 ${sec.bots.length} 个 Bot 可用`
-                : '所有 Bot 可用'
+                ? s.dsBotSettings.secretBotsOnly(sec.bots.length)
+                : s.dsBotSettings.secretAllBots
             return (
               <GroupRow
                 key={name}

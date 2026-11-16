@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
@@ -27,11 +28,12 @@ import { KeyboardInset } from '../ui/keyboard-inset'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
-import { BotAvatar } from './bot/avatar'
+import { BotAvatar, RoomAvatar } from './bot/avatar'
 import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
+import { ExpandedComposer, type ExpandedComposerProps } from './chat/expanded-composer'
 import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
 
 export function BotModeScreen({
@@ -44,6 +46,7 @@ export function BotModeScreen({
   onMore,
   splitView = false,
   drawerOpen = false,
+  screenActive = true,
 }: {
   selectedId?: string
   onSelect: (id?: string) => void
@@ -54,9 +57,11 @@ export function BotModeScreen({
   onMore: () => void
   splitView?: boolean
   drawerOpen?: boolean
+  screenActive?: boolean
 }) {
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
+  const [expandedComposerProps, setExpandedComposerProps] = useState<ExpandedComposerProps | null>(null)
   const device = useAppStore(store => store.selectedDevice)
   const connectionPhase = useAppStore(store => store.connection.phase)
   const hostScope = useAppStore(browseScope)
@@ -176,13 +181,14 @@ export function BotModeScreen({
     emitOnSelect(id)
   }
 
-  const [active, setActive] = useState(AppState.currentState === 'active')
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active')
+  const active = appActive && screenActive
   const [rosterSearch, setRosterSearch] = useState('')
   const [chatMoreOpen, setChatMoreOpen] = useState(false)
   const enterAnim = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', next => setActive(next === 'active'))
+    const sub = AppState.addEventListener('change', next => setAppActive(next === 'active'))
     return () => sub.remove()
   }, [])
 
@@ -336,6 +342,8 @@ export function BotModeScreen({
       >
         {bot ? (
           <BotAvatar bot={bot} size={26} />
+        ) : room && room.members.length > 0 ? (
+          <RoomAvatar members={room.members} bots={state?.bots ?? []} size={26} />
         ) : roomLeadBot ? (
           <BotAvatar bot={roomLeadBot} size={26} />
         ) : (
@@ -388,6 +396,11 @@ export function BotModeScreen({
   const slideX = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [22, 0] })
   const fadeOpacity = enterAnim.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1] })
 
+  const conversationReady = session !== undefined
+    && state !== undefined
+    && targetSessionId !== undefined
+    && session.sessionId === targetSessionId
+
   return (
     <KeyboardInset>
       <View style={styles.flex}>
@@ -406,7 +419,7 @@ export function BotModeScreen({
                   <Button label={s.bots.retry} onPress={retry} />
                 </View>
               )}
-              {session && state && clientValue ? (
+              {conversationReady ? (
                 <BotConversation
                   key={`${selectedId}:${session.sessionId}`}
                   bot={bot}
@@ -418,11 +431,19 @@ export function BotModeScreen({
                   active={active}
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
+                  onExpandedComposerChange={setExpandedComposerProps}
                 />
-              ) : (loading && visibleError === undefined) || (targetSessionId && !openError && state !== undefined) ? (
+              ) : (loading && visibleError === undefined) || (connectionPhase === 'connected' && targetSessionId && !openError && state !== undefined) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                   <ActivityIndicator color={colors.primary} />
                 </View>
+              ) : connectionPhase !== 'connected' && targetSessionId && state !== undefined ? (
+                <EmptyState
+                  icon={Bot}
+                  title={s.status.offline}
+                  body={visibleError ?? s.workspaces.offlineBody}
+                  action={<Button label={s.bots.back} onPress={() => handleSelect(undefined)} />}
+                />
               ) : state === undefined ? (
                 <ScrollView contentContainerStyle={{ padding: 16 }}>
                   <DsBotInstallCard error={visibleError} loading={loading} onRetry={retry} />
@@ -457,6 +478,9 @@ export function BotModeScreen({
           onClose={() => setChatMoreOpen(false)}
           anchor="top-right"
         />
+        {conversationReady && expandedComposerProps !== null && (
+          <ExpandedComposer {...expandedComposerProps} />
+        )}
         {!drawerOpen && <BotModalsHost />}
       </View>
     </KeyboardInset>

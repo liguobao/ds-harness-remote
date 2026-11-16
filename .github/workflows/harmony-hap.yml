@@ -1,14 +1,7 @@
-# Build the signed HarmonyOS HAP for the `harmony/` project at the repository root.
-#
-# GitHub-hosted Ubuntu runners do not ship the HarmonyOS SDK (DevEco / hvigor / ohpm),
-# so this workflow targets a self-hosted runner that has the SDK installed. Register one
-# with the label set below (see harmony/README.md for the exact prerequisites).
-#
-# Signing material is injected from repository secrets at build time and is never committed:
-#   HARMONY_SIGNING_STORE_B64, HARMONY_SIGNING_STORE_PASSWORD, HARMONY_SIGNING_KEY_ALIAS,
-#   HARMONY_SIGNING_KEY_PASSWORD, HARMONY_SIGNING_CERT_B64, HARMONY_SIGNING_PROFILE_B64
 name: HarmonyOS HAP
 
+# SDK jobs run only when a maintainer dispatches reviewed code or creates a release tag.
+# Do not run untrusted fork pull requests on a self-hosted runner.
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +10,10 @@ on:
         type: choice
         options: [release, debug]
         default: release
+      signed:
+        description: Sign with repository secrets (trusted code only)
+        type: boolean
+        default: false
   push:
     tags:
       - 'harmony-v*'
@@ -26,26 +23,34 @@ permissions:
 
 jobs:
   hap:
-    name: Build signed HAP
+    name: Build HAP with HarmonyOS SDK
     runs-on: [self-hosted, harmonyos]
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: harmony
+        working-directory: apps/harmony
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Verify the HarmonyOS toolchain is available
+      - name: Verify the HarmonyOS toolchain
         run: |
-          if ! command -v hvigorw >/dev/null 2>&1; then
-            echo "::error::hvigorw not found. This job needs a self-hosted runner with the HarmonyOS SDK."
-            exit 1
-          fi
+          command -v hvigorw
+          command -v ohpm
           hvigorw --version
           node --version
 
-      - name: Inject signing material from secrets
+      - name: Install HarmonyOS dependencies
+        run: ohpm install --all
+
+      - name: Configure unsigned validation build
+        if: github.event_name == 'workflow_dispatch' && !inputs.signed
+        run: node scripts/inject-signing.mjs --unsigned
+
+      - name: Inject release signing material
+        if: github.event_name == 'push' || inputs.signed
         env:
           HARMONY_SIGNING_STORE_B64: ${{ secrets.HARMONY_SIGNING_STORE_B64 }}
           HARMONY_SIGNING_STORE_PASSWORD: ${{ secrets.HARMONY_SIGNING_STORE_PASSWORD }}
@@ -54,30 +59,23 @@ jobs:
           HARMONY_SIGNING_CERT_B64: ${{ secrets.HARMONY_SIGNING_CERT_B64 }}
           HARMONY_SIGNING_PROFILE_B64: ${{ secrets.HARMONY_SIGNING_PROFILE_B64 }}
         run: |
-          set +e
+          umask 077
           node scripts/inject-signing.mjs
-          code=$?
-          set -e
-          if [[ $code -eq 2 ]]; then
-            echo "::warning::Signing secrets are absent; the produced HAP will be unsigned and not installable."
-          elif [[ $code -ne 0 ]]; then
-            exit $code
-          fi
 
       - name: Build HAP
-        run: |
-          mode="${{ github.event.inputs.build_mode || 'release' }}"
-          hvigorw --no-daemon assembleHap -p product=default -p buildMode="$mode"
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          find entry/build -name '*.hap' -print -exec cp {} artifacts/ \;
-          ls -la artifacts
+        env:
+          BUILD_MODE: ${{ inputs.build_mode || 'release' }}
+        run: hvigorw --no-daemon assembleHap -p product=default -p buildMode="$BUILD_MODE"
 
       - name: Upload HAP artifact
         uses: actions/upload-artifact@v4
         with:
           name: harmony-hap
-          path: harmony/artifacts/*.hap
+          path: apps/harmony/entry/build/default/outputs/default/*.hap
           if-no-files-found: error
+
+      - name: Remove signing material and restore profile
+        if: always()
+        run: |
+          git restore -- build-profile.json5
+          rm -rf build/signing

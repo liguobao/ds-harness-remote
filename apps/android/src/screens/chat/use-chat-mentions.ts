@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, TextInput } from 'react-native'
+import { TextInput } from 'react-native'
+import { Alert } from '../../ui/alert'
 import { strings } from '../../locales/i18n'
 import type { SkillEntry } from '../../services/session-tools'
 import { requireSessionTools } from '../../state/store'
@@ -223,9 +224,14 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
     selectionRef.current = { start: 0, end: 0 }
     setSelection({ start: 0, end: 0 })
   }
+  const setCursor = (cursor: number) => {
+    const clamped = Math.max(0, Math.min(draftRef.current.length, cursor))
+    selectionRef.current = { start: clamped, end: clamped }
+    setSelection({ start: clamped, end: clamped })
+  }
   return {
     composerInputRef, draftRef, mentionType, setMentionType, selection, mentionGroups,
-    applyDraft, closeMention, onChangeText, onSelectionChange, resetSelection, insertAtSelection
+    applyDraft, closeMention, onChangeText, onSelectionChange, resetSelection, setCursor, insertAtSelection
   }
 }
 

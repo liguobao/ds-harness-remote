@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Harness Typert | `harness.remote.*` | 官方 Gateway endpoint 与事件关联 |
 | CodeX | `codex.app.*` | stdio App Server、Project / Thread 根目录 |
-| Cursor / AGY / Pi / OpenCode / Claude | `agent.acp.*` | backend adapter、Host 会话/catalog |
+| Cursor / AGY / Pi / OpenCode / Claude / Hermes | `agent.acp.*` | backend adapter、Host 会话/catalog |
 | File Viewer | `fileviewer.call` | provider 已授权的 root / locator |
 | 开发预览 | `loopback.call` | Host 本地端口白名单 |
 
@@ -50,7 +50,7 @@ Plugin 仅负责认证、方法过滤、RPC 关联、流生命周期和传输，
 - 图片 Prompt 和大 History / attachment 走已协商的有界 transfer，保持原生业务 envelope。
 - 官方命令仅使用 Host 注册的目录与 handler；不允许反射任意 service。
 - 官方 settings 写入限实时注册的命名空间，排除插件自身访问设置；credential 只写入有界引用，不返回秘密值。
-- 禁止 native open/picker、动态 Cordis runtime/source、通用 attachment upload/download 和未知 endpoint。官方 `workspace/create` 可创建缺失的 Harness 工作区目录；独立 `workspace.upload.v1` 只向 Host 验证的当前会话根上传文件，不接受 Client cwd/path，详见[协议](../../protocol.md)。
+- 禁止 native open/picker、动态 Cordis runtime/source、任意目标路径的附件访问和未知 endpoint。官方 Session 附件上传通过固定 `remoteUploads/upload` / `fileUploads/upload` 处理并保留 receipt，不等同任意文件系统写入。官方 `workspace/create` 可创建缺失的 Harness 工作区目录；独立 `workspace.upload.v1` 只向 Host 验证的当前会话根上传文件，不接受 Client cwd/path，详见[协议](../../protocol.md)。
 
 Client 先调用 `harness.transport.describe`。缺少能力发现或仅提供 ApiProxy 的 Host 被拒绝；按 capability、
 版本 profile 和现有事件/history 归一化选择 carrier。不支持的组合在 mutation 或 UI target 切换前拒绝，不进行任意 wire format 翻译。
@@ -86,9 +86,9 @@ CodeX 默认开启，通过 stdio App Server 访问固定方法。
 Workspace authority 优先 `project/list`，缺少有效根目录才回退到 `thread/list` 已返回的绝对 cwd。
 `project/create` 仅注册 Host 真实目录，realpath + 目录验证后由 App Server 返回 Project 扩展 authority。
 新 Thread 子目录需词法路径与 realpath 双重校验；已有 Thread 操作也重新校验归属。
-详见[CodeX 投影](../codex-session-history-projection-prompt.md)。
+详见[CodeX 投影](../../codex-remote.md)。
 
-ACP 当前实现 Cursor、Antigravity、Pi、OpenCode 和 Claude adapter，不按命令名称选择后端，不对明确选中的不可用后端降级。
+ACP 当前实现 Cursor、Antigravity、Pi、OpenCode、Claude 和 Hermes adapter，不按命令名称选择后端，不对明确选中的不可用后端降级。
 启用 capability 与实际 `workspaceTypes.available` 分离；Cursor/AGY 工作区 ID 分别生成，AGY 使用 `antigravity:cwd:`。
 浏览器内存 carrier 只从 Host ACP 读取工作区、历史和图片，不依赖 Node、AGY 数据库或本机 transcript。
 Host 的 AGY catalog/transcript 则执行项目归属、realpath、符号链接与迟到结果隔离。

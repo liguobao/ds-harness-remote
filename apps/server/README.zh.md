@@ -18,24 +18,34 @@
 
 ## Docker 部署
 
+使用官方最新版镜像（`latest`）：
+
+```text
+ghcr.io/liguobao/ds-harness-remote/server:latest
+```
+
 ```bash
 cd apps/server
 cp .env.example .env
 # 编辑 .env，设置账号、密码和访问地址
-docker compose up -d --build
+docker compose pull server
+docker compose up -d --no-build server
 ```
 
 打开 <http://localhost:8080>。设备凭据保存在 `server-data` 卷；停止使用 `docker compose down`。
 
-公开镜像地址：`ghcr.io/liguobao/ds-harness-remote/server:latest`。需要时可以直接拉取：
+更新到最新发布的镜像，在同一目录执行（保留 `.env` 和现有数据卷）：
 
 ```bash
-docker pull ghcr.io/liguobao/ds-harness-remote/server:latest
+docker compose pull server
+docker compose up -d --no-build server
 ```
+
+`latest` 指向最近一次 Tag 工作流发布的镜像，不跟随 main 分支。若要从当前源码自行构建，执行 `docker compose up -d --build server`。
 
 若旧镜像启动时无法解析 `@dsh-remote/protocol`，更新源码后执行 `docker compose build --no-cache server && docker compose up -d server`。镜像显式包含 protocol 编译产物，并在构建阶段校验 Server 的模块加载；重建会保留数据卷。
 
-发布镜像由 GitHub Tag 工作流构建。生产环境应使用 HTTPS 反向代理，不要直接把 Node 监听端口暴露到公网。
+GitHub Tag 工作流发布包含 `linux/amd64` 和 `linux/arm64` 的多架构生产镜像，拉取时 Docker 自动选择匹配的架构。生产环境应使用 HTTPS 反向代理，不要直接把 Node 监听端口暴露到公网。
 
 ### 页面白屏或静态资源返回 403
 

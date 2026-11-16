@@ -33,7 +33,8 @@ import type {
   WorkspaceShortcut,
   WorkspaceView,
 } from '../types'
-import type { ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { QuickPromptActionMode } from '../services/storage'
 
 type BootPhase = 'loading' | 'ready' | 'error'
 
@@ -64,6 +65,7 @@ export interface AppState {
   connectionProbeOrder: ConnectionProbeTransport[]
   connectionNetworkDetails?: ConnectionNetworkDetails
   hostDescriptor?: HostDescriptor
+  hostSessionEvents: boolean
   codexAvailable: boolean
   cursorAvailable: boolean
   antigravityAvailable: boolean
@@ -113,6 +115,10 @@ export interface AppState {
   statusBarVisible: boolean
   themePreference: ThemePreference
   typographyDensity: TypographyDensity
+  chatAppearance: ChatAppearance
+  activityDockMode: ActivityDockMode
+  drawerLayoutMode: DrawerLayoutMode
+  quickPromptActionMode: QuickPromptActionMode
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
@@ -157,6 +163,7 @@ export interface AppState {
   refreshDevices(): Promise<void>
   refreshWorkspaces(backend?: AgentBackend): Promise<void>
   refreshSessionStatus(): Promise<void>
+  syncHarnessCatalog(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   resumeConnection(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
@@ -173,6 +180,8 @@ export interface AppState {
   quoteChatMessage(text: string, sessionId?: string): void
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
+  /** Cancel the tracked /compact operation for the selected Session, if any. */
+  cancelCompaction(): Promise<boolean>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
@@ -202,6 +211,11 @@ export interface AppState {
   setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
   setTypographyDensity(density: TypographyDensity): Promise<void>
+  setChatAppearance(appearance: Partial<ChatAppearance>): Promise<void>
+  resetChatAppearance(): Promise<void>
+  setActivityDockMode(mode: ActivityDockMode): Promise<void>
+  setDrawerLayoutMode(mode: DrawerLayoutMode): Promise<void>
+  setQuickPromptActionMode(mode: QuickPromptActionMode): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>
@@ -220,7 +234,7 @@ export const disconnected: ConnectionSnapshot = {
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -233,6 +247,7 @@ export function initialData(): Pick<AppState,
     connectionProbeOrder: [],
     connectionNetworkDetails: undefined,
     hostDescriptor: undefined,
+    hostSessionEvents: false,
     codexAvailable: false,
     cursorAvailable: false,
     antigravityAvailable: false,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { CalendarDays, MessageSquare, Search, X } from 'lucide-react-native'
+import { CalendarDays, MessageSquare, Search, X, Zap } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { BotState } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
@@ -21,11 +21,13 @@ export function BotPlusMenuModal({
   visible,
   onClose,
   onReferenceChat,
+  onOpenPrompts,
   onOpenSchedules,
 }: {
   visible: boolean
   onClose: () => void
   onReferenceChat: () => void
+  onOpenPrompts?: () => void
   onOpenSchedules?: () => void
 }) {
   const styles = useThemedStyles(createStyles)
@@ -41,13 +43,23 @@ export function BotPlusMenuModal({
             <GroupRow
               first
               icon={MessageSquare}
-              label="引用对话"
-              detail="将其他 Bot 对话或 DSH 会话作为上下文"
+              label={strings.chat.referenceChat}
+              detail={strings.chat.referenceChatDetail}
               onPress={() => {
                 onClose()
                 onReferenceChat()
               }}
             />
+            {onOpenPrompts !== undefined && (
+              <GroupRow
+                icon={Zap}
+                label={strings.chat.quickPrompts}
+                onPress={() => {
+                  onClose()
+                  onOpenPrompts()
+                }}
+              />
+            )}
             {onOpenSchedules !== undefined && (
               <GroupRow
                 icon={CalendarDays}
@@ -130,8 +142,8 @@ export function ReferenceChatModal({
       <ModalSurface onClose={onClose}>
         <View style={styles.header}>
           <View style={styles.grow}>
-            <Text style={styles.title}>引用对话</Text>
-            <Text style={styles.subtitle}>选择一段其他 Bot 对话或 DSH 会话作为上下文</Text>
+            <Text style={styles.title}>{strings.chat.referenceChat}</Text>
+            <Text style={styles.subtitle}>{strings.chat.referenceChatSubtitle}</Text>
           </View>
           <IconButton label={strings.common.close} icon={X} onPress={onClose} />
         </View>
@@ -287,7 +299,7 @@ export function ReferencedChatPills({
               <MessageSquare size={14} color={colors.primary} />
             )}
             <Text numberOfLines={1} style={styles.referencePillText}>
-              引用：{item.mentionLabel}
+              {strings.chat.referencedChat(item.mentionLabel)}
             </Text>
             <Pressable
               accessibilityRole="button"

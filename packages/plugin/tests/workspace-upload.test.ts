@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SafeLogger } from '../src/logging.js'
 import { createRpcRequest } from '@dsh-remote/protocol'
-import { WorkspaceUploadHost, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
+import { WorkspaceUploadHost, WORKSPACE_UPLOAD_AUTHORITY_TTL_MS, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
 const hosts: WorkspaceUploadHost[] = []
@@ -63,6 +63,54 @@ describe('workspace-root upload authority and lifecycle', () => {
     expect(await readFile(join(root, 'report.bin'), 'utf8')).toBe('existing')
     expect((await readdir(root)).some(name => name.endsWith('.part'))).toBe(false)
     expect(await put(host, request('empty', 0), Buffer.alloc(0))).toEqual({ name: 'empty', path: './empty', bytes: 0 })
+  })
+
+  it('bounds session-authority lookups between chunks but always revalidates before publication', async () => {
+    const { root } = await setup()
+    const clock = { now: 1_000 }
+    const resolve = vi.fn(async () => root)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => clock.now)
+    hosts.push(host)
+    const p = request('paced', 6)
+    expect(await host.call('workspace.upload.open', p)).toMatchObject({ uploadId: p.uploadId })
+    const afterOpen = resolve.mock.calls.length
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 3, data: 'ZGVm' })
+    expect(resolve).toHaveBeenCalledTimes(afterOpen)
+    expect(await host.call('workspace.upload.commit', scope(p))).toEqual({ name: 'paced', path: './paced', bytes: 6 })
+    expect(resolve.mock.calls.length).toBeGreaterThanOrEqual(afterOpen + 1)
+    expect(await readFile(join(root, 'paced'), 'utf8')).toBe('abcdef')
+  })
+
+  it('never publishes when the session authority is revoked between chunks', async () => {
+    const { root } = await setup()
+    let allowed = true
+    const resolve = vi.fn(async () => allowed ? root : undefined)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => 1_000)
+    hosts.push(host)
+    const p = request('revoked', 3)
+    await host.call('workspace.upload.open', p)
+    allowed = false
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    expect(await readdir(root)).toHaveLength(1)
+    await expect(host.call('workspace.upload.commit', scope(p))).rejects.toMatchObject({ code: 'UPLOAD_WORKSPACE_CHANGED' })
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it('revalidates authority after the ttl even when chunks are small', async () => {
+    const { root } = await setup()
+    const clock = { now: 1_000 }
+    const resolve = vi.fn(async () => root)
+    const host = new WorkspaceUploadHost(resolve, undefined, () => 'Relay', () => clock.now)
+    hosts.push(host)
+    const p = request('ttl', 6)
+    await host.call('workspace.upload.open', p)
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })
+    const beforeTtl = resolve.mock.calls.length
+    clock.now += WORKSPACE_UPLOAD_AUTHORITY_TTL_MS
+    await host.call('workspace.upload.chunk', { ...scope(p), offset: 3, data: 'ZGVm' })
+    expect(resolve).toHaveBeenCalledTimes(beforeTtl + 1)
+    expect(await host.call('workspace.upload.commit', scope(p))).toMatchObject({ bytes: 6 })
   })
 
   it('rejects traversal, client paths, oversized files and unknown/relative workspace authority', async () => {
@@ -204,4 +252,78 @@ describe('workspace-root upload authority and lifecycle', () => {
     expect(await readdir(root)).toEqual([])
     expect(await router.handle(createRpcRequest('workspace.upload.open', request()))).toMatchObject({ type: 'rpc.error', payload: { code: 'UPLOAD_CLOSED' } })
   })
+})
+
+it('negotiates binary chunks explicitly and preserves legacy open responses', async () => {
+  const { host, root } = await setup()
+  const legacy = request('legacy.bin', 3)
+  expect(await host.call('workspace.upload.open', legacy)).toEqual({ uploadId: legacy.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK })
+  await host.call('workspace.upload.chunk', { ...scope(legacy), offset: 0, data: 'AP8M' })
+  await host.call('workspace.upload.commit', scope(legacy))
+  const bytes = new Uint8Array(256 * 1024).map((_, i) => i % 251)
+  const binary = { ...request('binary.bin', bytes.length), encoding: 'binary-v1' }
+  expect(await host.call('workspace.upload.open', binary)).toEqual({ uploadId: binary.uploadId, chunkBytes: bytes.length, encoding: 'binary-v1' })
+  await host.call('workspace.upload.chunk.binary', { ...scope(binary), offset: 0, data: bytes })
+  await host.call('workspace.upload.commit', scope(binary))
+  expect(await readFile(join(root, 'binary.bin'))).toEqual(Buffer.from(bytes))
+  expect(await readFile(join(root, 'legacy.bin'))).toEqual(Buffer.from([0, 255, 12]))
+})
+
+it('rejects mixed encodings, wrong offsets and oversized binary chunks and discards partial data', async () => {
+  const { host } = await setup()
+  for (const [encoding, method, offset, data] of [
+    [undefined, 'workspace.upload.chunk.binary', 0, new Uint8Array([1])],
+    ['binary-v1', 'workspace.upload.chunk', 0, 'AQ=='],
+    ['binary-v1', 'workspace.upload.chunk.binary', 1, new Uint8Array([1])],
+    ['binary-v1', 'workspace.upload.chunk.binary', 0, new Uint8Array(256 * 1024 + 1)],
+  ] as const) {
+    const p = { ...request('bad.bin', 300000), ...(encoding ? { encoding } : {}) }
+    await host.call('workspace.upload.open', p)
+    await expect(host.call(method, { ...scope(p), offset, data })).rejects.toThrow()
+    await expect(host.call('workspace.upload.commit', scope(p))).rejects.toThrow()
+  }
+})
+
+it('advertises binary upload only with the base capability and a working upload service', async () => {
+  const { host } = await setup()
+  const describe = createRpcRequest('harness.transport.describe', {})
+  for (const [base, service, expected] of [[true, true, true], [true, false, false], [false, true, false]] as const) {
+    const router = new RpcRouter(128, undefined, undefined, undefined, () => [...(base ? ['workspace.upload.v1'] : []), 'workspace.upload.binary.v1'], undefined, undefined, undefined, undefined, undefined, service ? host : undefined)
+    const response = await router.handle(describe)
+    expect((response.payload as { result: { capabilities: string[] } }).result.capabilities.includes('workspace.upload.binary.v1')).toBe(expected)
+  }
+})
+it('keeps binary uploads connection/session scoped after a foreign session attempts a chunk', async () => {
+  const { host, root } = await setup()
+  const p = { ...request('scoped.bin', 1), encoding: 'binary-v1' }
+  await host.call('workspace.upload.open', p)
+  await expect(host.call('workspace.upload.chunk.binary', { ...scope(p), sessionId: 'foreign', offset: 0, data: new Uint8Array([42]) })).rejects.toMatchObject({ code: 'UPLOAD_NOT_FOUND' })
+  await host.call('workspace.upload.chunk.binary', { ...scope(p), offset: 0, data: new Uint8Array([42]) })
+  await host.call('workspace.upload.commit', scope(p))
+  expect(await readFile(join(root, 'scoped.bin'))).toEqual(Buffer.from([42]))
+})
+it('carries binary chunks through the real client codec, RPC router and ordinary JSON responses', async () => {
+  const { RemoteClientCore } = await import('@dsh-remote/client-core')
+  const { encodeMessage, decodeMessage } = await import('@dsh-remote/protocol')
+  const { host, root } = await setup()
+  const router = new RpcRouter(128, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, host)
+  let receive: ((data: Uint8Array) => void) | undefined
+  const frames: Uint8Array[] = []
+  const client = new RemoteClientCore({
+    async connect() {},
+    async send(data) { frames.push(data); receive?.(encodeMessage(await router.handle(decodeMessage(data)))) },
+    onMessage(handler) { receive = handler; return () => { receive = undefined } },
+    async close() {},
+    getStats: () => ({ mode: 'LAN', connected: true }),
+  })
+  try {
+    await client.connect()
+    const data = new Uint8Array(256 * 1024).map((_, i) => i % 251)
+    const p = { ...request('wire.bin', data.length), encoding: 'binary-v1' }
+    await client.rpc('workspace.upload.open', p)
+    await expect(client.rpc('workspace.upload.chunk.binary', { ...scope(p), offset: 0, data })).resolves.toEqual({ uploadId: p.uploadId, receivedBytes: data.length })
+    await expect(client.rpc('workspace.upload.commit', scope(p))).resolves.toEqual({ name: 'wire.bin', path: './wire.bin', bytes: data.length })
+    expect(frames[1]!.byteLength).toBeLessThan(data.length + 4096)
+    expect(await readFile(join(root, 'wire.bin'))).toEqual(Buffer.from(data))
+  } finally { await client.close() }
 })

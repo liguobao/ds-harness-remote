@@ -7,9 +7,11 @@ import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, PanelTop, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
@@ -29,8 +31,12 @@ import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
+import { easingCurve, resolveMotion } from '../ui/motion'
+import { useReduceMotion } from '../ui/use-reduce-motion'
+import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
@@ -603,7 +609,21 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout }: { onBack: () => void; onReset: () => void; onOpenDiagnostics?: () => void; onOpenAbout?: () => void }) {
+export function SettingsScreen({
+  active = true,
+  onBack,
+  onReset,
+  onSigningOutChange,
+  onOpenDiagnostics,
+  onOpenAbout,
+}: {
+  active?: boolean
+  onBack: () => void
+  onReset: () => void
+  onSigningOutChange?: (busy: boolean) => void
+  onOpenDiagnostics?: () => void
+  onOpenAbout?: () => void
+}) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -636,6 +656,9 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const chatAppearance = useAppStore(state => state.chatAppearance)
   const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
   useEffect(() => {
     setLogCount(connectionLogEntries().length)
@@ -644,6 +667,29 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
   const [densitySaving, setDensitySaving] = useState(false)
   const [densityPickerOpen, setDensityPickerOpen] = useState(false)
   const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
+  const activityDockMode = useAppStore(state => state.activityDockMode)
+  const setActivityDockMode = useAppStore(state => state.setActivityDockMode)
+  const [activityDockSaving, setActivityDockSaving] = useState(false)
+  const [activityDockPickerOpen, setActivityDockPickerOpen] = useState(false)
+  const currentActivityDockLabel = activityDockMode === 'cards'
+    ? zhCN.settings.activityDockCards
+    : activityDockMode === 'hidden'
+      ? zhCN.settings.activityDockHidden
+      : zhCN.settings.activityDockCompact
+  const drawerLayoutMode = useAppStore(state => state.drawerLayoutMode)
+  const setDrawerLayoutMode = useAppStore(state => state.setDrawerLayoutMode)
+  const [drawerLayoutSaving, setDrawerLayoutSaving] = useState(false)
+  const [drawerLayoutPickerOpen, setDrawerLayoutPickerOpen] = useState(false)
+  const currentDrawerLayoutLabel = drawerLayoutMode === 'classic'
+    ? zhCN.settings.drawerLayoutClassic
+    : zhCN.settings.drawerLayoutCompact
+  const quickPromptActionMode = useAppStore(state => state.quickPromptActionMode)
+  const setQuickPromptActionMode = useAppStore(state => state.setQuickPromptActionMode)
+  const [quickPromptActionSaving, setQuickPromptActionSaving] = useState(false)
+  const [quickPromptActionPickerOpen, setQuickPromptActionPickerOpen] = useState(false)
+  const currentQuickPromptActionLabel = quickPromptActionMode === 'send'
+    ? zhCN.settings.quickPromptActionSend
+    : zhCN.settings.quickPromptActionFill
   const compactHistory = useAppStore(state => state.compactHistory)
   const setCompactHistory = useAppStore(state => state.setCompactHistory)
   const [compactSaving, setCompactSaving] = useState(false)
@@ -692,6 +738,30 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     finally { setDensitySaving(false) }
   }
 
+  const toggleActivityDockMode = async (value: ActivityDockMode) => {
+    if (activityDockSaving || value === activityDockMode) return
+    setActivityDockSaving(true)
+    try { await setActivityDockMode(value) }
+    catch { Alert.alert(zhCN.settings.activityDockModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setActivityDockSaving(false) }
+  }
+
+  const toggleDrawerLayoutMode = async (value: DrawerLayoutMode) => {
+    if (drawerLayoutSaving || value === drawerLayoutMode) return
+    setDrawerLayoutSaving(true)
+    try { await setDrawerLayoutMode(value) }
+    catch { Alert.alert(zhCN.settings.drawerLayoutModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setDrawerLayoutSaving(false) }
+  }
+
+  const toggleQuickPromptActionMode = async (value: QuickPromptActionMode) => {
+    if (quickPromptActionSaving || value === quickPromptActionMode) return
+    setQuickPromptActionSaving(true)
+    try { await setQuickPromptActionMode(value) }
+    catch { Alert.alert(zhCN.settings.quickPromptActionSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setQuickPromptActionSaving(false) }
+  }
+
   const toggleStatusBar = async (visible: boolean) => {
     if (statusBarSaving) return
     setStatusBarSaving(true)
@@ -724,12 +794,25 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     } else void save()
   }
 
+  const runSignOutOrReset = async (action: () => Promise<void>) => {
+    if (signingOut) return
+    setSigningOut(true)
+    onSigningOutChange?.(true)
+    try {
+      await action()
+      onReset()
+    } finally {
+      setSigningOut(false)
+      onSigningOutChange?.(false)
+    }
+  }
+
   const confirmReset = () => Alert.alert(
     zhCN.settings.resetTitle,
     zhCN.settings.resetBody,
     [
       { text: zhCN.common.cancel, style: 'cancel' },
-      { text: zhCN.settings.reset, style: 'destructive', onPress: () => void reset().then(onReset) },
+      { text: zhCN.settings.reset, style: 'destructive', onPress: () => void runSignOutOrReset(reset) },
     ],
   )
 
@@ -738,22 +821,32 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
     zhCN.settings.signOutBody,
     [
       { text: zhCN.common.cancel, style: 'cancel' },
-      { text: zhCN.settings.signOut, style: 'destructive', onPress: () => void signOut().then(onReset) },
+      { text: zhCN.settings.signOut, style: 'destructive', onPress: () => void runSignOutOrReset(signOut) },
     ],
   )
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
+  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || appearanceOpen
 
-  if (diagnosticsOpen && !onOpenDiagnostics) {
-    return <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
-  }
-  if (aboutOpen && !onOpenAbout) {
-    return <AboutScreen onBack={() => setAboutOpen(false)} />
-  }
+  const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
+    : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
+      : chatAppearance.fontScale === 'xl' ? zhCN.settings.fontSizeXl
+        : zhCN.settings.fontSizeMd
+  const bubbleLabel = chatAppearance.bubbleStyle === 'tinted' ? zhCN.settings.bubbleTinted
+    : chatAppearance.bubbleStyle === 'solid' ? zhCN.settings.bubbleSolid
+      : chatAppearance.bubbleStyle === 'minimal' ? zhCN.settings.bubbleMinimal
+        : zhCN.settings.bubbleSoft
+  const chatAppearanceSummary = `${fontLabel} · ${bubbleLabel}`
 
   return (
     <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
+      <View
+        style={styles.flex}
+        pointerEvents={inlineSubpageOpen || signingOut ? 'none' : 'auto'}
+        accessibilityElementsHidden={inlineSubpageOpen}
+        importantForAccessibility={inlineSubpageOpen ? 'no-hide-descendants' : 'auto'}
+      >
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={signingOut ? undefined : onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
             <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
@@ -773,11 +866,39 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
+                icon={Palette}
+                label={zhCN.settings.chatAppearance}
+                value={chatAppearanceSummary}
+                chevron
+                onPress={() => setAppearanceOpen(true)}
+              />
+              <GroupRow
                 icon={Type}
                 label={zhCN.settings.typographyDensity}
                 value={currentDensityLabel}
                 chevron
                 onPress={() => setDensityPickerOpen(true)}
+              />
+              <GroupRow
+                icon={Layers}
+                label={zhCN.settings.activityDockMode}
+                value={currentActivityDockLabel}
+                chevron
+                onPress={() => setActivityDockPickerOpen(true)}
+              />
+              <GroupRow
+                icon={PanelLeft}
+                label={zhCN.settings.drawerLayoutMode}
+                value={currentDrawerLayoutLabel}
+                chevron
+                onPress={() => setDrawerLayoutPickerOpen(true)}
+              />
+              <GroupRow
+                icon={Zap}
+                label={zhCN.settings.quickPromptActionMode}
+                value={currentQuickPromptActionLabel}
+                chevron
+                onPress={() => setQuickPromptActionPickerOpen(true)}
               />
               <GroupRow
                 icon={PanelTop}
@@ -981,16 +1102,17 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
             </GroupCard>
 
             <GroupCard style={styles.signOutCard}>
-              <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} onPress={confirmSignOut} />
-              <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} onPress={confirmReset} />
+              <GroupRow first icon={LogOut} label={zhCN.settings.signOut} danger chevron={false} disabled={signingOut} onPress={confirmSignOut} />
+              <GroupRow icon={RotateCcw} label={zhCN.settings.resetLocal} danger chevron={false} disabled={signingOut} onPress={confirmReset} />
             </GroupCard>
           </View>
         </Screen>
       </BlurHeaderFrame>
-      <Modal visible={languagePickerOpen} transparent animationType="fade" onRequestClose={() => setLanguagePickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setLanguagePickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={languagePickerOpen}
+        onClose={() => setLanguagePickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.language}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setLanguagePickerOpen(false)} />
@@ -1016,14 +1138,13 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      </SheetModal>
       <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
-      <Modal visible={densityPickerOpen} transparent animationType="fade" onRequestClose={() => setDensityPickerOpen(false)} statusBarTranslucent>
-        <View style={styles.languageBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={() => setDensityPickerOpen(false)} />
-          <View style={[styles.languageDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+      <SheetModal
+        visible={densityPickerOpen}
+        onClose={() => setDensityPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
             <View style={styles.languageHeader}>
               <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.typographyDensity}</Text>
               <IconButton label={zhCN.common.close} icon={X} onPress={() => setDensityPickerOpen(false)} />
@@ -1052,9 +1173,126 @@ export function SettingsScreen({ onBack, onReset, onOpenDiagnostics, onOpenAbout
                 })}
               </GroupCard>
             </ScrollView>
-          </View>
+      </SheetModal>
+      <SheetModal
+        visible={activityDockPickerOpen}
+        onClose={() => setActivityDockPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.activityDockMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setActivityDockPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'compact' as const, name: zhCN.settings.activityDockCompact },
+                  { value: 'cards' as const, name: zhCN.settings.activityDockCards },
+                  { value: 'hidden' as const, name: zhCN.settings.activityDockHidden },
+                ]).map((option, index) => {
+                  const chosen = option.value === activityDockMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setActivityDockPickerOpen(false)
+                        void toggleActivityDockMode(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+      </SheetModal>
+      <SheetModal
+        visible={drawerLayoutPickerOpen}
+        onClose={() => setDrawerLayoutPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.drawerLayoutMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setDrawerLayoutPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'compact' as const, name: zhCN.settings.drawerLayoutCompact },
+                  { value: 'classic' as const, name: zhCN.settings.drawerLayoutClassic },
+                ]).map((option, index) => {
+                  const chosen = option.value === drawerLayoutMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setDrawerLayoutPickerOpen(false)
+                        void toggleDrawerLayoutMode(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+      </SheetModal>
+      <SheetModal
+        visible={quickPromptActionPickerOpen}
+        onClose={() => setQuickPromptActionPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.quickPromptActionMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setQuickPromptActionPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'fill' as const, name: zhCN.settings.quickPromptActionFill },
+                  { value: 'send' as const, name: zhCN.settings.quickPromptActionSend },
+                ]).map((option, index) => {
+                  const chosen = option.value === quickPromptActionMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setQuickPromptActionPickerOpen(false)
+                        void toggleQuickPromptActionMode(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+      </SheetModal>
+      </View>
+      {diagnosticsOpen && !onOpenDiagnostics && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
         </View>
-      </Modal>
+      )}
+      {aboutOpen && !onOpenAbout && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <AboutScreen onBack={() => setAboutOpen(false)} />
+        </View>
+      )}
+      {appearanceOpen && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+          <ChatAppearanceScreen active={active && appearanceOpen} onBack={() => setAppearanceOpen(false)} />
+        </View>
+      )}
     </View>
   )
 }
@@ -1096,7 +1334,7 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer, onPlugins, pluginsDisabled = false, onAutomationTasks }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
@@ -1104,12 +1342,31 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   onDevices?: () => void
   onRemoteHosts?: () => void
   onSwitchServer?: () => void
+  onPlugins?: () => void
+  pluginsDisabled?: boolean
+  onAutomationTasks?: () => void
 }) {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
   const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
+  const reduceMotion = useReduceMotion()
+  // The menu is anchored under the toolbar chip; growing from that corner
+  // avoids a card that pops in from nowhere.
+  const entrance = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (!visible) return
+    entrance.setValue(0)
+    const animation = Animated.timing(entrance, {
+      toValue: 1,
+      duration: resolveMotion('micro', reduceMotion).duration,
+      easing: Easing.bezier(...easingCurve('expand')),
+      useNativeDriver: true,
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [visible, entrance, reduceMotion])
 
   if (!visible) return null
 
@@ -1128,8 +1385,35 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: menuTop, maxHeight: menuMaxHeight }]} pointerEvents="box-none">
+      <Animated.View
+        accessibilityRole="menu"
+        pointerEvents="box-none"
+        style={[styles.homeMenuCard, {
+          top: menuTop,
+          maxHeight: menuMaxHeight,
+          opacity: entrance,
+          transform: [
+            { scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+            { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) },
+          ],
+        }]}
+      >
         <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+          {onPlugins !== undefined && (
+            <HomeMenuRow
+              icon={Puzzle}
+              label={zhCN.plugins.nav}
+              subtitle={pluginsDisabled ? zhCN.plugins.connectHostFirst : undefined}
+              disabled={pluginsDisabled}
+              onPress={onPlugins}
+            />
+          )}
+          {onAutomationTasks !== undefined && (
+            <HomeMenuRow icon={Clock} label={zhCN.automation.nav} onPress={onAutomationTasks} />
+          )}
+          {(onPlugins !== undefined || onAutomationTasks !== undefined) && (
+            <View style={styles.homeMenuDivider} />
+          )}
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
           )}
@@ -1149,10 +1433,11 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
                 : undefined}
             onPress={() => void checkForUpdates()}
             disabled={phase !== 'idle'}
+            busy={phase !== 'idle'}
             last
           />
         </ScrollView>
-      </View>
+      </Animated.View>
     </View>
   )
 }
@@ -1265,12 +1550,13 @@ function useUpdateCheck() {
   return { phase, progress, latestVersion, checkForUpdates }
 }
 
-function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, last = false }: {
+function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, busy = false, last = false }: {
   icon: LucideIcon
   label: string
   subtitle?: string
   onPress: () => void
   disabled?: boolean
+  busy?: boolean
   last?: boolean
 }) {
   const { colors } = useTheme()
@@ -1278,8 +1564,8 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, l
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled, busy: disabled }}
+      accessibilityLabel={subtitle !== undefined ? `${label} · ${subtitle}` : label}
+      accessibilityState={{ disabled, busy }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -1289,12 +1575,12 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, l
         disabled && styles.homeMenuRowDisabled,
       ]}
     >
-      <View style={styles.homeMenuRowIcon}><Icon size={20} color={colors.ink} strokeWidth={1.8} /></View>
+      <View style={styles.homeMenuRowIcon}><Icon size={20} color={disabled ? colors.muted : colors.ink} strokeWidth={1.8} /></View>
       <View style={styles.homeMenuRowCopy}>
-        <Text style={styles.homeMenuRowLabel}>{label}</Text>
+        <Text style={[styles.homeMenuRowLabel, disabled && styles.homeMenuRowLabelDisabled]}>{label}</Text>
         {subtitle !== undefined && <Text style={styles.homeMenuRowSubtitle} numberOfLines={1}>{subtitle}</Text>}
       </View>
-      {disabled
+      {busy
         ? <ActivityIndicator size="small" color={colors.primary} />
         : null}
     </Pressable>
@@ -1612,6 +1898,8 @@ function languageOptions(): Array<{ value: LanguagePreference; name: string }> {
     { value: 'es-ES', name: 'Español' },
     { value: 'de-DE', name: 'Deutsch' },
     { value: 'fr-FR', name: 'Français' },
+    { value: 'ru-RU', name: 'Русский' },
+    { value: 'uk-UA', name: 'Українська' },
   ]
 }
 
@@ -1741,6 +2029,7 @@ function createStyles(colors: ThemeColors) {
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
   // capped landscape card scroll instead of clipping its last row.
   homeMenuScroll: { flexGrow: 0, flexShrink: 1 },
+  homeMenuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: spacing.xxs, marginHorizontal: spacing.sm },
   homeMenuRow: { minHeight: 52, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderRadius: radius.lg },
   homeMenuRowBorder: {},
   homeMenuRowPressed: { backgroundColor: colors.surfaceStrong },
@@ -1748,6 +2037,7 @@ function createStyles(colors: ThemeColors) {
   homeMenuRowIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
   homeMenuRowCopy: { flex: 1 },
   homeMenuRowLabel: { ...type.body, color: colors.ink },
+  homeMenuRowLabelDisabled: { color: colors.muted },
   homeMenuRowSubtitle: { ...type.caption, color: colors.muted, marginTop: 1 },
   aboutHero: { alignItems: 'center', paddingVertical: spacing.xxl, gap: spacing.xs },
   aboutLogo: { width: 84, height: 84, borderRadius: radius.xl, marginBottom: spacing.sm },

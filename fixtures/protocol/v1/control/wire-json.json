@@ -1,0 +1,50 @@
+{
+  "name": "control-wire-json",
+  "cases": [
+    {
+      "name": "accept-canonical-control-wire-json",
+      "operation": "decodeControlFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"wire-1\",\"type\":\"ping\",\"timestamp\":1786000000000,\"payload\":{\"nonce\":\"nonce-1\"}}",
+        "limits": {}
+      },
+      "expect": { "accepted": true }
+    },
+    {
+      "name": "reject-duplicate-control-envelope-id",
+      "operation": "decodeControlFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"wire-1\",\"id\":\"wire-2\",\"type\":\"ping\",\"timestamp\":1786000000000,\"payload\":{\"nonce\":\"nonce-1\"}}",
+        "limits": {}
+      },
+      "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-duplicate-escaped-control-payload-key",
+      "operation": "decodeControlFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"wire-1\",\"type\":\"ping\",\"timestamp\":1786000000000,\"payload\":{\"n\\u006fnce\":\"first\",\"nonce\":\"second\"}}",
+        "limits": {}
+      },
+      "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-noncanonical-handshake-wire-data",
+      "operation": "decodeControlFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"wire-1\",\"type\":\"secure.handshake\",\"timestamp\":1786000000000,\"payload\":{\"connectionId\":\"link-1\",\"targetDeviceId\":\"host-1\",\"step\":1,\"data\":\"AQIDBB\"}}",
+        "limits": {}
+      },
+      "expect": { "accepted": false }
+    },
+    {
+      "name": "reject-noncanonical-relay-wire-ciphertext",
+      "operation": "decodeControlFrameWithLimits",
+      "input": {
+        "data": "{\"v\":1,\"id\":\"wire-1\",\"type\":\"relay\",\"timestamp\":1786000000000,\"payload\":{\"connectionId\":\"link-1\",\"targetDeviceId\":\"host-1\",\"counter\":0,\"ciphertext\":\"AQIDBA==\"}}",
+        "limits": {}
+      },
+      "expect": { "accepted": false }
+    }
+  ]
+}

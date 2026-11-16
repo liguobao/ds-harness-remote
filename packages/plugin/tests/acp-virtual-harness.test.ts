@@ -6,6 +6,7 @@ import {
   acpCwdWorkspaceId,
   type AcpClientLike,
 } from '../src/acp/virtual-harness.js'
+import { AcpSessionHistoryCache } from '../src/session-history-cache.js'
 import type { AcpSessionArchivedData, AgentAcpFrameData } from '@dsh-remote/protocol'
 
 type AgentAcpClientLike = AcpClientLike
@@ -211,6 +212,49 @@ describe('AcpVirtualHarness', () => {
         client.loadSessionHistory.mockResolvedValueOnce(events)
         expect(await target.dispatch('session/history', { args: { request } }, signal)).toMatchObject({ ok: true, value: { records: events } })
       } finally { await target.close() }
+    } })))
+  })
+
+  it('deduplicates concurrent ACP history hydration across backends and reuses cached history across workspace switches', async () => {
+    await runScenarios((['claude', 'hermes', 'opencode', 'pi'] as const).map(backend => ({ name: backend, run: async () => {
+      const event = { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: 'Cached project prompt' }] } } }
+      let resolveHistory!: (value: unknown[]) => void
+      const client = {
+        ...fakeAcp(),
+        listSessions: vi.fn(async () => [{ conversationId: 's1', cwd: '/repo-a', title: 'Repo A', createdAt: 10, updatedAt: 20 }]),
+        loadSessionHistory: vi.fn(() => new Promise<unknown[]>(resolve => { resolveHistory = resolve })),
+      }
+      const cache = new AcpSessionHistoryCache()
+      const signal = new AbortController().signal
+      const first = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend, undefined, cache)
+      try {
+        const workspace = await first.selectWorkspace(`${backend}:cwd:/repo-a`)
+        const request = { sessionId: workspace.sessionIds[0]!, address: { sessionId: workspace.sessionIds[0]! } }
+        const projections = first.dispatch('session/projections', { args: { request } }, signal)
+        const history = first.dispatch('session/history', { args: { request } }, signal)
+        const page = first.dispatch('session/page', { args: { request } }, signal)
+        expect(client.loadSessionHistory).toHaveBeenCalledTimes(1)
+        resolveHistory([event])
+        await expect(projections).resolves.toMatchObject({ ok: true })
+        await expect(history).resolves.toMatchObject({ ok: true, value: { records: [event] } })
+        await expect(page).resolves.toMatchObject({ ok: true, value: { records: [event] } })
+        expect(first.openedSessionId).toBe(workspace.sessionIds[0]!)
+      } finally {
+        await first.close()
+      }
+
+      const second = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend, undefined, cache)
+      try {
+        const workspace = await second.selectWorkspace(`${backend}:cwd:/repo-a`)
+        const request = { sessionId: workspace.sessionIds[0]!, address: { sessionId: workspace.sessionIds[0]! } }
+        await expect(second.dispatch('session/history', { args: { request } }, signal)).resolves.toMatchObject({
+          ok: true,
+          value: { records: [event] },
+        })
+        expect(client.loadSessionHistory).toHaveBeenCalledTimes(1)
+      } finally {
+        await second.close()
+      }
     } })))
   })
 

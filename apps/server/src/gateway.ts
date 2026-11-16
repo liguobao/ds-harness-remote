@@ -287,15 +287,20 @@ export class Gateway {
   }
 
   /**
-   * Authorize a REST `/api/v1/turn/credentials` request. Only the two devices
-   * of an active logical connection may obtain credentials, and only while
-   * that connection is still being established.
+   * Authorize a REST `/api/v1/turn/credentials` request. Only the two live
+   * devices of an active logical connection may obtain credentials: either
+   * while the connection is being established (`accepted`/`handshake`) or
+   * during an authenticated in-band transport upgrade (`ready`) when the link
+   * negotiated at least one WebRTC transport (`lan`/`p2p`/`turn`).
    */
   authorizeIce(deviceId: string, connectionId: string): boolean {
     const link = this.links.get(connectionId)
     if (link === undefined) return false
     if (link.host !== deviceId && link.client !== deviceId) return false
-    if (link.stage !== 'accepted' && link.stage !== 'handshake') return false
+    if (link.stage === 'pending') return false
+    if (link.stage === 'ready' && !link.preferredTransports.some(transport => transport !== 'relay')) {
+      return false
+    }
     return this.peers.has(link.host) && this.peers.has(link.client)
   }
   private supportedCapabilities(): string[] {

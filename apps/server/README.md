@@ -18,24 +18,34 @@ Existing device state remains compatible. Tokens already consumed before this Se
 
 ## Docker deployment
 
+Deploy the latest official image (`latest`):
+
+```text
+ghcr.io/liguobao/ds-harness-remote/server:latest
+```
+
 ```bash
 cd apps/server
 cp .env.example .env
 # Edit .env: set your account, password, and public URL
-docker compose up -d --build
+docker compose pull server
+docker compose up -d --no-build server
 ```
 
 Open <http://localhost:8080>. Device credentials persist in the `server-data` volume. Stop the service with `docker compose down`.
 
-Public image: `ghcr.io/liguobao/ds-harness-remote/server:latest`. Pull it directly when needed:
+To update to the latest published image, run these commands in the same directory, keeping your `.env` and existing data volume:
 
 ```bash
-docker pull ghcr.io/liguobao/ds-harness-remote/server:latest
+docker compose pull server
+docker compose up -d --no-build server
 ```
+
+`latest` tracks the most recent image published by the Tag workflow, rather than the main branch. To build from the current source instead, run `docker compose up -d --build server`.
 
 If an older image fails to resolve `@dsh-remote/protocol`, update the source and rebuild with `docker compose build --no-cache server && docker compose up -d server`. The image explicitly includes the compiled protocol package and checks the Server import graph during the build. Rebuilding preserves the data volume.
 
-The GitHub Tag workflow builds the production image. Put an HTTPS reverse proxy in front of it instead of exposing the Node listener directly to the public internet.
+The GitHub Tag workflow publishes a multi-platform production image for `linux/amd64` and `linux/arm64`. Docker automatically selects the matching architecture when pulling the image. Put an HTTPS reverse proxy in front of it instead of exposing the Node listener directly to the public internet.
 
 ### Blank page or static assets returning 403
 

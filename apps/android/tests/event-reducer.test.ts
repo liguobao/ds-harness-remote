@@ -532,7 +532,11 @@ describe('remote mux frame reducer', () => {
           const end = frame('', {
             type: 'session/event',
             sessionId: 's1',
-            event: sessionEvent({ type: 'turn/end', seq: 13, data: { turn: 3, reason: { kind: 'aborted' } } }),
+            event: sessionEvent({
+              type: 'turn/end',
+              seq: 13,
+              data: { turn: 3, reason: { kind: 'aborted' } },
+            }),
           })
           const items = applyMuxFrame(applyMuxFrame(applyMuxFrame(current, approval), question), end)
           expect(items).toMatchObject([
@@ -540,6 +544,57 @@ describe('remote mux frame reducer', () => {
             { kind: 'approval', turn: '3', outcome: 'unavailable' },
             { kind: 'question', turn: '3', outcome: 'cancelled' },
           ])
+        },
+      },
+      {
+        name: 'attaches background questions and approvals arriving before turn/start or tool/call to the active turn and revives re-emitted cards',
+        run: () => {
+          const closedTurn = foldHistory([
+            { event: sessionEvent({ type: 'assistant/message', seq: 1, data: { turn: 1, message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'Done' }] } } }) },
+            { event: sessionEvent({ type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } }) },
+          ], 's1')
+          const backgroundQuestion = frame('rpc-question-bg', {
+            type: 'question/requested',
+            sessionId: 's1',
+            questions: [{ id: 'q-bg', question: 'Which branch?' }],
+          })
+          const backgroundApproval = frame('rpc-approval-bg', {
+            type: 'approval/requested',
+            sessionId: 's1',
+            approvalId: 'app-bg',
+            toolName: 'bash',
+          })
+          const withPending = applyMuxFrame(applyMuxFrame(closedTurn, backgroundQuestion), backgroundApproval)
+          expect(withPending.find(item => item.kind === 'question')?.turn).toBeUndefined()
+          expect(withPending.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(withPending.find(item => item.kind === 'approval')?.turn).toBeUndefined()
+          expect(withPending.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+          const turnStart = frame('', {
+            type: 'session/event',
+            sessionId: 's1',
+            event: sessionEvent({ type: 'turn/start', seq: 3, data: { turn: 2 } }),
+          })
+          const afterStart = applyMuxFrame(withPending, turnStart)
+          expect(afterStart.find(item => item.kind === 'question')).toMatchObject({
+            kind: 'question',
+            turn: '2',
+          })
+          expect(afterStart.find(item => item.kind === 'question')?.outcome).toBeUndefined()
+          expect(afterStart.find(item => item.kind === 'approval')).toMatchObject({
+            kind: 'approval',
+            turn: '2',
+          })
+          expect(afterStart.find(item => item.kind === 'approval')?.outcome).toBeUndefined()
+          // If settled prematurely, a re-emitted live request frame revives the card.
+          const cancelled = applyMuxFrame(afterStart, frame('', {
+            type: 'question/resolved',
+            sessionId: 's1',
+            questionRpcId: 'rpc-question-bg',
+            outcome: 'cancelled',
+          }))
+          expect(cancelled.find(item => item.kind === 'question')?.outcome).toBe('cancelled')
+          const revived = applyMuxFrame(cancelled, backgroundQuestion)
+          expect(revived.find(item => item.kind === 'question')?.outcome).toBeUndefined()
         },
       },
     ])

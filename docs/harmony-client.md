@@ -1,102 +1,88 @@
-# HarmonyOS 客户端（harmony/）
+# HarmonyOS 客户端
 
-HarmonyOS 7.0（API 26）原生客户端，纯 ArkTS 实现，不依赖任何 Native 模块。
+源码位于 [`apps/harmony/`](../apps/harmony/)，面向 HarmonyOS 7.0（API 26）及以上设备，使用 ArkTS / ArkUI。WebRTC 数据通道由本地 ArkWeb 页面承载；身份、Noise 握手和 RPC 在 ArkTS 层处理。
 
-## 最低系统版本
+## 功能与边界
 
-**仅支持 HarmonyOS 7.0（API 26）及以上。**
+客户端提供账号登录、Host 选择、多会话、历史与流式回复、模型和权限选择、图片与语音输入，以及 LAN/P2P/TURN/Relay 连接。具体可用功能取决于 Host 暴露的能力。
 
-这是有意的产品取舍，不是隐藏的兼容性风险：华为开发者官网 2026-10-27 的存量设备数据显示，API 26 已占 77.01%，6.x 合计 22.73%，HarmonyOS 5 不足 0.3%。以 API 26 为下限换取能力基线，代价是放弃约两成尚未升级的设备。安装前请确认设备系统版本。
+本客户端是独立实现，不代表与 Android、Codex 或 ACP 客户端完全等价。它不在手机上运行 Host，不改写 Host 的会话存储。协议以 [protocol.md](protocol.md)、共享包及 `fixtures/` 为准。
 
-## 目录结构
+## 工程结构
 
-```
-harmony/entry/src/main/ets/
-├── crypto/        # X25519、ChaCha20-Poly1305、SHA-256、HKDF、Noise IK（纯 ArkTS）
-├── net/           # RelayTransport、SecureTransport、ServerApi、HarnessClient、RemoteGateway
-├── protocol/      # Protocol、SecureMessageCodec、Types
-├── services/      # AppRuntime（运行时/会话管理）、SecureStore（凭据存储）、Theme
-├── model/         # 数据模型
-├── pages/         # ArkUI 主界面
-└── entryability/  # Ability 生命周期
-harmony/tests/               # Node 侧一致性测试（见下）
-harmony/scripts/             # CI 辅助脚本（签名注入）
-```
-
-## 与共享包的对应关系
-
-| 共享实现 | 鸿蒙侧 | 说明 |
-|---|---|---|
-| `packages/protocol` | `ets/protocol/Protocol.ets`、`SecureMessageCodec.ets` | 帧头（`DSHF` magic、版本 1、17 字节头、48 KiB 分片、4 MiB 上限、8 路上限）与共享实现逐字节一致 |
-| `packages/crypto` | `ets/crypto/` | Noise IK 状态机为独立 ArkTS 实现，靠仓库的 `fixtures/crypto/v1/noise-ik.json` 金标向量保证互通 |
-| 传输层 | `ets/net/` | Relay（WebSocket）+ Noise IK；`forcesRelay` 可强制走中继 |
-
-**协议约束**：`docs/protocol.md` §12.1 禁止自行实现 Noise state machine。本客户端是过渡期的独立实现，用金标向量守住互通性；Rekey（§12.3）尚未实现，与 `packages/crypto` 的现状一致，由 `docs/TODO.md` 跟踪，不作为本客户端的单独缺陷。
-
-## 构建
-
-要求 DevEco Studio（含 HarmonyOS 7.0 / API 26 SDK）或已安装 HarmonyOS SDK 的命令行环境。
-
-```bash
-cd harmony
-hvigorw --no-daemon assembleHap -p product=default -p buildMode=release
+```text
+apps/harmony/
+├── AppScope/                     # 应用身份与版本
+├── entry/src/main/ets/
+│   ├── crypto/                   # Noise IK、X25519、ChaCha20-Poly1305、SHA-256
+│   ├── protocol/                 # 帧编解码与安全消息分片
+│   ├── net/                      # Server API、传输、RPC 与 Harness gateway
+│   ├── services/                 # 凭据、运行时、网络与生命周期
+│   └── pages/                    # ArkUI 界面
+├── entry/src/main/resources/rawfile/webrtc-bridge.html
+├── entry/src/ohosTest/            # 设备侧测试
+├── tests/                        # Node 侧一致性与安全存储失败场景
+└── scripts/                      # 签名注入、版本检查与真机烟测
 ```
 
-产物在 `entry/build/default/outputs/default/`。也可在 DevEco Studio 中直接打开仓库根的 `harmony` 目录构建运行。
+## 构建与验证
 
-编译产物（`*.hap`、`/release/`）已在 `.gitignore` 中忽略，不允许提交入库；正式包通过 GitHub Releases 的 Assets 发布。
-
-## 签名与发布流程
-
-**签名凭据永不入库。** 仓库里的 `build-profile.json5` 中 `signingConfigs` 为空数组；本机签名配置放在被忽略的 `build-profile.local.json5`（`.gitignore` 含 `*.local.json5`）。
-
-本机构建（要安装到设备时必须签名）：
+安装包含 API 26 SDK 的 DevEco Studio，并配置其 `hvigorw`、`ohpm` 和 `hdc` 命令。可在 DevEco Studio 中直接打开 `apps/harmony`。命令行构建：
 
 ```sh
-harmony/scripts/build-local.sh      # 临时顶替签名配置 → 构建 → 还原，签名材料不落仓库
+cd apps/harmony
+ohpm install --all
+# 未签名编译验证：清除产品的 signingConfig 引用，不需要签名凭据。
+node scripts/inject-signing.mjs --unsigned
+hvigorw --no-daemon assembleHap -p product=default -p buildMode=release
+# 验证后还原签名配置文件。
+git restore build-profile.json5
 ```
 
-hvigor **只读** `build-profile.json5`（不自动合并 `.local.json5`），所以脚本做的事是：备份 → 用 local 覆盖 → `devecocli build` → 通过 `trap` 无条件还原；产物在 `entry/build/default/outputs/default/entry-default-signed.hap`。
+产物位于 `entry/build/default/outputs/default/`，未签名包不能安装到真机。`*.hap`、构建目录和本机配置均不入库。
 
-CI 打包使用 `.github/workflows/harmony-hap.yml`，签名材料只通过仓库 Secrets 注入：
+在仓库根运行 Node 侧检查：
+
+```sh
+pnpm exec vitest run apps/harmony/tests
+node apps/harmony/scripts/check-i18n.mjs
+node apps/harmony/scripts/bump-version.mjs --check
+```
+
+Node 测试用 shim 替代鸿蒙 Kit，验证共享 Noise 金标向量及安全存储失败路径；它不验证 ArkTS 编译、系统 Kit、ArkWeb 或设备生命周期。原生构建和设备侧测试必须用 SDK 独立执行。
+
+真机烟测要求已签名安装、已登录且曾连接目标 Host：
+
+```sh
+apps/harmony/scripts/smoke.sh <hdc-device-id>
+```
+
+烟测会构建、覆盖安装当前应用并重新启动，检查本次启动的连接日志及崩溃记录。现场日志、设备地址和验收结果放 PR 附件或本地忽略目录。
+
+## 签名与 CI
+
+签名材料不得提交。复制 `build-profile.json5` 为被忽略的 `build-profile.local.json5`，通过 DevEco Studio 配置本机签名。`scripts/build-local.sh` 会临时使用该文件，结束时还原原配置；设置 `HVIGORW` 可指定构建命令路径。
+
+`.github/workflows/harmony-hap.yml` 提供手动构建（默认未签名）和 `harmony-v*` 标签签名构建，需要安装 SDK、带 `self-hosted` / `harmonyos` 标签的 runner。它不自动执行 fork PR 的代码。手动构建目标分支前须审查代码；签名构建只针对可信代码。
+
+签名任务由以下仓库 Secrets 注入，缺失或不完整时必须失败：
 
 | Secret | 内容 |
-|---|---|
-| `HARMONY_SIGNING_STORE_B64` | `.p12` 密钥库（base64） |
+| --- | --- |
+| `HARMONY_SIGNING_STORE_B64` | base64 编码的 `.p12` |
 | `HARMONY_SIGNING_STORE_PASSWORD` | 密钥库口令 |
 | `HARMONY_SIGNING_KEY_ALIAS` | 密钥别名 |
 | `HARMONY_SIGNING_KEY_PASSWORD` | 密钥口令 |
-| `HARMONY_SIGNING_CERT_B64` | `.cer` 证书（base64） |
-| `HARMONY_SIGNING_PROFILE_B64` | `.p7b` 授权文件（base64） |
+| `HARMONY_SIGNING_CERT_B64` | base64 编码的 `.cer` |
+| `HARMONY_SIGNING_PROFILE_B64` | base64 编码的 `.p7b` |
 
-构建前由 `harmony/scripts/inject-signing.mjs` 把材料写入临时目录并注入 `build-profile.json5`；缺少 Secrets 时脚本以退出码 2 跳过，产物为未签名包并给出告警。
+脚本以受限权限写入签名材料；workflow 在任务结束时还原配置并删除材料。工作流存在不等于已经配置 runner 或完成构建；合并验收应查看目标提交的实际构建结果。
 
-> GitHub 托管的 Ubuntu runner 未预置鸿蒙 SDK，因此该工作流使用 `[self-hosted, harmonyos]` 标签的自建 runner，工作流第一步会校验 `hvigorw` 是否存在，缺失即失败并给出原因。
+## 安全与维护
 
-## 安全实现要点
-
-- **凭据不落明文**：设备 X25519 私钥、账号 `accessToken`/`refreshToken`、Host 公钥固定记录（host pins）全部写入系统 **Asset Store Kit**（`@kit.AssetStoreKit`），配置 `Accessibility.DEVICE_UNLOCKED` + `SyncType.NEVER`，等价于 Android 端的 `WHEN_UNLOCKED_THIS_DEVICE_ONLY`。应用沙盒 KV（`preferences`）只保存服务地址、邮箱、设备别名、主题等非敏感项。
-- **旧数据自动迁移**：升级后首次启动会把历史明文私钥/token/pin 迁入 Asset Store 并删除明文条目。
-- **降级可见**：`SecureStore.isSecretStorageHealthy()` 反映 Asset Store 是否可用；不可用时才回退到沙盒 KV 并写 `WARN` 日志。
-- **日志脱敏**：控制帧只记录 `type` 与长度，不打印 payload；会话列表日志不包含会话标题（标题通常来自用户首句 prompt）。遵循 `docs/protocol.md` §25 不变量 12。
-- **Host 身份固定（TOFU）**：`AppRuntime.enforceHostPin()` 首次连接写入 pin，公钥变更直接中断握手；`SecureStore.forgetHostPin()` 提供清除入口。
-
-## 测试
-
-| 层级 | 命令 | 覆盖 |
-|---|---|---|
-| 一致性（Node，CI 可跑） | `pnpm exec vitest run harmony/tests` | 用仓库 `fixtures/crypto/v1/noise-ik.json` 校验 X25519 公钥推导、handshake msg1 逐字节、msg2 payload、双向 transport 帧、篡改拒绝 |
-| 设备端（DevEco / ohosTest） | `entry/src/ohosTest/ets/test/` | Crypto（X25519 对称性、AEAD 往返、篡改/换钥拒绝）、SecureStore（Asset Store 可用性、token/身份往返、host pin 清除） |
-
-Node 侧测试通过 esbuild 把 `.ets` 当作 TypeScript 打包，并用确定性桩替换 `@kit.CryptoArchitectureKit`，其余代码与实际出包完全一致。
-
-## 已知差异与后续
-
-- **Rekey** 未实现（与共享 `packages/crypto` 同步待办）。
-- **断线重连**：已具备指数退避重连（1/2/4/8/15/30 秒）与失败阈值判定；切后台/切网场景建议再补真机用例。
-- **文案国际化**：界面文案仍硬编码中文，待抽到 `resources/*/element/string.json`。
-- **功能对齐 dsh-go**：斜杠命令、`@` 引用、附件与图片、审批卡、轨迹、子代理、终端、分享卡等能力尚未在鸿蒙端落地，按版本逐步补齐。
-
-## 维护边界
-
-本目录由 HarmonyOS 客户端维护者负责：`ets/` 下的实现、`tests/`、`scripts/inject-signing.mjs` 与 `.github/workflows/harmony-hap.yml`。共享协议或密码学变更（`packages/protocol`、`packages/crypto`、`fixtures/crypto/`）时，需同步更新本客户端并通过上述一致性测试；金标向量变更必须经过互通性评审。
+- 设备私钥与账号 token 使用系统 Asset Store Kit，配置 `DEVICE_UNLOCKED` 与 `NEVER` 同步。写入失败时拒绝明文降级；旧明文私钥仅在安全写入并回读确认后移除。Host 公钥固定记录在 Asset Store 不可用时允许保存于应用沙箱 KV，其内容是公钥，不是凭据。
+- Host 公钥按设备固定，发生变化即拒绝握手。只有用户确认后才可忘记该记录。
+- 业务经 Noise IK 加密；安全消息使用 48 KiB 分片、4 MiB 上限。密码学为独立 ArkTS 实现，修改时必须同步运行共享向量、篡改与重放测试。
+- 自动日志不记录文件路径、命令、TURN 凭据或上游异常正文。保留连接阶段、耗时、数量等诊断元数据。
+- 修改协议、信任边界、刷新或重连时同步共享契约及对应场景测试。UI 文案、排版等使用检查和真机烟测，不添加源码字符串匹配单测。
+- 应用版本以 `AppScope/app.json5` 为准；使用 `scripts/bump-version.mjs` 同步设备注册版本回退值，不在文档维护当前构建号。鸿蒙发版独立于 npm / Expo 版本同步。

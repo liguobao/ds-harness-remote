@@ -20,7 +20,9 @@ import {
   resetDefaultIdentityRoles,
   serverStorageDirectory,
 } from './identity-store.js'
-import { SafeLogger } from './logging.js'
+import { basename, dirname } from 'node:path'
+import { HostLogStore, resolveHostLogPath } from './host-log-store.js'
+import { SafeLogger, type LogLevel } from './logging.js'
 import { safeStartupError } from './safe-error.js'
 import { HostPluginRuntime } from './service.js'
 import type { ScheduleCreateService } from './harness-remote-bridge.js'
@@ -34,6 +36,8 @@ import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './p
 import { installRemoteDiscoveryTools } from './remote-tools.js'
 import { runHmrSafe, type HmrContextLike } from './hmr-safe-settings.js'
 import { PluginUpdateChecker } from './update-check.js'
+import { LocalPluginUpgrade, type PluginManagerUpdate } from './plugin-self-update.js'
+import { assertRemoteEventSource } from './tui-event-source.js'
 import {
   createOwnerPeerFactory,
   ownerPeerConstructor,
@@ -122,10 +126,8 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     if (isLegacySettingsProvider(settings)) return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
-  // This release activates only the browser/Desktop Host surface: one official
-  // Harness `connection` service is required before the runtime starts. dsh-TUI
-  // support is deferred to a later release and no terminal-specific services
-  // are resolved here.
+  // The default entry uses the browser/Desktop Host connection service.
+  // The separate dsh-TUI entry starts through applyTuiHost.
   const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
@@ -140,6 +142,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
       } catch (error) {
         storageError = error
       }
+      const pendingLogStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(runtimeContext) }) })
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
           resolveConfig(readConfig()),
@@ -150,11 +153,16 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
           undefined,
           undefined,
           true,
+          pendingLogStore,
         )
         if (storageError !== undefined) {
           control.setStartupFailure(storageError, { storageAvailable: false })
         }
-        return control.register(connection, webServer)
+        const dispose = control.register(connection, webServer)
+        return async () => {
+          await dispose()
+          await pendingLogStore.flush()
+        }
       }, 'ds-harness-remote pending control')
     }
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
@@ -171,10 +179,27 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
 }
 
+/** Start the shared Host runtime from the separate dsh-TUI package. */
+export function applyTuiHost(
+  ctx: Context,
+  entry: EntryConfig | ConfigShape | undefined,
+): void {
+  const readConfig = (): ConfigInput => readEntryConfig(entry)
+  const entryId = locateEntryId(ctx)
+  ctx.inject(['settings', 'typertGateway'], async runtimeContext => {
+    const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
+    if (!new TypertGatewaySwitch(gateway).supportsCarrier()) {
+      throw new Error('dsh-TUI Remote requires the official Typert Gateway carrier.')
+    }
+    await activate(runtimeContext, readConfig, entryId, true)
+  })
+}
+
 async function activate(
   ctx: Context,
   readConfig: () => ConfigInput,
   entryId: string,
+  requireRemoteEvents = false,
 ): Promise<void> {
   const settings = ctx.get('settings') as SettingsServiceLike | undefined
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
@@ -183,6 +208,23 @@ async function activate(
   // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
   // raw composition seed) is honored; the rc.1 binding reads the live Config.
   const config: ResolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
+  const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) })
+  // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
+  // logger: the web process stdout is captured by the Desktop shell into
+  // desktop.log, so remote RPC/transport diagnostics stay greppable there.
+  const readSafeLogLevel = (): LogLevel => {
+    try {
+      const raw = (settingsBinding?.get() ?? readConfig()).logLevel
+      if (raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw
+    } catch { /* Keep logging with initial level if live config cannot be read. */ }
+    return config.logLevel
+  }
+  const logger = new SafeLogger({
+    debug: message => { logStore.record('debug', message); ctx.logger.debug(message); console.debug(message) },
+    info: message => { logStore.record('info', message); ctx.logger.info(message); console.info(message) },
+    warn: message => { logStore.record('warn', message); ctx.logger.warn(message); console.warn(message) },
+    error: message => { logStore.record('error', message); ctx.logger.error(message); console.error(message) },
+  }, readSafeLogLevel)
   let defaultIdentityDirectory = new IdentityStore().directory
   let initialStorageError: unknown
   try {
@@ -201,26 +243,39 @@ async function activate(
         undefined,
         undefined,
         true,
+        logStore,
       )
       if (initialStorageError !== undefined) {
+        logger.error('Remote plugin startup failed', safeStartupError(initialStorageError))
         controlRuntime.setStartupFailure(initialStorageError, { storageAvailable: false })
       }
-      ctx.effect(() => controlRuntime.register(connection, webServer), 'ds-harness-remote disabled control')
+      ctx.effect(() => {
+        const dispose = controlRuntime.register(connection, webServer)
+        return async () => {
+          await dispose()
+          await logStore.flush()
+        }
+      }, 'ds-harness-remote disabled control')
     }
     return
   }
-  // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
-  // logger: the web process stdout is captured by the Desktop shell into
-  // desktop.log, so remote RPC/transport diagnostics stay greppable there.
-  const logger = new SafeLogger({
-    debug: message => { ctx.logger.debug(message); console.debug(message) },
-    info: message => { ctx.logger.info(message); console.info(message) },
-    warn: message => { ctx.logger.warn(message); console.warn(message) },
-    error: message => { ctx.logger.error(message); console.error(message) },
-  }, () => resolveConfig(settingsBinding?.get() ?? readConfig()).logLevel)
   // Startup and daily npm dist-tags lookup backing the client update notice.
   // Lives for the whole activation so Server switches keep its snapshot.
   const updateChecker = new PluginUpdateChecker(logger)
+  // Harness 0.2.2 updates a registry-installed third-party bundle in place.
+  // The manager is a Host boot service, so it keeps running after this plugin
+  // is removed and replaced. GitHub and path installs are left on the releases link.
+  const pluginUpgrade = new LocalPluginUpgrade(
+    updateChecker,
+    () => readPluginManager(ctx),
+    listener => {
+      // The manager emits on its own context. Desktop puts that service on the
+      // profile root; a nested context with its own bus still needs to hear it.
+      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events]
+      const dispose = buses.map(events => events.on('plugin-manager/update-state', listener, { global: true }))
+      return () => { for (const stop of dispose) stop() }
+    },
+  )
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
@@ -259,6 +314,7 @@ async function activate(
       },
     }
   }
+  if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway)
   // The Host `subprocess` service owns PTY allocation, containment, and process
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
@@ -302,7 +358,7 @@ async function activate(
       clientRuntime = new ClientModeRuntime(
         config,
         clientIdentities,
-        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, config.httpServerAllowlist),
         nativeTypertGateway,
         logger,
         runtime,
@@ -392,8 +448,9 @@ async function activate(
         clientRuntime,
         runtime,
         replaceServer,
-        updateChecker,
+        pluginUpgrade,
         true,
+        logStore,
       )
   if (initialStorageError !== undefined) {
     controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false })
@@ -444,6 +501,7 @@ async function activate(
       await disposeControl?.()
       await clientRuntime?.close()
       await runtime?.close()
+      await logStore.flush()
     }
   }, 'ds-harness-remote lifecycle')
   if (config.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? undefined : clientRuntime)
@@ -454,6 +512,19 @@ async function activate(
  * {@link EntryConfig} (a live `Volatile` reference); a direct `ctx.plugin()`
  * caller passes the plain composition object instead.
  */
+function resolveLogProfileName(ctx: Context): string | undefined {
+  const envProfile = process.env.DSH_PROFILE?.trim()
+  if (envProfile) return envProfile
+  const baseDir = (ctx.root as { baseDir?: unknown } | undefined)?.baseDir
+  if (typeof baseDir === 'string' && baseDir.trim().length > 0) {
+    const trimmed = baseDir.trim()
+    if (basename(dirname(trimmed)) === 'profiles') {
+      const segment = basename(trimmed)
+      if (segment.length > 0) return segment
+    }
+  }
+  return undefined
+}
 function readEntryConfig(entry: EntryConfig | ConfigShape | undefined): ConfigInput {
   if (entry === undefined) return {}
   return isEntryConfig(entry) ? entry.get() : entry
@@ -462,6 +533,21 @@ function readEntryConfig(entry: EntryConfig | ConfigShape | undefined): ConfigIn
 /** Whether a config value is the Loader's live volatile reference. */
 function isEntryConfig(value: EntryConfig | ConfigShape): value is EntryConfig {
   return typeof (value as { get?: unknown }).get === 'function'
+}
+
+/**
+ * The official plugin manager lives on the profile context. A plugin-scoped
+ * lookup misses it when the service is isolated to the root.
+ */
+function readPluginManager(ctx: Context): PluginManagerUpdate | undefined {
+  const candidate = ctx.get('pluginManager', false) ?? ctx.root.get('pluginManager', false)
+  if (
+    typeof candidate !== 'object'
+    || candidate === null
+    || typeof (candidate as { listBundles?: unknown }).listBundles !== 'function'
+    || typeof (candidate as { updateBundle?: unknown }).updateBundle !== 'function'
+  ) return undefined
+  return candidate as PluginManagerUpdate
 }
 
 /** Entry id whose live Config backs this plugin instance's settings writes. */

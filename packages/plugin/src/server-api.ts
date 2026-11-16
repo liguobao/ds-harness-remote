@@ -4,7 +4,7 @@ import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
 import { deviceTokenPairSchema, type DeviceTokenPair as TokenPair } from '@dsh-remote/protocol'
 import type { RtcIceServer } from '@dsh-remote/webrtc'
 import type { HostIdentity } from './identity-store.js'
-import { ServerCredentialsBusyError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
+import { ServerCredentialsBusyError, ServerCredentialsLockUnsupportedError, type ServerCredentialStore, type ServerCredentials } from './server-credentials.js'
 import { normalizeServerUrl } from './config.js'
 import { PLUGIN_VERSION } from './version.js'
 
@@ -82,8 +82,9 @@ export class HostServerApi {
     private readonly store: ServerCredentialStore,
     private readonly fetchImplementation: FetchImplementation = fetch,
     private readonly role: 'host' | 'client' = 'host',
+    httpServerAllowlist: readonly string[] = [],
   ) {
-    this.baseUrl = normalizeServerUrl(serverUrl)
+    this.baseUrl = normalizeServerUrl(serverUrl, httpServerAllowlist)
   }
 
   bindIdentity(identity: HostIdentity): void { this.identity = identity }
@@ -374,13 +375,20 @@ export class HostServerApi {
       return await this.store.withRefreshLock(operation)
     } catch (error) {
       if (error instanceof ServerCredentialsBusyError) {
+        throw new ServerApiError(error.code, error.message, true)
+      }
+      if (error instanceof ServerCredentialsLockUnsupportedError) {
         throw new ServerApiError(error.code, error.message, false)
       }
       throw error
     }
   }
 
-  private async rotateCredentials(identity: HostIdentity, stored: ServerCredentials): Promise<ServerCredentials> {
+  private async rotateCredentials(
+    identity: HostIdentity,
+    stored: ServerCredentials,
+    allowRecoveredRotation = true,
+  ): Promise<ServerCredentials> {
     let tokens: TokenPair
     try {
       tokens = await this.publicRequest<TokenPair>('/api/v1/auth/refresh', {
@@ -390,21 +398,40 @@ export class HostServerApi {
     } catch (error) {
       if (error instanceof ServerApiError) {
         // A delayed rejection must not discard credentials another writer saved.
-        if (error.code === 'AUTH_INVALID') {
+        if (error.code === 'AUTH_INVALID' || error.code === 'TOKEN_EXPIRED') {
           const latest = await this.store.load(this.baseUrl, identity.deviceId)
           if (latest !== undefined && latest.refreshToken !== stored.refreshToken &&
-              latest.refreshTokenExpiresAt > Date.now() && latest.accessTokenExpiresAt > Date.now() + 30_000) {
-            return latest
+              latest.refreshTokenExpiresAt > Date.now()) {
+            if (latest.accessTokenExpiresAt > Date.now() + 30_000) return latest
+            if (allowRecoveredRotation) return this.rotateCredentials(identity, latest, false)
           }
         }
         throw new ServerApiError(error.code, error.message, error.retryable, error.status, 'credential_refresh', error.reason)
       }
       throw error
     }
-    return this.store.save({
+    const saved = await this.store.save({
       ...stored,
       ...validateTokens(tokens),
     })
+    // WHY: Self-hosted refresh response recovery returns the original successor
+    // pair, whose accessTokenExpiresAt may already have elapsed while its
+    // refreshToken remains valid. Rotate once more before returning so callers
+    // never put an already-expired accessToken on the wire.
+    if (allowRecoveredRotation && saved.accessTokenExpiresAt <= Date.now() + 30_000
+      && saved.refreshToken !== stored.refreshToken && saved.refreshTokenExpiresAt > Date.now()) {
+      return this.rotateCredentials(identity, saved, false)
+    }
+    if (saved.accessTokenExpiresAt <= Date.now()) {
+      throw new ServerApiError(
+        'CONNECTION_FAILED',
+        'The Server returned an already-expired access token.',
+        true,
+        200,
+        'credential_refresh',
+      )
+    }
+    return saved
   }
 
   async listDevices(signal?: AbortSignal): Promise<ServerHostDevice[]> {
@@ -527,8 +554,8 @@ export class HostServerApi {
       return await this.publicRequest<TResult>(path, init, credentials.accessToken)
     } catch (error) {
       // The Server may reject a bearer before its locally cached expiry.
-      // Only retry an explicitly rejected, read-only Client request, once.
-      if (this.role !== 'client' || this.identity?.deviceId !== credentials.deviceId || (init.method ?? 'GET') !== 'GET'
+      // Only retry an explicitly rejected, read-only request, once.
+      if (this.identity?.deviceId !== credentials.deviceId || (init.method ?? 'GET') !== 'GET'
         || !(error instanceof ServerApiError) || error.status !== 401
         || (error.code !== 'AUTH_INVALID' && error.code !== 'TOKEN_EXPIRED')) throw error
       init.signal?.throwIfAborted()
@@ -614,8 +641,8 @@ function normalizeOAuthScanUrl(value: unknown, baseUrl: string): string | undefi
 }
 
 export class ClientServerApi extends HostServerApi {
-  constructor(serverUrl: string, store: ServerCredentialStore, fetchImplementation: FetchImplementation = fetch) {
-    super(serverUrl, store, fetchImplementation, 'client')
+  constructor(serverUrl: string, store: ServerCredentialStore, fetchImplementation: FetchImplementation = fetch, httpServerAllowlist: readonly string[] = []) {
+    super(serverUrl, store, fetchImplementation, 'client', httpServerAllowlist)
   }
 }
 

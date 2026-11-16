@@ -206,6 +206,19 @@ describe('browser plugin route authority', () => {
     ], cleanup)
   })
 
+  it('returns an empty roster while the Host has no Bot route and discovers it when enabled', async () => {
+    const host = await carrier()
+    host.routeStatus = 404
+    for (let poll = 0; poll < 3; poll++) {
+      const response = await host.fetch('api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) })
+      expect(await response.json()).toEqual({ ok: true, value: { bots: [], rooms: [], agents: [] } })
+    }
+    expect(host.local).not.toHaveBeenCalled()
+    host.routeStatus = 200
+    const response = await host.fetch('api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) })
+    expect(await response.json()).toEqual({ ok: true, value: { source: 'remote' } })
+  })
+
   it('reports Host route and control refusals in the DS Bot error envelope without exposing upstream data', async () => {
     await runScenarios([
       { name: 'missing ds-bot route', status: 404, code: 'remote-plugin/bot-not-loaded' },
@@ -233,6 +246,203 @@ describe('browser plugin route authority', () => {
         expect(host.local).not.toHaveBeenCalled()
       },
     })), cleanup)
+  })
+})
+
+describe('browser plugin route failure classification', () => {
+  const routeUrl = 'http://127.0.0.1/'
+  // Correlate on the request's own rpcId: the probe and the route call differ.
+  const envelope = (value: unknown, init?: RequestInit) => new Response(JSON.stringify({
+    type: 'server-response',
+    rpcId: (JSON.parse(String(init?.body)) as { rpcId: string }).rpcId,
+    result: { ok: true, value },
+  }))
+  const controlCall = (input: RequestInfo | URL) => new URL(String(input)).pathname.endsWith('/status') ? 'status' : 'route'
+  const settle = async (original: typeof fetch, body = '{}', signal?: AbortSignal) => {
+    const response = await createPluginRouteFetch(original, routeUrl)('api/bot', { method: 'POST', body, signal })
+    return await response.json() as { ok: boolean; error: { code: string; message: string; details: Record<string, unknown> } }
+  }
+
+  it('classifies each failure stage with its own code and details', async () => {
+    await runScenarios([
+      {
+        name: '10s status probe timeout',
+        run: async () => {
+          const probe = new AbortController()
+          const spy = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(probe.signal)
+          const caller = new AbortController()
+          try {
+            const result = await settle(vi.fn<typeof fetch>(async () => {
+              probe.abort(new DOMException('The operation timed out.', 'TimeoutError'))
+              throw probe.signal.reason
+            }), '{}', caller.signal)
+            expect(result).toMatchObject({
+              ok: false,
+              error: {
+                code: 'remote-plugin/control-timeout',
+                message: 'The local Remote control probe timed out. Reload the Remote plugin.',
+                details: { stage: 'status', timeoutMs: 10_000, errorName: 'TimeoutError' },
+              },
+            })
+          } finally {
+            spy.mockRestore()
+          }
+        },
+      },
+      {
+        name: 'status request network ETIMEDOUT before probe timeout',
+        run: async () => {
+          const timeoutErr = new Error('connect ETIMEDOUT')
+          Object.assign(timeoutErr, { code: 'ETIMEDOUT' })
+          const result = await settle(vi.fn<typeof fetch>(async () => {
+            throw timeoutErr
+          }))
+          expect(result).toMatchObject({
+            ok: false,
+            error: {
+              code: 'remote-plugin/control-timeout',
+              message: 'The local Remote control request timed out. Reload the Remote plugin.',
+              details: { stage: 'transport', method: 'status', errorName: 'Error' },
+            },
+          })
+          expect(result.error.details).not.toHaveProperty('timeoutMs')
+        },
+      },
+      {
+        name: 'control transport TypeError',
+        run: async () => {
+          const result = await settle(vi.fn<typeof fetch>(async () => {
+            throw new TypeError('fetch failed')
+          }))
+          expect(result).toMatchObject({
+            ok: false,
+            error: { code: 'remote-plugin/control-unavailable', message: 'The local Remote control request failed. Reload the Remote plugin.', details: { stage: 'transport', method: 'status', errorName: 'TypeError' } },
+          })
+          expect(JSON.stringify(result)).not.toContain('fetch failed')
+        },
+      },
+      {
+        name: 'control non-2xx response',
+        run: async () => {
+          const result = await settle(vi.fn<typeof fetch>(async () => new Response('upstream secret', { status: 502 })))
+          expect(result).toMatchObject({ ok: false, error: { code: 'remote-plugin/control-unavailable', details: { stage: 'transport', httpStatus: 502 } } })
+          expect(JSON.stringify(result)).not.toContain('upstream secret')
+        },
+      },
+      {
+        name: 'structurally invalid route response',
+        run: async () => {
+          await runScenarios([
+            { label: 'null result', value: null },
+            { label: 'undefined result', value: undefined },
+            { label: 'string result', value: 'not-a-record' },
+            { label: 'number result', value: 42 },
+            { label: 'boolean result', value: true },
+            { label: 'array result', value: [] },
+            { label: 'missing status', value: { json: { ok: true } } },
+            { label: 'non-integer status', value: { status: '200', json: { ok: true } } },
+            { label: 'float status', value: { status: 200.5, json: { ok: true } } },
+            { label: 'NaN status', value: { status: Number.NaN, json: { ok: true } } },
+            { label: 'Infinity status', value: { status: Number.POSITIVE_INFINITY, json: { ok: true } } },
+            { label: 'status below range', value: { status: 199, json: { ok: true } } },
+            { label: 'status above range', value: { status: 600, json: { ok: true } } },
+          ].map(row => ({
+            name: row.label,
+            run: async () => {
+              const original = vi.fn<typeof fetch>(async (input, init) =>
+                envelope(controlCall(input) === 'status' ? remoteStatus() : row.value, init))
+              const result = await settle(original)
+              expect(result).toMatchObject({ ok: false, error: { code: 'remote-plugin/route-response-invalid', details: { stage: 'response-structure' } } })
+            },
+          })))
+        },
+      },
+      {
+        name: 'request body that is not a JSON object',
+        run: async () => {
+          await runScenarios([
+            { label: 'malformed JSON', body: 'not-json' },
+            { label: 'JSON array', body: '[]' },
+            { label: 'JSON scalar', body: '7' },
+          ].map(row => ({
+            name: row.label,
+            run: async () => {
+              const original = vi.fn<typeof fetch>(async (_input, init) => envelope(remoteStatus(), init))
+              const result = await settle(original, row.body)
+              expect(result).toMatchObject({ ok: false, error: { code: 'remote-plugin/route-request-invalid', details: { stage: 'request-body' } } })
+            },
+          })))
+        },
+      },
+    ])
+  })
+
+  it('keeps caller cancellation and unexpected errors free of upstream data', async () => {
+    await runScenarios([
+      {
+        name: 'caller abort stays an AbortError',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async (_input, init) => envelope(remoteStatus(), init))
+          const controller = new AbortController()
+          const wrapped = createPluginRouteFetch(original, routeUrl)
+          const pending = wrapped('api/bot', { method: 'POST', body: '{}', signal: controller.signal })
+          controller.abort()
+          await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+          expect(original).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'POST', body: expect.stringContaining('plugin.route') }))
+        },
+      },
+      {
+        name: 'unexpected error keeps only its name',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async () => ({
+            ok: true,
+            json: async () => { throw new RangeError('private upstream data') },
+          }) as unknown as Response)
+          const result = await settle(original)
+          expect(result).toMatchObject({ ok: false, error: { code: 'remote-plugin/unavailable', details: { errorName: 'RangeError' } } })
+          expect(JSON.stringify(result)).not.toContain('private upstream data')
+        },
+      },
+      {
+        name: 'error with custom/tampered name normalizes to Error without leaking upstream data',
+        run: async () => {
+          const tamperedError = new Error('private upstream data')
+          tamperedError.name = 'private upstream data'
+          const original = vi.fn<typeof fetch>(async () => ({
+            ok: true,
+            json: async () => { throw tamperedError },
+          }) as unknown as Response)
+          const result = await settle(original)
+          expect(result).toMatchObject({
+            ok: false,
+            error: {
+              code: 'remote-plugin/unavailable',
+              details: { errorName: 'Error' },
+            },
+          })
+          expect(result.error.details.errorName).toBe('Error')
+          expect(JSON.stringify(result)).not.toContain('private upstream data')
+        },
+      },
+      {
+        name: 'timeout that escapes the probe still reads as a timeout',
+        run: async () => {
+          const original = vi.fn<typeof fetch>(async (input, init) => {
+            if (controlCall(input) === 'status') return envelope(remoteStatus(), init)
+            throw new DOMException('The operation timed out.', 'TimeoutError')
+          })
+          const result = await settle(original)
+          expect(result).toMatchObject({
+            ok: false,
+            error: {
+              code: 'remote-plugin/control-timeout',
+              message: 'The Remote plugin route request timed out. Reload the Remote plugin.',
+              details: { stage: 'route', errorName: 'TimeoutError' },
+            },
+          })
+        },
+      },
+    ])
   })
 })
 

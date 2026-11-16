@@ -1,8 +1,9 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import type { RemoteClientCore } from '@dsh-remote/client-core'
+import { RemoteClientError, type RemoteClientCore } from '@dsh-remote/client-core'
 import type { EventPayload } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
+import { RemoteSessionHistoryCache } from '../src/session-history-cache.js'
 
 describe('RemoteTypertGateway', () => {
   it('marks legacy projection cuts while preserving migration-required and missing results', async () => {
@@ -596,6 +597,120 @@ describe('RemoteTypertGateway', () => {
       code: 'session/not-found',
       message: 'Session is unavailable.',
       details: { sessionId: 'session-1' },
+    })
+  })
+
+  it('reuses cached session follow snapshots, delta events, and unary pages across project switches and transient failures', async () => {
+    const handlers = new Set<(event: EventPayload) => void>()
+    const openedStreams: string[] = []
+    let failRemote = false
+    const client = {
+      rpc: vi.fn(async (method: string, params: unknown) => {
+        if (method === 'harness.transport.describe') return { capabilities: [] }
+        if (method === 'harness.remote.stream.open') {
+          if (failRemote) throw new RemoteClientError('RPC_TIMEOUT', 'stream open timed out')
+          const id = (params as { streamId: string }).streamId
+          openedStreams.push(id)
+          return { opened: true, streamId: id }
+        }
+        if (method === 'harness.remote.call') {
+          if (failRemote) throw new RemoteClientError('RPC_TIMEOUT', 'remote call timed out')
+          const { endpoint } = params as { endpoint: string }
+          if (endpoint === 'session/projections') {
+            return { ok: true, value: { kind: 'cached', asOfSeq: 1, values: { title: 'Project A' } } }
+          }
+          if (endpoint === 'session/prompt') {
+            return { ok: true, value: { accepted: true } }
+          }
+        }
+        return { closed: true }
+      }),
+      onEvent: (handler: (event: EventPayload) => void) => {
+        handlers.add(handler)
+        return () => handlers.delete(handler)
+      },
+      onClose: () => () => undefined,
+    } as unknown as RemoteClientCore
+    const emit = (streamId: string, value: unknown) => {
+      for (const handler of handlers) {
+        handler({ event: 'harness.remote.frame', data: { streamId, hasValue: true, value } } as EventPayload)
+      }
+    }
+    const cache = new RemoteSessionHistoryCache()
+    const firstGateway = new RemoteTypertGateway(client, undefined, undefined, false, cache)
+    const signal = new AbortController().signal
+    const followPayload = { args: { request: { address: { kind: 'session', sessionId: 'session-a' }, maxMessages: 50 } } }
+
+    const firstStream = await firstGateway.open('session/follow', followPayload, signal)
+    const firstIterator = firstStream[Symbol.asyncIterator]()
+    const record0 = { type: 'event', event: { seq: 0, time: 1, type: 'user/message', data: { text: 'first' } } }
+    const record1 = { type: 'event', event: { seq: 1, time: 2, type: 'assistant/message', data: { text: 'reply' } } }
+    emit(openedStreams[0]!, {
+      type: 'snapshot',
+      header: { id: 'session-a', version: 3 },
+      cursor: 0,
+      records: [record0],
+      hasMore: false,
+      projections: { kind: 'sequenced', asOfSeq: 0, values: { title: 'Project A' } },
+      assistantStream: { revision: 4 },
+    })
+    emit(openedStreams[0]!, record1)
+    await expect(firstIterator.next()).resolves.toMatchObject({ value: { type: 'snapshot', cursor: 0 } })
+    await expect(firstIterator.next()).resolves.toEqual({ done: false, value: record1 })
+    await firstIterator.return?.()
+
+    // Switching back to Project A on a new gateway sharing the Host cache serves
+    // the cached snapshot immediately (before upstream responds) and appends only delta records.
+    const secondGateway = new RemoteTypertGateway(client, undefined, undefined, false, cache)
+    const pagePayload = { args: { request: { address: { kind: 'session', sessionId: 'session-a' }, throughSeq: 1, maxMessages: 10 } } }
+    await expect(secondGateway.dispatch('session/page', pagePayload, signal)).resolves.toEqual({
+      ok: true,
+      value: { records: [record0, record1], hasMore: false, cursor: 1 },
+    })
+    await expect(secondGateway.dispatch('session/projections', { args: { request: { sessionId: 'session-a' } } }, signal)).resolves.toMatchObject({
+      ok: true,
+      value: { values: { title: 'Project A' } },
+    })
+    await expect(secondGateway.dispatch('session/projections', { args: { request: { sessionId: 'session-a' } } }, signal)).resolves.toMatchObject({
+      ok: true,
+      value: { values: { title: 'Project A' } },
+    })
+    expect((client.rpc as ReturnType<typeof vi.fn>).mock.calls.filter(call => call[0] === 'harness.remote.call')).toHaveLength(1)
+
+    const secondStream = await secondGateway.open('session/follow', followPayload, signal)
+    const secondIterator = secondStream[Symbol.asyncIterator]()
+    await expect(secondIterator.next()).resolves.toMatchObject({
+      value: {
+        type: 'snapshot',
+        cursor: 1,
+        records: [record0, record1],
+        assistantStream: { revision: 0 },
+      },
+    })
+    const record2 = { type: 'event', event: { seq: 2, time: 3, type: 'assistant/message', data: { text: 'delta' } } }
+    emit(openedStreams[1]!, {
+      type: 'snapshot',
+      header: { id: 'session-a', version: 3 },
+      cursor: 2,
+      records: [record0, record1, record2],
+      hasMore: false,
+      assistantStream: { revision: 0 },
+    })
+    await expect(secondIterator.next()).resolves.toEqual({ done: false, value: record2 })
+    await secondIterator.return?.()
+
+    // Fallback to cached history on a new connection when remote calls time out.
+    failRemote = true
+    const reconnectedClient = { ...client, rpc: client.rpc } as unknown as RemoteClientCore
+    const fallbackGateway = new RemoteTypertGateway(reconnectedClient, undefined, undefined, false, cache)
+    const fallbackStream = await fallbackGateway.open('session/follow', followPayload, signal)
+    const fallbackIterator = fallbackStream[Symbol.asyncIterator]()
+    await expect(fallbackIterator.next()).resolves.toMatchObject({
+      value: { type: 'snapshot', cursor: 2, records: [record0, record1, record2] },
+    })
+    await expect(fallbackGateway.dispatch('session/history', { args: { request: { sessionId: 'session-a' } } }, signal)).resolves.toMatchObject({
+      ok: true,
+      value: { throughSeq: 2, records: [record0, record1, record2] },
     })
   })
 })

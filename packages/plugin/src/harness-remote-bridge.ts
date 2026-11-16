@@ -1,5 +1,6 @@
 import { compactHistory } from './compact-history.js'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
@@ -30,6 +31,7 @@ import { harnessSessionGeneration } from './harness-version.js'
 import type { SafeLogger } from './logging.js'
 import { ensureHostWorkspaceDirectory, listRemoteDirectory } from './remote-directory-browser.js'
 import { RpcError } from './rpc-router.js'
+import { workspaceFileFailure, workspaceFileFailureReason } from './safe-error.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
 
@@ -71,10 +73,10 @@ const commandExecuteArgsSchema = z.object({
   agentId: z.string().min(1).max(128),
   line: z.string().min(1).max(2048),
   // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
-  // renamed it to `submittedAttachments`. Only empty arrays are exposed by
-  // the Remote bridge; command attachments are deliberately out of scope.
+  // renamed it to `submittedAttachments`. Current Hosts resolve opaque file
+  // receipts in the receiving Session; legacy image arguments stay empty.
   images: z.array(z.never()).length(0).optional(),
-  submittedAttachments: z.array(z.never()).length(0).optional(),
+  submittedAttachments: z.array(z.object({ type: z.literal('file'), receiptId: z.string().min(1).max(512) }).strict()).max(32).optional(),
 }).strict().superRefine((value, context) => {
   if (value.images !== undefined && value.submittedAttachments !== undefined) {
     context.addIssue({
@@ -156,6 +158,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'schedule/deliveryLimits',
   'schedule/edit',
   'schedule/run',
+  'fileUploads/upload',
   'session/attachment',
   'session/cancel',
   'session/canOpenWorkspacePath',
@@ -291,6 +294,7 @@ export class HarnessRemoteBridge {
   private readonly streams = new Map<string, ActiveRemoteStream>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
+  private warnedMissingRemoteEvents = false
 
   private readonly terminalCarrier: TerminalCarrierCompat | undefined
 
@@ -303,12 +307,17 @@ export class HarnessRemoteBridge {
     private readonly codexWorkspace?: CodexWorkspaceBridge,
     private readonly resolveWorkspaceRoot?: NativeWorkspaceResolver,
     private readonly schedule?: ScheduleCreateService,
+    private readonly uploadAttachment?: (body: unknown) => Promise<unknown>,
   ) {
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
   }
 
   async call(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
+    if ((params.endpoint === 'remoteUploads/upload' || params.endpoint === 'remoteImages/upload') && this.uploadAttachment !== undefined) {
+      const payload = z.object({ args: z.unknown() }).strict().parse(params.payload)
+      return { ok: true, value: await this.uploadAttachment(payload.args) }
+    }
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
@@ -384,10 +393,12 @@ export class HarnessRemoteBridge {
         })
         return result
       }
+      const reason = workspaceFileFailureReason(error)
       this.logger?.warn('harness remote call failed', {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
         code: this.gateway.failure(error).code,
+        ...(reason === undefined ? {} : { reason }),
       })
       throw error
     }
@@ -580,8 +591,50 @@ export class HarnessRemoteBridge {
       controller.abort()
       throw error
     }
+    if (params.endpoint === '$events') source = this.remoteEventsWithFallback(source, controller.signal)
     void this.pump(params.streamId, source, controller.signal, params.endpoint === 'session/follow', params.transferFrames)
     return { opened: true, streamId: params.streamId }
+  }
+
+  private async *remoteEventsWithFallback(source: AsyncIterable<unknown>, signal: AbortSignal): AsyncGenerator<unknown> {
+    const iterator = source[Symbol.asyncIterator]()
+    let first: IteratorResult<unknown>
+    try {
+      first = await iterator.next()
+    } catch (error) {
+      if (!await this.canUseIdleRemoteEvents(error, signal)) throw error
+      yield { type: 'ready', clientId: randomUUID(), host: { home: homedir() } }
+      await new Promise<void>(resolve => {
+        if (signal.aborted) { resolve(); return }
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return
+    }
+    try {
+      for (let item = first; !item.done; item = await iterator.next()) yield item.value
+    } finally {
+      await iterator.return?.()
+    }
+  }
+
+  private async canUseIdleRemoteEvents(error: unknown, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted || this.gateway.failure(error).code !== 'gateway/service-unavailable') return false
+    // Do not report a connected generation when the Host Session API is absent.
+    const sessions = await this.gateway.dispatch('session/list', { args: { _request: {} } }, signal).catch(() => undefined)
+    if (sessions?.ok !== true) {
+      this.warnMissingRemoteEvents(sessions?.ok === false && sessions.error.code === 'gateway/invocation-unavailable'
+        ? 'Host Remote API is incomplete. Install @deepseek-ai/dsh-api-remotes and its Host API packages.'
+        : 'Cannot verify the Host Session API. Remote events cannot start.')
+      return false
+    }
+    this.warnMissingRemoteEvents('Host Remote events are unavailable. Install @deepseek-ai/dsh-api-remotes and its Host API packages. Event updates are disabled.')
+    return true
+  }
+
+  private warnMissingRemoteEvents(message: string): void {
+    if (this.warnedMissingRemoteEvents) return
+    this.warnedMissingRemoteEvents = true
+    this.logger?.warn(message)
   }
 
   closeStream(input: unknown): { closed: boolean; streamId: string } {
@@ -751,11 +804,11 @@ export class HarnessRemoteBridge {
           ? args.agentId
           : undefined
     if (sessionId === undefined) {
-      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.')
+      throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace identifier is missing.', 'scope-missing')
     }
     const sessionWorkspace = await this.resolveWorkspaceRootForSession(sessionId, signal)
     if (!sessionWorkspace) {
-      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+      throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'authority-unavailable')
     }
 
     const options = isRecord(args.options) ? args.options : undefined
@@ -765,10 +818,10 @@ export class HarnessRemoteBridge {
 
     if (endpoint === 'workspaceFiles/readBytes') {
       if (options !== undefined && 'baseFile' in options && options.baseFile !== undefined && typeof options.baseFile !== 'string') {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
       if ('baseFile' in args && args.baseFile !== undefined && typeof args.baseFile !== 'string') {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
     }
 
@@ -777,24 +830,24 @@ export class HarnessRemoteBridge {
       const path = typeof args.path === 'string' ? args.path : ''
       const relative = path.replaceAll('\\', '/')
       if (relative.length === 0 || relative.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.includes('\x00')) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
       const baseSegments = process.platform === 'win32' ? rawBaseFile.replaceAll('\\', '/').split('/') : rawBaseFile.split('/')
       if (baseSegments.some(segment => segment === '..')) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
-      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, rawBaseFile, endpoint)
+      const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd)
       const baseCandidate = resolve(sessionWorkspace.root, safeBaseRel)
       const baseDir = dirname(baseCandidate)
       const targetCandidate = resolve(baseDir, path)
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, targetCandidate, endpoint)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd)
     } else {
       const path = typeof args.path === 'string' ? args.path : '.'
       const pathSegments = process.platform === 'win32' ? path.replaceAll('\\', '/').split('/') : path.split('/')
       if (pathSegments.some(segment => segment === '..')) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
-      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, sessionWorkspace.cwd, path, endpoint)
+      safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd)
     }
 
     let finalArgs: Record<string, unknown> = isRecord(rootPayload.args)
@@ -839,63 +892,77 @@ export class HarnessRemoteBridge {
     }
     const cwd = await this.resolveWorkspaceRoot(sessionId, signal)
     if (!cwd) {
-      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+      throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'authority-unavailable')
     }
     try {
       const root = await realpath(cwd)
       const info = await stat(root)
-      if (!info.isDirectory()) throw new Error()
+      if (!info.isDirectory()) {
+        throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'root-invalid')
+      }
       return { root, cwd }
-    } catch {
-      throw new RpcError('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.')
+    } catch (error) {
+      if (error instanceof RpcError) throw error
+      throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'authority-unavailable')
     }
   }
 
+  /**
+   * Containment is always evaluated against the canonical workspace root, not
+   * the raw `cwd`: a symlinked parent, a `..` segment or a Windows case variant
+   * must not turn an in-root file into a denial. The boundary itself is
+   * unchanged: the canonical target must stay inside the canonical root.
+   */
   private async verifyWorkspacePathContainment(
     root: string,
-    cwd: string,
     path: string,
     endpoint: string,
+    cwd = root,
   ): Promise<string> {
-    const candidate = isAbsolute(path) ? resolve(path) : resolve(cwd, path)
+    const supplied = isAbsolute(path) ? resolve(path) : resolve(root, path)
+    const cwdRelative = relative(resolve(cwd), supplied)
+    // Only the Host-authorized cwd is an accepted alias for the canonical root.
+    // Do not realpath arbitrary inputs: internal symlinks must still be denied.
+    const candidate = isAbsolute(path) && !isPathOutside(cwdRelative)
+      ? resolve(root, cwdRelative)
+      : supplied
     if (process.platform === 'win32') {
       const rootDrive = parse(root).root.toLowerCase()
       const candDrive = parse(candidate).root.toLowerCase()
       if (rootDrive !== candDrive) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
     }
-    const relCwd = relative(cwd, candidate)
-    const relRoot = relative(root, candidate)
-    if (isPathOutside(relCwd) && isPathOutside(relRoot)) {
-      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+    if (isPathOutside(relative(root, candidate))) {
+      throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
     }
 
     try {
       const rootLstat = await lstat(root)
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The workspace root is invalid or a symlink.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The workspace root is invalid or a symlink.', 'root-invalid')
       }
 
-      const base = !isPathOutside(relCwd) ? cwd : root
-      const rel = relative(base, candidate)
+      const rel = relative(root, candidate)
       const parts = rel.split(sep).filter(p => p.length > 0 && p !== '.')
-      let currentPath = base
+      let currentPath = root
       for (let i = 0; i < parts.length - 1; i++) {
         currentPath = join(currentPath, parts[i]!)
-        const dirRel = relative(base, currentPath)
-        if (isPathOutside(dirRel)) {
-          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        if (isPathOutside(relative(root, currentPath))) {
+          throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
         }
         const dirLstat = await lstat(currentPath)
-        if (dirLstat.isSymbolicLink() || !dirLstat.isDirectory()) {
-          throw new RpcError('WORKSPACE_PATH_DENIED', 'An ancestor directory is invalid or a symlink.')
+        if (dirLstat.isSymbolicLink()) {
+          throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'An ancestor directory is invalid or a symlink.', 'symlink')
+        }
+        if (!dirLstat.isDirectory()) {
+          throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'An ancestor directory is invalid or a symlink.', 'not-regular-file')
         }
       }
 
       const targetLstat = await lstat(candidate)
       if (targetLstat.isSymbolicLink()) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.', 'symlink')
       }
 
       const canonical = await realpath(candidate)
@@ -903,21 +970,21 @@ export class HarnessRemoteBridge {
         const rootDrive = parse(root).root.toLowerCase()
         const canonicalDrive = parse(canonical).root.toLowerCase()
         if (rootDrive !== canonicalDrive) {
-          throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+          throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
         }
       }
       const canonicalRel = relative(root, canonical)
       if (isPathOutside(canonicalRel)) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
 
       const info = await stat(canonical)
       if (endpoint !== 'workspaceFiles/stat' && !info.isFile()) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is not a regular file.', 'not-regular-file')
       }
 
       if (endpoint === 'workspaceFiles/readAll' && Number(info.size) > MAX_READ_BYTES) {
-        throw new RpcError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+        throw workspaceFileFailure('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.', 'too-large')
       }
 
       // On Windows normalize backslashes to slashes; on POSIX backslashes are valid filename characters and must not be mangled
@@ -928,13 +995,14 @@ export class HarnessRemoteBridge {
       const dispatchedCanonical = await realpath(dispatchedCandidate)
       const dispatchedRel = relative(root, dispatchedCanonical)
       if (isPathOutside(dispatchedRel)) {
-        throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.')
+        throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is outside the workspace.', 'outside-root')
       }
 
       return safeRel
     } catch (error) {
       if (error instanceof RpcError) throw error
-      throw new RpcError('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.')
+      const reason = (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'not-found' as const : 'io' as const
+      throw workspaceFileFailure('WORKSPACE_PATH_DENIED', 'The requested workspace path is unavailable.', reason)
     }
   }
 
@@ -1162,13 +1230,16 @@ function requiresWorkspaceChangePath(version: string | undefined): boolean {
     && ((Number(match[2]) === 1 && Number(match[3]) >= 7) || Number(match[2]) === 2)
 }
 
-async function dispatchCommandForHost(
+export async function dispatchCommandForHost(
   gateway: LocalTypertGateway,
   payload: unknown,
   signal: AbortSignal,
   harnessVersion?: string,
 ): Promise<TypertRpcResult> {
   const parsed = commandExecutePayloadSchema.parse(payload)
+  if (harnessSessionGeneration(harnessVersion) !== 'v3' && (parsed.args.submittedAttachments?.length ?? 0) > 0) {
+    throw new RpcError('METHOD_NOT_ALLOWED', 'This Host does not support command file receipts.')
+  }
   const legacyPayload = {
     args: {
       agentId: parsed.args.agentId,

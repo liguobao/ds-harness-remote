@@ -184,7 +184,15 @@ describe('Remote CLI', () => {
     const fetchMock = vi.fn(async () => { throw new Error('valid local credentials must not need a request') }) as unknown as typeof fetch
 
     const credentialBytes = await readFile(join(directory, 'server-credentials.json'))
-    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('move unavailable'), { code: 'EACCES' }))
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let pending = true
+    vi.mocked(rename).mockImplementation((from, to) => {
+      if (pending && from === root && to === join(dshHome, 'ds-harness-remote')) {
+        pending = false
+        return Promise.reject(Object.assign(new Error('move unavailable'), { code: 'EACCES' }))
+      }
+      return actual.rename(from, to)
+    })
 
     await expect(runCli(['status'], {
       env,

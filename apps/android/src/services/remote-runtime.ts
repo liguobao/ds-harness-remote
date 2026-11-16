@@ -56,6 +56,17 @@ export class AndroidRemoteRuntime {
     }
   }
 
+  supportsBinaryUpload(): boolean { return this.connected && this.client.supportsBinaryUpload?.() === true }
+
+  /** A file upload must not continue against a replacement Host/carrier. */
+  createRpcCaller() {
+    const generation = this.generation
+    return Object.assign((method:string, params:unknown, signal?:AbortSignal):Promise<unknown> => {
+      if (generation !== this.generation || !this.connected) return Promise.reject(new Error('The upload connection was replaced or closed.'))
+      return this.client.rpc(method, params, signal)
+    }, { supportsBinaryUpload: this.supportsBinaryUpload() })
+  }
+
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }
   rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
     return this.client.rpc<T>(method, params, signal)
@@ -68,6 +79,7 @@ export class AndroidRemoteRuntime {
   requireBotClient() { return this.client.requireBotClient() }
   requireCodex() { return this.client.requireCodex() }
   requireSessionTools(sessionId?: string) { return this.client.requireSessionTools(sessionId) }
+  hasSessionEvents() { return typeof this.client.hasSessionEvents === 'function' ? this.client.hasSessionEvents() : false }
   hasCodex() { return this.client.hasCodex() }
   requireCursor() { return this.client.requireCursor() }
   hasCursor() { return this.client.hasCursor() }
@@ -83,6 +95,7 @@ export class AndroidRemoteRuntime {
   hasHermes() { return this.client.hasHermes() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
+  promoteTransport(options?: { preferLan?: boolean }) { return this.client.promoteTransport?.(options) ?? Promise.resolve(false) }
   checkHealth() { return this.client.checkHealth() }
 
   async close(options: { preserveRecovery?: boolean } = {}): Promise<void> {

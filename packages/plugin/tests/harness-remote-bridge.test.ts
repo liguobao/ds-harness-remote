@@ -804,6 +804,70 @@ describe('HarnessRemoteBridge', () => {
     })
   })
 
+  it('keeps the event generation open when the Host has no Remote event source', async () => {
+    const publish = vi.fn(async () => undefined)
+    const warn = vi.fn()
+    const missing = Object.assign(new Error('source unavailable'), { code: 'gateway/service-unavailable' })
+    const open = vi.fn(async () => (async function* () { throw missing })())
+    const dispatch = vi.fn(async () => ({ ok: true as const }))
+    const bridge = new HarnessRemoteBridge(gateway({
+      open,
+      dispatch,
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish, { warn } as never)
+
+    await bridge.openStream({ streamId: 'events-1', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.frame', {
+      streamId: 'events-1', hasValue: true,
+      value: { type: 'ready', clientId: expect.any(String), host: { home: expect.any(String) } },
+    }))
+    expect(publish).not.toHaveBeenCalledWith('harness.remote.stream.closed', expect.anything())
+    expect(warn).toHaveBeenCalledOnce()
+    expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
+    await bridge.openStream({ streamId: 'events-2', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.frame', expect.objectContaining({ streamId: 'events-2' })))
+    expect(warn).toHaveBeenCalledOnce()
+    bridge.closeStream({ streamId: 'events-1' })
+    bridge.closeStream({ streamId: 'events-2' })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-1', reason: 'cancelled',
+    }))
+    expect(open).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps other event source failures terminal', async () => {
+    const publish = vi.fn(async () => undefined)
+    const failure = Object.assign(new Error('stream failed'), { code: 'gateway/peer-disposed' })
+    const bridge = new HarnessRemoteBridge(gateway({
+      open: async () => (async function* () { throw failure })(),
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish)
+    await bridge.openStream({ streamId: 'events-failed', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-failed', reason: 'failed',
+      failure: { code: 'gateway/peer-disposed', message: 'Request failed.', details: {} },
+    }))
+  })
+
+  it('does not report a ready generation when the Host Session API is missing', async () => {
+    const publish = vi.fn(async () => undefined)
+    const warn = vi.fn()
+    const missing = Object.assign(new Error('source unavailable'), { code: 'gateway/service-unavailable' })
+    const bridge = new HarnessRemoteBridge(gateway({
+      dispatch: async () => ({ ok: false, error: { code: 'gateway/service-unavailable', message: 'Unavailable', details: {} } }),
+      open: async () => (async function* () { throw missing })(),
+      failure: error => ({ code: (error as { code: string }).code, message: 'Request failed.', details: {} }),
+    }), publish, { warn } as never)
+    await bridge.openStream({ streamId: 'events-no-api', endpoint: '$events', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'events-no-api', reason: 'failed',
+      failure: { code: 'gateway/service-unavailable', message: 'Request failed.', details: {} },
+    }))
+    expect(publish).not.toHaveBeenCalledWith('harness.remote.frame', expect.anything())
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith('Cannot verify the Host Session API. Remote events cannot start.')
+  })
+
   it('routes CodeX terminal calls to the CodeX carrier and keeps device ownership', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-remote-codex-terminal-'))
     const dispatch = vi.fn(async () => ({ ok: true as const }))
@@ -1620,6 +1684,43 @@ describe('HarnessRemoteBridge', () => {
       await rm(outside, { recursive: true, force: true })
     }
   })
+})
+
+it('accepts absolute file paths through the trusted cwd alias without accepting other symlinks', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'remote-cwd-alias-'))
+  let bridge: HarnessRemoteBridge | undefined
+  try {
+    const workspace = join(fixture, 'workspace')
+    await mkdir(workspace)
+    const root = await realpath(workspace)
+    const cwd = join(fixture, 'trusted-cwd')
+    const otherAlias = join(fixture, 'untrusted-alias')
+    await symlink(root, cwd, process.platform === 'win32' ? 'junction' : 'dir')
+    await symlink(root, otherAlias, process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(join(root, 'inside.txt'), 'inside')
+    await writeFile(join(fixture, 'outside.txt'), 'outside')
+    await symlink(join(root, 'inside.txt'), join(root, 'internal-link.txt'), 'file')
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: {} }))
+    bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined),
+      undefined, undefined, undefined, undefined, async () => cwd)
+    for (const endpoint of ['workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll']) {
+      for (const path of [join(cwd, 'inside.txt'), join(root, 'inside.txt')]) {
+        await expect(bridge.call({ endpoint, payload: { args: { workspaceFileScopeId: 'session-1', path } } }))
+          .resolves.toMatchObject({ ok: true })
+        expect(dispatch).toHaveBeenLastCalledWith(endpoint,
+          expect.objectContaining({ args: expect.objectContaining({ path: 'inside.txt' }) }), expect.any(AbortSignal))
+      }
+      for (const path of [join(fixture, 'outside.txt'), join(otherAlias, 'inside.txt'), join(cwd, 'internal-link.txt')]) {
+        dispatch.mockClear()
+        await expect(bridge.call({ endpoint, payload: { args: { workspaceFileScopeId: 'session-1', path } } }))
+          .rejects.toMatchObject({ code: 'WORKSPACE_PATH_DENIED' })
+        expect(dispatch).not.toHaveBeenCalled()
+      }
+    }
+  } finally {
+    await bridge?.closeAll()
+    await rm(fixture, { recursive: true, force: true })
+  }
 })
 
 function stubTerminalSpawner(): RemoteTerminalSpawner {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { z } from 'zod'
-import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema } from '@dsh-remote/protocol'
+import { deviceRegistrationRequestSchema, deviceRefreshRequestSchema, parseWireJson } from '@dsh-remote/protocol'
 import { ApiError, Store, equal, hash, secret } from './store.js'
 import { Gateway } from './gateway.js'
 import { buildIceServers, parseIceConfig, type IceConfig } from './ice.js'
@@ -102,7 +102,7 @@ async function body(req: IncomingMessage): Promise<unknown> {
     if (length > 16384) throw new ApiError('FRAME_TOO_LARGE', 413)
     chunks.push(chunk)
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new ApiError('INVALID_MESSAGE') }
+  try { return parseWireJson(Buffer.concat(chunks)) } catch { throw new ApiError('INVALID_MESSAGE') }
 }
 /**
  * Normalize one bare IPv4/IPv6 literal to a single canonical form. IPv4-mapped

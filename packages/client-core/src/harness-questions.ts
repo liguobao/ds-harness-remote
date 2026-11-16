@@ -35,7 +35,14 @@ export class HarnessQuestions {
     const id = questionId(sessionId, wait.callId)
     const previous = this.questions.get(id)
     if (previous !== undefined) this.release(previous)
-    const question: Question = { sessionId, callId: wait.callId, questions: Array.isArray(request.questions) ? request.questions : [], state: 'open', eventId }
+    const question: Question = {
+      sessionId,
+      callId: wait.callId,
+      questions: Array.isArray(request.questions) ? request.questions : [],
+      state: 'open',
+      eventId,
+      ...(previous?.projected ? { projected: true } : {}),
+    }
     this.questions.set(id, question)
     void this.claim(id, question).catch(async () => {
       if (!this.current(id, question) || question.controller?.signal.aborted) return
@@ -83,6 +90,8 @@ export class HarnessQuestions {
         this.release(question)
         question.eventId = undefined
         this.publish(id, question)
+      } else if (question.controller === undefined || question.deadline !== undefined) {
+        this.publish(id, question)
       }
     }
     const settled = new Set(view.settled.flatMap(row => {
@@ -123,6 +132,16 @@ export class HarnessQuestions {
       return true
     } finally {
       question.answering = false
+    }
+  }
+
+  republish(sessionId: string): void {
+    if (this.closed) return
+    for (const [id, question] of this.questions) {
+      if (question.sessionId !== sessionId || question.answered) continue
+      if (question.state === 'continued' || question.controller === undefined || question.deadline !== undefined) {
+        this.publish(id, question)
+      }
     }
   }
 
@@ -169,6 +188,7 @@ export class HarnessQuestions {
     question.timer = undefined
     question.deadline = undefined
     question.controller?.abort()
+    question.controller = undefined
     void question.stream?.close(notifyRemote).catch(() => undefined)
     question.stream = undefined
   }

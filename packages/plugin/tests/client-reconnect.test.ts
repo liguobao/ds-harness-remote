@@ -108,7 +108,13 @@ it('recovers the selected Host with bounded backoff and fresh reads without repl
   } }, new AbortController().signal)
   const rejectedPrompt = expect(prompt).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
   const rejectedApproval = expect(approval).resolves.toMatchObject({ ok: false, error: { code: 'TRANSPORT_CLOSED' } })
-  expect(first.sent[1]).toMatchObject({ payload: { method: 'harness.remote.call', params: { endpoint: '$events/result' } } })
+  // Gateway dispatch crosses async authorization before reaching the carrier.
+  // Drop only once both mutations are actually in flight.
+  await vi.waitFor(() => expect(first.sent).toHaveLength(2))
+  expect(first.sent).toEqual(expect.arrayContaining([
+    expect.objectContaining({ payload: expect.objectContaining({ method: 'harness.remote.call', params: expect.objectContaining({ endpoint: '$events/result' }) }) }),
+    expect.objectContaining({ payload: expect.objectContaining({ method: 'harness.remote.call', params: expect.objectContaining({ endpoint: 'session/prompt' }) }) }),
+  ]))
   f.connect.mockRejectedValueOnce(new TypeError('fetch failed'))
     .mockRejectedValueOnce(Object.assign(new Error('HTTP 503'), { code: 'INTERNAL_ERROR', retryable: true }))
     .mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))

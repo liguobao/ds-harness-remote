@@ -25,6 +25,9 @@
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量"></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/177732" target="_blank"><img src="https://trendshift.io/api/badge/repositories/177732" alt="liguobao%2Fds-harness-remote | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
 
 ## 一次连接，随时可用。
 
@@ -34,7 +37,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 已支持 DeepSeek Harness 桌面版，使用最新版本安装即可：
 
-`ds-harness-remote@0.6.4`
+`ds-harness-remote@0.6.5`
 
 ## 主要特性
 
@@ -49,62 +52,25 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
-## 这个仓库是什么（鸿蒙移植版）
+## 鸿蒙原生客户端
 
-本仓库是 [liguobao/ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的 **HarmonyOS 7.0 移植分支**：
-上游的插件、服务端、协议与工具链保持跟进（当前已对齐上游 `v0.6.4`），另加一个**原生鸿蒙客户端**（纯 ArkTS + ArkWeb 内 WebRTC 数据面）。
+[鸿蒙客户端源码](apps/harmony/)支持 HarmonyOS 7.0（API 26）及以上系统，使用 DevEco Studio 构建。安装、签名、安全边界和验证方式见[客户端说明](docs/harmony-client.md)。
 
-- **客户端源码**：仓库根 [`harmony/`](harmony/)，HarmonyOS 7.0（API 26）及以上，DevEco Studio 构建
-- **能力**：账号授权登录、多主机列表与别名、端到端加密（Noise IK）、多会话、会话搜索/归档/置顶、
-  图片与语音输入、斜杠命令、插话与中断、模型与推理等级、权限预设、定时任务、工作区分组、
-  断点驱动的双栏/三栏（平板与 PC 2in1）、中英双语、深浅色与主题色、桌宠
-- **稳定性工程**：链路日志落盘（`link.log`，重启保留）、掉线自动重连与会话流重开（含服务器 4009 重启场景）、
-  静默探测、长时任务保活（熄屏不断）、主机未上线时 5 秒快重试、局域网直连（LAN/P2P）优先，中继/TURN 兜底
-- **构建与自测**：
-  ```sh
-  harmony/scripts/build-local.sh                     # 用本机签名构建（签名材料不入库）
-  harmony/scripts/smoke.sh 192.168.3.145:34521       # 构建→装机→拉起→等「已连接 · lan」→崩溃检查
-  node harmony/scripts/check-i18n.mjs                # 校验每个 UI 文案都有英文
-  ```
-- **文档**：[客户端说明](docs/harmony-client.md) · [局域网直连与链路日志](docs/harmony-link-log.md) ·
-  [2026-11-09 里程碑](docs/harmony-milestone-2026-11-09.md) · [发行说明](docs/release-0.17.86.md)
-- **上游同步**：`git remote add upstream https://github.com/liguobao/ds-harness-remote.git` 后 `git fetch upstream && git merge upstream/main`
-
-> 上游与本仓库的关系：上游是通用方案（Android/iOS/Web/桌面插件），本仓库只是多提供了一个鸿蒙原生客户端实现，不改上游协议。
-
-### 为什么有时显示「中继 / TURN」而不是「LAN」
-
-直连（LAN/P2P）要求**客户端与主机连的是同一个中继服务器、并且两端网络可达**。常见情况：
-
-| 现象 | 原因 |
-|---|---|
-| 同网段却显示 TURN | 主机插件连的是公网服务器（`dsh.r2049.cn`），客户端也连公网，走 ICE 时没打通直连候选 |
-| 局域网服务器上有两台同平台主机 | 旧身份没清（后台主机列表里可删除），连错对象就会走远路 |
-| 换服务器后立刻报「授权已失效」 | 凭据按 `deviceId + serverUrl` 绑定，换服务器必须重新登录一次 |
-
-排查入口：点顶栏传输徽标 → **连接详情**（传输、握手分段耗时、回落原因、测延迟）；更细的逐条决策在
-`link.log`（「诊断」面板可看最近行、可一键存文件后用 `hdc file recv` 拉走）。
-
-### 界面预览（手机实机，已脱敏）
-
-| 会话抽屉 | 新会话 · 局域网直连 | 输入坞 |
+| 会话抽屉 | 新会话 | 输入坞 |
 | --- | --- | --- |
 | ![会话抽屉](docs/images/harmony/sessions-drawer.jpg) | ![新会话](docs/images/harmony/chat-empty.jpg) | ![输入坞](docs/images/harmony/composer.jpg) |
-
-> 顶栏 `LAN` 徽标表示当前走局域网直连；截图里的会话标题、工作区名、快捷提示词均已模糊处理。
 
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| DSH&nbsp;Desktop&nbsp;插件 | Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.6.4`；Host 也可以就是这台电脑 |
+| DSH 插件 | Remote 侧栏 | 已支持 | 主控、被控任君差遣~ |
 | Web | 浏览器页面 | 已支持 | 打开 [https://dsh.r2049.cn](https://dsh.r2049.cn)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
-| DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: DeepSeek Harness 的 Android 客户端。手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
+| HarmonyOS | 原生 App | 提供源码 | HarmonyOS 7.0（API 26）及以上，使用 DevEco Studio 构建，见[客户端说明](docs/harmony-client.md) |
+| DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: 手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
-| Harmony&nbsp;7.* | 鸿蒙原生 App | 已支持 | 源码见 [harmony/](harmony/)，用 DevEco Studio 在 HarmonyOS 7.0（API 26）及以上构建；支持账号授权登录、在线主机与设备改名、端到端加密、多会话、断线自愈与局域网直连（LAN/P2P）。构建到装机见 [HarmonyOS 客户端文档](docs/harmony-client.md)，里程碑记录见 [2026-11-09 节点](docs/harmony-milestone-2026-11-09.md) |
-| 浏览器扩展 | Chrome | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
-| dsh-TUI | 纯终端 CLI | 计划中 | 本版本不包含该集成，将在后续版本单独提供；安装脚本不会为它自动创建 Web 服务 |
+| dsh-TUI | 独立 Host 组合包 + CLI | 核心真机验收通过 | 安装同版本 `ds-harness-remote-tui`，见[验证版本与边界](docs/compatibility.md)；安装脚本不会为它自动创建 Web 服务 |
 | Linux  | 云服务器  | 已支持 | [官网](https://dsh.r2049.cn/)登录后一键安装。
 
 多个客户端可以同时连接同一个 Host，RPC 与数据流按连接隔离。
@@ -115,10 +81,10 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 
 在 DeepSeek Harness Desktop 的 **扩展 / 插件管理** 中，选择从 **npm** 安装，输入包名和版本：
 
-`ds-harness-remote@0.6.4`
+`ds-harness-remote@0.6.5`
 
 安装后重启 Desktop。也可使用它的官方 `dsh` 启动器安装固定版本：
-`dsh plugin --profile desktop add -w ds-harness-remote@0.6.4`。
+`dsh plugin --profile desktop add -w ds-harness-remote@0.6.5`。
 
 DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更新失败时由 DSH 尝试恢复旧版。GitHub / 本地 link 安装需先切换到 npm，见[在线更新说明](docs/installation.zh.md#dsh-插件页在线更新)。
 
@@ -138,6 +104,7 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 
 在手机端DSH Go安装 ds-harness-remote 插件后，电脑端、Web端一样可以远程到手机上的DSH，丝滑使用Mobile Use.
 
+
 ### iOS 客户端
 
 - [内测招募](https://github.com/liguobao/ds-harness-remote/issues/20)
@@ -149,7 +116,7 @@ DSH 0.2.2 起，npm 安装支持在插件页检查版本和一键更新；热更
 3. 在另一台设备上使用 DeepSeek Harness安装同样插件，根据1、2完成同样方式的登录。也可以按需使用Remote Web、iOS、Android、DSH Go等客户端，即开即用，无需安装任何插件。
 4. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
 
-默认使用本项目提供的[https://dsh.r2049.cn](https://dsh.r2049.cn)托管 Remote Server。
+默认使用本项目提供的 [https://dsh.r2049.cn](https://dsh.r2049.cn) 托管 Remote Server。
 
 自建托管Server可使用仓库内的[最小 Server](apps/server/README.zh.md)，当前版本已包含 WebRTC LAN/P2P/TURN 连接协调（TURN 需自行部署 coturn）与加密 Relay Server 等功能，暂不支持托管Remote Web的完整功能。
 
@@ -213,7 +180,7 @@ Host 启动本机支持ACP 的Agent，通过ds-harness-remote 通道传递 Promp
 
 Claude 和 Hermes 均支持直接 Files/Terminal 访问，复用 Host 的工作区路径隔离与终端权限设置。
 
-配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-integration.md)。
+配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-remote.md)。
 
 Desktop/Android 的 Cursor、Claude、Hermes、Pi、OpenCode、AGY 模型选择使用 Host 实际模型目录，由Agent ACP决定
 
@@ -332,7 +299,7 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 ## 友情链接
 
 - 友情链接：[DSH Go](https://github.com/ccch1mneyyy/dsh-go) — 把 DeepSeek Harness 装进口袋：手机本机运行，也能遥控你的电脑。「已适配 Remote。」
-- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（终端优先的 Harness 客户端，Remote 集成计划在后续版本提供）
+- 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（终端优先的 Harness 客户端，Remote Host 使用独立 `ds-harness-remote-tui` 组合包）
 - 友情链接：[LINUX DO 社区](https://linux.do/)
 - 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
 
@@ -346,9 +313,26 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
  </picture>
 </a>
 
-## 项目声明与商标
+## 贡献者
 
-本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
+`ds-harness-remote` 由开源社区共同驱动与维护。我们坚信，优秀的基础工具不仅由代码铸就，更由每一位使用它、测试它、修正文档或分享想法的人共同塑造。
+
+无论你的技术背景如何，任何形式的参与都同样珍贵：
+
+- **提交 Issue**：发现异常、有新功能设想，或对使用体验有更好的建议？欢迎随时发起讨论。
+- **文档与多语言**：完善使用指南、修正表述细节，或协助保持中文、英文与日文文档同步。
+- **测试与多端体验**：在你的实际环境中（Desktop / Web / Android）体验运行，反馈真实场景下的表现。
+- **代码与代码审查**：认领待办事项、修复缺陷、实现新特性，或是协助 Review 社区的 Pull Request。
+
+<p align="center">
+  <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=liguobao/ds-harness-remote&max=30" alt="贡献者头像墙" />
+  </a>
+</p>
+
+<p align="center">
+  <em>衷心感谢每一位让这个项目变得更好的贡献者！</em>
+</p>
 
 ## 连接问题排查
 
@@ -356,10 +340,11 @@ Android：复现问题后打开 **设置 → 诊断 → 导出连接日志**，�
 
 Host：在 **插件 → Remote 设置** 开启 **Debug 日志**，立即生效并持久保存；排查完成后关闭（恢复 `info` 级别）。日志带 `[ds-harness-remote]` 前缀，Desktop 可在 `desktop.log` 查找。手动配置可设置 `logLevel: debug`。
 
+## 项目声明与商标
+
+本项目是独立的社区项目，不是 DeepSeek 官方产品。DeepSeek 及相关名称和商标归其各自权利人所有。
+
+
 ## License
 
 [MIT](packages/plugin/LICENSE)
-
-### 与 DSH-Go 配对
-
-在电脑本机 Remote 设置的「登录账号 → DSH-Go 扫码」中生成二维码，使用支持此协议的 DSH-Go 扫码确认，再将手机验证码输入电脑。仅允许校验一次，错误后整个配对作废。新 Host 默认仅被控，新建 Device-only 账号无 Web/Admin 权限。需要完整 Server 配对 v1 API 及按[接入文档](docs/dsh-go-pairing-integration.md)改造的 DSH-Go；随仓库提供的最小 Server 暂不支持此流程。

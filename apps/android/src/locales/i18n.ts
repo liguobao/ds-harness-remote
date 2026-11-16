@@ -6,8 +6,10 @@ import jaJP from './ja-JP'
 import esES from './es-ES'
 import deDE from './de-DE'
 import frFR from './fr-FR'
+import ruRU from './ru-RU'
+import ukUA from './uk-UA'
 
-export type AppLanguage = 'en-US' | 'zh-CN' | 'zh-TW' | 'ja-JP' | 'es-ES' | 'de-DE' | 'fr-FR'
+export type AppLanguage = 'en-US' | 'zh-CN' | 'zh-TW' | 'ja-JP' | 'es-ES' | 'de-DE' | 'fr-FR' | 'ru-RU' | 'uk-UA'
 export type LanguagePreference = 'system' | AppLanguage
 
 export const messageCatalogs: Record<AppLanguage, Messages> = {
@@ -18,6 +20,8 @@ export const messageCatalogs: Record<AppLanguage, Messages> = {
   'es-ES': esES,
   'de-DE': deDE,
   'fr-FR': frFR,
+  'ru-RU': ruRU,
+  'uk-UA': ukUA,
 }
 
 let systemLocaleTags = [defaultSystemLocale()]
@@ -71,6 +75,8 @@ function resolveLanguage(nextPreference: LanguagePreference, localeTags: readonl
     if (language === 'es') return 'es-ES'
     if (language === 'de') return 'de-DE'
     if (language === 'fr') return 'fr-FR'
+    if (language === 'ru') return 'ru-RU'
+    if (language === 'uk') return 'uk-UA'
   }
   return 'en-US'
 }

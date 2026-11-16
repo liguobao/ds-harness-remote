@@ -16,7 +16,7 @@ dsh plugin --profile desktop add -w ds-harness-remote@latest
 
 For a Web Host, use its actual launcher, `DSH_HOME` and profile (usually `web`). Restart when requested after switching sources, then check versions in Plugin management. Keep the profile and Remote credential directory.
 
-The Remote sidebar version badge remains a notice linking to release notes. Install updates through the local DSH Plugin management page. Updating Remote interrupts the remote connections it carries, so perform this operation on the machine running the plugin.
+The local Remote dialog offers an update only after its registry check finds a newer version and official Plugin management marks the installation updatable. Other sources retain a release link. Updating Remote interrupts its connections; operate locally. Before upgrade or downgrade, stop every Harness process and back up profiles and credentials; see the [integration guide](plugin-integration.md).
 
 ## Linux: DSH, one-time registration and boot startup
 
@@ -74,9 +74,9 @@ Older installer releases used `/opt/dsh-remote` and `dsh-remote-<profile>.servic
 - Existing Host credentials are never silently replaced. Stop the original Host and sign out through official controls before changing accounts with a fresh token.
 - If registration succeeds but service startup fails, credentials remain. Repair the environment and rerun without a token.
 - Units carry a canonical `DSH_HOME` ownership marker. Only matching installer-managed units are updated. Different homes, unmarked legacy units and symlinks are not taken over.
-- Web capability and unit ownership are preflighted before token redemption. Headless, SDK and terminal-only profiles (including `dsh-tui`) do not get Web units; use `DSH_REMOTE_AUTOSTART=0` and manage those processes separately. dsh-TUI integration itself is not part of this release.
+- Web capability and unit ownership are preflighted before token redemption. Headless, SDK and terminal-only profiles (including `dsh-tui`) do not get Web units; use `DSH_REMOTE_AUTOSTART=0` and manage those processes separately. For TUI profiles, install the matching standalone [ds-harness-remote-tui bundle](../packages/tui/README.md); enable only one Remote Host entry.
 - Only matching managed services are started/restarted. Other DSH processes are not stopped automatically; exit old foreground processes using the same home to prevent connection replacement or port conflicts.
-- Legacy services, runtimes and credentials are not migrated or deleted. There is no automatic rollback; failed bootstrap directories may remain for inspection.
+- Legacy services and runtimes are not migrated or deleted. Credentials are retained and their directory migration follows the rules above. There is no automatic rollback; failed bootstrap directories may remain for inspection.
 
 ## macOS: reuse Desktop / CLI
 
@@ -88,12 +88,12 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 
 The installer prefers Desktop's official launcher under `~/Applications` or `/Applications`, otherwise `dsh` on PATH. Both present is valid; neither present fails. It does not install Desktop, DSH or Node.js, or create services.
 
-Desktop defaults to `desktop`; standalone CLI defaults to `web`. Override with `DSH_COMMAND` / `DSH_PROFILE`. Token registration uses the same installer; restart the selected Desktop/CLI manually afterward. Without a token, sign in through Remote or `/remote login`.
+Desktop defaults to `desktop`; standalone CLI defaults to `web`. Override with `DSH_COMMAND` / `DSH_PROFILE`. Token registration uses the same installer; restart the selected Desktop/CLI manually afterward. Without a token, sign in through Remote or the standalone `ds-harness-remote login` CLI.
 
 Alternatively, open Desktop **Extensions / Plugin management** and install from npm:
 
 ```text
-ds-harness-remote@0.6.3
+ds-harness-remote@0.6.5
 ```
 
 An ordinary standalone CLI cannot manage the reserved `desktop` profile; use Desktop's official launcher.

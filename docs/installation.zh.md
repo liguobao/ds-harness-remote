@@ -16,7 +16,7 @@ dsh plugin --profile desktop add -w ds-harness-remote@latest
 
 Web Host 改用实际启动它的 `dsh`、`DSH_HOME` 和 profile（通常为 `web`）。切换安装来源后按宿主提示重启，再回插件页检查版本；不要删除 profile 或 Remote 凭据目录。
 
-Remote 侧栏的版本徽标仍是更新提示，点击链接打开发布页；实际安装在本机 DSH 插件页完成。更新 Remote 会中断它承载的远程连接，请在运行该插件的本机操作。
+本机 Remote 弹窗只有在 registry 检查发现新版、且官方管理器确认该安装可更新时，才提供在线升级；其他安装来源保留发布页链接。更新 Remote 会中断它承载的连接，请在运行该插件的本机操作。升级或降级前停止全部 Harness 进程并备份 profile 与凭据，锁与降级步骤见[接入指南](plugin-integration.md)。
 
 ## Linux：DSH + 一次性注册 + 开机自启
 
@@ -74,9 +74,9 @@ Remote 凭据存于 `$DSH_HOME/ds-harness-remote`（默认 `~/.dsh/ds-harness-re
 - 已有 Host 凭据时拒绝静默覆盖。换绑账号前，应停止原 Host 并通过官方入口退出登录，再使用新 Token。
 - 若已注册成功、随后服务启动失败，凭据仍保留；修复环境后不带 Token 重跑。
 - 服务带有规范化 `DSH_HOME` 归属标记。只允许更新匹配 home 的安装器管理服务；不同 home、无标记的旧服务和符号链接均不接管。
-- profile 的 Web 能力和服务归属在 Token 兑换之前预检查。`headless`、SDK 和终端类 profile（含 `dsh-tui`）不自动生成 Web 服务；可设置 `DSH_REMOTE_AUTOSTART=0`，自行管理进程。dsh-TUI 集成本身不在本版本内。
+- profile 的 Web 能力和服务归属在 Token 兑换之前预检查。`headless`、SDK 和终端类 profile（含 `dsh-tui`）不自动生成 Web 服务；可设置 `DSH_REMOTE_AUTOSTART=0`，自行管理进程。TUI profile 请安装同版本独立 [ds-harness-remote-tui 组合包](../packages/tui/README.md)，只启用一个 Remote Host entry。
 - 仅启动/重启归属匹配的管理服务，不自动停止其他 DSH 进程。使用同一 home 的旧前台进程应先手动退出，避免连接抢占或端口冲突。
-- 不自动迁移、删除旧服务、runtime 或凭据，不提供自动回滚。引导安装中途失败的私有目录可能保留，便于检查。
+- 不自动迁移或删除旧服务、runtime，不删除凭据；凭据目录按上述规则迁移。不提供自动回滚。引导安装中途失败的私有目录可能保留，便于检查。
 
 ## macOS：复用已有 Desktop / CLI
 
@@ -88,12 +88,12 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 
 优先使用 `~/Applications` 或 `/Applications` 的 Desktop 官方 launcher，否则 PATH 中的 `dsh`。两者都有时优先 Desktop；都没有才停止，不安装 Desktop、DSH 或 Node.js，不创建服务。
 
-Desktop 默认 `desktop` profile，独立 CLI 默认 `web`，可用 `DSH_COMMAND` / `DSH_PROFILE` 显式选择。Token 注册使用同一安装入口，安装后仍需手动重启所选 Desktop/CLI 实例。不传 Token 时在 Remote 或 `/remote login` 登录。
+Desktop 默认 `desktop` profile，独立 CLI 默认 `web`，可用 `DSH_COMMAND` / `DSH_PROFILE` 显式选择。Token 注册使用同一安装入口，安装后仍需手动重启所选 Desktop/CLI 实例。不传 Token 时在 Remote 登录界面或独立 `ds-harness-remote login` CLI 登录。
 
 Desktop 也可打开 **扩展 / 插件管理**，从 npm 安装：
 
 ```text
-ds-harness-remote@0.6.3
+ds-harness-remote@0.6.5
 ```
 
 普通独立 CLI 不能管理保留的 `desktop` profile，必须使用 Desktop 官方 launcher。

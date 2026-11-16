@@ -21,6 +21,7 @@ export interface SessionAccess extends StoreAccess {
 const MUX_FLUSH_MS = 100
 const MUX_FLUSH_MAX = 250
 const RECENT_WORKSPACE_LIMIT = 3
+const CATALOG_SYNC_DEBOUNCE_MS = 300
 
 /** Owns mutable connection generations, active streams and event-coalescing state. */
 export class SessionRuntime {
@@ -45,6 +46,9 @@ export class SessionRuntime {
   sessionLoadGeneration = 0
   reconnectFlight: Promise<boolean> | undefined
   createSessionFlight: Promise<boolean> | undefined
+  private catalogSyncTimer: ReturnType<typeof setTimeout> | undefined
+  private catalogSyncInFlight = false
+  private catalogSyncQueued = false
 
   constructor(private readonly store: StoreAccess) {}
 
@@ -120,6 +124,47 @@ export class SessionRuntime {
       this.muxFlushTimer = undefined
     }
     this.pendingMuxFrames = []
+    this.clearHarnessCatalogSync()
+  }
+
+  scheduleHarnessCatalogSync(): void {
+    const state = this.store.get()
+    if (state.connection.phase !== 'connected' || !state.hostSessionEvents) return
+    const generation = this.connectionGeneration
+    this.catalogSyncQueued = true
+    if (this.catalogSyncTimer !== undefined) clearTimeout(this.catalogSyncTimer)
+    this.catalogSyncTimer = setTimeout(() => {
+      this.catalogSyncTimer = undefined
+      void this.flushHarnessCatalogSync(generation)
+    }, CATALOG_SYNC_DEBOUNCE_MS)
+  }
+
+  private async flushHarnessCatalogSync(generation: number): Promise<void> {
+    if (generation !== this.connectionGeneration) return
+    if (this.catalogSyncInFlight || !this.catalogSyncQueued) return
+    const state = this.store.get()
+    if (state.connection.phase !== 'connected' || !state.hostSessionEvents) {
+      this.catalogSyncQueued = false
+      return
+    }
+    this.catalogSyncQueued = false
+    this.catalogSyncInFlight = true
+    try {
+      await state.syncHarnessCatalog()
+    } finally {
+      this.catalogSyncInFlight = false
+      if (this.catalogSyncQueued && generation === this.connectionGeneration) {
+        void this.flushHarnessCatalogSync(generation)
+      }
+    }
+  }
+
+  clearHarnessCatalogSync(): void {
+    if (this.catalogSyncTimer !== undefined) {
+      clearTimeout(this.catalogSyncTimer)
+      this.catalogSyncTimer = undefined
+    }
+    this.catalogSyncQueued = false
   }
 
   async refreshAntigravityCatalog(): Promise<void> {

@@ -1,5 +1,7 @@
-import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
-import { classifyControlClose } from '@dsh-remote/protocol'
+import { LanUploadRoutes } from './lan-upload'
+import { nativeWebSocketSender } from './native-websocket-binary'
+import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
+import { LAN_UPLOAD_CAPABILITY, TRANSPORT_UPGRADE_CAPABILITY, classifyControlClose, wireFromTransportTier } from '@dsh-remote/protocol'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { connectionFailure, connectionLog } from './connection-log'
@@ -7,7 +9,9 @@ import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
+import { nativeRtcFactory } from './native-rtc-binary'
 import { BotRemoteClient } from './bot-catalog'
+import { compactionStore } from './compaction-store'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
 export type CloseHandler = (options?: { retryable: boolean; lastTransport?: 'lan' | 'p2p' | 'turn' | 'relay' }) => void
@@ -19,6 +23,11 @@ export interface AndroidConnectionOptions {
   forceRelay?: boolean
   refreshAccessToken?: () => Promise<string>
   fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
+  /** Enable Relay-first authentication with parallel in-band WebRTC upgrade when available. */
+  relayFirstUpgrade?: boolean
+  /** Short bounded wait (ms) before initial history/catalog reads fall back to Relay (defaults to 450ms on Wi-Fi/LAN-capable routes and 250ms on cellular). */
+  initialDirectWaitMs?: number
+  onTransportUpgraded?: () => void
   onSecureHandshake?: () => void
   onWebRtcFallback?: () => void
   onClose?: CloseHandler
@@ -26,6 +35,9 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private binaryUploads = false
+  private lanUploads?: LanUploadRoutes
+  private sessionEventsSupported = false
   private pluginRouteSupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
@@ -39,6 +51,9 @@ export class AndroidRemoteConnection {
   private unsubscribeArchived?: () => void
   private muxHandler?: MuxFrameHandler
   private transport?: AdaptiveTransport
+  private secureChannel?: SecureTransport
+  private upgrader?: ClientLiveTransportUpgrader
+  private readonly legacyNoUpgradeHosts = new Set<string>()
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
@@ -69,19 +84,21 @@ export class AndroidRemoteConnection {
     let webRtcFallback = false
     let retryableClose = true
     let lastTransport: 'lan' | 'p2p' | 'turn' | 'relay' | undefined
-    const createTransport = (relayOnly: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
+    const createTransport = (relayFirst: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
       role: 'client',
+      rtcFactory: nativeRtcFactory(),
       deviceId: identity.deviceId,
       accessToken,
       refreshAccessToken: options.refreshAccessToken,
       targetDeviceId: host.deviceId,
-      forceRelay: options.forceRelay || relayOnly,
-      preferredTransports: options.forceRelay || relayOnly
+      forceRelay: options.forceRelay === true,
+      relayFirst,
+      preferredTransports: options.forceRelay
         ? ['relay']
         : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
       // TURN-only attempts may need extra time for relay allocation and TCP
       // fallback. Keep automatic hole punching on its shorter mobile budget.
-      negotiateTimeoutMs: !options.forceRelay && !relayOnly
+      negotiateTimeoutMs: !options.forceRelay && !relayFirst
         && options.preferredTransports?.includes('turn')
         && !options.preferredTransports.some(transport => transport === 'lan' || transport === 'p2p')
         ? 12_000
@@ -118,13 +135,21 @@ export class AndroidRemoteConnection {
           remoteCandidates: event.diagnostics.remoteCandidates.byType })
       },
     })
+    const rtcFactory = nativeRtcFactory()
+    const wantDirectUpgrade = options.relayFirstUpgrade === true
+      && !options.forceRelay
+      && rtcFactory !== undefined
+      && !this.legacyNoUpgradeHosts.has(host.deviceId)
+      && (options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay']).some(t => t !== 'relay')
     const connectCore = async (relayOnly: boolean) => {
       const transport = createTransport(relayOnly)
       this.transport = transport
+      const secure = new SecureTransport(transport, identity, host, options.onSecureHandshake)
+      this.secureChannel = secure
       // Host-side Typert calls are capped at 30s. Leave a small delivery
       // margin, then treat silence as an unhealthy business channel.
       const core = new RemoteClientCore(
-        new SecureTransport(transport, identity, host, options.onSecureHandshake),
+        secure,
         35_000,
       )
       this.core = core
@@ -136,12 +161,18 @@ export class AndroidRemoteConnection {
         // connection that may already be stored on this instance.
         if (this.core !== core) return
         this.clearHealthTimer()
+        void this.upgrader?.close()
+        this.upgrader = undefined
+        this.secureChannel = undefined
+        void this.lanUploads?.close()
+        this.lanUploads = undefined
         void this.closeMux?.(false)
         this.closeMux = undefined
         this.core = undefined
         this.proxy = undefined
         this.codex = undefined
-        this.codexAvailable = false
+        this.sessionEventsSupported = false
+    this.codexAvailable = false
         this.cursor = undefined
         this.acpBackends.clear()
         this.sessionTools = undefined
@@ -156,9 +187,47 @@ export class AndroidRemoteConnection {
       // the tunnel alive and switches its data plane to Relay. Rebuilding a
       // second relay-only connection doubled every fallback into two full
       // handshakes and added 10s+ to mobile connections.
-      const core = await connectCore(false)
+      const core = await connectCore(wantDirectUpgrade)
       const features = await probeRemoteHostFeatures(core, host.clientVersion)
       if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
+      if (features.capabilities.includes(TRANSPORT_UPGRADE_CAPABILITY)) {
+        this.legacyNoUpgradeHosts.delete(host.deviceId)
+      } else {
+        this.legacyNoUpgradeHosts.add(host.deviceId)
+      }
+      if (wantDirectUpgrade && rtcFactory !== undefined && this.secureChannel !== undefined && features.capabilities.includes(TRANSPORT_UPGRADE_CAPABILITY)) {
+        const preferLan = (options.preferredTransports ?? ['lan']).includes('lan')
+        const upgrader = new ClientLiveTransportUpgrader({
+          connectionId: this.transport!.connectionInfo().connectionId,
+          rpc: core,
+          channel: this.secureChannel,
+          rtcFactory,
+          fetchIceServers: options.fetchIceServers,
+          negotiateTimeoutMs: 6_000,
+          onUpgraded: mode => {
+            lastTransport = wireFromTransportTier(mode)
+            options.onTransportUpgraded?.()
+          },
+          onTelemetry: t => {
+            connectionLog('transport-upgrade', {
+              from: t.from,
+              to: t.to,
+              outcome: t.outcome,
+              durationMs: t.durationMs,
+              relaySentBytes: t.relayBytesAtOutcome?.sent,
+              relayReceivedBytes: t.relayBytesAtOutcome?.received,
+              errorName: t.reason,
+            })
+          },
+        })
+        this.upgrader = upgrader
+        void upgrader.promote({ preferLan })
+        // Give fast direct paths (LAN / low-RTT P2P) a short bounded window so
+        // initial history/catalog reads traverse WebRTC without Relay load when
+        // available, while weak cellular falls back to Relay without multi-second stalls.
+        await upgrader.waitForInitialWindow(options.initialDirectWaitMs ?? (preferLan ? 450 : 250))
+        if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
+      }
       const emitFrame = (frame: MuxStreamFrame) => {
         if (this.core !== core) return
         if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'failed') {
@@ -172,6 +241,16 @@ export class AndroidRemoteConnection {
         this.muxHandler?.(frame)
       }
       this.compactHistorySupported = features.capabilities.includes('remote.history.compact.v1')
+      this.binaryUploads = features.capabilities.includes('workspace.upload.v1') && features.capabilities.includes('workspace.upload.binary.v1')
+      const sender = this.binaryUploads && features.capabilities.includes(LAN_UPLOAD_CAPABILITY) ? nativeWebSocketSender() : undefined
+      const carrier = this.transport
+      if(sender && carrier) this.lanUploads = new LanUploadRoutes({
+        control: core, identity, host, sender,
+        current: () => this.core === core && this.transport === carrier,
+        mode: () => this.getStats()?.mode ?? carrier.getStats().mode,
+        details: () => this.getNetworkDetails(),
+        connectionId: () => carrier.connectionInfo().connectionId,
+      })
       this.applyBackendFeatures(core, features)
       this.unsubscribeArchived = this.cursor?.onSessionArchived(data => {
         if (this.core === core) options.onOpencodeArchived?.(data.sessionId)
@@ -183,11 +262,16 @@ export class AndroidRemoteConnection {
           {
             clientVersion: host.clientVersion,
             harnessVersion: host.harnessVersion,
+            capabilities: features.capabilities,
             ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
           },
           frame => emitFrame(frame as unknown as MuxStreamFrame),
+          { store: compactionStore, scope: host.deviceId },
         )
         alpha.start()
+        // Reconcile attempts persisted before the disconnect. This only queries
+        // the Host; it never submits a new compaction.
+        void alpha.resumeCompactions().catch(() => undefined)
         this.proxy = alpha
         this.closeMux = async (notifyRemote = true) => { await alpha.close(notifyRemote) }
       } else {
@@ -212,6 +296,7 @@ export class AndroidRemoteConnection {
   }
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
+    this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -280,9 +365,11 @@ export class AndroidRemoteConnection {
     )
   }
 
+  supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
+
   async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
     if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
-    return this.core.rpc<T>(method, params, signal)
+    return this.lanUploads ? this.lanUploads.rpc<T>(method, params, signal) : this.core.rpc<T>(method, params, signal)
   }
 
   /** Optional CodeX business client; available only when the Host advertises both domain capabilities. */
@@ -300,6 +387,10 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
+  }
+
+  hasSessionEvents(): boolean {
+    return this.sessionEventsSupported
   }
 
   hasCodex(): boolean {
@@ -426,8 +517,21 @@ export class AndroidRemoteConnection {
     this.healthTimer = undefined
   }
 
+  promoteTransport(options?: { preferLan?: boolean }): Promise<boolean> {
+    return this.upgrader?.promote(options) ?? Promise.resolve(false)
+  }
+
   async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
-    return await this.transport?.connectionDetails()
+    const base = await this.transport?.connectionDetails()
+    const upgraded = await this.upgrader?.connectionDetails()
+    if (upgraded !== undefined && base !== undefined) {
+      return {
+        ...base,
+        webRtcEnabled: true,
+        webRtc: upgraded,
+      }
+    }
+    return base
   }
 
   async close(): Promise<void> {
@@ -442,6 +546,14 @@ export class AndroidRemoteConnection {
     this.closeMux = undefined
     const core = this.core
     this.core = undefined
+    this.binaryUploads = false
+    const upgrader = this.upgrader
+    this.upgrader = undefined
+    this.secureChannel = undefined
+    await upgrader?.close()
+    const lanUploads = this.lanUploads
+    this.lanUploads = undefined
+    await lanUploads?.close()
     // Closing the whole transport makes a remote stream-close redundant.
     // Only remove the local subscription here so a half-open RTC path cannot
     // add another RPC timeout before recovery begins.

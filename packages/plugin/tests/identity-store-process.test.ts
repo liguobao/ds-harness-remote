@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -113,6 +114,23 @@ describe('identity lock across processes', () => {
     const contenders = [startWorker(directory), startWorker(directory)]
     const created = await Promise.all(contenders.map(contender => contender.done))
     expect(created[1]).toMatchObject({ deviceId: created[0]!.deviceId, publicKey: created[0]!.publicKey })
+    await expect(new IdentityStore({ directory }).loadOrCreate('Workstation')).resolves.toMatchObject({
+      publicKey: created[0]!.publicKey, privateKey: created[0]!.privateKey,
+    })
+  })
+
+  it('reclaims once when two processes race after an interrupted takeover left both device.lock and its real takeover claim', async () => {
+    const directory = await temporaryDirectory()
+    const lockRecord = `${await deadPid()}\n`
+    const takeoverRecord = `${await deadPid()}\n`
+    const takeoverName = `device.lock.takeover-${createHash('sha256').update(lockRecord).digest('hex').slice(0, 16)}`
+    await writeFile(join(directory, 'device.lock'), lockRecord)
+    await writeFile(join(directory, takeoverName), takeoverRecord)
+
+    const contenders = [startWorker(directory), startWorker(directory)]
+    const created = await Promise.all(contenders.map(contender => contender.done))
+    expect(created[1]).toMatchObject({ deviceId: created[0]!.deviceId, publicKey: created[0]!.publicKey })
+    expect((await readdir(directory)).sort()).toEqual(['device.json', 'device.key', 'trusted-peers.json'])
     await expect(new IdentityStore({ directory }).loadOrCreate('Workstation')).resolves.toMatchObject({
       publicKey: created[0]!.publicKey, privateKey: created[0]!.privateKey,
     })

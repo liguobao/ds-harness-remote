@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   Pressable,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
+import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
 import { ArrowLeft, Check, ChevronRight, Copy, Download, Puzzle, RefreshCw, Smartphone, X } from 'lucide-react-native'
 import { SvgXml } from 'react-native-svg'

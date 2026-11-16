@@ -1,6 +1,7 @@
+import { createRemoteUploadFetch } from './remote-upload-client.js'
 import { renderBodyPortal } from './client/portal.js'
-import type { Translate } from './client-locale.js'
-import { en, localeNamespace, zh } from './client-locale.js'
+import type { LocaleKey, Translate } from './client-locale.js'
+import { en, localeNamespace, ru, uk, zh } from './client-locale.js'
 import { createRemoteSessionHeaderAction } from './client/header.js'
 import { unwrapControlResult } from './client/control-result.js'
 import { pendingWorkspaceSelectionKey, storedWorkspaceSelection, workspacesReady } from './client/navigation.js'
@@ -71,6 +72,14 @@ const pluginRouteFetch = typeof originalPluginFetch === 'function' && typeof doc
   })
   : undefined
 if (pluginRouteFetch !== undefined) window.fetch = pluginRouteFetch
+// The official uploader reads this hook before Cordis boot, including in IDE.
+const uploadGlobal = globalThis as typeof globalThis & { __DSH_FILE_UPLOAD__?: { fetch: typeof fetch } }
+const previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__
+const remoteUploadHook = typeof originalPluginFetch === 'function' && typeof document !== 'undefined'
+  ? { fetch: createRemoteUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) }
+  : undefined
+if (remoteUploadHook !== undefined) uploadGlobal.__DSH_FILE_UPLOAD__ = remoteUploadHook
+
 
 function controlRouteUnavailableStatus(): RemoteStatus {
   return {
@@ -336,7 +345,7 @@ window.__ModuleLoader__.load({
       locale: {
         bind(namespace: string): Translate
         getLocale(): { active: 'zh' | 'en' }
-        register(namespace: string, dictionaries: { zh: typeof zh; en: typeof en }): () => void
+        register(namespace: string, dictionaries: { zh: typeof zh; en: typeof en } & Record<string, Record<LocaleKey, string>>): () => void
       }
       slots: {
         inject(name: string, factory: () => unknown): void
@@ -346,9 +355,25 @@ window.__ModuleLoader__.load({
       if (window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__) return
       window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = true
       readyPluginSessions(ctx.sessions)
+      // A shell may construct fileUpload before loading third-party modules.
+      ctx.inject(['fileUpload'], uploadContext => {
+        const service = uploadContext.get<{ post(request: { path: string; body: BodyInit; headers?: Record<string, string>; signal?: AbortSignal }): Promise<{ status: number; body: string }> }>('fileUpload')
+        if (service === undefined || remoteUploadHook === undefined) return
+        const originalPost = service.post
+        const post: typeof originalPost = async request => {
+          const response = await remoteUploadHook.fetch(request.path, { method: 'POST', body: request.body,
+            headers: request.headers, signal: request.signal })
+          return { status: response.status, body: await response.text() }
+        }
+        uploadContext.effect(() => {
+          service.post = post
+          return () => { if (service.post === post) service.post = originalPost }
+        }, 'ds-harness-remote: attachment upload carrier')
+      })
       ctx.effect(() => () => { window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = false }, 'ds-harness-remote: client singleton')
       ctx.effect(() => () => {
         if (pluginRouteFetch !== undefined && window.fetch === pluginRouteFetch) window.fetch = originalPluginFetch
+        if (uploadGlobal.__DSH_FILE_UPLOAD__ === remoteUploadHook) uploadGlobal.__DSH_FILE_UPLOAD__ = previousUploadHook
       }, 'ds-harness-remote: plugin route fetch')
 
       const t = ctx.locale.bind(localeNamespace)
@@ -564,9 +589,11 @@ window.__ModuleLoader__.load({
                   }
                 })
             },
-            onPick: (pick: { candidate: { label?: string; name: string } }) => {
-              const label = pick.candidate.label ?? pick.candidate.name
-              return { text: `@${label} ` }
+            onPick: (pick: { candidate: { label?: string; name: string; value: string } }) => {
+              // Use the selected candidate's identity, never the name-keyed UI
+              // cache: multiple Hosts can have the same display name.
+              const host = JSON.parse(pick.candidate.value) as { deviceId: string; label: string }
+              return { text: `@${host.label} (Remote hostId=${JSON.stringify(host.deviceId)}) ` }
             },
           }
           const stopHostFileOpen = (event: Event): void => {
@@ -598,7 +625,7 @@ window.__ModuleLoader__.load({
           }
         }, 'ds-harness-remote: host mention source')
       })
-      ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en }), 'ds-harness-remote: dictionaries')
+      ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en, ru, uk }), 'ds-harness-remote: dictionaries')
       ctx.effect(() => installStyle(clientModuleId), 'ds-harness-remote: client styles')
       ctx.effect(() => installTerminalAvailabilityNotice(statusFeed, t), 'ds-harness-remote: terminal availability notice')
       ctx.slots.inject('shell.overlay', () => ctx.slots.register({
