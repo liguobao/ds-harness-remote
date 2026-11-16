@@ -161,9 +161,9 @@ describe('ClaudeAcpClient startup isolation', () => {
       fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'login required' } })}\n`)
     })
     const client = new ClaudeAcpClient(undefined, logger(), () => fake.child)
-    await expect(client.start()).rejects.toMatchObject({ code: 'CURSOR_UPSTREAM_ERROR' })
+    await expect(client.start()).rejects.toMatchObject({ code: 'CLAUDE_UPSTREAM_ERROR' })
     expect(client.isReady()).toBe(false)
-    await expect(client.call('session/new', {})).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+    await expect(client.call('session/new', {})).rejects.toMatchObject({ code: 'CLAUDE_UNAVAILABLE' })
     expect(methods).toEqual(['initialize'])
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM')
     await client.close()
@@ -175,12 +175,12 @@ describe('ClaudeAcpClient startup isolation', () => {
     fake.child.stdin.on('data', chunk => { initializeId = JSON.parse(String(chunk)).id })
     const client = new ClaudeAcpClient(undefined, logger(), () => fake.child)
     const starting = client.start()
-    const rejection = expect(starting).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+    const rejection = expect(starting).rejects.toMatchObject({ code: 'CLAUDE_CLOSED' })
     await client.close()
     fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: initializeId, result: {} })}\n`)
     await rejection
     expect(client.isReady()).toBe(false)
-    await expect(client.start()).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+    await expect(client.start()).rejects.toMatchObject({ code: 'CLAUDE_CLOSED' })
   })
 
   it('cannot become ready after close races with an already delivered initialize response', async () => {
@@ -196,7 +196,7 @@ describe('ClaudeAcpClient startup isolation', () => {
         ? new CursorAcpClient('agent', logger(), () => fake.child)
         : new ClaudeAcpClient(undefined, logger(), () => fake.child)
       const starting = client.start()
-      const rejection = expect(starting).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+      const rejection = expect(starting).rejects.toMatchObject({ code: backend === 'cursor' ? 'CURSOR_CLOSED' : 'CLAUDE_CLOSED' })
       await client.close()
       await rejection
       expect(client.isReady(), backend).toBe(false)
