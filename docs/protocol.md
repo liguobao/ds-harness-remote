@@ -2196,3 +2196,12 @@ or oversized client-local files fail the prompt. Paths absent on the client rema
 text mentions for remote Host resolution.
 At most four files and 192 MiB total are accepted per prompt. Non-absolute and non-native `@` references keep their existing behavior. The remote Host's
 attachment service still controls file acceptance and storage.
+
+### Optional in-band live transport upgrade (`remote.transport.upgrade.v1`)
+
+When the Host advertises `remote.transport.upgrade.v1` in `harness.transport.describe`, a Client that completed its authenticated Noise IK session immediately over Relay may negotiate higher-tier WebRTC DataChannels (`TURN -> P2P -> LAN`) in-band without rotating Noise keys, resetting stream subscriptions, or altering the Relay Server:
+
+- **Handshake vs initial history separation**: Relay completes Noise authentication in parallel with WebRTC hole punching; Clients wait a short bounded direct window (default 450 ms on Wi-Fi/LAN-capable routes, 250 ms on cellular) before sending large initial history/catalog reads so fast LAN/P2P paths avoid Relay history load while high-latency cellular networks still fall back to Relay promptly.
+- **RPCs & events**: `remote.transport.upgrade.offer` (`{ attemptId, sdp } -> { attemptId, sdp }`), `remote.transport.upgrade.ice` (`{ attemptId, candidate } -> { ok: true }`, with responder trickle ICE emitted as `remote.transport.upgrade.ice` event), `remote.transport.upgrade.activate` (`{ attemptId, transport? } -> { activated, mode, previousLegEndCounter? }`), `remote.transport.upgrade.drain` (`{ attemptId, previousLegEndCounter } -> { ok: true }`), and `remote.transport.upgrade.abort` (`{ attemptId? } -> { ok: true }`).
+- **Authoritative Host path verification**: Tier promotion (`Relay < TURN < P2P < LAN`) strictly trusts the Host's own verified ICE candidate-pair telemetry (`connectionDetails().mode`); client hints never elevate a lower-tier path into `LAN` or `P2P`.
+- **Sequenced framing, watermark draining & bounded reorder**: Upgraded DataChannel frames prepend a 12-byte big-endian sequence header (`'DSHU' || uint64 noiseCounter`) before RTCH chunking. Both endpoints buffer out-of-order frames in `SequencedCiphertextReorderBuffer` (bounded by 256 frames, 4 MiB total bytes, and a 5 s gap timeout) and drain superseded WebRTC legs until `receivingCounter >= previousLegEndCounter` (bounded by a 3 s fallback deadline). Upgrade failure before activation keeps the current carrier intact; DataChannel loss after activation closes the tunnel so normal reconnect recovery runs.

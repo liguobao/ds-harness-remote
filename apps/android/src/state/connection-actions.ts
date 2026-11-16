@@ -89,6 +89,11 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             fetchIceServers: async connectionId => api.turnCredentials(connectionId),
             preferredTransports: [...preferredTransports],
             forceRelay,
+            relayFirstUpgrade: !forceRelay && preference === 'auto',
+            onTransportUpgraded: () => {
+              if (generation !== runtime.connectionGeneration) return
+              void get().refreshConnectionNetworkDetails()
+            },
             onWebRtcFallback: () => {
               if (generation !== runtime.connectionGeneration) return
               // Repeated negotiation failures on this host: remember to go
@@ -273,7 +278,13 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           await get().refreshConnectionNetworkDetails()
         }
       }
-      else await get().refreshConnectionNetworkDetails()
+      else {
+        await get().refreshConnectionNetworkDetails()
+        if (get().transportPreference === 'auto') {
+          const nextPreferred: readonly string[] = await resolveAutomaticPreferredTransports().catch(() => [])
+          void runtime.connection.promoteTransport({ preferLan: nextPreferred.includes('lan') })
+        }
+      }
     },
 
     async refreshConnectionNetworkDetails() {
