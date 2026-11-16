@@ -10,7 +10,7 @@ import {
 describe('Control frame byte limits', () => {
   it('exports the protocol defaults', () => {
     expect(MAX_CONTROL_FRAME_BYTES).toBe(64 * 1024)
-    expect(MAX_RELAY_FRAME_BYTES).toBe(1024 * 1024)
+    expect(MAX_RELAY_FRAME_BYTES).toBe(8 * 1024 * 1024)
   })
 
   it('enforces a negotiated Control limit', () => {

@@ -56,7 +56,20 @@ export const SERVER_SHUTDOWN_CLOSE_CODE = 4009
 export const SERVER_SHUTDOWN_CLOSE_REASON: string = SERVER_SHUTDOWN_REASON_NAME
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
-export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
+/**
+ * Upper bound for one Relay frame.
+ *
+ * The Host batches several secure-channel fragments into a single Relay frame,
+ * so a `session/follow` snapshot for a long conversation (500 messages, ~1.2 MB
+ * measured on an 18 MB session) used to exceed the former 1 MiB ceiling. The
+ * Server then tore the socket down (close 1006, no RATE_LIMITED), which clients
+ * surface as an interrupted conversation sync.
+ *
+ * The Server's per-second byte budget and backpressure thresholds derive from
+ * this value (16x / 4x), so raising it also scales the allowances that were
+ * sized for the old ceiling.
+ */
+export const MAX_RELAY_FRAME_BYTES = 8 * 1024 * 1024
 export const SECURE_FRAGMENT_CHUNK_BYTES = 48 * 1024
 export const MAX_SECURE_MESSAGE_BYTES = 4 * 1024 * 1024
 /** Decoded bytes carried by one authenticated Harness business transfer chunk. */
