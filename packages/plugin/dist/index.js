@@ -99686,8 +99686,8 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat4, open as open6, opendir, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
+import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat7, unlink as unlink3 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
@@ -99768,6 +99768,34 @@ var WorkspaceUploadBudget = class {
     };
   }
 };
+
+// packages/plugin/src/workspace-upload-cleanup.ts
+import { lstat as lstat4, opendir, unlink as unlink2 } from "node:fs/promises";
+import { join as join16 } from "node:path";
+var ORPHAN_UPLOAD_NAME = /^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu;
+async function cleanOrphanUploads(root2, dev, ino, budget) {
+  const now = Date.now();
+  if (now - (budget.scannedRoots.get(root2) ?? 0) < 60 * 60 * 1e3) return;
+  const cutoff = now - 24 * 60 * 60 * 1e3;
+  try {
+    const entries = await opendir(root2);
+    for await (const { name: name2 } of entries) {
+      if (!ORPHAN_UPLOAD_NAME.test(name2)) continue;
+      const path = join16(root2, name2);
+      if (budget.activePaths.has(path)) continue;
+      try {
+        const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
+        if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.geteuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
+        await unlink2(path);
+      } catch {
+      }
+    }
+  } catch {
+    return;
+  }
+  budget.scannedRoots.set(root2, now);
+  if (budget.scannedRoots.size > 1024) budget.scannedRoots.delete(budget.scannedRoots.keys().next().value);
+}
 
 // packages/plugin/src/workspace-upload.ts
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -99855,9 +99883,9 @@ var WorkspaceUploadHost = class {
     const root2 = await realpath6(sourceRoot);
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    await this.cleanOrphans(root2, directory.dev, directory.ino);
+    await cleanOrphanUploads(root2, directory.dev, directory.ino, this.budget);
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join17(root2, `.dsh-upload-${randomUUID16()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -99866,7 +99894,10 @@ var WorkspaceUploadHost = class {
       throw error62;
     }
     const upload = {
-      ...p,
+      sessionId: p.sessionId,
+      name: p.name,
+      totalBytes: p.totalBytes,
+      encoding: p.encoding,
       received: 0,
       touched: this.now(),
       root: root2,
@@ -99888,8 +99919,9 @@ var WorkspaceUploadHost = class {
     const p = binary ? binaryChunkParams.parse(input4) : chunkParams.parse(input4);
     const upload = this.requireUpload(p);
     if (binary !== (upload.encoding === "binary-v1")) throw failure4("UPLOAD_INVALID_CHUNK");
-    const data2 = typeof p.data === "string" ? Buffer.from(p.data, "base64") : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength);
-    if (!data2.length || data2.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || !binary && data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
+    const data2 = decodeChunk(p.data);
+    if (p.offset !== upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
+    if (data2.length > upload.totalBytes - upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
     await this.validateRoot(upload, this.authorityExpired(upload));
     await upload.reservation.checkDisk();
     let written = 0;
@@ -99916,7 +99948,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat4(upload.temp);
+    const temp = await lstat5(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -99924,7 +99956,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join16(upload.root, name2));
+        await link2(upload.temp, join17(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -99990,35 +100022,12 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat4(upload.root);
-      const temp = await lstat4(upload.temp);
-      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
+      const root2 = await lstat5(upload.root);
+      const temp = await lstat5(upload.temp);
+      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink3(upload.temp);
     } catch {
     }
     this.budget.activePaths.delete(upload.temp);
-  }
-  async cleanOrphans(root2, dev, ino) {
-    const now = Date.now();
-    if (now - (this.budget.scannedRoots.get(root2) ?? 0) < 60 * 60 * 1e3) return;
-    const cutoff = now - 24 * 60 * 60 * 1e3;
-    try {
-      const entries = await opendir(root2);
-      for await (const { name: name2 } of entries) {
-        if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name2)) continue;
-        const path = join16(root2, name2);
-        if (this.budget.activePaths.has(path)) continue;
-        try {
-          const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
-          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.geteuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
-          await unlink2(path);
-        } catch {
-        }
-      }
-    } catch {
-      return;
-    }
-    this.budget.scannedRoots.set(root2, now);
-    if (this.budget.scannedRoots.size > 1024) this.budget.scannedRoots.delete(this.budget.scannedRoots.keys().next().value);
   }
   async expire() {
     const cutoff = this.now() - this.ttlMs;
@@ -100028,6 +100037,13 @@ var WorkspaceUploadHost = class {
 };
 function failure4(code) {
   return new RpcError(code, "The workspace upload could not be completed.");
+}
+function decodeChunk(value) {
+  const data2 = typeof value === "string" ? Buffer.from(value, "base64") : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  const limit = typeof value === "string" ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES;
+  if (data2.length === 0 || data2.length > limit) throw failure4("UPLOAD_INVALID_CHUNK");
+  if (typeof value === "string" && data2.toString("base64") !== value) throw failure4("UPLOAD_INVALID_CHUNK");
+  return data2;
 }
 function validName(name2) {
   return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
@@ -102410,8 +102426,8 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { lstat as lstat6, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { dirname as dirname8, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
@@ -103234,7 +103250,7 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat5(root2);
+      const rootLstat = await lstat6(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
@@ -103242,11 +103258,11 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join17(currentPath, parts[i]);
+        currentPath = join18(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat5(currentPath);
+        const dirLstat = await lstat6(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -103254,7 +103270,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat5(candidate);
+      const targetLstat = await lstat6(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }
@@ -105277,7 +105293,7 @@ function decodeBase64(value) {
 // packages/plugin/src/cli.ts
 import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -105369,7 +105385,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join18(directory, "device.json"))) {
+  if (!await exists3(join19(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -105429,9 +105445,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join18(directory, "device.json")),
-    exists3(join18(directory, "device.key")),
-    exists3(join18(directory, "server-credentials.json"))
+    exists3(join19(directory, "device.json")),
+    exists3(join19(directory, "device.key")),
+    exists3(join19(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();

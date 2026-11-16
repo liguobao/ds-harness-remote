@@ -2,11 +2,12 @@ import { BINARY_UPLOAD_CHUNK_BYTES } from '@dsh-remote/protocol'
 import { workspaceUploadMaxBytes } from './workspace-transfer-limits.js'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { link, lstat, open, opendir, realpath, stat, unlink, type FileHandle } from 'node:fs/promises'
+import { link, lstat, open, realpath, stat, unlink, type FileHandle } from 'node:fs/promises'
 import { extname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { RpcError } from './safe-error.js'
 import { WorkspaceUploadBudget, type UploadReservation } from './workspace-upload-budget.js'
+import { cleanOrphanUploads } from './workspace-upload-cleanup.js'
 
 export const WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024
 export const WORKSPACE_UPLOAD_CHUNK = 64 * 1024
@@ -104,14 +105,29 @@ export class WorkspaceUploadHost {
     const root = await realpath(sourceRoot)
     const directory = await stat(root)
     if (!directory.isDirectory()) throw failure('UPLOAD_WORKSPACE_UNAVAILABLE')
-    await this.cleanOrphans(root, directory.dev, directory.ino)
+    await cleanOrphanUploads(root, directory.dev, directory.ino, this.budget)
     const reservation = await this.budget.reserve(root, directory.dev, p.sessionId, p.totalBytes)
     const temp = join(root, `.dsh-upload-${randomUUID()}.part`)
     let handle: FileHandle
     try { handle = await open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600) }
     catch (error) { reservation.release(); throw error }
-    const upload: Upload = { ...p, received: 0, touched: this.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle,
-      authorityCheckedAt: 0, authorityBytes: 0, reservation }
+    const upload: Upload = {
+      sessionId: p.sessionId,
+      name: p.name,
+      totalBytes: p.totalBytes,
+      encoding: p.encoding,
+      received: 0,
+      touched: this.now(),
+      root,
+      sourceRoot,
+      dev: directory.dev,
+      ino: directory.ino,
+      temp,
+      handle,
+      authorityCheckedAt: 0,
+      authorityBytes: 0,
+      reservation,
+    }
     this.uploads.set(p.uploadId, upload)
     this.budget.activePaths.add(temp)
     await this.validateRoot(upload)
@@ -122,9 +138,9 @@ export class WorkspaceUploadHost {
     const p = binary ? binaryChunkParams.parse(input) : chunkParams.parse(input)
     const upload = this.requireUpload(p)
     if (binary !== (upload.encoding === 'binary-v1')) throw failure('UPLOAD_INVALID_CHUNK')
-    const data = typeof p.data === 'string' ? Buffer.from(p.data, 'base64') : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength)
-    if (!data.length || data.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || (!binary && data.toString('base64') !== p.data)
-      || p.offset !== upload.received || upload.received + data.length > upload.totalBytes) throw failure('UPLOAD_INVALID_CHUNK')
+    const data = decodeChunk(p.data)
+    if (p.offset !== upload.received) throw failure('UPLOAD_INVALID_CHUNK')
+    if (data.length > upload.totalBytes - upload.received) throw failure('UPLOAD_INVALID_CHUNK')
     await this.validateRoot(upload, this.authorityExpired(upload))
     await upload.reservation.checkDisk()
     let written = 0
@@ -240,30 +256,6 @@ export class WorkspaceUploadHost {
     this.budget.activePaths.delete(upload.temp)
   }
 
-  private async cleanOrphans(root: string, dev: number, ino: number) {
-    const now = Date.now()
-    if (now - (this.budget.scannedRoots.get(root) ?? 0) < 60 * 60 * 1000) return
-    const cutoff = now - 24 * 60 * 60 * 1000
-    try {
-      const entries = await opendir(root)
-      for await (const { name } of entries) {
-        if (!/^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu.test(name)) continue
-        const path = join(root, name)
-        if (this.budget.activePaths.has(path)) continue
-        try {
-          const [directory, file] = await Promise.all([lstat(root), lstat(path)])
-          if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino
-            || !file.isFile() || file.dev !== dev || file.nlink !== 1
-            || file.uid !== process.geteuid?.() || (file.mode & 0o777) !== 0o600
-            || file.mtimeMs > cutoff) continue
-          await unlink(path)
-        } catch { /* A changed entry is not safe to remove. */ }
-      }
-    } catch { /* A failed scan must not block an authorized upload. */ return }
-    this.budget.scannedRoots.set(root, now)
-    if (this.budget.scannedRoots.size > 1024) this.budget.scannedRoots.delete(this.budget.scannedRoots.keys().next().value!)
-  }
-
   private async expire() {
     const cutoff = this.now() - this.ttlMs
     await Promise.all([...this.uploads].filter(([, u]) => u.touched <= cutoff).map(([id, u]) => this.discard(id, u)))
@@ -272,6 +264,15 @@ export class WorkspaceUploadHost {
 }
 
 function failure(code: string) { return new RpcError(code, 'The workspace upload could not be completed.') }
+function decodeChunk(value: string | Uint8Array): Buffer {
+  const data = typeof value === 'string'
+    ? Buffer.from(value, 'base64')
+    : Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  const limit = typeof value === 'string' ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES
+  if (data.length === 0 || data.length > limit) throw failure('UPLOAD_INVALID_CHUNK')
+  if (typeof value === 'string' && data.toString('base64') !== value) throw failure('UPLOAD_INVALID_CHUNK')
+  return data
+}
 function validName(name: string): boolean {
   return Buffer.byteLength(name, 'utf8') <= 220 && name !== '.' && name !== '..'
     && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name) && !/[. ]$/u.test(name)
