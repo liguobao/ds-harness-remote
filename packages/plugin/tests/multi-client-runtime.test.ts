@@ -214,7 +214,7 @@ describe('HostPluginRuntime multi-Client routing', () => {
         return ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
       }
       const missing = await describe()
-      expect(dispatch).toHaveBeenCalledWith('session/list', { args: { _request: {} } }, expect.any(AbortSignal))
+      expect(dispatch).toHaveBeenCalledWith('session/list', { args: { __remoteCapabilityProbe: true } }, expect.any(AbortSignal))
       expect(missing.some(value => value.startsWith('harness.remote.'))).toBe(false)
       expect(missing).not.toContain('harness.remote.stream.transfer.v1')
       await expect(probeRemoteHostFeatures({ rpc: async () => ({ capabilities: missing }) } as never))
@@ -226,11 +226,44 @@ describe('HostPluginRuntime multi-Client routing', () => {
     } finally { await runtime.close() }
   })
 
+  it('discovers capabilities for concurrent Clients without reading persisted sessions', async () => {
+    const gateway = localGateway()
+    const readSessions = vi.fn(() => new Promise<TypertRpcResult>(() => {}))
+    vi.mocked(gateway.dispatch).mockImplementation(async (endpoint, payload) => {
+      if (endpoint === 'session/list' && (payload as { args: object }).args
+        && '__remoteCapabilityProbe' in (payload as { args: object }).args) {
+        return { ok: false, error: { code: 'gateway/arguments-invalid', message: 'Unknown argument', details: {} } }
+      }
+      return readSessions()
+    })
+    const runtime = new HostPluginRuntime(config(), identities(), logger(), gateway)
+    const channels = [fakeChannel('slow-history-phone', 'phone'), fakeChannel('slow-history-tablet', 'tablet')]
+    try {
+      await runtime.start()
+      for (const channel of channels) await runtime.acceptAuthenticatedPeer(channel)
+      const requests = channels.map(channel => {
+        const request = createRpcRequest('harness.transport.describe', {})
+        channel.push(request)
+        return request
+      })
+      await vi.waitFor(() => {
+        for (const [index, channel] of channels.entries()) {
+          const response = channel.sent().find(row => row.type === 'rpc.response'
+            && (row.payload as RpcResponsePayload).requestId === requests[index]!.id)
+          expect(response).toBeDefined()
+          const capabilities = ((response!.payload as RpcResponsePayload).result as { capabilities: string[] }).capabilities
+          expect(capabilities.some(value => value === 'harness.remote.v1' || value === 'harness.remote.v3')).toBe(true)
+        }
+      })
+      expect(readSessions).not.toHaveBeenCalled()
+    } finally { await runtime.close() }
+  })
+
   it('runs /compact as a Host-owned operation with idempotent submission and status', async () => {
     const gateway = localGateway()
     let release!: (value: TypertRpcResult) => void
     vi.mocked(gateway.dispatch).mockImplementation(async (endpoint: string) => {
-      if (endpoint === 'session/list') return { ok: true as const, value: [] }
+      if (endpoint === 'session/list') return { ok: false as const, error: { code: 'gateway/arguments-invalid', message: 'Unknown argument', details: {} } }
       if (endpoint === 'commands/execute') {
         return await new Promise(resolve => { release = resolve })
       }
@@ -280,9 +313,10 @@ describe('HostPluginRuntime multi-Client routing', () => {
       { name: 'service unavailable', answer: { ok: false as const, error: {
         code: 'gateway/service-unavailable', message: 'Service unavailable', details: {},
       } }, message: 'The Host Session API is not ready.' },
-      { name: 'invalid arguments', answer: { ok: false as const, error: {
-        code: 'gateway/arguments-invalid', message: 'Invalid arguments', details: {},
+      { name: 'internal failure', answer: { ok: false as const, error: {
+        code: 'gateway/internal', message: 'Internal failure', details: {},
       } }, message: 'Cannot verify the Host Session API.' },
+      { name: 'unexpected success', answer: { ok: true as const }, message: 'The Host Gateway did not reject the Session API probe.' },
       { name: 'timeout', answer: new DOMException('Timed out', 'TimeoutError'), message: 'Cannot verify the Host Session API.' },
     ].map(({ name, answer, message }) => ({ name, run: async () => {
       const gateway = localGateway()
@@ -666,7 +700,9 @@ function identities(): IdentityStore {
 function localGateway(): LocalTypertGateway {
   return {
     invoke: vi.fn(async () => undefined),
-    dispatch: vi.fn(async () => ({ ok: true as const })),
+    dispatch: vi.fn(async (endpoint: string) => endpoint === 'session/list'
+      ? { ok: false as const, error: { code: 'gateway/arguments-invalid', message: 'Unknown argument', details: {} } }
+      : { ok: true as const }),
     open: vi.fn(async () => (async function* () { return })()),
     failure: vi.fn(() => ({ code: 'internal', message: 'failed', details: {} })),
     supportsCarrier: true,

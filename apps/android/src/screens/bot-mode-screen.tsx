@@ -33,6 +33,7 @@ import { BotConversation } from './bot/conversation'
 import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
+import { ExpandedComposer, type ExpandedComposerProps } from './chat/expanded-composer'
 import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
 
 export function BotModeScreen({
@@ -60,6 +61,7 @@ export function BotModeScreen({
 }) {
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
+  const [expandedComposerProps, setExpandedComposerProps] = useState<ExpandedComposerProps | null>(null)
   const device = useAppStore(store => store.selectedDevice)
   const connectionPhase = useAppStore(store => store.connection.phase)
   const hostScope = useAppStore(browseScope)
@@ -429,6 +431,7 @@ export function BotModeScreen({
                   active={active}
                   perform={perform}
                   onSelectBot={id => handleSelect(id)}
+                  onExpandedComposerChange={setExpandedComposerProps}
                 />
               ) : (loading && visibleError === undefined) || (connectionPhase === 'connected' && targetSessionId && !openError && state !== undefined) ? (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -475,6 +478,9 @@ export function BotModeScreen({
           onClose={() => setChatMoreOpen(false)}
           anchor="top-right"
         />
+        {conversationReady && expandedComposerProps !== null && (
+          <ExpandedComposer {...expandedComposerProps} />
+        )}
         {!drawerOpen && <BotModalsHost />}
       </View>
     </KeyboardInset>

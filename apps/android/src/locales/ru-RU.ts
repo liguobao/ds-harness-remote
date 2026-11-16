@@ -647,6 +647,7 @@ const ruRU = {
   },
   settings: {
     drawerLayoutMode: 'Макет боковой панели', drawerLayoutCompact: 'Компактный', drawerLayoutClassic: 'Развёрнутые карточки', drawerLayoutModeSaveFailed: 'Не удалось сохранить макет боковой панели',
+    quickPromptActionMode: 'Нажатие на быстрый запрос', quickPromptActionFill: 'Вставить в поле ввода', quickPromptActionSend: 'Отправить сразу', quickPromptActionSaveFailed: 'Не удалось сохранить настройку быстрых запросов',
     identityHint: "Нажмите на поле, чтобы посмотреть и скопировать полное значение.",
     copyIdentity: "Копировать",
     identityCopyFailed: "Не удалось скопировать. Повторите попытку.",

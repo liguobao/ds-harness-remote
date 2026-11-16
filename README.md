@@ -25,6 +25,10 @@
   <a href="https://dshfind.com/en/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=en" alt="dshfind downloads"></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/177732" target="_blank"><img src="https://trendshift.io/api/badge/repositories/177732" alt="liguobao%2Fds-harness-remote | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
+
 ## Connect once. Ready whenever you are.
 
 Continue using your DeepSeek Harness instance from a phone, computer, or browser. Return to the same Harness session from whichever device is with you.

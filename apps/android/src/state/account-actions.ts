@@ -35,6 +35,7 @@ import {
   loadTypographyDensity,
   loadActivityDockMode,
   loadDrawerLayoutMode,
+  loadQuickPromptActionMode,
   loadStatusBarVisible,
   loadTransportPreference,
   loadTrustedHosts,
@@ -49,6 +50,7 @@ import {
   saveTypographyDensity,
   saveActivityDockMode,
   saveDrawerLayoutMode,
+  saveQuickPromptActionMode,
   saveStatusBarVisible,
   trustHost,
 } from '../services/storage'
@@ -114,7 +116,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, drawerLayoutMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, drawerLayoutMode, quickPromptActionMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
@@ -124,6 +126,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           loadChatAppearance(),
           loadActivityDockMode(),
           loadDrawerLayoutMode(),
+          loadQuickPromptActionMode(),
           loadStatusBarVisible(),
           loadFavoriteWorkspaces(),
           loadRecentWorkspaces(),
@@ -144,6 +147,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           chatAppearance,
           activityDockMode,
           drawerLayoutMode,
+          quickPromptActionMode,
           statusBarVisible,
           compactHistory,
           defaultPermissionPreset,
@@ -543,6 +547,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
         activityDockMode: 'compact',
         drawerLayoutMode: 'compact',
+        quickPromptActionMode: 'fill',
         statusBarVisible: true,
         compactHistory: false,
         defaultPermissionPreset: 'default',
@@ -554,7 +559,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, drawerLayoutMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
+      const { config, identity, languagePreference, themePreference, typographyDensity, chatAppearance, activityDockMode, drawerLayoutMode, quickPromptActionMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       await clearBrowseMemory()
       if (config !== undefined && identity !== undefined) {
@@ -572,6 +577,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveChatAppearance(chatAppearance)
       await saveActivityDockMode(activityDockMode)
       await saveDrawerLayoutMode(drawerLayoutMode)
+      await saveQuickPromptActionMode(quickPromptActionMode)
       await saveStatusBarVisible(statusBarVisible)
       await saveCompactHistory(compactHistory)
       await saveDefaultPermissionPreset(defaultPermissionPreset)

@@ -1330,7 +1330,16 @@ export class AcpRemoteGateway {
   }
 
   private requireAcp(backend?: string): CursorAcpLike {
-    if (!this.config.enabled || (backend !== undefined && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend))) || !this.isAvailable()) {
+    if (!this.config.enabled) {
+      throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
+    }
+    // A backend the profile turned off is reported as configured-off, not as a
+    // generic outage: it is never launched, so "unavailable" would be misleading.
+    const configured = backend === undefined ? undefined : this.config.backends.find(item => item.id === backend)
+    if (configured !== undefined && !configured.enabled) {
+      throw new RpcError('ACP_BACKEND_DISABLED', `The ${backend} ACP backend is disabled by configuration.`)
+    }
+    if ((backend !== undefined && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend))) || !this.isAvailable()) {
       throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
     }
     if (backend !== undefined) {

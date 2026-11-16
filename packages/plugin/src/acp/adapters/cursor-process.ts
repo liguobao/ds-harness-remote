@@ -35,8 +35,25 @@ export type CursorAcpInboundHandler = (message: CursorAcpInbound) => void
 export type CursorAcpUnavailableHandler = (code: string) => void
 export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 
+/** Backends that reuse this stdio client and must keep their own failure vocabulary. */
+export type AcpAdapterBackend = 'cursor' | 'pi' | 'claude' | 'hermes'
+
+const ADAPTER_LABELS: Readonly<Record<AcpAdapterBackend, string>> = Object.freeze({
+  cursor: 'Cursor',
+  pi: 'Pi',
+  claude: 'Claude',
+  hermes: 'Hermes',
+})
+
 export interface CursorAcpOptions {
   modelBackend?: 'cursor' | 'claude' | 'hermes'
+  /**
+   * Backend that owns this process. Pi, Claude and Hermes reuse this client, so
+   * codes and log lines must name the backend that actually failed; otherwise a
+   * missing Pi/Claude binary is reported as `CURSOR_BINARY_UNAVAILABLE` while
+   * Cursor itself may be disabled.
+   */
+  backend?: AcpAdapterBackend
 
   args?: string[]
   cwd?: string
@@ -83,6 +100,11 @@ export class CursorAcpClient implements CursorAcpLike {
   private readonly modelStates = new Map<string, AcpSessionModelState>()
   private readonly modelBusy = new Set<string>()
 
+  /** Backend that owns this process: failure codes and log lines must name it. */
+  private get backend(): AcpAdapterBackend { return this.options.backend ?? 'cursor' }
+  private get adapterLabel(): string { return ADAPTER_LABELS[this.backend] }
+  private code(suffix: string): string { return `${this.backend.toUpperCase()}_${suffix}` }
+
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
@@ -96,7 +118,7 @@ export class CursorAcpClient implements CursorAcpLike {
   ) {}
 
   start(): Promise<void> {
-    if (this.closed) return Promise.reject(new CursorAcpError('CURSOR_CLOSED', 'The Cursor domain is closed.'))
+    if (this.closed) return Promise.reject(new CursorAcpError(this.code('CLOSED'), `The ${this.adapterLabel} domain is closed.`))
     if (this.ready) return Promise.resolve()
     this.startPromise ??= this.startOnce().finally(() => { this.startPromise = undefined })
     return this.startPromise
@@ -105,7 +127,7 @@ export class CursorAcpClient implements CursorAcpLike {
   isReady(): boolean { return this.ready }
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
-    if (!this.ready) throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not ready.')
+    if (!this.ready) throw new CursorAcpError(this.code('UNAVAILABLE'), `${this.adapterLabel} ACP is not ready.`)
     const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? undefined : 'cursor')
     const id = isRecord(params) && typeof params.sessionId === 'string' ? params.sessionId : undefined
     if (backend && (method === 'dsh/sessionModels' || method === 'dsh/selectModel')) {
@@ -170,7 +192,7 @@ export class CursorAcpClient implements CursorAcpLike {
     this.closed = true
     this.ready = false
     this.modelStates.clear()
-    this.failPending(new CursorAcpError('CURSOR_CLOSED', 'Cursor ACP was closed.'))
+    this.failPending(new CursorAcpError(this.code('CLOSED'), `${this.adapterLabel} ACP was closed.`))
     const child = this.process
     this.process = undefined
     if (child === undefined || child.exitCode !== null || child.killed) return
@@ -190,7 +212,7 @@ export class CursorAcpClient implements CursorAcpLike {
 
   private async startOnce(): Promise<void> {
     if (this.process !== undefined) {
-      throw new CursorAcpError('CURSOR_STARTING', 'Cursor ACP is already starting.')
+      throw new CursorAcpError(this.code('STARTING'), `${this.adapterLabel} ACP is already starting.`)
     }
     const child = this.spawnAcp(this.binary)
     this.process = child
@@ -205,21 +227,21 @@ export class CursorAcpClient implements CursorAcpLike {
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer.byteLength(chunk))
     })
     child.on('error', error => {
-      if (this.process === child) this.handleProcessFailure('CURSOR_BINARY_UNAVAILABLE', error)
+      if (this.process === child) this.handleProcessFailure(this.code('BINARY_UNAVAILABLE'), error)
     })
     child.on('exit', (code, signal) => {
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
       this.modelStates.clear()
-      this.failPending(new CursorAcpError('CURSOR_ACP_EXITED', 'Cursor ACP exited unexpectedly.'))
+      this.failPending(new CursorAcpError(this.code('ACP_EXITED'), `${this.adapterLabel} ACP exited unexpectedly.`))
       if (!this.closed) {
-        this.logger?.warn('Cursor ACP exited', {
+        this.logger?.warn(`${this.adapterLabel} ACP exited`, {
           code: code ?? 'none',
           signal: signal ?? 'none',
           stderrBytes: this.stderrBytes,
         })
-        this.notifyUnavailable('CURSOR_ACP_EXITED')
+        this.notifyUnavailable(this.code('ACP_EXITED'))
       }
     })
 
@@ -241,21 +263,21 @@ export class CursorAcpClient implements CursorAcpLike {
       }
       this.assertStarting(child)
       this.ready = true
-      this.logger?.info('Cursor ACP ready')
+      this.logger?.info(`${this.adapterLabel} ACP ready`)
     } catch (error) {
       this.ready = false
       this.modelStates.clear()
       if (this.process === child) this.process = undefined
       child.kill('SIGTERM')
       if (error instanceof CursorAcpError) throw error
-      throw new CursorAcpError('CURSOR_INITIALIZE_FAILED', 'Cursor ACP initialization failed.', { cause: error })
+      throw new CursorAcpError(this.code('INITIALIZE_FAILED'), `${this.adapterLabel} ACP initialization failed.`, { cause: error })
     }
   }
 
   private assertStarting(child: ChildProcessWithoutNullStreams): void {
-    if (this.closed) throw new CursorAcpError('CURSOR_CLOSED', 'Cursor ACP was closed.')
+    if (this.closed) throw new CursorAcpError(this.code('CLOSED'), `${this.adapterLabel} ACP was closed.`)
     if (this.process !== child || child.exitCode !== null || child.killed) {
-      throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not available.')
+      throw new CursorAcpError(this.code('UNAVAILABLE'), `${this.adapterLabel} ACP is not available.`)
     }
   }
 
@@ -264,7 +286,7 @@ export class CursorAcpClient implements CursorAcpLike {
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new CursorAcpError('CURSOR_REQUEST_TIMEOUT', 'Cursor ACP request timed out.'))
+        reject(new CursorAcpError(this.code('REQUEST_TIMEOUT'), `${this.adapterLabel} ACP request timed out.`))
       }, timeoutMs)
       timer.unref?.()
       this.pending.set(id, { resolve, reject, timer })
@@ -281,7 +303,7 @@ export class CursorAcpClient implements CursorAcpLike {
   private write(message: unknown): void {
     const child = this.process
     if (child === undefined || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not available.')
+      throw new CursorAcpError(this.code('UNAVAILABLE'), `${this.adapterLabel} ACP is not available.`)
     }
     child.stdin.write(`${JSON.stringify(message)}\n`)
   }
@@ -290,8 +312,8 @@ export class CursorAcpClient implements CursorAcpLike {
     this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer.concat([this.stdoutBuffer, chunk])
     if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
       this.handleProcessFailure(
-        'CURSOR_RESPONSE_TOO_LARGE',
-        new Error('Cursor ACP emitted an oversized JSONL message.'),
+        this.code('RESPONSE_TOO_LARGE'),
+        new Error(`${this.adapterLabel} ACP emitted an oversized JSONL message.`),
       )
       return
     }
@@ -309,18 +331,18 @@ export class CursorAcpClient implements CursorAcpLike {
     try {
       value = JSON.parse(line.toString('utf8'))
     } catch {
-      this.handleProcessFailure('CURSOR_INVALID_RESPONSE', new Error('Cursor ACP emitted invalid JSON.'))
+      this.handleProcessFailure(this.code('INVALID_RESPONSE'), new Error(`${this.adapterLabel} ACP emitted invalid JSON.`))
       return
     }
     if (!isRecord(value)) {
-      this.handleProcessFailure('CURSOR_INVALID_RESPONSE', new Error('Cursor ACP emitted an invalid message.'))
+      this.handleProcessFailure(this.code('INVALID_RESPONSE'), new Error(`${this.adapterLabel} ACP emitted an invalid message.`))
       return
     }
     if ((typeof value.id === 'number' || typeof value.id === 'string') && ('result' in value || 'error' in value)) {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(new CursorAcpError('CURSOR_UPSTREAM_ERROR', safeUpstreamError(value.error)))
+        pending.reject(new CursorAcpError(this.code('UPSTREAM_ERROR'), safeUpstreamError(value.error, this.adapterLabel)))
       } else {
         pending.resolve(value.result)
       }
@@ -342,11 +364,11 @@ export class CursorAcpClient implements CursorAcpLike {
   private handleProcessFailure(code: string, cause: Error): void {
     this.ready = false
     this.modelStates.clear()
-    this.failPending(new CursorAcpError(code, 'Cursor ACP communication failed.', { cause }))
+    this.failPending(new CursorAcpError(code, `${this.adapterLabel} ACP communication failed.`, { cause }))
     const child = this.process
     this.process = undefined
     child?.kill('SIGTERM')
-    this.logger?.warn('Cursor ACP communication failed', { code })
+    this.logger?.warn(`${this.adapterLabel} ACP communication failed`, { code })
     if (!this.closed) this.notifyUnavailable(code)
   }
 
@@ -369,14 +391,14 @@ export class CursorAcpClient implements CursorAcpLike {
   }
 }
 
-function safeUpstreamError(value: unknown): string {
-  if (!isRecord(value) || typeof value.message !== 'string') return 'Cursor ACP rejected the request.'
+function safeUpstreamError(value: unknown, label = 'Cursor'): string {
+  if (!isRecord(value) || typeof value.message !== 'string') return `${label} ACP rejected the request.`
   const message = value.message.toLowerCase()
   if (message.includes('auth') || message.includes('login') || message.includes('api key')) {
-    return 'Cursor ACP authentication failed.'
+    return `${label} ACP authentication failed.`
   }
-  if (message.includes('not initialized')) return 'Cursor ACP is not initialized.'
-  return 'Cursor ACP rejected the request.'
+  if (message.includes('not initialized')) return `${label} ACP is not initialized.`
+  return `${label} ACP rejected the request.`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,4 +1,24 @@
 export { LAN_UPLOAD_CAPABILITY, LAN_UPLOAD_MIN_BYTES, LAN_UPLOAD_TICKET_MS, LAN_UPLOAD_CONNECT_MS, lanUploadScopeSchema, lanUploadRequestSchema, lanUploadOfferSchema, isLanUploadAddress, validateLanUploadOffer, createLanUploadPrologue, type LanUploadOffer } from './lan-upload.js'
+export {
+  TRANSPORT_UPGRADE_CAPABILITY,
+  UPGRADE_SEQUENCE_HEADER_BYTES,
+  MAX_REORDER_BUFFERED_FRAMES,
+  MAX_REORDER_BUFFERED_BYTES,
+  DEFAULT_REORDER_GAP_TIMEOUT_MS,
+  DEFAULT_PREVIOUS_LEG_DRAIN_MS,
+  transportUpgradeCandidateSchema,
+  transportUpgradeOfferSchema,
+  transportUpgradeIceSchema,
+  transportUpgradeActivateSchema,
+  transportUpgradeDrainSchema,
+  transportUpgradeAbortSchema,
+  transportTierRank,
+  wireFromTransportTier,
+  wrapUpgradedTransportFrame,
+  unwrapUpgradedTransportFrame,
+  SequencedCiphertextReorderBuffer,
+  type TransportTier,
+} from './transport-upgrade.js'
 import { encodeBinaryUpload, decodeBinaryUpload } from './binary-upload.js'
 export { BINARY_UPLOAD_CAPABILITY, BINARY_UPLOAD_CHUNK_BYTES } from './binary-upload.js'
 export * from './loopback.js'
@@ -221,6 +241,7 @@ export const remoteEvents = [
   'acp.session.update',
   'acp.session.request_permission',
   'acp.session.closed',
+  'remote.transport.upgrade.ice',
 ] as const
 
 export const errorCodes = [

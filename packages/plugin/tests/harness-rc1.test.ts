@@ -22,6 +22,8 @@ describe('Harness RC.1 authenticated carrier', () => {
       const local = new TypertGatewaySwitch(gateway as unknown as TypertGatewayLike).local(peer)
       expect(await local.dispatch('session/list', { args: { _request: {} } }, new AbortController().signal))
         .toMatchObject({ ok: false, error: { code: 'gateway/invocation-unavailable' } })
+      expect(await local.dispatch('session/list', { args: { __remoteCapabilityProbe: true } }, new AbortController().signal))
+        .toMatchObject({ ok: false, error: { code: 'gateway/invocation-unavailable' } })
       const publish = vi.fn(async () => undefined)
       const warn = vi.fn()
       const bridge = new HarnessRemoteBridge(local, publish, { warn } as never)
@@ -66,6 +68,11 @@ describe('Harness RC.1 authenticated carrier', () => {
       const signal = new AbortController().signal
       expect(await local.dispatch('session/list', { args: {} }, signal))
         .toMatchObject({ ok: false, error: { code: 'gateway/arguments-invalid' } })
+      // Capability discovery must stop at Gateway validation, even when the
+      // backing list handler would block on a large persisted history.
+      expect(await local.dispatch('session/list', { args: { __remoteCapabilityProbe: true } }, signal))
+        .toMatchObject({ ok: false, error: { code: 'gateway/arguments-invalid' } })
+      expect(list).not.toHaveBeenCalled()
       expect(await local.dispatch('session/list', { args: { _request: {} } }, signal))
         .toEqual({ ok: true, value: [] })
       expect(list).toHaveBeenCalledWith({})

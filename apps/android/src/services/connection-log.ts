@@ -4,13 +4,13 @@ const limit = 500
 const allowed = new Set(['attempt', 'forceRelay', 'phase', 'reason', 'closeCode', 'transport',
   'connectionState', 'iceConnectionState', 'localCandidates', 'remoteCandidates',
   'protocol', 'localCandidateType', 'remoteCandidateType', 'status', 'durationMs', 'method', 'request', 'stage', 'errorName',
-  'listed', 'resolved', 'unpinned', 'keyMismatch', 'lookupFailed', 'missingTrusted'])
+  'listed', 'resolved', 'unpinned', 'keyMismatch', 'lookupFailed', 'missingTrusted', 'from', 'to', 'outcome', 'relaySentBytes', 'relayReceivedBytes'])
 const safeWords = new Set(['auto', 'lan', 'p2p', 'turn', 'relay', 'starting', 'secure', 'ready', 'failed',
   'closed', 'new', 'connecting', 'connected', 'disconnected', 'checking', 'completed',
   'gathering', 'complete', 'host', 'srflx', 'prflx', 'GET', 'POST', 'PATCH', 'DELETE',
   'tcp', 'udp', 'reassembly', 'message-handler', 'control-closed', 'webrtc-closed', 'timeout', 'network', 'control-close', 'control-error', 'invalid-control-frame',
   'transport-close', 'data-channel-close', 'decrypt', 'decode', 'dispatch', 'unknown',
-  'auth', 'devices', 'account', 'turn', 'other', 'authorization', 'handshake', 'unavailable', 'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'ZodError'])
+  'auth', 'devices', 'account', 'turn', 'other', 'authorization', 'handshake', 'unavailable', 'Relay', 'TURN', 'P2P', 'LAN', 'activated', 'skipped-not-higher', 'rejected', 'aborted', 'reorder-gap-timeout', 'TimeoutError', 'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'ZodError'])
 
 // Never stringify arbitrary errors, URLs, server responses, SDP or business data.
 function safeValue(value: unknown, depth = 0): unknown {
@@ -39,7 +39,7 @@ export function subscribeConnectionLog(listener: ConnectionLogListener): () => v
 
 export function connectionLog(
   event: 'connect' | 'handshake' | 'disconnect' | 'fallback' | 'selected-path' | 'stream-failed'
-    | 'health-failed' | 'secure-send-failed' | 'secure-receive-failed' | 'http' | 'devices',
+    | 'health-failed' | 'secure-send-failed' | 'secure-receive-failed' | 'http' | 'devices' | 'transport-upgrade',
   fields: Record<string, unknown> = {},
 ): void {
   const safe = Object.fromEntries(Object.entries(fields).filter(([key]) => allowed.has(key)).map(([key, value]) => [key, safeValue(value)]))

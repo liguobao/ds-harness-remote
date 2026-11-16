@@ -680,6 +680,7 @@ const enUS = {
     activityDockMode: 'Activity widgets', activityDockModeNote: 'Control how background tasks, subagents, and agent team appear above the composer',
     activityDockCompact: 'Compact pill bar', activityDockCards: 'Stacked cards', activityDockHidden: 'Always hidden', activityDockModeSaveFailed: 'Could not save activity widgets setting',
     drawerLayoutMode: 'Sidebar layout', drawerLayoutCompact: 'Compact', drawerLayoutClassic: 'Expanded cards', drawerLayoutModeSaveFailed: 'Could not save sidebar layout setting',
+    quickPromptActionMode: 'Quick prompt tap', quickPromptActionFill: 'Insert into input', quickPromptActionSend: 'Send immediately', quickPromptActionSaveFailed: 'Could not save quick prompt setting',
     statusBar: 'Show status bar', statusBarNote: 'Show the time, battery and network status at the top of the screen. Turn off to hide the system status bar.', statusBarSaveFailed: 'Could not save status bar setting', statusBarSaveFailedBody: 'Could not write to local storage. Please try again.',
     theme: 'Dark mode', themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System',
     chat: 'Chat',

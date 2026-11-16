@@ -51,7 +51,9 @@ it('ACP reconfiguration stops changed backends despite failed cleanup and retrie
       expect(old.close).toHaveBeenCalledTimes(1)
       expect(other.close).not.toHaveBeenCalled()
       expect(gateway.availableBackends()).toEqual(['antigravity'])
-      await expect(peer.call({ method: 'initialize', params: { backend: 'cursor' } })).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+      await expect(peer.call({ method: 'initialize', params: { backend: 'cursor' } })).rejects.toMatchObject({
+        code: action === 'disable' ? 'ACP_BACKEND_DISABLED' : 'CURSOR_UNAVAILABLE',
+      })
       await expect(peer.call({ method: 'initialize', params: { backend: 'antigravity' } })).resolves.toMatchObject({ backend: 'antigravity' })
       // Startup while cleanup remains pending cannot resurrect the old backend
       // or launch its replacement ahead of successful process cleanup.
