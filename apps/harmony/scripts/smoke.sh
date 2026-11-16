@@ -10,7 +10,7 @@
 # 判定口径（缺一不可）：
 #   1) 构建产出 signed hap
 #   2) 安装返回 install bundle successfully
-#   3) 拉起后 link.log 出现「已连接 ·」，并且传输是 lan/p2p/turn（不是空）
+#   3) 拉起后 link.log 出现「已连接 ·」，并且传输是 lan/p2p/turn/relay
 #   4) hilog 里没有 ArkTS 运行时崩溃（$fa_crash / jscrash / Unhandled exception）
 #
 # 退出码：0 通过 / 1 失败（并打印失败点）
@@ -67,7 +67,7 @@ CONNECTED=""
 while [ "$i" -lt "$WAIT" ]; do
   sleep 3
   i=$((i + 3))
-  CONNECTED=$(hdc -t "$DEV" shell "tail -n +$((BEFORE + 1)) $LOG_PATH 2>/dev/null" 2>/dev/null | grep "已连接 ·" | tail -1)
+  CONNECTED=$(hdc -t "$DEV" shell "tail -n +$((BEFORE + 1)) $LOG_PATH 2>/dev/null" 2>/dev/null | grep -E "已连接 · (lan|p2p|turn|relay)([^a-z]|$)" | tail -1)
   [ -n "$CONNECTED" ] && break
 done
 

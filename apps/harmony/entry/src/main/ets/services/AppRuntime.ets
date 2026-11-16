@@ -864,6 +864,7 @@ export class AppRuntime {
       this.connectedHostName = host.name.length > 0 ? host.name : '远程主机';
       this.connectedDeviceId = host.deviceId;
       this.transportLabel = relay.transportKind();
+      LinkLog.write('conn', '已连接 · ' + this.transportLabel);
       logInfo('connected to host ' + host.deviceId + ' transport=' + this.transportLabel);
       const lanSkip: string = relay.lanSkipReason();
       this.pushLinkEvent('已连接 · ' + this.transportLabel
