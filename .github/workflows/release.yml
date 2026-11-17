@@ -26,7 +26,9 @@ env:
 
 jobs:
   tui-manual:
-    if: github.event_name == 'workflow_dispatch'
+    # Publishes to npm under the project's own package name, so it must never
+    # run from a fork.
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'liguobao/ds-harness-remote'
     name: Publish or recover TUI package
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -88,7 +90,10 @@ jobs:
           fi
 
   release:
-    if: github.event_name == 'push'
+    # Publishes to npm and creates a GitHub Release, so it is restricted to the
+    # upstream repository. A fork tagging v* gets the CI build verification
+    # instead, which needs no credentials.
+    if: github.event_name == 'push' && github.repository == 'liguobao/ds-harness-remote'
     name: Build and publish release
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -120,7 +125,19 @@ jobs:
           const tui = await readJson('packages/tui/package.json')
           const androidPackage = await readJson('apps/android/package.json')
           const androidApp = await readJson('apps/android/app.json')
-          const versions = new Set([root.version, plugin.version, tui.version, androidPackage.version, androidApp.expo?.version])
+          const iosPackage = await readJson('apps/ios/package.json')
+          const iosApp = await readJson('apps/ios/app.json')
+          const appCore = await readJson('packages/app-core/package.json')
+          const versions = new Set([
+            root.version,
+            plugin.version,
+            tui.version,
+            androidPackage.version,
+            androidApp.expo?.version,
+            iosPackage.version,
+            iosApp.expo?.version,
+            appCore.version,
+          ])
           if (tui.dependencies['ds-harness-remote'] !== `workspace:${plugin.version}`) {
             throw new Error('TUI must depend on the matching Remote workspace version.')
           }
@@ -130,9 +147,12 @@ jobs:
             throw new Error(`Release versions do not match: ${[...versions].join(', ')}`)
           }
           const androidBuild = androidApp.expo?.android?.versionCode
-          const iosBuild = androidApp.expo?.ios?.buildNumber
+          const iosBuild = iosApp.expo?.ios?.buildNumber
           if (androidBuild === undefined || iosBuild === undefined || String(androidBuild) !== String(iosBuild)) {
             throw new Error('Android versionCode and iOS buildNumber must match for a release.')
+          }
+          if (androidApp.expo?.ios !== undefined) {
+            throw new Error('apps/android/app.json must not declare an ios section; apps/ios/app.json owns it.')
           }
           if (process.env.GITHUB_REF_NAME !== expectedTag) {
             throw new Error(`Expected tag ${expectedTag}, received ${process.env.GITHUB_REF_NAME}`)
@@ -328,7 +348,7 @@ jobs:
       - name: Verify bundled Android renderers
         env:
           DSH_REQUIRE_INTELLIGENT_UI: 'true'
-        run: node apps/android/scripts/verify-intelligent-ui-renderer.mjs
+        run: node packages/app-core/scripts/verify-intelligent-ui-renderer.mjs
 
       - name: Generate Android project
         run: pnpm --dir apps/android exec expo prebuild --platform android --no-install

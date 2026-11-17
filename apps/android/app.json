@@ -7,11 +7,6 @@
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "io.github.liguobao.dshremote",
-      "buildNumber": "72"
-    },
     "android": {
       "package": "io.github.liguobao.dshremote",
       "versionCode": 72,

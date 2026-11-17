@@ -1,0 +1,9 @@
+# dependencies
+node_modules/
+
+# typescript
+*.tsbuildinfo
+
+# Locally bundled terminal, PDF, Mermaid and Intelligent UI renderers.
+# Produced by scripts/build-*.mjs; see AGENTS.md.
+src/generated/
