@@ -13,48 +13,45 @@ wrapper scripts and the entry point.
 | `apps/android` | Android shell: entry point, `app.json`, Android config plugins, native modules |
 | `apps/ios` | iOS shell: entry point, `app.json`, `app.config.js`, iOS config plugins, Hermes scripts |
 
-The native `ios/` project is **not** committed. `expo prebuild --platform ios`
-regenerates it from `app.json`, `app.config.js` and `plugins/`, so every native
-setting must be expressible declaratively. This is the main difference from the
-private repository, where `ios/` is tracked because Xcode Cloud builds it
-directly.
+The native `ios/` project **is committed** (see below for how to regenerate it),
+because Xcode Cloud builds the workspace straight from the repository. `Pods/`,
+`build/` and `.xcode.env.local` stay ignored. Regeneration is always
+`pnpm --dir apps/ios run generate:ios` (pinned to `--no-clean`); a bare
+`expo prebuild --platform ios` deletes `ci_scripts/` and resets the team and
+version settings.
 
-## Deployment identity is not in the repository
+## Signing is Xcode Cloud's job; Actions only verifies
 
-This repository is public, so the Apple team and the signing material are
-supplied at build time.
+GitHub Actions never signs and never uploads. The unsigned `ios-build` job
+proves the app compiles on every relevant push, and Xcode Cloud — configured in
+App Store Connect against `apps/ios/ios/DSHRemote.xcworkspace` — owns signing,
+archiving and TestFlight distribution. Its bootstrap is
+`apps/ios/ios/ci_scripts/ci_post_clone.sh`; see
+[ios-xcode-cloud.md](ios-xcode-cloud.md).
 
-| Name | Kind | Value | Used by |
-| --- | --- | --- | --- |
-| `IOS_TEAM_ID` | Variable | Apple Developer team id | `app.config.js` (`APPLE_TEAM_ID`), `xcodebuild` `DEVELOPMENT_TEAM` |
-| `APP_STORE_CONNECT_ISSUER_ID` | Secret | Issuer UUID | archive, export, upload |
-| `APP_STORE_CONNECT_KEY_ID` | Secret | 10-character key id | archive, export, upload |
-| `APP_STORE_CONNECT_PRIVATE_KEY` | Secret | Full `.p8` contents | archive, export, upload |
-
-Configure these under **Settings → Secrets and variables → Actions**. The App
-Store Connect API key covers both automatic signing and the TestFlight upload,
-so no distribution certificate or provisioning profile needs to be stored here.
+No Apple credential is required by any workflow in this repository. The
+repository-level `IOS_TEAM_ID` variable and `APP_STORE_CONNECT_*` secrets, if
+configured, are inert: they would only be read by an Actions signing path if
+one is ever reintroduced.
 
 `EXPO_PUBLIC_*` values are inlined into the JavaScript bundle and are therefore
 never secrets. `EXPO_PUBLIC_DSH_REMOTE_SERVER` overrides the default server for
 a build; the in-app default stays user-editable.
 
-Forks build without any of this: the compile-verification job disables code
-signing, and `app.config.js` omits `appleTeamId` when `APPLE_TEAM_ID` is unset.
+Forks build without any configuration: the compile-verification job disables
+code signing, and `app.config.js` omits `appleTeamId` when `APPLE_TEAM_ID` is
+unset.
 
 ## Workflows
 
-**`ci.yml` → `ios-build`** compiles the app unsigned on every pull request that
-touches `apps/ios`, `packages/app-core`, the shared packages, `patches/` or the
-lockfile. It needs no Apple credentials, so it runs for fork pull requests. It
-proves the app still builds; it cannot produce an installable artifact.
+**`ci.yml` → `ios-build`** compiles the app unsigned on every pull request or
+branch push that touches `apps/ios`, `packages/app-core`, the shared packages,
+`patches/` or the lockfile. It needs no Apple credentials, so it runs for fork
+pull requests and fork branches alike. It proves the app still builds; it
+cannot produce an installable artifact.
 
-**`ios-release.yml` → `testflight`** runs on a `v*` tag, archives with automatic
-signing and uploads to TestFlight. It is pinned to the `ios-release`
-environment, so you can require a manual approval before anything is signed.
-
-macOS runners bill at ten times the Linux rate, which is why the unsigned job
-stays behind a path filter.
+macOS runners bill at ten times the Linux rate, which is why the job stays
+behind a path filter.
 
 ## Version coupling
 
@@ -73,10 +70,8 @@ and these to match each other:
 `release.yml` enforces both, and additionally rejects an `expo.ios` section in
 `apps/android/app.json` so the retired copy cannot drift back.
 
-Because GitHub Actions does not auto-increment the build number the way Xcode
-Cloud does, **`expo.ios.buildNumber` is authoritative and must be raised for
-every TestFlight upload.** App Store Connect rejects a duplicate
-`CFBundleVersion` for the same version string.
+Xcode Cloud auto-increments the TestFlight build number, so
+`expo.ios.buildNumber` acts as a floor rather than the shipped value.
 
 ## Native configuration that must stay declarative
 

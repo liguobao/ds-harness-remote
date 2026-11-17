@@ -1,12 +1,14 @@
 # iOS Xcode Cloud 配置
 
-本仓库的 iOS 有两条发布链路并存：
+iOS 的分工：**GitHub Actions 只验证编译（无签名、零凭据），Xcode Cloud 负责签名、
+归档和 TestFlight 分发**。
 
-| | GitHub Actions（`ios-release.yml`） | Xcode Cloud |
+| | GitHub Actions（`ci.yml` → `ios-build`） | Xcode Cloud |
 | --- | --- | --- |
-| 触发 | `v*` tag / 手动 | 分支 / tag / PR，在 App Store Connect 里配 |
-| 签名 | 仓库 secrets 里的 App Store Connect API key | Apple 侧管理，仓库零凭据 |
-| 前提 | 三个 `APP_STORE_CONNECT_*` secrets + `IOS_TEAM_ID` variable | 已提交的原生工程（本方案） |
+| 职责 | 证明代码能编译 | 签名 + 归档 + TestFlight 分发 |
+| 触发 | push / PR（路径过滤） | 分支 / tag / PR，在 App Store Connect 里配 |
+| 签名 | 关闭（`CODE_SIGNING_ALLOWED=NO`） | Apple 侧管理，仓库零凭据 |
+| 前提 | 无 | 已提交的原生工程（本方案） |
 
 Xcode Cloud 只执行 **workspace 旁边** 的 `ci_scripts/ci_post_clone.sh`（放仓库根
 目录不会被运行，私有仓库实测过），且要求工程在仓库里存在——所以本方案提交
@@ -51,8 +53,10 @@ team id 随 pbxproj 提交不是机密泄露：它出现在每一个已上架二
 - 发版 bump 版本 → 五处联动（app.json 两处、package.json、app-core、pbxproj
   两个配置块），Xcode Cloud 会自动递增 TestFlight build number，`buildNumber`
   只需是下限。
-- GitHub Actions 的 `ios-release.yml` 用 `buildNumber` 原值上传；同一版本
-  不要两条链路交叉上传，否则 App Store Connect 拒收重复 build。
+- 曾存在的 Actions 签名上传链路（`ios-release.yml`）已移除：Xcode Cloud 是唯一
+  分发通道，日常推送只需 `ci.yml` 的无签名编译验证通过。仓库里的
+  `APP_STORE_CONNECT_*` secrets 与 `IOS_TEAM_ID` variable 当前无任何 workflow
+  读取，保留无害；将来若恢复 Actions 签名路径可直接复用。
 
 ## 为什么不用"prebuild 生成、不提交工程"的方案
 

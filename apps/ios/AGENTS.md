@@ -38,19 +38,20 @@ profile、API key）不在仓库里，见下。
    `CFBundleVersion`；**pbxproj 的 `MARKETING_VERSION` /
    `CURRENT_PROJECT_VERSION` 需手动改两个配置块**（Debug + Release）。
 3. 跨端：`expo.ios.buildNumber` 必须等于 `apps/android` 的
-   `expo.android.versionCode`。Xcode Cloud 会自动递增 TestFlight build number，
-   `buildNumber` 是下限；GitHub Actions（ios-release.yml）用原值，两条链路
-   不要对同一版本号交叉上传。
+   `expo.android.versionCode`（`release.yml` 校验相等）。Xcode Cloud 会自动
+   递增 TestFlight build number，`buildNumber` 只需是下限。
 
-## GitHub Actions 与 Xcode Cloud 并存
+## 分工：Actions 验证编译，Xcode Cloud 负责签名分发
 
-- **GitHub Actions**（`ios-release.yml`）：tag 触发，签名材料走
-  `IOS_TEAM_ID`（variable）+ 三个 `APP_STORE_CONNECT_*`（secrets），
-  `app.config.js` 在构建时注入 team。适合公开仓库的自动化。
+- **GitHub Actions**（`ci.yml` → `ios-build`）：无签名编译验证
+  （`CODE_SIGNING_ALLOWED=NO`），不需要任何 Apple 凭据，fork 分支/PR 直接可跑。
+  Actions 不做签名、不上传 TestFlight。
 - **Xcode Cloud**：从已提交的工程直接构建，签名由 Apple 侧管理，仓库里
   不需要任何凭据。引导脚本 `ios/ci_scripts/ci_post_clone.sh` 负责 Node/pnpm、
   workspace 构建、渲染器、pod install 与 ExpoModulesJSI 预编译。配置步骤见
   [docs/ios-xcode-cloud.md](../../docs/ios-xcode-cloud.md)。
+- 仓库的 `APP_STORE_CONNECT_*` secrets 与 `IOS_TEAM_ID` variable 当前无任何
+  workflow 读取（曾用于已移除的 Actions 签名链路），保留无害。
 
 不要把 team id、证书、profile、`.p8` 或 `.env.local` 提交进来；`.gitignore`
 已覆盖常见后缀，别用 `-f` 绕过。`EXPO_PUBLIC_*` 会被内联进 JS bundle，
