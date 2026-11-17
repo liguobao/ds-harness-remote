@@ -135,8 +135,8 @@ Re-verify them on any dependency upgrade. Never apply them by editing
 pnpm install --frozen-lockfile
 pnpm --filter './packages/**' -r build
 pnpm --filter @dsh-remote/app-core run build:renderers
-pnpm --dir apps/ios exec expo prebuild --platform ios --no-install
-pod install --project-directory=apps/ios/ios
+APPLE_TEAM_ID=857C9KMARL pnpm --dir apps/ios run generate:ios
+(cd apps/ios/ios && pod install)
 pnpm --dir apps/ios run ios          # or open apps/ios/ios/DSHRemote.xcworkspace
 ```
 

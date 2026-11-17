@@ -774,8 +774,7 @@ export class AppRuntime {
       // 那样会直接判「桥未就绪」回落中继，用户看到的就是"明明同网段却显示中继"。
       await this.waitForRtcBridge(2500);
       relayOptions.rtc = this.rtcBridge;
-      // relay-first：先在中继上完成认证，再经已认证 RPC 在带内升级到 TURN/P2P/LAN。
-      // 桥没就绪时保持老行为（没有直连尝试，数据面本来就在中继上）。
+      // LAN 请求保持直连优先；回落中继后仍可经认证 RPC 带内升级。
       relayOptions.relayFirst = this.rtcBridge !== undefined && this.rtcBridge.isReady();
       // WebRTC 要 TURN/STUN 配置时现取：接口要求 active connection，正好在 connect.accepted 之后
       relayOptions.fetchIceServers = (connectionId: string): Promise<string> => {
@@ -872,7 +871,8 @@ export class AppRuntime {
       // 与主机并行协商 WebRTC 直连；切腿不重建 Noise、不重置订阅，失败就留在中继。
       const upgradeBridge: RtcBridge | undefined = this.rtcBridge;
       const upgradeCapable: boolean = features.capabilities.indexOf(TRANSPORT_UPGRADE_CAPABILITY) >= 0;
-      if (relayOptions.relayFirst && upgradeCapable && upgradeBridge !== undefined) {
+      if (relayOptions.relayFirst && relay.transportKind() === 'relay'
+        && upgradeCapable && upgradeBridge !== undefined) {
         const bearer: string = this.netMonitor !== undefined ? this.netMonitor.type : 'unknown';
         // Wi-Fi/有线/未知链路先按 LAN 思路只吃本地候选；蜂窝网络才去取 TURN 配置。
         const preferLan: boolean = bearer !== 'cellular';
@@ -2573,7 +2573,7 @@ export class AppRuntime {
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     const sessionId: string = this.currentSessionId;
-    if (harness === undefined || sessionId.length === 0) {
+    if (this.phase !== PHASE_CHAT || this.reconnecting || harness === undefined || sessionId.length === 0) {
       return;
     }
     const requestId: string = randomId();

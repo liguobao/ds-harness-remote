@@ -88,6 +88,7 @@ interface RelayTransportLike {
   transportKind(): string
   connect(): Promise<void>
   close(): void
+  send(data: Uint8Array): Promise<void>
 }
 
 interface RelayTransportOptionsLike {
@@ -95,6 +96,7 @@ interface RelayTransportOptionsLike {
   accessToken: string
   targetDeviceId: string
   relayFirst: boolean
+  preferredTransports: string[]
   rtc?: object
 }
 
@@ -450,6 +452,10 @@ describe('SecureTransport in-band upgrade', () => {
 
 class FakeBridge {
   readyCalls = 0
+  sent: string[] = []
+
+  send(data: string): void { this.sent.push(data) }
+  closeAll(): void {}
 
   isReady(): boolean {
     this.readyCalls += 1
@@ -457,12 +463,13 @@ class FakeBridge {
   }
 }
 
-function makeRelay(relayFirst: boolean, bridge: FakeBridge): RelayTransportLike {
+function makeRelay(relayFirst: boolean, bridge: FakeBridge, lan = false): RelayTransportLike {
   const options = new mod.RelayTransportOptions()
   options.deviceId = 'client-device'
   options.accessToken = 'token'
   options.targetDeviceId = 'host-device'
   options.relayFirst = relayFirst
+  options.preferredTransports = lan ? ['lan', 'p2p', 'turn', 'relay'] : ['p2p', 'turn', 'relay']
   options.rtc = bridge
   return new mod.RelayTransport('ws://relay.invalid/ws/v1/connect', options)
 }
@@ -482,6 +489,16 @@ describe('RelayTransport relay-first data path', () => {
     expect(relay.transportKind()).toBe('relay')
   })
 
+  it('preserves LAN intent with relayFirst and falls back when the bridge is unavailable', () => {
+    const bridge = new FakeBridge()
+    const relay = makeRelay(true, bridge, true)
+    ;(relay as unknown as { handleConnectAccepted(frame: ConnectAcceptedFrame): void })
+      .handleConnectAccepted({ payload: { connectionId: 'conn-1' } })
+    expect(bridge.readyCalls).toBe(1)
+    expect(relay.isAuthorized()).toBe(true)
+    expect(relay.transportKind()).toBe('relay')
+  })
+
   it('still attempts the direct RTC link when relayFirst is disabled', () => {
     const bridge = new FakeBridge()
     const relay = makeRelay(false, bridge)
@@ -489,6 +506,21 @@ describe('RelayTransport relay-first data path', () => {
       .handleConnectAccepted({ payload: { connectionId: 'conn-1' } })
     expect(bridge.readyCalls).toBe(1)
     expect(relay.transportKind()).toBe('relay')
+  })
+
+  it.each(['lan', 'p2p', 'turn'])('keeps %s ciphertext on the RTC data channel', async mode => {
+    const bridge = new FakeBridge()
+    const relay = makeRelay(true, bridge, true)
+    const state = relay as unknown as {
+      connectionId: string; rtcTransport: string; rtcOpened(): void
+    }
+    state.connectionId = 'conn-1'
+    state.rtcTransport = mode
+    state.rtcOpened()
+    expect(relay.transportKind()).toBe(mode)
+    await relay.send(new Uint8Array([1, 2, 3]))
+    expect(bridge.sent).toEqual([mod.toBase64Url(new Uint8Array([1, 2, 3]))])
+    relay.close()
   })
 
   it('forwards the relay wire counter through onMessageWithCounter', () => {

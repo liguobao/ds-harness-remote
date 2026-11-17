@@ -734,7 +734,7 @@ struct Index {
   }
 
   private sendTap(): void {
-    if (this.reconnecting) {
+    if (this.phase !== PHASE_CHAT || this.reconnecting) {
       promptAction.showToast({ message: this.tr('正在重连，连上后再发') });
       return;
     }

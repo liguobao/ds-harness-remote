@@ -6,7 +6,7 @@
 
 客户端提供账号登录、Host 选择、多会话、历史与流式回复、模型和权限选择、图片与语音输入，以及 LAN/P2P/TURN/Relay 连接。具体可用功能取决于 Host 暴露的能力。
 
-连接默认先在中继上完成 Noise 认证；Host 通告 `remote.transport.upgrade.v1` 时，客户端再经已认证 RPC 在带内升级到 TURN/P2P/LAN 直连（见 [协议 §带内传输升级](protocol.md)）。升级失败保持中继数据面，不阻断会话；切换不重建 Noise 密钥、不重置流订阅。初始目录/历史读取与升级协商有界并行：Wi-Fi/有线最多等待 450 ms、蜂窝最多 250 ms 后回落中继。
+连接默认优先尝试 WebRTC（LAN/P2P/TURN），失败后回落中继并完成 Noise 认证；Host 通告 `remote.transport.upgrade.v1` 时，尚在中继上的客户端再经已认证 RPC 在带内升级到 TURN/P2P/LAN 直连（见 [协议 §带内传输升级](protocol.md)）。升级失败保持中继数据面，不阻断会话；切换不重建 Noise 密钥、不重置流订阅。初始目录/历史读取与升级协商有界并行：Wi-Fi/有线最多等待 450 ms、蜂窝最多 250 ms 后回落中继。
 
 本客户端是独立实现，不代表与 Android、Codex 或 ACP 客户端完全等价。它不在手机上运行 Host，不改写 Host 的会话存储。协议以 [protocol.md](protocol.md)、共享包及 `fixtures/` 为准。
 
