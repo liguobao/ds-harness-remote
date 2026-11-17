@@ -23,10 +23,8 @@ export interface AndroidConnectionOptions {
   forceRelay?: boolean
   refreshAccessToken?: () => Promise<string>
   fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
-  /** Enable Relay-first authentication with parallel in-band WebRTC upgrade when available. */
-  relayFirstUpgrade?: boolean
-  /** Short bounded wait (ms) before initial history/catalog reads fall back to Relay (defaults to 450ms on Wi-Fi/LAN-capable routes and 250ms on cellular). */
-  initialDirectWaitMs?: number
+  /** Allow in-band upgrade after initial direct negotiation has fallen back to Relay. */
+  liveTransportUpgrade?: boolean
   onTransportUpgraded?: () => void
   onSecureHandshake?: () => void
   onWebRtcFallback?: () => void
@@ -53,7 +51,6 @@ export class AndroidRemoteConnection {
   private transport?: AdaptiveTransport
   private secureChannel?: SecureTransport
   private upgrader?: ClientLiveTransportUpgrader
-  private readonly legacyNoUpgradeHosts = new Set<string>()
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
@@ -84,7 +81,7 @@ export class AndroidRemoteConnection {
     let webRtcFallback = false
     let retryableClose = true
     let lastTransport: 'lan' | 'p2p' | 'turn' | 'relay' | undefined
-    const createTransport = (relayFirst: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
+    const createTransport = () => new AdaptiveTransport(websocketUrl(baseUrl), {
       role: 'client',
       rtcFactory: nativeRtcFactory(),
       deviceId: identity.deviceId,
@@ -92,13 +89,12 @@ export class AndroidRemoteConnection {
       refreshAccessToken: options.refreshAccessToken,
       targetDeviceId: host.deviceId,
       forceRelay: options.forceRelay === true,
-      relayFirst,
       preferredTransports: options.forceRelay
         ? ['relay']
         : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
       // TURN-only attempts may need extra time for relay allocation and TCP
       // fallback. Keep automatic hole punching on its shorter mobile budget.
-      negotiateTimeoutMs: !options.forceRelay && !relayFirst
+      negotiateTimeoutMs: !options.forceRelay
         && options.preferredTransports?.includes('turn')
         && !options.preferredTransports.some(transport => transport === 'lan' || transport === 'p2p')
         ? 12_000
@@ -136,13 +132,12 @@ export class AndroidRemoteConnection {
       },
     })
     const rtcFactory = nativeRtcFactory()
-    const wantDirectUpgrade = options.relayFirstUpgrade === true
+    const wantDirectUpgrade = options.liveTransportUpgrade === true
       && !options.forceRelay
       && rtcFactory !== undefined
-      && !this.legacyNoUpgradeHosts.has(host.deviceId)
       && (options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay']).some(t => t !== 'relay')
-    const connectCore = async (relayOnly: boolean) => {
-      const transport = createTransport(relayOnly)
+    const connectCore = async () => {
+      const transport = createTransport()
       this.transport = transport
       const secure = new SecureTransport(transport, identity, host, options.onSecureHandshake)
       this.secureChannel = secure
@@ -187,15 +182,14 @@ export class AndroidRemoteConnection {
       // the tunnel alive and switches its data plane to Relay. Rebuilding a
       // second relay-only connection doubled every fallback into two full
       // handshakes and added 10s+ to mobile connections.
-      const core = await connectCore(wantDirectUpgrade)
+      const core = await connectCore()
       const features = await probeRemoteHostFeatures(core, host.clientVersion)
       if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
-      if (features.capabilities.includes(TRANSPORT_UPGRADE_CAPABILITY)) {
-        this.legacyNoUpgradeHosts.delete(host.deviceId)
-      } else {
-        this.legacyNoUpgradeHosts.add(host.deviceId)
-      }
-      if (wantDirectUpgrade && rtcFactory !== undefined && this.secureChannel !== undefined && features.capabilities.includes(TRANSPORT_UPGRADE_CAPABILITY)) {
+      // Only Relay fallback needs an in-band upgrade. Initial WebRTC legs use
+      // unsequenced framing and must not enter the sequenced upgrade path.
+      if (wantDirectUpgrade && rtcFactory !== undefined && this.secureChannel !== undefined
+        && this.transport?.getStats().mode === 'Relay'
+        && features.capabilities.includes(TRANSPORT_UPGRADE_CAPABILITY)) {
         const preferLan = (options.preferredTransports ?? ['lan']).includes('lan')
         const upgrader = new ClientLiveTransportUpgrader({
           connectionId: this.transport!.connectionInfo().connectionId,
@@ -222,11 +216,6 @@ export class AndroidRemoteConnection {
         })
         this.upgrader = upgrader
         void upgrader.promote({ preferLan })
-        // Give fast direct paths (LAN / low-RTT P2P) a short bounded window so
-        // initial history/catalog reads traverse WebRTC without Relay load when
-        // available, while weak cellular falls back to Relay without multi-second stalls.
-        await upgrader.waitForInitialWindow(options.initialDirectWaitMs ?? (preferLan ? 450 : 250))
-        if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
       }
       const emitFrame = (frame: MuxStreamFrame) => {
         if (this.core !== core) return

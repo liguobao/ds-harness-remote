@@ -1,6 +1,6 @@
 import { browseScope, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
-import { initialProbeTransports } from '../lib/network-route'
+import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
@@ -69,13 +69,15 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         await runtime.closeActiveCursorStream(false)
         const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
         const preference = get().transportPreference
-        const relayOnlyActive = (get().relayOnlyUntil ?? 0) > Date.now()
+        const requestedTransports: readonly PreferredTransport[] = preference === 'turn'
+          ? ['turn', 'relay'] as const
+          : await resolveAutomaticPreferredTransports()
+        // A failure remembered on cellular must not suppress LAN negotiation
+        // after returning to Wi-Fi (or during an unknown startup network state).
+        const relayOnlyActive = !requestedTransports.includes('lan')
+          && (get().relayOnlyUntil ?? 0) > Date.now()
         const forceRelay = options.forceRelay === true || preference === 'relay' || relayOnlyActive
-        const preferredTransports = forceRelay
-          ? ['relay'] as const
-          : preference === 'turn'
-            ? ['turn', 'relay'] as const
-            : await resolveAutomaticPreferredTransports()
+        const preferredTransports = forceRelay ? ['relay'] as const : requestedTransports
         if (generation !== runtime.connectionGeneration) return false
         set({ connectionStage: 'transport', connectionProbeOrder: initialProbeTransports(preferredTransports) })
         await runtime.connection.connect(
@@ -89,7 +91,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             fetchIceServers: async connectionId => api.turnCredentials(connectionId),
             preferredTransports: [...preferredTransports],
             forceRelay,
-            relayFirstUpgrade: !forceRelay && preference === 'auto',
+            liveTransportUpgrade: !forceRelay && preference === 'auto',
             onTransportUpgraded: () => {
               if (generation !== runtime.connectionGeneration) return
               void get().refreshConnectionNetworkDetails()
@@ -99,7 +101,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
               // Repeated negotiation failures on this host: remember to go
               // straight to the relay data plane for a while.
               runtime.webRtcFallbackStreak += 1
-              if (runtime.webRtcFallbackStreak >= 2) {
+              if (runtime.webRtcFallbackStreak >= 2 && !preferredTransports.includes('lan')) {
                 set({ relayOnlyUntil: Date.now() + RELAY_DOWNGRADE_MS })
               }
             },

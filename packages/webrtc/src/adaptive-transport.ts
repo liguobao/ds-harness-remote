@@ -52,7 +52,7 @@ export interface AdaptiveTransportOptions {
   onParallelConnections?: () => void
   onWebRtcStarted?: (timeoutMs: number) => void
   forceRelay?: boolean
-  /** Select Relay immediately for initial setup while keeping WebRTC/TURN in preferredTransports for in-band upgrade. */
+  /** Select Relay for initial setup only on routes that do not request LAN; LAN always negotiates WebRTC first. */
   relayFirst?: boolean
   /** Control authorization only, ending at connect.accepted. */
   handshakeTimeoutMs?: number
@@ -427,7 +427,7 @@ export class AdaptiveTransport extends BaseTransport {
   private async negotiate(signal: AbortSignal): Promise<void> {
     if (this.connectionId === undefined) return
     const preferred = this.negotiatedTransports()
-    const wantWebRtc = !this.options.forceRelay && !this.options.relayFirst && this.webrtcEnabled
+    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || preferred.includes('lan')) && this.webrtcEnabled
       && (preferred.includes('lan') || preferred.includes('p2p') || preferred.includes('turn'))
     let selected: SelectedTransport = 'relay'
     this.lastRtcDiagnostics = undefined

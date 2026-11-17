@@ -7,7 +7,7 @@ import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '..
 import { workspaceStableKey } from '../src/lib/workspace-key'
 import { ForegroundConnectionRecovery } from '../src/services/connection-recovery'
 
-const { proxy, transport, storage, authenticate, acp, codex, botDispatch } = vi.hoisted(() => ({
+const { proxy, transport, storage, authenticate, acp, codex, botDispatch, network } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn() },
@@ -16,9 +16,10 @@ const { proxy, transport, storage, authenticate, acp, codex, botDispatch } = vi.
   codex: { request: vi.fn(), subscribe: vi.fn() },
   authenticate: vi.fn(),
   botDispatch: vi.fn(),
+  network: { preferred: ['relay'] as Array<'lan' | 'p2p' | 'turn' | 'relay'> },
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
-vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => ['relay'] }))
+vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => network.preferred }))
 vi.mock('../src/services/connection', async () => {
   const { BotRemoteClient } = await import('../src/services/bot-catalog')
   return { AndroidRemoteConnection: class {
@@ -65,6 +66,7 @@ const page = (events: HistoryEntry[], throughSeq = 10) => ({ events, throughSeq,
 
 const prepareScenario1 = () => {
   vi.resetAllMocks()
+  network.preferred = ['relay']
   transport.checkHealth.mockResolvedValue(true)
   transport.hasCodex.mockReturnValue(false)
   transport.hasCursor.mockReturnValue(false)
@@ -610,6 +612,24 @@ describe('session restore state machine', () => {
     finish(page([call()]))
     expect(await old).toBe(false)
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s2')
+  })
+  it('ignores remembered Relay downgrade on LAN-capable networks while honoring explicit Relay', async () => {
+    await runScenarios([
+      { name: 'Wi-Fi after cellular failures', preferred: ['lan', 'p2p', 'turn', 'relay'], preference: 'auto', force: false },
+      { name: 'cellular cooldown', preferred: ['p2p', 'turn', 'relay'], preference: 'auto', force: true },
+      { name: 'explicit Relay on Wi-Fi', preferred: ['lan', 'p2p', 'turn', 'relay'], preference: 'relay', force: true },
+    ].map(row => ({ name: row.name, run: async () => {
+      prepareScenario1()
+      network.preferred = row.preferred as typeof network.preferred
+      useAppStore.setState({
+        config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never,
+        transportPreference: row.preference as 'auto' | 'relay', relayOnlyUntil: Date.now() + 600_000,
+      })
+      expect(await useAppStore.getState().connectDevice({ deviceId: 'host' } as never)).toBe(true)
+      const options = transport.connect.mock.calls[0]![5]
+      expect(options.forceRelay).toBe(row.force)
+      expect(options.preferredTransports).toEqual(row.force ? ['relay'] : row.preferred)
+    } })), prepareScenario1)
   })
   it('restores the selected conversation once for overlapping reconnect requests', async () => {
     useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })

@@ -53,12 +53,19 @@ const testState = vi.hoisted(() => ({
   cores: [] as FakeCore[],
   connectGate: undefined as undefined | (() => Promise<void>),
   transportOptions: [] as AdaptiveTransportOptions[],
+  transportMode: 'Relay' as 'LAN' | 'P2P' | 'TURN' | 'Relay',
+  upgrades: 0,
 }))
 
 vi.mock('@dsh-remote/client-core', async () => {
   const actual = await vi.importActual<typeof import('@dsh-remote/client-core')>('@dsh-remote/client-core')
   return {
     ...actual,
+    ClientLiveTransportUpgrader: class {
+      constructor() { testState.upgrades += 1 }
+      async promote() { return false }
+      async close() {}
+    },
     RemoteClientCore: class {
       constructor() {
         const core = new FakeCore()
@@ -71,7 +78,10 @@ vi.mock('@dsh-remote/client-core', async () => {
 
 vi.mock('@dsh-remote/webrtc', () => ({ AdaptiveTransport: class {
   constructor(_url: string, options: AdaptiveTransportOptions) { testState.transportOptions.push(options) }
+  getStats() { return { mode: testState.transportMode, connected: true } }
+  connectionInfo() { return { connectionId: 'conn-1' } }
 } }))
+vi.mock('../src/services/native-rtc-binary', () => ({ nativeRtcFactory: () => ({ create() {} }) }))
 vi.mock('../src/services/secure-transport', () => ({ SecureTransport: class {} }))
 
 import { AndroidRemoteConnection } from '../src/services/connection'
@@ -102,12 +112,38 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
     testState.cores.length = 0
     testState.connectGate = undefined
     testState.transportOptions.length = 0
+    testState.transportMode = 'Relay'
+    testState.upgrades = 0
   }
 beforeEach(prepareScenario1)
 afterEach(async () => {
   await Promise.all(testState.cores.map(core => core.close()))
   vi.useRealTimers()
 })
+
+  it('tries direct transport before authentication and upgrades only a Relay fallback', async () => {
+    await runScenarios([
+      { name: 'LAN', mode: 'LAN', capable: true, forceRelay: false, upgrades: 0 },
+      { name: 'P2P', mode: 'P2P', capable: true, forceRelay: false, upgrades: 0 },
+      { name: 'TURN', mode: 'TURN', capable: true, forceRelay: false, upgrades: 0 },
+      { name: 'Relay fallback', mode: 'Relay', capable: true, forceRelay: false, upgrades: 1 },
+      { name: 'legacy Host', mode: 'Relay', capable: false, forceRelay: false, upgrades: 0 },
+      { name: 'explicit Relay', mode: 'Relay', capable: true, forceRelay: true, upgrades: 0 },
+    ].map(row => ({ name: row.name, run: async () => {
+      prepareScenario1()
+      testState.transportMode = row.mode as typeof testState.transportMode
+      testState.capabilities = ['harness.remote.v1', ...(row.capable ? ['remote.transport.upgrade.v1'] : [])]
+      const connection = new AndroidRemoteConnection()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, {
+        liveTransportUpgrade: true, forceRelay: row.forceRelay,
+      })
+      const options = testState.transportOptions[0]!
+      expect(options.relayFirst).not.toBe(true)
+      expect(options.preferredTransports).toEqual(row.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'])
+      expect(testState.upgrades).toBe(row.upgrades)
+      await connection.close()
+    } })), prepareScenario1)
+  })
 
   it('scopes binary upload support to the current Host and clears it on close', async () => {
     const connection = new AndroidRemoteConnection()
