@@ -1,3 +1,5 @@
+import { connectPreferredTransport } from './preferred-connection.js'
+import type { AdaptiveTransportOptions } from '@dsh-remote/webrtc'
 import { RemoteClientCore } from '@dsh-remote/client-core'
 import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
 import { AdaptiveTransport } from '@dsh-remote/webrtc'
@@ -12,7 +14,6 @@ import {
   ClientModeError,
   diagnosticReason,
   DIRECT_LAN_PROGRESS_DISPLAY_MS,
-  DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
   iceServersForAttempt,
   preferredTransportsForAttempt,
   shortId,
@@ -80,8 +81,7 @@ export class ClientConnection {
           targetDeviceId: shortId(target.deviceId),
         })
       }
-      let webRtcFallback = false
-      const createTransport = (attempt: TransportAttempt): AdaptiveTransport => new AdaptiveTransport(
+      const createTransport = (attempt: TransportAttempt, hooks: Partial<AdaptiveTransportOptions> = {}): AdaptiveTransport => new AdaptiveTransport(
         websocketUrl(this.context.server.baseUrl),
         {
           role: 'client',
@@ -91,11 +91,10 @@ export class ClientConnection {
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === 'relay',
           preferredTransports: preferredTransportsForAttempt(attempt),
-          negotiateTimeoutMs: attempt === 'direct' ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : undefined,
           ...(rtcFactory === undefined || attempt === 'relay' ? {} : { rtcFactory }),
           fetchIceServers: async connectionId => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
+          ...hooks,
           onWebRtcFallback: (error, diagnostics) => {
-            webRtcFallback = true
             this.context.logger.warn(attempt === 'direct'
               ? 'remote Harness direct WebRTC failed; trying TURN'
               : 'remote Harness TURN WebRTC failed; using relay', {
@@ -113,38 +112,24 @@ export class ClientConnection {
           },
         },
       )
-      const attempts: TransportAttempt[] = this.context.config.forceRelay || rtcFactory === undefined
-        ? ['relay']
-        : ['direct', 'turn', 'relay']
-      let transport: AdaptiveTransport | undefined
-      for (const attempt of attempts) {
-        webRtcFallback = false
-        const stopProgressTimer = options.background ? () => undefined : this.beginAttemptProgress(progressRunId, attempt)
-        try {
-          transport = createTransport(attempt)
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target), 60_000)
-          closed = false
-          closeError = undefined
-          client.onClose(error => { closed = true; closeError = error })
-          const attemptClient = client
-          signal?.throwIfAborted()
-          await attemptClient.connect()
-          signal?.throwIfAborted()
-        } finally {
-          stopProgressTimer()
+      const stopProgressTimer = options.background ? () => undefined : this.beginAttemptProgress(progressRunId, 'direct')
+      let transport: AdaptiveTransport
+      try {
+        signal?.throwIfAborted()
+        if (this.context.config.forceRelay || rtcFactory === undefined) {
+          transport = createTransport('relay', { signal })
+          await transport.connect()
+        } else {
+          transport = await connectPreferredTransport(createTransport, signal)
         }
-        if (attempt === 'relay' || !webRtcFallback) break
-        await client.close()
-        client = undefined
-        transport = undefined
-        if (attempt === 'turn') {
-          this.context.logger.info('remote Harness relay fallback re-established', {
-            targetDeviceId: shortId(target.deviceId),
-          })
-        }
-      }
-      if (client === undefined || transport === undefined) {
-        throw new ClientModeError('CONNECTION_FAILED', 'Unable to establish a remote transport.', true)
+        client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target), 60_000)
+        closed = false
+        closeError = undefined
+        client.onClose(error => { closed = true; closeError = error })
+        await client.connect()
+        signal?.throwIfAborted()
+      } finally {
+        stopProgressTimer()
       }
       const connectedClient = client
       const connectedTransport = transport

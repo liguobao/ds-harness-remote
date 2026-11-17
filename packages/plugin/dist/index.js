@@ -65186,6 +65186,8 @@ var connectIncomingPayloadSchema = external_exports.object({
   relayEpoch: external_exports.number().int().nonnegative().optional()
 });
 var connectAcceptedPayloadSchema = external_exports.object({
+  webrtcFallbackTimeoutMs: external_exports.number().int().positive().max(2147483647).optional(),
+  parallelConnections: external_exports.boolean().optional(),
   relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
@@ -66377,6 +66379,112 @@ function canonicalBase64ToBytes(value) {
     bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
+
+// packages/webrtc/dist/direct-preferred-race.js
+var DirectPreferredRace = class {
+  signal;
+  windowMs;
+  result;
+  resolve;
+  reject;
+  settled = false;
+  windowExpired = false;
+  directFailed = false;
+  turnFailed = false;
+  standby;
+  windowTimer;
+  deadlineTimer;
+  deadlineAt;
+  started = /* @__PURE__ */ new Set();
+  abort = () => this.finish(void 0, new Error("RTC race aborted"));
+  constructor(signal, windowMs = 3e3, deadlineMs = 12e3, deferWindow = false) {
+    this.signal = signal;
+    this.windowMs = windowMs;
+    this.result = new Promise((resolve10, reject) => {
+      this.resolve = resolve10;
+      this.reject = reject;
+    });
+    this.deadlineAt = Date.now() + deadlineMs;
+    this.armDeadline(deadlineMs);
+    signal.addEventListener("abort", this.abort, { once: true });
+    if (signal.aborted)
+      this.abort();
+    else if (!deferWindow)
+      this.startWindow();
+  }
+  /** Preserve each configured RTC budget without allowing repeated events to prolong it. */
+  startAttempt(attempt, timeoutMs) {
+    if (this.settled || this.started.has(attempt))
+      return;
+    this.started.add(attempt);
+    if (attempt === "direct")
+      this.startWindow();
+    const deadline = Date.now() + timeoutMs;
+    if (deadline > this.deadlineAt) {
+      this.deadlineAt = deadline;
+      clearTimeout(this.deadlineTimer);
+      this.armDeadline(timeoutMs);
+    }
+  }
+  armDeadline(delayMs) {
+    this.deadlineTimer = setTimeout(() => {
+      this.windowExpired = true;
+      if (!this.chooseStandby())
+        this.finish(void 0, new Error("RTC race timed out"));
+    }, delayMs);
+  }
+  startWindow() {
+    if (this.settled || this.windowTimer !== void 0)
+      return;
+    this.windowTimer = setTimeout(() => {
+      this.windowExpired = true;
+      this.chooseStandby();
+    }, this.windowMs);
+  }
+  ready(attempt, value) {
+    if (this.settled || (attempt === "direct" ? this.directFailed : this.turnFailed))
+      return;
+    if (attempt === "direct")
+      this.finish({ attempt, value });
+    else {
+      this.standby = value;
+      this.chooseStandby();
+    }
+  }
+  failed(attempt) {
+    if (this.settled)
+      return;
+    if (attempt === "direct")
+      this.directFailed = true;
+    else {
+      this.turnFailed = true;
+      this.standby = void 0;
+    }
+    if (this.directFailed && this.turnFailed)
+      this.finish(void 0, new Error("Both RTC attempts failed"));
+    else
+      this.chooseStandby();
+  }
+  chooseStandby() {
+    if (this.standby === void 0 || !(this.windowExpired || this.directFailed))
+      return false;
+    this.finish({ attempt: "turn", value: this.standby });
+    return true;
+  }
+  finish(winner, error62) {
+    if (this.settled)
+      return;
+    this.settled = true;
+    clearTimeout(this.windowTimer);
+    clearTimeout(this.deadlineTimer);
+    this.signal.removeEventListener("abort", this.abort);
+    this.standby = void 0;
+    if (winner)
+      this.resolve(winner);
+    else
+      this.reject(error62 ?? new Error("RTC race failed"));
+  }
+};
 
 // packages/webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
@@ -67638,7 +67746,7 @@ var AdaptiveTransport = class extends BaseTransport {
       const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
       this.options.signal?.addEventListener("abort", onAbort, { once: true });
       this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
-      this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
+      this.handshakeTimer = setTimeout(() => this.failConnection(Object.assign(new Error("Adaptive control handshake timed out"), { code: "TRANSPORT_SETUP_FAILED" })), this.options.handshakeTimeoutMs ?? 15e3);
       const socket = this.socket;
       socket.onmessage = (event) => {
         if (this.socket === socket)
@@ -67657,7 +67765,7 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       socket.onerror = () => {
         if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(new Error("Control socket failed"), { reason: "control-error" });
+          this.controlLost(Object.assign(new Error("Control socket failed"), { code: "TRANSPORT_SETUP_FAILED" }), { reason: "control-error" });
       };
       socket.onclose = (event) => {
         if (this.lifetime === lifetime && this.socket === socket)
@@ -67806,6 +67914,11 @@ var AdaptiveTransport = class extends BaseTransport {
           throw new Error("connect.accepted did not include a connectionId");
         }
         this.connectionId = payload.connectionId;
+        if (this.options.useServerNegotiateTimeout && typeof payload.webrtcFallbackTimeoutMs === "number") {
+          this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs;
+        }
+        if (payload.parallelConnections === true)
+          this.options.onParallelConnections?.();
         if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
           this.recoveryTicket = payload.recoveryTicket;
         if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY))
@@ -67927,6 +68040,8 @@ var AdaptiveTransport = class extends BaseTransport {
         await this.rtc?.close();
         throwIfAborted(signal);
         this.rtc = void 0;
+        if (this.options.failOnWebRtcFallback)
+          throw Object.assign(new Error("WebRTC attempt failed"), { code: "RTC_NEGOTIATION_FAILED", cause: reason });
         if (!preferred.includes("relay"))
           throw reason;
         this.dataMode = "relay";
@@ -67976,8 +68091,9 @@ var AdaptiveTransport = class extends BaseTransport {
       iceServers = [];
     }
     throwIfAborted(signal);
-    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
+    const negotiatedMs = this.options.useServerNegotiateTimeout ? Math.min(2147483647, this.serverNegotiateTimeoutMs ?? this.options.negotiateTimeoutMs ?? 8e3) : negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
     const effectiveNegotiateTimeoutMs = iceServers.length === 0 ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS) : negotiatedMs;
+    this.options.onWebRtcStarted?.(effectiveNegotiateTimeoutMs ?? 8e3);
     const rtc = new RtcDataChannelTransport({
       role: "initiator",
       factory,
@@ -71111,7 +71227,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
 };
 
 // packages/plugin/src/client-runtime-contract.ts
-var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
 var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
   "ACCOUNT_AUTH_REQUIRED",
@@ -71428,6 +71543,91 @@ var ClientCodexStreams = class {
     }));
   }
 };
+
+// packages/plugin/src/preferred-connection.ts
+async function connectPreferredTransport(create, signal) {
+  const lifetime = new AbortController();
+  const cancel = () => lifetime.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  const race = new DirectPreferredRace(lifetime.signal, 3e3, 25e3, true);
+  const candidates = /* @__PURE__ */ new Map();
+  const unsubscribes = [];
+  let fatal;
+  let chosen;
+  let finished = false;
+  let succeeded = false;
+  const begin = (attempt) => {
+    if (finished || lifetime.signal.aborted || candidates.has(attempt)) return;
+    try {
+      const transport = create(attempt, {
+        signal: lifetime.signal,
+        failOnWebRtcFallback: true,
+        useServerNegotiateTimeout: true,
+        onParallelConnections: attempt === "direct" ? () => begin("turn") : void 0,
+        onWebRtcStarted: (timeoutMs) => race.startAttempt(attempt, timeoutMs)
+      });
+      candidates.set(attempt, transport);
+      let ready = false;
+      unsubscribes.push(transport.onClose(() => {
+        if (ready) race.failed(attempt);
+      }));
+      void transport.connect().then(() => {
+        if (finished || lifetime.signal.aborted) return;
+        const mode2 = transport.getStats().mode;
+        if (attempt === "direct" ? mode2 !== "LAN" && mode2 !== "P2P" : mode2 !== "TURN") {
+          race.failed(attempt);
+          void transport.close();
+          if (attempt === "direct") begin("turn");
+          return;
+        }
+        ready = true;
+        race.ready(attempt, transport);
+      }).catch((error62) => {
+        if (finished || lifetime.signal.aborted) return;
+        const candidateFailed = ["RTC_NEGOTIATION_FAILED", "TRANSPORT_SETUP_FAILED"].includes(error62?.code) || error62?.code === "TRANSPORT_CLOSED" && error62?.retryable === true;
+        if (!candidateFailed) {
+          fatal = error62;
+          lifetime.abort();
+          return;
+        }
+        race.failed(attempt);
+        void transport.close().then(() => {
+          if (attempt === "direct") begin("turn");
+        });
+      });
+    } catch (error62) {
+      fatal = error62;
+      lifetime.abort();
+    }
+  };
+  begin("direct");
+  try {
+    try {
+      chosen = (await race.result).value;
+      signal?.throwIfAborted();
+      if (!chosen.getStats().connected) throw new Error("Selected RTC closed");
+      succeeded = true;
+      return chosen;
+    } catch (error62) {
+      if (fatal) throw fatal;
+      signal?.throwIfAborted();
+      finished = true;
+      for (const candidate of candidates.values()) void candidate.close();
+      chosen = create("relay", { signal });
+      await chosen.connect();
+      signal?.throwIfAborted();
+      succeeded = true;
+      return chosen;
+    }
+  } finally {
+    finished = true;
+    signal?.removeEventListener("abort", cancel);
+    for (const unsubscribe of unsubscribes) unsubscribe();
+    for (const candidate of candidates.values()) if (candidate !== chosen || !succeeded) void candidate.close();
+    if (!succeeded) void chosen?.close();
+  }
+}
 
 // node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
@@ -78636,8 +78836,7 @@ var ClientConnection = class {
           targetDeviceId: shortId(target3.deviceId)
         });
       }
-      let webRtcFallback = false;
-      const createTransport = (attempt) => new AdaptiveTransport(
+      const createTransport = (attempt, hooks = {}) => new AdaptiveTransport(
         websocketUrl(this.context.server.baseUrl),
         {
           role: "client",
@@ -78647,11 +78846,10 @@ var ClientConnection = class {
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === "relay",
           preferredTransports: preferredTransportsForAttempt(attempt),
-          negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
           ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
           fetchIceServers: async (connectionId) => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
+          ...hooks,
           onWebRtcFallback: (error62, diagnostics) => {
-            webRtcFallback = true;
             this.context.logger.warn(attempt === "direct" ? "remote Harness direct WebRTC failed; trying TURN" : "remote Harness TURN WebRTC failed; using relay", {
               targetDeviceId: shortId(target3.deviceId),
               attempt,
@@ -78667,39 +78865,27 @@ var ClientConnection = class {
           }
         }
       );
-      const attempts = this.context.config.forceRelay || rtcFactory === void 0 ? ["relay"] : ["direct", "turn", "relay"];
+      const stopProgressTimer = options.background ? () => void 0 : this.beginAttemptProgress(progressRunId, "direct");
       let transport;
-      for (const attempt of attempts) {
-        webRtcFallback = false;
-        const stopProgressTimer = options.background ? () => void 0 : this.beginAttemptProgress(progressRunId, attempt);
-        try {
-          transport = createTransport(attempt);
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity3, target3), 6e4);
-          closed = false;
-          closeError = void 0;
-          client.onClose((error62) => {
-            closed = true;
-            closeError = error62;
-          });
-          const attemptClient = client;
-          signal?.throwIfAborted();
-          await attemptClient.connect();
-          signal?.throwIfAborted();
-        } finally {
-          stopProgressTimer();
+      try {
+        signal?.throwIfAborted();
+        if (this.context.config.forceRelay || rtcFactory === void 0) {
+          transport = createTransport("relay", { signal });
+          await transport.connect();
+        } else {
+          transport = await connectPreferredTransport(createTransport, signal);
         }
-        if (attempt === "relay" || !webRtcFallback) break;
-        await client.close();
-        client = void 0;
-        transport = void 0;
-        if (attempt === "turn") {
-          this.context.logger.info("remote Harness relay fallback re-established", {
-            targetDeviceId: shortId(target3.deviceId)
-          });
-        }
-      }
-      if (client === void 0 || transport === void 0) {
-        throw new ClientModeError("CONNECTION_FAILED", "Unable to establish a remote transport.", true);
+        client = new RemoteClientCore(new ClientSecureTransport(transport, identity3, target3), 6e4);
+        closed = false;
+        closeError = void 0;
+        client.onClose((error62) => {
+          closed = true;
+          closeError = error62;
+        });
+        await client.connect();
+        signal?.throwIfAborted();
+      } finally {
+        stopProgressTimer();
       }
       const connectedClient = client;
       const connectedTransport = transport;
@@ -86960,7 +87146,7 @@ var ExternalNativePeerConnection = class {
     this.child.on("exit", () => this.handleExit());
     this.child.on("error", (error62) => this.handleExit(error62));
     this.child.stdin.on("error", (error62) => this.handleExit(error62));
-    this.ready = this.request("init", { iceServers: configuration.iceServers ?? [] }).then(() => void 0);
+    this.ready = this.request("init", { iceServers: configuration.iceServers ?? [], iceTransportPolicy: configuration.iceTransportPolicy }).then(() => void 0);
   }
   connectionState = "new";
   iceConnectionState = "new";
@@ -87268,7 +87454,7 @@ async function handle(command) {
   const { id, method, payload = {} } = command
   try {
     if (method === 'init') {
-      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [] })
+      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [], iceTransportPolicy: payload.iceTransportPolicy })
       pc.onconnectionstatechange = emitState
       pc.oniceconnectionstatechange = emitState
       pc.onicegatheringstatechange = emitState
@@ -87395,7 +87581,7 @@ function isElectronRuntime() {
 function buildNativeRtcFactory(RTCPeerConnection3) {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection3({ iceServers: configuration.iceServers });
+      const raw = new RTCPeerConnection3({ iceServers: configuration.iceServers, iceTransportPolicy: configuration.iceTransportPolicy });
       return {
         get connectionState() {
           return raw.connectionState;
@@ -87479,6 +87665,7 @@ function buildWeriftFactory(werift, options = {}) {
       const allowedHostIpv4 = new Set(hostIpv4Candidates);
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []),
+        iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
         iceUseIpv6: false,
         iceUseLinkLocalAddress: false,

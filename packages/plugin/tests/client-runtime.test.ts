@@ -203,6 +203,8 @@ describe('ClientModeRuntime Host account control', () => {
         ['lan', 'p2p', 'relay'], ['turn', 'relay'], ['relay'],
       ])
       expect(create).toHaveBeenCalledTimes(2)
+      expect(sockets.slice(0, 2).flatMap(socket => socket.sent).some(frame => frame.type === 'secure.handshake' || frame.type === 'relay.attach')).toBe(false)
+      expect(sockets[2]?.sent.filter(frame => frame.type === 'secure.handshake')).toHaveLength(1)
       expect(sockets.slice(0, 2).every(socket => socket.readyState === 3)).toBe(true)
       expect(connected.client.getStats().mode).toBe('Relay')
       // Agent discovery uses the same real handshake/fallback path without

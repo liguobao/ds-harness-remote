@@ -230,7 +230,7 @@ class ExternalNativePeerConnection implements RtcPeerConnection {
     this.child.on('exit', () => this.handleExit())
     this.child.on('error', error => this.handleExit(error))
     this.child.stdin.on('error', error => this.handleExit(error))
-    this.ready = this.request('init', { iceServers: configuration.iceServers ?? [] }).then(() => undefined)
+    this.ready = this.request('init', { iceServers: configuration.iceServers ?? [], iceTransportPolicy: configuration.iceTransportPolicy }).then(() => undefined)
   }
 
   createDataChannel(label: string, options?: RtcDataChannelInit): RtcDataChannel {
@@ -548,7 +548,7 @@ async function handle(command) {
   const { id, method, payload = {} } = command
   try {
     if (method === 'init') {
-      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [] })
+      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [], iceTransportPolicy: payload.iceTransportPolicy })
       pc.onconnectionstatechange = emitState
       pc.oniceconnectionstatechange = emitState
       pc.onicegatheringstatechange = emitState

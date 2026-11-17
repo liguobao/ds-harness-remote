@@ -2,6 +2,10 @@
 
 版本条目保留发布时的功能和验证范围；当前使用方式与限制见[文档入口](README.md)和[版本兼容](compatibility.zh.md)。
 
+## Unreleased
+
+- Desktop Client prepares direct P2P and standby TURN connections concurrently on supported Gateways, prefers direct within a bounded window, and starts business traffic only on the selected connection. Existing multi-connection Hosts remain compatible.
+
 ## 0.6.5 — 2026-11-15
 
 Android build 72.

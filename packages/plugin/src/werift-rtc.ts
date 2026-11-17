@@ -29,6 +29,7 @@ interface WeriftModule {
 }
 
 interface WeriftConfig {
+  iceTransportPolicy?: 'all' | 'relay'
   iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }>
   iceAdditionalHostAddresses?: string[]
   iceFilterCandidatePair?: (pair: WeriftCandidatePair) => boolean
@@ -86,9 +87,9 @@ let cachedWerift: WeriftModule | undefined
 let cachedNativeFactory: RtcPeerConnectionFactory | undefined
 
 interface NativeRtcModule {
-  RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection
+  RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection
   default?: {
-    RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection
+    RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection
   }
 }
 
@@ -179,11 +180,11 @@ function isElectronRuntime(): boolean {
 }
 
 function buildNativeRtcFactory(
-  RTCPeerConnection: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection,
+  RTCPeerConnection: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection,
 ): RtcPeerConnectionFactory {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers })
+      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers, iceTransportPolicy: configuration.iceTransportPolicy })
       return {
         get connectionState(): string { return raw.connectionState },
         get iceConnectionState(): string { return raw.iceConnectionState },
@@ -236,6 +237,7 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
       const allowedHostIpv4 = new Set(hostIpv4Candidates)
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []) as RtcIceServer[],
+        iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
         iceUseIpv6: false,
         iceUseLinkLocalAddress: false,
