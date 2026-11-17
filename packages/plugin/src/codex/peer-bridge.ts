@@ -113,19 +113,22 @@ export class CodexPeerBridge {
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError('RATE_LIMITED', 'Too many Codex streams are active for this connection.', undefined, true)
     }
-    // A bounded summary call proves this connection may observe the thread.
-    await this.domain.call(this.context.connectionId, {
-      method: 'thread/read',
-      params: { threadId: params.threadId, includeTurns: false },
+    await this.domain.useThread(params.threadId, async () => {
+      await this.domain.call(this.context.connectionId, {
+        method: 'thread/read',
+        params: { threadId: params.threadId, includeTurns: false },
+      })
+      this.requireOpen()
+      this.streams.set(params.streamId, params.threadId)
     })
-    this.requireOpen()
-    this.streams.set(params.streamId, params.threadId)
     return { opened: true, streamId: params.streamId, threadId: params.threadId }
   }
 
-  closeStream(input: unknown): { closed: true; streamId: string } {
+  async closeStream(input: unknown): Promise<{ closed: true; streamId: string }> {
     const params = streamCloseSchema.parse(input)
+    const threadId = this.streams.get(params.streamId)
     this.streams.delete(params.streamId)
+    if (threadId !== undefined) await this.domain.releaseThread(threadId)
     return { closed: true, streamId: params.streamId }
   }
 
@@ -268,6 +271,7 @@ export class CodexPeerBridge {
       const data: CodexAppFrameData = { streamId, frame }
       if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId)
+        void this.domain.releaseThread(threadId)
         await this.publish('codex.app.stream.closed', { streamId, reason: 'failed' })
         this.logger?.warn('Codex stream closed after oversized frame', { streamId })
         continue

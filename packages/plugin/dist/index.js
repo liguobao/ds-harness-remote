@@ -90397,7 +90397,7 @@ var CodexAppServerError = class extends Error {
   }
 };
 var CodexAppServerClient = class {
-  constructor(binary, logger2, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
+  constructor(binary, logger2, spawnAppServer = (binary2) => spawn2(binary2, ["app-server", "-c", "thread_unload_delay_secs=0"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
   })) {
@@ -90523,7 +90523,7 @@ var CodexAppServerClient = class {
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id6, { method, resolve: resolve10, reject, timer: timer2 });
     });
     try {
       this.write({ id: id6, method, params });
@@ -90574,7 +90574,7 @@ var CodexAppServerClient = class {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(safeUpstreamError(value.error));
+        pending.reject(safeUpstreamError(value.error, pending.method));
       } else {
         pending.resolve(value.result);
       }
@@ -90612,11 +90612,14 @@ var CodexAppServerClient = class {
 };
 var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
 var CODEX_UNMATERIALIZED_THREAD_MESSAGE = "Codex thread has no turns yet.";
-function safeUpstreamError(value) {
+function safeUpstreamError(value, method) {
   if (!isRecord12(value) || typeof value.message !== "string") {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex App Server rejected the request.");
   }
   const message = value.message.toLowerCase();
+  if (method === "thread/goal/get" && (value.code === -32601 || message === "goals feature is disabled" || message.startsWith("unknown variant `thread/goal/get`") || message.startsWith("ephemeral thread does not support goals:"))) {
+    return new CodexAppServerError("CODEX_GOALS_UNAVAILABLE", "Codex Goals are not available for this thread.");
+  }
   if (message.includes("active writer")) {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex thread already has an active writer.");
   }
@@ -91009,17 +91012,21 @@ var CodexPeerBridge = class {
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
     }
-    await this.domain.call(this.context.connectionId, {
-      method: "thread/read",
-      params: { threadId: params.threadId, includeTurns: false }
+    await this.domain.useThread(params.threadId, async () => {
+      await this.domain.call(this.context.connectionId, {
+        method: "thread/read",
+        params: { threadId: params.threadId, includeTurns: false }
+      });
+      this.requireOpen();
+      this.streams.set(params.streamId, params.threadId);
     });
-    this.requireOpen();
-    this.streams.set(params.streamId, params.threadId);
     return { opened: true, streamId: params.streamId, threadId: params.threadId };
   }
-  closeStream(input4) {
+  async closeStream(input4) {
     const params = streamCloseSchema.parse(input4);
+    const threadId = this.streams.get(params.streamId);
     this.streams.delete(params.streamId);
+    if (threadId !== void 0) await this.domain.releaseThread(threadId);
     return { closed: true, streamId: params.streamId };
   }
   openTransfer(input4) {
@@ -91152,6 +91159,7 @@ var CodexPeerBridge = class {
       const data2 = { streamId, frame };
       if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId);
+        void this.domain.releaseThread(threadId);
         await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
         this.logger?.warn("Codex stream closed after oversized frame", { streamId });
         continue;
@@ -91226,6 +91234,110 @@ function concatChunks(chunks, totalBytes) {
   return output2;
 }
 
+// packages/plugin/src/codex/thread-lifecycle.ts
+var CodexThreadLifecycle = class {
+  constructor(retained, unsubscribe, released, failed, closeTimeoutMs = 5e3) {
+    this.retained = retained;
+    this.unsubscribe = unsubscribe;
+    this.released = released;
+    this.failed = failed;
+    this.closeTimeoutMs = closeTimeoutMs;
+  }
+  threads = /* @__PURE__ */ new Map();
+  async use(threadId, action) {
+    const state2 = this.state(threadId);
+    state2.uses += 1;
+    try {
+      await state2.release;
+      if (this.threads.get(threadId) !== state2) throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
+      return await action();
+    } finally {
+      state2.uses -= 1;
+      await this.settle(threadId, state2);
+    }
+  }
+  active(threadId, active2) {
+    const state2 = this.state(threadId);
+    state2.active = active2;
+    state2.activityVersion += 1;
+    if (!active2) void this.settle(threadId, state2);
+  }
+  starting(threadId) {
+    const state2 = this.state(threadId);
+    const version2 = state2.activityVersion;
+    return (accepted) => {
+      if (accepted && this.threads.get(threadId) === state2 && state2.activityVersion === version2) {
+        state2.active = true;
+      }
+    };
+  }
+  async retry(threadId) {
+    const state2 = this.threads.get(threadId);
+    if (state2 !== void 0) await this.settle(threadId, state2);
+  }
+  async release(threadId) {
+    const state2 = this.state(threadId);
+    state2.pending = true;
+    await this.settle(threadId, state2);
+  }
+  closed(threadId) {
+    const state2 = this.threads.get(threadId);
+    state2?.closed?.();
+    if (state2 !== void 0) {
+      state2.active = false;
+      state2.activityVersion += 1;
+      state2.pending = false;
+      state2.release = void 0;
+      state2.closed = void 0;
+      if (state2.uses === 0) this.threads.delete(threadId);
+    }
+    this.released(threadId);
+  }
+  reset() {
+    const states = [...this.threads.values()];
+    this.threads.clear();
+    for (const state2 of states) state2.closed?.();
+  }
+  state(threadId) {
+    let state2 = this.threads.get(threadId);
+    if (state2 === void 0) {
+      state2 = { uses: 0, active: false, activityVersion: 0, pending: false };
+      this.threads.set(threadId, state2);
+    }
+    return state2;
+  }
+  async settle(threadId, state2) {
+    if (this.threads.get(threadId) !== state2 || state2.release !== void 0) return;
+    if (state2.uses > 0 || state2.active || this.retained(threadId)) return;
+    if (!state2.pending) {
+      this.threads.delete(threadId);
+      return;
+    }
+    const release = this.unload(threadId, state2);
+    state2.release = release;
+    await release.catch((error62) => this.failed(error62));
+  }
+  async unload(threadId, state2) {
+    let timer2;
+    const closed = new Promise((resolve10, reject) => {
+      state2.closed = resolve10;
+      timer2 = setTimeout(() => reject(new RpcError("CODEX_THREAD_CLOSING", "The CodeX thread is still closing. Please retry shortly.")), this.closeTimeoutMs);
+      timer2.unref?.();
+    });
+    void closed.catch(() => void 0);
+    try {
+      const result = await this.unsubscribe(threadId);
+      if (typeof result === "object" && result !== null && "status" in result && result.status === "notLoaded") {
+        this.closed(threadId);
+      } else {
+        await closed;
+      }
+    } finally {
+      clearTimeout(timer2);
+    }
+  }
+};
+
 // packages/plugin/src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
@@ -91248,6 +91360,17 @@ var CodexRemoteDomain = class {
   unsubscribeInbound;
   unsubscribeUnavailable;
   peers = /* @__PURE__ */ new Map();
+  peerThreads = /* @__PURE__ */ new Map();
+  threadGoals = /* @__PURE__ */ new Map();
+  threadLifecycle = new CodexThreadLifecycle(
+    (threadId) => this.hasSubscriber(threadId) || this.threadGoals.get(threadId)?.active === true || [...this.approvals.values()].some((approval) => approval.threadId === threadId),
+    (threadId) => this.callUpstream("thread/unsubscribe", { threadId }),
+    (threadId) => {
+      this.threadGoals.delete(threadId);
+      for (const threads of this.peerThreads.values()) threads.delete(threadId);
+    },
+    (error62) => this.logger.warn("Codex thread release could not be confirmed", { code: errorCode2(error62) })
+  );
   peerDeviceIds = /* @__PURE__ */ new Map();
   turnOwners = /* @__PURE__ */ new Map();
   turnWatchdogs = /* @__PURE__ */ new Map();
@@ -91333,9 +91456,55 @@ var CodexRemoteDomain = class {
     const envelope = parseCallEnvelope(input4);
     const call = parseCodexCall(envelope.method, envelope.params);
     const assertCurrent = this.captureCallScope(connectionId);
-    const result = await this.callInternal(connectionId, call, assertCurrent);
-    assertCurrent();
-    return result;
+    const action = async () => {
+      const result = await this.callInternal(connectionId, call, assertCurrent);
+      assertCurrent();
+      return result;
+    };
+    const threadId = threadIdFromParams(call.params);
+    return threadId === void 0 ? action() : this.threadLifecycle.use(threadId, action);
+  }
+  useThread(threadId, action) {
+    return this.threadLifecycle.use(threadId, action);
+  }
+  releaseThread(threadId) {
+    if (!this.isAvailable() || this.closed) return Promise.resolve();
+    const tracked = this.threadGoals.has(threadId);
+    return this.threadLifecycle.use(threadId, async () => {
+      if (tracked && !this.threadGoals.has(threadId)) return;
+      if (await this.refreshThreadGoal(threadId)) await this.threadLifecycle.release(threadId);
+    });
+  }
+  async refreshThreadGoal(threadId) {
+    const appServer = this.requireAppServer();
+    const previous = this.threadGoals.get(threadId) ?? { active: true };
+    this.threadGoals.set(threadId, previous);
+    let active2 = true;
+    try {
+      const result = await this.callUpstream("thread/goal/get", { threadId }, 5e3);
+      if (!isRecord14(result) || !("goal" in result)) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Goal.");
+      }
+      active2 = result.goal === null ? false : goalRetainsThread(result.goal, threadId);
+    } catch (error62) {
+      if (errorCode2(error62) === "CODEX_GOALS_UNAVAILABLE") active2 = false;
+      else this.logger.warn("Codex Goal state could not be confirmed", { code: errorCode2(error62) });
+    }
+    if (this.closed || this.appServer !== appServer || !this.isAvailable() || !this.threadGoals.has(threadId)) return false;
+    if (this.threadGoals.get(threadId) === previous) this.threadGoals.set(threadId, { active: active2 });
+    return true;
+  }
+  rememberThread(connectionId, threadId, releaseDetached = false) {
+    if (!this.peers.has(connectionId)) {
+      if (releaseDetached) void this.releaseThread(threadId);
+      return;
+    }
+    let threads = this.peerThreads.get(connectionId);
+    if (threads === void 0) {
+      threads = /* @__PURE__ */ new Set();
+      this.peerThreads.set(connectionId, threads);
+    }
+    threads.add(threadId);
   }
   captureCallScope(connectionId) {
     const appServer = this.requireAppServer();
@@ -91351,6 +91520,7 @@ var CodexRemoteDomain = class {
   }
   async callInternal(connectionId, call, assertCurrent) {
     assertCurrent();
+    const attached = this.peers.has(connectionId);
     if (call.method === "account/read") {
       return sanitizeAccount(await this.callUpstream(call.method, call.params));
     }
@@ -91384,6 +91554,8 @@ var CodexRemoteDomain = class {
         ...codexThreadPermissionParams(permission),
         serviceName: "deepseek_harness_remote"
       });
+      const createdId = extractThread(result)?.id;
+      if (typeof createdId === "string") this.rememberThread(connectionId, createdId, attached);
       assertCurrent();
       if (extractThread(result)?.id === void 0) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
@@ -91424,6 +91596,7 @@ var CodexRemoteDomain = class {
     }
     const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
     assertCurrent();
+    if (threadId !== void 0) this.rememberThread(connectionId, threadId);
     if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
       const owner = this.turnOwners.get(threadId);
       if (owner !== void 0 && owner.connectionId !== connectionId) {
@@ -91437,8 +91610,8 @@ var CodexRemoteDomain = class {
     if (call.method === "thread/unsubscribe") {
       const bridge = this.peers.get(connectionId);
       bridge?.removeThreadSubscriptions(threadId);
-      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
-      return this.callUpstream(call.method, call.params);
+      await this.releaseThread(threadId);
+      return { status: "unsubscribed" };
     }
     let claimed = false;
     let previousOwner;
@@ -91454,6 +91627,7 @@ var CodexRemoteDomain = class {
       previousOwner = claim2.previous;
       claimedOwner = this.turnOwners.get(threadId);
     }
+    const finishStart = call.method === "turn/start" && threadId !== void 0 ? this.threadLifecycle.starting(threadId) : void 0;
     try {
       const permission = codexPermission(call.params);
       const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
@@ -91480,6 +91654,11 @@ var CodexRemoteDomain = class {
         }
         throw error62;
       }
+      finishStart?.(true);
+      if (call.method === "thread/fork") {
+        const createdId = extractThread(result)?.id;
+        if (typeof createdId === "string") this.rememberThread(connectionId, createdId, attached);
+      }
       assertCurrent();
       if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
         await this.assertResultThreadAllowed(result);
@@ -91501,6 +91680,7 @@ var CodexRemoteDomain = class {
       }
       return result;
     } catch (error62) {
+      finishStart?.(errorCode2(error62) === "CODEX_REQUEST_TIMEOUT");
       if (claimed && threadId !== void 0 && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === void 0) this.turnOwners.delete(threadId);
         else this.turnOwners.set(threadId, previousOwner);
@@ -91519,9 +91699,12 @@ var CodexRemoteDomain = class {
     this.approvals.delete(params.requestHandle);
     this.scheduleApprovalExpiry();
     await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
+    await this.threadLifecycle.retry(approval.threadId);
     return { resolved: true };
   }
   async detachPeer(connectionId) {
+    const threadIds = this.peerThreads.get(connectionId) ?? /* @__PURE__ */ new Set();
+    this.peerThreads.delete(connectionId);
     const bridge = this.peers.get(connectionId);
     if (bridge !== void 0) this.peers.delete(connectionId);
     this.peerDeviceIds.delete(connectionId);
@@ -91537,12 +91720,16 @@ var CodexRemoteDomain = class {
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
     }
     this.scheduleApprovalExpiry();
+    await Promise.all([...threadIds].map((threadId) => this.releaseThread(threadId)));
   }
   async reconfigure(config2) {
     if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
     if (JSON.stringify(this.config) === JSON.stringify(config2)) return;
     this.config = config2;
     this.available = false;
+    this.threadLifecycle.reset();
+    this.peerThreads.clear();
+    this.threadGoals.clear();
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
     await this.startPromise?.catch(() => void 0);
@@ -91565,6 +91752,9 @@ var CodexRemoteDomain = class {
     if (this.closed) return;
     this.closed = true;
     this.available = false;
+    this.threadLifecycle.reset();
+    this.peerThreads.clear();
+    this.threadGoals.clear();
     this.state = this.config.enabled ? "unavailable" : "disabled";
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
@@ -91634,6 +91824,9 @@ var CodexRemoteDomain = class {
   async handleAppServerUnavailable(appServer, code) {
     if (this.closed || this.appServer !== appServer) return;
     this.available = false;
+    this.threadLifecycle.reset();
+    this.peerThreads.clear();
+    this.threadGoals.clear();
     this.state = "restarting";
     this.unavailableCode = code;
     this.clearAllTurnWatchdogs();
@@ -91694,13 +91887,24 @@ var CodexRemoteDomain = class {
       return;
     }
     const threadId = extractThreadId(message.params);
+    if (threadId !== void 0 && (message.method === "thread/goal/updated" || message.method === "thread/goal/cleared")) {
+      const active2 = message.method !== "thread/goal/cleared" && (!isRecord14(message.params) || goalRetainsThread(message.params.goal, threadId));
+      this.threadGoals.set(threadId, { active: active2 });
+      await this.threadLifecycle.retry(threadId);
+    }
     if (message.method === "thread/settings/updated" && threadId !== void 0) {
       this.rememberPermission(threadId, message.params);
     }
-    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
+    if (message.method === "thread/closed" && threadId !== void 0) {
+      this.permissionPresets.delete(threadId);
+      this.turnOwners.delete(threadId);
+      this.clearTurnWatchdog(threadId);
+      this.threadLifecycle.closed(threadId);
+    }
     if (message.method === "turn/completed" && threadId !== void 0) {
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
+      this.threadLifecycle.active(threadId, false);
     }
     if (message.method === "thread/status/changed" && threadId !== void 0 && isTerminalThreadStatus(message.params)) {
       this.turnOwners.delete(threadId);
@@ -91711,14 +91915,19 @@ var CodexRemoteDomain = class {
         void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
       }
       this.scheduleApprovalExpiry();
+      this.threadLifecycle.active(threadId, false);
     }
     if (message.method === "turn/started" && threadId !== void 0) {
+      this.threadLifecycle.active(threadId, true);
       const owner = this.turnOwners.get(threadId);
       const turnId = extractTurnId(message.params);
       if (owner !== void 0) {
         this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
       }
       this.armTurnWatchdog(threadId);
+    }
+    if (message.method === "thread/status/changed" && threadId !== void 0 && isRecord14(message.params) && isRecord14(message.params.status) && message.params.status.type === "active") {
+      this.threadLifecycle.active(threadId, true);
     }
     if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
     if (threadId === void 0) return;
@@ -92005,7 +92214,10 @@ var CodexRemoteDomain = class {
   resolveUpstreamApproval(params) {
     if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
-      if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
+      if (approval.upstreamId === params.requestId) {
+        this.approvals.delete(handle);
+        void this.threadLifecycle.retry(approval.threadId);
+      }
     }
   }
   async expireApprovals() {
@@ -92015,6 +92227,7 @@ var CodexRemoteDomain = class {
       if (approval.expiresAt > now) continue;
       this.approvals.delete(handle);
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+      await this.threadLifecycle.retry(approval.threadId);
     }
     this.scheduleApprovalExpiry();
   }
@@ -92090,10 +92303,10 @@ var CodexRemoteDomain = class {
     }
     return this.appServer;
   }
-  async callUpstream(method, params) {
+  async callUpstream(method, params, timeoutMs) {
     const appServer = this.requireAppServer();
     try {
-      const result = await appServer.call(method, params);
+      const result = await appServer.call(method, params, timeoutMs);
       if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
         throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
       }
@@ -92496,6 +92709,10 @@ function extractThreadId(params) {
   if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
   if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
+}
+function goalRetainsThread(goal, threadId) {
+  if (!isRecord14(goal) || goal.threadId !== threadId || typeof goal.status !== "string") return true;
+  return !["complete", "paused", "blocked", "usageLimited", "budgetLimited"].includes(goal.status);
 }
 function isTerminalThreadStatus(params) {
   if (!isRecord14(params) || !isRecord14(params.status) || typeof params.status.type !== "string") return false;

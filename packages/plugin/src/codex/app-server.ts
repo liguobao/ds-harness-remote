@@ -9,6 +9,7 @@ const MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
 
 interface PendingRequest {
+  method: string
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -71,7 +72,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
-    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawn(binary, ['app-server'], {
+    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawn(binary, ['app-server', '-c', 'thread_unload_delay_secs=0'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     }),
@@ -191,7 +192,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
         reject(new CodexAppServerError('CODEX_REQUEST_TIMEOUT', 'Codex App Server request timed out.'))
       }, timeoutMs)
       timer.unref?.()
-      this.pending.set(id, { resolve, reject, timer })
+      this.pending.set(id, { method, resolve, reject, timer })
     })
     try {
       this.write({ id, method, params })
@@ -244,7 +245,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(safeUpstreamError(value.error))
+        pending.reject(safeUpstreamError(value.error, pending.method))
       } else {
         pending.resolve(value.result)
       }
@@ -299,13 +300,19 @@ export const CODEX_THREAD_UNMATERIALIZED = 'CODEX_THREAD_UNMATERIALIZED'
 /** Safe Remote-facing message for an unmaterialized Thread. */
 export const CODEX_UNMATERIALIZED_THREAD_MESSAGE = 'Codex thread has no turns yet.'
 
-function safeUpstreamError(value: unknown): CodexAppServerError {
+function safeUpstreamError(value: unknown, method: string): CodexAppServerError {
   if (!isRecord(value) || typeof value.message !== 'string') {
     return new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex App Server rejected the request.')
   }
   // Upstream messages may contain paths or prompt fragments. Only retain a
   // short generic category for the Remote boundary.
   const message = value.message.toLowerCase()
+  if (method === 'thread/goal/get' && (value.code === -32601
+    || message === 'goals feature is disabled'
+    || message.startsWith('unknown variant `thread/goal/get`')
+    || message.startsWith('ephemeral thread does not support goals:'))) {
+    return new CodexAppServerError('CODEX_GOALS_UNAVAILABLE', 'Codex Goals are not available for this thread.')
+  }
   if (message.includes('active writer')) {
     return new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex thread already has an active writer.')
   }

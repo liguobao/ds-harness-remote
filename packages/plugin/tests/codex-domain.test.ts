@@ -1108,6 +1108,322 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('releases only the last idle subscription across streams, peers, and explicit unsubscribe', async () => {
+    await runScenarios(['stream', 'disconnect', 'unsubscribe'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const first = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        const second = domain.createPeer({ connectionId: 'second', peerDeviceId: 'two' }, async () => undefined)!
+        const releases = () => app.calls.filter(call => call.method === 'thread/unsubscribe')
+        try {
+          await first.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          await first.openStream({ streamId: 'two', threadId: 'allowed-thread' })
+          await second.openStream({ streamId: 'three', threadId: 'allowed-thread' })
+          await first.closeStream({ streamId: 'one' })
+          await first.closeAll()
+          expect(releases()).toHaveLength(0)
+          if (action === 'stream') await second.closeStream({ streamId: 'three' })
+          else if (action === 'disconnect') await second.closeAll()
+          else await second.call({ method: 'thread/unsubscribe', params: { threadId: 'allowed-thread' } })
+          expect(releases()).toHaveLength(1)
+          await second.closeStream({ streamId: 'three' })
+          await second.closeAll()
+          expect(releases()).toHaveLength(1)
+        } finally { await domain.close() }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('keeps disconnected or timed-out turns loaded until an authoritative terminal event', async () => {
+    await runScenarios(['stream', 'disconnect', 'silence', 'late-result', 'rpc-timeout'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app, undefined, action === 'silence' ? 10 : 600000)
+        await domain.start()
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        let finish!: () => void
+        let entered!: () => void
+        const gate = new Promise<void>(resolve => { finish = resolve })
+        const waiting = new Promise<void>(resolve => { entered = resolve })
+        const original = app.call.bind(app)
+        if (action === 'late-result' || action === 'rpc-timeout') vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+          if (method === 'turn/start') {
+            entered()
+            await gate
+            if (action === 'rpc-timeout') throw new CodexAppServerError('CODEX_REQUEST_TIMEOUT', 'Timed out')
+          }
+          return original(method, params)
+        })
+        const releases = () => app.calls.filter(call => call.method === 'thread/unsubscribe')
+        let turn: Promise<unknown> | undefined
+        try {
+          await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          turn = peer.call({ method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'hello' }] } }).catch(() => undefined)
+          if (action === 'late-result' || action === 'rpc-timeout') await waiting
+          else await turn
+          if (action === 'stream' || action === 'silence' || action === 'rpc-timeout') await peer.closeStream({ streamId: 'one' })
+          else await peer.closeAll()
+          finish()
+          await turn
+          if (action === 'silence') await new Promise(resolve => setTimeout(resolve, 25))
+          expect(releases()).toHaveLength(0)
+          app.emit({ kind: 'notification', method: 'turn/completed', params: { threadId: 'allowed-thread', turn: { id: 'turn-1' } } })
+          await flush()
+          expect(releases()).toHaveLength(1)
+        } finally {
+          finish()
+          await turn
+          await domain.close()
+          vi.restoreAllMocks()
+        }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('retains active goals across idle turn boundaries and releases after the final turn', async () => {
+    await runScenarios(['complete', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'cleared'].map(status => ({
+      name: status,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        try {
+          app.goal = { threadId: 'allowed-thread', status: 'active' }
+          await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          await peer.call({ method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'finish the goal' }] } })
+          await peer.closeAll()
+          app.emit({ kind: 'notification', method: 'thread/status/changed', params: { threadId: 'allowed-thread', status: { type: 'idle' } } })
+          app.emit({ kind: 'notification', method: 'turn/completed', params: { threadId: 'allowed-thread', turn: { id: 'turn-1' } } })
+          await flush()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(0)
+          app.emit({ kind: 'notification', method: 'turn/started', params: { threadId: 'allowed-thread', turn: { id: 'turn-2' } } })
+          app.goal = status === 'cleared' ? null : { threadId: 'allowed-thread', status }
+          app.emit({ kind: 'notification', method: status === 'cleared' ? 'thread/goal/cleared' : 'thread/goal/updated', params: { threadId: 'allowed-thread', goal: app.goal } })
+          await flush()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(0)
+          app.emit({ kind: 'notification', method: 'turn/completed', params: { threadId: 'allowed-thread', turn: { id: 'turn-2' } } })
+          await flush()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+        } finally { await domain.close() }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('keeps a goal created after disconnect through its automatic continuation', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+    try {
+      await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+      await peer.call({ method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'create a goal' }] } })
+      await peer.closeAll()
+      app.goal = { threadId: 'allowed-thread', status: 'active' }
+      app.emit({ kind: 'notification', method: 'thread/goal/updated', params: { threadId: 'allowed-thread', goal: app.goal } })
+      app.emit({ kind: 'notification', method: 'turn/completed', params: { threadId: 'allowed-thread', turn: { id: 'turn-1' } } })
+      await flush()
+      expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(0)
+      app.emit({ kind: 'notification', method: 'thread/goal/cleared', params: { threadId: 'allowed-thread' } })
+      await flush()
+      expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+    } finally { await domain.close() }
+  })
+
+  it('prefers goal notifications over an older in-flight goal snapshot', async () => {
+    await runScenarios(['activated', 'cleared'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        let finish!: (result: unknown) => void
+        let entered!: () => void
+        const waiting = new Promise<void>(resolve => { entered = resolve })
+        const snapshot = new Promise(resolve => { finish = resolve })
+        const original = app.call.bind(app)
+        vi.spyOn(app, 'call').mockImplementation((method, params) => {
+          if (method === 'thread/goal/get') { entered(); return snapshot }
+          return original(method, params)
+        })
+        let closing: Promise<void> | undefined
+        try {
+          await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          closing = peer.closeAll()
+          await waiting
+          const goal = { threadId: 'allowed-thread', status: 'active' }
+          app.emit({ kind: 'notification', method: action === 'activated' ? 'thread/goal/updated' : 'thread/goal/cleared', params: { threadId: 'allowed-thread', goal } })
+          finish({ goal: action === 'activated' ? null : goal })
+          await closing
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(action === 'activated' ? 0 : 1)
+          if (action === 'activated') {
+            app.emit({ kind: 'notification', method: 'thread/goal/cleared', params: { threadId: 'allowed-thread' } })
+            await flush()
+            expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+          }
+        } finally { finish({ goal: null }); await closing; vi.restoreAllMocks(); await domain.close() }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('retains threads when goal state is unknown and permits confirmed unsupported goals', async () => {
+    await runScenarios(['timeout', 'invalid', 'unknown-status', 'wrong-thread', 'unsupported'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        const original = app.call.bind(app)
+        const spy = vi.spyOn(app, 'call').mockImplementation((method, params) => {
+          if (method !== 'thread/goal/get') return original(method, params)
+          if (action === 'unsupported' || action === 'timeout') return Promise.reject(new CodexAppServerError(action === 'unsupported' ? 'CODEX_GOALS_UNAVAILABLE' : 'CODEX_REQUEST_TIMEOUT', 'Unavailable'))
+          if (action === 'invalid') return Promise.resolve({})
+          return Promise.resolve({ goal: { threadId: action === 'wrong-thread' ? 'other-thread' : 'allowed-thread', status: action === 'unknown-status' ? 'new-status' : 'complete' } })
+        })
+        try {
+          await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          await peer.closeAll()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(action === 'unsupported' ? 1 : 0)
+          if (action !== 'unsupported') {
+            spy.mockRestore()
+            await domain.releaseThread('allowed-thread')
+            expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+          }
+        } finally { vi.restoreAllMocks(); await domain.close() }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('defers release through approval resolution, expiry, and disconnect', async () => {
+    await runScenarios(['respond', 'resolved', 'expire', 'disconnect'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const frames: unknown[] = []
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async (_, data) => { frames.push(data) })!
+        try {
+          await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+          await peer.call({ method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'hello' }] } })
+          app.emit({ kind: 'request', id: 42, method: 'item/commandExecution/requestApproval', params: { threadId: 'allowed-thread', turnId: 'turn-1' } })
+          await flush()
+          const handle = extractRequestHandle(frames.at(-1))
+          await peer.closeStream({ streamId: 'one' })
+          app.emit({ kind: 'notification', method: 'turn/completed', params: { threadId: 'allowed-thread' } })
+          await flush()
+          expect(app.calls.some(call => call.method === 'thread/unsubscribe')).toBe(false)
+          if (action === 'respond') await peer.respond({ requestHandle: handle, decision: 'decline' })
+          else if (action === 'resolved') app.emit({ kind: 'notification', method: 'serverRequest/resolved', params: { requestId: 42 } })
+          else if (action === 'disconnect') await peer.closeAll()
+          else {
+            const now = Date.now()
+            vi.spyOn(Date, 'now').mockReturnValue(now + 300001)
+            await expect(peer.respond({ requestHandle: handle, decision: 'decline' })).rejects.toMatchObject({ code: 'CODEX_APPROVAL_NOT_FOUND' })
+          }
+          await flush()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+        } finally {
+          vi.restoreAllMocks()
+          await domain.close()
+        }
+      },
+    })), cleanupScenario1)
+  })
+
+  it('waits for upstream thread/closed before reopening and coalesces duplicate closes', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+    const original = app.call.bind(app)
+    vi.spyOn(app, 'call').mockImplementation((method, params) => {
+      if (method !== 'thread/unsubscribe' || app.calls.some(call => call.method === 'thread/unsubscribe')) {
+        return original(method, params)
+      }
+      app.calls.push({ method, params })
+      return Promise.resolve({ status: 'unsubscribed' })
+    })
+    try {
+      await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
+      const closing = peer.closeStream({ streamId: 'one' })
+      await vi.waitFor(() => expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1))
+      let opened = false
+      const opening = peer.openStream({ streamId: 'two', threadId: 'allowed-thread' }).then(() => { opened = true })
+      await peer.closeStream({ streamId: 'one' })
+      await flush()
+      expect(opened).toBe(false)
+      expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+      app.emit({ kind: 'notification', method: 'thread/closed', params: { threadId: 'allowed-thread' } })
+      await Promise.all([closing, opening])
+      expect(opened).toBe(true)
+      expect(peer.hasThreadSubscription('allowed-thread')).toBe(true)
+
+      await peer.closeStream({ streamId: 'two' })
+      expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(2)
+
+      const readsBeforeReopen = app.calls.filter(call => call.method === 'thread/read').length
+      await expect(peer.openStream({ streamId: 'three', threadId: 'allowed-thread' })).resolves.toMatchObject({ opened: true })
+      expect(app.calls.filter(call => call.method === 'thread/read').length).toBeGreaterThan(readsBeforeReopen)
+      expect(peer.hasThreadSubscription('allowed-thread')).toBe(true)
+      await expect(peer.call({ method: 'thread/resume', params: { threadId: 'allowed-thread' } }))
+        .resolves.toMatchObject({ thread: { id: 'allowed-thread' } })
+      await expect(peer.call({
+        method: 'turn/start',
+        params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Continue after release' }] },
+      })).resolves.toMatchObject({ turn: { id: 'turn-1' } })
+    } finally { await domain.close() }
+  })
+
+  it('cleans up threads acquired before any stream, including a late create after disconnect', async () => {
+    await runScenarios(['thread/start', 'thread/resume', 'late-create'].map(action => ({
+      name: action,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
+        let finish!: () => void
+        let entered!: () => void
+        const gate = new Promise<void>(resolve => { finish = resolve })
+        const waiting = new Promise<void>(resolve => { entered = resolve })
+        const original = app.call.bind(app)
+        if (action === 'late-create') vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+          if (method === 'thread/start') { entered(); await gate }
+          return original(method, params)
+        })
+        let request: Promise<unknown> | undefined
+        try {
+          request = peer.call(action === 'thread/resume'
+            ? { method: action, params: { threadId: 'allowed-thread' } }
+            : { method: 'thread/start', params: { cwd: root } }).catch(() => undefined)
+          if (action === 'late-create') await waiting
+          else await request
+          await peer.closeAll()
+          finish()
+          await request
+          await flush()
+          expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+        } finally { finish(); await request; await domain.close(); vi.restoreAllMocks() }
+      },
+    })), cleanupScenario1)
+  })
+
   it('lets a replacement connection from the same peer stop its recovered active turn', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
@@ -1311,6 +1627,7 @@ class FakeAppServer implements CodexAppServerLike {
   rejectTurnStartBusy = false
   rejectSettings = false
   projectListMode: 'normal' | 'empty' | 'unsupported' = 'normal'
+  goal: Record<string, unknown> | null = null
 
   constructor(private readonly root: string, private readonly outside = root) {}
 
@@ -1319,6 +1636,11 @@ class FakeAppServer implements CodexAppServerLike {
 
   async call(method: string, params: unknown): Promise<unknown> {
     this.calls.push({ method, params })
+    if (method === 'thread/goal/get') return { goal: this.goal }
+    if (method === 'thread/unsubscribe') {
+      queueMicrotask(() => this.emit({ kind: 'notification', method: 'thread/closed', params }))
+      return { status: 'unsubscribed' }
+    }
     if (method === 'account/read') return { account: { type: 'chatgpt', email: 'private@example.com' }, requiresOpenaiAuth: true }
     if (method === 'thread/list') return {
       data: [

@@ -1518,6 +1518,19 @@ active turn owner，并以 Host 生成的 opaque `requestHandle` 暴露。`codex
 审批自动 decline。`acceptForSession`、execpolicy amendment 和额外 permission grant 不得进入
 Remote frame。
 
+Host 在最后一个 Codex stream 关闭或所属 Peer 断开后，自动对空闲 Thread 发送
+`thread/unsubscribe`。连接断开只撤销 mutation lease，不代表上游 Turn 已结束；运行状态独立
+保留，直到收到上游 `turn/completed` 或 terminal Thread status。未决审批同样阻止释放。
+释放前通过 Host 内部的 `thread/goal/get` 确认 Goal，并跟踪 `thread/goal/updated|cleared`；
+`active` Goal 跨 Turn 空闲期仍保留，完成、暂停、阻塞或预算/额度停止后还需等待当前 Turn 收尾。
+查询失败或未知状态保守保留，后续释放请求可重新确认；明确不支持或禁用 Goal 的版本沿用普通释放。
+此读取不增加 Remote 方法白名单，也不重放 Goal 或 Turn mutation。
+Peer 断开还清理该连接曾经读取/加载/创建但尚未打开 stream 的 Thread；其他连接仍有订阅时不释放。
+App Server 子进程使用 `-c thread_unload_delay_secs=0`，仅缩短该进程的原生空闲卸载延迟，不写用户配置。
+`unsubscribed` 是退订确认，不是关闭确认：除 `notLoaded` 外，Host 等待 `thread/closed`，
+同 Thread 的并发 stream open / RPC 在关闭确认后继续。五秒内未确认或退订失败时，后续操作
+失败关闭，直到原生关闭通知或 App Server 重启；不重放 mutation、不删除锁文件、不终止其他 Thread。
+
 `codex.appserver.transfer.v1` 使用独立的 512 KiB chunk、288 MiB 总上限、canonical base64，
 承载大 History 响应和图片 Prompt request；它保持严格有序/恰好一次、每连接输入/输出各两个
 transfer 和 2 分钟 idle 清理。重组后的内容必须再次
