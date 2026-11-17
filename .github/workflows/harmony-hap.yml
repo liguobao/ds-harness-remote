@@ -1,6 +1,6 @@
 name: HarmonyOS HAP
 
-# SDK jobs run only when a maintainer dispatches reviewed code or creates a release tag.
+# SDK jobs run only for reviewed manual builds or the upstream release workflow.
 # Do not run untrusted fork pull requests on a self-hosted runner.
 on:
   workflow_dispatch:
@@ -14,15 +14,14 @@ on:
         description: Sign with repository secrets (trusted code only)
         type: boolean
         default: false
-  push:
-    tags:
-      - 'harmony-v*'
+  workflow_call:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   hap:
+    if: github.repository == 'liguobao/ds-harness-remote'
     name: Build HAP with HarmonyOS SDK
     runs-on: [self-hosted, harmonyos]
     timeout-minutes: 30
@@ -46,11 +45,11 @@ jobs:
         run: ohpm install --all
 
       - name: Configure unsigned validation build
-        if: github.event_name == 'workflow_dispatch' && !inputs.signed
+        if: github.event_name != 'workflow_dispatch' || !inputs.signed
         run: node scripts/inject-signing.mjs --unsigned
 
       - name: Inject release signing material
-        if: github.event_name == 'push' || inputs.signed
+        if: github.event_name == 'workflow_dispatch' && inputs.signed
         env:
           HARMONY_SIGNING_STORE_B64: ${{ secrets.HARMONY_SIGNING_STORE_B64 }}
           HARMONY_SIGNING_STORE_PASSWORD: ${{ secrets.HARMONY_SIGNING_STORE_PASSWORD }}
@@ -73,6 +72,24 @@ jobs:
           name: harmony-hap
           path: apps/harmony/entry/build/default/outputs/default/*.hap
           if-no-files-found: error
+
+      - name: Stage unsigned release HAP
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p build/release-assets
+          haps=(entry/build/default/outputs/default/*-unsigned.hap)
+          test "${#haps[@]}" -eq 1 && test -f "${haps[0]}"
+          cp "${haps[0]}" "build/release-assets/dsh-remote-harmony-${RELEASE_TAG}-unsigned.hap"
+
+      - name: Attach HAP to GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: apps/harmony/build/release-assets/*.hap
+          fail_on_unmatched_files: true
 
       - name: Remove signing material and restore profile
         if: always()

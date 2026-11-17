@@ -291,6 +291,13 @@ jobs:
           body_path: .github/release-notes.md
           generate_release_notes: false
 
+  harmony-hap:
+    name: Build and attach unsigned HarmonyOS HAP
+    needs: release
+    uses: ./.github/workflows/harmony-hap.yml
+    permissions:
+      contents: write
+
   android-apk:
     name: Build and attach Android APK
     needs: release
