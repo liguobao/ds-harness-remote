@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SafeLogger } from '../src/logging.js'
 import { createRpcRequest } from '@dsh-remote/protocol'
 import { WorkspaceUploadHost, WORKSPACE_UPLOAD_AUTHORITY_TTL_MS, WORKSPACE_UPLOAD_BYTES, WORKSPACE_UPLOAD_CHUNK } from '../src/workspace-upload.js'
+import { WorkspaceUploadBudget, UPLOAD_DISK_FREE_BYTES } from '../src/workspace-upload-budget.js'
 import { RpcRouter } from '../src/rpc-router.js'
 
 const hosts: WorkspaceUploadHost[] = []
@@ -23,6 +24,123 @@ async function setup(resolve?: (id: string, signal: AbortSignal) => Promise<stri
 }
 function request(name = 'report.bin', totalBytes = 3) { return { sessionId: 'session-a', uploadId: randomUUID(), name, totalBytes } }
 const scope = (p: ReturnType<typeof request>) => ({ sessionId: p.sessionId, uploadId: p.uploadId })
+
+it('limits active uploads across connections and releases slots on abort', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-shared-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 20, sessionBytes: 20, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const c = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b, c)
+  const uploads = [request('first', 1), request('second', 1), request('third', 1), request('fourth', 1)]
+  await Promise.all(uploads.map((item, index) => (index < 2 ? a : b).call('workspace.upload.open', item)))
+  await expect(c.call('workspace.upload.open', request('fifth', 1))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await a.call('workspace.upload.abort', scope(uploads[0]!))
+  await c.call('workspace.upload.open', request('replacement', 1))
+  await b.closeAll()
+  await a.call('workspace.upload.open', request('after-disconnect', 1))
+})
+
+it('limits reserved bytes across connections and releases them on commit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-bytes-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 6, sessionBytes: 10, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  const first = request('first', 3), second = request('second', 3)
+  await Promise.all([a.call('workspace.upload.open', first), b.call('workspace.upload.open', second)])
+  await expect(a.call('workspace.upload.open', request('blocked', 1))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await a.call('workspace.upload.chunk', { ...scope(first), offset: 0, data: 'YWJj' })
+  await expect(a.call('workspace.upload.open', request('still-blocked', 1))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  await a.call('workspace.upload.commit', scope(first))
+  await a.call('workspace.upload.open', request('after-commit', 3))
+})
+
+it('limits one session across connections and releases reservations after failure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-session-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 20, sessionBytes: 5, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  const first = request('first', 3)
+  await a.call('workspace.upload.open', first)
+  await expect(b.call('workspace.upload.open', request('blocked', 3))).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  const other = { ...request('other', 3), sessionId: 'other-session' }
+  await b.call('workspace.upload.open', other)
+  await expect(a.call('workspace.upload.chunk', { ...scope(first), offset: 1, data: 'YQ==' })).rejects.toMatchObject({ code: 'UPLOAD_INVALID_CHUNK' })
+  await b.call('workspace.upload.open', request('after-failure', 3))
+})
+
+it('reserves free disk space atomically across peers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-disk-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => 15)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  const first = request('first', 4), second = request('second', 4)
+  const results = await Promise.allSettled([a.call('workspace.upload.open', first), b.call('workspace.upload.open', second)])
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+  expect(results.filter(result => result.status === 'rejected').map(result => (result as PromiseRejectedResult).reason.code)).toEqual(['UPLOAD_LIMIT'])
+  if (results[0]?.status === 'fulfilled') await a.call('workspace.upload.abort', scope(first))
+  else await b.call('workspace.upload.abort', scope(second))
+  await b.call('workspace.upload.open', request('third', 4))
+})
+
+it('checks the disk reserve at open', async () => {
+  let free = UPLOAD_DISK_FREE_BYTES + 2
+  const budget = new WorkspaceUploadBudget(undefined, async () => free)
+  await expect(budget.reserve('/unused', 1, 'session-a', 3)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  free++
+  const reservation = await budget.reserve('/unused', 1, 'session-a', 3)
+  reservation.release()
+})
+
+it('does not limit completed bytes across sessions or repeated uploads', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-total-'))
+  directories.push(root)
+  const budget = new WorkspaceUploadBudget({ active: 4, reservedBytes: 3, sessionBytes: 3, diskFreeBytes: 0 }, async () => 100)
+  const a = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  const b = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(a, b)
+  for (let index = 0; index < 10; index++) {
+    await put(index % 2 === 0 ? a : b, { ...request(`file-${index}`, 3), sessionId: index % 2 === 0 ? 'session-a' : 'session-b' })
+  }
+  await a.call('workspace.upload.open', request('another', 3))
+})
+
+it('drops an open upload when disk space falls before a chunk', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-space-'))
+  directories.push(root)
+  let free = 100
+  const budget = new WorkspaceUploadBudget({ active: 2, reservedBytes: 100, sessionBytes: 100, diskFreeBytes: 10 }, async () => free)
+  const host = new WorkspaceUploadHost(async () => root, undefined, () => 'Relay', Date.now, budget)
+  hosts.push(host)
+  const p = request()
+  await host.call('workspace.upload.open', p)
+  free = 12
+  await expect(host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: 'YWJj' })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+  expect(await readdir(root)).toEqual([])
+  free = 100
+  await host.call('workspace.upload.open', request('after-disk-failure'))
+})
+
+it('leaves existing upload temporary files untouched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-orphan-'))
+  directories.push(root)
+  const existing = join(root, `.dsh-upload-${randomUUID()}.part`)
+  await writeFile(existing, 'existing', { mode: 0o600 })
+  const host = new WorkspaceUploadHost(async () => root)
+  hosts.push(host)
+  const p = request('new', 1)
+  await host.call('workspace.upload.open', p)
+  expect(await readdir(root)).toContain(existing.split('/').at(-1))
+  await host.call('workspace.upload.abort', scope(p))
+  expect(await readdir(root)).toEqual([existing.split('/').at(-1)])
+})
 async function put(host: WorkspaceUploadHost, p = request(), bytes = Buffer.from([0, 255, 12])) {
   await host.call('workspace.upload.open', p)
   if (bytes.length) await host.call('workspace.upload.chunk', { ...scope(p), offset: 0, data: bytes.toString('base64') })

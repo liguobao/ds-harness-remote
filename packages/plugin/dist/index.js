@@ -100291,6 +100291,67 @@ import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
+
+// packages/plugin/src/workspace-upload-budget.ts
+import { statfs } from "node:fs/promises";
+var HOST_UPLOAD_ACTIVE_LIMIT = 4;
+var HOST_UPLOAD_RESERVED_BYTES = 4 * 1024 * 1024 * 1024;
+var SESSION_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
+var UPLOAD_DISK_FREE_BYTES = 32 * 1024 * 1024;
+var WorkspaceUploadBudget = class {
+  constructor(limits = {
+    active: HOST_UPLOAD_ACTIVE_LIMIT,
+    reservedBytes: HOST_UPLOAD_RESERVED_BYTES,
+    sessionBytes: SESSION_UPLOAD_RESERVED_BYTES,
+    diskFreeBytes: UPLOAD_DISK_FREE_BYTES
+  }, freeBytes = async (root2) => {
+    const disk = await statfs(root2);
+    return disk.bavail * disk.bsize;
+  }) {
+    this.limits = limits;
+    this.freeBytes = freeBytes;
+  }
+  active = /* @__PURE__ */ new Set();
+  queue = Promise.resolve();
+  reserve(root2, dev, sessionId, bytes) {
+    const next = this.queue.then(async () => {
+      const free = await this.freeBytes(root2);
+      const active2 = [...this.active];
+      const reserved = active2.reduce((sum, entry2) => sum + entry2.total, 0);
+      const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
+      const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0);
+      if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+      const entry = { sessionId, dev, remaining: bytes, total: bytes };
+      this.active.add(entry);
+      let done = false;
+      return {
+        checkDisk: async () => {
+          const current = await this.freeBytes(root2);
+          const other = [...this.active].filter((item) => item.dev === dev).reduce((sum, item) => sum + item.remaining, 0);
+          if (!Number.isFinite(current) || current - other < this.limits.diskFreeBytes)
+            throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+        },
+        consume: (amount) => {
+          entry.remaining -= amount;
+        },
+        commit: () => {
+          if (done) return;
+          done = true;
+          this.active.delete(entry);
+        },
+        release: () => {
+          if (done) return;
+          done = true;
+          this.active.delete(entry);
+        }
+      };
+    });
+    this.queue = next.catch(() => void 0);
+    return next;
+  }
+};
+
+// packages/plugin/src/workspace-upload.ts
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
@@ -100300,11 +100361,12 @@ var openParams = scope.extend({ name: external_exports.string().min(1), totalByt
 var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
 var binaryChunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
 var WorkspaceUploadHost = class {
-  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now) {
+  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now, budget = new WorkspaceUploadBudget()) {
     this.resolveRoot = resolveRoot;
     this.ttlMs = ttlMs;
     this.transportMode = transportMode;
     this.now = now;
+    this.budget = budget;
     this.timer = setInterval(() => {
       void this.serialize(() => this.expire()).catch(() => void 0);
     }, Math.min(ttlMs, 3e4));
@@ -100375,10 +100437,20 @@ var WorkspaceUploadHost = class {
     const root2 = await realpath6(sourceRoot);
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
+    const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
     const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
-    const handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
+    let handle;
+    try {
+      handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
+    } catch (error62) {
+      reservation.release();
+      throw error62;
+    }
     const upload = {
-      ...p,
+      sessionId: p.sessionId,
+      name: p.name,
+      totalBytes: p.totalBytes,
+      encoding: p.encoding,
       received: 0,
       touched: this.now(),
       root: root2,
@@ -100388,7 +100460,8 @@ var WorkspaceUploadHost = class {
       temp,
       handle,
       authorityCheckedAt: 0,
-      authorityBytes: 0
+      authorityBytes: 0,
+      reservation
     };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
@@ -100398,9 +100471,11 @@ var WorkspaceUploadHost = class {
     const p = binary ? binaryChunkParams.parse(input4) : chunkParams.parse(input4);
     const upload = this.requireUpload(p);
     if (binary !== (upload.encoding === "binary-v1")) throw failure4("UPLOAD_INVALID_CHUNK");
-    const data2 = typeof p.data === "string" ? Buffer.from(p.data, "base64") : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength);
-    if (!data2.length || data2.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || !binary && data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
+    const data2 = decodeChunk(p.data);
+    if (p.offset !== upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
+    if (data2.length > upload.totalBytes - upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
     await this.validateRoot(upload, this.authorityExpired(upload));
+    await upload.reservation.checkDisk();
     let written = 0;
     while (written < data2.length) {
       const result = await upload.handle.write(data2, written, data2.length - written, upload.received + written);
@@ -100409,6 +100484,7 @@ var WorkspaceUploadHost = class {
     }
     this.assertLive();
     upload.received += data2.length;
+    upload.reservation.consume(data2.length);
     upload.touched = this.now();
     return { uploadId: p.uploadId, receivedBytes: upload.received };
   }
@@ -100440,6 +100516,7 @@ var WorkspaceUploadHost = class {
       const result = { name: name2, path: `./${name2}`, bytes: upload.totalBytes };
       this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: this.now() });
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value);
+      upload.reservation.commit();
       await this.discard(p.uploadId, upload);
       return result;
     }
@@ -100493,6 +100570,7 @@ var WorkspaceUploadHost = class {
   }
   async discard(id6, upload) {
     this.uploads.delete(id6);
+    upload.reservation.release();
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
@@ -100510,6 +100588,13 @@ var WorkspaceUploadHost = class {
 };
 function failure4(code) {
   return new RpcError(code, "The workspace upload could not be completed.");
+}
+function decodeChunk(value) {
+  const data2 = typeof value === "string" ? Buffer.from(value, "base64") : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  const limit = typeof value === "string" ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES;
+  if (data2.length === 0 || data2.length > limit) throw failure4("UPLOAD_INVALID_CHUNK");
+  if (typeof value === "string" && data2.toString("base64") !== value) throw failure4("UPLOAD_INVALID_CHUNK");
+  return data2;
 }
 function validName(name2) {
   return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
@@ -104604,7 +104689,7 @@ var HostPluginRuntime = class {
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-      ), void 0, context.transportMode);
+      ), void 0, context.transportMode, Date.now, this.uploadBudget);
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId,
         peerIdentityKey: context.peerIdentityKey,
@@ -104638,6 +104723,7 @@ var HostPluginRuntime = class {
   }
   connections;
   terminalOwners = /* @__PURE__ */ new Map();
+  uploadBudget = new WorkspaceUploadBudget();
   loopbackHosts = /* @__PURE__ */ new Set();
   terminalEnabled;
   loopbackPorts;

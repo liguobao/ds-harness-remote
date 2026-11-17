@@ -6,6 +6,7 @@ import { link, lstat, open, realpath, stat, unlink, type FileHandle } from 'node
 import { extname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { RpcError } from './safe-error.js'
+import { WorkspaceUploadBudget, type UploadReservation } from './workspace-upload-budget.js'
 
 export const WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024
 export const WORKSPACE_UPLOAD_CHUNK = 64 * 1024
@@ -21,6 +22,7 @@ type Upload = {
   sessionId: string; name: string; totalBytes: number; received: number; touched: number
   root: string; sourceRoot: string; dev: number; ino: number; temp: string; handle: FileHandle
   authorityCheckedAt: number; authorityBytes: number; encoding?: 'binary-v1'
+  reservation: UploadReservation
 }
 
 /** One authenticated peer owns this bounded, ephemeral upload service. */
@@ -37,6 +39,7 @@ export class WorkspaceUploadHost {
     private readonly ttlMs = 120_000,
     private readonly transportMode: () => string | undefined = () => undefined,
     private readonly now: () => number = Date.now,
+    private readonly budget: WorkspaceUploadBudget = new WorkspaceUploadBudget(),
   ) {
     this.timer = setInterval(() => { void this.serialize(() => this.expire()).catch(() => undefined) }, Math.min(ttlMs, 30_000))
     this.timer.unref()
@@ -101,10 +104,28 @@ export class WorkspaceUploadHost {
     const root = await realpath(sourceRoot)
     const directory = await stat(root)
     if (!directory.isDirectory()) throw failure('UPLOAD_WORKSPACE_UNAVAILABLE')
+    const reservation = await this.budget.reserve(root, directory.dev, p.sessionId, p.totalBytes)
     const temp = join(root, `.dsh-upload-${randomUUID()}.part`)
-    const handle = await open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600)
-    const upload: Upload = { ...p, received: 0, touched: this.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle,
-      authorityCheckedAt: 0, authorityBytes: 0 }
+    let handle: FileHandle
+    try { handle = await open(temp, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600) }
+    catch (error) { reservation.release(); throw error }
+    const upload: Upload = {
+      sessionId: p.sessionId,
+      name: p.name,
+      totalBytes: p.totalBytes,
+      encoding: p.encoding,
+      received: 0,
+      touched: this.now(),
+      root,
+      sourceRoot,
+      dev: directory.dev,
+      ino: directory.ino,
+      temp,
+      handle,
+      authorityCheckedAt: 0,
+      authorityBytes: 0,
+      reservation,
+    }
     this.uploads.set(p.uploadId, upload)
     await this.validateRoot(upload)
     return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...(p.encoding ? { encoding: p.encoding } : {}) }
@@ -114,10 +135,11 @@ export class WorkspaceUploadHost {
     const p = binary ? binaryChunkParams.parse(input) : chunkParams.parse(input)
     const upload = this.requireUpload(p)
     if (binary !== (upload.encoding === 'binary-v1')) throw failure('UPLOAD_INVALID_CHUNK')
-    const data = typeof p.data === 'string' ? Buffer.from(p.data, 'base64') : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength)
-    if (!data.length || data.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || (!binary && data.toString('base64') !== p.data)
-      || p.offset !== upload.received || upload.received + data.length > upload.totalBytes) throw failure('UPLOAD_INVALID_CHUNK')
+    const data = decodeChunk(p.data)
+    if (p.offset !== upload.received) throw failure('UPLOAD_INVALID_CHUNK')
+    if (data.length > upload.totalBytes - upload.received) throw failure('UPLOAD_INVALID_CHUNK')
     await this.validateRoot(upload, this.authorityExpired(upload))
+    await upload.reservation.checkDisk()
     let written = 0
     while (written < data.length) {
       const result = await upload.handle.write(data, written, data.length - written, upload.received + written)
@@ -126,6 +148,7 @@ export class WorkspaceUploadHost {
     }
     this.assertLive()
     upload.received += data.length
+    upload.reservation.consume(data.length)
     upload.touched = this.now()
     return { uploadId: p.uploadId, receivedBytes: upload.received }
   }
@@ -160,6 +183,7 @@ export class WorkspaceUploadHost {
       // Publication is the commit point. Abort/disconnect may only remove the temp.
       this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: this.now() })
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value!)
+      upload.reservation.commit()
       await this.discard(p.uploadId, upload)
       return result
     }
@@ -216,6 +240,7 @@ export class WorkspaceUploadHost {
 
   private async discard(id: string, upload: Upload) {
     this.uploads.delete(id)
+    upload.reservation.release()
     const original = await upload.handle.stat().catch(() => undefined)
     await upload.handle.close().catch(() => undefined)
     // Do not follow a replaced root or remove a substituted temporary entry.
@@ -235,6 +260,15 @@ export class WorkspaceUploadHost {
 }
 
 function failure(code: string) { return new RpcError(code, 'The workspace upload could not be completed.') }
+function decodeChunk(value: string | Uint8Array): Buffer {
+  const data = typeof value === 'string'
+    ? Buffer.from(value, 'base64')
+    : Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  const limit = typeof value === 'string' ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES
+  if (data.length === 0 || data.length > limit) throw failure('UPLOAD_INVALID_CHUNK')
+  if (typeof value === 'string' && data.toString('base64') !== value) throw failure('UPLOAD_INVALID_CHUNK')
+  return data
+}
 function validName(name: string): boolean {
   return Buffer.byteLength(name, 'utf8') <= 220 && name !== '.' && name !== '..'
     && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name) && !/[. ]$/u.test(name)
