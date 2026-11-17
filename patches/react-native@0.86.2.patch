@@ -1,0 +1,20 @@
+diff --git a/scripts/cocoapods/rncore.rb b/scripts/cocoapods/rncore.rb
+index 252588c98432894d30c52fc08ceb35c39ff481bc..26e6a192cab00f8eb30c49f1718f28fcc8a8430e 100644
+--- a/scripts/cocoapods/rncore.rb
++++ b/scripts/cocoapods/rncore.rb
+@@ -593,6 +593,15 @@ class ReactNativeCoreUtils
+ 
+                 xcconfig = Xcodeproj::Config.new(xcconfig_path)
+ 
++                # Pods using add_rncore_dependency already have the VFS overlay,
++                # but still need the same prebuilt-framework diagnostic policy
++                # as aggregate targets. Do this before skipping overlay setup.
++                swift_flags = xcconfig.attributes["OTHER_SWIFT_FLAGS"] || ""
++                unless swift_flags.include?("-Wno-incomplete-umbrella")
++                    ReactNativePodsUtils.add_flag_to_map_with_inheritance(xcconfig.attributes, "OTHER_SWIFT_FLAGS", " -Xcc -Wno-incomplete-umbrella")
++                    xcconfig.save_as(xcconfig_path)
++                end
++
+                 # Check if VFS overlay is already present
+                 other_cflags = xcconfig.attributes["OTHER_CFLAGS"] || ""
+                 next if other_cflags.include?("ivfsoverlay")

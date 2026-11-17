@@ -84,6 +84,13 @@
       "js-yaml@4": "^4.3.2",
       "shell-quote@1": "^1.11.0",
       "source-map-js@1": "^1.2.2"
+    },
+    "patchedDependencies": {
+      "react-native@0.86.2": "patches/react-native@0.86.2.patch",
+      "react-native-webview@13.16.1": "patches/react-native-webview@13.16.1.patch",
+      "react-native-safe-area-context@5.7.0": "patches/react-native-safe-area-context@5.7.0.patch",
+      "expo-localization@57.0.1": "patches/expo-localization@57.0.1.patch",
+      "expo-modules-autolinking@57.0.10": "patches/expo-modules-autolinking@57.0.10.patch"
     }
   },
   "dependencies": {
