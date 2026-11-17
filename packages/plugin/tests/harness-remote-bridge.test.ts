@@ -275,6 +275,29 @@ describe('HarnessRemoteBridge', () => {
     } })))
   })
 
+  it('forwards only approved translation calls and preserves native outcomes', async () => {
+    await runScenarios(['cotTranslation/limits', 'cotTranslation/translate'].flatMap(endpoint => [
+      { ok: true as const, value: { text: 'translated' } },
+      { ok: false as const, error: { code: 'gateway/lookup-not-found', message: 'Unavailable', details: {} } },
+    ].map(outcome => ({ name: `${endpoint}/${outcome.ok ? 'success' : 'unavailable'}`, run: async () => {
+      const dispatch = vi.fn(async () => outcome)
+      const open = vi.fn()
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), vi.fn())
+      const payload = { args: endpoint.endsWith('/limits') ? {} : { text: 'hello' } }
+      await expect(bridge.call({ endpoint, payload })).resolves.toEqual(outcome)
+      expect(dispatch).toHaveBeenCalledTimes(1)
+      expect(dispatch).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
+      await expect(bridge.openStream({ streamId: 'translation', endpoint, payload }))
+        .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      expect(open).not.toHaveBeenCalled()
+      dispatch.mockClear()
+      for (const rejected of ['cotTranslation/arbitrary', 'cotTranslation/translateExtra', 'otherPlugin/translate']) {
+        await expect(bridge.call({ endpoint: rejected, payload })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      }
+      expect(dispatch).not.toHaveBeenCalled()
+    } }))))
+  })
+
   it('forwards only the fixed alpha Gateway endpoint allowlist', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: [{ id: 'session-1' }] }))
     const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))

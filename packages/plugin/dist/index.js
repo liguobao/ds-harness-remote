@@ -103153,6 +103153,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "agentPresets/select",
   "commands/execute",
   "commands/list",
+  "cotTranslation/limits",
+  "cotTranslation/translate",
   "credentials/describe",
   "credentials/set",
   "credentials/unset",
@@ -103549,6 +103551,7 @@ var HarnessRemoteBridge = class {
     const params = streamOpenSchema3.parse(input4);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
+    if (params.endpoint.startsWith("cotTranslation/")) throw new RpcError("METHOD_NOT_ALLOWED", "Translation endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);

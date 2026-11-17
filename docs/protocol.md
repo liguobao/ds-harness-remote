@@ -758,6 +758,10 @@ Plugin Host 的 Harness 业务路由只接受 capability 对应的官方 Typert 
 `permissions.respond`、`connection.ping` 与 `sync.from` 已退出 Plugin 协议，Host 必须返回
 `METHOD_NOT_FOUND`。Android 旧原型不是兼容目标。
 
+Harness Remote 固定白名单允许官方 CoT 翻译插件的 `cotTranslation/limits` 与
+`cotTranslation/translate` unary 调用；不开放该命名空间的其他方法或 stream。
+Host 必须启用对应官方插件，原生 Gateway 的不可用或翻译失败结果原样返回。
+
 ### 16.1 Request
 
 ```json

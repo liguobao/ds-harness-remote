@@ -110,7 +110,7 @@ const MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION
 const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
-/** Fixed v0.1.2 Typert Remote subset exposed to authenticated peers. */
+/** Fixed Typert Remote subset exposed to authenticated peers. */
 export const HARNESS_REMOTE_ALLOWLIST = [
   '$events',
   '$events/result',
@@ -119,6 +119,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'agentPresets/select',
   'commands/execute',
   'commands/list',
+  'cotTranslation/limits',
+  'cotTranslation/translate',
   'credentials/describe',
   'credentials/set',
   'credentials/unset',
@@ -570,6 +572,7 @@ export class HarnessRemoteBridge {
     const params = streamOpenSchema.parse(input) as HarnessRemoteStreamOpenParams
     this.assertAllowed(params.endpoint)
     if (params.endpoint.startsWith('pluginManager/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Plugin management endpoints are not streams.')
+    if (params.endpoint.startsWith('cotTranslation/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Translation endpoints are not streams.')
     if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)

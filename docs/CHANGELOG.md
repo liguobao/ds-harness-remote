@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Restore official CoT translation over Remote when the Host enables the translation bundle, including the limits query needed for client plugin activation.
+
 - Restore direct-first LAN/P2P connections on mobile clients; automatic connections no longer authenticate over Relay before trying direct paths. Keep in-band upgrades for Relay fallback connections.
 
 - Desktop Client prepares direct P2P and standby TURN connections concurrently on supported Gateways, prefers direct within a bounded window, and starts business traffic only on the selected connection. Existing multi-connection Hosts remain compatible.
