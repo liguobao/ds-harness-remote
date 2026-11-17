@@ -68009,7 +68009,8 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.connectionId === void 0)
       return;
     const preferred = this.negotiatedTransports();
-    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || preferred.includes("lan")) && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
+    const lanRequested = (this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS).includes("lan");
+    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || lanRequested) && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
     let selected = "relay";
     this.lastRtcDiagnostics = void 0;
     if (wantWebRtc) {

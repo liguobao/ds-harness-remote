@@ -427,7 +427,10 @@ export class AdaptiveTransport extends BaseTransport {
   private async negotiate(signal: AbortSignal): Promise<void> {
     if (this.connectionId === undefined) return
     const preferred = this.negotiatedTransports()
-    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || preferred.includes('lan')) && this.webrtcEnabled
+    // Older Servers expose LAN candidates through transport.p2p. Preserve the
+    // caller's LAN intent even when transport.lan is absent from hello.ack.
+    const lanRequested = (this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS).includes('lan')
+    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || lanRequested) && this.webrtcEnabled
       && (preferred.includes('lan') || preferred.includes('p2p') || preferred.includes('turn'))
     let selected: SelectedTransport = 'relay'
     this.lastRtcDiagnostics = undefined
