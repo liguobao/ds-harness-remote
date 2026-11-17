@@ -29,7 +29,7 @@ function SimpleModalSurface({ onClose, colors, children }: { onClose: () => void
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 }}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View style={{ backgroundColor: colors.card, borderRadius: 16, overflow: 'hidden', maxHeight: 480, borderWidth: 1, borderColor: colors.border }}>
+      <View style={{ backgroundColor: colors.cardOpaque, borderRadius: 16, overflow: 'hidden', maxHeight: 480, borderWidth: 1, borderColor: colors.border }}>
         {children}
       </View>
     </View>

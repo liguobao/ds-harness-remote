@@ -412,6 +412,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
+    // Floating popup: must stay opaque (dark `card` is translucent and would let the
+    // transcript bleed through). Inner cards composite their translucent fill over this.
+    backgroundColor: colors.cardOpaque,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
   },
   group: { borderRadius: radius.xl, backgroundColor: colors.card, overflow: 'hidden' },
   header: { minHeight: 44, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
