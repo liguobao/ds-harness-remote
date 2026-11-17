@@ -349,6 +349,13 @@ describe('ClientModeRuntime Host account control', () => {
               antigravity: false,
               opencode: true,
             })
+            client.rpc.mockResolvedValueOnce({
+              capabilities: ['agent.acp.v1', 'agent.acp.opencode.v1', 'agent.acp.opencode.archive.v1'],
+            })
+            expect(await probeRemoteHostFeatures(client as never)).toMatchObject({
+              opencode: true,
+              acpOpencodeArchive: true,
+            })
           },
         },
         {
@@ -1571,6 +1578,68 @@ describe('ClientModeRuntime Host account control', () => {
       error: { code: 'internal', details: { remoteCode: 'INVALID_MESSAGE' } },
     })
     await runtime.close()
+  })
+
+  it('forwards agent.acp.opencode.archive.v1 and antigravity model-load in openCursorWorkspace and createCursorWorkspace', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-opencode-archive-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      gatewayWithCarrier(),
+      logger(),
+    )
+    await runtime.start()
+    const rpc = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'harness.transport.describe') {
+        return {
+          capabilities: [
+            'harness.remote.v1',
+            'agent.acp.opencode.v1',
+            'agent.acp.opencode.archive.v1',
+            'agent.acp.antigravity.model-load.v1',
+          ],
+        }
+      }
+      if (method === 'agent.acp.call') {
+        if (params.method === 'dsh/sessionList') return { items: [{ conversationId: 'oc-1', title: 'OC 1', createdAt: 1, updatedAt: 2 }] }
+        if (params.method === 'session/new') return { sessionId: 'oc-new' }
+      }
+      throw new Error(`unexpected rpc ${method}`)
+    })
+    ;(runtime as unknown as { connected: unknown }).connected = {
+      client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }), onEvent: () => () => undefined },
+      target: {
+        deviceId: 'host-1', name: 'Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1,
+      },
+      transport: {},
+      features: remoteHostFeatures(),
+    }
+    const spy = vi.spyOn(AcpVirtualHarness, 'remote')
+    try {
+      await runtime.openCursorWorkspace('host-1', 'opencode:cwd:%2Frepo-open', undefined, 'opencode')
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { deviceId: 'host-1', name: 'Host' },
+        'opencode',
+        ['agent.acp.antigravity.model-load.v1', 'agent.acp.opencode.archive.v1'],
+        expect.anything(),
+        expect.anything(),
+      )
+      await runtime.createCursorWorkspace('host-1', '/repo-create', undefined, 'opencode')
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.anything(),
+        { deviceId: 'host-1', name: 'Host' },
+        'opencode',
+        ['agent.acp.antigravity.model-load.v1', 'agent.acp.opencode.archive.v1'],
+        expect.anything(),
+        expect.anything(),
+      )
+    } finally {
+      spy.mockRestore()
+      await runtime.close()
+    }
   })
 })
 

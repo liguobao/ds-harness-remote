@@ -628,3 +628,72 @@ describe('image attachment metadata tolerance', () => {
     ])
   })
 })
+
+describe('assistant attempt abandonment', () => {
+  it('clears only the matching streaming item on assistant/attempt-abandoned so retry chunks start clean', () => {
+    const finalizedOtherStep = sessionEvent({
+      type: 'assistant/message',
+      seq: 1,
+      data: { turn: 2, step: 0, message: { id: 'settled-step', role: 'assistant', content: [{ type: 'text', text: 'Kept' }] } },
+    })
+    const attempt1Reasoning = sessionEvent({
+      type: 'assistant/chunk',
+      seq: 1.5,
+      data: { turn: 2, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'stale thought' } },
+    })
+    const attempt1Text = sessionEvent({
+      type: 'assistant/chunk',
+      seq: 1.6666666666666667,
+      data: { turn: 2, step: 1, chunk: { type: 'text-delta', index: 1, text: 'abandoned partial' } },
+    })
+
+    let items = foldHistory([
+      { event: finalizedOtherStep },
+      { event: attempt1Reasoning },
+      { event: attempt1Text },
+    ], 's1')
+    expect(items.map(item => item.id)).toEqual(['settled-step', 'stream:2:1'])
+
+    // Abandonment clears stream:2:1 without touching settled-step.
+    items = applyMuxFrame(items, frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({
+        type: 'assistant/attempt-abandoned',
+        seq: 1.75,
+        data: { turn: 2, step: 1, attemptId: 'att-1' },
+      }),
+    }))
+    expect(items.map(item => item.id)).toEqual(['settled-step'])
+
+    // Retry chunks in the same (turn, step) rebuild stream:2:1 cleanly and finalize.
+    items = applyMuxFrame(items, frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({
+        type: 'assistant/chunk',
+        seq: 1.8,
+        data: { turn: 2, step: 1, chunk: { type: 'text-delta', index: 0, text: 'fresh reply' } },
+      }),
+    }))
+    expect(items).toEqual([
+      expect.objectContaining({ id: 'settled-step', text: 'Kept' }),
+      expect.objectContaining({ id: 'stream:2:1', text: 'fresh reply', streaming: true, nativeOrderSeq: 1.8 }),
+    ])
+    expect((items[1] as { reasoning?: string }).reasoning).toBeUndefined()
+
+    items = applyMuxFrame(items, frame('', {
+      type: 'session/event',
+      sessionId: 's1',
+      event: sessionEvent({
+        type: 'assistant/message',
+        seq: 2,
+        data: { turn: 2, step: 1, message: { id: 'final-step', role: 'assistant', content: [{ type: 'text', text: 'fresh reply' }] } },
+      }),
+    }))
+    expect(items).toEqual([
+      expect.objectContaining({ id: 'settled-step', text: 'Kept' }),
+      expect.objectContaining({ id: 'final-step', text: 'fresh reply' }),
+    ])
+  })
+})

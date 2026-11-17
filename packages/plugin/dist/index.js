@@ -66261,7 +66261,25 @@ var AgentAcpClient = class {
   }
   async openStream(sessionId, onFrame, onClosed, signal, tool) {
     const streamId = createRemoteId();
-    const unsubscribe = this.core.onEvent((event) => {
+    let closed = false;
+    let opened = false;
+    let unsubscribe = () => void 0;
+    let unsubscribeCoreClose = () => void 0;
+    const onAbort = () => {
+      if (!markClosed())
+        return;
+      void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
+    };
+    const markClosed = () => {
+      if (closed)
+        return false;
+      closed = true;
+      unsubscribe();
+      unsubscribeCoreClose();
+      signal?.removeEventListener("abort", onAbort);
+      return true;
+    };
+    unsubscribe = this.core.onEvent((event) => {
       if (event.event === "agent.acp.frame" && isRecord2(event.data)) {
         const data2 = event.data;
         if (tool ? data2.streamId !== streamId : !frameMatchesSubscription(data2, streamId, sessionId))
@@ -66269,24 +66287,40 @@ var AgentAcpClient = class {
         onFrame(data2);
       }
       if (event.event === "agent.acp.stream.closed" && isRecord2(event.data) && event.data.streamId === streamId) {
+        if (!markClosed())
+          return;
         onClosed?.(event.data);
       }
+    });
+    unsubscribeCoreClose = this.core.onClose(() => {
+      if (!opened) {
+        markClosed();
+        return;
+      }
+      if (!markClosed())
+        return;
+      onClosed?.({ streamId, reason: "peer-disconnected" });
     });
     try {
       await this.core.rpc("agent.acp.stream.open", { streamId, sessionId, ...tool ? { tool } : {} }, signal);
       if (signal?.aborted) {
-        unsubscribe();
+        markClosed();
         await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
         throw signal.reason;
       }
+      opened = true;
+      if (!closed) {
+        signal?.addEventListener("abort", onAbort, { once: true });
+      }
     } catch (error62) {
-      unsubscribe();
+      markClosed();
       throw error62;
     }
     return {
       streamId,
       close: async () => {
-        unsubscribe();
+        if (!markClosed())
+          return;
         await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
       }
     };
@@ -69678,105 +69712,149 @@ var AcpLiveProjection = class {
   constructor(context) {
     this.context = context;
   }
-  async sessionFollow(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.context.ensureSessionRegistered(sessionId) ?? this.context.sessions.get(sessionId);
-    if (session2 === void 0) throw new Error("The Session was not found.");
-    await this.context.hydrateSession(session2);
-    this.context.rememberOpenedSession?.(session2.sessionId);
-    const history = this.context.historyPage(session2, {
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50
-    });
-    const queue = new AsyncValueQueue(signal);
-    const follow = {
-      sessionId,
+  findFollow(sessionId) {
+    for (const follow of this.context.follows) {
+      if (follow.sessionId === sessionId) return follow;
+    }
+    return void 0;
+  }
+  createFollowState(session2, queue, hasConsumer, stepOpen) {
+    return {
+      sessionId: session2.sessionId,
       acpSessionId: session2.acpSessionId,
       queue,
-      nextSeq: session2.events.length,
+      hasConsumer,
+      nextSeq: session2.events.length === 0 ? 0 : Math.max(...session2.events.map((entry) => entry.event.seq)) + 1,
       turn: Math.max(0, ...session2.events.map((entry) => isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
-      stepOpen: session2.running,
+      stepOpen,
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: "",
+      accumulatedReasoning: "",
       activeToolCalls: /* @__PURE__ */ new Set(),
       piToolOutputs: /* @__PURE__ */ new Map(),
       piToolCalls: /* @__PURE__ */ new Map()
     };
-    this.context.follows.add(follow);
-    queue.push({
+  }
+  snapshotFrame(session2, history, follow) {
+    const step = this.context.backend === "pi" ? follow.piStep ?? 1 : 1;
+    const assistantStream = follow.assistantAttempt === void 0 ? { revision: follow.assistantStreamRevision } : {
+      revision: follow.assistantStreamRevision,
+      activeAttempt: {
+        attemptId: follow.assistantAttempt.attemptId,
+        startedAfterSeq: follow.assistantAttempt.startedAfterSeq,
+        turn: follow.turn,
+        step,
+        nextIndex: follow.assistantAttempt.nextIndex,
+        stream: [...follow.assistantAttempt.stream]
+      }
+    };
+    return {
       type: "snapshot",
       header: history.header,
       cursor: history.cursor,
       records: history.records,
       hasMore: history.hasMore,
       projections: {
-        asOfSeq: history.cursor,
+        asOfSeq: session2.projectionSeq ?? -1,
         values: {
           title: session2.title ?? acpBackendLabel(this.context.backend),
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
-          modelSelection: this.context.modelSelectionProjection(sessionId),
-          permissions: this.context.permissionsProjection(sessionId),
+          modelSelection: this.context.modelSelectionProjection(session2.sessionId),
+          permissions: this.context.permissionsProjection(session2.sessionId),
           imageLimits: acpImageLimits(this.context.backend)
         }
       },
-      assistantStream: { revision: 0 }
+      assistantStream
+    };
+  }
+  handleRemoteStreamClosed(session2, follow, reason) {
+    if (follow.closed) return;
+    session2.running = false;
+    this.context.emitRemoteEvent("api-session/status", [session2.sessionId, false]);
+    this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(reason), true);
+  }
+  async sessionFollow(request, signal) {
+    const requestedId = extractSessionId(request);
+    const session2 = this.context.lookupSession(requestedId);
+    if (session2 === void 0) throw new Error("The Session was not found.");
+    const sessionId = session2.sessionId;
+    await this.context.hydrateSession(session2);
+    this.context.rememberOpenedSession?.(sessionId);
+    const history = this.context.historyPage(session2, {
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50
     });
+    const queue = new AsyncValueQueue(signal);
+    const existing = this.findFollow(sessionId);
+    if (existing !== void 0) {
+      const priorQueue = existing.queue;
+      existing.queue = queue;
+      existing.hasConsumer = true;
+      priorQueue.close();
+      queue.push(this.snapshotFrame(session2, history, existing));
+      return queue.iterate(() => {
+        if (existing.queue === queue) {
+          existing.closed = true;
+          this.context.follows.delete(existing);
+          void existing.close?.().catch(() => void 0);
+        }
+      });
+    }
+    const follow = this.createFollowState(session2, queue, true, session2.running);
+    this.context.follows.add(follow);
+    queue.push(this.snapshotFrame(session2, history, follow));
     try {
       const stream = await this.context.client.openStream(
         session2.acpSessionId,
         (frame) => this.acceptAcpFrame(follow, frame),
-        (closed) => {
-          session2.running = false;
-          this.context.emitRemoteEvent("api-session/status", [sessionId, false]);
-          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
-        },
+        (closed) => this.handleRemoteStreamClosed(session2, follow, closed.reason),
         signal
       );
-      follow.close = () => stream.close();
+      if (follow.closed || !this.context.follows.has(follow)) {
+        await stream.close().catch(() => void 0);
+      } else {
+        follow.close = () => stream.close();
+      }
     } catch (error62) {
       this.context.follows.delete(follow);
-      queue.close();
+      follow.closed = true;
+      follow.queue.close();
       throw error62;
     }
     return queue.iterate(() => {
-      this.context.follows.delete(follow);
-      void follow.close?.().catch(() => void 0);
+      if (follow.queue === queue) {
+        follow.closed = true;
+        this.context.follows.delete(follow);
+        void follow.close?.().catch(() => void 0);
+      }
     });
   }
   async ensureFollow(session2) {
-    if ([...this.context.follows].some((follow2) => follow2.sessionId === session2.sessionId)) return;
+    if (this.findFollow(session2.sessionId) !== void 0) return;
     const controller = new AbortController();
     const queue = new AsyncValueQueue(controller.signal);
-    const follow = {
-      sessionId: session2.sessionId,
-      acpSessionId: session2.acpSessionId,
-      queue,
-      nextSeq: session2.events.length === 0 ? 0 : Math.max(...session2.events.map((entry) => entry.event.seq)) + 1,
-      turn: Math.max(0, ...session2.events.map((entry) => isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
-      stepOpen: false,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      accumulatedText: "",
-      activeToolCalls: /* @__PURE__ */ new Set(),
-      piToolOutputs: /* @__PURE__ */ new Map(),
-      piToolCalls: /* @__PURE__ */ new Map()
-    };
+    const follow = this.createFollowState(session2, queue, false, false);
     this.context.follows.add(follow);
-    const stream = await this.context.client.openStream(
-      session2.acpSessionId,
-      (frame) => this.acceptAcpFrame(follow, frame),
-      (closed) => {
-        if (this.context.backend === "pi") {
-          session2.running = false;
-          this.context.emitRemoteEvent("api-session/status", [session2.sessionId, false]);
-        }
-        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
+    try {
+      const stream = await this.context.client.openStream(
+        session2.acpSessionId,
+        (frame) => this.acceptAcpFrame(follow, frame),
+        (closed) => this.handleRemoteStreamClosed(session2, follow, closed.reason)
+      );
+      if (follow.closed || !this.context.follows.has(follow)) {
+        await stream.close().catch(() => void 0);
+        return;
       }
-    );
-    follow.close = async () => {
-      controller.abort();
-      await stream.close();
-    };
+      follow.close = async () => {
+        controller.abort();
+        await stream.close();
+      };
+    } catch (error62) {
+      this.context.follows.delete(follow);
+      follow.closed = true;
+      follow.queue.close();
+      throw error62;
+    }
   }
   acceptAcpFrame(follow, frame) {
     const method = frame.frame.method;
@@ -69785,6 +69863,7 @@ var AcpLiveProjection = class {
       this.acceptSessionUpdate(follow, params);
       return;
     }
+    if (follow.closed) return;
     if (method === "session/request_permission" || method === "cursor/ask_question" || method === "cursor/create_plan") {
       this.acceptApproval(follow, params, method);
     }
@@ -69799,9 +69878,10 @@ var AcpLiveProjection = class {
       }
       return;
     }
+    if (follow.closed) return;
     if (kind === "model_selection" && isRecord4(update.selected) && update.selected.provider === this.context.backend && typeof update.selected.model === "string") {
       this.context.selectedModels.set(follow.sessionId, update.selected);
-      this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq());
+      this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq(follow.sessionId));
       return;
     }
     if (kind === "agent_message_chunk" || kind === "agent_message") {
@@ -69878,19 +69958,41 @@ var AcpLiveProjection = class {
         return;
       }
       if (kind === "tool_call_update" && !terminal) return;
-      if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
-      this.pushEvent(follow, "tool/call", {
-        turn: follow.turn,
-        step: 1,
-        callId,
-        name: toolName,
-        arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
-        toolCallId: callId,
-        toolName,
-        status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
-      });
-      if (terminal) follow.activeToolCalls.delete(callId);
-      else follow.activeToolCalls.add(callId);
+      if (!terminal && follow.activeToolCalls.has(callId)) return;
+      if (!terminal || !follow.activeToolCalls.has(callId)) {
+        this.pushEvent(follow, "tool/call", {
+          turn: follow.turn,
+          step: 1,
+          callId,
+          name: toolName,
+          arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
+          toolCallId: callId,
+          toolName,
+          status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
+        });
+      }
+      if (terminal) {
+        const output2 = piToolResult(update);
+        const content = output2.content.length > 0 ? output2.content : typeof update.rawOutput === "string" && update.rawOutput.length > 0 ? [{ type: "text", text: update.rawOutput }] : [];
+        this.pushEvent(follow, "tool/result", {
+          turn: follow.turn,
+          step: 1,
+          message: {
+            id: `${callId}:result`,
+            role: "user",
+            content: [{
+              type: "tool-result",
+              toolCallId: callId,
+              content,
+              ...output2.isError ? { isError: true } : {}
+            }],
+            source: { kind: "tool", callId }
+          }
+        });
+        follow.activeToolCalls.delete(callId);
+      } else {
+        follow.activeToolCalls.add(callId);
+      }
       if (session2 !== void 0) session2.updatedAt = Date.now();
       return;
     }
@@ -70015,6 +70117,7 @@ var AcpLiveProjection = class {
       this.ensurePiStep(follow, true);
       follow.piReasoning = (follow.piReasoning ?? "") + delta;
     }
+    follow.accumulatedReasoning = (follow.accumulatedReasoning ?? "") + delta;
     if (!follow.stepOpen) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -70043,21 +70146,35 @@ var AcpLiveProjection = class {
     }
     if (advanceAfterTools) follow.piAfterTools = false;
   }
+  finishReason(outcome) {
+    if (outcome.kind === "error") return { kind: "error", failure: outcome.error };
+    if (outcome.kind === "aborted") {
+      return {
+        kind: "aborted",
+        failure: { code: "ABORTED", message: `${acpBackendLabel(this.context.backend)} reply interrupted.` }
+      };
+    }
+    return { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
+  }
   finishPiAssistant(follow, outcome = { kind: "completed" }) {
     if (!follow.streamActive) return;
+    const isPi = this.context.backend === "pi";
+    const step = isPi ? follow.piStep ?? 1 : 1;
+    const reasoningText = follow.accumulatedReasoning ?? follow.piReasoning ?? "";
     const blocks = [
-      { index: follow.reasoningBlockIndex, type: "reasoning", text: follow.piReasoning ?? "" },
+      { index: follow.reasoningBlockIndex, type: "reasoning", text: reasoningText },
       { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
     ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
-    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
-    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "Pi reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
-    this.pushAssistantChunk(follow, { type: "finish", reason });
+    for (const { index, type, text } of blocks) {
+      this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
+    }
+    this.pushAssistantChunk(follow, { type: "finish", reason: this.finishReason(outcome) });
     const selection = this.context.modelSelection(follow.sessionId);
     const seq = this.pushEvent(follow, "assistant/message", {
       turn: follow.turn,
-      step: follow.piStep ?? 1,
+      step,
       message: {
-        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
+        id: isPi ? `${follow.sessionId}:${follow.turn}:${step}` : `${follow.sessionId}:${follow.turn}`,
         role: "assistant",
         content: blocks.map(({ type, text }) => ({ type, text })),
         source: { kind: "model", provider: selection.provider, model: selection.model }
@@ -70069,80 +70186,35 @@ var AcpLiveProjection = class {
     follow.blockIndex = void 0;
     follow.reasoningBlockIndex = void 0;
     follow.accumulatedText = "";
+    follow.accumulatedReasoning = "";
     follow.piReasoning = "";
   }
-  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }) {
+  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }, remoteClosed = false) {
+    if (follow.closed) return;
     const session2 = this.context.sessions.get(follow.sessionId);
     if (session2 !== void 0) session2.running = false;
-    if (this.context.backend === "pi") {
-      this.finishPiAssistant(follow, outcome);
-      if (follow.stepOpen) {
-        this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
-        this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
-      }
-      follow.stepOpen = false;
+    const isPi = this.context.backend === "pi";
+    const step = isPi ? follow.piStep ?? 1 : 1;
+    this.finishPiAssistant(follow, outcome);
+    if (follow.stepOpen) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
+    }
+    follow.stepOpen = false;
+    if (isPi) {
       follow.piStep = 1;
       follow.piAfterTools = false;
-      follow.piToolOutputs.clear();
-      follow.piToolCalls.clear();
-      follow.activeToolCalls.clear();
-      if (session2 !== void 0) this.context.syncSessionCache?.(session2);
-      return;
     }
-    if (follow.streamActive) {
-      if (follow.reasoningBlockIndex !== void 0) {
-        this.pushAssistantChunk(follow, {
-          type: "block-end",
-          index: follow.reasoningBlockIndex,
-          block: { type: "reasoning", text: "" }
-        });
-        follow.reasoningBlockIndex = void 0;
-      }
-      if (follow.blockIndex !== void 0) {
-        const fullText2 = follow.accumulatedText;
-        this.pushAssistantChunk(follow, {
-          type: "block-end",
-          index: follow.blockIndex,
-          block: { type: "text", text: fullText2 }
-        });
-      }
-      this.pushAssistantChunk(follow, {
-        type: "finish",
-        reason: { kind: "stop" }
-      });
-      const fullText = follow.accumulatedText;
-      const selection = this.context.modelSelection(follow.sessionId);
-      const stream = follow.assistantAttempt?.stream ?? [];
-      const assistantMessageSeq = this.pushEvent(follow, "assistant/message", {
-        turn: follow.turn,
-        step: 1,
-        message: {
-          id: `${follow.sessionId}:${follow.turn}`,
-          role: "assistant",
-          content: [{ type: "text", text: fullText }],
-          source: { kind: "model", provider: selection.provider, model: selection.model }
-        },
-        stream
-      });
-      this.endAssistantAttempt(follow, {
-        kind: "committed",
-        eventType: "assistant/message",
-        seq: assistantMessageSeq
-      });
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
-    } else if (follow.stepOpen) {
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
-    }
-    follow.streamActive = false;
-    follow.stepOpen = false;
-    follow.blockIndex = void 0;
-    follow.reasoningBlockIndex = void 0;
-    follow.accumulatedText = "";
     follow.piToolOutputs.clear();
     follow.piToolCalls.clear();
+    follow.activeToolCalls.clear();
     if (session2 !== void 0) this.context.syncSessionCache?.(session2);
+    if (remoteClosed || !follow.hasConsumer) {
+      follow.closed = true;
+      this.context.follows.delete(follow);
+      follow.queue.close();
+      void follow.close?.().catch(() => void 0);
+    }
   }
   pushEvent(follow, type, data2) {
     const session2 = this.context.sessions.get(follow.sessionId);
@@ -70258,7 +70330,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.historyCache = historyCache;
     const owner = this;
     this.live = new AcpLiveProjection({
-      ensureSessionRegistered: (...args) => owner.ensureSessionRegistered(...args),
+      lookupSession: (...args) => owner.lookupSession(...args),
       get sessions() {
         return owner.sessions;
       },
@@ -70278,7 +70350,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       get selectedModels() {
         return owner.selectedModels;
       },
-      publishProjection: (...args) => owner.events.publishProjection(...args),
+      publishProjection: (...args) => owner.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
       refreshSessionTitle: (...args) => owner.titles.refresh(...args),
       applySessionTitle: (...args) => owner.titles.applyNative(...args),
@@ -70329,7 +70401,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       backend,
       client,
       this.sessions,
-      (sessionId, title) => this.events.publishProjection(sessionId, "title", title)
+      (sessionId, title) => {
+        const session2 = this.sessions.get(sessionId);
+        if (session2 !== void 0) this.syncSessionCache(session2);
+        this.publishProjection(sessionId, "title", title);
+      }
     );
     this.unsubscribeArchived = client.onSessionArchived?.((data2) => {
       if (this.closed || data2.backend !== this.backend) return;
@@ -70540,15 +70616,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "directoryPicker/list":
           return business(await this.listDirectory(requestArg(args), signal));
         case "skills/list":
-          return business(success2({ items: [] }));
+          return business(success2({ skills: [] }));
         case "job/kill":
-          return this.hostCarrier === void 0 ? business(success2({ outcome: "already-finished" })) : await this.hostCarrier.dispatch(endpoint, payload, signal);
+          return business(success2({ outcome: "already-finished" }));
         case "commands/list":
           return business(this.commandList(requestArg(args)));
         case "commands/execute":
           return business(await this.executeCommand(requestArg(args)));
         default:
-          return this.hostCarrier === void 0 ? fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
+          return this.hostCarrier !== void 0 && isAllowedHostCarrierDispatch(endpoint) ? await this.hostCarrier.dispatch(endpoint, payload, signal) : fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`);
       }
     } catch (error62) {
       return failFrom(error62);
@@ -70571,7 +70647,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (endpoint === "session/follow") return this.live.sessionFollow(requestArg(args), signal);
     if (endpoint === "$events") return this.events.remoteEvents(signal);
     if (endpoint === "job/list" || endpoint === "job/follow") return this.events.emptyJobStream(endpoint, signal);
-    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
+    if (this.hostCarrier !== void 0 && isAllowedHostCarrierOpen(endpoint)) {
+      return this.hostCarrier.open(endpoint, payload, signal);
+    }
     throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",
@@ -70597,6 +70675,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const follows = [...this.follows];
     this.follows.clear();
     for (const follow of follows) {
+      follow.closed = true;
       follow.queue.close();
       await follow.close?.().catch(() => void 0);
     }
@@ -70679,39 +70758,25 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const session2 = this.registerSession(created.sessionId, cwd2, workspace2?.title);
     this.attachSessionToWorkspace(cwd2, session2.sessionId);
     this.publishWorkspaceBaseline();
-    const seq = this.nextProjectionSeq();
-    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, seq)]);
-    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), seq);
-    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), seq);
+    const summarySeq = this.nextProjectionSeq(session2.sessionId);
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, summarySeq)]);
+    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), this.nextProjectionSeq(session2.sessionId));
+    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), this.nextProjectionSeq(session2.sessionId));
     return success2({ sessionId: session2.sessionId });
   }
-  ensureSessionRegistered(sessionId) {
-    let session2 = this.sessions.get(sessionId);
-    if (session2 !== void 0) return session2;
-    const prefix = sessionPrefix(this.backend);
+  lookupSession(sessionId) {
+    const direct = this.sessions.get(sessionId);
+    if (direct !== void 0) return direct;
     if (this.backend !== "cursor") {
-      if (sessionId.startsWith(prefix)) {
-        const acpSessionId = sessionId.slice(prefix.length);
-        const workspace2 = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
-        const cwd2 = workspace2?.path ?? "/";
-        session2 = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
-        if (workspace2 && !workspace2.sessionIds.includes(sessionId)) {
-          workspace2.sessionIds.unshift(sessionId);
-          workspace2.sessionCount = workspace2.sessionIds.length;
-          this.publishWorkspaceBaseline();
-        }
-        return session2;
-      }
-      const prefixed = `${prefix}${sessionId}`;
-      const found = this.sessions.get(prefixed);
-      if (found !== void 0) return found;
+      return this.sessions.get(`${sessionPrefix(this.backend)}${sessionId}`);
     }
     return void 0;
   }
   async prompt(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const requestedId = extractSessionId(request);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
+    const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
     const text = extractPromptText(array2(request.content));
     let images;
@@ -70723,10 +70788,30 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     if (text === void 0 && images.length === 0) return failure2("attachment-error", "A prompt or image is required.");
     const imageBlocks = images.map((image) => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice(6)}`));
+    const hadFollow = [...this.follows].some((f) => f.sessionId === sessionId);
+    const prevEventsLen = session2.events.length;
+    const prevBlank = session2.blank;
+    const prevHydrated = session2.hydrated;
+    const prevRunning = session2.running;
+    const prevUpdatedAt = session2.updatedAt;
+    const prevTitle = session2.title;
+    const prevTitleFromPrompt = session2.titleFromPrompt;
+    const prevTitleOverridden = session2.titleOverridden;
+    const prevAttachmentIds = new Set(this.imageAttachments.keys());
     this.cacheImageAttachments(sessionId, imageBlocks);
     const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
-    await this.live.ensureFollow(session2);
+    try {
+      await this.live.ensureFollow(session2);
+    } catch (error62) {
+      for (const id6 of [...this.imageAttachments.keys()]) {
+        if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
+      }
+      throw error62;
+    }
     const follow = [...this.follows].find((f) => f.sessionId === sessionId);
+    const prevTurn = follow?.turn;
+    const prevStepOpen = follow?.stepOpen;
+    const prevNextSeq = follow?.nextSeq;
     if (follow !== void 0) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -70747,13 +70832,56 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.syncSessionCache(session2);
     this.events.emitRemoteEvent("api-session/status", [sessionId, true]);
     this.publishWorkspaceBaseline();
-    await this.client.prompt(session2.acpSessionId, text ?? "", signal, images, this.backend);
+    try {
+      await this.client.prompt(session2.acpSessionId, text ?? "", signal, images, this.backend);
+    } catch (error62) {
+      if (!follow?.streamActive && session2.events.length === prevEventsLen + 3) {
+        session2.events.length = prevEventsLen;
+        session2.blank = prevBlank;
+        session2.hydrated = prevHydrated;
+        session2.running = prevRunning;
+        session2.updatedAt = prevUpdatedAt;
+        const titleChanged = session2.title !== prevTitle;
+        session2.title = prevTitle;
+        session2.titleFromPrompt = prevTitleFromPrompt;
+        session2.titleOverridden = prevTitleOverridden;
+        if (titleChanged) {
+          this.publishProjection(sessionId, "title", prevTitle ?? this.backendLabel());
+        }
+        for (const id6 of [...this.imageAttachments.keys()]) {
+          if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
+        }
+        if (follow !== void 0) {
+          follow.turn = prevTurn;
+          follow.stepOpen = prevStepOpen;
+          follow.nextSeq = prevNextSeq;
+          if (!hadFollow || follow.hasConsumer) {
+            follow.closed = true;
+            this.follows.delete(follow);
+            follow.queue.close();
+            void follow.close?.().catch(() => void 0);
+          }
+        }
+      } else {
+        session2.running = false;
+        if (follow !== void 0 && !follow.closed && (follow.stepOpen || follow.streamActive)) {
+          const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" ? error62.code : "ACP_PROMPT_FAILED";
+          const message = error62 instanceof Error ? error62.message : String(error62);
+          this.live.closeFollowAfterRemoteStreamClosed(follow, { kind: "error", error: { code, message } });
+        }
+      }
+      this.events.emitRemoteEvent("api-session/status", [sessionId, false]);
+      this.syncSessionCache(session2);
+      this.publishWorkspaceBaseline();
+      throw error62;
+    }
     return success2({ accepted: true });
   }
   async cancel(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const requestedId = extractSessionId(request);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
+    const sessionId = session2.sessionId;
     await this.client.cancel(session2.acpSessionId, signal);
     session2.running = false;
     for (const follow of this.follows) {
@@ -70766,17 +70894,18 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ accepted: true });
   }
   async renameSession(request) {
-    const sessionId = extractSessionId(request);
+    const requestedId = extractSessionId(request);
     const title = string4(request.title)?.trim();
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
-    if (title === void 0) return failure2("bad-request", "A Session title is required.");
+    if (!title) return failure2("bad-request", "A Session title is required.");
     session2.title = title;
     session2.titleOverridden = true;
     session2.updatedAt = Date.now();
     this.syncSessionCache(session2);
-    this.events.publishProjection(sessionId, "title", title);
-    return success2({ sessionId });
+    const seq = this.nextProjectionSeq(session2.sessionId);
+    this.events.publishProjection(session2.sessionId, "title", title, seq);
+    return success2({ title, seq });
   }
   cacheImageAttachments(sessionId, content) {
     for (const value of content) {
@@ -70788,13 +70917,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
   }
   async attachment(request) {
-    const sessionId = extractSessionId(request);
+    const requestedId = extractSessionId(request);
     const attachmentId = string4(request.attachmentId) ?? string4(record2(request.attachment).attachmentId);
-    const session2 = this.ensureSessionRegistered(sessionId);
+    const session2 = this.lookupSession(requestedId);
     if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
     const cached2 = this.imageAttachments.get(attachmentId);
-    return cached2?.sessionId === sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
+    return cached2?.sessionId === session2.sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
   }
   async hydrateSession(session2) {
     if (this.backend === "cursor" || session2.blank || session2.events.length > 0 && !session2.staleHistory) return;
@@ -70879,13 +71008,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
   }
   async sessionHistory(request) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const requestedId = extractSessionId(request);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
+    const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
     const beforeSeq = optionalInteger(request.beforeSeq);
     if (beforeSeq === void 0) {
-      this.rememberOpenedSession(session2.sessionId);
+      this.rememberOpenedSession(sessionId);
     }
     const page = this.historyPage(session2, {
       beforeSeq,
@@ -70895,7 +71025,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       ...page,
       events: page.records.map((entry) => ({ event: entry.event })),
       projections: {
-        asOfSeq: page.cursor,
+        asOfSeq: session2.projectionSeq ?? -1,
         values: {
           title: session2.title ?? acpBackendLabel(this.backend),
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
@@ -70907,15 +71037,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
   }
   async sessionProjections(request) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const requestedId = extractSessionId(request);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return success2(null);
     await this.hydrateSession(session2);
-    return success2(this.sessionSummary(session2, session2.events.at(-1)?.event.seq ?? -1).projections);
+    return success2(this.sessionSummary(session2, session2.projectionSeq ?? -1).projections);
   }
   async sessionPage(request) {
-    const sessionId = extractSessionId(request);
-    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    const requestedId = extractSessionId(request);
+    const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session2);
     const page = this.historyPage(session2, {
@@ -71038,10 +71168,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const title = this.backend === "antigravity" ? "Antigravity" : this.backend === "opencode" ? "OpenCode" : workspace2.title;
     const session2 = this.registerSession(sessionId, cwd2, title);
     this.attachSessionToWorkspace(cwd2, session2.sessionId);
-    const seq = this.nextProjectionSeq();
-    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, seq)]);
-    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), seq);
-    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), seq);
+    const summarySeq = this.nextProjectionSeq(session2.sessionId);
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, summarySeq)]);
+    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), this.nextProjectionSeq(session2.sessionId));
+    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), this.nextProjectionSeq(session2.sessionId));
     this.publishWorkspaceBaseline();
     return session2;
   }
@@ -71057,7 +71187,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
-    return [...this.sessions.values()].filter((session2) => allowed.has(session2.sessionId) && !this.archivedSessionIds.has(session2.sessionId)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId)).map((session2) => this.sessionSummary(session2, 0));
+    return [...this.sessions.values()].filter((session2) => allowed.has(session2.sessionId) && !this.archivedSessionIds.has(session2.sessionId)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId)).map((session2) => this.sessionSummary(session2, session2.projectionSeq ?? -1));
   }
   sortWorkspaceSessions(workspace2) {
     workspace2.sessionIds.sort((a, b) => (this.sessions.get(b)?.updatedAt ?? 0) - (this.sessions.get(a)?.updatedAt ?? 0) || a.localeCompare(b));
@@ -71117,7 +71247,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.selectedPermissions.set(resolved, preset);
       this.selectedPermissions.set(sessionId, preset);
     }
-    const seq = this.nextProjectionSeq();
+    const seq = this.nextProjectionSeq(resolved);
     this.events.publishProjection(resolved, "permissions", this.permissionsProjection(resolved), seq);
     if (resolved !== sessionId) {
       this.events.publishProjection(sessionId, "permissions", this.permissionsProjection(resolved), seq);
@@ -71206,7 +71336,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed);
     const session2 = this.sessions.get(sessionId);
     if (session2 !== void 0) this.syncSessionCache(session2);
-    const seq = this.nextProjectionSeq();
+    const seq = this.nextProjectionSeq(sessionId);
     this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
     if (rawSessionId && rawSessionId !== sessionId) {
       this.events.publishProjection(rawSessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
@@ -71221,11 +71351,39 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       queue.push({ type: "archived", archivedSessionIds: [...this.archivedSessionIds] });
     }
   }
-  nextProjectionSeq() {
+  publishProjection(sessionId, key, value, seq = this.nextProjectionSeq(sessionId)) {
+    this.events.publishProjection(sessionId, key, value, seq);
+  }
+  nextProjectionSeq(sessionId) {
     this.lastProjectionSeq += 1;
+    if (sessionId !== void 0) {
+      const session2 = this.lookupSession(sessionId);
+      if (session2 !== void 0) session2.projectionSeq = this.lastProjectionSeq;
+    }
     return this.lastProjectionSeq;
   }
 };
+var ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES = [
+  "settings/",
+  "pluginManager/",
+  "pluginMarket/",
+  "pluginRecommendations/",
+  "pluginRegistryProbe/",
+  "credentials/",
+  "llm/",
+  "speech/",
+  "account/"
+];
+var ALLOWED_HOST_CARRIER_DISPATCH_EXACT = /* @__PURE__ */ new Set([
+  "pluginInventory/list",
+  "permissionPresets/catalog"
+]);
+function isAllowedHostCarrierDispatch(endpoint) {
+  return ALLOWED_HOST_CARRIER_DISPATCH_EXACT.has(endpoint) || ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES.some((prefix) => endpoint.startsWith(prefix));
+}
+function isAllowedHostCarrierOpen(endpoint) {
+  return endpoint === "remoteAccess/follow" || endpoint.startsWith("account/") || endpoint.startsWith("settings/");
+}
 
 // packages/plugin/src/client-runtime-contract.ts
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
@@ -71404,6 +71562,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     claude,
     ...hermes ? { hermes: true } : {},
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
+    ...capabilities.has("agent.acp.opencode.archive.v1") ? { acpOpencodeArchive: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
     pluginRoute: capabilities.has("plugin.route.v1")
   };
@@ -88716,7 +88875,7 @@ var ClientModeRuntime = class {
         name: remote.target.name
       },
       backend,
-      remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
+      remoteAcpCapabilities(remote.features),
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend)
     );
@@ -88770,7 +88929,7 @@ var ClientModeRuntime = class {
         name: remote.target.name
       },
       backend,
-      remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
+      remoteAcpCapabilities(remote.features),
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend)
     );
@@ -89112,6 +89271,12 @@ var ClientModeRuntime = class {
     }, error62);
   }
 };
+function remoteAcpCapabilities(features) {
+  return [
+    ...features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
+    ...features.acpOpencodeArchive ? ["agent.acp.opencode.archive.v1"] : []
+  ];
+}
 
 // packages/plugin/src/control-runtime.ts
 import { hostname as hostname4 } from "node:os";

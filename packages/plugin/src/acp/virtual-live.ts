@@ -1,4 +1,4 @@
-import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+import type { AgentAcpFrameData, AgentAcpStreamClosedData } from '@dsh-remote/protocol'
 import { acpImageLimits } from './image-content.js'
 import { piToolResult } from './pi-tool-result.js'
 import type { AcpCatalogBackend, AcpModelSelection } from './virtual-catalog.js'
@@ -29,7 +29,7 @@ import {
 
 /** Collaborates with one AcpVirtualHarness; never creates a second session or connection state. */
 export interface AcpLiveProjectionContext {
-  readonly ensureSessionRegistered: (sessionId: string) => AcpSessionState | undefined
+  readonly lookupSession: (sessionId: string) => AcpSessionState | undefined
   readonly sessions: Map<string, AcpSessionState>
   readonly hydrateSession: (session: AcpSessionState) => Promise<void>
   readonly historyPage: (session: AcpSessionState, options?: { beforeSeq?: number; throughSeq?: number; limit?: number; }) => { assistantStream: { revision: number; }; activeTurnId?: string | undefined; header: { version: number; id: string; createdAt: number; cwd: string; isSeeded: boolean; }; cursor: number; nextTurn: number; records: { type: "event"; event: NativeEvent; }[]; hasMore: boolean; }
@@ -40,7 +40,7 @@ export interface AcpLiveProjectionContext {
   readonly emitRemoteEvent: (event: string, args: unknown[]) => void
   readonly selectedModels: Map<string, AcpModelSelection>
   readonly publishProjection: (sessionId: string, key: string, value: unknown, seq?: number) => void
-  readonly nextProjectionSeq: () => number
+  readonly nextProjectionSeq: (sessionId?: string) => number
   readonly refreshSessionTitle: (session: AcpSessionState) => Promise<void>
   readonly applySessionTitle: (session: AcpSessionState, title: string) => void
   readonly publishWorkspaceBaseline: () => void
@@ -56,106 +56,169 @@ export interface AcpLiveProjectionContext {
 export class AcpLiveProjection {
   constructor(private readonly context: AcpLiveProjectionContext) {}
 
-  async sessionFollow(request: JsonRecord, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const sessionId = extractSessionId(request)
-    const session = this.context.ensureSessionRegistered(sessionId) ?? this.context.sessions.get(sessionId)
-    if (session === undefined) throw new Error('The Session was not found.')
-    await this.context.hydrateSession(session)
-    this.context.rememberOpenedSession?.(session.sessionId)
-    const history = this.context.historyPage(session, {
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
-    })
-    const queue = new AsyncValueQueue(signal)
-    const follow: FollowState = {
-      sessionId,
+  private findFollow(sessionId: string): FollowState | undefined {
+    for (const follow of this.context.follows) {
+      if (follow.sessionId === sessionId) return follow
+    }
+    return undefined
+  }
+
+  private createFollowState(
+    session: AcpSessionState,
+    queue: AsyncValueQueue,
+    hasConsumer: boolean,
+    stepOpen: boolean,
+  ): FollowState {
+    return {
+      sessionId: session.sessionId,
       acpSessionId: session.acpSessionId,
       queue,
-      nextSeq: session.events.length,
+      hasConsumer,
+      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map(entry => entry.event.seq)) + 1,
       turn: Math.max(0, ...session.events.map(entry => (isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0))),
-      stepOpen: session.running,
+      stepOpen,
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: '',
+      accumulatedReasoning: '',
       activeToolCalls: new Set(),
       piToolOutputs: new Map(),
       piToolCalls: new Map(),
     }
-    this.context.follows.add(follow)
-    queue.push({
+  }
+
+  private snapshotFrame(
+    session: AcpSessionState,
+    history: ReturnType<AcpLiveProjectionContext['historyPage']>,
+    follow: FollowState,
+  ) {
+    const step = this.context.backend === 'pi' ? follow.piStep ?? 1 : 1
+    const assistantStream = follow.assistantAttempt === undefined
+      ? { revision: follow.assistantStreamRevision }
+      : {
+          revision: follow.assistantStreamRevision,
+          activeAttempt: {
+            attemptId: follow.assistantAttempt.attemptId,
+            startedAfterSeq: follow.assistantAttempt.startedAfterSeq,
+            turn: follow.turn,
+            step,
+            nextIndex: follow.assistantAttempt.nextIndex,
+            stream: [...follow.assistantAttempt.stream],
+          },
+        }
+    return {
       type: 'snapshot',
       header: history.header,
       cursor: history.cursor,
       records: history.records,
       hasMore: history.hasMore,
       projections: {
-        asOfSeq: history.cursor,
+        asOfSeq: session.projectionSeq ?? -1,
         values: {
           title: session.title ?? acpBackendLabel(this.context.backend),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
-          modelSelection: this.context.modelSelectionProjection(sessionId),
-          permissions: this.context.permissionsProjection(sessionId),
+          modelSelection: this.context.modelSelectionProjection(session.sessionId),
+          permissions: this.context.permissionsProjection(session.sessionId),
           imageLimits: acpImageLimits(this.context.backend),
         },
       },
-      assistantStream: { revision: 0 },
+      assistantStream,
+    }
+  }
+
+  private handleRemoteStreamClosed(
+    session: AcpSessionState,
+    follow: FollowState,
+    reason: AgentAcpStreamClosedData['reason'],
+  ): void {
+    if (follow.closed) return
+    session.running = false
+    this.context.emitRemoteEvent('api-session/status', [session.sessionId, false])
+    this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(reason), true)
+  }
+
+  async sessionFollow(request: JsonRecord, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
+    const requestedId = extractSessionId(request)
+    const session = this.context.lookupSession(requestedId)
+    if (session === undefined) throw new Error('The Session was not found.')
+    const sessionId = session.sessionId
+    await this.context.hydrateSession(session)
+    this.context.rememberOpenedSession?.(sessionId)
+    const history = this.context.historyPage(session, {
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
     })
+    const queue = new AsyncValueQueue(signal)
+    const existing = this.findFollow(sessionId)
+    if (existing !== undefined) {
+      const priorQueue = existing.queue
+      existing.queue = queue
+      existing.hasConsumer = true
+      priorQueue.close()
+      queue.push(this.snapshotFrame(session, history, existing))
+      return queue.iterate(() => {
+        if (existing.queue === queue) {
+          existing.closed = true
+          this.context.follows.delete(existing)
+          void existing.close?.().catch(() => undefined)
+        }
+      })
+    }
+    const follow = this.createFollowState(session, queue, true, session.running)
+    this.context.follows.add(follow)
+    queue.push(this.snapshotFrame(session, history, follow))
     try {
       const stream = await this.context.client.openStream(
         session.acpSessionId,
         frame => this.acceptAcpFrame(follow, frame),
-        closed => {
-          session.running = false
-          this.context.emitRemoteEvent('api-session/status', [sessionId, false])
-          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason))
-        },
+        closed => this.handleRemoteStreamClosed(session, follow, closed.reason),
         signal,
       )
-      follow.close = () => stream.close()
+      if (follow.closed || !this.context.follows.has(follow)) {
+        await stream.close().catch(() => undefined)
+      } else {
+        follow.close = () => stream.close()
+      }
     } catch (error) {
       this.context.follows.delete(follow)
-      queue.close()
+      follow.closed = true
+      follow.queue.close()
       throw error
     }
     return queue.iterate(() => {
-      this.context.follows.delete(follow)
-      void follow.close?.().catch(() => undefined)
+      if (follow.queue === queue) {
+        follow.closed = true
+        this.context.follows.delete(follow)
+        void follow.close?.().catch(() => undefined)
+      }
     })
   }
 
   async ensureFollow(session: AcpSessionState): Promise<void> {
-    if ([...this.context.follows].some(follow => follow.sessionId === session.sessionId)) return
+    if (this.findFollow(session.sessionId) !== undefined) return
     // Native UI opens session/follow; prompts before follow still work via Host stream open on demand.
     const controller = new AbortController()
     const queue = new AsyncValueQueue(controller.signal)
-    const follow: FollowState = {
-      sessionId: session.sessionId,
-      acpSessionId: session.acpSessionId,
-      queue,
-      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map(entry => entry.event.seq)) + 1,
-      turn: Math.max(0, ...session.events.map(entry => (isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0))),
-      stepOpen: false,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      accumulatedText: '',
-      activeToolCalls: new Set(),
-      piToolOutputs: new Map(),
-      piToolCalls: new Map(),
-    }
+    const follow = this.createFollowState(session, queue, false, false)
     this.context.follows.add(follow)
-    const stream = await this.context.client.openStream(
-      session.acpSessionId,
-      frame => this.acceptAcpFrame(follow, frame),
-      closed => {
-        if (this.context.backend === 'pi') {
-          session.running = false
-          this.context.emitRemoteEvent('api-session/status', [session.sessionId, false])
-        }
-        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason))
-      },
-    )
-    follow.close = async () => {
-      controller.abort()
-      await stream.close()
+    try {
+      const stream = await this.context.client.openStream(
+        session.acpSessionId,
+        frame => this.acceptAcpFrame(follow, frame),
+        closed => this.handleRemoteStreamClosed(session, follow, closed.reason),
+      )
+      if (follow.closed || !this.context.follows.has(follow)) {
+        await stream.close().catch(() => undefined)
+        return
+      }
+      follow.close = async () => {
+        controller.abort()
+        await stream.close()
+      }
+    } catch (error) {
+      this.context.follows.delete(follow)
+      follow.closed = true
+      follow.queue.close()
+      throw error
     }
   }
 
@@ -166,6 +229,7 @@ export class AcpLiveProjection {
       this.acceptSessionUpdate(follow, params)
       return
     }
+    if (follow.closed) return
     if (method === 'session/request_permission' || method === 'cursor/ask_question' || method === 'cursor/create_plan') {
       this.acceptApproval(follow, params, method)
     }
@@ -181,10 +245,11 @@ export class AcpLiveProjection {
       }
       return
     }
+    if (follow.closed) return
     if (kind === 'model_selection' && isRecord(update.selected)
       && update.selected.provider === this.context.backend && typeof update.selected.model === 'string') {
       this.context.selectedModels.set(follow.sessionId, update.selected as unknown as AcpModelSelection)
-      this.context.publishProjection(follow.sessionId, 'modelSelection', this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq())
+      this.context.publishProjection(follow.sessionId, 'modelSelection', this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq(follow.sessionId))
       return
     }
     if (kind === 'agent_message_chunk' || kind === 'agent_message') {
@@ -251,23 +316,49 @@ export class AcpLiveProjection {
         return
       }
       if (kind === 'tool_call_update' && !terminal) return
-      if (kind === 'tool_call' && follow.activeToolCalls.has(callId)) return
-      this.pushEvent(follow, 'tool/call', {
-        turn: follow.turn,
-        step: 1,
-        callId,
-        name: toolName,
-        arguments: typeof update.parameters === 'object' && update.parameters !== null
-          ? JSON.stringify(update.parameters)
-          : typeof update.rawInput === 'object' && update.rawInput !== null
-            ? JSON.stringify(update.rawInput)
-            : '{}',
-        toolCallId: callId,
-        toolName,
-        status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
-      })
-      if (terminal) follow.activeToolCalls.delete(callId)
-      else follow.activeToolCalls.add(callId)
+      if (!terminal && follow.activeToolCalls.has(callId)) return
+      if (!terminal || !follow.activeToolCalls.has(callId)) {
+        this.pushEvent(follow, 'tool/call', {
+          turn: follow.turn,
+          step: 1,
+          callId,
+          name: toolName,
+          arguments: typeof update.parameters === 'object' && update.parameters !== null
+            ? JSON.stringify(update.parameters)
+            : typeof update.rawInput === 'object' && update.rawInput !== null
+              ? JSON.stringify(update.rawInput)
+              : '{}',
+          toolCallId: callId,
+          toolName,
+          status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
+        })
+      }
+      if (terminal) {
+        const output = piToolResult(update)
+        const content = output.content.length > 0
+          ? output.content
+          : typeof update.rawOutput === 'string' && update.rawOutput.length > 0
+            ? [{ type: 'text' as const, text: update.rawOutput }]
+            : []
+        this.pushEvent(follow, 'tool/result', {
+          turn: follow.turn,
+          step: 1,
+          message: {
+            id: `${callId}:result`,
+            role: 'user',
+            content: [{
+              type: 'tool-result',
+              toolCallId: callId,
+              content,
+              ...(output.isError ? { isError: true } : {}),
+            }],
+            source: { kind: 'tool', callId },
+          },
+        })
+        follow.activeToolCalls.delete(callId)
+      } else {
+        follow.activeToolCalls.add(callId)
+      }
       if (session !== undefined) session.updatedAt = Date.now()
       return
     }
@@ -412,6 +503,7 @@ export class AcpLiveProjection {
       this.ensurePiStep(follow, true)
       follow.piReasoning = (follow.piReasoning ?? '') + delta
     }
+    follow.accumulatedReasoning = (follow.accumulatedReasoning ?? '') + delta
     if (!follow.stepOpen) {
       follow.turn += 1
       follow.stepOpen = true
@@ -442,24 +534,39 @@ export class AcpLiveProjection {
     if (advanceAfterTools) follow.piAfterTools = false
   }
 
+  private finishReason(outcome: PiTurnOutcome): JsonRecord {
+    if (outcome.kind === 'error') return { kind: 'error', failure: outcome.error }
+    if (outcome.kind === 'aborted') {
+      return {
+        kind: 'aborted',
+        failure: { code: 'ABORTED', message: `${acpBackendLabel(this.context.backend)} reply interrupted.` },
+      }
+    }
+    return { kind: outcome.kind === 'max-tokens' ? 'max-tokens' : 'stop' }
+  }
+
   finishPiAssistant(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
     if (!follow.streamActive) return
+    const isPi = this.context.backend === 'pi'
+    const step = isPi ? follow.piStep ?? 1 : 1
+    const reasoningText = follow.accumulatedReasoning ?? follow.piReasoning ?? ''
     const blocks = [
-      { index: follow.reasoningBlockIndex, type: 'reasoning', text: follow.piReasoning ?? '' },
+      { index: follow.reasoningBlockIndex, type: 'reasoning', text: reasoningText },
       { index: follow.blockIndex, type: 'text', text: follow.accumulatedText },
     ].filter((block): block is { index: number; type: string; text: string } => block.index !== undefined)
       .sort((a, b) => a.index - b.index)
-    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: 'block-end', index, block: { type, text } })
-    const reason = outcome.kind === 'error' ? { kind: 'error', failure: outcome.error }
-      : outcome.kind === 'aborted' ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'Pi reply interrupted.' } }
-        : { kind: outcome.kind === 'max-tokens' ? 'max-tokens' : 'stop' }
-    this.pushAssistantChunk(follow, { type: 'finish', reason })
+    for (const { index, type, text } of blocks) {
+      this.pushAssistantChunk(follow, { type: 'block-end', index, block: { type, text } })
+    }
+    this.pushAssistantChunk(follow, { type: 'finish', reason: this.finishReason(outcome) })
     const selection = this.context.modelSelection(follow.sessionId)
     const seq = this.pushEvent(follow, 'assistant/message', {
-      turn: follow.turn, step: follow.piStep ?? 1,
+      turn: follow.turn,
+      step,
       message: {
-        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
-        role: 'assistant', content: blocks.map(({ type, text }) => ({ type, text })),
+        id: isPi ? `${follow.sessionId}:${follow.turn}:${step}` : `${follow.sessionId}:${follow.turn}`,
+        role: 'assistant',
+        content: blocks.map(({ type, text }) => ({ type, text })),
         source: { kind: 'model', provider: selection.provider, model: selection.model },
       },
       stream: follow.assistantAttempt?.stream ?? [],
@@ -469,81 +576,40 @@ export class AcpLiveProjection {
     follow.blockIndex = undefined
     follow.reasoningBlockIndex = undefined
     follow.accumulatedText = ''
+    follow.accumulatedReasoning = ''
     follow.piReasoning = ''
   }
 
-  closeFollowAfterRemoteStreamClosed(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
+  closeFollowAfterRemoteStreamClosed(
+    follow: FollowState,
+    outcome: PiTurnOutcome = { kind: 'completed' },
+    remoteClosed = false,
+  ): void {
+    if (follow.closed) return
     const session = this.context.sessions.get(follow.sessionId)
     if (session !== undefined) session.running = false
-    if (this.context.backend === 'pi') {
-      this.finishPiAssistant(follow, outcome)
-      if (follow.stepOpen) {
-        this.pushEvent(follow, 'step/end', { turn: follow.turn, step: follow.piStep ?? 1 })
-        this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: outcome })
-      }
-      follow.stepOpen = false
+    const isPi = this.context.backend === 'pi'
+    const step = isPi ? follow.piStep ?? 1 : 1
+    this.finishPiAssistant(follow, outcome)
+    if (follow.stepOpen) {
+      this.pushEvent(follow, 'step/end', { turn: follow.turn, step })
+      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: outcome })
+    }
+    follow.stepOpen = false
+    if (isPi) {
       follow.piStep = 1
       follow.piAfterTools = false
-      follow.piToolOutputs.clear()
-      follow.piToolCalls.clear()
-      follow.activeToolCalls.clear()
-      if (session !== undefined) this.context.syncSessionCache?.(session)
-      return
     }
-    if (follow.streamActive) {
-      if (follow.reasoningBlockIndex !== undefined) {
-        this.pushAssistantChunk(follow, {
-          type: 'block-end',
-          index: follow.reasoningBlockIndex,
-          block: { type: 'reasoning', text: '' },
-        })
-        follow.reasoningBlockIndex = undefined
-      }
-      if (follow.blockIndex !== undefined) {
-        const fullText = follow.accumulatedText
-        this.pushAssistantChunk(follow, {
-          type: 'block-end',
-          index: follow.blockIndex,
-          block: { type: 'text', text: fullText },
-        })
-      }
-      this.pushAssistantChunk(follow, {
-        type: 'finish',
-        reason: { kind: 'stop' },
-      })
-      const fullText = follow.accumulatedText
-      const selection = this.context.modelSelection(follow.sessionId)
-      const stream = follow.assistantAttempt?.stream ?? []
-      const assistantMessageSeq = this.pushEvent(follow, 'assistant/message', {
-        turn: follow.turn,
-        step: 1,
-        message: {
-          id: `${follow.sessionId}:${follow.turn}`,
-          role: 'assistant',
-          content: [{ type: 'text', text: fullText }],
-          source: { kind: 'model', provider: selection.provider, model: selection.model },
-        },
-        stream,
-      })
-      this.endAssistantAttempt(follow, {
-        kind: 'committed',
-        eventType: 'assistant/message',
-        seq: assistantMessageSeq,
-      })
-      this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
-      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: { kind: 'completed' } })
-    } else if (follow.stepOpen) {
-      this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
-      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: { kind: 'completed' } })
-    }
-    follow.streamActive = false
-    follow.stepOpen = false
-    follow.blockIndex = undefined
-    follow.reasoningBlockIndex = undefined
-    follow.accumulatedText = ''
     follow.piToolOutputs.clear()
     follow.piToolCalls.clear()
+    follow.activeToolCalls.clear()
     if (session !== undefined) this.context.syncSessionCache?.(session)
+    if (remoteClosed || !follow.hasConsumer) {
+      follow.closed = true
+      this.context.follows.delete(follow)
+      follow.queue.close()
+      void follow.close?.().catch(() => undefined)
+    }
   }
 
   pushEvent(follow: FollowState, type: string, data: unknown): number {

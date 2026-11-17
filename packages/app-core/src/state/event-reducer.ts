@@ -189,6 +189,12 @@ function reduceNativeEvent(
   if (event.type === 'user/message') return addUserMessage(current, data, sessionId)
   if (event.type === 'assistant/message') return addAssistantMessage(current, data, sessionId, event)
   if (event.type === 'assistant/chunk') return applyAssistantChunk(current, data, sessionId, event)
+  if (event.type === 'assistant/attempt-abandoned') {
+    const streamId = `stream:${stepKey(event)}`
+    return current.some(item => item.kind === 'message' && item.streaming === true && item.id === streamId)
+      ? current.filter(item => !(item.kind === 'message' && item.streaming === true && item.id === streamId))
+      : current
+  }
   if (event.type === 'tool/call') return applyToolCall(current, data, sessionId, 'running', view)
   if (event.type === 'tool/result') return applyToolCall(current, data, sessionId, 'finished', view)
   return current

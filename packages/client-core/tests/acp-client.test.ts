@@ -125,5 +125,156 @@ describe('ACP image transfer', () => {
       },
     ])
   }, 10000)
+})
 
+describe('AgentAcpClient.openStream', () => {
+  function createStreamCore(rpcImpl?: (method: string, params: unknown) => Promise<unknown>) {
+    const eventHandlers = new Set<(event: { event: string; data: unknown }) => void>()
+    const closeHandlers = new Set<(error?: Error) => void>()
+    const rpc = vi.fn(async (method: string, params: unknown) => {
+      if (rpcImpl) return rpcImpl(method, params)
+      return { opened: true }
+    })
+    return {
+      rpc,
+      eventHandlers,
+      closeHandlers,
+      onEvent(handler: (event: { event: string; data: unknown }) => void) {
+        eventHandlers.add(handler)
+        return () => eventHandlers.delete(handler)
+      },
+      onClose(handler: (error?: Error) => void) {
+        closeHandlers.add(handler)
+        return () => closeHandlers.delete(handler)
+      },
+      emit(event: string, data: unknown) {
+        for (const handler of eventHandlers) handler({ event, data })
+      },
+      drop(error?: Error) {
+        for (const handler of closeHandlers) handler(error)
+      },
+    }
+  }
+
+  it('unsubscribes on stream.closed so reopened streams do not invoke stale onFrame', async () => {
+    const core = createStreamCore()
+    const client = new AgentAcpClient(core as never)
+    const firstFrames: unknown[] = []
+    const firstClosed: unknown[] = []
+    const first = await client.openStream('ses-1', frame => firstFrames.push(frame), closed => firstClosed.push(closed))
+
+    core.emit('agent.acp.frame', {
+      streamId: first.streamId,
+      frame: { method: 'session/update', params: { sessionId: 'ses-1', delta: 'a' } },
+    })
+    expect(firstFrames).toHaveLength(1)
+
+    core.emit('agent.acp.stream.closed', { streamId: first.streamId, reason: 'completed' })
+    expect(firstClosed).toEqual([{ streamId: first.streamId, reason: 'completed' }])
+    expect(core.eventHandlers.size).toBe(0)
+    expect(core.closeHandlers.size).toBe(0)
+
+    const secondFrames: unknown[] = []
+    const second = await client.openStream('ses-1', frame => secondFrames.push(frame))
+    // Fallback sessionId-matched frame on reopened stream must not reach the first listener.
+    core.emit('agent.acp.frame', {
+      streamId: second.streamId,
+      frame: { method: 'session/update', params: { sessionId: 'ses-1', delta: 'b' } },
+    })
+    expect(firstFrames).toHaveLength(1)
+    expect(secondFrames).toHaveLength(1)
+    await first.close()
+    await second.close()
+    expect(core.rpc.mock.calls.filter(([method]) => method === 'agent.acp.stream.close')).toHaveLength(1)
+  })
+
+  it('notifies peer-disconnected on core.onClose after open, and cleans up silently before open', async () => {
+    await runScenarios([
+      {
+        name: 'after open: emits peer-disconnected once and unsubscribes',
+        run: async () => {
+          const core = createStreamCore()
+          const client = new AgentAcpClient(core as never)
+          const frames: unknown[] = []
+          const closed: unknown[] = []
+          const stream = await client.openStream('ses-1', frame => frames.push(frame), data => closed.push(data))
+
+          core.drop(new Error('socket lost'))
+          core.drop(new Error('socket lost again'))
+          core.emit('agent.acp.frame', {
+            streamId: stream.streamId,
+            frame: { method: 'session/update', params: { sessionId: 'ses-1' } },
+          })
+
+          expect(closed).toEqual([{ streamId: stream.streamId, reason: 'peer-disconnected' }])
+          expect(frames).toHaveLength(0)
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+        },
+      },
+      {
+        name: 'before open settles: unsubscribes without calling onClosed',
+        run: async () => {
+          let rejectOpen!: (error: Error) => void
+          const core = createStreamCore((method) => {
+            if (method === 'agent.acp.stream.open') {
+              return new Promise((_, reject) => { rejectOpen = reject })
+            }
+            return Promise.resolve({})
+          })
+          const client = new AgentAcpClient(core as never)
+          const closed: unknown[] = []
+          const pending = client.openStream('ses-1', () => undefined, data => closed.push(data))
+
+          core.drop(new Error('transport closed'))
+          rejectOpen(new Error('TRANSPORT_CLOSED'))
+          await expect(pending).rejects.toThrow('TRANSPORT_CLOSED')
+          expect(closed).toEqual([])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+        },
+      },
+    ])
+  })
+
+  it('unsubscribes and closes remotely on post-open abort without fabricating onClosed, and makes close() idempotent', async () => {
+    const core = createStreamCore()
+    const client = new AgentAcpClient(core as never)
+    const controller = new AbortController()
+    const frames: unknown[] = []
+    const closed: unknown[] = []
+
+    const stream = await client.openStream(
+      'ses-1',
+      frame => frames.push(frame),
+      data => closed.push(data),
+      controller.signal,
+    )
+
+    controller.abort()
+    await Promise.resolve()
+
+    expect(closed).toEqual([])
+    expect(core.eventHandlers.size).toBe(0)
+    expect(core.closeHandlers.size).toBe(0)
+    expect(core.rpc.mock.calls.filter(([method]) => method === 'agent.acp.stream.close')).toEqual([
+      ['agent.acp.stream.close', { streamId: stream.streamId }],
+    ])
+
+    // Subsequent frame and redundant close() calls must be no-ops.
+    core.emit('agent.acp.frame', {
+      streamId: stream.streamId,
+      frame: { method: 'session/update', params: { sessionId: 'ses-1' } },
+    })
+    await stream.close()
+    await stream.close()
+    expect(frames).toHaveLength(0)
+    expect(core.rpc.mock.calls.filter(([method]) => method === 'agent.acp.stream.close')).toHaveLength(1)
+
+    // Also verify standalone idempotent close() without abort.
+    const second = await client.openStream('ses-2', () => undefined)
+    await second.close()
+    await second.close()
+    expect(core.rpc.mock.calls.filter(([method, p]) => method === 'agent.acp.stream.close' && (p as { streamId: string }).streamId === second.streamId)).toHaveLength(1)
+  })
 })
