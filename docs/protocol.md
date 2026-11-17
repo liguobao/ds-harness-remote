@@ -939,6 +939,15 @@ seq/cursor/throughSeq/hasMore、轮次生命周期及工具关联/错误状态�
 关闭模式后重新打开会话加载完整历史；CodeX 已有的详情句柄与按需读取继续有效。
 此能力只减少 Host → Client 历史载荷，不保证减少后端读取历史成本。
 
+Session V3 最终 `assistant/message.data.stream` 是逐块回放数据，精简投影省略该字段；正文、
+reasoning、工具关联、`source` 模型信息与 `surfaceOp` 仍以最终 `message` 与事件字段为准。省略前，
+若顶层 `data.usage` 缺失（`undefined` 或 `null`），Host 把 `stream` 中最后一个
+`{ type: "chunk", chunk: { type: "usage", usage } }` 的 `usage` 提升为 `data.usage`，与 Android
+`data.usage ?? stream` 的回退语义一致；已有顶层 `data.usage` 时保持其优先级，没有 usage chunk 时不补字段。
+§19 对 `data.stream` 的必需约束针对完整历史，精简投影只发给按连接显式开启该模式的 Client。
+当前只有 Android 发送 `remote.history.configure`；Desktop Client 不开启精简，始终收到含 `stream`
+的完整 V3 envelope。其他 Client 开启精简前，必须先确认自身不依赖 `data.stream`。
+
 普通工具正文的默认摘要在 512 字符截断；但已识别的 DS Bot 群聊轮次载荷
 （`{"replies":[...],"passed":N}`）属于会话正文而非工具诊断，改为**有界结构化保留**：
 只保留 `replies` 条目的原语字段、原始顺序、每条正文上限、条目上限与单条投影上限，
@@ -1062,7 +1071,8 @@ envelope；`harness.remote.v3` 承载 `dsh-v0.1.5-rc.1` 的相同官方 carrier 
 两项 capability 复用相同的 `harness.remote.call`、stream 与 transfer RPC。它们的区别是
 Session 业务语义：V3 使用 `SessionWireHeader.version = 3` 与 `isSeeded`，replacement surface
 operation 使用 `{ op: "replace", startSeq, endSeq }`，实时 Assistant 输出使用
-`assistant-stream` frame，并要求最终 `assistant/message.data.stream`。v0.1.2 的 replacement 使用
+`assistant-stream` frame，并要求最终 `assistant/message.data.stream`（指完整历史；连接显式开启的
+`remote.history.compact.v1` 精简投影可省略，见 §17）。v0.1.2 的 replacement 使用
 `{ op: "replace", start, end }`。Desktop Client 不在 v0.1.2 与 V3 格式之间翻译，只允许相同代际互连；
 Android 与 VS Code 可直接消费各自已声明支持的 Host 格式。
 

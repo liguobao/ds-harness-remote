@@ -9,6 +9,7 @@ import { CodexPeerBridge } from '../src/codex/peer-bridge.js'
 
 const output = 'sensitive tool output '.repeat(4000)
 const MARKER = '\n[Compact history: output omitted]'
+const v3FixturePath = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/session-v3-snapshot.json')
 const page = () => ({ cursor: 91, throughSeq: 91, hasMore: true, activeTurnId: 'turn-2', records: [
   { type: 'event', event: { type: 'user/message', seq: 40, data: { content: [{ type: 'text', text: output }] } } },
   { type: 'event', event: { type: 'tool/result', seq: 41, data: { callId: 'tool-1', turn: 2, failed: true, message: { source: { callId: 'tool-1' }, content: [{ type: 'tool-result', toolCallId: 'tool-1', isError: true, content: [{ type: 'text', text: output }] }] } } }, view: { for: 'result', view: { title: 'Read', output } } },
@@ -217,8 +218,7 @@ describe('compact group round preservation', () => {
   })
 
   it('projects a Session V3 snapshot fixture while preserving seq continuity, human attachments, model/usage metadata and final markdown', () => {
-    const fixturePath = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/session-v3-snapshot.json')
-    const rawJson = readFileSync(fixturePath, 'utf8')
+    const rawJson = readFileSync(v3FixturePath, 'utf8')
     const rawSnapshot = JSON.parse(rawJson) as {
       type: string
       cursor: number
@@ -275,5 +275,54 @@ describe('compact group round preservation', () => {
     expect(ptc.output).toContain(MARKER)
 
     expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(rawSnapshot).length * 0.2)
+  })
+
+  it('lifts the last stream usage chunk into data.usage before omitting a V3 stream', () => {
+    const usageChunk = (inputTokens: number, outputTokens: number) => ({ type: 'chunk', time: 1, chunk: { type: 'usage', usage: { inputTokens, outputTokens } } })
+    const textChunk = { type: 'chunk', time: 1, chunk: { type: 'text-delta', text: 'answer' } }
+    const assistant = (data: Record<string, unknown>) => ({
+      type: 'snapshot', cursor: 1, throughSeq: 1, hasMore: false,
+      records: [{ type: 'event', event: { type: 'assistant/message', seq: 1, time: 1, data: {
+        message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'answer' }] }, ...data,
+      } } }],
+    })
+    const dataOf = (value: unknown) => (value as { records: Array<{ event: { data: Record<string, unknown> } }> }).records[0]!.event.data
+
+    // No top-level data.usage: the last usage chunk of the stream survives the projection.
+    const streamOnly = assistant({ stream: [usageChunk(1, 1), textChunk, usageChunk(42, 7)] })
+    const snapshot = structuredClone(streamOnly)
+    const projected = compactHistory(streamOnly)
+    expect(dataOf(projected)).not.toHaveProperty('stream')
+    expect(dataOf(projected).usage).toEqual({ inputTokens: 42, outputTokens: 7 })
+    expect(streamOnly).toEqual(snapshot)
+    expect(compactHistory(projected)).toEqual(projected)
+
+    // Top-level usage keeps priority; a null one falls back like `data.usage ?? stream`.
+    expect(dataOf(compactHistory(assistant({ usage: { inputTokens: 5, outputTokens: 2 }, stream: [usageChunk(42, 7)] }))).usage)
+      .toEqual({ inputTokens: 5, outputTokens: 2 })
+    expect(dataOf(compactHistory(assistant({ usage: null, stream: [usageChunk(42, 7)] }))).usage)
+      .toEqual({ inputTokens: 42, outputTokens: 7 })
+    // Without a usage chunk nothing is invented.
+    expect(dataOf(compactHistory(assistant({ stream: [textChunk] })))).not.toHaveProperty('usage')
+  })
+
+  it('keeps the full Session V3 envelope, including data.stream, for connections that never enable compact mode', async () => {
+    const { HarnessRemoteBridge } = await import('../src/harness-remote-bridge.js')
+    const v3 = JSON.parse(readFileSync(v3FixturePath, 'utf8')) as { records: Array<{ event: { type: string; data: Record<string, unknown> } }> }
+    expect(v3.records.filter(record => record.event.type === 'assistant/message').every(record => Array.isArray(record.event.data.stream))).toBe(true)
+    const publish = vi.fn(async () => undefined)
+    const gateway = {
+      dispatch: vi.fn(async () => ({ ok: true, value: structuredClone(v3) })),
+      open: vi.fn(async () => (async function* () { yield structuredClone(v3) })()),
+      failure: () => ({ code: 'FAILED', message: '', details: {} }),
+      supportsCarrier: true,
+    }
+    const bridge = new HarnessRemoteBridge(gateway as never, publish)
+    expect(bridge.compactHistoryEnabled).toBe(false)
+    expect(await bridge.call({ endpoint: 'session/page', payload: { args: {} } })).toEqual({ ok: true, value: v3 })
+    await bridge.openStream({ streamId: 'follow', endpoint: 'session/follow', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', { streamId: 'follow', reason: 'completed' }))
+    expect(publish.mock.calls[0]).toEqual(['harness.remote.frame', { streamId: 'follow', hasValue: true, value: v3 }])
+    await bridge.closeAll()
   })
 })

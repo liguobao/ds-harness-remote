@@ -81,6 +81,22 @@ function compactMessageSource(value: unknown, isInjectedUser: boolean): unknown 
   return next
 }
 
+/**
+ * Usage carried by the last usage chunk of a V3 `assistant/message.data.stream`.
+ * Mirrors the Android `nativeUsage()` fallback, so omitting `stream` from the
+ * compact projection never hides Token usage that client could still derive.
+ */
+function streamUsage(stream: unknown): Record<string, unknown> | undefined {
+  if (!Array.isArray(stream)) return undefined
+  for (let index = stream.length - 1; index >= 0; index--) {
+    const row = stream[index]
+    if (object(row) && row.type === 'chunk' && object(row.chunk) && row.chunk.type === 'usage') {
+      return object(row.chunk.usage) ? row.chunk.usage : undefined
+    }
+  }
+  return undefined
+}
+
 function messageValue(value: unknown, budget: Budget, isInjectedUser = false): unknown {
   if (Array.isArray(value)) return value.map(item => messageValue(item, budget, isInjectedUser))
   if (!object(value)) return value
@@ -93,6 +109,11 @@ function messageValue(value: unknown, budget: Budget, isInjectedUser = false): u
     if (key === 'stream') continue
     if (key === 'source') out[key] = compactMessageSource(child, isInjectedUser)
     else out[key] = messageValue(child, budget, isInjectedUser)
+  }
+  // An explicit top-level usage keeps priority, exactly like the client fallback.
+  if (value.usage === undefined || value.usage === null) {
+    const usage = streamUsage(value.stream)
+    if (usage !== undefined) out.usage = messageValue(usage, budget, isInjectedUser)
   }
   return out
 }

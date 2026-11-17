@@ -90357,6 +90357,16 @@ function compactMessageSource(value, isInjectedUser) {
   }
   return next;
 }
+function streamUsage(stream) {
+  if (!Array.isArray(stream)) return void 0;
+  for (let index = stream.length - 1; index >= 0; index--) {
+    const row = stream[index];
+    if (object3(row) && row.type === "chunk" && object3(row.chunk) && row.chunk.type === "usage") {
+      return object3(row.chunk.usage) ? row.chunk.usage : void 0;
+    }
+  }
+  return void 0;
+}
 function messageValue(value, budget, isInjectedUser = false) {
   if (Array.isArray(value)) return value.map((item) => messageValue(item, budget, isInjectedUser));
   if (!object3(value)) return value;
@@ -90369,6 +90379,10 @@ function messageValue(value, budget, isInjectedUser = false) {
     if (key === "stream") continue;
     if (key === "source") out[key] = compactMessageSource(child, isInjectedUser);
     else out[key] = messageValue(child, budget, isInjectedUser);
+  }
+  if (value.usage === void 0 || value.usage === null) {
+    const usage = streamUsage(value.stream);
+    if (usage !== void 0) out.usage = messageValue(usage, budget, isInjectedUser);
   }
   return out;
 }
