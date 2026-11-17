@@ -1351,9 +1351,13 @@ describe('CodexRemoteDomain', () => {
     await domain.start()
     const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async () => undefined)!
     const original = app.call.bind(app)
-    vi.spyOn(app, 'call').mockImplementation((method, params) => method === 'thread/unsubscribe'
-      ? (app.calls.push({ method, params }), Promise.resolve({ status: 'unsubscribed' }))
-      : original(method, params))
+    vi.spyOn(app, 'call').mockImplementation((method, params) => {
+      if (method !== 'thread/unsubscribe' || app.calls.some(call => call.method === 'thread/unsubscribe')) {
+        return original(method, params)
+      }
+      app.calls.push({ method, params })
+      return Promise.resolve({ status: 'unsubscribed' })
+    })
     try {
       await peer.openStream({ streamId: 'one', threadId: 'allowed-thread' })
       const closing = peer.closeStream({ streamId: 'one' })
@@ -1368,6 +1372,20 @@ describe('CodexRemoteDomain', () => {
       await Promise.all([closing, opening])
       expect(opened).toBe(true)
       expect(peer.hasThreadSubscription('allowed-thread')).toBe(true)
+
+      await peer.closeStream({ streamId: 'two' })
+      expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(2)
+
+      const readsBeforeReopen = app.calls.filter(call => call.method === 'thread/read').length
+      await expect(peer.openStream({ streamId: 'three', threadId: 'allowed-thread' })).resolves.toMatchObject({ opened: true })
+      expect(app.calls.filter(call => call.method === 'thread/read').length).toBeGreaterThan(readsBeforeReopen)
+      expect(peer.hasThreadSubscription('allowed-thread')).toBe(true)
+      await expect(peer.call({ method: 'thread/resume', params: { threadId: 'allowed-thread' } }))
+        .resolves.toMatchObject({ thread: { id: 'allowed-thread' } })
+      await expect(peer.call({
+        method: 'turn/start',
+        params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Continue after release' }] },
+      })).resolves.toMatchObject({ turn: { id: 'turn-1' } })
     } finally { await domain.close() }
   })
 
