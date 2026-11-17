@@ -48,11 +48,16 @@ export interface AdaptiveTransportOptions {
   targetDeviceId: string
   capabilities?: string[]
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
+  failOnWebRtcFallback?: boolean
+  onParallelConnections?: () => void
+  onWebRtcStarted?: (timeoutMs: number) => void
   forceRelay?: boolean
   /** Select Relay immediately for initial setup while keeping WebRTC/TURN in preferredTransports for in-band upgrade. */
   relayFirst?: boolean
   /** Control authorization only, ending at connect.accepted. */
   handshakeTimeoutMs?: number
+  /** Opt in to the configured Server budget; other clients retain their local ceiling. */
+  useServerNegotiateTimeout?: boolean
   negotiateTimeoutMs?: number
   iceServersTimeoutMs?: number
   signal?: AbortSignal
@@ -165,7 +170,7 @@ export class AdaptiveTransport extends BaseTransport {
       this.options.signal?.addEventListener('abort', onAbort, { once: true })
       this.removeAbort = () => this.options.signal?.removeEventListener('abort', onAbort)
       this.handshakeTimer = setTimeout(
-        () => this.failConnection(new Error('Adaptive control handshake timed out')),
+        () => this.failConnection(Object.assign(new Error('Adaptive control handshake timed out'), { code: 'TRANSPORT_SETUP_FAILED' })),
         this.options.handshakeTimeoutMs ?? 15_000,
       )
       const socket = this.socket!
@@ -181,7 +186,7 @@ export class AdaptiveTransport extends BaseTransport {
         })
       }
       socket.onerror = () => {
-        if (this.lifetime === lifetime && this.socket === socket) this.controlLost(new Error('Control socket failed'), { reason: 'control-error' })
+        if (this.lifetime === lifetime && this.socket === socket) this.controlLost(Object.assign(new Error('Control socket failed'), { code: 'TRANSPORT_SETUP_FAILED' }), { reason: 'control-error' })
       }
       socket.onclose = event => {
         if (this.lifetime === lifetime && this.socket === socket) this.controlLost(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code, closeReason: event.reason })
@@ -332,6 +337,10 @@ export class AdaptiveTransport extends BaseTransport {
           throw new Error('connect.accepted did not include a connectionId')
         }
         this.connectionId = payload.connectionId
+        if (this.options.useServerNegotiateTimeout && typeof payload.webrtcFallbackTimeoutMs === 'number') {
+          this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs
+        }
+        if (payload.parallelConnections === true) this.options.onParallelConnections?.()
         if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY)) this.recoveryTicket = payload.recoveryTicket
         if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY)) this.relayRecoveryTicket = payload.relayRecoveryTicket
         const assignment = payload as RelayAssignment
@@ -449,6 +458,7 @@ export class AdaptiveTransport extends BaseTransport {
         await this.rtc?.close()
         throwIfAborted(signal)
         this.rtc = undefined
+        if (this.options.failOnWebRtcFallback) throw Object.assign(new Error('WebRTC attempt failed'), { code: 'RTC_NEGOTIATION_FAILED', cause: reason })
         if (!preferred.includes('relay')) throw reason
         this.dataMode = 'relay'
         selected = 'relay'
@@ -499,12 +509,15 @@ export class AdaptiveTransport extends BaseTransport {
       iceServers = []
     }
     throwIfAborted(signal)
-    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs)
+    const negotiatedMs = this.options.useServerNegotiateTimeout
+      ? Math.min(2_147_483_647, this.serverNegotiateTimeoutMs ?? this.options.negotiateTimeoutMs ?? 8_000)
+      : negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs)
     // Without STUN/TURN servers only same-LAN host candidates can succeed;
     // fail fast instead of waiting the full timeout on cross-network links.
     const effectiveNegotiateTimeoutMs = iceServers.length === 0
       ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS)
       : negotiatedMs
+    this.options.onWebRtcStarted?.(effectiveNegotiateTimeoutMs ?? 8_000)
     const rtc = new RtcDataChannelTransport({
       role: 'initiator',
       factory,

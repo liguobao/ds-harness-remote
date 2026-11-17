@@ -509,6 +509,8 @@ describe('AdaptiveTransport capability negotiation', () => {
   })
   it('separates authorization from RTC timeout while clamping Server budgets', async () => {
     await runScenarios([
+      { name: 'configured ordinary timeout', server: 8000, local: undefined, configured: true, budget: 8000 },
+      { name: 'configured cloud snapshot overrides hello', server: 8000, local: undefined, configured: true, snapshot: 30000, budget: 30000 },
       { name: 'old Server without timeout', server: undefined, local: undefined, budget: 8000 },
       { name: 'Server twenty seconds clamped to the mobile ceiling', server: 20000, local: undefined, budget: 12000 },
       { name: 'local budget wins over larger Server budget', server: 20000, local: 12000, budget: 12000 },
@@ -521,6 +523,7 @@ describe('AdaptiveTransport capability negotiation', () => {
       const transport = createAdaptiveTransport({
         rtcFactory: rtc.factory,
         negotiateTimeoutMs: row.local,
+        useServerNegotiateTimeout: row.configured,
         fetchIceServers: async () => [{ urls: 'stun:stun.example.test' }],
         onWebRtcFallback: fallback,
       })
@@ -530,7 +533,7 @@ describe('AdaptiveTransport capability negotiation', () => {
       socket.open()
       await vi.advanceTimersByTimeAsync(4000)
       socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'], webrtcFallbackTimeoutMs: row.server }))
-      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', webrtcFallbackTimeoutMs: row.snapshot }))
       await vi.advanceTimersByTimeAsync(row.budget - 1)
       expect(ready).toBe(false)
       expect(socket.readyState).toBe(FakeWebSocket.OPEN)

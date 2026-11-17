@@ -428,6 +428,8 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
+  webrtcFallbackTimeoutMs?: number
+  parallelConnections?: boolean
   relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
@@ -1197,6 +1199,8 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  webrtcFallbackTimeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
+  parallelConnections: z.boolean().optional(),
   relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
