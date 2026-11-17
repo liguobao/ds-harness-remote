@@ -830,11 +830,13 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
 按 `endpoint` 执行编译期固定操作白名单，新增上游操作默认拒绝。
 
-2026-11-13 对齐 [DS-Bot v0.3.6](https://github.com/Fei2411/DS-Bot/tree/v0.3.6)：
+2026-11-18 对齐 [DS-Bot v0.3.8](https://github.com/Fei2411/DS-Bot/tree/v0.3.8)：
 完整暴露其 `channel.js` 的命名 endpoint 与 `computer/index.js` 的 `computer-*` endpoint，
 包括模型供应商、密钥、连接器、IM、手机配对、电脑控制、更新、诊断、头像、分组、记忆编辑与 Side Chat。
 精确清单见 `packages/plugin/src/plugin-route-bridge.ts` 的 `BOT_REMOTE_OPERATIONS`；
-独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.3.6-endpoints.json`。
+独立上游快照见 `packages/plugin/tests/fixtures/ds-bot-v0.3.8-endpoints.json`。
+v0.3.8 新增的变更审查、文件下载、Markdown 图片、群聊搜索/待办、任务批注/取消、
+供应商模型保存及密钥存储/解锁/加解密端点均通过相同的认证转发入口，业务校验由 DS-Bot 执行。
 旧 Host 的 `btw`、`btw-cancel`、`room-continue` 仍放行。
 `approval-answer` 的 choice 不再限制为单次允许/拒绝，交由 DS-Bot 自身校验。
 这些管理操作仅能通过既有认证 Remote 通道调用；不新增 HTTP 路径或通用 endpoint 通配符。
@@ -866,7 +868,7 @@ Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本�
 HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
 未知 endpoint 返回 `INVALID_MESSAGE`，浏览器兼容入口显示
-`remote-plugin/operation-not-allowed` 原生错误封装。DS-Bot v0.3.6 的管理接口
+`remote-plugin/operation-not-allowed` 原生错误封装。DS-Bot v0.3.8 的管理接口
 已按上述完整白名单开放，旧版本文档中的“仅单次审批/本地管理”限制不再适用。
 
 ```json

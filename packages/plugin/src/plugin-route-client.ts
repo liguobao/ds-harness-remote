@@ -296,7 +296,7 @@ function botSessionIds(endpoint: unknown, value: Record<string, unknown>): Set<s
     }
   }
   switch (endpoint) {
-    case 'state': case 'delete-bot': case 'delete-room': case 'set-main': case 'remove-agent': case 'goal-draft': case 'goal-control': roster(); break
+    case 'state': case 'delete-bot': case 'delete-room': case 'set-main': case 'remove-agent': case 'goal-draft': case 'goal-control': case 'task-note': case 'task-cancel': roster(); break
     case 'create-bot': case 'duplicate-bot': case 'update-bot': bot(value); break
     case 'create-room': room(value); break
     case 'update-room': room(value.room); break

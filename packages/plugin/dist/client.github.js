@@ -6860,6 +6860,8 @@ If a code was sent, recover the original submission without changing it.`,
       case "remove-agent":
       case "goal-draft":
       case "goal-control":
+      case "task-note":
+      case "task-cancel":
         roster();
         break;
       case "create-bot":

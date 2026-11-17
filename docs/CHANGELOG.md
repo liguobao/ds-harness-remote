@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Align Remote Host routes with DS-Bot 0.3.8, enabling change reviews, file downloads, Markdown images, group search and to-dos, task actions, provider model saving, and secret storage operations from remote Desktop clients.
+
 - Restore official CoT translation over Remote when the Host enables the translation bundle, including the limits query needed for client plugin activation.
 
 - Restore direct-first LAN/P2P connections on mobile clients; automatic connections no longer authenticate over Relay before trying direct paths. Keep in-band upgrades for Relay fallback connections.
