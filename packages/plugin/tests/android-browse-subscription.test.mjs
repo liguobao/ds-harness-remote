@@ -5,13 +5,13 @@ import { BaseTransport } from '@dsh-remote/webrtc'
 import { CodexPeerBridge } from '../src/codex/peer-bridge.ts'
 
 const { client } = vi.hoisted(() => ({ client: { request: vi.fn(), subscribe: vi.fn() } }))
-vi.mock('../../../apps/android/src/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}) }))
-vi.mock('../../../apps/android/src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
+vi.mock('@dsh-remote/app-core/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}) }))
+vi.mock('@dsh-remote/app-core/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
   async configureHistory() {}
   requireCodex() { return client }
 } }))
-import { SessionRuntime } from '../../../apps/android/src/state/session-runtime.ts'
-import { createSessionActions } from '../../../apps/android/src/state/session-actions.ts'
+import { SessionRuntime } from '@dsh-remote/app-core/state/session-runtime'
+import { createSessionActions } from '@dsh-remote/app-core/state/session-actions'
 
 function deferred() {
   let resolve

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "types": ["react", "react-native", "node", "vitest/globals"]
+    "types": ["react", "react-native", "node"]
   },
   "include": ["**/*.ts", "**/*.tsx"]
 }

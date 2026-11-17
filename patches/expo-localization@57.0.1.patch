@@ -1,0 +1,15 @@
+diff --git a/ios/LocalizationModule.swift b/ios/LocalizationModule.swift
+index 4c21fbe4470ece178a26c3236c14416598d98d0f..adf728bd2b4a7d5a6d98552596a59c6d588a2da7 100644
+--- a/ios/LocalizationModule.swift
++++ b/ios/LocalizationModule.swift
+@@ -125,7 +125,9 @@ public class LocalizationModule: Module {
+       return "roc"
+     case .iso8601:
+       return "iso8601"
+-    @unknown default:
++    // New system calendars also use this fallback until their BCP 47
++    // mapping is supported here. Keep it exhaustive across SDK versions.
++    default:
+       log.error("Unhandled `Calendar.Identifier` value: \(calendar.identifier), returning `iso8601` as fallback. Add the missing case as soon as possible.")
+       return "iso8601"
+     }
