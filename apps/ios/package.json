@@ -59,7 +59,7 @@
     "ios": "expo run:ios",
     "check": "pnpm run build:renderers && pnpm run verify:workspace && tsc --noEmit",
     "prebuild": "pnpm run prepare:workspace",
-    "generate:ios": "expo prebuild --platform ios",
+    "generate:ios": "expo prebuild --platform ios --no-clean",
     "build": "expo export --platform ios"
   },
   "private": true,

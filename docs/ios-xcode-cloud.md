@@ -1,107 +1,61 @@
-# iOS Xcode Cloud configuration
+# iOS Xcode Cloud 配置
 
-GitHub Actions is the supported release path for this repository; see
-[ios-build-and-release.md](ios-build-and-release.md). This document covers
-running Xcode Cloud as well, which is useful when you want Apple-managed
-signing and automatic TestFlight build numbering without storing an App Store
-Connect API key in repository secrets.
+本仓库的 iOS 有两条发布链路并存：
 
-## The constraint to design around
+| | GitHub Actions（`ios-release.yml`） | Xcode Cloud |
+| --- | --- | --- |
+| 触发 | `v*` tag / 手动 | 分支 / tag / PR，在 App Store Connect 里配 |
+| 签名 | 仓库 secrets 里的 App Store Connect API key | Apple 侧管理，仓库零凭据 |
+| 前提 | 三个 `APP_STORE_CONNECT_*` secrets + `IOS_TEAM_ID` variable | 已提交的原生工程（本方案） |
 
-Xcode Cloud starts from a repository checkout and looks for an Xcode project or
-workspace. This repository does not commit `apps/ios/ios`, so there is nothing
-for it to open until `expo prebuild` has run.
+Xcode Cloud 只执行 **workspace 旁边** 的 `ci_scripts/ci_post_clone.sh`（放仓库根
+目录不会被运行，私有仓库实测过），且要求工程在仓库里存在——所以本方案提交
+`apps/ios/ios/` 原生工程。仓库侧已全部就绪：
 
-Xcode Cloud runs `ci_scripts/ci_post_clone.sh` after cloning and **before** it
-resolves the project, and the script is only executed when it sits beside the
-workspace. So the bootstrap script has to both generate the native project and
-live where the generated project will be.
+- `apps/ios/ios/DSHRemote.xcodeproj`（`DEVELOPMENT_TEAM = 857C9KMARL`，
+  `MARKETING_VERSION = 0.6.5`，`CURRENT_PROJECT_VERSION = 73`）
+- `apps/ios/ios/Podfile.lock`
+- `apps/ios/ios/ci_scripts/ci_post_clone.sh`：Node 22 + pnpm 9.15.4 →
+  `pnpm install`（应用 `patches/`）→ workspace 构建 + 渲染器（Intelligent UI
+  按 commit + hash 校验固定版本）→ 写 `.xcode.env.local` → `pod install` →
+  预编译 ExpoModulesJSI xcframework
 
-That gives two workable options.
+team id 随 pbxproj 提交不是机密泄露：它出现在每一个已上架二进制的签名信息里。
+真正的凭据（证书、profile、API key）都不在仓库中。
 
-## Option A: generate in `ci_post_clone.sh` (keeps `ios/` out of git)
+## 网页配置步骤（一次性，约 10 分钟）
 
-Commit only `apps/ios/ci_scripts/ci_post_clone.sh` and let it produce
-`apps/ios/ios/` on the Xcode Cloud machine.
+1. **[App Store Connect](https://appstoreconnect.apple.com/) → Xcode Cloud**，
+   左侧选中 DSH Remote 产品（`io.github.liguobao.dshremote`）。
+2. 没有关联仓库的话先点 **Connect Repository / 设置源代码仓库**，用 GitHub
+   账号授权并选择 `vccddd/ds-harness-remote`（fork 也是独立仓库，可以授权）。
+3. **Create Workflow**：
+   - **分支**：`feat/ios-client`（合并 main 后可改 main）
+   - **Project/Workspace**：`apps/ios/ios/DSHRemote.xcworkspace`
+   - **Scheme**：`DSHRemote`
+   - **Xcode 版本**：默认（最新稳定版）或按需固定
+   - **Environment Variables**（可选）：`EXPO_PUBLIC_DSH_REMOTE_SERVER`
+     （覆盖打进 bundle 的默认服务器地址；`EXPO_PUBLIC_*` 会内联进 JS，不能放密钥）
+   - **Signing**：自动（Xcode Cloud 自己管理证书和 profile，什么都不用填）
+4. **Actions**：先只勾 **Build** 验证；通过后再加 **Archive** + **TestFlight**。
+5. 首次运行约 30–50 分钟（无 Pods 缓存）。`ci_post_clone.sh` 的每一步都会在
+   构建日志里带 `ci_post_clone:` 前缀，失败先看这段。
 
-Workflow settings:
+## 日常维护
 
-- **Repository**: this repository.
-- **Primary branch** or tag trigger as you prefer.
-- **Xcode**: 26 or later. **macOS**: the matching runtime image.
-- **Project/Workspace**: `apps/ios/ios/DSHRemote.xcworkspace`. Xcode Cloud needs
-  this path to exist when it resolves the build, which it does because
-  `ci_post_clone.sh` has already generated it.
-- **Scheme**: `DSHRemote`.
-- **Environment variables**: `APPLE_TEAM_ID` (so `app.config.js` writes the
-  team into the generated project), optionally
-  `EXPO_PUBLIC_DSH_REMOTE_SERVER`. Mark nothing here as secret: Expo inlines
-  `EXPO_PUBLIC_*` into the bundle.
-- **Signing**: Xcode Cloud manages certificates and profiles. No secrets in the
-  repository.
+- 改 iOS 原生配置 → 改 `app.json` / `plugins/`，然后
+  `APPLE_TEAM_ID=857C9KMARL pnpm --dir apps/ios run generate:ios`（内置
+  `--no-clean`），把 diff 连同 `Podfile.lock` 一起提交。**绝不裸跑 prebuild**
+  （会删 `ci_scripts/`、重置 team/版本设置），规则详见
+  [apps/ios/AGENTS.md](../apps/ios/AGENTS.md)。
+- 发版 bump 版本 → 五处联动（app.json 两处、package.json、app-core、pbxproj
+  两个配置块），Xcode Cloud 会自动递增 TestFlight build number，`buildNumber`
+  只需是下限。
+- GitHub Actions 的 `ios-release.yml` 用 `buildNumber` 原值上传；同一版本
+  不要两条链路交叉上传，否则 App Store Connect 拒收重复 build。
 
-The script must do what the GitHub Actions job does, in this order:
+## 为什么不用"prebuild 生成、不提交工程"的方案
 
-1. Install Node 22 or 24 and pnpm 9.15.4. Xcode Cloud images ship neither at a
-   pinned version, so install explicitly.
-2. `pnpm install --frozen-lockfile` **at the repository root** — the app
-   depends on `workspace:*` packages.
-3. Build the workspace packages, then the renderers:
-   `pnpm --filter './packages/**' -r build` and
-   `pnpm --filter @dsh-remote/app-core run build:renderers`.
-   `src/generated/` is gitignored and Metro requires it.
-4. Clone and verify the pinned Intelligent UI renderer (same commit and file
-   hash the GitHub workflows assert), export
-   `DSH_INTELLIGENT_UI_RENDERER_BUNDLE` and `DSH_REQUIRE_INTELLIGENT_UI=true`.
-5. `pnpm --dir apps/ios exec expo prebuild --platform ios --no-install`.
-6. Write `apps/ios/ios/.xcode.env.local` with an absolute `NODE_BINARY`. The
-   bundling phase sources it and the `xcodebuild` PATH does not include the
-   Node you just installed. The `HERMES_CLI_PATH` line is restored by
-   `plugins/with-ios-hermes-globals.js` during prebuild, so do not duplicate it
-   here.
-7. `pod install` in `apps/ios/ios`.
-8. Pre-build the ExpoModulesJSI xcframework. The
-   `[CP-User] Build ExpoModulesJSI xcframework` phase compiles an SPM package
-   through a nested `xcodebuild -quiet`, which swallows the real error on
-   failure. Building the slices first surfaces it; on success the phase hits its
-   hash cache. Keep it Release for both `iphoneos` and `iphonesimulator`.
-
-The private repository's script is a working reference for steps 1, 4, 6, 7 and
-8, but its paths assume a `clients/` workspace root and the package filter
-`@dsh-remote/android`. In this layout the workspace root is the repository root,
-the iOS package is `@dsh-remote/ios`, the renderers belong to
-`@dsh-remote/app-core`, and the app lives at `apps/ios`.
-
-Caveat: `expo prebuild` runs on every build, so Xcode Cloud cannot cache
-`Pods/` or derived data across builds as effectively as it would with a
-committed project. Expect each archive to take roughly as long as a clean
-build.
-
-## Option B: commit the generated project (closest to the private repo)
-
-Run `pnpm --dir apps/ios exec expo prebuild --platform ios` locally, remove
-`/ios` from `apps/ios/.gitignore`, and commit `apps/ios/ios/`. Xcode Cloud then
-resolves the workspace without any bootstrap, and `ci_post_clone.sh` only has to
-install dependencies and run `pod install`.
-
-The costs are real, which is why this repository does not do it by default:
-
-- `DEVELOPMENT_TEAM` lands in `project.pbxproj` in a public repository.
-- `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` must be hand-synchronized in
-  two configuration blocks on every version bump.
-- A bare `expo prebuild --platform ios` deletes `ci_scripts/` and resets those
-  settings. Only `--no-clean` is safe, and the resulting diff needs review on
-  every run.
-
-If you choose this, mirror the private repository's guard rails: a
-`generate:ios` script pinned to `--no-clean`, and a documented review step for
-`git diff apps/ios/ios`.
-
-## Build numbers
-
-Xcode Cloud can increment the TestFlight build number itself, in which case
-`expo.ios.buildNumber` acts as a floor rather than the shipped value. If you run
-both Xcode Cloud and the GitHub Actions release workflow against the same app
-record, pick one as the source of truth: Actions uses `buildNumber` verbatim, so
-a Cloud-incremented build can collide with it. Keeping Actions for releases and
-Xcode Cloud for pull-request verification avoids the overlap entirely.
+Xcode Cloud 创建 workflow 时就要在仓库里找到 workspace，且 `ci_scripts/` 必须在
+workspace 旁边——两者都要求工程入库，"运行时生成"无法满足工作流创建。私有仓库
+此前也是提交工程的同款做法。

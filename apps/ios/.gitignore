@@ -35,11 +35,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native project
-# `expo prebuild --platform ios` regenerates all of ios/ from app.json,
-# app.config.js and plugins/, so the native project is a build artifact here.
-/ios
-
-# build artifacts
+# Native project: committed because Xcode Cloud builds the workspace straight
+# from the repository (see docs/ios-xcode-cloud.md). Pods/, build/ and
+# .xcode.env.local stay ignored via the committed ios/.gitignore template.
+# Never commit signing material under any circumstances.
 *.ipa
 *.xcarchive

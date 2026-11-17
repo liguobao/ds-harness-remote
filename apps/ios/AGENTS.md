@@ -5,41 +5,56 @@
 
 完整构建与发布说明见 [docs/ios-build-and-release.md](../../docs/ios-build-and-release.md)。
 
-## 不提交原生工程
+## 原生工程已提交（Xcode Cloud 直接从仓库构建）
 
-`apps/ios/ios/` 由 `expo prebuild --platform ios` 生成，已在 `.gitignore` 中忽略。
-因此**任何原生设置都必须能声明式表达**：写进 `app.json`、`app.config.js` 或
-`plugins/` 下的 config plugin。在 Xcode 里手改工程设置不会进仓库，下次 prebuild 即丢。
+`apps/ios/ios/` 是**已提交的源代码**（含 `project.pbxproj`、`Podfile.lock`、
+`ci_scripts/ci_post_clone.sh`），因为 Xcode Cloud 只执行 workspace 旁边的
+`ci_scripts/`、只认仓库里存在的工程。这与 Android 侧不对称：Android 原生目录
+各机器本地生成、不入库。
 
-与私有仓库的最大差别就在这里：私有仓库提交 `ios/` 以供 Xcode Cloud 直接构建，
-所以那边禁止裸跑 `expo prebuild -p ios`；本仓库没有这个限制，重新生成是常态。
+**绝不裸跑 `expo prebuild -p ios`**（不带 `--no-clean`）：默认模式会重建整个
+`ios/`——删掉 `ci_scripts/`，并重置 `project.pbxproj` 里的 `DEVELOPMENT_TEAM`、
+`CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`。统一用：
 
-## 敏感配置走 Actions
+```bash
+APPLE_TEAM_ID=857C9KMARL pnpm --dir apps/ios run generate:ios   # 已内置 --no-clean
+```
 
-仓库是公开的，Apple 账号与签名材料不进代码：
+每次 generate 后过一遍 `git diff apps/ios/ios`：正常只应有 Info.plist 层面的
+变化；若 pbxproj 丢了上述三个设置，`git restore` 该文件再手补。误跑裸 prebuild
+后同样 `git restore apps/ios/ios` 找回。
 
-- `IOS_TEAM_ID`（variable）→ `app.config.js` 读 `APPLE_TEAM_ID`，未设置时不写
-  `appleTeamId`，不签名的编译验证因此可以在 fork 上跑。
-- `APP_STORE_CONNECT_ISSUER_ID` / `APP_STORE_CONNECT_KEY_ID` /
-  `APP_STORE_CONNECT_PRIVATE_KEY`（secrets）→ 仅 `ios-release.yml` 使用。
+绝不提交 `ios/Pods/`、`ios/build/`、`ios/.xcode.env.local`（gitignore 已覆盖，
+别用 `-f` 绕）。`DEVELOPMENT_TEAM = 857C9KMARL` 会随 pbxproj 提交——team id
+本身不是机密（任何已上架二进制的签名信息里都能看到），真正的凭据（证书、
+profile、API key）不在仓库里，见下。
 
-不要把 team id、证书、profile、`.p8` 或 `.env.local` 提交进来；`.gitignore` 已覆盖
-常见后缀，别用 `-f` 绕过。`EXPO_PUBLIC_*` 会被内联进 JS bundle，永远不能放密钥。
+## 版本号联动（pbxproj 也要手动同步）
 
-## 版本联动（四处 + 跨端一处）
+1. `app.json` 的 `expo.version` 与 `expo.ios.buildNumber`、`package.json` 的
+   `version`、`packages/app-core/package.json` 的 `version`，与仓库根及
+   plugin/tui 保持一致（`release.yml` 校验）。
+2. `generate:ios` 会同步 Info.plist 的 `CFBundleShortVersionString` /
+   `CFBundleVersion`；**pbxproj 的 `MARKETING_VERSION` /
+   `CURRENT_PROJECT_VERSION` 需手动改两个配置块**（Debug + Release）。
+3. 跨端：`expo.ios.buildNumber` 必须等于 `apps/android` 的
+   `expo.android.versionCode`。Xcode Cloud 会自动递增 TestFlight build number，
+   `buildNumber` 是下限；GitHub Actions（ios-release.yml）用原值，两条链路
+   不要对同一版本号交叉上传。
 
-1. `app.json` 的 `expo.version` 与 `expo.ios.buildNumber`
-2. `package.json` 的 `version`，必须等于 `expo.version`
-3. `packages/app-core/package.json` 的 `version`
-4. 仓库根与 `packages/plugin`、`packages/tui` 的 `version`
+## GitHub Actions 与 Xcode Cloud 并存
 
-跨端：`apps/ios/app.json` 的 `expo.ios.buildNumber` 必须等于
-`apps/android/app.json` 的 `expo.android.versionCode`。`release.yml` 会校验这两条，
-并拒绝 `apps/android/app.json` 里再出现 `expo.ios` 段。
+- **GitHub Actions**（`ios-release.yml`）：tag 触发，签名材料走
+  `IOS_TEAM_ID`（variable）+ 三个 `APP_STORE_CONNECT_*`（secrets），
+  `app.config.js` 在构建时注入 team。适合公开仓库的自动化。
+- **Xcode Cloud**：从已提交的工程直接构建，签名由 Apple 侧管理，仓库里
+  不需要任何凭据。引导脚本 `ios/ci_scripts/ci_post_clone.sh` 负责 Node/pnpm、
+  workspace 构建、渲染器、pod install 与 ExpoModulesJSI 预编译。配置步骤见
+  [docs/ios-xcode-cloud.md](../../docs/ios-xcode-cloud.md)。
 
-GitHub Actions 不像 Xcode Cloud 会自动递增 build number，所以 `buildNumber`
-是实际上传值：**每次发 TestFlight 都要 +1**，否则 App Store Connect 拒收重复的
-`CFBundleVersion`。
+不要把 team id、证书、profile、`.p8` 或 `.env.local` 提交进来；`.gitignore`
+已覆盖常见后缀，别用 `-f` 绕过。`EXPO_PUBLIC_*` 会被内联进 JS bundle，
+永远不能放密钥。
 
 ## config plugin 注意事项
 
@@ -50,8 +65,9 @@ GitHub Actions 不像 Xcode Cloud 会自动递增 build number，所以 `buildNu
   iOS 27 下缺少 scene 适配会在启动时直接 trap。修模板变化，不要删这个检查。
 - `with-ios-hermes-globals` 负责在 prebuild 后把 `HERMES_CLI_PATH` 写回
   `.xcode.env`。`scripts/hermesc-with-globals.sh` 必须保持可执行位。
-- 新增 `expo-*` 或任何带原生代码的依赖后，在 `apps/ios/ios` 下跑 `pod install`
-  验证；`Podfile.lock` 不提交（随 `ios/` 一起忽略）。
+- 新增 `expo-*` 或任何带原生代码的依赖后：改 `apps/ios/package.json`，
+  `APPLE_TEAM_ID=... pnpm --dir apps/ios run generate:ios`，再在
+  `apps/ios/ios` 下 `pod install`，把更新后的 `Podfile.lock` 一起提交。
 
 ## 平台差异写在共享包里
 
@@ -69,5 +85,5 @@ API 时两端都要确认。
 pnpm --filter @dsh-remote/app-core check
 pnpm --filter @dsh-remote/app-core test
 pnpm --dir apps/ios check
-pnpm --dir apps/ios exec expo prebuild --platform ios --no-install   # 原生配置改动后
+git status --short apps/ios/ios   # 原生产物改动是否都带上了
 ```
