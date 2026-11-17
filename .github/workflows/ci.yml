@@ -463,7 +463,12 @@ jobs:
       - name: Install CocoaPods
         env:
           EXPO_USE_PRECOMPILED_MODULES: '1'
-        run: pod install --project-directory=apps/ios/ios
+        # Run from inside apps/ios/ios, matching the layout the Expo Podfile
+        # assumes: its backtick node resolution and use_native_modules! both
+        # evaluate relative to the working directory, and invoking with
+        # --project-directory from the repository root breaks them.
+        working-directory: apps/ios/ios
+        run: pod install
 
       # The "[CP-User] Build ExpoModulesJSI xcframework" build phase compiles an
       # SPM package through a nested `xcodebuild -quiet`, which swallows the real
