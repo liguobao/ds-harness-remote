@@ -31,6 +31,7 @@ export interface RemoteHostFeatures {
   claude?: boolean
   hermes?: boolean
   acpModelLoadsSession?: boolean
+  acpOpencodeArchive?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
   pluginRoute: boolean
 }

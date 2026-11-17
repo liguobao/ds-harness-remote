@@ -1277,6 +1277,261 @@ describe('HarnessAlphaClient', () => {
     expect(frames.filter(item => item.rpcId === 'evt-a-1')).toHaveLength(2)
     await client.close()
   })
+
+  it('restarts $events and session/control via start() after stream completion or failure', async () => {
+    await runScenarios([
+      {
+        name: 'restarts after next.done stream/closed completed (including synchronous restart in onFrame)',
+        run: async () => {
+          const core = new ScriptedCore()
+          const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+          const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, { sessionFormat: 3 }, frame => {
+            frames.push(frame)
+            if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'completed') {
+              client.start()
+            }
+          })
+          const openedIds = (endpoint: string) => core.rpcCalls
+            .filter(call => call.method === 'harness.remote.stream.open' && (call.params as { endpoint?: string }).endpoint === endpoint)
+            .map(call => (call.params as { streamId: string }).streamId)
+
+          client.start()
+          await vi.waitFor(() => {
+            expect(openedIds('$events')).toHaveLength(1)
+            expect(openedIds('session/control')).toHaveLength(1)
+          })
+
+          // Complete $events -> should emit stream/closed(completed) and restart $events only.
+          core.emit({ event: 'harness.remote.stream.closed', data: { streamId: openedIds('$events')[0], reason: 'completed' } })
+          await vi.waitFor(() => expect(openedIds('$events')).toHaveLength(2))
+          expect(openedIds('session/control')).toHaveLength(1)
+
+          // Complete session/control -> should emit stream/closed(completed) and restart session/control only.
+          core.emit({ event: 'harness.remote.stream.closed', data: { streamId: openedIds('session/control')[0], reason: 'completed' } })
+          await vi.waitFor(() => expect(openedIds('session/control')).toHaveLength(2))
+          expect(frames.filter(f => f.payload.type === 'stream/closed' && f.payload.reason === 'completed')).toHaveLength(2)
+
+          // client.close() must not emit spurious stream/closed.
+          await client.close()
+          expect(frames.filter(f => f.payload.type === 'stream/closed')).toHaveLength(2)
+        },
+      },
+      {
+        name: 'clears handles before emitting stream/closed failed so start() restarts after error',
+        run: async () => {
+          const core = new ScriptedCore()
+          let failNextOpen = true
+          const baseRpc = core.rpc.bind(core)
+          vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+            if (method === 'harness.remote.stream.open' && (params as { endpoint?: string }).endpoint === '$events' && failNextOpen) {
+              failNextOpen = false
+              core.rpcCalls.push({ method, params })
+              throw Object.assign(new Error('events open failed'), { code: 'TRANSPORT_CLOSED' })
+            }
+            return baseRpc(method, params)
+          })
+          const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+          const client = new HarnessAlphaClient(core as unknown as RemoteClientCore, { sessionFormat: 3 }, frame => frames.push(frame))
+          const openedIds = (endpoint: string) => core.rpcCalls
+            .filter(call => call.method === 'harness.remote.stream.open' && (call.params as { endpoint?: string }).endpoint === endpoint)
+            .map(call => (call.params as { streamId: string }).streamId)
+
+          client.start()
+          await vi.waitFor(() => {
+            expect(frames.some(f => f.payload.type === 'stream/closed' && f.payload.reason === 'failed')).toBe(true)
+            expect(openedIds('session/control')).toHaveLength(1)
+          })
+
+          // Fail session/control mid-stream as well.
+          core.emit({
+            event: 'harness.remote.stream.closed',
+            data: { streamId: openedIds('session/control')[0], reason: 'failed', failure: { code: 'DISCONNECTED', message: 'dropped', details: {} } },
+          })
+          await vi.waitFor(() => expect(frames.filter(f => f.payload.type === 'stream/closed' && f.payload.reason === 'failed')).toHaveLength(2))
+
+          // start() must now reopen both $events and session/control.
+          client.start()
+          await vi.waitFor(() => {
+            expect(openedIds('$events')).toHaveLength(2)
+            expect(openedIds('session/control')).toHaveLength(2)
+          })
+          await client.close()
+        },
+      },
+    ])
+  })
+
+  it('replays activeAttempt.stream on mid-stream sessionHistory join and continues with monotonic seq across abandonment retry', async () => {
+    const core = new ScriptedCore()
+    const frames: Array<{ rpcId: string; payload: Record<string, unknown> }> = []
+    const client = new HarnessAlphaClient(
+      core as unknown as RemoteClientCore,
+      { sessionFormat: 3 },
+      frame => frames.push(frame),
+    )
+
+    const historyPromise = client.sessionHistory('session-mid')
+    await vi.waitFor(() => expect(core.streamIdFor('session/follow')).toBeTruthy())
+    const streamId = core.streamIdFor('session/follow')
+
+    // Snapshot has durable cursor 4 and activeAttempt with 5 packed/raw chunks (nextIndex = 5),
+    // plus an extra 6th chunk in stream beyond nextIndex to verify capping at nextIndex.
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'snapshot',
+          cursor: 4,
+          records: [{
+            type: 'event',
+            event: { type: 'step/start', seq: 4, time: 100, data: { turn: 2, step: 1 } },
+          }],
+          hasMore: false,
+          projections: { asOfSeq: 4, values: {} },
+          assistantStream: {
+            revision: 5,
+            activeAttempt: {
+              attemptId: 'att-1',
+              startedAfterSeq: 4,
+              turn: 2,
+              step: 1,
+              nextIndex: 5,
+              stream: [
+                { type: 'chunk', time: 101, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } },
+                { type: 'reasoning-chunks', time0: 102, index: 0, dt: [], texts: ['think'] },
+                { type: 'text-chunks', time0: 105, index: 1, dt: [3], texts: ['hel', 'lo'] },
+                { type: 'tool-call-chunks', time0: 110, index: 2, dt: [1], id: 'tc-1', name: 'bash', args: ['{"cmd":', '"ls"}'] },
+              ],
+            },
+          },
+        },
+      },
+    })
+
+    const page = await historyPromise
+    expect(page.throughSeq).toBe(4)
+    expect(page.events).toHaveLength(6)
+    expect(page.events.slice(1)).toEqual([
+      { event: { type: 'assistant/chunk', seq: 4 + 1 - 1 / 2, time: 101, data: { turn: 2, step: 1, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } } } },
+      { event: { type: 'assistant/chunk', seq: 4 + 1 - 1 / 3, time: 102, data: { turn: 2, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'think' } } } },
+      { event: { type: 'assistant/chunk', seq: 4 + 1 - 1 / 4, time: 105, data: { turn: 2, step: 1, chunk: { type: 'text-delta', index: 1, text: 'hel' } } } },
+      { event: { type: 'assistant/chunk', seq: 4 + 1 - 1 / 5, time: 108, data: { turn: 2, step: 1, chunk: { type: 'text-delta', index: 1, text: 'lo' } } } },
+      { event: { type: 'assistant/chunk', seq: 4 + 1 - 1 / 6, time: 110, data: { turn: 2, step: 1, chunk: { type: 'tool-call-delta', index: 2, id: 'tc-1', name: 'bash', argumentsDelta: '{"cmd":' } } } },
+    ])
+
+    // Live suffix chunk (index 5) continues seamlessly at transientInGap = 6.
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'chunk', attemptId: 'att-1', revision: 6, index: 5, time: 112, chunk: { type: 'text-delta', index: 1, text: ' world' } },
+        },
+      },
+    })
+    // Attempt 1 is abandoned -> synthetic assistant/attempt-abandoned at transientInGap = 7.
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'end', attemptId: 'att-1', revision: 7, index: 6, outcome: { kind: 'abandoned' } },
+        },
+      },
+    })
+    // Attempt 2 retries in the same (turn=2, step=1) durable gap (startedAfterSeq: 4).
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'start', attemptId: 'att-2', revision: 8, startedAfterSeq: 4, turn: 2, step: 1 },
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'chunk', attemptId: 'att-2', revision: 9, index: 0, time: 120, chunk: { type: 'text-delta', index: 0, text: 'retry' } },
+        },
+      },
+    })
+    // Durable event at seq 5 advances durableCursor and resets transientInGap, so next attempt gets 5.5.
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'event',
+          event: { type: 'step/end', seq: 5, time: 130, data: { turn: 2, step: 1 } },
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'start', attemptId: 'att-3', revision: 10, startedAfterSeq: 5, turn: 2, step: 2 },
+        },
+      },
+    })
+    core.emit({
+      event: 'harness.remote.frame',
+      data: {
+        streamId,
+        hasValue: true,
+        value: {
+          type: 'assistant-stream',
+          frame: { type: 'chunk', attemptId: 'att-3', revision: 11, index: 0, time: 140, chunk: { type: 'text-delta', index: 0, text: 'next' } },
+        },
+      },
+    })
+
+    await vi.waitFor(() => expect(frames.filter(f => f.payload.type === 'session/event')).toHaveLength(5))
+    const sessionEvents = frames
+      .filter(f => f.payload.type === 'session/event')
+      .map(f => f.payload.event as { type: string; seq: number; data: Record<string, unknown> })
+
+    expect(sessionEvents.map(e => e.type)).toEqual([
+      'assistant/chunk',
+      'assistant/attempt-abandoned',
+      'assistant/chunk',
+      'step/end',
+      'assistant/chunk',
+    ])
+    expect(sessionEvents[0]!.seq).toBe(4 + 1 - 1 / 7)
+    expect(sessionEvents[1]).toMatchObject({
+      type: 'assistant/attempt-abandoned',
+      seq: 4 + 1 - 1 / 8,
+      data: { turn: 2, step: 1, attemptId: 'att-1' },
+    })
+    expect(sessionEvents[2]!.seq).toBe(4 + 1 - 1 / 9)
+    expect(sessionEvents[3]!.seq).toBe(5)
+    expect(sessionEvents[4]!.seq).toBe(5.5)
+    // All seqs from mid-stream replay through retry stay strictly monotonic.
+    const allSeqs = [...page.events.map(e => e.event.seq), ...sessionEvents.map(e => e.seq)]
+    for (let i = 1; i < allSeqs.length; i += 1) {
+      expect(allSeqs[i]).toBeGreaterThan(allSeqs[i - 1]!)
+    }
+
+    await client.close()
+  })
 })
 
 
