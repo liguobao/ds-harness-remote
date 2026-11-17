@@ -99692,46 +99692,32 @@ import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
 var HOST_UPLOAD_ACTIVE_LIMIT = 4;
-var HOST_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
-var HOST_UPLOAD_DAILY_BYTES = 16 * 1024 * 1024 * 1024;
-var SESSION_UPLOAD_DAILY_BYTES = 8 * 1024 * 1024 * 1024;
+var HOST_UPLOAD_RESERVED_BYTES = 4 * 1024 * 1024 * 1024;
+var SESSION_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
 var UPLOAD_DISK_FREE_BYTES = 32 * 1024 * 1024;
-var DAY_MS = 24 * 60 * 60 * 1e3;
 var WorkspaceUploadBudget = class {
   constructor(limits = {
     active: HOST_UPLOAD_ACTIVE_LIMIT,
     reservedBytes: HOST_UPLOAD_RESERVED_BYTES,
-    hostDailyBytes: HOST_UPLOAD_DAILY_BYTES,
-    sessionBytes: SESSION_UPLOAD_DAILY_BYTES,
+    sessionBytes: SESSION_UPLOAD_RESERVED_BYTES,
     diskFreeBytes: UPLOAD_DISK_FREE_BYTES
   }, freeBytes = async (root2) => {
     const disk = await statfs(root2);
     return disk.bavail * disk.bsize;
-  }, now = Date.now) {
+  }) {
     this.limits = limits;
     this.freeBytes = freeBytes;
-    this.now = now;
   }
   active = /* @__PURE__ */ new Set();
-  completed = /* @__PURE__ */ new Map();
-  hostCompleted = 0;
-  windowStart = null;
   queue = Promise.resolve();
-  resetWindow(now) {
-    if (this.windowStart !== null && now - this.windowStart < DAY_MS) return;
-    this.windowStart = now;
-    this.hostCompleted = 0;
-    this.completed.clear();
-  }
   reserve(root2, dev, sessionId, bytes) {
     const next = this.queue.then(async () => {
       const free = await this.freeBytes(root2);
-      this.resetWindow(this.now());
       const active2 = [...this.active];
-      const reserved = active2.reduce((sum, entry2) => sum + entry2.remaining, 0);
+      const reserved = active2.reduce((sum, entry2) => sum + entry2.total, 0);
       const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
-      const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0) + (this.completed.get(sessionId) ?? 0);
-      if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || this.hostCompleted + active2.reduce((sum, entry2) => sum + entry2.total, 0) + bytes > this.limits.hostDailyBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+      const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0);
+      if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
       const entry = { sessionId, dev, remaining: bytes, total: bytes };
       this.active.add(entry);
       let done = false;
@@ -99747,12 +99733,8 @@ var WorkspaceUploadBudget = class {
         },
         commit: () => {
           if (done) return;
-          const now = this.now();
-          this.resetWindow(now);
           done = true;
           this.active.delete(entry);
-          this.hostCompleted += bytes;
-          if (bytes > 0) this.completed.set(sessionId, (this.completed.get(sessionId) ?? 0) + bytes);
         },
         release: () => {
           if (done) return;

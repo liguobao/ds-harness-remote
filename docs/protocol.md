@@ -1681,12 +1681,12 @@ commit 任意一次发送后失败，都不能回退重放。abort 是清理请�
 
 每连接最多 2 个活动上传。Host 在工作区根目录排他创建随机 `.dsh-upload-*.part`
 临时文件，权限为 `0600`。根目录必须经过 realpath 与目录身份验证。
-Host 进程最多允许 4 个活动上传，并预留最多 2 GiB 未接收字节。
-Host 从首个提交起的 24 小时窗口内最多接收 4 GiB。
-单个会话从该会话首个提交起的 24 小时窗口内最多接收 2 GiB。
-Host 同时保留最多 1024 个未过期的会话额度记录。新会话超过上限时返回 `UPLOAD_LIMIT`。
-这些累计额度保存在 Host 进程内存中，进程重启后重置。
-Host 在 `open` 时原子分配额度，并检查目标磁盘至少保留 256 MiB。
+Host 进程最多允许 4 个活动上传，活动上传声明大小之和最多为 4 GiB。
+同一会话的活动上传声明大小之和最多为 2 GiB。
+提交、取消或失败后，Host 释放对应的在途字节预算。
+Host 不限制已完成上传的累计字节数或会话数量。
+Host 在 `open` 时原子分配预算，并检查目标磁盘至少保留 32 MiB。
+磁盘检查预留同一磁盘上所有活动上传尚未写入的字节。
 Host 在每次写入前重查可用空间。磁盘之外的进程仍可同时占用空间。
 每次分块写入都重新
 验证根目录未被替换（realpath 与设备号/inode），会话 authority 则按有界频率重验
@@ -1698,9 +1698,7 @@ Host 本地进程仍保有原有文件系统权限，本协议不隔离恶意本
 未提交上传在空闲达到 2 min 后进入清理范围；Host 定时或处理下一次调用时回收。
 取消、失败和连接断开也清理未提交临时文件；不得跟随被替换的根目录或删除被替换的
 临时条目。进程崩溃后的残留不支持恢复上传。每次目录 authority 解析最多等待 15 s。
-Host 在重启后首次访问一个工作区根目录时，清理超过 24 小时的旧上传临时文件。
-之后每次访问至少间隔 1 小时再扫描该目录。
-清理只处理匹配随机文件名、当前用户、`0600` 权限和单个硬链接的普通文件。
+Host 当前不扫描或清理进程崩溃后留下的旧上传临时文件。
 
 原子发布成功是提交点。提交点后的 abort、断线或 Client 取消不能撤销文件。
 Host 为每连接最多缓存 64 个提交结果，保留至提交后 2 min 或被淘汰；缓存存在时，
@@ -1922,6 +1920,10 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | Workspace upload file | LAN / direct P2P：1 GiB；TURN / Relay / 未知：20 MiB；允许零字节 |
 | Workspace upload chunk（解码后） | 64 KiB；以 open 返回的 chunkBytes 为准 |
 | Workspace active uploads / connection | 2；2 min idle 后回收 |
+| Workspace active uploads / Host | 4 |
+| Workspace active upload bytes / Host | 4 GiB |
+| Workspace active upload bytes / session | 2 GiB |
+| Workspace upload disk free space | 32 MiB；另预留活动上传尚未写入的字节 |
 | Workspace upload authority lookup | 每次最多 15 s |
 | Workspace upload commit cache / connection | 最多 64 项；提交后最多 2 min |
 | Web composer files | 5；仅 Web 交互限制 |
