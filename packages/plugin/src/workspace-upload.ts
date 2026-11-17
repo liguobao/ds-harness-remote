@@ -7,7 +7,6 @@ import { extname, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { RpcError } from './safe-error.js'
 import { WorkspaceUploadBudget, type UploadReservation } from './workspace-upload-budget.js'
-import { cleanOrphanUploads } from './workspace-upload-cleanup.js'
 
 export const WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024
 export const WORKSPACE_UPLOAD_CHUNK = 64 * 1024
@@ -105,7 +104,6 @@ export class WorkspaceUploadHost {
     const root = await realpath(sourceRoot)
     const directory = await stat(root)
     if (!directory.isDirectory()) throw failure('UPLOAD_WORKSPACE_UNAVAILABLE')
-    await cleanOrphanUploads(root, directory.dev, directory.ino, this.budget)
     const reservation = await this.budget.reserve(root, directory.dev, p.sessionId, p.totalBytes)
     const temp = join(root, `.dsh-upload-${randomUUID()}.part`)
     let handle: FileHandle
@@ -129,7 +127,6 @@ export class WorkspaceUploadHost {
       reservation,
     }
     this.uploads.set(p.uploadId, upload)
-    this.budget.activePaths.add(temp)
     await this.validateRoot(upload)
     return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...(p.encoding ? { encoding: p.encoding } : {}) }
   }
@@ -253,7 +250,6 @@ export class WorkspaceUploadHost {
       if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino
         && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink(upload.temp)
     } catch { /* Missing/replaced directories are never followed during cleanup. */ }
-    this.budget.activePaths.delete(upload.temp)
   }
 
   private async expire() {

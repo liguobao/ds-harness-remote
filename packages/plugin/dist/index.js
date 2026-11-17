@@ -99686,17 +99686,16 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat7, unlink as unlink3 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
+import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
 var HOST_UPLOAD_ACTIVE_LIMIT = 4;
 var HOST_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
-var HOST_UPLOAD_DAILY_BYTES = 4 * 1024 * 1024 * 1024;
-var SESSION_UPLOAD_DAILY_BYTES = 2 * 1024 * 1024 * 1024;
-var SESSION_UPLOAD_DAILY_RECORDS = 1024;
-var UPLOAD_DISK_FREE_BYTES = 256 * 1024 * 1024;
+var HOST_UPLOAD_DAILY_BYTES = 16 * 1024 * 1024 * 1024;
+var SESSION_UPLOAD_DAILY_BYTES = 8 * 1024 * 1024 * 1024;
+var UPLOAD_DISK_FREE_BYTES = 32 * 1024 * 1024;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var WorkspaceUploadBudget = class {
   constructor(limits = {
@@ -99704,7 +99703,6 @@ var WorkspaceUploadBudget = class {
     reservedBytes: HOST_UPLOAD_RESERVED_BYTES,
     hostDailyBytes: HOST_UPLOAD_DAILY_BYTES,
     sessionBytes: SESSION_UPLOAD_DAILY_BYTES,
-    sessions: SESSION_UPLOAD_DAILY_RECORDS,
     diskFreeBytes: UPLOAD_DISK_FREE_BYTES
   }, freeBytes = async (root2) => {
     const disk = await statfs(root2);
@@ -99716,86 +99714,57 @@ var WorkspaceUploadBudget = class {
   }
   active = /* @__PURE__ */ new Set();
   completed = /* @__PURE__ */ new Map();
-  hostCompleted = { at: null, bytes: 0 };
-  activePaths = /* @__PURE__ */ new Set();
-  scannedRoots = /* @__PURE__ */ new Map();
-  prune(now) {
-    const cutoff = now - DAY_MS;
-    if (this.hostCompleted.at !== null && this.hostCompleted.at <= cutoff) this.hostCompleted = { at: null, bytes: 0 };
-    for (const [id6, entry] of this.completed) {
-      if (entry.at > cutoff) break;
-      this.completed.delete(id6);
-    }
+  hostCompleted = 0;
+  windowStart = null;
+  queue = Promise.resolve();
+  resetWindow(now) {
+    if (this.windowStart !== null && now - this.windowStart < DAY_MS) return;
+    this.windowStart = now;
+    this.hostCompleted = 0;
+    this.completed.clear();
   }
-  async reserve(root2, dev, sessionId, bytes) {
-    const free = await this.freeBytes(root2);
-    this.prune(this.now());
-    const active2 = [...this.active];
-    const reserved = active2.reduce((sum, entry2) => sum + entry2.remaining, 0);
-    const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
-    const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0) + (this.completed.get(sessionId)?.bytes ?? 0);
-    const pendingSessions = new Set(active2.filter((entry2) => !this.completed.has(entry2.sessionId)).map((entry2) => entry2.sessionId));
-    const newSession = !this.completed.has(sessionId) && !pendingSessions.has(sessionId);
-    if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || this.hostCompleted.bytes + active2.reduce((sum, entry2) => sum + entry2.total, 0) + bytes > this.limits.hostDailyBytes || session2 + bytes > this.limits.sessionBytes || newSession && this.completed.size + pendingSessions.size >= this.limits.sessions || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
-    const entry = { sessionId, dev, remaining: bytes, total: bytes };
-    this.active.add(entry);
-    let done = false;
-    return {
-      checkDisk: async () => {
-        const current = await this.freeBytes(root2);
-        const other = [...this.active].filter((item) => item.dev === dev).reduce((sum, item) => sum + item.remaining, 0);
-        if (!Number.isFinite(current) || current - other < this.limits.diskFreeBytes)
-          throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
-      },
-      consume: (amount) => {
-        entry.remaining -= amount;
-      },
-      commit: () => {
-        if (done) return;
-        const now = this.now();
-        this.prune(now);
-        done = true;
-        this.active.delete(entry);
-        this.hostCompleted = { at: this.hostCompleted.at ?? now, bytes: this.hostCompleted.bytes + bytes };
-        const prior = this.completed.get(sessionId);
-        this.completed.set(sessionId, { at: prior?.at ?? now, bytes: (prior?.bytes ?? 0) + bytes });
-      },
-      release: () => {
-        if (done) return;
-        done = true;
-        this.active.delete(entry);
-      }
-    };
+  reserve(root2, dev, sessionId, bytes) {
+    const next = this.queue.then(async () => {
+      const free = await this.freeBytes(root2);
+      this.resetWindow(this.now());
+      const active2 = [...this.active];
+      const reserved = active2.reduce((sum, entry2) => sum + entry2.remaining, 0);
+      const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
+      const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0) + (this.completed.get(sessionId) ?? 0);
+      if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || this.hostCompleted + active2.reduce((sum, entry2) => sum + entry2.total, 0) + bytes > this.limits.hostDailyBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+      const entry = { sessionId, dev, remaining: bytes, total: bytes };
+      this.active.add(entry);
+      let done = false;
+      return {
+        checkDisk: async () => {
+          const current = await this.freeBytes(root2);
+          const other = [...this.active].filter((item) => item.dev === dev).reduce((sum, item) => sum + item.remaining, 0);
+          if (!Number.isFinite(current) || current - other < this.limits.diskFreeBytes)
+            throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
+        },
+        consume: (amount) => {
+          entry.remaining -= amount;
+        },
+        commit: () => {
+          if (done) return;
+          const now = this.now();
+          this.resetWindow(now);
+          done = true;
+          this.active.delete(entry);
+          this.hostCompleted += bytes;
+          if (bytes > 0) this.completed.set(sessionId, (this.completed.get(sessionId) ?? 0) + bytes);
+        },
+        release: () => {
+          if (done) return;
+          done = true;
+          this.active.delete(entry);
+        }
+      };
+    });
+    this.queue = next.catch(() => void 0);
+    return next;
   }
 };
-
-// packages/plugin/src/workspace-upload-cleanup.ts
-import { lstat as lstat4, opendir, unlink as unlink2 } from "node:fs/promises";
-import { join as join16 } from "node:path";
-var ORPHAN_UPLOAD_NAME = /^\.dsh-upload-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/iu;
-async function cleanOrphanUploads(root2, dev, ino, budget) {
-  const now = Date.now();
-  if (now - (budget.scannedRoots.get(root2) ?? 0) < 60 * 60 * 1e3) return;
-  const cutoff = now - 24 * 60 * 60 * 1e3;
-  try {
-    const entries = await opendir(root2);
-    for await (const { name: name2 } of entries) {
-      if (!ORPHAN_UPLOAD_NAME.test(name2)) continue;
-      const path = join16(root2, name2);
-      if (budget.activePaths.has(path)) continue;
-      try {
-        const [directory, file2] = await Promise.all([lstat4(root2), lstat4(path)]);
-        if (!directory.isDirectory() || directory.dev !== dev || directory.ino !== ino || !file2.isFile() || file2.dev !== dev || file2.nlink !== 1 || file2.uid !== process.geteuid?.() || (file2.mode & 511) !== 384 || file2.mtimeMs > cutoff) continue;
-        await unlink2(path);
-      } catch {
-      }
-    }
-  } catch {
-    return;
-  }
-  budget.scannedRoots.set(root2, now);
-  if (budget.scannedRoots.size > 1024) budget.scannedRoots.delete(budget.scannedRoots.keys().next().value);
-}
 
 // packages/plugin/src/workspace-upload.ts
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -99883,9 +99852,8 @@ var WorkspaceUploadHost = class {
     const root2 = await realpath6(sourceRoot);
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    await cleanOrphanUploads(root2, directory.dev, directory.ino, this.budget);
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join17(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -99911,7 +99879,6 @@ var WorkspaceUploadHost = class {
       reservation
     };
     this.uploads.set(p.uploadId, upload);
-    this.budget.activePaths.add(temp);
     await this.validateRoot(upload);
     return { uploadId: p.uploadId, chunkBytes: p.encoding ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK, ...p.encoding ? { encoding: p.encoding } : {} };
   }
@@ -99948,7 +99915,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat5(upload.temp);
+    const temp = await lstat4(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -99956,7 +99923,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join17(upload.root, name2));
+        await link2(upload.temp, join16(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -100022,12 +99989,11 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat5(upload.root);
-      const temp = await lstat5(upload.temp);
-      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink3(upload.temp);
+      const root2 = await lstat4(upload.root);
+      const temp = await lstat4(upload.temp);
+      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
-    this.budget.activePaths.delete(upload.temp);
   }
   async expire() {
     const cutoff = this.now() - this.ttlMs;
@@ -102426,8 +102392,8 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat6, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
@@ -103250,7 +103216,7 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat6(root2);
+      const rootLstat = await lstat5(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
@@ -103258,11 +103224,11 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join18(currentPath, parts[i]);
+        currentPath = join17(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat6(currentPath);
+        const dirLstat = await lstat5(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -103270,7 +103236,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat6(candidate);
+      const targetLstat = await lstat5(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }
@@ -105293,7 +105259,7 @@ function decodeBase64(value) {
 // packages/plugin/src/cli.ts
 import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join19 } from "node:path";
+import { join as join18 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -105385,7 +105351,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join19(directory, "device.json"))) {
+  if (!await exists3(join18(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -105445,9 +105411,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join19(directory, "device.json")),
-    exists3(join19(directory, "device.key")),
-    exists3(join19(directory, "server-credentials.json"))
+    exists3(join18(directory, "device.json")),
+    exists3(join18(directory, "device.key")),
+    exists3(join18(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
