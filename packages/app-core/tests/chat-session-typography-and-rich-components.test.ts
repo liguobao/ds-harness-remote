@@ -77,15 +77,13 @@ describe('chat session typography and rich components', () => {
       expect(stdStyles.tableContainer.alignSelf).toBe('stretch')
       expect(stdStyles.tableScrollContent.minWidth).toBe('100%')
 
-      // Standard cell min-width and padding
-      expect(stdStyles.tableCell.flex).toBe(1)
+      // Standard cell min-width and padding (column flex basis is planned per table in markdown.tsx)
       expect(stdStyles.tableCell.minWidth).toBe(96)
       expect(stdStyles.tableCell.paddingHorizontal).toBe(12)
       expect(stdStyles.tableCell.paddingVertical).toBe(8)
       expect(stdStyles.tableHeader.backgroundColor).toBe(lightColors.surfaceStrong)
 
       // Compact cell min-width and padding
-      expect(compactStyles.tableCell.flex).toBe(1)
       expect(compactStyles.tableCell.minWidth).toBe(80)
       expect(compactStyles.tableCell.paddingHorizontal).toBe(8)
       expect(compactStyles.tableCell.paddingVertical).toBe(6)

@@ -1,6 +1,6 @@
 import { ChatImageView } from './chat-image'
 import { chatImageWorkspacePath, markdownImageSource } from '../services/chat-image-loader'
-import { createContext, memo, useContext, useMemo, useRef } from 'react'
+import { createContext, memo, useContext, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
@@ -282,6 +282,119 @@ function extractBlockText(node: MarkdownNode): string {
   return node.children.map(extractBlockText).filter(Boolean).join('\n')
 }
 
+/** Fullwidth/CJK code units measure ~1 em; other units ~0.55 em at body size. */
+function isFullwidthCodeUnit(code: number): boolean {
+  return (code >= 0x1100 && code <= 0x115f)
+    || (code >= 0x2e80 && code <= 0xa4cf)
+    || (code >= 0xac00 && code <= 0xd7a3)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0xfe30 && code <= 0xfe4f)
+    || (code >= 0xff00 && code <= 0xff60)
+    || (code >= 0xffe0 && code <= 0xffe6)
+}
+
+/**
+ * Markdown tables render as native rows. Column edges must line up across
+ * rows, so every row shares one width plan derived from the table's cells:
+ * with per-row sizing, a long unbreakable cell pushes only its own row wider
+ * and column boundaries drift apart between rows. Cells take a plain `width`
+ * — no flex properties — so a column cannot vary between rows. Long text
+ * wraps inside its fixed column; when the plan exceeds the viewport the outer
+ * horizontal ScrollView takes over, and when it is narrower the plan scales
+ * up proportionally to fill the width.
+ */
+const MaxColumnWidth = 260
+
+function renderTable(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode {
+  const rows: MarkdownNode[][] = []
+  const collectRows = (list: MarkdownNode[]) => {
+    for (const child of list) {
+      if (child.token.type === 'tr_open') {
+        rows.push(child.children.filter(cell => cell.token.type === 'th_open' || cell.token.type === 'td_open'))
+      } else {
+        collectRows(child.children)
+      }
+    }
+  }
+  collectRows(node.children)
+
+  const fontSize = (styles.tableText.fontSize as number | undefined) ?? 13
+  const cellPadding = ((styles.tableCell.paddingHorizontal as number | undefined) ?? 12) * 2 + 2
+  const minCellWidth = (styles.tableCell.minWidth as number | undefined) ?? 96
+  const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0)
+  const columnWidths: number[] = []
+  for (let column = 0; column < columnCount; column += 1) {
+    let widest = 0
+    for (const row of rows) {
+      const cell = row[column]
+      if (cell === undefined) continue
+      const text = extractBlockText(cell).replace(/\s+/gu, ' ').trim()
+      if (text.length === 0) continue
+      let units = 0
+      for (let index = 0; index < text.length; index += 1) {
+        units += isFullwidthCodeUnit(text.charCodeAt(index)) ? 1 : 0.55
+      }
+      widest = Math.max(widest, Math.ceil(units * fontSize) + cellPadding)
+    }
+    columnWidths.push(Math.min(MaxColumnWidth, Math.max(minCellWidth, widest)))
+  }
+
+  return (
+    <MarkdownTable
+      key={node.key}
+      plan={columnWidths}
+      minCellWidth={minCellWidth}
+      rows={rows}
+      styles={styles}
+      colors={colors}
+      onLinkPress={onLinkPress}
+    />
+  )
+}
+
+const MarkdownTable = memo(function MarkdownTable({ plan, minCellWidth, rows, styles, colors, onLinkPress }: {
+  plan: number[]
+  minCellWidth: number
+  rows: MarkdownNode[][]
+  styles: MarkdownStyles
+  colors: ThemeColors
+  onLinkPress?: MarkdownLinkHandler
+}) {
+  // Fill the viewport when the plan is narrower; overflow keeps plan widths and scrolls.
+  const [viewportWidth, setViewportWidth] = useState(0)
+  const planTotal = plan.reduce((sum, width) => sum + width, 0)
+  const fillScale = viewportWidth > planTotal && planTotal > 0 ? viewportWidth / planTotal : 1
+
+  return (
+    <ScrollView
+      horizontal
+      nestedScrollEnabled
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.tableScrollContent}
+      style={styles.tableContainer}
+      onLayout={event => setViewportWidth(event.nativeEvent.layout.width)}
+    >
+      <View style={styles.table}>
+        {rows.map((row, rowIndex) => (
+          <View key={`md-table-row-${row[0]?.key ?? rowIndex}`} style={styles.tableRow}>
+            {row.map((cell, column) => {
+              const isHeader = cell.token.type === 'th_open'
+              return (
+                <View
+                  key={cell.key}
+                  style={[styles.tableCell, { width: (plan[column] ?? minCellWidth) * fillScale }, isHeader && styles.tableHeader]}
+                >
+                  <Text selectable style={isHeader ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(cell.children, styles, colors, onLinkPress)}</Text>
+                </View>
+              )
+            })}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  )
+})
+
 function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeColors, onLinkPress?: MarkdownLinkHandler): ReactNode {
   const { token, key, children } = node
   if (token.type === 'math_block') return <MathFormula key={key} source={token.content} display />
@@ -336,31 +449,7 @@ function renderBlock(node: MarkdownNode, styles: MarkdownStyles, colors: ThemeCo
     )
   }
   if (token.type === 'hr') return <View key={key} style={styles.rule} />
-  if (token.type === 'table_open') {
-    return (
-      <ScrollView
-        key={key}
-        horizontal
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tableScrollContent}
-        style={styles.tableContainer}
-      >
-        <View style={styles.table}>
-          {children.map(child => renderBlock(child, styles, colors, onLinkPress))}
-        </View>
-      </ScrollView>
-    )
-  }
-  if (token.type === 'thead_open' || token.type === 'tbody_open') return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
-  if (token.type === 'tr_open') return <View key={key} style={styles.tableRow}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
-  if (token.type === 'th_open' || token.type === 'td_open') {
-    return (
-      <View key={key} style={[styles.tableCell, token.type === 'th_open' && styles.tableHeader]}>
-        <Text selectable style={token.type === 'th_open' ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(children, styles, colors, onLinkPress)}</Text>
-      </View>
-    )
-  }
+  if (token.type === 'table_open') return renderTable(node, styles, colors, onLinkPress)
   if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`, onLinkPress)}</Text>
   if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, colors, onLinkPress))}</View>
   if (token.content.length > 0) return <Text key={key} selectable style={styles.paragraph}>{token.content}</Text>
