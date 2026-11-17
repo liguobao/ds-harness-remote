@@ -9,6 +9,7 @@
 | [TUI 组合包](../packages/tui/README.md) | 终端 profile 的 Remote Host 与账号入口 |
 | [版本兼容](compatibility.zh.md)（[English](compatibility.md)） | 当前基线、旧 Host 边界与平台限制 |
 | [最小自部署 Server](../apps/server/README.zh.md) | 单账号 Server 的配置、Docker 和运行方式 |
+| [HarmonyOS 客户端](harmony-client.md) | 原生客户端构建、签名、安全边界与验证 |
 | [Remote Tools](remote-tools.md) | 本地 Harness 会话的远程工具注入开关 |
 | [隐私政策](PRIVACY.md) | Browser Launcher 的数据处理范围 |
 

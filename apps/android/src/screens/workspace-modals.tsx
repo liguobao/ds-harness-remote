@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native'
 import { deviceVersionSubtitle, platformIcon } from '../lib/device-display'
+import { canManageWorkspace } from '../lib/workspace-key'
 import { useAppStore } from '../state/store'
 import type { AgentBackend, DirectoryListing, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
@@ -70,7 +71,7 @@ export function WorkspaceActionsModal({
 }) {
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight } = useResponsiveLayout()
-  const canManage = target !== undefined && (target.backend === undefined || target.backend === 'harness' || target.backend === 'cursor')
+  const canManage = canManageWorkspace(target)
 
   return (
     <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
