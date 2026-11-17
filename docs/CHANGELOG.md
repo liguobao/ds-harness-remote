@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Restore direct-first LAN/P2P connections on mobile clients; automatic connections no longer authenticate over Relay before trying direct paths. Keep in-band upgrades for Relay fallback connections.
+
 - Desktop Client prepares direct P2P and standby TURN connections concurrently on supported Gateways, prefers direct within a bounded window, and starts business traffic only on the selected connection. Existing multi-connection Hosts remain compatible.
 
 ## 0.6.5 — 2026-11-15

@@ -11,8 +11,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@dsh-remote/crypto": "workspace:*",
+    "@dsh-remote/app-core": "workspace:*",
     "@dsh-remote/client-core": "workspace:*",
+    "@dsh-remote/crypto": "workspace:*",
     "@dsh-remote/protocol": "workspace:*",
     "@dsh-remote/webrtc": "workspace:*",
     "ws": "^8.18.0"

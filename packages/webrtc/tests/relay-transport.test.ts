@@ -725,6 +725,29 @@ describe('AdaptiveTransport capability negotiation', () => {
     } })), cleanupScenario1)
   })
 
+  it('never lets relay-first setup bypass an available LAN data path', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    vi.spyOn(RtcDataChannelTransport.prototype, 'connect').mockResolvedValue()
+    vi.spyOn(RtcDataChannelTransport.prototype, 'selectedTransport').mockReturnValue('lan')
+    vi.spyOn(RtcDataChannelTransport.prototype, 'diagnostics').mockReturnValue({} as never)
+    vi.spyOn(RtcDataChannelTransport.prototype, 'close').mockResolvedValue()
+    const transport = createAdaptiveTransport({ relayFirst: true })
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.lan', 'transport.p2p', 'transport.relay', 'transport.relay.attach'] }))
+    await Promise.resolve()
+    socket.receive(createControlFrame('connect.accepted', {
+      connectionId: 'connection-1', relayEndpoint: 'wss://unavailable-relay.example/ws',
+      relayTicket: 'unused-ticket', relayNodeId: 'relay-1', relayEpoch: 1,
+    }))
+    await connecting
+    expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: 'lan' })
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(socket.sent.map(frame => JSON.parse(frame).type)).not.toContain('relay')
+    await transport.close()
+  })
+
   it('requests only transports present in hello.ack capabilities', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const transport = new AdaptiveTransport('wss://remote.example/ws/v1/connect', {

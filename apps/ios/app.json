@@ -1,0 +1,106 @@
+{
+  "expo": {
+    "name": "DSH Remote",
+    "slug": "dsh-remote",
+    "scheme": "dshremote",
+    "version": "0.6.5",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.liguobao.dshremote",
+      "buildNumber": "73",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "DSH Remote connects to trusted Harness hosts on your local network.",
+        "NSCameraUsageDescription": "Allow DSH Remote to take photos that you choose to send in a conversation.",
+        "NSMicrophoneUsageDescription": "DSH Remote does not capture or transmit audio. Microphone access is declared because the WebRTC peer-to-peer framework links the system microphone APIs.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIApplicationSceneManifest": {
+          "UIApplicationSupportsMultipleScenes": false,
+          "UISceneConfigurations": {
+            "UIWindowSceneSessionRoleApplication": [
+              {
+                "UISceneConfigurationName": "Default Configuration",
+                "UISceneDelegateClassName": "$(PRODUCT_MODULE_NAME).DSHRemoteSceneDelegate"
+              }
+            ]
+          }
+        }
+      },
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          }
+        ]
+      }
+    },
+    "plugins": [
+      "expo-file-system",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-brand.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F8F8F8"
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ],
+      [
+        "expo-localization",
+        {
+          "supportedLocales": {
+            "ios": [
+              "en-US",
+              "zh-CN",
+              "ja-JP",
+              "zh-TW",
+              "es-ES",
+              "de-DE",
+              "fr-FR",
+              "ru-RU",
+              "uk-UA"
+            ]
+          }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow DSH Remote to select images that you choose to send in a conversation.",
+          "cameraPermission": "Allow DSH Remote to take photos that you choose to send in a conversation.",
+          "microphonePermission": "DSH Remote does not capture or transmit audio. Microphone access is declared because the WebRTC peer-to-peer framework links the system microphone APIs."
+        }
+      ],
+      "./plugins/with-background-connection-grace",
+      "./plugins/with-ios-scene-lifecycle",
+      "./plugins/with-ios-build-diagnostics",
+      "./plugins/with-ios-hermes-globals"
+    ]
+  }
+}
