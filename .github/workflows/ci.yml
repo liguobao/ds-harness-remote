@@ -1,16 +1,23 @@
 name: CI
 
-# Runs on every branch, not just main, so a fork can verify a change by pushing
-# a branch without opening a pull request. Jobs that need credentials or publish
-# anything are gated on the upstream repository; everything else works on a fork
-# with no configuration.
+# Verification only — signing and TestFlight distribution happen in Xcode
+# Cloud (see docs/ios-xcode-cloud.md).
+#
+# Pushes to any branch keep a fork able to verify without a pull request.
+# Documentation-only changes skip CI entirely, and a v* tag does not run this
+# workflow at all: a tag is the release signal consumed by Xcode Cloud and, on
+# the upstream repository, by release.yml.
 on:
   push:
     branches:
       - "**"
-    tags:
-      - "v*"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -35,7 +42,7 @@ jobs:
       # A branch push needs the commit range to diff, which requires history.
       # Pull requests read the file list from the API and need no clone.
       - name: Check out repository
-        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -47,10 +54,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BEFORE_SHA: ${{ github.event.before }}
-          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
-          # A tag build or an explicit manual run always exercises both clients.
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" || "$IS_TAG" == "true" ]]; then
+          # An explicit manual run always exercises both clients.
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "android=true" >> "$GITHUB_OUTPUT"
             echo "ios=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -252,60 +258,6 @@ jobs:
           path: artifacts/browser/dsh-remote-browser-${{ github.sha }}.zip
           if-no-files-found: error
           retention-days: 14
-
-  server-image:
-    name: Build Server container
-    # Pushes an image to the registry, so it is restricted to the upstream
-    # repository. A fork that tags a release skips it rather than publishing
-    # into its own namespace unexpectedly.
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'liguobao/ds-harness-remote'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up QEMU for ARM64
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Extract container metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/server
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-            type=sha,prefix=sha-
-
-      - name: Log in to GitHub Container Registry
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Server image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/server/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   android-apk:
     name: Package Android APK

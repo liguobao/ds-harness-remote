@@ -50,6 +50,11 @@ branch push that touches `apps/ios`, `packages/app-core`, the shared packages,
 pull requests and fork branches alike. It proves the app still builds; it
 cannot produce an installable artifact.
 
+A `v*` tag does **not** run this workflow: a tag is the release signal consumed
+by Xcode Cloud (signed archive and TestFlight) and, on the upstream repository,
+by `release.yml`. Documentation-only changes skip CI entirely via
+`paths-ignore`.
+
 macOS runners bill at ten times the Linux rate, which is why the job stays
 behind a path filter.
 

@@ -25,21 +25,35 @@ Xcode Cloud 只执行 **workspace 旁边** 的 `ci_scripts/ci_post_clone.sh`（�
 team id 随 pbxproj 提交不是机密泄露：它出现在每一个已上架二进制的签名信息里。
 真正的凭据（证书、profile、API key）都不在仓库中。
 
-## 网页配置步骤（一次性，约 10 分钟）
+## 触发模型：日常推送不进 Xcode Cloud，只有 `v*` tag 进
+
+- **日常推送 / PR** → GitHub Actions `ci.yml` 的无签名编译验证（见
+  [ios-build-and-release.md](ios-build-and-release.md)）。Xcode Cloud 的 workflow
+  起始条件**不配分支**，日常推送不会消耗 Xcode Cloud 时长。
+- **`v*` tag** → Xcode Cloud 的唯一触发条件：起始条件选 **Tag**（模式 `v*`）。
+  tag 同时触发 upstream 的 `release.yml`（npm/GitHub Release/Android APK/容器
+  镜像）——iOS 的签名构建与 TestFlight 分发只发生在 Xcode Cloud。
+
+## 网页配置步骤（正式形态，配置在 upstream 仓库）
+
+> 迁移验证期间曾在 fork（`vccddd/ds-harness-remote`）上以分支触发临时配置过
+> 一次并验证通过；PR 合并后按下述在 upstream 重建为正式配置，fork 那条可删除。
 
 1. **[App Store Connect](https://appstoreconnect.apple.com/) → Xcode Cloud**，
    左侧选中 DSH Remote 产品（`io.github.liguobao.dshremote`）。
-2. 没有关联仓库的话先点 **Connect Repository / 设置源代码仓库**，用 GitHub
-   账号授权并选择 `vccddd/ds-harness-remote`（fork 也是独立仓库，可以授权）。
+2. **Connect Repository / 设置源代码仓库**：用 GitHub 账号授权并选择
+   `liguobao/ds-harness-remote`（upstream，不是 fork）。
 3. **Create Workflow**：
-   - **分支**：`feat/ios-client`（合并 main 后可改 main）
+   - **Start Condition**：选 **Tag**（不是 Branch），模式填 `v*`——只有打
+     release tag 才构建与分发
    - **Project/Workspace**：`apps/ios/ios/DSHRemote.xcworkspace`
    - **Scheme**：`DSHRemote`
    - **Xcode 版本**：默认（最新稳定版）或按需固定
    - **Environment Variables**（可选）：`EXPO_PUBLIC_DSH_REMOTE_SERVER`
      （覆盖打进 bundle 的默认服务器地址；`EXPO_PUBLIC_*` 会内联进 JS，不能放密钥）
    - **Signing**：自动（Xcode Cloud 自己管理证书和 profile，什么都不用填）
-4. **Actions**：先只勾 **Build** 验证；通过后再加 **Archive** + **TestFlight**。
+4. **Actions**：勾 **Build** + **Archive** + **TestFlight**（Build 已在验证期
+   实测通过；Tag 触发的正式构建即走完整分发）。
 5. 首次运行约 30–50 分钟（无 Pods 缓存）。`ci_post_clone.sh` 的每一步都会在
    构建日志里带 `ci_post_clone:` 前缀，失败先看这段。
 
