@@ -6,6 +6,8 @@
 
 客户端提供账号登录、Host 选择、多会话、历史与流式回复、模型和权限选择、图片与语音输入，以及 LAN/P2P/TURN/Relay 连接。具体可用功能取决于 Host 暴露的能力。
 
+连接默认先在中继上完成 Noise 认证；Host 通告 `remote.transport.upgrade.v1` 时，客户端再经已认证 RPC 在带内升级到 TURN/P2P/LAN 直连（见 [协议 §带内传输升级](protocol.md)）。升级失败保持中继数据面，不阻断会话；切换不重建 Noise 密钥、不重置流订阅。初始目录/历史读取与升级协商有界并行：Wi-Fi/有线最多等待 450 ms、蜂窝最多 250 ms 后回落中继。
+
 本客户端是独立实现，不代表与 Android、Codex 或 ACP 客户端完全等价。它不在手机上运行 Host，不改写 Host 的会话存储。协议以 [protocol.md](protocol.md)、共享包及 `fixtures/` 为准。
 
 ## 工程结构
@@ -15,13 +17,13 @@ apps/harmony/
 ├── AppScope/                     # 应用身份与版本
 ├── entry/src/main/ets/
 │   ├── crypto/                   # Noise IK、X25519、ChaCha20-Poly1305、SHA-256
-│   ├── protocol/                 # 帧编解码与安全消息分片
-│   ├── net/                      # Server API、传输、RPC 与 Harness gateway
+│   ├── protocol/                 # 帧编解码、安全消息分片与升级序号帧/重排
+│   ├── net/                      # Server API、中继/直连传输、RPC、传输升级与 Harness gateway
 │   ├── services/                 # 凭据、运行时、网络与生命周期
 │   └── pages/                    # ArkUI 界面
 ├── entry/src/main/resources/rawfile/webrtc-bridge.html
 ├── entry/src/ohosTest/            # 设备侧测试
-├── tests/                        # Node 侧一致性与安全存储失败场景
+├── tests/                        # Node 侧一致性、升级状态机与安全存储失败场景
 └── scripts/                      # 签名注入、版本检查与真机烟测
 ```
 
@@ -83,6 +85,7 @@ apps/harmony/scripts/smoke.sh <hdc-device-id>
 - 设备私钥与账号 token 使用系统 Asset Store Kit，配置 `DEVICE_UNLOCKED` 与 `NEVER` 同步。写入失败时拒绝明文降级；旧明文私钥仅在安全写入并回读确认后移除。Host 公钥固定记录在 Asset Store 不可用时允许保存于应用沙箱 KV，其内容是公钥，不是凭据。
 - Host 公钥按设备固定，发生变化即拒绝握手。只有用户确认后才可忘记该记录。
 - 业务经 Noise IK 加密；安全消息使用 48 KiB 分片、4 MiB 上限。密码学为独立 ArkTS 实现，修改时必须同步运行共享向量、篡改与重放测试。
-- 自动日志不记录文件路径、命令、TURN 凭据或上游异常正文。保留连接阶段、耗时、数量等诊断元数据。
+- 带内传输升级遵循 [protocol.md](protocol.md) 的同名章节：升级帧在 RTCH 分块前加 `DSHU` + 8 字节大端序号头，序号空间与 Noise 计数器一致；乱序帧进有界重排缓冲（256 帧 / 4 MiB / 5 s 空洞超时），旧腿按 Host 下发水位与 3 s 兜底 drain。传输级别只信 Host 自己验证的 ICE 候选对（`LAN > P2P > TURN > Relay`），客户端提示不能抬高级别；激活后 DataChannel 丢失即关闭隧道交由正常重连恢复。
+- 自动日志不记录文件路径、命令、TURN 凭据或上游异常正文。保留连接阶段、耗时、数量等诊断元数据；传输升级只记录 outcome、耗时、字节计数与级别名称，不记录 SDP、候选地址或密文。
 - 修改协议、信任边界、刷新或重连时同步共享契约及对应场景测试。UI 文案、排版等使用检查和真机烟测，不添加源码字符串匹配单测。
 - 应用版本以 `AppScope/app.json5` 为准；使用 `scripts/bump-version.mjs` 同步设备注册版本回退值，不在文档维护当前构建号。鸿蒙发版独立于 npm / Expo 版本同步。

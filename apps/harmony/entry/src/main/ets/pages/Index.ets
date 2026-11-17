@@ -23,6 +23,7 @@ import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { heartbeatBodyOf } from '../services/Heartbeat';
+import { isVisibleSession } from '../util/SessionVisibility';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
@@ -1125,6 +1126,11 @@ struct Index {
       if (session.cwd.length === 0) {
         continue;
       }
+      // 被隐藏的空白/subagent 会话也不该贡献工作区筛选 chip。
+      if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId,
+        this.sessionSearchActive ? this.sessionSearchInput.trim() : '')) {
+        continue;
+      }
       counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
     }
     const keys: string[] = [];
@@ -1146,8 +1152,13 @@ struct Index {
   private visibleSessions(): HarnessRemoteSession[] {
     const base: HarnessRemoteSession[] = this.sessionSearchActive
       ? this.sessionSearchResults : this.sessions;
+    const query: string = this.sessionSearchActive ? this.sessionSearchInput.trim() : '';
     const list: HarnessRemoteSession[] = [];
     for (const session of base) {
+      // 空白占位只保留当前打开的那个；subagent 会话不进平铺列表（对齐 Desktop/Android）。
+      if (!isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId, query)) {
+        continue;
+      }
       // 归档的会话默认不进列表；搜索时照常给结果，别让搜到的会话凭空消失
       if (this.workspaceFilter.length > 0 && session.cwd !== this.workspaceFilter) {
         continue;

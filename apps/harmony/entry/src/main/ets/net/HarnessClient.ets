@@ -63,6 +63,8 @@ export class HarnessRemoteSession {
   updatedAt: number = 0;
   running: boolean = false;
   blank: boolean = false;
+  /** `'subagent'` 表示子代理会话；列表默认不展示（对齐 Desktop/Android）。 */
+  origin: string = '';
   title: string = '';
   cwd: string = '';
   turns: number = 0;
@@ -1285,6 +1287,7 @@ function normalizeSession(value: Object): HarnessRemoteSession | undefined {
   session.blank = blank;
   session.title = jsonStr(root, 'title', '');
   session.cwd = jsonStr(root, 'cwd', '');
+  session.origin = jsonStr(root, 'origin', '');
   const projections: Record<string, Object> | undefined = asRecord(root['projections']);
   const values: Record<string, Object> | undefined = projections !== undefined
     ? asRecord(projections['values']) : undefined;

@@ -7,6 +7,8 @@ import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLo
   OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { CloseVerdict, RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
 import { SecureTransport } from '../net/SecureTransport';
+import { TransportUpgrader, TransportUpgraderOptions, TransportUpgradeTelemetry } from '../net/TransportUpgrader';
+import { TRANSPORT_UPGRADE_CAPABILITY } from '../protocol/TransportUpgrade';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
@@ -16,6 +18,7 @@ import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, Acco
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
+import { isVisibleSession } from '../util/SessionVisibility';
 import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
 import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
@@ -137,6 +140,8 @@ export class AppRuntime {
   private netMonitor: NetworkMonitor | undefined = undefined;
   /** ArkWeb 里的 WebRTC 桥（LAN 直连用），由页面在 aboutToAppear 时挂进来。 */
   private rtcBridge: RtcBridge | undefined = undefined;
+  /** relay-first 认证完成后的 in-band WebRTC 升级（remote.transport.upgrade.v1）。 */
+  private upgrader: TransportUpgrader | undefined = undefined;
   /** 退回设备列表时保留连接的那台主机；空表示没有保活连接。 */
   keepAliveDeviceId: string = '';
   /** 这次连接最终用的数据面：'' | 'relay' | 'lan' | 'p2p' | 'turn'。 */
@@ -684,6 +689,21 @@ export class AppRuntime {
     this.rtcBridge = bridge;
   }
 
+  /**
+   * 当前数据面标签：in-band 升级腿优先（'lan' | 'p2p' | 'turn'），
+   * 否则用中继自身的判定（含旧式 pre-auth 直连与 'relay'）。全部小写，与 UI 徽标一致。
+   */
+  private transportLabelFor(relay: RelayTransport): string {
+    const upgrader: TransportUpgrader | undefined = this.upgrader;
+    if (upgrader !== undefined) {
+      const tier: string = upgrader.currentMode();
+      if (tier !== 'Relay') {
+        return tier.toLowerCase();
+      }
+    }
+    return relay.transportKind();
+  }
+
   async connectDevice(deviceId: string): Promise<void> {
     // 正常入口在设备页；断线重连时允许从会话页直接重来（reconnecting 标记着这件事）
     const fromChatReconnect: boolean = this.phase === PHASE_CHAT && this.reconnecting;
@@ -754,6 +774,9 @@ export class AppRuntime {
       // 那样会直接判「桥未就绪」回落中继，用户看到的就是"明明同网段却显示中继"。
       await this.waitForRtcBridge(2500);
       relayOptions.rtc = this.rtcBridge;
+      // relay-first：先在中继上完成认证，再经已认证 RPC 在带内升级到 TURN/P2P/LAN。
+      // 桥没就绪时保持老行为（没有直连尝试，数据面本来就在中继上）。
+      relayOptions.relayFirst = this.rtcBridge !== undefined && this.rtcBridge.isReady();
       // WebRTC 要 TURN/STUN 配置时现取：接口要求 active connection，正好在 connect.accepted 之后
       relayOptions.fetchIceServers = (connectionId: string): Promise<string> => {
         return this.ensureApi().then((api: RemoteServerApi) => api.iceServersJson(connectionId));
@@ -845,6 +868,66 @@ export class AppRuntime {
       if (this.connectCancelled) {
         return;
       }
+      // In-band 传输升级（remote.transport.upgrade.v1）：relay-first 认证完成后，
+      // 与主机并行协商 WebRTC 直连；切腿不重建 Noise、不重置订阅，失败就留在中继。
+      const upgradeBridge: RtcBridge | undefined = this.rtcBridge;
+      const upgradeCapable: boolean = features.capabilities.indexOf(TRANSPORT_UPGRADE_CAPABILITY) >= 0;
+      if (relayOptions.relayFirst && upgradeCapable && upgradeBridge !== undefined) {
+        const bearer: string = this.netMonitor !== undefined ? this.netMonitor.type : 'unknown';
+        // Wi-Fi/有线/未知链路先按 LAN 思路只吃本地候选；蜂窝网络才去取 TURN 配置。
+        const preferLan: boolean = bearer !== 'cellular';
+        const waitMs: number = preferLan ? 450 : 250;
+        const upgraderOptions: TransportUpgraderOptions =
+          new TransportUpgraderOptions(core, secure, upgradeBridge);
+        // 回调里用它校验「升级结果是否还属于当前连接」：断线重连后旧 upgrader 的
+        // 迟到回调不能把新连接的传输标签改掉。
+        let createdUpgrader: TransportUpgrader | undefined = undefined;
+        upgraderOptions.connectionId = relay.connectionInfo().connectionId;
+        upgraderOptions.fetchIceServers = (connectionId: string): Promise<string> => {
+          return this.ensureApi().then((api: RemoteServerApi) => api.iceServersJson(connectionId));
+        };
+        upgraderOptions.onUpgraded = (mode: string): void => {
+          if (createdUpgrader === undefined || this.upgrader !== createdUpgrader) {
+            return;
+          }
+          this.transportLabel = mode;
+          LinkLog.write('conn', '传输已升级 · ' + mode);
+          logInfo('transport upgraded transport=' + mode);
+          this.pushLinkEvent('传输已升级 · ' + mode);
+          this.notify();
+        };
+        upgraderOptions.onTelemetry = (telemetry: TransportUpgradeTelemetry): void => {
+          // 只记阶段/时长/字节数，不记 SDP、候选地址或密文。
+          logInfo('transport upgrade outcome=' + telemetry.outcome
+            + ' from=' + telemetry.from
+            + ' to=' + (telemetry.to.length > 0 ? telemetry.to : '—')
+            + ' duration=' + telemetry.durationMs + 'ms'
+            + ' relaySent=' + telemetry.relaySentBytes
+            + ' relayReceived=' + telemetry.relayReceivedBytes
+            + (telemetry.reason.length > 0 ? ' error=' + telemetry.reason : ''));
+        };
+        const upgrader: TransportUpgrader = new TransportUpgrader(upgraderOptions);
+        createdUpgrader = upgrader;
+        this.upgrader = upgrader;
+        // 后台协商，绝不挡连接主链路；失败就当没升级，继续用中继。
+        upgrader.promote(preferLan).then((upgraded: boolean) => {
+          if (!upgraded) {
+            logInfo('transport upgrade skipped; staying on relay');
+          }
+        }).catch(() => {
+          logWarn('transport upgrade failed');
+        });
+        // 给快的直连路径一个有界窗口：LAN/P2P 能在历史/目录大请求之前切过去，
+        // 高延迟蜂窝网络最多等 250ms 就回落到中继，不乱拖连接速度。
+        this.setConnectStage('尝试直连数据面…');
+        await upgrader.waitForInitialWindow(waitMs);
+        if (this.connectCancelled) {
+          return;
+        }
+      } else if (relayOptions.relayFirst && !upgradeCapable) {
+        // 老 Host 不认升级：relay-first 下没有 pre-auth 直连可回落，保持中继数据面。
+        logInfo('host does not advertise ' + TRANSPORT_UPGRADE_CAPABILITY + '; staying on relay');
+      }
       const harness: HarnessAlphaClient =
         new HarnessAlphaClient(core, features.sessionFormat, (frame: HarnessClientFrame) => {
           this.handleFrame(frame);
@@ -863,7 +946,7 @@ export class AppRuntime {
       // list is loaded afterwards so a slow host never keeps the user locked out.
       this.connectedHostName = host.name.length > 0 ? host.name : '远程主机';
       this.connectedDeviceId = host.deviceId;
-      this.transportLabel = relay.transportKind();
+      this.transportLabel = this.transportLabelFor(relay);
       LinkLog.write('conn', '已连接 · ' + this.transportLabel);
       logInfo('connected to host ' + host.deviceId + ' transport=' + this.transportLabel);
       const lanSkip: string = relay.lanSkipReason();
@@ -2239,7 +2322,14 @@ export class AppRuntime {
     }
     try {
       const found: HarnessRemoteSession[] = await harness.sessionSearch(trimmed);
-      this.searchResults = found;
+      const visible: HarnessRemoteSession[] = [];
+      for (const session of found) {
+        // 空白占位与 subagent 会话不参与搜索（对齐 Desktop/Android）。
+        if (isVisibleSession(session.sessionId, session.blank, session.origin, this.currentSessionId, trimmed)) {
+          visible.push(session);
+        }
+      }
+      this.searchResults = visible;
     } catch (error) {
       this.searchResults = [];
       this.errorMsg = errorMessage(error);
@@ -3595,6 +3685,14 @@ export class AppRuntime {
     this.activeRelay = undefined;
     if (pending !== undefined) {
       pending.close();
+    }
+    // 升级腿/升级协商先收掉：关掉隐藏 Web 里的 peer，别把一次连接的 DataChannel 留到下一次。
+    const upgrader: TransportUpgrader | undefined = this.upgrader;
+    this.upgrader = undefined;
+    if (upgrader !== undefined) {
+      upgrader.close().catch(() => {
+        return;
+      });
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     this.harness = undefined;

@@ -46,6 +46,8 @@ interface CryptoModule {
     encrypt(plaintext: Uint8Array): Uint8Array
     decrypt(ciphertext: Uint8Array): Uint8Array
     isComplete(): boolean
+    sendingCounter(): bigint
+    receivingCounter(): bigint
   }
   fromBase64Url(value: string): Uint8Array
   toBase64Url(bytes: Uint8Array): string
@@ -213,5 +215,57 @@ describe('Noise IK v1 golden vectors', () => {
       expect(initiator.isComplete()).toBe(false)
     }
   )
+
+  // The DSHU sequence number space is the Noise transport counter, so both counters must
+  // start at zero after the handshake and advance exactly one per transport frame.
+  it('starts the transport counters at zero after the handshake', () => {
+    const initiator = makeInitiator()
+    initiator.writeHandshake(crypto.fromBase64Url(vector.handshake.message1.payload))
+    expect(initiator.sendingCounter()).toBe(0n)
+    expect(initiator.receivingCounter()).toBe(0n)
+    initiator.readHandshake(crypto.fromBase64Url(vector.handshake.message2.message))
+    expect(initiator.sendingCounter()).toBe(0n)
+    expect(initiator.receivingCounter()).toBe(0n)
+  })
+
+  it('advances the sending and receiving counters independently', () => {
+    const initiator = makeInitiator()
+    initiator.writeHandshake(crypto.fromBase64Url(vector.handshake.message1.payload))
+    initiator.readHandshake(crypto.fromBase64Url(vector.handshake.message2.message))
+
+    initiator.encrypt(crypto.fromBase64Url('Y2xpZW50IHRyYW5zcG9ydCAw'))
+    expect(initiator.sendingCounter()).toBe(1n)
+    expect(initiator.receivingCounter()).toBe(0n)
+
+    const responderFrame = vector.transport.find((entry) => entry.sender === 'responder')!
+    initiator.decrypt(crypto.fromBase64Url(responderFrame.ciphertext))
+    expect(initiator.sendingCounter()).toBe(1n)
+    expect(initiator.receivingCounter()).toBe(1n)
+
+    initiator.encrypt(crypto.fromBase64Url('Y2xpZW50IHRyYW5zcG9ydCAx'))
+    expect(initiator.sendingCounter()).toBe(2n)
+    expect(initiator.receivingCounter()).toBe(1n)
+  })
+
+  it('matches the receiving counter to the consumed golden transport frames', () => {
+    const initiator = makeInitiator()
+    initiator.writeHandshake(crypto.fromBase64Url(vector.handshake.message1.payload))
+    initiator.readHandshake(crypto.fromBase64Url(vector.handshake.message2.message))
+    let sent = 0n
+    let received = 0n
+    for (const frame of vector.transport) {
+      if (frame.sender === 'initiator') {
+        initiator.encrypt(crypto.fromBase64Url(frame.plaintext))
+        sent += 1n
+      } else {
+        initiator.decrypt(crypto.fromBase64Url(frame.ciphertext))
+        received += 1n
+      }
+      expect(initiator.sendingCounter()).toBe(sent)
+      expect(initiator.receivingCounter()).toBe(received)
+    }
+    expect(sent).toBe(BigInt(vector.transport.filter((entry) => entry.sender === 'initiator').length))
+    expect(received).toBe(BigInt(vector.transport.filter((entry) => entry.sender === 'responder').length))
+  })
 
 })

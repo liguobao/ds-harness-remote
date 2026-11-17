@@ -18,6 +18,12 @@ export class RelayTransportOptions {
   /** 优先级照原项目 network.md：LAN -> P2P -> TURN -> Relay。 */
   preferredTransports: string[] = ['lan', 'p2p', 'turn', 'relay'];
   /**
+   * relay-first（in-band 升级）：先在中继/Control WS 上完成 Noise 握手，再由
+   * TransportUpgrader 用 RtcBridge 协商 WebRTC 腿并原地切换。为 true 时本类不发起
+   * `signal.*` 协商（RTC 桥归 Upgrader 独占），数据面直接走中继。
+   */
+  relayFirst: boolean = false;
+  /**
    * 整个控制握手（含重新要票）的预算。服务端 connect.request 偶尔要十几秒才回
    * （网关刚重启时实测 16s），所以别按秒级预算掐死。
    */
@@ -244,6 +250,12 @@ export class RelayTransport {
   private url: string;
   private options: RelayTransportOptions;
   public onMessage: ((data: Uint8Array) => void) | undefined = undefined;
+  /**
+   * 带 wire counter 的入站回调（in-band 升级）：relay 帧的 `counter` 与 Noise 接收计数器
+   * 同源，供 SecureTransport 做跨腿重排；直连数据面没有 wire counter 时传 undefined。
+   * 设置后优先于 `onMessage`（旧回调保留以兼容老调用方）。
+   */
+  public onMessageWithCounter: ((counter: number | undefined, data: Uint8Array) => void) | undefined = undefined;
   public onHandshakeStep: ((step: number, data: Uint8Array) => void) | undefined = undefined;
   public onClosed: (() => void) | undefined = undefined;
 
@@ -623,7 +635,9 @@ export class RelayTransport {
     // 先试 LAN 直连：成功就不用中继的数据面（中继节点满容量时这是唯一活路）。
     // 注意别把它塞进「有中继端点」的分支里——本机服务器经常压根不下发 relayEndpoint，
     // 数据面直接跑在 Control WS 上，那种情况下以前永远不会尝试直连。
-    if (this.startRtcAttempt()) {
+    // relay-first 时 RTC 桥归 TransportUpgrader 独占：这里不发起 signal.* 协商，
+    // 先把中继数据面跑起来，等 RPC 阶段再原地升级。
+    if (!this.options.relayFirst && this.startRtcAttempt()) {
       return;
     }
     this.attachOrFinishRelay();
@@ -795,10 +809,8 @@ export class RelayTransport {
       // 走直连时数据帧不经过 Control WS，必须在这里也记「链路还活着」，
       // 否则静默检测会把一条健康的直连当成死链，上层还会反复重连。
       this.markLinkAlive();
-      const cb = this.onMessage;
-      if (cb !== undefined) {
-        cb(fromBase64Url(base64));
-      }
+      // 直连数据面本身不带 wire counter（序号由升级腿的 DSHU 帧头提供）。
+      this.emitData(undefined, fromBase64Url(base64));
     };
     rtc.onError = (message: string) => {
       logWarn('webrtc: bridge error');
@@ -887,6 +899,22 @@ export class RelayTransport {
     }
   }
 
+  /**
+   * 统一入站分发：有 counter 能力的订阅方（SecureTransport）优先，
+   * 否则回退老的 `onMessage`。直连数据面/旧 Host 没有 wire counter 时 counter 为 undefined。
+   */
+  private emitData(counter: number | undefined, data: Uint8Array): void {
+    const counted = this.onMessageWithCounter;
+    if (counted !== undefined) {
+      counted(counter, data);
+      return;
+    }
+    const cb = this.onMessage;
+    if (cb !== undefined) {
+      cb(data);
+    }
+  }
+
   private handleRelayPayload(payload: Record<string, Object>): void {
     const connectionId = jsonStr(payload, 'connectionId', '');
     const targetDeviceId = jsonStr(payload, 'targetDeviceId', '');
@@ -896,10 +924,11 @@ export class RelayTransport {
       throw new Error('Received a relay frame for an unknown connection');
     }
     const data = fromBase64Url(ciphertext);
-    const cb = this.onMessage;
-    if (cb !== undefined) {
-      cb(data);
-    }
+    // relay 帧的 wire counter 与 Noise 接收计数器同源（协议 0d46b303）；
+    // 旧 Host 不带该字段时按 undefined 处理，退回无序号兼容路径。
+    const wireCounter: number = jsonNum(payload, 'counter', -1);
+    const counter: number | undefined = wireCounter >= 0 ? wireCounter : undefined;
+    this.emitData(counter, data);
   }
 
   private handleHandshakePayload(payload: Record<string, Object>): void {

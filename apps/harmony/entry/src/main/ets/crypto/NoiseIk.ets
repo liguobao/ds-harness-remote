@@ -17,6 +17,11 @@ export class CipherState {
     return b;
   }
 
+  /** Current nonce/counter value: the next frame's big-endian sequence number. */
+  counter(): bigint {
+    return this.n;
+  }
+
   encrypt(ad: Uint8Array, plaintext: Uint8Array): Uint8Array {
     const out = chacha20poly1305Seal(this.key, this.nonceBytes(), ad, plaintext);
     this.n += 1n;
@@ -125,6 +130,16 @@ export class NoiseIkInitiator {
 
   isComplete(): boolean {
     return this.send !== undefined && this.recv !== undefined;
+  }
+
+  /** Outbound transport counter (`DSHU` sequence number space). 0 before handshake completes. */
+  sendingCounter(): bigint {
+    return this.send !== undefined ? this.send.counter() : 0n;
+  }
+
+  /** Inbound transport counter; compared against buffered DSHU sequence numbers. */
+  receivingCounter(): bigint {
+    return this.recv !== undefined ? this.recv.counter() : 0n;
   }
 
   encrypt(plaintext: Uint8Array): Uint8Array {
