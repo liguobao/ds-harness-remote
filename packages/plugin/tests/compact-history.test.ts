@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { createRpcRequest } from '@dsh-remote/protocol'
 import { compactHistory } from '../src/compact-history.js'
@@ -6,6 +9,7 @@ import { CodexPeerBridge } from '../src/codex/peer-bridge.js'
 
 const output = 'sensitive tool output '.repeat(4000)
 const MARKER = '\n[Compact history: output omitted]'
+const v3FixturePath = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/session-v3-snapshot.json')
 const page = () => ({ cursor: 91, throughSeq: 91, hasMore: true, activeTurnId: 'turn-2', records: [
   { type: 'event', event: { type: 'user/message', seq: 40, data: { content: [{ type: 'text', text: output }] } } },
   { type: 'event', event: { type: 'tool/result', seq: 41, data: { callId: 'tool-1', turn: 2, failed: true, message: { source: { callId: 'tool-1' }, content: [{ type: 'tool-result', toolCallId: 'tool-1', isError: true, content: [{ type: 'text', text: output }] }] } } }, view: { for: 'result', view: { title: 'Read', output } } },
@@ -191,5 +195,134 @@ describe('compact group round preservation', () => {
     const empty = groupRound([])
     const result = compactHistory({ cursor: 2, throughSeq: 2, hasMore: false, records: [groupResultRecord(9, empty)] }) as { records: unknown[] }
     expect(messageText(result.records[0])).toBe(empty)
+  })
+
+  it('never truncates human user prompts containing literal <system-reminder> tags (with or without source metadata)', () => {
+    const literalReminder = '<system-reminder>\n' + 'Human pasted prompt '.repeat(80) + '</system-reminder>'
+    const cases = [
+      { source: { kind: 'user', rpcId: 'r1' }, content: [{ type: 'text', text: literalReminder }] },
+      { message: { role: 'user', source: { kind: 'user', requestId: 'req-1' }, content: [{ type: 'text', text: literalReminder }] } },
+      { content: [{ type: 'text', text: literalReminder }] },
+    ]
+    for (const data of cases) {
+      const projected = compactHistory({
+        type: 'snapshot',
+        records: [{ type: 'event', event: { type: 'user/message', seq: 1, time: 1, data } }],
+      })
+      const d = (projected.records[0]!.event as { data: Record<string, unknown> }).data
+      const content = Array.isArray(d.content)
+        ? d.content
+        : ((d.message as { content: unknown[] }).content)
+      expect((content[0] as { text: string }).text).toBe(literalReminder)
+    }
+  })
+
+  it('projects a Session V3 snapshot fixture while preserving seq continuity, human attachments, model/usage metadata and final markdown', () => {
+    const rawJson = readFileSync(v3FixturePath, 'utf8')
+    const rawSnapshot = JSON.parse(rawJson) as {
+      type: string
+      cursor: number
+      throughSeq: number
+      hasMore: boolean
+      header: Record<string, unknown>
+      assistantStream: Record<string, unknown>
+      records: Array<{ type: string; event: Record<string, unknown> }>
+    }
+    const projected = compactHistory(rawSnapshot)
+
+    expect(projected.cursor).toBe(rawSnapshot.cursor)
+    expect(projected.throughSeq).toBe(rawSnapshot.throughSeq)
+    expect(projected.hasMore).toBe(true)
+    expect(projected.header).toEqual(rawSnapshot.header)
+    expect(projected.assistantStream).toEqual(rawSnapshot.assistantStream)
+    expect(projected.records.map(r => r.event.seq)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18])
+
+    // Seq 11: human prompt with <system-reminder> literal + image attachment is 100% intact.
+    expect(projected.records[1]).toEqual(rawSnapshot.records[1])
+
+    // Seq 12: injected skill-catalog user/message drops source.entries and summarizes text.
+    const injected = projected.records[2]!.event.data as { source: Record<string, unknown>; content: Array<{ text: string }> }
+    expect(injected.source).toEqual({ kind: 'skill-catalog', form: 'catalog' })
+    expect(injected.content[0]!.text).toContain(MARKER)
+
+    // Seq 13: request/header keeps config, omits tools/system schemas.
+    expect(projected.records[3]!.event.data).toEqual({
+      reason: 'step',
+      header: { config: { provider: 'openai', model: 'gpt-test', reasoningEffort: 'medium' } },
+    })
+
+    // Seq 14 & 17: assistant/message keeps usage, reasoning, surfaceOp, tool-call correlation, model, and full final markdown, while omitting stream & replayState.
+    const step1 = projected.records[4]!.event as { surfaceOp: unknown; data: Record<string, unknown> }
+    expect(step1.surfaceOp).toEqual({ op: 'append' })
+    expect(step1.data).not.toHaveProperty('stream')
+    expect(step1.data.usage).toEqual({ inputTokens: 4200, outputTokens: 350, cacheReadTokens: 3000 })
+    const step1Msg = step1.data.message as { id: string; role: string; source: unknown; content: Array<Record<string, unknown>> }
+    expect(step1Msg.source).toEqual({ kind: 'model', provider: 'openai', model: 'gpt-test' })
+    expect(step1Msg.content[0]).toEqual({ type: 'reasoning', text: 'Checking workspace files' })
+    expect(step1Msg.content[1]!.id).toBe('call_1')
+    expect(step1Msg.content[1]!.name).toBe('run_code')
+    expect(String(step1Msg.content[1]!.arguments)).toContain(MARKER)
+
+    const step2 = projected.records[7]!.event.data as { message: { content: Array<{ text: string }>; source: unknown }; usage: unknown }
+    expect(step2.message.content[0]!.text).toBe((rawSnapshot.records[7]!.event.data as typeof step2).message.content[0]!.text)
+    expect(step2.message.source).toEqual({ kind: 'model', provider: 'openai', model: 'gpt-test' })
+    expect(step2.usage).toEqual({ inputTokens: 4800, outputTokens: 180 })
+
+    // Seq 15: tool/ptc-dispatch summarizes code & output while keeping callId.
+    const ptc = projected.records[5]!.event.data as { callId: string; code: string; output: string }
+    expect(ptc.callId).toBe('call_1')
+    expect(ptc.code).toContain(MARKER)
+    expect(ptc.output).toContain(MARKER)
+
+    expect(JSON.stringify(projected).length).toBeLessThan(JSON.stringify(rawSnapshot).length * 0.2)
+  })
+
+  it('lifts the last stream usage chunk into data.usage before omitting a V3 stream', () => {
+    const usageChunk = (inputTokens: number, outputTokens: number) => ({ type: 'chunk', time: 1, chunk: { type: 'usage', usage: { inputTokens, outputTokens } } })
+    const textChunk = { type: 'chunk', time: 1, chunk: { type: 'text-delta', text: 'answer' } }
+    const assistant = (data: Record<string, unknown>) => ({
+      type: 'snapshot', cursor: 1, throughSeq: 1, hasMore: false,
+      records: [{ type: 'event', event: { type: 'assistant/message', seq: 1, time: 1, data: {
+        message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: 'answer' }] }, ...data,
+      } } }],
+    })
+    const dataOf = (value: unknown) => (value as { records: Array<{ event: { data: Record<string, unknown> } }> }).records[0]!.event.data
+
+    // No top-level data.usage: the last usage chunk of the stream survives the projection.
+    const streamOnly = assistant({ stream: [usageChunk(1, 1), textChunk, usageChunk(42, 7)] })
+    const snapshot = structuredClone(streamOnly)
+    const projected = compactHistory(streamOnly)
+    expect(dataOf(projected)).not.toHaveProperty('stream')
+    expect(dataOf(projected).usage).toEqual({ inputTokens: 42, outputTokens: 7 })
+    expect(streamOnly).toEqual(snapshot)
+    expect(compactHistory(projected)).toEqual(projected)
+
+    // Top-level usage keeps priority; a null one falls back like `data.usage ?? stream`.
+    expect(dataOf(compactHistory(assistant({ usage: { inputTokens: 5, outputTokens: 2 }, stream: [usageChunk(42, 7)] }))).usage)
+      .toEqual({ inputTokens: 5, outputTokens: 2 })
+    expect(dataOf(compactHistory(assistant({ usage: null, stream: [usageChunk(42, 7)] }))).usage)
+      .toEqual({ inputTokens: 42, outputTokens: 7 })
+    // Without a usage chunk nothing is invented.
+    expect(dataOf(compactHistory(assistant({ stream: [textChunk] })))).not.toHaveProperty('usage')
+  })
+
+  it('keeps the full Session V3 envelope, including data.stream, for connections that never enable compact mode', async () => {
+    const { HarnessRemoteBridge } = await import('../src/harness-remote-bridge.js')
+    const v3 = JSON.parse(readFileSync(v3FixturePath, 'utf8')) as { records: Array<{ event: { type: string; data: Record<string, unknown> } }> }
+    expect(v3.records.filter(record => record.event.type === 'assistant/message').every(record => Array.isArray(record.event.data.stream))).toBe(true)
+    const publish = vi.fn(async () => undefined)
+    const gateway = {
+      dispatch: vi.fn(async () => ({ ok: true, value: structuredClone(v3) })),
+      open: vi.fn(async () => (async function* () { yield structuredClone(v3) })()),
+      failure: () => ({ code: 'FAILED', message: '', details: {} }),
+      supportsCarrier: true,
+    }
+    const bridge = new HarnessRemoteBridge(gateway as never, publish)
+    expect(bridge.compactHistoryEnabled).toBe(false)
+    expect(await bridge.call({ endpoint: 'session/page', payload: { args: {} } })).toEqual({ ok: true, value: v3 })
+    await bridge.openStream({ streamId: 'follow', endpoint: 'session/follow', payload: { args: {} } })
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', { streamId: 'follow', reason: 'completed' }))
+    expect(publish.mock.calls[0]).toEqual(['harness.remote.frame', { streamId: 'follow', hasValue: true, value: v3 }])
+    await bridge.closeAll()
   })
 })

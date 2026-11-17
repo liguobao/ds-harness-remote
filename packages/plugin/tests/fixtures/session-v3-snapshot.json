@@ -1,0 +1,676 @@
+{
+  "type": "snapshot",
+  "cursor": 18,
+  "throughSeq": 18,
+  "hasMore": true,
+  "header": {
+    "version": 3,
+    "sessionId": "session-synthetic-v3-fixture",
+    "agentPreset": "ptc",
+    "delegationDepth": 0
+  },
+  "assistantStream": {
+    "revision": 0
+  },
+  "records": [
+    {
+      "type": "event",
+      "event": {
+        "type": "turn/start",
+        "seq": 10,
+        "time": 1794600000100,
+        "data": {
+          "turn": 1
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "user/message",
+        "seq": 11,
+        "time": 1794600000110,
+        "data": {
+          "id": "msg-user-1",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "rpcId": "00000000-0000-4000-8000-000000000001"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "<system-reminder>\nUser pasted literal XML block that must NEVER be truncated: UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU\n</system-reminder>"
+            },
+            {
+              "type": "image",
+              "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "mediaType": "image/png",
+              "width": 800,
+              "height": 600
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "user/message",
+        "seq": 12,
+        "time": 1794600000115,
+        "data": {
+          "id": "msg-injected-skills",
+          "role": "user",
+          "source": {
+            "kind": "skill-catalog",
+            "form": "catalog",
+            "entries": [
+              {
+                "name": "sample-skill-0",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-1",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-2",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-3",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-4",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-5",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-6",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-7",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-8",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-9",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-10",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-11",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-12",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-13",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-14",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-15",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-16",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-17",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-18",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-19",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-20",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-21",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-22",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-23",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-24",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-25",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-26",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-27",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-28",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-29",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-30",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-31",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-32",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-33",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-34",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-35",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-36",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-37",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-38",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              },
+              {
+                "name": "sample-skill-39",
+                "description": "Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description Synthetic skill description "
+              }
+            ]
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "<system-reminder>\n<available_skills>\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n- sample-skill: description\n</available_skills>\n</system-reminder>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "request/header",
+        "seq": 13,
+        "time": 1794600000120,
+        "data": {
+          "reason": "step",
+          "header": {
+            "config": {
+              "provider": "openai",
+              "model": "gpt-test",
+              "reasoningEffort": "medium"
+            },
+            "system": "System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt System prompt ",
+            "tools": [
+              {
+                "name": "tool_0",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_1",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_2",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_3",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_4",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_5",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_6",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_7",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_8",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_9",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_10",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_11",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_12",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_13",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_14",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_15",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_16",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_17",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_18",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              },
+              {
+                "name": "tool_19",
+                "parameters": {
+                  "type": "object",
+                  "description": "Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema Schema "
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "assistant/message",
+        "seq": 14,
+        "time": 1794600000500,
+        "surfaceOp": {
+          "op": "append"
+        },
+        "data": {
+          "turn": 1,
+          "step": 1,
+          "usage": {
+            "inputTokens": 4200,
+            "outputTokens": 350,
+            "cacheReadTokens": 3000
+          },
+          "stream": [
+            {
+              "type": "reasoning-chunks",
+              "texts": [
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think ",
+                "think "
+              ],
+              "dt": [
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12,
+                12
+              ]
+            },
+            {
+              "type": "tool-call-chunks",
+              "callId": "call_1",
+              "deltas": [
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()",
+                "code()"
+              ]
+            }
+          ],
+          "message": {
+            "id": "msg-asst-1",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "reasoning",
+                "text": "Checking workspace files"
+              },
+              {
+                "type": "tool-call",
+                "id": "call_1",
+                "name": "run_code",
+                "arguments": "{\"description\":\"Inspect files\",\"code\":\"console.log('x'.repeat(2000));\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n// line\\n\"}"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "openai",
+              "model": "gpt-test",
+              "replayState": {
+                "response": {
+                  "responseId": "resp_1",
+                  "stopReason": "toolUse"
+                },
+                "blocks": [
+                  {
+                    "type": "reasoning",
+                    "encrypted_content": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "tool/ptc-dispatch",
+        "seq": 15,
+        "time": 1794600000900,
+        "data": {
+          "callId": "call_1",
+          "code": "console.log('a'.repeat(2000));\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n// body\n",
+          "output": "Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line Result line "
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "tool/result",
+        "seq": 16,
+        "time": 1794600000950,
+        "data": {
+          "callId": "call_1",
+          "toolName": "run_code",
+          "isError": false,
+          "message": {
+            "role": "tool",
+            "toolCallId": "call_1",
+            "content": [
+              {
+                "type": "text",
+                "text": "Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output Tool output "
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "assistant/message",
+        "seq": 17,
+        "time": 1794600001500,
+        "data": {
+          "turn": 1,
+          "step": 2,
+          "usage": {
+            "inputTokens": 4800,
+            "outputTokens": 180
+          },
+          "stream": [
+            {
+              "type": "text-chunks",
+              "texts": [
+                "Complete ",
+                "final ",
+                "markdown ",
+                "answer."
+              ],
+              "dt": [
+                10,
+                15,
+                12,
+                8
+              ]
+            }
+          ],
+          "message": {
+            "id": "msg-asst-2",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Complete final markdown answer: MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "openai",
+              "model": "gpt-test",
+              "replayState": {
+                "blocks": [
+                  {
+                    "type": "reasoning",
+                    "encrypted_content": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "event",
+      "event": {
+        "type": "turn/end",
+        "seq": 18,
+        "time": 1794600001550,
+        "data": {
+          "turn": 1,
+          "reason": {
+            "kind": "completed"
+          }
+        }
+      }
+    }
+  ]
+}
