@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "cn.r2049.dshremote",
+    "bundleName": "io.github.liguobao.dshremote",
     "vendor": "r2049",
     "versionCode": 1000225,
     "versionName": "0.17.103-lan",

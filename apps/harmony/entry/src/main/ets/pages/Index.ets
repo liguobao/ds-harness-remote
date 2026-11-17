@@ -2575,7 +2575,7 @@ struct Index {
                 this.connectedTransport.length > 0 ? this.transportBadgeText() : this.tr('未连接'), false, () => {
                   const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
                   const lines: string[] = [
-                    'bundle: cn.r2049.dshremote',
+                    'bundle: ' + context.abilityInfo.bundleName,
                     'app: ' + appVersion(),
                     'server: ' + this.accountServer,
                     'account: ' + this.accountEmail,
