@@ -528,6 +528,9 @@ importers:
 
   examples/mock-host:
     dependencies:
+      '@dsh-remote/app-core':
+        specifier: workspace:*
+        version: link:../../packages/app-core
       '@dsh-remote/client-core':
         specifier: workspace:*
         version: link:../../packages/client-core
@@ -807,6 +810,9 @@ importers:
       '@deepseek-ai/dsh-typert-registry':
         specifier: 0.2.1-rc.1
         version: 0.2.1-rc.1(@deepseek-ai/cordis@4.0.5)
+      '@dsh-remote/app-core':
+        specifier: workspace:*
+        version: link:../app-core
       '@dsh-remote/client-core':
         specifier: workspace:*
         version: link:../client-core
