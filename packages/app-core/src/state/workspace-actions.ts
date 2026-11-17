@@ -1,9 +1,15 @@
 import * as Haptics from 'expo-haptics'
 import { friendlyError } from '../lib/errors'
-import { workspaceStableKey } from '../lib/workspace-key'
+import {
+  filterVisibleAcpCatalog,
+  isAcpManagedBackend,
+  workspaceStableKey,
+  type AcpCatalogFilterOptions,
+} from '../lib/workspace-key'
 import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
+import * as browseMemory from '../services/browse-memory'
 import { createNativeRpcId } from '../services/rpc-id'
 import { createCodexWorkspace, loadCodexCatalog } from '../services/codex'
 import {
@@ -19,7 +25,7 @@ import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
 import { loadHermesCatalog, mergeHermesCatalog } from '../services/hermes'
 import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import type { AndroidRemoteRuntime } from '../services/remote-runtime'
-import { saveFavoriteWorkspaces } from '../services/storage'
+import { saveFavoriteWorkspaces, saveRecentWorkspaces } from '../services/storage'
 import type { RemoteSession, WorkspaceView } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission } from './codex-session-state'
 import type { AppState, StoreAccess } from './store-state'
@@ -34,6 +40,42 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
   'refreshWorkspaces' | 'workspaceRename' | 'workspaceDelete' | 'workspaceMove' | 'toggleFavoriteWorkspace' | 'removeFavoriteWorkspace' | 'openFavoriteWorkspaceSession' | 'hostListDirectory' | 'workspaceCreate'> {
   let mutationGeneration = 0
   let refreshGeneration = 0
+
+  function catalogOptions(): AcpCatalogFilterOptions {
+    const state = get()
+    const scope = browseMemory.browseScope?.(state)
+    return {
+      deletedKeys: scope ? browseMemory.getDeletedAcpWorkspaceKeys?.(scope) : undefined,
+      platform: state.selectedDevice?.platform,
+    }
+  }
+
+  function persistCatalogNow(): void {
+    const state = get()
+    const scope = browseMemory.browseScope?.(state)
+    if (!scope) return
+    browseMemory.saveBrowseCatalog?.(scope, state.workspaces, state.sessions)
+    void Promise.resolve(browseMemory.flushBrowseMemory?.()).catch(() => undefined)
+  }
+
+  function clearDeletedShortcuts(target: WorkspaceView | undefined): void {
+    const device = get().selectedDevice
+    if (!target || !device) return
+    const stableKey = workspaceStableKey(target, device.platform)
+    const matchesTarget = (item: { deviceId: string; key: string; workspaceId: string }) =>
+      item.deviceId === device.deviceId && (item.key === stableKey || item.workspaceId === target.workspaceId)
+    const nextFavorites = get().favoriteWorkspaces.filter(item => !matchesTarget(item))
+    const nextRecent = get().recentWorkspaces.filter(item => !matchesTarget(item))
+    const favChanged = nextFavorites.length !== get().favoriteWorkspaces.length
+    const recentChanged = nextRecent.length !== get().recentWorkspaces.length
+    if (!favChanged && !recentChanged) return
+    set({
+      ...(favChanged ? { favoriteWorkspaces: nextFavorites } : {}),
+      ...(recentChanged ? { recentWorkspaces: nextRecent } : {}),
+    })
+    if (favChanged) void Promise.resolve(saveFavoriteWorkspaces?.(nextFavorites)).catch(() => undefined)
+    if (recentChanged) void Promise.resolve(saveRecentWorkspaces?.(nextRecent)).catch(() => undefined)
+  }
 
   function captureConnection() {
     const generation = getConnectionGeneration()
@@ -82,6 +124,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         let catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[] }
         let archivedSessionIds: string[] | undefined
         let pinnedSessionIds: string[] | undefined
+        const filterOpts = catalogOptions()
         switch (backend) {
           case 'harness': {
             const proxy = scope.bind(() => connection.requireProxy())
@@ -100,22 +143,53 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             break
           }
           case 'antigravity':
-            catalog = mergeAntigravityCatalog(await loadAntigravityCatalog(scope.bind(() => connection.requireAntigravity()), get().workspaces), get().workspaces, get().sessions)
+            catalog = mergeAntigravityCatalog(
+              await loadAntigravityCatalog(scope.bind(() => connection.requireAntigravity()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
             break
           case 'pi':
-            catalog = mergePiCatalog(await loadPiCatalog(scope.bind(() => connection.requirePi()), get().workspaces), get().workspaces, get().sessions)
+            catalog = mergePiCatalog(
+              await loadPiCatalog(scope.bind(() => connection.requirePi()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
             break
           case 'opencode':
-            catalog = mergeOpencodeCatalog(await loadOpencodeCatalog(scope.bind(() => connection.requireOpencode()), get().workspaces), get().workspaces, get().sessions)
+            catalog = mergeOpencodeCatalog(
+              await loadOpencodeCatalog(scope.bind(() => connection.requireOpencode()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
             break
           case 'claude':
-            catalog = mergeClaudeCatalog(await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces), get().workspaces, get().sessions)
+            catalog = mergeClaudeCatalog(
+              await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
             break
           case 'hermes':
-            catalog = mergeHermesCatalog(await loadHermesCatalog(scope.bind(() => connection.requireHermes()), get().workspaces), get().workspaces, get().sessions)
+            catalog = mergeHermesCatalog(
+              await loadHermesCatalog(scope.bind(() => connection.requireHermes()), get().workspaces, undefined, filterOpts),
+              get().workspaces,
+              get().sessions,
+              filterOpts,
+            )
             break
           case 'cursor':
-            catalog = { workspaces: get().workspaces.filter(item => item.backend === 'cursor'), sessions: get().sessions.filter(item => item.backend === 'cursor') }
+            catalog = filterVisibleAcpCatalog(
+              'cursor',
+              get().workspaces.filter(item => item.backend === 'cursor'),
+              get().sessions.filter(item => item.backend === 'cursor'),
+              filterOpts.deletedKeys,
+              filterOpts.platform,
+            )
             break
         }
         if (!current()) return
@@ -154,7 +228,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude' || target?.backend === 'hermes') {
+        if (isAcpManagedBackend(target?.backend)) {
           const nextTitle = title.trim()
           if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
           set(state => ({
@@ -163,6 +237,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
               : item),
             busyAction: undefined,
           }))
+          persistCatalogNow()
           return true
         }
         const proxy = scope.bind(() => connection.requireProxy())
@@ -189,12 +264,19 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude' || target?.backend === 'hermes') {
+        if (target !== undefined && isAcpManagedBackend(target.backend)) {
+          const targetBackend = target.backend
+          const targetPath = target.path
           const sessionIds = new Set(target.sessionIds)
           const selected = get().selectedSession
           if (selected !== undefined && sessionIds.has(selected.sessionId)) {
             await closeActiveCursorStream()
             if (!scope.current()) return false
+          }
+          const currentState = get()
+          const memScope = browseMemory.browseScope?.(currentState)
+          if (memScope) {
+            browseMemory.markDeletedAcpWorkspace?.(memScope, targetBackend, targetPath, currentState.selectedDevice?.platform)
           }
           set(state => ({
             workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
@@ -208,19 +290,21 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
               : state.sessionModels,
             busyAction: undefined,
           }))
+          clearDeletedShortcuts(target)
+          persistCatalogNow()
           return true
         }
         const proxy = scope.bind(() => connection.requireProxy())
         await proxy.workspaceDelete(workspaceId)
         if (!scope.current()) return false
+        const sessionIds = new Set(target?.sessionIds ?? [])
         set(state => ({
           workspaces: state.workspaces.filter(item => item.workspaceId !== workspaceId),
-          sessions: state.sessions.filter(session => {
-            const workspace = state.workspaces.find(item => item.workspaceId === workspaceId)
-            return workspace === undefined || !workspace.sessionIds.includes(session.sessionId)
-          }),
+          sessions: state.sessions.filter(session => !sessionIds.has(session.sessionId)),
           busyAction: undefined,
         }))
+        clearDeletedShortcuts(target)
+        persistCatalogNow()
         return true
       } catch (error) {
         if (!scope.current()) return false
@@ -241,7 +325,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex' || before?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude' || target?.backend === 'hermes' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi' || before?.backend === 'opencode' || before?.backend === 'claude' || before?.backend === 'hermes') {
+        if (isAcpManagedBackend(target?.backend) || isAcpManagedBackend(before?.backend)) {
           set(state => {
             const items = state.workspaces.slice()
             const from = items.findIndex(item => item.workspaceId === workspaceId)
@@ -254,6 +338,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             items.splice(to < 0 ? items.length : to, 0, workspace)
             return { workspaces: items, busyAction: undefined }
           })
+          persistCatalogNow()
           return true
         }
         const proxy = scope.bind(() => connection.requireProxy())
@@ -263,7 +348,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         set({
           workspaces: [
             ...workspaceIds.flatMap(id => byId.get(id) === undefined ? [] : [byId.get(id)!]),
-            ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi' || item.backend === 'opencode' || item.backend === 'claude' || item.backend === 'hermes'),
+            ...get().workspaces.filter(item => item.backend === 'codex' || isAcpManagedBackend(item.backend)),
           ],
           busyAction: undefined,
         })
@@ -381,97 +466,94 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         }
         if (backend === 'cursor') {
           if (!connection.hasCursor()) throw new Error(zhCN.runtime.cursorUnavailable)
+          const memScope = browseMemory.browseScope?.(get())
+          const platform = get().selectedDevice?.platform
+          if (memScope) browseMemory.unmarkDeletedAcpWorkspace?.(memScope, 'cursor', path, platform)
           const workspace = createCursorWorkspace(path)
           set(state => ({
             workspaces: [...state.workspaces.filter(item => item.workspaceId !== workspace.workspaceId), workspace],
             busyAction: undefined,
           }))
+          persistCatalogNow()
           return workspace
         }
-        if (backend === 'antigravity') {
-          if (!connection.hasAntigravity()) throw new Error(zhCN.runtime.antigravityUnavailable)
-          const workspace = createAntigravityWorkspace(path)
-          const catalog = await loadAntigravityCatalog(scope.bind(() => connection.requireAntigravity()), [...get().workspaces, workspace], path)
-          if (!scope.current()) return undefined
-          let created = workspace
-          set(state => {
-            const merged = mergeAntigravityCatalog(catalog, state.workspaces, state.sessions)
-            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
-            return {
-              workspaces: [...state.workspaces.filter(item => item.backend !== 'antigravity'), ...merged.workspaces],
-              sessions: [...state.sessions.filter(item => item.backend !== 'antigravity'), ...merged.sessions],
-              busyAction: undefined,
+        const directoryBackends = {
+          antigravity: {
+            has: () => connection.hasAntigravity(),
+            require: () => connection.requireAntigravity(),
+            unavailable: zhCN.runtime.antigravityUnavailable,
+            create: createAntigravityWorkspace,
+            load: loadAntigravityCatalog,
+            merge: mergeAntigravityCatalog,
+          },
+          pi: {
+            has: () => connection.hasPi(),
+            require: () => connection.requirePi(),
+            unavailable: zhCN.runtime.piUnavailable,
+            create: createPiWorkspace,
+            load: loadPiCatalog,
+            merge: mergePiCatalog,
+          },
+          opencode: {
+            has: () => connection.hasOpencode(),
+            require: () => connection.requireOpencode(),
+            unavailable: zhCN.runtime.opencodeUnavailable,
+            create: createOpencodeWorkspace,
+            load: loadOpencodeCatalog,
+            merge: mergeOpencodeCatalog,
+          },
+          claude: {
+            has: () => connection.hasClaude(),
+            require: () => connection.requireClaude(),
+            unavailable: zhCN.runtime.claudeUnavailable,
+            create: createClaudeWorkspace,
+            load: loadClaudeCatalog,
+            merge: mergeClaudeCatalog,
+          },
+          hermes: {
+            has: () => connection.hasHermes(),
+            require: () => connection.requireHermes(),
+            unavailable: zhCN.runtime.hermesUnavailable,
+            create: createHermesWorkspace,
+            load: loadHermesCatalog,
+            merge: mergeHermesCatalog,
+          },
+        } as const
+        if (backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes') {
+          const entry = directoryBackends[backend]
+          if (!entry.has()) throw new Error(entry.unavailable)
+          const memScope = browseMemory.browseScope?.(get())
+          const platform = get().selectedDevice?.platform
+          const wasDeleted = memScope
+            ? browseMemory.isDeletedAcpWorkspace?.(browseMemory.getDeletedAcpWorkspaceKeys?.(memScope), backend, path, platform) ?? false
+            : false
+          if (memScope) browseMemory.unmarkDeletedAcpWorkspace?.(memScope, backend, path, platform)
+          const workspace = entry.create(path)
+          try {
+            const catalog = await entry.load(scope.bind(entry.require), [...get().workspaces, workspace], path, catalogOptions())
+            if (!scope.current()) {
+              if (wasDeleted && memScope) browseMemory.markDeletedAcpWorkspace?.(memScope, backend, path, platform)
+              return undefined
             }
-          })
-          return created
-        }
-        if (backend === 'pi') {
-          if (!connection.hasPi()) throw new Error(zhCN.runtime.piUnavailable)
-          const workspace = createPiWorkspace(path)
-          const catalog = await loadPiCatalog(scope.bind(() => connection.requirePi()), [...get().workspaces, workspace], path)
-          if (!scope.current()) return undefined
-          let created = workspace
-          set(state => {
-            const merged = mergePiCatalog(catalog, state.workspaces, state.sessions)
-            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
-            return {
-              workspaces: [...state.workspaces.filter(item => item.backend !== 'pi'), ...merged.workspaces],
-              sessions: [...state.sessions.filter(item => item.backend !== 'pi'), ...merged.sessions],
-              busyAction: undefined,
+            let created = workspace
+            set(state => {
+              const merged = entry.merge(catalog, state.workspaces, state.sessions, catalogOptions())
+              created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+              return {
+                workspaces: [...state.workspaces.filter(item => item.backend !== backend), ...merged.workspaces],
+                sessions: [...state.sessions.filter(item => item.backend !== backend), ...merged.sessions],
+                busyAction: undefined,
+              }
+            })
+            if (memScope && created.path !== path) {
+              browseMemory.unmarkDeletedAcpWorkspace?.(memScope, backend, created.path, platform)
             }
-          })
-          return created
-        }
-        if (backend === 'opencode') {
-          if (!connection.hasOpencode()) throw new Error(zhCN.runtime.opencodeUnavailable)
-          const workspace = createOpencodeWorkspace(path)
-          const catalog = await loadOpencodeCatalog(scope.bind(() => connection.requireOpencode()), [...get().workspaces, workspace], path)
-          if (!scope.current()) return undefined
-          let created = workspace
-          set(state => {
-            const merged = mergeOpencodeCatalog(catalog, state.workspaces, state.sessions)
-            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
-            return {
-              workspaces: [...state.workspaces.filter(item => item.backend !== 'opencode'), ...merged.workspaces],
-              sessions: [...state.sessions.filter(item => item.backend !== 'opencode'), ...merged.sessions],
-              busyAction: undefined,
-            }
-          })
-          return created
-        }
-        if (backend === 'claude') {
-          if (!connection.hasClaude()) throw new Error(zhCN.runtime.claudeUnavailable)
-          const workspace = createClaudeWorkspace(path)
-          const catalog = await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), [...get().workspaces, workspace], path)
-          if (!scope.current()) return undefined
-          let created = workspace
-          set(state => {
-            const merged = mergeClaudeCatalog(catalog, state.workspaces, state.sessions)
-            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
-            return {
-              workspaces: [...state.workspaces.filter(item => item.backend !== 'claude'), ...merged.workspaces],
-              sessions: [...state.sessions.filter(item => item.backend !== 'claude'), ...merged.sessions],
-              busyAction: undefined,
-            }
-          })
-          return created
-        }
-        if (backend === 'hermes') {
-          if (!connection.hasHermes()) throw new Error(zhCN.runtime.hermesUnavailable)
-          const workspace = createHermesWorkspace(path)
-          const catalog = await loadHermesCatalog(scope.bind(() => connection.requireHermes()), [...get().workspaces, workspace], path)
-          if (!scope.current()) return undefined
-          let created = workspace
-          set(state => {
-            const merged = mergeHermesCatalog(catalog, state.workspaces, state.sessions)
-            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
-            return {
-              workspaces: [...state.workspaces.filter(item => item.backend !== 'hermes'), ...merged.workspaces],
-              sessions: [...state.sessions.filter(item => item.backend !== 'hermes'), ...merged.sessions],
-              busyAction: undefined,
-            }
-          })
-          return created
+            persistCatalogNow()
+            return created
+          } catch (error) {
+            if (wasDeleted && memScope) browseMemory.markDeletedAcpWorkspace?.(memScope, backend, path, platform)
+            throw error
+          }
         }
         const proxy = scope.bind(() => connection.requireProxy())
         const { workspace } = await proxy.workspaceCreate(path)

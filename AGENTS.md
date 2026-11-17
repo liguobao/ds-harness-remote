@@ -14,6 +14,7 @@
   - `packages/tui` 为同版本独立发布的 `ds-harness-remote-tui` Host 组合包（装配官方 API 并调 `applyTuiHost`）。
   - `packages/tui-plugin` 为未发布开发与契约校验包。
 - `apps/android`：Expo SDK 57 客户端（官方 Typert、`codex.app.*`、`agent.acp.*`、`plugin.route.call`、9 语言；见 [Android Guide](apps/android/AGENTS.md)）。
+- `apps/harmony`：HarmonyOS 原生 Client（ArkTS + ArkWeb WebRTC）；SDK 构建独立于 pnpm workspace，见 [客户端说明](docs/harmony-client.md)。
 - `apps/vscode`：VS Code 扩展 Client。
 - `apps/browser`：Chrome/Edge MV3 启动器（换独立凭据开同源 Remote Web，无登录/传输/会话 UI）。
 - `packages/{protocol,crypto,webrtc,client-core}` & `fixtures/`：共享协议/加密/传输/客户端库与一致性向量。
@@ -27,7 +28,7 @@
 ## Project Structure & Packaging Boundaries
 
 ```text
-apps/        android/  browser/  server/  vscode/
+apps/        android/  browser/  harmony/  server/  vscode/
 packages/    plugin/  tui/  tui-plugin/  protocol/  crypto/  webrtc/  client-core/
 examples/    mock-host/
 fixtures/    crypto/  pairing/  protocol/

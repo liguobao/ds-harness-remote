@@ -1,8 +1,9 @@
 import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
-import { workspaceStableKey } from '../lib/workspace-key'
+import { workspaceStableKey, type AcpCatalogFilterOptions } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
+import * as browseMemory from '../services/browse-memory'
 import { codexModelSelectionFromSession, loadCodexModels } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
 import { loadOpencodeCatalog, loadOpencodeModels, mergeOpencodeCatalog } from '../services/opencode'
@@ -11,7 +12,7 @@ import { loadHermesCatalog, loadHermesModels, mergeHermesCatalog } from '../serv
 import { loadPiCatalog, loadPiModels, mergePiCatalog } from '../services/pi'
 import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveRecentWorkspaces } from '../services/storage'
-import type { ModelSelection, MuxStreamFrame, RemoteSession, WorkspaceShortcut } from '../types'
+import type { ModelSelection, MuxStreamFrame, RemoteSession, WorkspaceShortcut, WorkspaceView } from '../types'
 import type { StoreAccess } from './store-state'
 
 export interface SessionAccess extends StoreAccess {
@@ -167,104 +168,90 @@ export class SessionRuntime {
     this.catalogSyncQueued = false
   }
 
-  async refreshAntigravityCatalog(): Promise<void> {
-    if (!this.connection.hasAntigravity()) return
-    const client = this.connection.requireAntigravity()
+  private acpCatalogOptions(): AcpCatalogFilterOptions {
+    const state = this.store.get()
+    const scope = browseMemory.browseScope?.(state)
+    return {
+      deletedKeys: scope ? browseMemory.getDeletedAcpWorkspaceKeys?.(scope) : undefined,
+      platform: state.selectedDevice?.platform,
+    }
+  }
+
+  private async refreshAcpCatalog(spec: {
+    backend: 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+    has: () => boolean
+    require: () => Parameters<typeof loadPiCatalog>[0]
+    load: typeof loadPiCatalog
+    merge: typeof mergePiCatalog
+  }): Promise<void> {
+    if (!spec.has()) return
+    const client = spec.require()
     const deviceId = this.store.get().selectedDevice?.deviceId
     try {
-      const catalog = await loadAntigravityCatalog(client, this.store.get().workspaces)
-      if (!this.connection.hasAntigravity() || this.connection.requireAntigravity() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
+      const options = this.acpCatalogOptions()
+      const catalog = await spec.load(client, this.store.get().workspaces, undefined, options)
+      if (!spec.has() || spec.require() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
       this.store.set(state => {
-        const merged = mergeAntigravityCatalog(catalog, state.workspaces, state.sessions)
+        const merged = spec.merge(catalog, state.workspaces, state.sessions, this.acpCatalogOptions())
         return {
-          workspaces: [...state.workspaces.filter(item => item.backend !== 'antigravity'), ...merged.workspaces],
-          sessions: [...state.sessions.filter(item => item.backend !== 'antigravity'), ...merged.sessions],
-          selectedSession: state.selectedSession?.backend === 'antigravity'
+          workspaces: [...state.workspaces.filter(item => item.backend !== spec.backend), ...merged.workspaces],
+          sessions: [...state.sessions.filter(item => item.backend !== spec.backend), ...merged.sessions],
+          selectedSession: state.selectedSession?.backend === spec.backend
             ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
             : state.selectedSession,
         }
       })
-    } catch { /* Keep the live projection when AGY is still persisting its summary. */ }
+    } catch { /* Keep the live projection while the backend is still persisting its summary. */ }
+  }
+
+  async refreshAntigravityCatalog(): Promise<void> {
+    return this.refreshAcpCatalog({
+      backend: 'antigravity',
+      has: () => this.connection.hasAntigravity(),
+      require: () => this.connection.requireAntigravity(),
+      load: loadAntigravityCatalog,
+      merge: mergeAntigravityCatalog,
+    })
   }
 
   async refreshPiCatalog(): Promise<void> {
-    if (!this.connection.hasPi()) return
-    const client = this.connection.requirePi()
-    const deviceId = this.store.get().selectedDevice?.deviceId
-    try {
-      const catalog = await loadPiCatalog(client, this.store.get().workspaces)
-      if (!this.connection.hasPi() || this.connection.requirePi() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
-      this.store.set(state => {
-        const merged = mergePiCatalog(catalog, state.workspaces, state.sessions)
-        return {
-          workspaces: [...state.workspaces.filter(item => item.backend !== 'pi'), ...merged.workspaces],
-          sessions: [...state.sessions.filter(item => item.backend !== 'pi'), ...merged.sessions],
-          selectedSession: state.selectedSession?.backend === 'pi'
-            ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
-            : state.selectedSession,
-        }
-      })
-    } catch { /* Keep the live projection when Pi is still persisting its summary. */ }
+    return this.refreshAcpCatalog({
+      backend: 'pi',
+      has: () => this.connection.hasPi(),
+      require: () => this.connection.requirePi(),
+      load: loadPiCatalog,
+      merge: mergePiCatalog,
+    })
   }
 
   async refreshOpencodeCatalog(): Promise<void> {
-    if (!this.connection.hasOpencode()) return
-    const client = this.connection.requireOpencode()
-    const deviceId = this.store.get().selectedDevice?.deviceId
-    try {
-      const catalog = await loadOpencodeCatalog(client, this.store.get().workspaces)
-      if (!this.connection.hasOpencode() || this.connection.requireOpencode() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
-      this.store.set(state => {
-        const merged = mergeOpencodeCatalog(catalog, state.workspaces, state.sessions)
-        return {
-          workspaces: [...state.workspaces.filter(item => item.backend !== 'opencode'), ...merged.workspaces],
-          sessions: [...state.sessions.filter(item => item.backend !== 'opencode'), ...merged.sessions],
-          selectedSession: state.selectedSession?.backend === 'opencode'
-            ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
-            : state.selectedSession,
-        }
-      })
-    } catch { /* Keep the live projection when OpenCode is still persisting its summary. */ }
+    return this.refreshAcpCatalog({
+      backend: 'opencode',
+      has: () => this.connection.hasOpencode(),
+      require: () => this.connection.requireOpencode(),
+      load: loadOpencodeCatalog,
+      merge: mergeOpencodeCatalog,
+    })
   }
 
   async refreshClaudeCatalog(): Promise<void> {
-    if (!this.connection.hasClaude()) return
-    const client = this.connection.requireClaude()
-    const deviceId = this.store.get().selectedDevice?.deviceId
-    try {
-      const catalog = await loadClaudeCatalog(client, this.store.get().workspaces)
-      if (!this.connection.hasClaude() || this.connection.requireClaude() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
-      this.store.set(state => {
-        const merged = mergeClaudeCatalog(catalog, state.workspaces, state.sessions)
-        return {
-          workspaces: [...state.workspaces.filter(item => item.backend !== 'claude'), ...merged.workspaces],
-          sessions: [...state.sessions.filter(item => item.backend !== 'claude'), ...merged.sessions],
-          selectedSession: state.selectedSession?.backend === 'claude'
-            ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
-            : state.selectedSession,
-        }
-      })
-    } catch { /* Keep the live projection when Claude is still persisting its summary. */ }
+    return this.refreshAcpCatalog({
+      backend: 'claude',
+      has: () => this.connection.hasClaude(),
+      require: () => this.connection.requireClaude(),
+      load: loadClaudeCatalog,
+      merge: mergeClaudeCatalog,
+    })
   }
 
   async refreshHermesCatalog(): Promise<void> {
-    if (!this.connection.hasHermes()) return
-    const client = this.connection.requireHermes()
-    const deviceId = this.store.get().selectedDevice?.deviceId
-    try {
-      const catalog = await loadHermesCatalog(client, this.store.get().workspaces)
-      if (!this.connection.hasHermes() || this.connection.requireHermes() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
-      this.store.set(state => {
-        const merged = mergeHermesCatalog(catalog, state.workspaces, state.sessions)
-        return {
-          workspaces: [...state.workspaces.filter(item => item.backend !== 'hermes'), ...merged.workspaces],
-          sessions: [...state.sessions.filter(item => item.backend !== 'hermes'), ...merged.sessions],
-          selectedSession: state.selectedSession?.backend === 'hermes'
-            ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
-            : state.selectedSession,
-        }
-      })
-    } catch { /* Keep the live projection when Hermes is still persisting its summary. */ }
+    return this.refreshAcpCatalog({
+      backend: 'hermes',
+      has: () => this.connection.hasHermes(),
+      require: () => this.connection.requireHermes(),
+      load: loadHermesCatalog,
+      merge: mergeHermesCatalog,
+    })
   }
 
   async closeActiveCodexStream(notifyRemote = true): Promise<void> {

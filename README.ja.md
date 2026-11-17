@@ -52,6 +52,14 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 - Android、iOS、Web、ネイティブ DSH 向けのクライアントを提供しています。
 - 複数のクライアントから同じ Harness Host に同時接続でき、RPC 呼び出しとストリームは接続ごとに分離されます。
 
+## HarmonyOS ネイティブクライアント
+
+[HarmonyOS クライアント](apps/harmony/)は HarmonyOS 7.0（API 26）以降に対応します。DevEco Studio でビルドします。設定、署名、安全性と検証方法は[クライアントガイド](docs/harmony-client.md)を参照してください。
+
+| セッション一覧 | 新規セッション | 入力欄 |
+| --- | --- | --- |
+| ![セッション一覧](docs/images/harmony/sessions-drawer.jpg) | ![新規セッション](docs/images/harmony/chat-empty.jpg) | ![入力欄](docs/images/harmony/composer.jpg) |
+
 ## 対応クライアント
 
 | クライアント | 形式 | 状態 | 備考 |
@@ -59,6 +67,7 @@ DeepSeek Harness デスクトップ版に対応しています。最新リリー
 | DSH プラグイン | Remote サイドバー | 対応 | 他のデバイスを操作する側にも、操作される Host 側にも自由に使えます！ |
 | Web | ブラウザーページ | 対応 | [https://dsh.r2049.cn](https://dsh.r2049.cn) を開きます。ネイティブの Harness UI を再利用します |
 | Android | ネイティブアプリ | 対応 | [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) から APK をダウンロードできます。[Android ガイド](apps/android/README.md)を参照してください |
+| HarmonyOS | ネイティブアプリ | ソース公開 | HarmonyOS 7.0（API 26）以降。DevEco Studio でビルド。[ガイド](docs/harmony-client.md) |
 | DSH Go | ccch1mneyyy 氏の力作 | 対応済み | 詳細：[ccch1mneyyy/dsh-go: スマートフォンで直接実行したり、パソコン上の DSH をリモート操作したりできます。](https://github.com/ccch1mneyyy/dsh-go) |
 | iOS | TestFlight ベータ | ベータ | 一般公開はまだ行っていません。[Issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) を参照してください |
 | dsh-TUI | 独立 Host バンドル + CLI | 主要な実機検証済み | 同じバージョンの `ds-harness-remote-tui` を導入。[検証範囲](docs/compatibility.md)を参照。Web サービスは自動作成されません |
