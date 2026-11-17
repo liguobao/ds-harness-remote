@@ -393,14 +393,19 @@ jobs:
       - changes
       - quality
     if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Select Xcode
-        run: sudo xcode-select --switch /Applications/Xcode_26.app
+      # Expo SDK 57 needs a current Xcode. Rather than pinning a path that may
+      # not exist on a future image, take the runner default and log what is
+      # installed; pod install fails loudly if the toolchain is too old.
+      - name: Show Xcode toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | sed -n '1,12p'
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6

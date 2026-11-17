@@ -46,7 +46,7 @@ env:
 jobs:
   testflight:
     name: Archive and upload to TestFlight
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 90
     # A fork builds under its own Apple account, so this is not restricted to
     # the upstream repository. It needs the four values below; without them the
@@ -79,10 +79,11 @@ jobs:
             exit 1
           fi
 
-      - name: Select Xcode
-        run: |
-          sudo xcode-select --switch /Applications/Xcode_26.app
-          xcodebuild -version
+      # The signing build needs a current Xcode for Expo SDK 57. Take the
+      # runner default rather than pinning a path that may not exist on a
+      # future image; an archive fails loudly if the toolchain is too old.
+      - name: Show Xcode toolchain
+        run: xcodebuild -version
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
