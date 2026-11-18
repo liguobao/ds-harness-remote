@@ -6,6 +6,7 @@
 | [界面设计系统](DESIGN.md) | Android / Desktop 的交互规则；具体 token 以源码为准 |
 | [Plugin 功能设计](plugin/functional-design.md) | 生命周期、业务域、路径隔离与恢复 |
 | [控制面恢复](control-recovery.md) | 共用授权租约，以及 WebRTC / 独立 Relay 的保留条件 |
+| [跨机器对话导入导出](session-transfer.md) | 工作区与会话查询、压缩传输及目标端创建接口 |
 
 线协议统一维护在 [protocol.md](../protocol.md)，账号和凭据维护在 [Host 接入指南](../plugin-integration.md)，加密与网络分别见[端到端加密](../end-to-end-encryption.md)和[网络与传输](../network.md)。不在设计目录重复维护同一组协议字段、版本矩阵或测试数量。
 
