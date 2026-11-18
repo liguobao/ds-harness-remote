@@ -97,6 +97,31 @@ async function writeTranscript(end: TestEnd, id: string, prompt: string, step = 
   return path
 }
 
+/** Create a WAL-mode trajectory database with a `steps` table holding 3 rows. */
+function createTrajectoryDb(dbPath: string): void {
+  const db = new (sqlite().DatabaseSync)(dbPath)
+  try {
+    db.exec('PRAGMA journal_mode = WAL;')
+    db.exec('CREATE TABLE IF NOT EXISTS steps (id INTEGER PRIMARY KEY, payload TEXT)')
+    const insert = db.prepare('INSERT INTO steps (payload) VALUES (?)')
+    insert.run('step-1')
+    insert.run('step-2')
+    insert.run('step-3')
+  } finally {
+    db.close()
+  }
+}
+
+function trajectoryStepCount(dbPath: string): number {
+  const db = new (sqlite().DatabaseSync)(dbPath, { readOnly: true })
+  try {
+    const row = db.prepare('SELECT COUNT(*) AS n FROM steps').get() as { n: number }
+    return row.n
+  } finally {
+    db.close()
+  }
+}
+
 async function transcriptText(end: TestEnd, id: string): Promise<string | undefined> {
   try {
     return await fs.readFile(join(end.brainDir, id, '.system_generated', 'logs', 'transcript.jsonl'), 'utf8')
@@ -240,12 +265,63 @@ describe('Antigravity dual-source sessions', () => {
       fs.stat(`${desktop.dbPath}${suffix}`).then(() => true, () => false)))).toEqual(sidecars)
   })
 
+  it('exports a SQLite .db trajectory and completes a CLI session that only had summaries', async () => {
+    const id = 'sqlite-trajectory-session'
+    insertRow(desktop, { id, title: 'SQLite resume', modified: '2026-11-10T00:00:00Z' })
+    await writeTranscript(desktop, id, 'Resume a SQLite trajectory')
+    // Newer Antigravity stores the trajectory as a WAL-mode SQLite database.
+    const srcDb = join(desktop.conversationsDir, `${id}.db`)
+    createTrajectoryDb(srcDb)
+    const desktopBefore = await fs.readFile(srcDb)
+
+    // Simulate the broken state from the earlier patch: CLI already has the
+    // brain transcript and the summaries row but its trajectory store is gone.
+    insertRow(cli, { id, title: 'Stale CLI summary', modified: '2026-11-10T00:00:00Z' })
+    await writeTranscript(cli, id, 'Resume a SQLite trajectory')
+    expect(await hasCliSession(id, syncOptions(desktop, cli))).toBe(false)
+
+    const result = await syncDesktopSessionForResume(id, syncOptions(desktop, cli))
+
+    expect(result.status).toBe('synced')
+    expect(result.copiedFiles.some(file => file.includes(`${id}.db`))).toBe(true)
+    const cliDb = join(cli.conversationsDir, `${id}.db`)
+    expect(await fs.stat(cliDb).then(() => true, () => false)).toBe(true)
+    // The exported database is readable and keeps every step (including WAL-resident ones).
+    expect(trajectoryStepCount(cliDb)).toBe(3)
+    expect(await hasCliSession(id, syncOptions(desktop, cli))).toBe(true)
+    // The live desktop database was never rewritten.
+    expect(await fs.readFile(srcDb)).toEqual(desktopBefore)
+  })
+
+  it('treats a WAL-only .db as present and keeps the newest mtime', async () => {
+    const id = 'wal-freshness-session'
+    insertRow(desktop, { id, title: 'WAL freshness', modified: '2026-11-09T00:00:00Z' })
+    const srcDb = join(desktop.conversationsDir, `${id}.db`)
+    createTrajectoryDb(srcDb)
+    // A newer -wal sidecar means there are uncheckpointed steps to carry over.
+    const walPath = `${srcDb}-wal`
+    await fs.writeFile(walPath, '')
+    await fs.utimes(walPath, new Date(2_000_000_000_000), new Date(2_000_000_000_000))
+
+    const result = await syncDesktopSessionForResume(id, syncOptions(desktop, cli))
+    expect(result.status).toBe('synced')
+    // Destination must not keep a stale sidecar that could corrupt the export.
+    expect(await fs.stat(`${join(cli.conversationsDir, `${id}.db`)}-wal`).then(() => true, () => false)).toBe(false)
+    expect(trajectoryStepCount(join(cli.conversationsDir, `${id}.db`))).toBe(3)
+  })
+
   it('does not overwrite a newer CLI session', async () => {
     const id = 'newer-cli-session'
     insertRow(desktop, { id, title: 'Desktop old', modified: '2026-10-01T00:00:00Z' })
     await writeTranscript(desktop, id, 'Desktop version', 1, 1_000_000)
+    const desktopPb = join(desktop.conversationsDir, `${id}.pb`)
+    await fs.writeFile(desktopPb, 'desktop-old-pb')
+    await fs.utimes(desktopPb, new Date(1_000_000), new Date(1_000_000))
     insertRow(cli, { id, title: 'CLI current', modified: '2026-11-01T00:00:00Z' })
     await writeTranscript(cli, id, 'CLI version', 2, 3_000_000)
+    const cliPb = join(cli.conversationsDir, `${id}.pb`)
+    await fs.writeFile(cliPb, 'cli-current-pb')
+    await fs.utimes(cliPb, new Date(3_000_000), new Date(3_000_000))
 
     const result = await syncDesktopSessionForResume(id, syncOptions(desktop, cli))
 

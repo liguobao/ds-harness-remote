@@ -13,7 +13,7 @@ import type {
 } from './cursor-process.js'
 
 import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
-import { hasCliSession, syncDesktopSessionForResume } from './antigravity/session-sync.js'
+import { hasCliSession, syncCliSessionToDesktop, syncDesktopSessionForResume } from './antigravity/session-sync.js'
 import { DSH_AGY_DUAL_END_PATCH_V1 } from './antigravity/antigravity-paths.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
@@ -526,6 +526,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
   }
 
+  /** Session sync options derived from this client's (optionally isolated) brain dir. */
+  private syncOptions(): { cliBrainDir?: string } {
+    return this.brainDir === undefined ? {} : { cliBrainDir: this.brainDir }
+  }
+
   private sendPrompt(sessionId: string, promptText: string, timeoutMs: number): Promise<unknown> {
     if (this.currentPromptPending) {
       throw new AntigravityAcpError('PROMPT_IN_PROGRESS', 'Another prompt is already in progress.')
@@ -681,6 +686,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
             await this.watcher?.flush()
           } catch {
             // ignore flush errors
+          }
+          // A resumed desktop session was copied into the CLI root so `agy`
+          // could continue it; mirror the advanced trajectory back so the
+          // desktop application shows this turn. Best-effort only.
+          try {
+            await syncCliSessionToDesktop(this.activeConversationId ?? '', this.syncOptions())
+          } catch (err) {
+            this.logger?.warn('Failed to mirror the CLI turn back to desktop', { error: String(err) })
           }
           if (result.status === 'ERROR') {
             current.reject(new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', String(result.error ?? 'Execution error')))

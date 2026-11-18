@@ -95547,14 +95547,32 @@ async function writeSummaryRow(desktopDb, cliDb, conversationId) {
     await fs4.rm(backup.tempDir, { recursive: true, force: true }).catch(() => void 0);
   }
 }
-async function sessionStamp(end, conversationId) {
-  const transcript = await resolveTranscriptPath(end.brainDir, conversationId);
-  const pb = join12(end.conversationsDir, `${conversationId}.pb`);
+async function trajectoryFiles(end, conversationId) {
+  const base = join12(end.conversationsDir, conversationId);
+  const db = `${base}.db`;
+  const pb = `${base}.pb`;
   const stats = await Promise.all([
-    transcript === void 0 ? Promise.resolve(void 0) : fs4.stat(transcript).catch(() => void 0),
+    fs4.stat(db).catch(() => void 0),
+    fs4.stat(`${db}-wal`).catch(() => void 0),
+    fs4.stat(`${db}-shm`).catch(() => void 0),
     fs4.stat(pb).catch(() => void 0)
   ]);
-  let mtimeMs = Math.max(stats[0]?.mtimeMs ?? 0, stats[1]?.mtimeMs ?? 0);
+  const [dbStat, walStat, shmStat, pbStat] = stats;
+  let mtimeMs = 0;
+  for (const stat11 of [dbStat, walStat, shmStat, pbStat]) {
+    if (stat11 !== void 0) mtimeMs = Math.max(mtimeMs, stat11.mtimeMs);
+  }
+  return {
+    ...dbStat === void 0 ? {} : { db },
+    ...pbStat === void 0 ? {} : { pb },
+    mtimeMs
+  };
+}
+async function sessionStamp(end, conversationId) {
+  const transcript = await resolveTranscriptPath(end.brainDir, conversationId);
+  const trajectory = await trajectoryFiles(end, conversationId);
+  const transcriptStat = transcript === void 0 ? void 0 : await fs4.stat(transcript).catch(() => void 0);
+  let mtimeMs = Math.max(transcriptStat?.mtimeMs ?? 0, trajectory.mtimeMs);
   let hasDbRow = false;
   try {
     const row = await readSummaryRow(end.dbPath, conversationId);
@@ -95566,10 +95584,12 @@ async function sessionStamp(end, conversationId) {
   } catch {
   }
   return {
-    present: transcript !== void 0 || stats[1] !== void 0 || hasDbRow,
+    present: transcript !== void 0 || trajectory.db !== void 0 || trajectory.pb !== void 0 || hasDbRow,
     mtimeMs,
+    trajectoryMtimeMs: trajectory.mtimeMs,
     ...transcript === void 0 ? {} : { transcript },
-    ...stats[1] === void 0 ? {} : { pb }
+    ...trajectory.pb === void 0 ? {} : { pb: trajectory.pb },
+    ...trajectory.db === void 0 ? {} : { db: trajectory.db }
   };
 }
 async function copyIfNewer(src, dst, copiedFiles, label) {
@@ -95613,40 +95633,128 @@ async function copyBrainTree(srcDir, dstDir, copiedFiles) {
     }
   }
 }
+async function exportSqlite(dbPath, out) {
+  const removeOut = () => fs4.rm(out, { force: true }).catch(() => void 0);
+  let vacuumError;
+  await removeOut();
+  try {
+    await execFileAsync("sqlite3", ["-uri", `file:${dbPath}?mode=ro`, `VACUUM INTO '${out.replace(/'/g, "''")}'`], { timeout: 12e4 });
+    const stat11 = await fs4.stat(out).catch(() => void 0);
+    if (stat11 !== void 0 && stat11.size > 0) return { ok: true, method: "vacuum-into-cli" };
+  } catch (error62) {
+    await removeOut();
+    vacuumError = error62;
+  }
+  try {
+    const db = new (sqlite()).DatabaseSync(dbPath, { readOnly: true, timeout: 5e3 });
+    try {
+      db.exec(`VACUUM INTO '${out.replace(/'/g, "''")}'`);
+    } finally {
+      db.close();
+    }
+    const stat11 = await fs4.stat(out).catch(() => void 0);
+    if (stat11 !== void 0 && stat11.size > 0) return { ok: true, method: "vacuum-into-node" };
+  } catch (error62) {
+    await removeOut();
+    vacuumError = vacuumError ?? error62;
+  }
+  try {
+    await fs4.copyFile(dbPath, out);
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${out}${suffix}`;
+      await fs4.copyFile(`${dbPath}${suffix}`, sidecar).catch(() => fs4.rm(sidecar, { force: true }).catch(() => void 0));
+    }
+    return { ok: true, method: "physical-copy-with-wal" };
+  } catch (error62) {
+    await removeOut();
+    return { ok: false, error: error62 ?? vacuumError };
+  }
+}
+async function copyTrajectoryDb(srcDb, dstDb, copiedFiles, label) {
+  await fs4.mkdir(dirname5(dstDb), { recursive: true });
+  const temp = join12(dirname5(dstDb), `.${basename7(dstDb)}.agy-sync-${randomUUID15()}.tmp`);
+  try {
+    const result = await exportSqlite(srcDb, temp);
+    if (!result.ok) {
+      throw new AntigravitySessionSyncError(
+        "TRAJECTORY_EXPORT_FAILED",
+        `Failed to export the desktop SQLite trajectory for ${label}.`,
+        { cause: result.error }
+      );
+    }
+    for (const suffix of ["-wal", "-shm"]) {
+      await fs4.rm(`${dstDb}${suffix}`, { force: true }).catch(() => void 0);
+    }
+    await fs4.rename(temp, dstDb);
+    copiedFiles.push(`${label} (${result.method ?? "sqlite"})`);
+  } finally {
+    await fs4.rm(temp, { force: true }).catch(() => void 0);
+    await fs4.rm(`${temp}-wal`, { force: true }).catch(() => void 0);
+    await fs4.rm(`${temp}-shm`, { force: true }).catch(() => void 0);
+  }
+}
+async function copySession(source, destination, conversationId, sourceLabel, destinationLabel) {
+  const [sourceStamp, destinationStamp] = await Promise.all([
+    sessionStamp(source, conversationId),
+    sessionStamp(destination, conversationId)
+  ]);
+  if (!sourceStamp.present) {
+    return { status: "noop", reason: `session is not present on ${sourceLabel}`, copiedFiles: [] };
+  }
+  const sourceTrajectory = sourceStamp.db ?? sourceStamp.pb;
+  const destinationTrajectory = destinationStamp.db ?? destinationStamp.pb;
+  const sameKind = sourceStamp.db !== void 0 && destinationStamp.db !== void 0 || sourceStamp.db === void 0 && sourceStamp.pb !== void 0 && destinationStamp.pb !== void 0;
+  const destinationComplete = sameKind && destinationTrajectory !== void 0 && destinationStamp.trajectoryMtimeMs >= sourceStamp.trajectoryMtimeMs;
+  if (destinationComplete) {
+    return { status: "skipped", reason: `${destinationLabel} session is already current`, copiedFiles: [] };
+  }
+  const copiedFiles = [];
+  if (sourceStamp.db !== void 0) {
+    await copyTrajectoryDb(
+      sourceStamp.db,
+      join12(destination.conversationsDir, `${conversationId}.db`),
+      copiedFiles,
+      `conversations/${conversationId}.db`
+    );
+  }
+  if (sourceStamp.pb !== void 0) {
+    await copyIfNewer(
+      sourceStamp.pb,
+      join12(destination.conversationsDir, `${conversationId}.pb`),
+      copiedFiles,
+      `conversations/${conversationId}.pb`
+    );
+  }
+  await copyBrainTree(
+    join12(source.brainDir, conversationId),
+    join12(destination.brainDir, conversationId),
+    copiedFiles
+  );
+  await writeSummaryRow(source.dbPath, destination.dbPath, conversationId);
+  return { status: "synced", reason: `${sourceLabel} session copied into ${destinationLabel}`, copiedFiles };
+}
+function validSyncId(conversationId) {
+  return /^[a-zA-Z0-9_-]{1,256}$/.test(conversationId);
+}
 async function syncDesktopSessionForResume(conversationId, options = {}) {
-  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) {
+  if (!validSyncId(conversationId)) {
     return { status: "noop", reason: "invalid conversation id", copiedFiles: [] };
   }
   const { desktop, cli } = endsForSync(options);
-  const [desktopStamp, cliStamp] = await Promise.all([
-    sessionStamp(desktop, conversationId),
-    sessionStamp(cli, conversationId)
-  ]);
-  if (!desktopStamp.present) {
-    return { status: "noop", reason: "session is not present on desktop", copiedFiles: [] };
+  return copySession(desktop, cli, conversationId, "desktop", "CLI");
+}
+async function syncCliSessionToDesktop(conversationId, options = {}) {
+  if (!validSyncId(conversationId)) {
+    return { status: "noop", reason: "invalid conversation id", copiedFiles: [] };
   }
-  if (cliStamp.present && cliStamp.mtimeMs >= desktopStamp.mtimeMs) {
-    return { status: "skipped", reason: "CLI session is already current", copiedFiles: [] };
-  }
-  const copiedFiles = [];
-  await copyIfNewer(
-    join12(desktop.conversationsDir, `${conversationId}.pb`),
-    join12(cli.conversationsDir, `${conversationId}.pb`),
-    copiedFiles,
-    `conversations/${conversationId}.pb`
-  );
-  await copyBrainTree(
-    join12(desktop.brainDir, conversationId),
-    join12(cli.brainDir, conversationId),
-    copiedFiles
-  );
-  await writeSummaryRow(desktop.dbPath, cli.dbPath, conversationId);
-  return { status: "synced", reason: "desktop session copied into CLI", copiedFiles };
+  const { desktop, cli } = endsForSync(options);
+  return copySession(cli, desktop, conversationId, "CLI", "desktop");
 }
 async function hasCliSession(conversationId, options = {}) {
-  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return false;
+  if (!validSyncId(conversationId)) return false;
   const { cli } = endsForSync(options);
-  return (await sessionStamp(cli, conversationId)).present;
+  const stamp = await sessionStamp(cli, conversationId);
+  return stamp.db !== void 0 || stamp.pb !== void 0;
 }
 
 // packages/plugin/src/acp/adapters/antigravity-process.ts
@@ -96114,6 +96222,10 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       throw err5;
     }
   }
+  /** Session sync options derived from this client's (optionally isolated) brain dir. */
+  syncOptions() {
+    return this.brainDir === void 0 ? {} : { cliBrainDir: this.brainDir };
+  }
   sendPrompt(sessionId, promptText, timeoutMs) {
     if (this.currentPromptPending) {
       throw new AntigravityAcpError("PROMPT_IN_PROGRESS", "Another prompt is already in progress.");
@@ -96252,6 +96364,11 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           try {
             await this.watcher?.flush();
           } catch {
+          }
+          try {
+            await syncCliSessionToDesktop(this.activeConversationId ?? "", this.syncOptions());
+          } catch (err5) {
+            this.logger?.warn("Failed to mirror the CLI turn back to desktop", { error: String(err5) });
           }
           if (result.status === "ERROR") {
             current.reject(new AntigravityAcpError("ANTIGRAVITY_TURN_FAILED", String(result.error ?? "Execution error")));
