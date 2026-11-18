@@ -325,7 +325,16 @@ export class SessionTransferPeer {
       fail('SESSION_TRANSFER_WORKSPACE_UNAVAILABLE', 'The target workspace directory is unavailable.')
     }
     const sessionId = `session-${randomUUID()}`
-    const { inheritedEventCount, events } = source
+    const { inheritedEventCount } = source
+    const events = source.events.map(item => {
+      // Harness replays directory changes over the header when restoring a session.
+      if (item.type === 'working-directory/change') return { ...item, data: { cwd } }
+      if (item.type === 'plugin:worktree/created' || item.type === 'plugin:client-ui-forge/worktree') {
+        // Keep event references and the inherited prefix intact without transferring checkout ownership.
+        return { seq: item.seq, time: item.time, type: 'plugin:ds-harness-remote/omitted-worktree', ignorable: true, data: {} }
+      }
+      return item
+    })
     let header: TargetHeader
     try {
       header = sessions.prepare(sessionId, {
@@ -339,7 +348,7 @@ export class SessionTransferPeer {
     try {
       const handle = await persistence.create(header, { inheritedEventCount })
       try {
-        await handle.append(source.events)
+        await handle.append(events)
         await handle.flush()
       } finally {
         await handle.close()

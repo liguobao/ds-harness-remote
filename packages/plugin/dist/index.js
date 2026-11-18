@@ -101834,7 +101834,14 @@ var SessionTransferPeer = class {
       fail6("SESSION_TRANSFER_WORKSPACE_UNAVAILABLE", "The target workspace directory is unavailable.");
     }
     const sessionId = `session-${randomUUID16()}`;
-    const { inheritedEventCount, events } = source;
+    const { inheritedEventCount } = source;
+    const events = source.events.map((item) => {
+      if (item.type === "working-directory/change") return { ...item, data: { cwd: cwd2 } };
+      if (item.type === "plugin:worktree/created" || item.type === "plugin:client-ui-forge/worktree") {
+        return { seq: item.seq, time: item.time, type: "plugin:ds-harness-remote/omitted-worktree", ignorable: true, data: {} };
+      }
+      return item;
+    });
     let header;
     try {
       header = sessions.prepare(sessionId, {
@@ -101849,7 +101856,7 @@ var SessionTransferPeer = class {
     try {
       const handle = await persistence.create(header, { inheritedEventCount });
       try {
-        await handle.append(source.events);
+        await handle.append(events);
         await handle.flush();
       } finally {
         await handle.close();
