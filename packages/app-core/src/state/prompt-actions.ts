@@ -8,6 +8,7 @@ import {
   readCodexHistoryPage,
 } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
+import { resolveHarnessSendMode } from '../screens/chat/composer-gate'
 import type { ChatItem } from '../types'
 import { withCodexPermissionState } from './codex-session-state'
 import { findApproval, findQuestion, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
@@ -83,9 +84,14 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         }
       }
       const requestRpcId = reuseRpcId ?? createNativeRpcId()
-      // DSH semantics (`ui-conversation.busyEnter`): while a turn is active a
-      // prompt is queued (`mode:'queue'`), not merged into the running turn.
-      const queuedAtSend = session.running === true || get().busyAction === 'send-message'
+      // DSH semantics (`ui-conversation.busyEnter`): while a turn is active,
+      // prompts default to `'queue'` unless the user selected `'steer'`.
+      const runningAtSend = session.running === true || get().busyAction === 'send-message'
+      const harnessSendMode = resolveHarnessSendMode({
+        running: runningAtSend,
+        preferredMode: get().busySendMode,
+      })
+      const expectQueued = runningAtSend && harnessSendMode === 'queue'
       const optimistic: ChatItem = {
         kind: 'message',
         // `local:` prefix is load-bearing for mergeCodexLive's optimistic matching;
@@ -197,36 +203,54 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             }))
           }
         } else {
-          await runtime.connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
+          await runtime.connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images, [], harnessSendMode)
           // `session.prompt` acknowledges receipt only; keep busyAction until the
           // event stream shows the turn starting. When a turn was already active
-          // the Host queued the prompt (`inbox` projection is authoritative), so
-          // the row leaves the timeline and appears in the queue dock.
+          // and `mode === 'queue'`, the Host queued the prompt (`inbox`
+          // projection is authoritative), so the row leaves the timeline and
+          // appears in the queue dock. When `mode === 'steer'`, do not fall back
+          // to `'queued'`: the message stays in the timeline awaiting its echo.
           set(state => {
             const latest = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession : state.sessions.find(item => item.sessionId === session.sessionId)
             const inInbox = inboxRpcIds(latest?.projections?.values?.inbox).has(requestRpcId)
+            const sessionMessages = state.messages[session.sessionId] ?? []
+            const echoed = sessionMessages.some(item =>
+              item.kind === 'message' && !item.id.startsWith('local:') && item.requestRpcId === requestRpcId)
+            // Only idle prompts wait for `turn/start` to release `busyAction`;
+            // already-running turns (or adopted/echoed/switched sessions) release on ACK.
+            const releaseBusy = state.busyAction === 'send-message' && (
+              latest?.running === true
+              || inInbox
+              || echoed
+              || state.selectedSession?.sessionId !== session.sessionId
+            )
             return {
+              ...(releaseBusy ? { busyAction: undefined } : {}),
               messages: {
                 ...state.messages,
-                [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+                [session.sessionId]: sessionMessages.map(item =>
                   item.id === optimistic.id && item.kind === 'message' && item.sendState !== 'canceled'
                     ? {
                       ...item,
                       // A projection may already have queued or released this
                       // row while the acknowledgement was still in flight.
                       sendState: item.queuedAdopted === true ? item.sendState
-                        : inInbox ? 'queued' : item.sendState ?? (queuedAtSend ? 'queued' : undefined),
+                        : inInbox ? 'queued' : item.sendState ?? (expectQueued ? 'queued' : undefined),
                       ...(inInbox ? { queuedAdopted: true as const } : {}),
                     }
                     : item),
               },
             }
           })
-          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+          await Haptics.impactAsync(
+            harnessSendMode === 'steer' && runningAtSend
+              ? Haptics.ImpactFeedbackStyle.Medium
+              : Haptics.ImpactFeedbackStyle.Light,
+          )
           return 'sent'
         }
-        set({ busyAction: undefined })
+        set(state => state.busyAction === 'send-message' ? { busyAction: undefined } : {})
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
         return 'sent'
       } catch (error) {
@@ -251,7 +275,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
             selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
           } : {}),
-          busyAction: undefined,
+          ...(state.busyAction === 'send-message' ? { busyAction: undefined } : {}),
         }))
         return 'kept'
       }

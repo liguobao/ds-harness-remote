@@ -8,7 +8,7 @@ import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
 import { isActivityDockMode, isDrawerLayoutMode, isThemePreference, isTypographyDensity, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type DrawerLayoutMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
-import { isQuickPromptActionMode, type QuickPromptActionMode } from '../screens/chat/composer-gate'
+import { isBusySendMode, isQuickPromptActionMode, type BusySendMode, type QuickPromptActionMode } from '../screens/chat/composer-gate'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 /** Durable compaction attempt shape shared with `compaction-store`. */
@@ -35,6 +35,7 @@ const KEYS = {
   activityDockMode: 'dshremote.activity-dock-mode.v1',
   drawerLayoutMode: 'dshremote.drawer-layout-mode.v1',
   quickPromptActionMode: 'dshremote.quick-prompt-action-mode.v1',
+  busySendMode: 'dshremote.busy-send-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
@@ -631,6 +632,17 @@ export async function loadQuickPromptActionMode(): Promise<QuickPromptActionMode
 
 export async function saveQuickPromptActionMode(value: QuickPromptActionMode): Promise<void> {
   await writeJson(KEYS.quickPromptActionMode, { value })
+}
+
+export { isBusySendMode, type BusySendMode }
+
+export async function loadBusySendMode(): Promise<BusySendMode> {
+  const stored = await readJson<{ value: unknown }>(KEYS.busySendMode)
+  return isBusySendMode(stored?.value) ? stored.value : 'queue'
+}
+
+export async function saveBusySendMode(value: BusySendMode): Promise<void> {
+  await writeJson(KEYS.busySendMode, { value })
 }
 
 export async function loadChatAppearance(): Promise<ChatAppearance> {

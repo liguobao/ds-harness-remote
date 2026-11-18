@@ -886,7 +886,14 @@ export class HarnessAlphaClient {
     return this.callValue('fileUploads/upload', { agentId: sessionId, request: { data, ...(name === undefined ? {} : { name }) } })
   }
 
-  async sessionPrompt(sessionId: string, text: string, requestId = createRemoteId(), images: HarnessPromptImage[] = [], files: { receiptId: string }[] = []): Promise<void> {
+  async sessionPrompt(
+    sessionId: string,
+    text: string,
+    requestId = createRemoteId(),
+    images: HarnessPromptImage[] = [],
+    files: { receiptId: string }[] = [],
+    mode: 'queue' | 'steer' = 'queue',
+  ): Promise<void> {
     const timeZone = clientTimeZone()
     const content = [
       ...files.map(file => ({ type: 'file' as const, receiptId: file.receiptId })),
@@ -902,7 +909,7 @@ export class HarnessAlphaClient {
       request: {
         requestId,
         sessionId,
-        mode: 'queue',
+        mode,
         content,
         ...(timeZone === undefined ? {} : { clientTimeZone: timeZone }),
       },
