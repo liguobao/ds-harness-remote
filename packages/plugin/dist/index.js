@@ -66185,6 +66185,62 @@ var AgentAcpClient = class {
     }
     return result.selected;
   }
+  async sessionModes(sessionId, backend, signal) {
+    const result = await this.call("dsh/sessionModes", { sessionId, backend }, signal);
+    if (!isRecord2(result) || !Array.isArray(result.availableModes)) {
+      return { availableModes: [] };
+    }
+    return {
+      ...typeof result.currentModeId === "string" ? { currentModeId: result.currentModeId } : {},
+      availableModes: result.availableModes.flatMap((item) => isRecord2(item) && typeof item.id === "string" && typeof item.name === "string" ? [{ id: item.id, name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : [])
+    };
+  }
+  async setMode(sessionId, backend, modeId, signal) {
+    const result = await this.call("session/set_mode", { sessionId, backend, modeId }, signal);
+    return isRecord2(result) && typeof result.currentModeId === "string" ? { currentModeId: result.currentModeId } : { currentModeId: modeId };
+  }
+  async sessionCommands(sessionId, backend, signal) {
+    const result = await this.call("dsh/sessionCommands", { sessionId, backend }, signal);
+    if (!isRecord2(result) || !Array.isArray(result.commands))
+      return [];
+    return result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{ name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : []);
+  }
+  async forkSession(sessionId, backend, signal) {
+    const result = await this.call("session/fork", { sessionId, backend }, signal);
+    const forkedId = readString(result, "sessionId");
+    if (forkedId === void 0)
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session/fork did not return sessionId.");
+    return { sessionId: forkedId };
+  }
+  async createWorkspace(path, backend, title, signal) {
+    const result = await this.call("dsh/workspaceCreate", { backend, path, ...title ? { title } : {} }, signal);
+    if (!isRecord2(result) || typeof result.path !== "string") {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace creation failed.");
+    }
+    return result;
+  }
+  async renameWorkspace(path, backend, title, signal) {
+    const result = await this.call("dsh/workspaceRename", { backend, path, title }, signal);
+    if (!isRecord2(result) || typeof result.path !== "string") {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace rename failed.");
+    }
+    return result;
+  }
+  async deleteWorkspace(path, backend, signal) {
+    await this.call("dsh/workspaceDelete", { backend, path }, signal);
+  }
+  async reorderWorkspaces(backend, paths, signal) {
+    const result = await this.call("dsh/workspaceReorder", { backend, paths }, signal);
+    return isRecord2(result) && Array.isArray(result.paths) ? result.paths.filter((item) => typeof item === "string") : paths;
+  }
+  async pinSession(sessionId, backend, signal) {
+    const result = await this.call("dsh/sessionPin", { backend, sessionId }, signal);
+    return isRecord2(result) && Array.isArray(result.pinnedSessionIds) ? result.pinnedSessionIds.filter((item) => typeof item === "string") : [];
+  }
+  async unpinSession(sessionId, backend, signal) {
+    const result = await this.call("dsh/sessionUnpin", { backend, sessionId }, signal);
+    return isRecord2(result) && Array.isArray(result.pinnedSessionIds) ? result.pinnedSessionIds.filter((item) => typeof item === "string") : [];
+  }
   async selectPermission(sessionId, backend, preset, signal) {
     return this.call("dsh/selectPermission", { sessionId, backend, preset }, signal);
   }
@@ -66220,6 +66276,10 @@ var AgentAcpClient = class {
     return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
   }
   async loadSessionHistory(sessionId, backend, signal) {
+    const details2 = await this.loadSessionDetails(sessionId, backend, signal);
+    return details2.events;
+  }
+  async loadSessionDetails(sessionId, backend, signal) {
     const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
@@ -66231,7 +66291,21 @@ var AgentAcpClient = class {
     if ((backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes") && (!isRecord2(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
-    return isRecord2(result) && Array.isArray(result.events) ? result.events : [];
+    if (!isRecord2(result))
+      return { events: [] };
+    const events = Array.isArray(result.events) ? result.events : [];
+    const permissionPreset2 = typeof result.permissionPreset === "string" ? result.permissionPreset : void 0;
+    const modes = isRecord2(result.modes) && Array.isArray(result.modes.availableModes) ? {
+      ...typeof result.modes.currentModeId === "string" ? { currentModeId: result.modes.currentModeId } : {},
+      availableModes: result.modes.availableModes.flatMap((item) => isRecord2(item) && typeof item.id === "string" && typeof item.name === "string" ? [{ id: item.id, name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : [])
+    } : void 0;
+    const commands = Array.isArray(result.commands) ? result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{ name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : []) : void 0;
+    return {
+      events,
+      ...permissionPreset2 ? { permissionPreset: permissionPreset2 } : {},
+      ...modes ? { modes } : {},
+      ...commands ? { commands } : {}
+    };
   }
   async createSession(cwd2, mode2, backend, signal) {
     const result = await this.call("session/new", {
@@ -69313,16 +69387,16 @@ var BACKEND_PROVIDERS = {
   hermes: "hermes"
 };
 function acpWorkspacePrefix(backend) {
-  return WORKSPACE_PREFIXES[backend];
+  return WORKSPACE_PREFIXES[backend] ?? `${backend}:cwd:`;
 }
 function acpBackendLabel(backend) {
-  return BACKEND_LABELS[backend];
+  return BACKEND_LABELS[backend] ?? backend;
 }
 function acpBackendProvider(backend) {
-  return BACKEND_PROVIDERS[backend];
+  return BACKEND_PROVIDERS[backend] ?? backend;
 }
 function acpCwdWorkspaceId(path, backend) {
-  if (!(backend in WORKSPACE_PREFIXES)) throw new Error("An explicit ACP workspace backend is required.");
+  if (!backend || typeof backend !== "string") throw new Error("An explicit ACP workspace backend is required.");
   return `${acpWorkspacePrefix(backend)}${encodeURIComponent(path)}`;
 }
 function createAcpWorkspaceView(path, backend, title) {
@@ -69457,7 +69531,7 @@ function extractSessionId(request) {
   throw new Error("The sessionId is required.");
 }
 function sessionPrefix(backend) {
-  return SESSION_PREFIXES[backend] ?? CURSOR_SESSION_PREFIX;
+  return SESSION_PREFIXES[backend] ?? `${backend}:`;
 }
 function nativeAcpId(sessionId, backend) {
   const prefix = sessionPrefix(backend);
@@ -69616,7 +69690,7 @@ var AcpEventCarrier = class {
       value: {
         items: this.context.visibleWorkspaces().map(nativeWorkspace),
         archivedSessionIds: [...this.context.archivedSessionIds],
-        pinnedSessionIds: []
+        pinnedSessionIds: [...this.context.pinnedSessionIds]
       }
     });
     return queue.iterate(() => this.context.workspaceStreams.delete(queue));
@@ -69669,8 +69743,9 @@ var AcpEventCarrier = class {
     const pending = this.context.pendingApprovals.get(eventId);
     if (pending === void 0) return void 0;
     this.context.pendingApprovals.delete(eventId);
-    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "allow-once" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "reject-once";
-    await this.context.client.respond(pending.requestHandle, decision, void 0, signal);
+    const decision = outcome.kind === "result" && (outcome.value === "allowed-once" || outcome.value === "answered" || isRecord4(outcome.value)) ? "allow-once" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "reject-once";
+    const result = outcome.kind === "result" && isRecord4(outcome.value) ? { outcome: { outcome: "answered", ...outcome.value } } : void 0;
+    await this.context.client.respond(pending.requestHandle, decision, result, signal);
     return void 0;
   }
   publishProjection(sessionId, key, value, seq = this.context.nextProjectionSeq()) {
@@ -69762,7 +69837,10 @@ var AcpLiveProjection = class {
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
           modelSelection: this.context.modelSelectionProjection(session2.sessionId),
           permissions: this.context.permissionsProjection(session2.sessionId),
-          imageLimits: acpImageLimits(this.context.backend)
+          imageLimits: acpImageLimits(this.context.backend),
+          ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
+          ...session2.todos !== void 0 ? { todos: session2.todos } : {},
+          ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
         }
       },
       assistantStream
@@ -69878,6 +69956,59 @@ var AcpLiveProjection = class {
       }
       return;
     }
+    if (kind === "available_commands_update" && session2 !== void 0) {
+      const commands = normalizeAvailableCommands(update.availableCommands ?? update.commands);
+      if (commands !== void 0) {
+        session2.availableCommands = commands;
+        session2.updatedAt = Date.now();
+      }
+      return;
+    }
+    if (kind === "current_mode_update" && session2 !== void 0) {
+      const modeId = string4(update.currentModeId) ?? string4(update.modeId) ?? string4(update.mode);
+      if (modeId !== void 0 && modeId.length > 0) {
+        session2.agentPreset = modeId;
+        if (session2.modes !== void 0) {
+          session2.modes = { ...session2.modes, currentModeId: modeId };
+        }
+        session2.updatedAt = Date.now();
+        this.context.publishProjection(
+          follow.sessionId,
+          "agentPreset",
+          modeId,
+          this.context.nextProjectionSeq(follow.sessionId)
+        );
+      }
+      return;
+    }
+    if (kind === "usage_update" && session2 !== void 0) {
+      const usage = normalizeContextUsage(update);
+      if (usage !== void 0) {
+        session2.contextUsage = usage;
+        session2.updatedAt = Date.now();
+        this.context.publishProjection(
+          follow.sessionId,
+          "contextPressure",
+          contextPressureProjection(usage),
+          this.context.nextProjectionSeq(follow.sessionId)
+        );
+      }
+      return;
+    }
+    if ((kind === "cursor/update_todos" || kind === "plan") && session2 !== void 0) {
+      const todos = normalizeAcpTodos(update.todos ?? update.entries ?? update.items);
+      if (todos !== void 0) {
+        session2.todos = todos;
+        session2.updatedAt = Date.now();
+        this.context.publishProjection(
+          follow.sessionId,
+          "todos",
+          todos,
+          this.context.nextProjectionSeq(follow.sessionId)
+        );
+      }
+      return;
+    }
     if (follow.closed) return;
     if (kind === "model_selection" && isRecord4(update.selected) && update.selected.provider === this.context.backend && typeof update.selected.model === "string") {
       this.context.selectedModels.set(follow.sessionId, update.selected);
@@ -69895,20 +70026,20 @@ var AcpLiveProjection = class {
       const status2 = string4(update.status);
       const callId = string4(update.toolCallId) ?? string4(update.callId) ?? toolName;
       const terminal = status2 === "completed" || status2 === "failed";
+      const termDelta = record2(record2(update._meta).terminal_output).data;
       if (this.context.backend === "pi") {
-        const call = follow.piToolCalls.get(callId) ?? { name: toolName };
-        if (typeof update.title === "string") call.name = update.title;
-        if (update.rawInput !== void 0) call.input = update.rawInput;
-        follow.piToolCalls.set(callId, call);
+        const call2 = follow.piToolCalls.get(callId) ?? { name: toolName };
+        if (typeof update.title === "string") call2.name = update.title;
+        if (update.rawInput !== void 0) call2.input = update.rawInput;
+        follow.piToolCalls.set(callId, call2);
         const output2 = piToolResult(update);
-        const delta = record2(record2(update._meta).terminal_output).data;
-        if (typeof delta === "string") {
+        if (typeof termDelta === "string") {
           const buffered = follow.piToolOutputs.get(callId) ?? { text: "", overflow: false };
           if (!buffered.overflow) {
-            if (buffered.text.length + delta.length > 1048576) {
+            if (buffered.text.length + termDelta.length > 1048576) {
               buffered.text = "";
               buffered.overflow = true;
-            } else buffered.text += delta;
+            } else buffered.text += termDelta;
           }
           follow.piToolOutputs.set(callId, buffered);
         }
@@ -69922,9 +70053,9 @@ var AcpLiveProjection = class {
             step: follow.piStep ?? 1,
             callId,
             toolCallId: callId,
-            name: call.name,
-            toolName: call.name,
-            arguments: typeof call.input === "string" ? call.input : call.input != null ? JSON.stringify(call.input) : "{}",
+            name: call2.name,
+            toolName: call2.name,
+            arguments: typeof call2.input === "string" ? call2.input : call2.input != null ? JSON.stringify(call2.input) : "{}",
             status: terminal ? status2 === "failed" ? "failed" : "finished" : "running"
           });
           follow.activeToolCalls.add(callId);
@@ -69957,23 +70088,55 @@ var AcpLiveProjection = class {
         if (session2 !== void 0) session2.updatedAt = Date.now();
         return;
       }
-      if (kind === "tool_call_update" && !terminal) return;
-      if (!terminal && follow.activeToolCalls.has(callId)) return;
-      if (!terminal || !follow.activeToolCalls.has(callId)) {
+      if (typeof termDelta === "string") {
+        const buffered = follow.piToolOutputs.get(callId) ?? { text: "", overflow: false };
+        if (!buffered.overflow) {
+          if (buffered.text.length + termDelta.length > 1048576) {
+            buffered.text = "";
+            buffered.overflow = true;
+          } else buffered.text += termDelta;
+        }
+        follow.piToolOutputs.set(callId, buffered);
+      }
+      const existingCall = follow.piToolCalls.get(callId);
+      const call = existingCall ?? { name: toolName };
+      if (typeof update.title === "string") call.name = update.title;
+      if (update.parameters !== void 0) call.input = update.parameters;
+      else if (update.rawInput !== void 0) call.input = update.rawInput;
+      follow.piToolCalls.set(callId, call);
+      if (!follow.activeToolCalls.has(callId)) {
+        if (!terminal && kind === "tool_call_update" && status2 !== "in_progress" && status2 !== "pending") {
+          if (session2 !== void 0) session2.updatedAt = Date.now();
+          return;
+        }
+        if (!follow.stepOpen) {
+          follow.turn += 1;
+          follow.stepOpen = true;
+          this.pushEvent(follow, "turn/start", { turn: follow.turn });
+          this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+        }
         this.pushEvent(follow, "tool/call", {
           turn: follow.turn,
           step: 1,
           callId,
-          name: toolName,
-          arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
+          name: call.name,
+          arguments: typeof call.input === "string" ? call.input : isRecord4(call.input) ? JSON.stringify(call.input) : "{}",
           toolCallId: callId,
-          toolName,
+          toolName: call.name,
           status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
         });
+        if (!terminal) follow.activeToolCalls.add(callId);
+      } else if (!terminal) {
+        if (session2 !== void 0) session2.updatedAt = Date.now();
+        return;
       }
       if (terminal) {
         const output2 = piToolResult(update);
-        const content = output2.content.length > 0 ? output2.content : typeof update.rawOutput === "string" && update.rawOutput.length > 0 ? [{ type: "text", text: update.rawOutput }] : [];
+        const buffered = follow.piToolOutputs.get(callId);
+        const content = output2.content.length > 0 ? output2.content : buffered !== void 0 ? [{
+          type: "text",
+          text: buffered.overflow ? "[Tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
+        }] : typeof update.rawOutput === "string" && update.rawOutput.length > 0 ? [{ type: "text", text: update.rawOutput }] : update.rawOutput !== void 0 && update.rawOutput !== null ? [{ type: "text", text: JSON.stringify(update.rawOutput) }] : [];
         this.pushEvent(follow, "tool/result", {
           turn: follow.turn,
           step: 1,
@@ -69989,9 +70152,9 @@ var AcpLiveProjection = class {
             source: { kind: "tool", callId }
           }
         });
+        follow.piToolOutputs.delete(callId);
+        follow.piToolCalls.delete(callId);
         follow.activeToolCalls.delete(callId);
-      } else {
-        follow.activeToolCalls.add(callId);
       }
       if (session2 !== void 0) session2.updatedAt = Date.now();
       return;
@@ -70007,10 +70170,11 @@ var AcpLiveProjection = class {
       if (!hasLiveContent && Array.isArray(update.catchUp)) {
         for (const item of update.catchUp) {
           if (!isRecord4(item) || typeof item.method !== "string") continue;
-          const params2 = isRecord4(item.params) ? item.params : {};
-          if (item.method === "session/update") this.acceptSessionUpdate(follow, params2);
+          const catchUpParams = isRecord4(item.params) ? item.params : {};
+          if (item.method === "session/update") this.acceptSessionUpdate(follow, catchUpParams);
         }
       }
+      const usage = normalizeAcpUsage(update.usage);
       if (session2 !== void 0) {
         session2.running = false;
         session2.updatedAt = Date.now();
@@ -70018,7 +70182,7 @@ var AcpLiveProjection = class {
         this.context.publishWorkspaceBaseline();
         if (kind === "prompt_completed") void this.context.refreshSessionTitle(session2);
       }
-      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update));
+      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update), false, usage);
     }
   }
   acceptApproval(follow, params, method) {
@@ -70037,7 +70201,14 @@ var AcpLiveProjection = class {
       agentId: follow.sessionId,
       request: {
         toolName,
-        ...reason === void 0 ? {} : { reason }
+        method,
+        ...reason === void 0 ? {} : { reason },
+        ...method === "cursor/ask_question" && Array.isArray(params.questions) ? { questions: params.questions, ...typeof params.title === "string" ? { title: params.title } : {} } : {},
+        ...method === "cursor/create_plan" ? {
+          ...typeof params.name === "string" ? { name: params.name } : {},
+          ...typeof params.overview === "string" ? { overview: params.overview } : {},
+          ...typeof params.plan === "string" ? { plan: params.plan } : {}
+        } : {}
       }
     });
   }
@@ -70156,7 +70327,7 @@ var AcpLiveProjection = class {
     }
     return { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
   }
-  finishPiAssistant(follow, outcome = { kind: "completed" }) {
+  finishPiAssistant(follow, outcome = { kind: "completed" }, usage) {
     if (!follow.streamActive) return;
     const isPi = this.context.backend === "pi";
     const step = isPi ? follow.piStep ?? 1 : 1;
@@ -70177,8 +70348,10 @@ var AcpLiveProjection = class {
         id: isPi ? `${follow.sessionId}:${follow.turn}:${step}` : `${follow.sessionId}:${follow.turn}`,
         role: "assistant",
         content: blocks.map(({ type, text }) => ({ type, text })),
-        source: { kind: "model", provider: selection.provider, model: selection.model }
+        source: { kind: "model", provider: selection.provider, model: selection.model },
+        ...usage !== void 0 ? { usage } : {}
       },
+      ...usage !== void 0 ? { usage } : {},
       stream: follow.assistantAttempt?.stream ?? []
     });
     this.endAssistantAttempt(follow, { kind: "committed", eventType: "assistant/message", seq });
@@ -70189,16 +70362,20 @@ var AcpLiveProjection = class {
     follow.accumulatedReasoning = "";
     follow.piReasoning = "";
   }
-  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }, remoteClosed = false) {
+  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }, remoteClosed = false, usage) {
     if (follow.closed) return;
     const session2 = this.context.sessions.get(follow.sessionId);
     if (session2 !== void 0) session2.running = false;
     const isPi = this.context.backend === "pi";
     const step = isPi ? follow.piStep ?? 1 : 1;
-    this.finishPiAssistant(follow, outcome);
+    this.finishPiAssistant(follow, outcome, usage);
     if (follow.stepOpen) {
       this.pushEvent(follow, "step/end", { turn: follow.turn, step });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
+      this.pushEvent(follow, "turn/end", {
+        turn: follow.turn,
+        reason: outcome,
+        ...usage !== void 0 ? { usage } : {}
+      });
     }
     follow.stepOpen = false;
     if (isPi) {
@@ -70239,6 +70416,79 @@ var AcpLiveProjection = class {
     return seq;
   }
 };
+function nonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
+function normalizeAcpUsage(value) {
+  if (!isRecord4(value)) return void 0;
+  const totalTokens = nonNegativeNumber(value.totalTokens);
+  const inputTokens = nonNegativeNumber(value.inputTokens);
+  const outputTokens = nonNegativeNumber(value.outputTokens);
+  const cacheReadTokens = nonNegativeNumber(value.cacheReadTokens ?? value.cachedReadTokens);
+  const cacheWriteTokens = nonNegativeNumber(value.cacheWriteTokens ?? value.cachedWriteTokens);
+  const reasoningTokens = nonNegativeNumber(value.reasoningTokens ?? value.thoughtTokens);
+  if (totalTokens === void 0 && inputTokens === void 0 && outputTokens === void 0 && cacheReadTokens === void 0 && cacheWriteTokens === void 0 && reasoningTokens === void 0) {
+    return void 0;
+  }
+  const computedTotal = totalTokens ?? (inputTokens ?? 0) + (outputTokens ?? 0) + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0) + (reasoningTokens ?? 0);
+  return {
+    totalTokens: computedTotal,
+    ...inputTokens !== void 0 ? { inputTokens } : {},
+    ...outputTokens !== void 0 ? { outputTokens } : {},
+    ...cacheReadTokens !== void 0 ? { cacheReadTokens } : {},
+    ...cacheWriteTokens !== void 0 ? { cacheWriteTokens } : {},
+    ...reasoningTokens !== void 0 ? { reasoningTokens } : {}
+  };
+}
+function normalizeContextUsage(value) {
+  const used = nonNegativeNumber(value.used);
+  const size2 = nonNegativeNumber(value.size);
+  if (used === void 0 && size2 === void 0) return void 0;
+  return {
+    used: used ?? 0,
+    size: size2 ?? 0
+  };
+}
+function contextPressureProjection(usage) {
+  const ratio = usage.size > 0 ? Math.min(1, Math.max(0, usage.used / usage.size)) : 0;
+  return {
+    used: usage.used,
+    size: usage.size,
+    ratio
+  };
+}
+function normalizeAvailableCommands(value) {
+  if (!Array.isArray(value)) return void 0;
+  const items = [];
+  for (const entry of value) {
+    if (!isRecord4(entry) || typeof entry.name !== "string" || entry.name.trim().length === 0) continue;
+    const input4 = isRecord4(entry.input) && typeof entry.input.hint === "string" ? { hint: entry.input.hint } : void 0;
+    items.push({
+      name: entry.name.trim(),
+      ...typeof entry.description === "string" ? { description: entry.description } : {},
+      ...input4 !== void 0 ? { input: input4 } : {}
+    });
+  }
+  return items;
+}
+function normalizeAcpTodos(value) {
+  if (!Array.isArray(value)) return void 0;
+  const items = [];
+  for (const entry of value) {
+    if (!isRecord4(entry)) continue;
+    const content = string4(entry.content) ?? string4(entry.title) ?? string4(entry.label);
+    if (content === void 0 || content.trim().length === 0) continue;
+    const rawStatus = string4(entry.status);
+    const status2 = rawStatus === "completed" || rawStatus === "done" ? "completed" : rawStatus === "in_progress" || rawStatus === "inProgress" || rawStatus === "running" ? "in_progress" : "pending";
+    const priority = string4(entry.priority);
+    items.push({
+      content: content.trim(),
+      status: status2,
+      ...priority !== void 0 ? { priority } : {}
+    });
+  }
+  return items;
+}
 
 // packages/plugin/src/acp/virtual-titles.ts
 var OPENCODE_DEFAULT_TITLE = /^(?:New|Child) session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -70395,7 +70645,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       get sessions() {
         return owner.sessions;
       },
-      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args)
+      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
+      get pinnedSessionIds() {
+        return owner.pinnedSessionIds;
+      }
     });
     this.titles = new AcpSessionTitles(
       backend,
@@ -70433,6 +70686,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   imageAttachments = /* @__PURE__ */ new Map();
   closed = false;
   archivedSessionIds = /* @__PURE__ */ new Set();
+  pinnedSessionIds = /* @__PURE__ */ new Set();
+  workspaceOrder = [];
   unsubscribeArchived;
   static remote(core, host, backend = "cursor", capabilities = [], hostCarrier, historyCache) {
     return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier, historyCache);
@@ -70462,10 +70717,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   backendLabel() {
     return acpBackendLabel(this.backend);
   }
+  rememberWorkspace(workspace2) {
+    this.workspaceById.set(workspace2.workspaceId, workspace2);
+    if (!this.workspaceOrder.includes(workspace2.workspaceId)) {
+      this.workspaceOrder.push(workspace2.workspaceId);
+    }
+  }
   async selectWorkspace(workspaceId) {
     const workspace2 = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
     if (workspace2 === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
-    this.workspaceById.set(workspace2.workspaceId, workspace2);
+    this.rememberWorkspace(workspace2);
     this.selectedWorkspaceId = workspace2.workspaceId;
     await this.discoverAndAttachSessions(workspace2);
     if (workspace2.sessionIds.length === 0) {
@@ -70474,12 +70735,25 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return this.workspaceById.get(workspace2.workspaceId) ?? workspace2;
   }
-  async selectOrCreateWorkspace(path) {
+  async selectOrCreateWorkspace(path, title) {
     const trimmed = path.trim();
     if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`);
     const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
-    const workspace2 = existing ?? createAcpWorkspaceView(trimmed, this.backend);
-    this.workspaceById.set(workspace2.workspaceId, workspace2);
+    let persisted;
+    if (existing === void 0 && this.client.createWorkspace !== void 0) {
+      try {
+        persisted = await this.client.createWorkspace(trimmed, this.backend, title);
+      } catch (err5) {
+        const code = err5 && typeof err5 === "object" && "code" in err5 ? err5.code : void 0;
+        if (code !== "METHOD_NOT_FOUND" && code !== "method-not-found" && code !== -32601) {
+          throw err5;
+        }
+      }
+    }
+    const resolvedPath = persisted?.path ?? trimmed;
+    const resolvedTitle = persisted?.title ?? title;
+    const workspace2 = existing ?? createAcpWorkspaceView(resolvedPath, this.backend, resolvedTitle);
+    this.rememberWorkspace(workspace2);
     this.selectedWorkspaceId = workspace2.workspaceId;
     await this.discoverAndAttachSessions(workspace2);
     if (workspace2.sessionIds.length === 0) {
@@ -70538,32 +70812,34 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(success2({
             items: this.visibleWorkspaces().map(nativeWorkspace),
             archivedSessionIds: [...this.archivedSessionIds],
-            pinnedSessionIds: []
+            pinnedSessionIds: [...this.pinnedSessionIds]
           }));
         case "workspace/create":
           return business(await this.createWorkspace(requestArg(args)));
         case "workspace/rename":
           return business(await this.renameWorkspace(requestArg(args)));
         case "workspace/delete":
-          return business(failure2("workspace-read-only", `${this.backendLabel()} virtual Workspaces cannot be deleted from Desktop yet.`));
+          return business(await this.deleteWorkspace(requestArg(args)));
         case "workspace/insertBefore":
-          return business({
-            workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId)
-          });
+          return business(await this.reorderWorkspaces(requestArg(args)));
         case "workspace/insertSessionBefore":
           return business(await this.workspaceForSession(requestArg(args)));
         case "workspace/archiveSession":
           return business(await this.archiveSession(requestArg(args)));
+        case "workspace/pinSession":
+          return business(await this.pinSession(requestArg(args)));
+        case "workspace/unpinSession":
+          return business(await this.unpinSession(requestArg(args)));
         case "session/list":
           return business(success2({ items: await this.handleSessionList() }));
         case "session/projections":
           return business(await this.sessionProjections(requestArg(args)));
         case "session/search":
-          return business(success2({ items: [], hasMore: false }));
+          return business(success2(this.searchSessions(requestArg(args))));
         case "session/create":
           return business(await this.createSession(requestArg(args), signal));
         case "session/fork":
-          return business(failure2("bad-request", `${this.backendLabel()} Remote does not support session fork yet.`));
+          return business(await this.forkSession(requestArg(args), signal));
         case "session/history":
           return business(await this.sessionHistory(requestArg(args)));
         case "session/events":
@@ -70579,6 +70855,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(failure2("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
         case "session/attachment":
           return business(await this.attachment(requestArg(args)));
+        case "agentPresets/list":
+          return business(await this.agentPresetsList());
+        case "agentPresets/select":
+          return business(await this.agentPresetSelect(args, signal));
         case "session/modelCatalog": {
           const sessionId = await this.preferredSessionId();
           const catalog = modelCatalog(this.backend);
@@ -70620,9 +70900,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "job/kill":
           return business(success2({ outcome: "already-finished" }));
         case "commands/list":
-          return business(this.commandList(requestArg(args)));
+          return business(await this.commandList(requestArg(args)));
         case "commands/execute":
-          return business(await this.executeCommand(requestArg(args)));
+          return business(await this.executeCommand(requestArg(args), signal));
         default:
           return this.hostCarrier !== void 0 && isAllowedHostCarrierDispatch(endpoint) ? await this.hostCarrier.dispatch(endpoint, payload, signal) : fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`);
       }
@@ -70682,20 +70962,30 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.pendingApprovals.clear();
     this.imageAttachments.clear();
   }
+  hasExplicitWorkspaceOrder = false;
   visibleWorkspaces() {
     for (const workspace2 of this.workspaceById.values()) this.sortWorkspaceSessions(workspace2);
-    if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
+    const ordered = [];
+    for (const id6 of this.workspaceOrder) {
+      const item = this.workspaceById.get(id6);
+      if (item !== void 0) ordered.push(item);
+    }
+    for (const item of this.workspaceById.values()) {
+      if (!ordered.some((existing) => existing.workspaceId === item.workspaceId)) ordered.push(item);
+    }
+    if (this.hasExplicitWorkspaceOrder || this.selectedWorkspaceId === void 0) return ordered;
     const selected = this.workspaceById.get(this.selectedWorkspaceId);
-    if (selected === void 0) return [...this.workspaceById.values()];
+    if (selected === void 0) return ordered;
     return [
       selected,
-      ...[...this.workspaceById.values()].filter((item) => item.workspaceId !== selected.workspaceId)
+      ...ordered.filter((item) => item.workspaceId !== selected.workspaceId)
     ];
   }
   async createWorkspace(request) {
     const path = string4(request.path)?.trim();
-    if (path === void 0 || path.length === 0) return failure2("bad-request", "A Cursor working directory is required.");
-    const workspace2 = await this.selectOrCreateWorkspace(path);
+    const title = string4(request.title)?.trim();
+    if (path === void 0 || path.length === 0) return failure2("bad-request", `A ${this.backendLabel()} working directory is required.`);
+    const workspace2 = await this.selectOrCreateWorkspace(path, title);
     this.publishWorkspaceBaseline();
     return success2({ workspace: nativeWorkspace(workspace2), created: true });
   }
@@ -70703,12 +70993,154 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const workspaceId = requiredString(request.workspaceId, "workspaceId");
     const title = string4(request.title)?.trim();
     const workspace2 = this.workspaceById.get(workspaceId);
-    if (workspace2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    if (workspace2 === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
     if (title === void 0 || title.length === 0) return failure2("bad-request", "A Workspace name is required.");
+    if (this.client.renameWorkspace !== void 0) {
+      await this.client.renameWorkspace(workspace2.path, this.backend, title);
+    }
     const next = { ...workspace2, title, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
     this.workspaceById.set(workspaceId, next);
     this.publishWorkspaceBaseline();
     return success2({ workspace: nativeWorkspace(next) });
+  }
+  async deleteWorkspace(request) {
+    const workspaceId = requiredString(request.workspaceId, "workspaceId");
+    const workspace2 = this.workspaceById.get(workspaceId);
+    if (workspace2 === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
+    if (this.client.deleteWorkspace !== void 0) {
+      await this.client.deleteWorkspace(workspace2.path, this.backend);
+    }
+    this.workspaceById.delete(workspaceId);
+    const idx = this.workspaceOrder.indexOf(workspaceId);
+    if (idx !== -1) this.workspaceOrder.splice(idx, 1);
+    if (this.selectedWorkspaceId === workspaceId) {
+      this.selectedWorkspaceId = this.visibleWorkspaces()[0]?.workspaceId;
+    }
+    this.publishWorkspaceBaseline();
+    return success2({ workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId) });
+  }
+  async reorderWorkspaces(request) {
+    const workspaceId = requiredString(request.workspaceId, "workspaceId");
+    const beforeWorkspaceId = string4(request.beforeWorkspaceId);
+    const current = this.visibleWorkspaces().map((item) => item.workspaceId);
+    if (!current.includes(workspaceId)) {
+      return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
+    }
+    const remaining = current.filter((id6) => id6 !== workspaceId);
+    const targetIdx = beforeWorkspaceId !== void 0 ? remaining.indexOf(beforeWorkspaceId) : -1;
+    if (targetIdx === -1) remaining.push(workspaceId);
+    else remaining.splice(targetIdx, 0, workspaceId);
+    this.workspaceOrder.splice(0, this.workspaceOrder.length, ...remaining);
+    this.hasExplicitWorkspaceOrder = true;
+    if (this.client.reorderWorkspaces !== void 0) {
+      const paths = remaining.map((id6) => this.workspaceById.get(id6)?.path).filter((p) => p !== void 0);
+      await this.client.reorderWorkspaces(this.backend, paths);
+    }
+    this.publishWorkspaceBaseline();
+    return success2({ workspaceIds: remaining });
+  }
+  async pinSession(request) {
+    const sessionId = this.resolveSessionId(extractSessionId(request));
+    if (this.client.pinSession !== void 0) {
+      const updated = await this.client.pinSession(nativeAcpId(sessionId, this.backend), this.backend);
+      this.pinnedSessionIds.clear();
+      for (const raw of updated) {
+        this.pinnedSessionIds.add(raw.startsWith(sessionPrefix(this.backend)) ? raw : `${sessionPrefix(this.backend)}${raw}`);
+      }
+    } else {
+      this.pinnedSessionIds.add(sessionId);
+    }
+    this.publishWorkspaceBaseline();
+    return success2({ pinnedSessionIds: [...this.pinnedSessionIds] });
+  }
+  async unpinSession(request) {
+    const sessionId = this.resolveSessionId(extractSessionId(request));
+    if (this.client.unpinSession !== void 0) {
+      const updated = await this.client.unpinSession(nativeAcpId(sessionId, this.backend), this.backend);
+      this.pinnedSessionIds.clear();
+      for (const raw of updated) {
+        this.pinnedSessionIds.add(raw.startsWith(sessionPrefix(this.backend)) ? raw : `${sessionPrefix(this.backend)}${raw}`);
+      }
+    } else {
+      this.pinnedSessionIds.delete(sessionId);
+    }
+    this.publishWorkspaceBaseline();
+    return success2({ pinnedSessionIds: [...this.pinnedSessionIds] });
+  }
+  searchSessions(request) {
+    const query = (string4(request.query) ?? "").trim().toLowerCase();
+    const workspaceId = string4(request.workspaceId);
+    const allowedWorkspace = workspaceId !== void 0 ? this.workspaceById.get(workspaceId) : void 0;
+    const allowedIds = allowedWorkspace !== void 0 ? new Set(allowedWorkspace.sessionIds) : void 0;
+    const limit = optionalPositiveInteger(request.limit) ?? 30;
+    const matched = [...this.sessions.values()].filter((session2) => !this.archivedSessionIds.has(session2.sessionId)).filter((session2) => allowedIds === void 0 || allowedIds.has(session2.sessionId)).filter((session2) => {
+      if (!query) return true;
+      if ((session2.title ?? "").toLowerCase().includes(query)) return true;
+      if (session2.cwd.toLowerCase().includes(query)) return true;
+      return session2.events.some((entry) => {
+        const text = JSON.stringify(entry.event.data ?? "").toLowerCase();
+        return text.includes(query);
+      });
+    }).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId));
+    const slice = matched.slice(0, limit).map((session2) => this.sessionSummary(session2, session2.projectionSeq ?? -1));
+    return { items: slice, hasMore: matched.length > slice.length };
+  }
+  async forkSession(request, signal) {
+    const rawId = extractSessionId(request);
+    const source = this.lookupSession(rawId);
+    if (source === void 0) return failure2("session-not-found", "The Session was not found.");
+    if (this.client.forkSession === void 0) {
+      return failure2("fork-unavailable", `${this.backendLabel()} Remote does not support session fork yet.`);
+    }
+    const forked = await this.client.forkSession(source.acpSessionId, this.backend, signal);
+    const session2 = this.registerSession(forked.sessionId, source.cwd, source.title ? `${source.title} (fork)` : void 0, Date.now(), Date.now(), source.blank);
+    if (source.modes !== void 0) session2.modes = { ...source.modes };
+    if (source.agentPreset !== void 0) session2.agentPreset = source.agentPreset;
+    this.attachSessionToWorkspace(source.cwd, session2.sessionId);
+    this.publishWorkspaceBaseline();
+    const summarySeq = this.nextProjectionSeq(session2.sessionId);
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, summarySeq)]);
+    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), this.nextProjectionSeq(session2.sessionId));
+    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), this.nextProjectionSeq(session2.sessionId));
+    return success2({ sessionId: session2.sessionId });
+  }
+  async agentPresetsList() {
+    const sessionId = await this.preferredSessionId();
+    if (sessionId === void 0 || this.client.sessionModes === void 0) {
+      return success2({ presets: [] });
+    }
+    const session2 = this.sessions.get(sessionId);
+    const modes = session2?.modes ?? await this.client.sessionModes(nativeAcpId(sessionId, this.backend), this.backend);
+    if (session2 !== void 0) {
+      session2.modes = modes;
+      if (modes.currentModeId) session2.agentPreset = modes.currentModeId;
+    }
+    const presets = modes.availableModes.map((mode2) => ({
+      id: mode2.id,
+      isDefault: mode2.id === "default" || mode2.id === modes.currentModeId,
+      ...mode2.name !== void 0 ? { name: mode2.name } : {},
+      ...mode2.description !== void 0 ? { description: mode2.description } : {}
+    }));
+    return success2({ presets });
+  }
+  async agentPresetSelect(args, signal) {
+    const req = requestArg(args);
+    const rawId = string4(args.agentId) ?? extractSessionId(req);
+    const sessionId = this.resolveSessionId(rawId);
+    const session2 = this.sessions.get(sessionId);
+    const agentPreset = requiredString(args.agentPreset ?? req.agentPreset ?? req.modeId, "agentPreset");
+    if (this.client.setMode === void 0) {
+      return failure2("mode-unavailable", `${this.backendLabel()} Remote does not support mode switching.`);
+    }
+    const result = await this.client.setMode(nativeAcpId(sessionId, this.backend), this.backend, agentPreset, signal);
+    const committed = result.currentModeId ?? agentPreset;
+    if (session2 !== void 0) {
+      session2.agentPreset = committed;
+      if (session2.modes !== void 0) session2.modes = { ...session2.modes, currentModeId: committed };
+    }
+    const seq = this.nextProjectionSeq(sessionId);
+    this.events.publishProjection(sessionId, "agentPreset", committed, seq);
+    return success2(committed);
   }
   async workspaceForSession(request) {
     const sessionId = string4(request.sessionId);
@@ -70926,7 +71358,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return cached2?.sessionId === session2.sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
   }
   async hydrateSession(session2) {
-    if (this.backend === "cursor" || session2.blank || session2.events.length > 0 && !session2.staleHistory) return;
+    if (session2.blank || session2.events.length > 0 && !session2.staleHistory) return;
     const cached2 = this.historyCache.getFresh(session2.sessionId);
     if (cached2 !== void 0 && (!Number.isFinite(session2.updatedAt) || session2.updatedAt === cached2.hostUpdatedAt)) {
       this.restoreCachedSession(session2, cached2, false);
@@ -70944,7 +71376,29 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async hydrateSessionOnce(session2) {
     let events = [];
-    if (this.client.loadSessionHistory !== void 0) {
+    if (this.client.loadSessionDetails !== void 0) {
+      try {
+        const details2 = await this.client.loadSessionDetails(session2.sessionId, this.backend);
+        events = details2.events;
+        if (details2.modes !== void 0) {
+          session2.modes = details2.modes;
+          if (details2.modes.currentModeId) session2.agentPreset = details2.modes.currentModeId;
+        }
+        if (details2.availableCommands !== void 0) {
+          session2.availableCommands = details2.availableCommands;
+        }
+        if (details2.permissionPreset !== void 0 && isAcpPermissionPreset(details2.permissionPreset) && !this.selectedPermissions.has(session2.sessionId)) {
+          this.selectedPermissions.set(session2.sessionId, details2.permissionPreset);
+        }
+      } catch (error62) {
+        const stale = this.historyCache.getStale(session2.sessionId);
+        if (stale !== void 0 && stale.events.length > 0) {
+          this.restoreCachedSession(session2, stale, true);
+          return;
+        }
+        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode" || this.backend === "hermes") throw error62;
+      }
+    } else if (this.client.loadSessionHistory !== void 0) {
       try {
         events = await this.client.loadSessionHistory(session2.sessionId, this.backend);
       } catch (error62) {
@@ -70988,7 +71442,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
   }
   syncSessionCache(session2) {
-    if (this.backend === "cursor") return;
     const existing = this.historyCache.getStale(session2.sessionId);
     const isStale = Boolean(session2.running || session2.staleHistory);
     const hostUpdatedAt = session2.staleHistory && existing !== void 0 ? existing.hostUpdatedAt : session2.updatedAt;
@@ -71031,7 +71484,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           permissions: this.permissionsProjection(sessionId),
-          imageLimits: acpImageLimits(this.backend)
+          imageLimits: acpImageLimits(this.backend),
+          ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
+          ...session2.todos !== void 0 ? { todos: session2.todos } : {},
+          ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
         }
       }
     });
@@ -71115,7 +71571,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return session2;
   }
   async discoverAndAttachSessions(workspace2) {
-    if (this.backend === "cursor") return;
     const previousTitles = new Map([...this.sessions].map(([id6, session2]) => [id6, session2.title]));
     try {
       let discovered = [];
@@ -71138,6 +71593,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
             this.titles.applyNative(existing, item.title);
           }
         }
+        if (item.pinned) this.pinnedSessionIds.add(sessionId);
         if (!this.archivedSessionIds.has(sessionId) && !workspace2.sessionIds.includes(sessionId)) {
           workspace2.sessionIds.push(sessionId);
         }
@@ -71158,7 +71614,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       sessionCount: sessionIds.length,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
     };
-    this.workspaceById.set(next.workspaceId, next);
+    this.rememberWorkspace(next);
     if (this.selectedWorkspaceId === void 0) this.selectedWorkspaceId = next.workspaceId;
   }
   async ensureInitialSession(workspace2) {
@@ -71208,7 +71664,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           sessionListMetadata: { blank: session2.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session2.sessionId),
           permissions: this.permissionsProjection(session2.sessionId),
-          imageLimits: acpImageLimits(this.backend)
+          imageLimits: acpImageLimits(this.backend),
+          ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
+          ...session2.todos !== void 0 ? { todos: session2.todos } : {},
+          ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
         }
       }
     };
@@ -71258,37 +71717,80 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       void this.client.selectPermission(nativeAcpId(resolved, this.backend), this.backend, preset ?? "workspace-write").catch(() => void 0);
     }
   }
-  commandList(args) {
+  async commandList(args) {
     const rawId = extractSessionId(args);
-    if (rawId) this.resolveSessionId(rawId);
-    return [{
-      name: "permission",
-      description: `Switch the ${this.backendLabel()} Remote sandbox mode and approval policy`,
-      input: { hint: "<preset>" }
-    }];
+    const sessionId = rawId ? this.resolveSessionId(rawId) : void 0;
+    const session2 = sessionId ? this.sessions.get(sessionId) : void 0;
+    const base = [
+      {
+        name: "permission",
+        description: `Switch the ${this.backendLabel()} Remote sandbox mode and approval policy`,
+        input: { hint: "<preset>" }
+      }
+    ];
+    let remote = session2?.availableCommands ?? [];
+    if (remote.length === 0 && sessionId !== void 0 && this.client.sessionCommands !== void 0) {
+      try {
+        remote = await this.client.sessionCommands(nativeAcpId(sessionId, this.backend), this.backend);
+        if (session2 !== void 0 && remote.length > 0) session2.availableCommands = remote;
+      } catch {
+      }
+    }
+    const merged = [...base];
+    for (const cmd of remote) {
+      if (merged.some((item) => item.name === cmd.name)) continue;
+      const hint = typeof cmd.input?.hint === "string" ? cmd.input.hint : void 0;
+      merged.push({
+        name: cmd.name,
+        description: cmd.description ?? `Run /${cmd.name} on ${this.backendLabel()}`,
+        ...hint !== void 0 ? { input: { hint } } : {}
+      });
+    }
+    if ((this.client.sessionCommands !== void 0 || remote.length > 0) && !merged.some((item) => item.name === "compact")) {
+      merged.push({
+        name: "compact",
+        description: `Compact conversation history in ${this.backendLabel()}`
+      });
+    }
+    return merged;
   }
-  async executeCommand(args) {
+  async executeCommand(args, signal) {
     const rawId = requiredString(args.agentId ?? args.sessionId, "agentId");
     const sessionId = this.resolveSessionId(rawId);
+    const session2 = this.sessions.get(sessionId);
     const line = requiredString(args.line, "command line").trim();
-    const match = /^\/permission(?:\s+([\s\S]*))?$/u.exec(line);
-    if (match === null) return void 0;
-    const commandId = `acp-permission:${++this.commandSeq}`;
-    const requested = (match[1] ?? "").trim();
-    if (requested === "") {
-      return {
-        commandId,
-        result: { kind: "success", text: `current preset ${this.permissionSelection(sessionId) ?? "Host settings (not reported)"}` }
-      };
+    const permissionMatch = /^\/permission(?:\s+([\s\S]*))?$/u.exec(line);
+    if (permissionMatch !== null) {
+      const commandId2 = `acp-permission:${++this.commandSeq}`;
+      const requested = (permissionMatch[1] ?? "").trim();
+      if (requested === "") {
+        return {
+          commandId: commandId2,
+          result: { kind: "success", text: `current preset ${this.permissionSelection(sessionId) ?? "Host settings (not reported)"}` }
+        };
+      }
+      if (!isAcpPermissionPreset(requested)) {
+        return {
+          commandId: commandId2,
+          result: { kind: "error", text: `unknown preset "${requested}" (available: workspace-write, danger-full-access)` }
+        };
+      }
+      this.setPermissionSelection(sessionId, requested);
+      return { commandId: commandId2, result: { kind: "success", text: `preset ${requested}` } };
     }
-    if (!isAcpPermissionPreset(requested)) {
-      return {
-        commandId,
-        result: { kind: "error", text: `unknown preset "${requested}" (available: workspace-write, danger-full-access)` }
-      };
+    const slashMatch = /^\/([a-zA-Z0-9_-]+)(?:\s+([\s\S]*))?$/u.exec(line);
+    if (slashMatch === null || session2 === void 0) return void 0;
+    const commandName = slashMatch[1].toLowerCase();
+    const upstreamNames = new Set((session2.availableCommands ?? []).map((cmd) => cmd.name.toLowerCase()));
+    if (commandName !== "compact" && !upstreamNames.has(commandName)) {
+      return void 0;
     }
-    this.setPermissionSelection(sessionId, requested);
-    return { commandId, result: { kind: "success", text: `preset ${requested}` } };
+    const commandId = `acp-command:${++this.commandSeq}`;
+    await this.prompt(
+      { sessionId, content: [{ type: "text", text: line }] },
+      signal ?? new AbortController().signal
+    );
+    return { commandId, result: { kind: "success", text: `Ran ${line}` } };
   }
   async hostSessionModels(sessionId) {
     const resolvedId = this.resolveSessionId(sessionId);
@@ -71349,6 +71851,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         queue.push({ type: "upsert", workspace: nativeWorkspace(workspace2) });
       }
       queue.push({ type: "archived", archivedSessionIds: [...this.archivedSessionIds] });
+      queue.push({ type: "pinned", pinnedSessionIds: [...this.pinnedSessionIds] });
     }
   }
   publishProjection(sessionId, key, value, seq = this.nextProjectionSeq(sessionId)) {
@@ -71545,7 +72048,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!remoteGateway && !codex && !cursor3 && !antigravity && !pi && !opencode && !claude && !hermes) {
+  const anyCustomAcp = workspaceTypes?.some((type) => type.available && type.id !== "codex" && type.id !== "harness") || value.capabilities.some((cap) => cap.startsWith("agent.acp.") && cap.endsWith(".v1") && cap !== "agent.acp.v1" && cap !== "agent.acp.transfer.v1" && cap !== "agent.acp.workspace-files.v1" && cap !== "agent.acp.terminal.v1");
+  if (!remoteGateway && !codex && !cursor3 && !antigravity && !pi && !opencode && !claude && !hermes && !anyCustomAcp) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -80240,6 +80744,49 @@ var ClientControl = class {
         }
         return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "hermes"));
       }
+      if (endpoint === "acp.workspaces.list") {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.backend !== "string" || value.backend.trim() === "") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and ACP backend are required.");
+        }
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, value.backend.trim()));
+      }
+      if (endpoint === "acp.workspace.open") {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string" || typeof value.backend !== "string" || value.backend.trim() === "") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host, ACP backend, and Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, value.backend.trim()));
+      }
+      if (endpoint === "acp.workspace.create") {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string" || typeof value.backend !== "string" || value.backend.trim() === "") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host, ACP backend, and project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, value.backend.trim()));
+      }
+      const dynamicListMatch = /^([a-z0-9][a-z0-9_-]{0,31})\.workspaces\.list$/.exec(endpoint);
+      if (dynamicListMatch !== null) {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, dynamicListMatch[1]));
+      }
+      const dynamicOpenMatch = /^([a-z0-9][a-z0-9_-]{0,31})\.workspace\.open$/.exec(endpoint);
+      if (dynamicOpenMatch !== null) {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", `A Host and ${dynamicOpenMatch[1]} Workspace are required.`);
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, dynamicOpenMatch[1]));
+      }
+      const dynamicCreateMatch = /^([a-z0-9][a-z0-9_-]{0,31})\.workspace\.create$/.exec(endpoint);
+      if (dynamicCreateMatch !== null) {
+        const value = record3(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", `A Host and ${dynamicCreateMatch[1]} project directory are required.`);
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, dynamicCreateMatch[1]));
+      }
       if (endpoint === "workspace.selection.consume") {
         const value = record3(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
@@ -85965,7 +86512,7 @@ function resolveConfig(input4 = {}, env = process.env) {
           id: id6,
           enabled: configured?.enabled ?? legacy?.enabled ?? (id6 === "codex" ? codexEnabled : id6 === "cursor" ? cursorEnabled : id6 === "pi" ? true : id6 === "claude" ? true : id6 === "opencode" ? true : id6 === "hermes" ? false : parsed.acp !== void 0),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id6] ?? id6,
-          args: id6 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id6 === "pi" || id6 === "claude" ? [] : id6 === "hermes" ? ["acp"] : id6 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
+          args: id6 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id6 === "pi" || id6 === "claude" ? [] : ["acp"]),
           ...cwd2 === void 0 ? {} : { cwd: cwd2 }
         };
       })
@@ -88714,8 +89261,12 @@ var ClientModeRuntime = class {
       if (remote.features.codex) {
         await read("codex", () => discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), activeSignal));
       }
-      for (const backend of ["cursor", "antigravity", "pi", "opencode", "claude", "hermes"]) {
-        if (!remote.features[backend]) continue;
+      const knownAcpBackends = /* @__PURE__ */ new Set(["cursor", "antigravity", "pi", "opencode", "claude", "hermes"]);
+      for (const wt of remote.features.workspaceTypes ?? []) {
+        if (wt.id !== "codex" && wt.id !== "harness" && wt.available) knownAcpBackends.add(wt.id);
+      }
+      for (const backend of knownAcpBackends) {
+        if (!hasAcpFeature(remote.features, backend)) continue;
         await read(backend, async () => {
           const rows = await new AgentAcpClient(remote.client).call("dsh/workspaceList", { backend }, activeSignal);
           if (!Array.isArray(rows)) throw new ClientModeError("INVALID_MESSAGE", "Invalid workspace catalog.");
@@ -88865,7 +89416,7 @@ var ClientModeRuntime = class {
   async listCursorWorkspaces(targetDeviceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     await this.refreshRemoteFeatures(remote);
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
@@ -88878,7 +89429,7 @@ var ClientModeRuntime = class {
   async openCursorWorkspace(targetDeviceId, workspaceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     await this.refreshRemoteFeatures(remote);
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
@@ -88932,7 +89483,7 @@ var ClientModeRuntime = class {
     if (trimmedPath === "") throw new ClientModeError("INVALID_MESSAGE", `A ${backend} project directory is required.`);
     const remote = await this.ensureConnected(targetDeviceId, signal);
     await this.refreshRemoteFeatures(remote);
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
@@ -89285,6 +89836,15 @@ var ClientModeRuntime = class {
     }, error62);
   }
 };
+function hasAcpFeature(features, backend) {
+  if (backend === "cursor") return features.cursor;
+  if (backend === "antigravity") return features.antigravity;
+  if (backend === "pi") return Boolean(features.pi);
+  if (backend === "opencode") return features.opencode;
+  if (backend === "claude") return Boolean(features.claude);
+  if (backend === "hermes") return Boolean(features.hermes);
+  return features.workspaceTypes?.some((item) => item.id === backend && item.available) ?? false;
+}
 function remoteAcpCapabilities(features) {
   return [
     ...features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
@@ -92899,22 +93459,201 @@ function isUnmaterializedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === CODEX_THREAD_UNMATERIALIZED;
 }
 
+// packages/plugin/src/acp/adapters/auth-diagnostics.ts
+var DEFAULT_LOGIN_COMMANDS = {
+  cursor: "agent login",
+  antigravity: "agy acp --login",
+  pi: "pi",
+  opencode: "opencode auth login",
+  claude: "claude login",
+  hermes: "hermes setup"
+};
+function parseInitializeMetadata(result) {
+  if (!isRecord15(result)) {
+    return { agentCapabilities: {}, authMethods: [] };
+  }
+  const caps = isRecord15(result.agentCapabilities) ? result.agentCapabilities : {};
+  const promptCaps = isRecord15(caps.promptCapabilities) ? caps.promptCapabilities : void 0;
+  const sessionCaps = isRecord15(caps.sessionCapabilities) ? caps.sessionCapabilities : isRecord15(caps.session_capabilities) ? caps.session_capabilities : void 0;
+  const rawMeta = isRecord15(result._meta) ? result._meta : isRecord15(caps._meta) ? caps._meta : void 0;
+  const steering = isRecord15(rawMeta?.steering) && rawMeta.steering.supported === true;
+  const rawInfo = isRecord15(result.agentInfo) ? result.agentInfo : void 0;
+  const authMethods = Array.isArray(result.authMethods) ? result.authMethods.flatMap((item) => {
+    if (!isRecord15(item) || typeof item.id !== "string" || typeof item.name !== "string") return [];
+    return [{
+      id: item.id,
+      name: item.name,
+      ...typeof item.description === "string" ? { description: redactPaths(item.description) } : {},
+      ...typeof item.type === "string" ? { type: item.type } : {},
+      ...Array.isArray(item.args) ? { args: item.args.filter((arg) => typeof arg === "string").slice(0, 8).map(redactPaths) } : {}
+    }];
+  }) : [];
+  return {
+    ...rawInfo ? {
+      agentInfo: {
+        ...typeof rawInfo.name === "string" ? { name: rawInfo.name } : {},
+        ...typeof rawInfo.version === "string" ? { version: rawInfo.version } : {}
+      }
+    } : {},
+    agentCapabilities: {
+      ...typeof caps.loadSession === "boolean" ? { loadSession: caps.loadSession } : {},
+      ...promptCaps ? {
+        promptCapabilities: {
+          ...typeof promptCaps.image === "boolean" ? { image: promptCaps.image } : {},
+          ...typeof promptCaps.audio === "boolean" ? { audio: promptCaps.audio } : {},
+          ...typeof promptCaps.embeddedContext === "boolean" ? { embeddedContext: promptCaps.embeddedContext } : {}
+        }
+      } : {},
+      ...sessionCaps ? {
+        sessionCapabilities: {
+          ...isRecord15(sessionCaps.list) || sessionCaps.list === true ? { list: true } : {},
+          ...isRecord15(sessionCaps.fork) || sessionCaps.fork === true ? { fork: true } : {},
+          ...isRecord15(sessionCaps.delete) || sessionCaps.delete === true ? { delete: true } : {},
+          ...isRecord15(sessionCaps.resume) || sessionCaps.resume === true ? { resume: true } : {},
+          ...isRecord15(sessionCaps.close) || sessionCaps.close === true ? { close: true } : {},
+          ...isRecord15(sessionCaps.additionalDirectories) || sessionCaps.additionalDirectories === true ? { additionalDirectories: true } : {}
+        }
+      } : {},
+      ...steering ? { steering: true } : {}
+    },
+    authMethods
+  };
+}
+function detectUpstreamAuthFailure(backend, errorValue, authMethods = []) {
+  if (!isRecord15(errorValue)) return void 0;
+  const rpcCode = typeof errorValue.code === "number" ? errorValue.code : void 0;
+  const messageText = typeof errorValue.message === "string" ? errorValue.message : "";
+  const dataMessage = isRecord15(errorValue.data) && typeof errorValue.data.message === "string" ? errorValue.data.message : "";
+  const combined = `${messageText} ${dataMessage}`.trim();
+  const lower = combined.toLowerCase();
+  const browserOpenFailed = (rpcCode === -32602 || lower.includes("browser")) && lower.includes("open browser");
+  const isAuthError = rpcCode === -32e3 || browserOpenFailed || lower.includes("authentication required") || lower.includes("not logged in") || lower.includes("unauthorized") || lower.includes("api key") || lower.includes("auth") && lower.includes("login");
+  if (!isAuthError) return void 0;
+  const terminalMethod = authMethods.find((method) => method.type === "terminal");
+  const rawLoginCommand = DEFAULT_LOGIN_COMMANDS[backend] ?? (terminalMethod?.args?.length ? `${backend} ${terminalMethod.args.join(" ")}` : void 0);
+  const loginCommand = rawLoginCommand ? redactPaths(rawLoginCommand) : void 0;
+  const loginUrl = extractSafeHttpsUrl(combined);
+  const guidance = browserOpenFailed ? `Headless login cannot open a browser on this Host. Run \`${loginCommand ?? `${backend} login`}\` in a Host terminal (or configure the backend API key), then check again.` : terminalMethod ? `${terminalMethod.name}: ${terminalMethod.description ?? `run \`${loginCommand ?? backend}\` in a Host terminal.`}` : loginCommand ? `Authentication required on this Host. Run \`${loginCommand}\` in a Host terminal and retry.` : "Authentication required on this Host. Complete CLI login in a Host terminal and retry.";
+  return {
+    authStatus: "auth_required",
+    errorCode: browserOpenFailed ? "ACP_HEADLESS_BROWSER_LOGIN_FAILED" : "ACP_AUTH_REQUIRED",
+    guidance: redactPaths(guidance),
+    ...loginCommand ? { loginCommand } : {},
+    ...loginUrl ? { loginUrl } : {},
+    ...authMethods.length > 0 ? { authMethods: [...authMethods] } : {}
+  };
+}
+function buildAuthDiagnosticFromMetadata(backend, metadata, lastDiagnostic, ready) {
+  if (lastDiagnostic) {
+    return {
+      ...lastDiagnostic,
+      ...metadata?.authMethods.length && !lastDiagnostic.authMethods?.length ? { authMethods: metadata.authMethods } : {}
+    };
+  }
+  const authMethods = metadata?.authMethods ?? [];
+  const terminalMethod = authMethods.find((method) => method.type === "terminal");
+  const rawLoginCommand = DEFAULT_LOGIN_COMMANDS[backend];
+  const loginCommand = rawLoginCommand ? redactPaths(rawLoginCommand) : void 0;
+  if (ready) {
+    return {
+      authStatus: "authenticated",
+      ...authMethods.length > 0 ? { authMethods } : {},
+      ...terminalMethod && loginCommand ? { loginCommand } : {}
+    };
+  }
+  return {
+    authStatus: "unknown",
+    ...authMethods.length > 0 ? { authMethods } : {},
+    ...terminalMethod ? {
+      guidance: redactPaths(terminalMethod.description ?? `Run \`${loginCommand ?? backend}\` in a Host terminal to configure credentials.`),
+      ...loginCommand ? { loginCommand } : {}
+    } : {}
+  };
+}
+function parseAvailableCommands(update) {
+  if (!isRecord15(update) || !Array.isArray(update.availableCommands)) return [];
+  return update.availableCommands.flatMap((item) => {
+    if (!isRecord15(item) || typeof item.name !== "string" || item.name.trim().length === 0) return [];
+    const input4 = isRecord15(item.input) && typeof item.input.hint === "string" ? { hint: item.input.hint } : void 0;
+    return [{
+      name: item.name.trim(),
+      ...typeof item.description === "string" ? { description: item.description } : {},
+      ...input4 ? { input: input4 } : {}
+    }];
+  });
+}
+function extractSafeHttpsUrl(text) {
+  const match = /https:\/\/[^\s"'<>]+/i.exec(text);
+  if (!match) return void 0;
+  try {
+    const parsed = new URL(match[0]);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return void 0;
+  }
+}
+function redactPaths(text) {
+  return text.replace(/(["'])[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\\\r\n"']+?(?:\\[^\\\r\n"']+)*\1/gi, (quote) => `${quote[0]}<host-path>${quote[0]}`).replace(/[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\\\r\n:*?"<>|]+(?:\\[^\s\\/:*?"<>|'`]+)+/gi, "<host-path>").replace(/[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\s\\/:*?"<>|'`]+/gi, "<host-path>").replace(/(["'])\/(?:Users|home)\/[^/\r\n"']+?(?:\/[^/\r\n"']+)*\1/g, (quote) => `${quote[0]}<host-path>${quote[0]}`).replace(/\/(?:Users|home)\/[^/\r\n:*?"<>|]+(?:\/[^\s/:*?"<>|'`]+)+/g, "<host-path>").replace(/\/(?:Users|home)\/[^\s/:*?"<>|'`]+/g, "<host-path>");
+}
+function isRecord15(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // packages/plugin/src/acp/adapters/session-models.ts
+var KNOWN_LABELS = {
+  cursor: "Cursor",
+  claude: "Claude",
+  opencode: "OpenCode",
+  hermes: "Hermes",
+  antigravity: "Antigravity",
+  pi: "Pi"
+};
 var AcpSessionModelState = class {
   constructor(backend) {
     this.backend = backend;
   }
   get label() {
-    return { cursor: "Cursor", claude: "Claude", opencode: "OpenCode", hermes: "Hermes" }[this.backend];
+    return KNOWN_LABELS[this.backend] ?? this.backend;
   }
   model;
   effort;
+  modes = { availableModes: [] };
+  modeConfigId;
   legacy = false;
   update(value) {
     if (!record8(value)) return;
+    if (record8(value.modes) && Array.isArray(value.modes.availableModes)) {
+      const availableModes = value.modes.availableModes.flatMap((item) => record8(item) && typeof item.id === "string" && typeof item.name === "string" ? [{
+        id: item.id,
+        name: item.name,
+        ...typeof item.description === "string" ? { description: item.description } : {}
+      }] : []);
+      this.modes = {
+        ...typeof value.modes.currentModeId === "string" ? { currentModeId: value.modes.currentModeId } : {},
+        availableModes
+      };
+      this.modeConfigId = void 0;
+    }
     if (Array.isArray(value.configOptions)) {
-      this.model = readOption(value.configOptions.find((option) => record8(option) && option.id === "model"));
-      this.effort = readOption(value.configOptions.find((option) => record8(option) && option.id === "effort"));
+      this.model = readOption(value.configOptions.find((option) => record8(option) && (option.id === "model" || option.category === "model")));
+      this.effort = readOption(value.configOptions.find((option) => record8(option) && (option.id === "effort" || option.id === "thought_level" || option.category === "thought_level")));
+      const modeOption = value.configOptions.find((option) => record8(option) && (option.id === "mode" || option.category === "mode"));
+      if (record8(modeOption) && typeof modeOption.id === "string" && Array.isArray(modeOption.options)) {
+        const availableModes = flattenOptions(modeOption.options).flatMap((option) => record8(option) && typeof option.value === "string" && typeof option.name === "string" ? [{
+          id: option.value,
+          name: option.name,
+          ...typeof option.description === "string" ? { description: option.description } : {}
+        }] : []);
+        if (availableModes.length > 0 && this.modes.availableModes.length === 0) {
+          this.modes = {
+            ...typeof modeOption.currentValue === "string" ? { currentModeId: modeOption.currentValue } : {},
+            availableModes
+          };
+          this.modeConfigId = modeOption.id;
+        } else if (typeof modeOption.currentValue === "string" && this.modes.availableModes.some((item) => item.id === modeOption.currentValue)) {
+          this.modes = { ...this.modes, currentModeId: modeOption.currentValue };
+        }
+      }
       this.legacy = false;
     } else if (record8(value.models) && Array.isArray(value.models.availableModels) && typeof value.models.currentModelId === "string") {
       this.model = {
@@ -92926,7 +93665,30 @@ var AcpSessionModelState = class {
       this.legacy = true;
     } else if (value.sessionUpdate === "current_model_update" && typeof value.currentModelId === "string" && this.model) {
       this.model.current = value.currentModelId;
+    } else if (value.sessionUpdate === "current_mode_update" && typeof value.currentModeId === "string") {
+      this.modes = { ...this.modes, currentModeId: value.currentModeId };
     }
+  }
+  modesCatalog() {
+    return {
+      ...this.modes.currentModeId === void 0 ? {} : { currentModeId: this.modes.currentModeId },
+      availableModes: this.modes.availableModes.map((item) => ({ ...item }))
+    };
+  }
+  async setMode(sessionId, modeId, request) {
+    if (typeof modeId !== "string" || !this.modes.availableModes.some((item) => item.id === modeId)) {
+      throw new Error(`The selected ${this.label} mode is unavailable on this Host.`);
+    }
+    if (this.modeConfigId !== void 0) {
+      this.update(await request("session/set_config_option", { sessionId, configId: this.modeConfigId, value: modeId }));
+    } else {
+      await request("session/set_mode", { sessionId, modeId });
+      this.modes = { ...this.modes, currentModeId: modeId };
+    }
+    if (this.modes.currentModeId !== modeId) {
+      throw new Error(`${this.label} did not confirm the mode change.`);
+    }
+    return { currentModeId: modeId };
   }
   catalog() {
     const model = this.model;
@@ -92958,21 +93720,29 @@ var AcpSessionModelState = class {
       await request("session/set_model", { sessionId, modelId: model });
       this.model.current = model;
     } else {
-      this.update(await request("session/set_config_option", { sessionId, configId: "model", value: model }));
-      if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`);
-    }
-    if (effort !== void 0) {
-      if (!this.effort?.options.some((item) => item.id === effort)) throw new Error(`The ${this.label} effort level is unavailable.`);
-      this.update(await request("session/set_config_option", { sessionId, configId: "effort", value: effort }));
-      if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`);
+      if (model !== this.model.current) {
+        this.update(await request("session/set_config_option", { sessionId, configId: this.model.id, value: model }));
+        if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`);
+      }
+      if (effort !== void 0 && this.effort) {
+        this.update(await request("session/set_config_option", { sessionId, configId: this.effort.id, value: effort }));
+        if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`);
+      }
     }
     return { selected: this.catalog().current };
   }
 };
+function flattenOptions(raw) {
+  return raw.flatMap((option) => record8(option) && Array.isArray(option.options) ? option.options : [option]);
+}
 function readOption(value) {
-  if (!record8(value) || value.type !== "select" || typeof value.id !== "string" || typeof value.currentValue !== "string" || !Array.isArray(value.options)) return void 0;
-  const options = value.options.flatMap((option) => record8(option) && Array.isArray(option.options) ? option.options : [option]);
-  return { id: value.id, current: value.currentValue, options: options.flatMap((option) => record8(option) && typeof option.value === "string" && typeof option.name === "string" ? [{ id: option.value, name: option.name }] : []) };
+  if (!record8(value) || value.type !== void 0 && value.type !== "select" || typeof value.id !== "string" || typeof value.currentValue !== "string" || !Array.isArray(value.options)) return void 0;
+  const options = flattenOptions(value.options);
+  return {
+    id: value.id,
+    current: value.currentValue,
+    options: options.flatMap((option) => record8(option) && typeof option.value === "string" && typeof option.name === "string" ? [{ id: option.value, name: option.name }] : [])
+  };
 }
 function record8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -92990,14 +93760,17 @@ var ADAPTER_LABELS = Object.freeze({
   cursor: "Cursor",
   pi: "Pi",
   claude: "Claude",
-  hermes: "Hermes"
+  hermes: "Hermes",
+  antigravity: "Antigravity"
 });
 var CursorAcpError = class extends Error {
   constructor(code, message, options) {
     super(message, options);
     this.code = code;
     this.name = "CursorAcpError";
+    this.authDiagnostic = options?.authDiagnostic;
   }
+  authDiagnostic;
 };
 var CursorAcpClient = class {
   constructor(binary, logger2, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
@@ -93024,15 +93797,27 @@ var CursorAcpClient = class {
   startPromise;
   modelStates = /* @__PURE__ */ new Map();
   modelBusy = /* @__PURE__ */ new Set();
+  sessionCommands = /* @__PURE__ */ new Map();
+  initMetadata;
+  lastAuthDiagnostic;
   /** Backend that owns this process: failure codes and log lines must name it. */
   get backend() {
     return this.options.backend ?? "cursor";
   }
   get adapterLabel() {
-    return ADAPTER_LABELS[this.backend];
+    return ADAPTER_LABELS[this.backend] ?? this.backend;
   }
   code(suffix) {
     return `${this.backend.toUpperCase()}_${suffix}`;
+  }
+  diagnostics() {
+    return buildAuthDiagnosticFromMetadata(this.backend, this.initMetadata, this.lastAuthDiagnostic, this.ready);
+  }
+  capabilities() {
+    return this.initMetadata?.agentCapabilities ?? {};
+  }
+  authMethods() {
+    return this.initMetadata?.authMethods ?? [];
   }
   start() {
     if (this.closed) return Promise.reject(new CursorAcpError(this.code("CLOSED"), `The ${this.adapterLabel} domain is closed.`));
@@ -93047,8 +93832,11 @@ var CursorAcpClient = class {
   }
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not ready.`);
-    const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
-    const id6 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    const backend = this.options.modelBackend ?? this.backend;
+    const id6 = isRecord16(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    if (method === "dsh/sessionCommands") {
+      return { commands: id6 ? [...this.sessionCommands.get(id6) ?? []] : [] };
+    }
     if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
       const state2 = id6 ? this.modelStates.get(id6) : void 0;
       if (!state2 || !id6) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before selecting a model.");
@@ -93073,6 +93861,29 @@ var CursorAcpClient = class {
         this.modelBusy.delete(id6);
       }
     }
+    if (backend && (method === "dsh/sessionModes" || method === "session/set_mode")) {
+      const state2 = id6 ? this.modelStates.get(id6) : void 0;
+      if (!state2 || !id6) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before changing its mode.");
+      if (method === "dsh/sessionModes") return state2.modesCatalog();
+      if (this.modelBusy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its mode.");
+      const modeId = isRecord16(params) ? params.modeId : void 0;
+      this.modelBusy.add(id6);
+      try {
+        const result2 = await state2.setMode(
+          id6,
+          modeId,
+          (method2, params2) => this.request(method2, params2, timeoutMs ?? ACP_REQUEST_TIMEOUT_MS)
+        );
+        for (const handler of this.inboundHandlers) handler({
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: id6, update: { sessionUpdate: "current_mode_update", currentModeId: result2.currentModeId } }
+        });
+        return result2;
+      } finally {
+        this.modelBusy.delete(id6);
+      }
+    }
     if (backend && method === "session/prompt" && id6) {
       if (this.modelBusy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The ACP session is busy.");
       this.modelBusy.add(id6);
@@ -93082,17 +93893,30 @@ var CursorAcpClient = class {
         this.modelBusy.delete(id6);
       }
     }
-    if (method === "session/cancel" && this.options.authenticationMethod === null) {
+    if (method === "session/cancel") {
       this.write({ jsonrpc: "2.0", method, params });
       return {};
     }
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
-    const result = await this.request(method, params, budget);
-    if (backend && (method === "session/new" || method === "session/load")) {
-      const returnedId = isRecord15(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const provisionalLoad = Boolean(backend && method === "session/load" && id6 && !this.modelStates.has(id6));
+    if (provisionalLoad && backend && id6) {
+      this.modelStates.set(id6, new AcpSessionModelState(backend));
+    }
+    let result;
+    try {
+      result = await this.request(method, params, budget);
+    } catch (error62) {
+      if (provisionalLoad && id6) this.modelStates.delete(id6);
+      throw error62;
+    }
+    if (backend && (method === "session/new" || method === "session/load" || method === "session/fork")) {
+      const returnedId = isRecord16(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
       const sessionId = method === "session/load" ? id6 : returnedId;
-      if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "ACP returned an invalid session.");
-      const state2 = new AcpSessionModelState(backend);
+      if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) {
+        if (provisionalLoad && id6) this.modelStates.delete(id6);
+        throw new CursorAcpError("ACP_INVALID_SESSION", "ACP returned an invalid session.");
+      }
+      const state2 = (method === "session/load" ? this.modelStates.get(sessionId) : void 0) ?? new AcpSessionModelState(backend);
       state2.update(result);
       this.modelStates.set(sessionId, state2);
     }
@@ -93169,7 +93993,7 @@ var CursorAcpClient = class {
       }
     });
     try {
-      await this.request("initialize", {
+      const initResult = await this.request("initialize", {
         protocolVersion: 1,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
@@ -93180,11 +94004,13 @@ var CursorAcpClient = class {
           version: PLUGIN_VERSION
         }
       }, ACP_START_TIMEOUT_MS);
+      this.initMetadata = parseInitializeMetadata(initResult);
       this.assertStarting(child);
       if (this.options.authenticationMethod !== null) {
         await this.request("authenticate", { methodId: this.options.authenticationMethod ?? "cursor_login" }, ACP_START_TIMEOUT_MS);
       }
       this.assertStarting(child);
+      this.lastAuthDiagnostic = void 0;
       this.ready = true;
       this.logger?.info(`${this.adapterLabel} ACP ready`);
     } catch (error62) {
@@ -93253,7 +94079,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted invalid JSON.`));
       return;
     }
-    if (!isRecord15(value)) {
+    if (!isRecord16(value)) {
       this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted an invalid message.`));
       return;
     }
@@ -93261,7 +94087,13 @@ var CursorAcpClient = class {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(new CursorAcpError(this.code("UPSTREAM_ERROR"), safeUpstreamError2(value.error, this.adapterLabel)));
+        const authDiagnostic = detectUpstreamAuthFailure(this.backend, value.error, this.initMetadata?.authMethods);
+        if (authDiagnostic) this.lastAuthDiagnostic = authDiagnostic;
+        pending.reject(new CursorAcpError(
+          this.code("UPSTREAM_ERROR"),
+          authDiagnostic?.guidance ?? safeUpstreamError2(value.error, this.adapterLabel),
+          authDiagnostic ? { authDiagnostic } : void 0
+        ));
       } else {
         pending.resolve(value.result);
       }
@@ -93270,8 +94102,11 @@ var CursorAcpClient = class {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord15(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord16(params) && typeof params.sessionId === "string") {
       this.modelStates.get(params.sessionId)?.update(params.update);
+      if (isRecord16(params.update) && params.update.sessionUpdate === "available_commands_update") {
+        this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update));
+      }
     }
     for (const handler of this.inboundHandlers) handler(inbound);
   }
@@ -93302,7 +94137,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value, label = "Cursor") {
-  if (!isRecord15(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
+  if (!isRecord16(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return `${label} ACP authentication failed.`;
@@ -93310,7 +94145,7 @@ function safeUpstreamError2(value, label = "Cursor") {
   if (message.includes("not initialized")) return `${label} ACP is not initialized.`;
   return `${label} ACP rejected the request.`;
 }
-function isRecord15(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -93322,13 +94157,16 @@ function acpHistoryEvents(messages, sessionId, provider) {
   let step = 1;
   let afterTools = false;
   let pending;
-  const push2 = (type, data2, surface = false) => events.push({ type: "event", event: {
-    type,
-    seq: events.length,
-    time: 0,
-    data: data2,
-    ...surface ? { surfaceOp: "append" } : {}
-  } });
+  const push2 = (type, data2, surface = false) => events.push({
+    type: "event",
+    event: {
+      type,
+      seq: events.length,
+      time: 0,
+      data: data2,
+      ...surface ? { surfaceOp: "append" } : {}
+    }
+  });
   const id6 = () => `${provider}-history:${sessionId}:${events.length}`;
   const flushMessage = () => {
     if (!pending) return;
@@ -93340,12 +94178,21 @@ function acpHistoryEvents(messages, sessionId, provider) {
   const result = (tool) => {
     if (tool.emitted || !tool.terminal) return;
     tool.emitted = true;
-    push2("tool/result", { turn, step, message: { id: id6(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
-      type: "tool-result",
-      toolCallId: tool.id,
-      content: tool.output,
-      ...tool.failed ? { isError: true } : {}
-    }] } }, true);
+    push2("tool/result", {
+      turn,
+      step,
+      message: {
+        id: id6(),
+        role: "user",
+        source: { kind: "tool", callId: tool.id },
+        content: [{
+          type: "tool-result",
+          toolCallId: tool.id,
+          content: tool.output,
+          ...tool.failed ? { isError: true } : {}
+        }]
+      }
+    }, true);
   };
   const flushTools = () => {
     for (const tool of tools.values()) result(tool);
@@ -93367,7 +94214,10 @@ function acpHistoryEvents(messages, sessionId, provider) {
     if (!update) continue;
     const kind = update.sessionUpdate;
     if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
-      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
+      const content = update.content;
+      const isText = content?.type === "text" && typeof content.text === "string";
+      const isImage = kind === "user_message_chunk" && content?.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
+      if (!isText && !isImage) continue;
       const role2 = kind === "user_message_chunk" ? "user" : "assistant";
       if (role2 === "user" && pending?.role !== "user") {
         endTurn();
@@ -93389,10 +94239,18 @@ function acpHistoryEvents(messages, sessionId, provider) {
         afterTools = false;
       }
       pending ??= { role: role2, content: [] };
-      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
-      const previous = pending.content.at(-1);
-      if (previous?.type === type) previous.text += update.content.text;
-      else pending.content.push({ type, text: update.content.text });
+      if (isImage) {
+        pending.content.push({
+          type: "image",
+          mimeType: content.mimeType,
+          data: content.data
+        });
+      } else {
+        const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
+        const previous = pending.content.at(-1);
+        if (previous?.type === type && typeof previous.text === "string") previous.text += content.text;
+        else pending.content.push({ type, text: content.text });
+      }
     } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
       flushMessage();
       afterTools = true;
@@ -93405,8 +94263,8 @@ function acpHistoryEvents(messages, sessionId, provider) {
       if (!tool) {
         tool = {
           id: update.toolCallId,
-          name: typeof update.title === "string" ? update.title : "tool",
-          input: update.rawInput,
+          name: typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "tool",
+          input: update.rawInput ?? update.args,
           output: [],
           failed: false,
           terminal: false,
@@ -93422,10 +94280,16 @@ function acpHistoryEvents(messages, sessionId, provider) {
         });
       }
       const decoded = piToolResult(update);
+      if (!decoded.content.length && update.rawOutput !== void 0) {
+        decoded.content.push({
+          type: "text",
+          text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
+        });
+      }
       if (decoded.content.length) tool.output = decoded.content;
-      tool.failed ||= decoded.isError;
+      tool.failed ||= decoded.isError || update.status === "failed";
       tool.terminal ||= update.status === "completed" || update.status === "failed";
-      if (kind === "tool_call_update") result(tool);
+      if (kind === "tool_call_update" && tool.terminal) result(tool);
     }
   }
   endTurn();
@@ -93472,6 +94336,15 @@ var IsolatedAcpClient = class {
   }
   isReady() {
     return !this.closed && this.catalog?.isReady() === true;
+  }
+  diagnostics() {
+    return this.catalog?.diagnostics?.() ?? { authStatus: this.isReady() ? "authenticated" : "unknown" };
+  }
+  capabilities() {
+    return this.catalog?.capabilities?.() ?? {};
+  }
+  authMethods() {
+    return this.catalog?.authMethods?.() ?? [];
   }
   async create(history = false) {
     if (this.closed) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
@@ -93553,11 +94426,17 @@ var IsolatedAcpClient = class {
         if (typeof id7 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id7) || this.clients.has(id7) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id7) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
         this.clients.set(id7, client2);
         const config2 = { ...result };
+        if (config2.modes && Array.isArray(config2.modes.availableModes) && !config2.sessionModes) {
+          config2.sessionModes = { ...config2.modes };
+        }
         this.updateConfiguration(id7, { kind: "notification", method: "session/update", params: {
           update: { sessionUpdate: "config_option_update", configOptions: config2.configOptions }
         } }, config2);
-        for (const key of ["models", "modes"]) {
+        for (const key of ["models", "modes", "sessionModes"]) {
           if (replayConfiguration[key]) config2[key] = { ...config2[key], ...replayConfiguration[key] };
+        }
+        if (typeof replayConfiguration.sessionModeConfigId === "string") {
+          config2.sessionModeConfigId = replayConfiguration.sessionModeConfigId;
         }
         this.configurations.set(id7, config2);
         boundId = id7;
@@ -93572,19 +94451,51 @@ var IsolatedAcpClient = class {
     const client = this.clients.get(String(p.sessionId));
     if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", `Load the ${this.label} session before using it.`);
     const id6 = String(p.sessionId);
+    if (method === "dsh/sessionCommands") return client.call(method, params, timeoutMs);
+    if (method === "dsh/sessionModes" || method === "session/set_mode") {
+      if (this.backend === "cursor") return client.call(method, params, timeoutMs);
+      const config2 = this.configurations.get(id6);
+      const sessionModes = config2?.sessionModes;
+      if (method === "dsh/sessionModes") {
+        return sessionModes ?? { availableModes: [] };
+      }
+      if (this.busy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `Stop the ${this.label} reply before changing its mode.`);
+      const modeId = typeof p.modeId === "string" ? p.modeId : void 0;
+      if (!modeId || !sessionModes?.availableModes?.some((item) => item.id === modeId)) {
+        throw new CursorAcpError("INVALID_MESSAGE", `The selected ${this.label} mode is unavailable.`);
+      }
+      this.busy.add(id6);
+      try {
+        if (typeof config2?.sessionModeConfigId === "string") {
+          await client.call("session/set_config_option", {
+            sessionId: id6,
+            configId: config2.sessionModeConfigId,
+            value: modeId
+          }, timeoutMs);
+        } else {
+          await client.call("session/set_mode", { sessionId: id6, modeId }, timeoutMs);
+        }
+        if (config2?.sessionModes) config2.sessionModes.currentModeId = modeId;
+        return { currentModeId: modeId };
+      } finally {
+        this.busy.delete(id6);
+      }
+    }
     if (this.backend === "cursor" && (method === "dsh/sessionModels" || method === "dsh/selectModel")) return client.call(method, params, timeoutMs);
     if (method === "dsh/sessionModels") return this.models(id6);
     if (method === "dsh/selectModel") {
       if (this.busy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `Stop the ${this.label} reply before changing its model.`);
       const config2 = this.configurations.get(id6);
-      if (!config2?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config2?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
-        throw new CursorAcpError("INVALID_MESSAGE", `The ${this.label} model or thinking level is not available.`);
+      if (!config2?.models?.availableModels?.some((item) => item.modelId === p.model)) {
+        throw new CursorAcpError("INVALID_MESSAGE", `The ${this.label} model is not available.`);
       }
       this.busy.add(id6);
       try {
-        const modelResult = await client.call("session/set_config_option", { sessionId: id6, configId: "model", value: p.model });
-        this.updateConfiguration(id6, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
-        if (this.configurations.get(id6)?.models?.currentModelId !== p.model) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the model change.`);
+        if (config2.models.currentModelId !== p.model) {
+          const modelResult = await client.call("session/set_config_option", { sessionId: id6, configId: "model", value: p.model });
+          this.updateConfiguration(id6, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
+          if (this.configurations.get(id6)?.models?.currentModelId !== p.model) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the model change.`);
+        }
         if (p.reasoningEffort !== void 0) {
           if (!this.configurations.get(id6)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
           const thinkingResult = await client.call("session/set_config_option", { sessionId: id6, configId: "thought_level", value: p.reasoningEffort });
@@ -93612,7 +94523,10 @@ var IsolatedAcpClient = class {
     const update = message.params.update;
     const config2 = initial ?? this.configurations.get(id6);
     if (!update || !config2) return;
-    if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config2.modes = { ...config2.modes, currentModeId: update.currentModeId };
+    if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") {
+      config2.modes = { ...config2.modes, currentModeId: update.currentModeId };
+      if (config2.sessionModes) config2.sessionModes.currentModeId = update.currentModeId;
+    }
     if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
       for (const option of update.configOptions) {
         if (option?.type !== "select" || !Array.isArray(option.options)) continue;
@@ -93625,6 +94539,17 @@ var IsolatedAcpClient = class {
           currentModeId: option.currentValue,
           availableModes: options.map((item) => ({ id: item.value, name: item.name }))
         };
+        if (option.id === "mode" || option.category === "mode") {
+          config2.sessionModeConfigId = option.id;
+          config2.sessionModes = {
+            currentModeId: option.currentValue,
+            availableModes: options.map((item) => ({
+              id: item.value,
+              name: item.name,
+              ...typeof item.description === "string" ? { description: item.description } : {}
+            }))
+          };
+        }
       }
     }
   }
@@ -94507,8 +95432,8 @@ var WorkspaceBridge = class {
   }
 };
 function argsOf(payload) {
-  const value = isRecord16(payload) ? payload : {};
-  return isRecord16(value.args) ? value.args : value;
+  const value = isRecord17(payload) ? payload : {};
+  return isRecord17(value.args) ? value.args : value;
 }
 function toolScope(endpoint, args) {
   const session2 = args.agentId ?? args.sessionId;
@@ -94518,13 +95443,13 @@ function toolScope(endpoint, args) {
   }
   return session2;
 }
-function isRecord16(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function byteOrLineRange(args) {
-  const options = isRecord16(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord16(options.range)) return options.range;
-  return isRecord16(args.range) ? args.range : args;
+  const options = isRecord17(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord17(options.range)) return options.range;
+  return isRecord17(args.range) ? args.range : args;
 }
 function readOffset(args) {
   const range = byteOrLineRange(args);
@@ -94662,137 +95587,10 @@ var AcpWorkspaceTools = class {
 import { randomUUID as randomUUID15 } from "node:crypto";
 import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir6 } from "node:os";
-import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve6 } from "node:path";
+import { basename as basename7, isAbsolute as isAbsolute7, join as join13, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
-
-// packages/plugin/src/acp/adapters/claude-history.ts
-function claudeHistoryEvents(messages, sessionId, provider = "claude") {
-  const events = [];
-  const tools = /* @__PURE__ */ new Map();
-  let turn = 0;
-  let step = 1;
-  let afterTools = false;
-  let pending;
-  const push2 = (type, data2, surface = false) => events.push({ type: "event", event: {
-    type,
-    seq: events.length,
-    time: 0,
-    data: data2,
-    ...surface ? { surfaceOp: "append" } : {}
-  } });
-  const id6 = () => `${provider}-history:${sessionId}:${events.length}`;
-  const flushMessage = () => {
-    if (!pending) return;
-    const message = { id: id6(), role: pending.role, content: pending.content };
-    if (pending.role === "user") push2("user/message", { ...message, source: { kind: "user" } }, true);
-    else push2("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
-    pending = void 0;
-  };
-  const result = (tool) => {
-    if (tool.emitted || !tool.terminal) return;
-    tool.emitted = true;
-    push2("tool/result", { turn, step, message: { id: id6(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
-      type: "tool-result",
-      toolCallId: tool.id,
-      content: tool.output,
-      ...tool.failed ? { isError: true } : {}
-    }] } }, true);
-  };
-  const flushTools = () => {
-    for (const tool of tools.values()) result(tool);
-  };
-  const endTurn = () => {
-    flushMessage();
-    flushTools();
-    if (turn) {
-      push2("step/end", { turn, step });
-      push2("turn/end", { turn, reason: { kind: "completed" } });
-    }
-    tools.clear();
-    afterTools = false;
-  };
-  for (const message of messages) {
-    const params = message.params;
-    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
-    const update = params.update;
-    if (!update) continue;
-    const kind = update.sessionUpdate;
-    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
-      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
-      const role2 = kind === "user_message_chunk" ? "user" : "assistant";
-      if (role2 === "user" && pending?.role !== "user") {
-        endTurn();
-        turn++;
-        step = 1;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      } else if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      }
-      if (pending && pending.role !== role2) flushMessage();
-      flushTools();
-      if (role2 === "assistant" && afterTools) {
-        push2("step/end", { turn, step });
-        step++;
-        push2("step/start", { turn, step });
-        afterTools = false;
-      }
-      pending ??= { role: role2, content: [] };
-      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
-      const previous = pending.content.at(-1);
-      if (previous?.type === type) previous.text += update.content.text;
-      else pending.content.push({ type, text: update.content.text });
-    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
-      flushMessage();
-      afterTools = true;
-      if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      }
-      let tool = tools.get(update.toolCallId);
-      if (!tool) {
-        tool = {
-          id: update.toolCallId,
-          name: typeof update.title === "string" ? update.title : "tool",
-          input: update.rawInput,
-          output: [],
-          failed: false,
-          terminal: false,
-          emitted: false
-        };
-        tools.set(tool.id, tool);
-        push2("tool/call", {
-          turn,
-          step,
-          callId: tool.id,
-          name: tool.name,
-          arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
-        });
-      }
-      const decoded = {
-        content: Array.isArray(update.content) ? update.content.flatMap((item) => item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string" ? [{ type: "text", text: item.content.text }] : []) : [],
-        isError: update.status === "failed" || update.rawOutput?.isError === true
-      };
-      if (!decoded.content.length && update.rawOutput !== void 0) decoded.content.push({
-        type: "text",
-        text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
-      });
-      if (decoded.content.length) tool.output = decoded.content;
-      tool.failed ||= decoded.isError;
-      tool.terminal ||= update.status === "completed" || update.status === "failed";
-      if (kind === "tool_call_update") result(tool);
-    }
-  }
-  endTurn();
-  return events;
-}
-
-// packages/plugin/src/acp/adapters/claude-process.ts
 var ClaudeAcpClient = class extends CursorAcpClient {
   live = /* @__PURE__ */ new Map();
   loads = /* @__PURE__ */ new Map();
@@ -94811,7 +95609,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   /** History events and model catalogs are labelled with the backend that produced them. */
   modelLabel;
   get label() {
-    return this.modelLabel === "hermes" ? "Hermes" : "Claude";
+    return this.modelLabel === "hermes" ? "Hermes" : this.modelLabel === "antigravity" ? "Antigravity" : this.modelLabel === "claude" ? "Claude" : this.modelLabel;
   }
   onInbound(handler) {
     return super.onInbound((message) => {
@@ -94840,7 +95638,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         this.loads.delete(id6);
       }
     }
-    if (method === "session/new") {
+    if (method === "session/new" || method === "session/fork") {
       this.checkSessionLimit();
       this.pendingNew++;
       try {
@@ -94895,7 +95693,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
-      return claudeHistoryEvents(updates, sessionId, this.modelLabel);
+      return acpHistoryEvents(updates, sessionId, this.modelLabel);
     } catch (error62) {
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
       throw error62;
@@ -95857,6 +96655,47 @@ function withoutSelectionArgs(args) {
   return filtered;
 }
 
+// packages/plugin/src/acp/adapters/antigravity-acp.ts
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+var execFileAsync = promisify3(execFile2);
+var NEGATIVE_CACHE_TTL_MS = 3e4;
+var nativeAcpSupportCache = /* @__PURE__ */ new Map();
+function supportsAntigravityNativeAcp(binary = "agy") {
+  const key = binary.trim() || "agy";
+  const cached2 = nativeAcpSupportCache.get(key);
+  if (cached2 && (cached2.expiresAt === void 0 || cached2.expiresAt > Date.now())) {
+    return cached2.promise;
+  }
+  const entry = {
+    promise: execFileAsync(key, ["acp", "--help"], {
+      timeout: 3e3,
+      windowsHide: true,
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(key)
+    }).then(
+      () => true,
+      () => {
+        entry.expiresAt = Date.now() + NEGATIVE_CACHE_TTL_MS;
+        return false;
+      }
+    )
+  };
+  nativeAcpSupportCache.set(key, entry);
+  return entry.promise;
+}
+function isLegacyAntigravityStreamJsonArgs(args) {
+  if (!args || args.length === 0) return false;
+  return args.includes("--input-format") || args.includes("stream-json");
+}
+var AntigravityNativeAcpClient = class extends ClaudeAcpClient {
+  constructor(binary = "agy", logger2, spawnAcp, options = {}) {
+    super(binary, logger2, spawnAcp, {
+      ...options,
+      args: options.args && options.args.length > 0 && !isLegacyAntigravityStreamJsonArgs(options.args) ? options.args : ["acp"]
+    }, "antigravity");
+  }
+};
+
 // packages/plugin/src/acp/adapters/opencode-process.ts
 import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
@@ -95866,13 +96705,13 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify3, stripVTControlCharacters } from "node:util";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify4, stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
-var execFileAsync = promisify3(execFile2);
+var execFileAsync2 = promisify4(execFile3);
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
-    const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), "--help"], {
+    const { stdout, stderr } = await execFileAsync2(binary, [...opencodePrivateArgs(args), "--help"], {
       cwd: cwd2,
       signal,
       timeout: 2e4,
@@ -96014,6 +96853,18 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   nativeApi;
   archivedSessions = /* @__PURE__ */ new Set();
   archivingSessions = /* @__PURE__ */ new Set();
+  sessionCommands = /* @__PURE__ */ new Map();
+  initMetadata;
+  lastAuthDiagnostic;
+  diagnostics() {
+    return buildAuthDiagnosticFromMetadata("opencode", this.initMetadata, this.lastAuthDiagnostic, this.ready);
+  }
+  capabilities() {
+    return this.initMetadata?.agentCapabilities ?? {};
+  }
+  authMethods() {
+    return this.initMetadata?.authMethods ?? [];
+  }
   start() {
     if (this.closed) return Promise.reject(new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed."));
     if (this.ready) return Promise.resolve();
@@ -96098,7 +96949,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   busy = /* @__PURE__ */ new Set();
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
-    const p = isRecord17(params) ? params : {};
+    const p = isRecord18(params) ? params : {};
     const id6 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id6 && this.archivingSessions.has(id6)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id6 && this.archivedSessions.has(id6) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
@@ -96115,7 +96966,10 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         this.loads.delete(id6);
       }
     }
-    if (method === "session/new") return this.loadSession(method, params, budget);
+    if (method === "session/new" || method === "session/fork") return this.loadSession(method, params, budget);
+    if (method === "dsh/sessionCommands") {
+      return { commands: id6 ? [...this.sessionCommands.get(id6) ?? []] : [] };
+    }
     if (method === "dsh/sessionModels" || method === "dsh/selectModel") {
       const models = id6 ? this.models.get(id6) : void 0;
       if (!models) throw new OpencodeAcpError("ACP_SESSION_NOT_LOADED", "Load the OpenCode session before selecting its model.");
@@ -96127,6 +96981,23 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         this.publish({ kind: "notification", method: "session/update", params: {
           sessionId: id6,
           update: { sessionUpdate: "model_selection", selected: result2.selected }
+        } });
+        return result2;
+      } finally {
+        this.busy.delete(id6);
+      }
+    }
+    if (method === "dsh/sessionModes" || method === "session/set_mode") {
+      const models = id6 ? this.models.get(id6) : void 0;
+      if (!models) throw new OpencodeAcpError("ACP_SESSION_NOT_LOADED", "Load the OpenCode session before changing its mode.");
+      if (method === "dsh/sessionModes") return models.modesCatalog();
+      if (this.busy.has(id6)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before changing its mode.");
+      this.busy.add(id6);
+      try {
+        const result2 = await models.setMode(id6, p.modeId, (method2, params2) => this.request(method2, params2, budget));
+        this.publish({ kind: "notification", method: "session/update", params: {
+          sessionId: id6,
+          update: { sessionUpdate: "current_mode_update", currentModeId: result2.currentModeId }
         } });
         return result2;
       } finally {
@@ -96148,7 +97019,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     }
     const result = await this.request(method, params, budget);
     const nativeApi = this.nativeApi;
-    if (method === "session/list" && nativeApi && isRecord17(result) && Array.isArray(result.sessions)) {
+    if (method === "session/list" && nativeApi && isRecord18(result) && Array.isArray(result.sessions)) {
       if (result.sessions.length > 1e3) throw new OpencodeAcpError("INVALID_MESSAGE", "The OpenCode catalog page is too large.");
       const items = result.sessions;
       const archivedItems = /* @__PURE__ */ new Map();
@@ -96158,7 +97029,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           const index = next++;
           if (index >= items.length) return;
           const item = items[index];
-          if (!isRecord17(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+          if (!isRecord18(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
           const cwd2 = await realpath4(item.cwd).catch(() => void 0);
           if (!cwd2) continue;
           const archived = await nativeApi.isArchived(item.sessionId, cwd2);
@@ -96174,7 +97045,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
-    const returnedId = isRecord17(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const returnedId = isRecord18(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
     const id6 = sessionId ?? returnedId;
     if (!this.ready || !id6 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
@@ -96281,7 +97152,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       }
     });
     try {
-      await this.request("initialize", {
+      const initResult = await this.request("initialize", {
         protocolVersion: 1,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
@@ -96292,6 +97163,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           version: PLUGIN_VERSION
         }
       }, ACP_START_TIMEOUT_MS3);
+      this.initMetadata = parseInitializeMetadata(initResult);
+      this.lastAuthDiagnostic = void 0;
       if (this.closed || this.process !== child) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       this.ready = true;
       this.logger?.info("OpenCode ACP ready");
@@ -96352,7 +97225,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord17(value)) {
+    if (!isRecord18(value)) {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted an invalid message."));
       return;
     }
@@ -96360,7 +97233,12 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(new OpencodeAcpError("OPENCODE_UPSTREAM_ERROR", safeUpstreamError3(value.error)));
+        const authDiagnostic = detectUpstreamAuthFailure("opencode", value.error, this.initMetadata?.authMethods);
+        if (authDiagnostic) this.lastAuthDiagnostic = authDiagnostic;
+        pending.reject(new OpencodeAcpError(
+          "OPENCODE_UPSTREAM_ERROR",
+          authDiagnostic?.guidance ?? safeUpstreamError3(value.error)
+        ));
       } else {
         pending.resolve(value.result);
       }
@@ -96369,12 +97247,15 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "request" && isRecord17(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
+    if (inbound.kind === "request" && isRecord18(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
       void this.respondError(inbound.id, -32600, "OpenCode session is not loaded.").catch(() => void 0);
       return;
     }
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord17(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord18(params) && typeof params.sessionId === "string") {
       this.models.get(params.sessionId)?.update(params.update);
+      if (isRecord18(params.update) && params.update.sessionUpdate === "available_commands_update") {
+        this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update));
+      }
       if (this.loads.has(params.sessionId) && !this.options.historyReader) return;
     }
     this.publish(inbound);
@@ -96409,7 +97290,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
 };
 function safeUpstreamError3(value) {
-  if (!isRecord17(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
+  if (!isRecord18(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "OpenCode ACP authentication failed.";
@@ -96417,7 +97298,7 @@ function safeUpstreamError3(value) {
   if (message.includes("not initialized")) return "OpenCode ACP is not initialized.";
   return "OpenCode ACP rejected the request.";
 }
-function isRecord17(value) {
+function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -96425,11 +97306,30 @@ function isRecord17(value) {
 var id5 = external_exports.string().min(1).max(256);
 var cwd = external_exports.string().min(1).max(4096);
 var mode = external_exports.enum(["agent", "plan", "ask"]);
+var RESERVED_ACP_BACKENDS = /* @__PURE__ */ new Set([
+  "codex",
+  "harness",
+  "kimi",
+  "acp",
+  "constructor",
+  "tostring",
+  "valueof",
+  "hasownproperty",
+  "__proto__",
+  "prototype"
+]);
+var backendId = external_exports.string().trim().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/i).refine(
+  (value) => !RESERVED_ACP_BACKENDS.has(value.toLowerCase())
+);
 var textBlock = external_exports.object({
   type: external_exports.literal("text"),
   text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
-var imageBlock = external_exports.object({ type: external_exports.literal("image"), mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
+var imageBlock = external_exports.object({
+  type: external_exports.literal("image"),
+  mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4)
+}).strict().refine((value) => {
   try {
     parseAcpImage(value);
     return true;
@@ -96439,7 +97339,7 @@ var imageBlock = external_exports.object({ type: external_exports.literal("image
 });
 var promptBlock = external_exports.union([textBlock, imageBlock]);
 var acpToolStreamSchema = external_exports.object({
-  backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode", "hermes"]),
+  backend: backendId,
   endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
   args: external_exports.record(external_exports.string(), external_exports.unknown())
 }).strict();
@@ -96447,25 +97347,53 @@ var schemas2 = {
   "dsh/sessionArchive": external_exports.object({ sessionId: id5.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports.literal("opencode") }).strict(),
   "dsh/toolCall": external_exports.object({
     sessionId: id5,
-    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode", "hermes"]),
+    backend: backendId,
     endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
     args: external_exports.record(external_exports.string(), external_exports.unknown())
   }).strict(),
-  "dsh/sessionModels": external_exports.object({ sessionId: id5, backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode", "hermes"]) }).strict(),
+  "dsh/sessionModels": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
   "dsh/selectModel": external_exports.object({
     sessionId: id5,
-    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode", "hermes"]),
+    backend: backendId,
     model: id5,
     reasoningEffort: id5.optional()
   }).strict(),
+  "dsh/sessionModes": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
+  "dsh/sessionCommands": external_exports.object({ sessionId: id5, backend: backendId }).strict(),
   "dsh/selectPermission": external_exports.object({
     sessionId: id5,
-    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode", "hermes"]).optional(),
+    backend: backendId.optional(),
     preset: external_exports.enum(["workspace-write", "danger-full-access"])
+  }).strict(),
+  "dsh/workspaceCreate": external_exports.object({
+    backend: backendId,
+    path: cwd,
+    title: external_exports.string().trim().min(1).max(256).optional()
+  }).strict(),
+  "dsh/workspaceRename": external_exports.object({
+    backend: backendId,
+    path: cwd,
+    title: external_exports.string().trim().min(1).max(256)
+  }).strict(),
+  "dsh/workspaceDelete": external_exports.object({
+    backend: backendId,
+    path: cwd
+  }).strict(),
+  "dsh/workspaceReorder": external_exports.object({
+    backend: backendId,
+    paths: external_exports.array(cwd).max(200)
+  }).strict(),
+  "dsh/sessionPin": external_exports.object({
+    backend: backendId,
+    sessionId: id5
+  }).strict(),
+  "dsh/sessionUnpin": external_exports.object({
+    backend: backendId,
+    sessionId: id5
   }).strict(),
   "initialize": external_exports.object({
     protocolVersion: external_exports.number().int().positive().optional(),
-    backend: external_exports.string().min(1).max(64).optional(),
+    backend: backendId.optional(),
     clientInfo: external_exports.object({
       name: external_exports.string().min(1).max(128).optional(),
       version: external_exports.string().min(1).max(128).optional()
@@ -96473,17 +97401,26 @@ var schemas2 = {
   }).strict(),
   "session/new": external_exports.object({
     cwd,
-    backend: external_exports.string().min(1).max(64).optional(),
+    backend: backendId.optional(),
     mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
     mode: mode.optional()
   }).strict(),
   "session/load": external_exports.object({
     sessionId: id5,
-    backend: external_exports.string().min(1).max(64).optional()
+    backend: backendId.optional()
+  }).strict(),
+  "session/fork": external_exports.object({
+    sessionId: id5,
+    backend: backendId.optional()
+  }).strict(),
+  "session/set_mode": external_exports.object({
+    sessionId: id5,
+    backend: backendId.optional(),
+    modeId: id5
   }).strict(),
   "session/prompt": external_exports.object({
     sessionId: id5,
-    backend: external_exports.enum(["cursor", "antigravity", "pi", "claude", "opencode", "hermes"]).optional(),
+    backend: backendId.optional(),
     prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
   "session/cancel": external_exports.object({
@@ -96493,20 +97430,23 @@ var schemas2 = {
     path: external_exports.string().min(1).max(4096)
   }).strict(),
   "dsh/workspaceList": external_exports.object({
-    backend: external_exports.string().min(1).max(64).optional()
+    backend: backendId.optional()
   }).strict().optional(),
   "dsh/sessionList": external_exports.object({
     path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
-    backend: external_exports.string().min(1).max(64).optional(),
+    backend: backendId.optional(),
     limit: external_exports.number().int().positive().max(100).optional(),
     prewarm: external_exports.boolean().optional()
   }).strict(),
   "dsh/sessionHistory": external_exports.object({
     sessionId: id5,
-    backend: external_exports.string().min(1).max(64).optional()
+    backend: backendId.optional()
   }).strict()
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
+function isValidAcpBackendId(value) {
+  return backendId.safeParse(value).success;
+}
 function parseAcpCall(method, params) {
   if (!Object.prototype.hasOwnProperty.call(schemas2, method)) {
     throw new RpcError("METHOD_NOT_ALLOWED", "The ACP method is not allowlisted for Remote.");
@@ -96519,12 +97459,12 @@ function parseAcpCall(method, params) {
   return { method, params: parsed.data };
 }
 function sessionIdFromParams(method, params) {
-  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
+  if (method === "initialize" || method === "session/new" || method === "dsh/directoryList" || method === "dsh/workspaceList" || method === "dsh/workspaceCreate" || method === "dsh/workspaceRename" || method === "dsh/workspaceDelete" || method === "dsh/workspaceReorder" || method === "dsh/sessionPin" || method === "dsh/sessionUnpin" || method === "dsh/sessionList" || method === "dsh/sessionHistory") return void 0;
   if (typeof params.sessionId === "string") return params.sessionId;
   return void 0;
 }
 function isSessionMutation(method) {
-  return method === "session/prompt" || method === "session/cancel" || method === "dsh/selectModel" || method === "dsh/selectPermission" || method === "dsh/toolCall";
+  return method === "session/prompt" || method === "session/cancel" || method === "session/fork" || method === "session/set_mode" || method === "dsh/selectModel" || method === "dsh/selectPermission" || method === "dsh/toolCall";
 }
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
@@ -96662,15 +97602,15 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile4 } = await import("node:child_process");
-    const { promisify: promisify5 } = await import("node:util");
-    const execFileAsync3 = promisify5(execFile4);
+    const { execFile: execFile5 } = await import("node:child_process");
+    const { promisify: promisify6 } = await import("node:util");
+    const execFileAsync4 = promisify6(execFile5);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync3("sqlite3", [dbPath, "-json", formattedSql]);
+    const { stdout } = await execFileAsync4("sqlite3", [dbPath, "-json", formattedSql]);
     return JSON.parse(stdout || "[]");
   } catch {
     return [];
@@ -97167,15 +98107,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord18(value) {
+function isRecord19(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error62) {
-  if (isRecord18(error62) && typeof error62.code === "string") return error62.code;
+  if (isRecord19(error62) && typeof error62.code === "string") return error62.code;
   return "UNKNOWN";
 }
 function safeMethod2(input4) {
-  return isRecord18(input4) && typeof input4.method === "string" ? input4.method : "invalid";
+  return isRecord19(input4) && typeof input4.method === "string" ? input4.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
@@ -97187,12 +98127,230 @@ function concatChunks2(chunks, totalBytes) {
   return output2;
 }
 
+// packages/plugin/src/acp/workspace-store.ts
+import { mkdir as mkdir4, readFile as readFile5, rename as rename3, writeFile as writeFile3 } from "node:fs/promises";
+import { dirname as dirname5, join as join12 } from "node:path";
+var PROTOTYPE_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
+function emptyBackends() {
+  return /* @__PURE__ */ Object.create(null);
+}
+function emptyPermissions() {
+  return /* @__PURE__ */ Object.create(null);
+}
+function createEmptyStore() {
+  return {
+    version: 1,
+    backends: emptyBackends(),
+    sessionPermissions: emptyPermissions()
+  };
+}
+var AcpWorkspaceStore = class _AcpWorkspaceStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+  }
+  data = createEmptyStore();
+  loaded = false;
+  loadPromise;
+  writeChain = Promise.resolve();
+  static inDirectory(directory) {
+    return typeof directory === "string" && directory.length > 0 ? new _AcpWorkspaceStore(join12(directory, "acp-state.json")) : new _AcpWorkspaceStore();
+  }
+  async load() {
+    if (this.loaded) return;
+    this.loadPromise ??= this.loadOnce().finally(() => {
+      this.loadPromise = void 0;
+    });
+    return this.loadPromise;
+  }
+  async loadOnce() {
+    if (this.filePath === void 0) {
+      this.loaded = true;
+      return;
+    }
+    try {
+      const raw = await readFile5(this.filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      this.data = normalizeStore(parsed);
+    } catch {
+      this.data = createEmptyStore();
+    }
+    this.loaded = true;
+  }
+  getBackend(backend) {
+    if (PROTOTYPE_KEYS.has(backend) || !Object.hasOwn(this.data.backends, backend)) return void 0;
+    return this.data.backends[backend];
+  }
+  ensureBackend(backend) {
+    if (PROTOTYPE_KEYS.has(backend)) {
+      throw new Error(`Reserved ACP backend key: ${backend}`);
+    }
+    let entry = Object.hasOwn(this.data.backends, backend) ? this.data.backends[backend] : void 0;
+    if (entry === void 0) {
+      entry = { workspaces: [], deletedPaths: [], pinnedSessionIds: [] };
+      this.data.backends[backend] = entry;
+    }
+    return entry;
+  }
+  async persist() {
+    if (this.filePath === void 0) return;
+    const filePath = this.filePath;
+    const snapshot2 = JSON.stringify(this.data, null, 2);
+    const next = this.writeChain.catch(() => void 0).then(async () => {
+      await mkdir4(dirname5(filePath), { recursive: true });
+      const temp = `${filePath}.${process.pid}.tmp`;
+      await writeFile3(temp, snapshot2, "utf8");
+      await rename3(temp, filePath);
+    });
+    this.writeChain = next;
+    return next;
+  }
+  async listWorkspaces(backend) {
+    await this.load();
+    const entry = this.getBackend(backend);
+    return {
+      workspaces: (entry?.workspaces ?? []).map((item) => ({ ...item })),
+      deletedPaths: new Set(entry?.deletedPaths ?? [])
+    };
+  }
+  async upsertWorkspace(backend, path, title) {
+    await this.load();
+    const entry = this.ensureBackend(backend);
+    entry.deletedPaths = entry.deletedPaths.filter((item) => item !== path);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = entry.workspaces.find((item) => item.path === path);
+    if (existing !== void 0) {
+      if (title !== void 0 && title.trim().length > 0) existing.title = title.trim();
+      existing.updatedAt = now;
+      await this.persist();
+      return { ...existing };
+    }
+    const created = {
+      path,
+      ...title !== void 0 && title.trim().length > 0 ? { title: title.trim() } : {},
+      updatedAt: now
+    };
+    entry.workspaces.push(created);
+    await this.persist();
+    return { ...created };
+  }
+  async renameWorkspace(backend, path, title) {
+    await this.load();
+    const trimmed = title.trim();
+    const entry = this.ensureBackend(backend);
+    entry.deletedPaths = entry.deletedPaths.filter((item) => item !== path);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = entry.workspaces.find((item) => item.path === path);
+    if (existing !== void 0) {
+      existing.title = trimmed;
+      existing.updatedAt = now;
+      await this.persist();
+      return { ...existing };
+    }
+    const created = { path, title: trimmed, updatedAt: now };
+    entry.workspaces.push(created);
+    await this.persist();
+    return { ...created };
+  }
+  async deleteWorkspace(backend, path) {
+    await this.load();
+    const entry = this.ensureBackend(backend);
+    entry.workspaces = entry.workspaces.filter((item) => item.path !== path);
+    if (!entry.deletedPaths.includes(path)) entry.deletedPaths.push(path);
+    await this.persist();
+  }
+  async reorderWorkspaces(backend, orderedPaths) {
+    await this.load();
+    const entry = this.ensureBackend(backend);
+    const byPath = new Map(entry.workspaces.map((item) => [item.path, item]));
+    const next = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const path of orderedPaths) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+      const existing = byPath.get(path);
+      if (existing !== void 0) next.push(existing);
+      else if (!entry.deletedPaths.includes(path)) {
+        next.push({ path, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      }
+    }
+    for (const item of entry.workspaces) {
+      if (!seen.has(item.path)) next.push(item);
+    }
+    entry.workspaces = next;
+    await this.persist();
+    return next.map((item) => item.path);
+  }
+  async getPinnedSessions(backend) {
+    await this.load();
+    return [...this.getBackend(backend)?.pinnedSessionIds ?? []];
+  }
+  async pinSession(backend, sessionId) {
+    await this.load();
+    const entry = this.ensureBackend(backend);
+    entry.pinnedSessionIds = [sessionId, ...entry.pinnedSessionIds.filter((id6) => id6 !== sessionId)];
+    await this.persist();
+    return [...entry.pinnedSessionIds];
+  }
+  async unpinSession(backend, sessionId) {
+    await this.load();
+    const entry = this.ensureBackend(backend);
+    entry.pinnedSessionIds = entry.pinnedSessionIds.filter((id6) => id6 !== sessionId);
+    await this.persist();
+    return [...entry.pinnedSessionIds];
+  }
+  async getSessionPermission(sessionId) {
+    await this.load();
+    if (PROTOTYPE_KEYS.has(sessionId) || !Object.hasOwn(this.data.sessionPermissions, sessionId)) return void 0;
+    return this.data.sessionPermissions[sessionId];
+  }
+  async setSessionPermission(sessionId, preset) {
+    await this.load();
+    if (PROTOTYPE_KEYS.has(sessionId)) {
+      throw new Error(`Reserved ACP session key: ${sessionId}`);
+    }
+    this.data.sessionPermissions[sessionId] = preset;
+    await this.persist();
+  }
+  async getAllSessionPermissions() {
+    await this.load();
+    return { ...this.data.sessionPermissions };
+  }
+};
+function normalizeStore(value) {
+  if (!isRecord20(value) || value.version !== 1) return createEmptyStore();
+  const backends = emptyBackends();
+  if (isRecord20(value.backends)) {
+    for (const [key, raw] of Object.entries(value.backends)) {
+      if (PROTOTYPE_KEYS.has(key) || !isRecord20(raw)) continue;
+      const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.flatMap((item) => isRecord20(item) && typeof item.path === "string" && item.path.length > 0 ? [{
+        path: item.path,
+        ...typeof item.title === "string" && item.title.trim() ? { title: item.title.trim() } : {},
+        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : (/* @__PURE__ */ new Date(0)).toISOString()
+      }] : []) : [];
+      const deletedPaths = Array.isArray(raw.deletedPaths) ? raw.deletedPaths.filter((item) => typeof item === "string" && item.length > 0) : [];
+      const pinnedSessionIds = Array.isArray(raw.pinnedSessionIds) ? raw.pinnedSessionIds.filter((item) => typeof item === "string" && item.length > 0) : [];
+      backends[key] = { workspaces, deletedPaths, pinnedSessionIds };
+    }
+  }
+  const sessionPermissions = emptyPermissions();
+  if (isRecord20(value.sessionPermissions)) {
+    for (const [key, preset] of Object.entries(value.sessionPermissions)) {
+      if (!PROTOTYPE_KEYS.has(key) && (preset === "workspace-write" || preset === "danger-full-access")) {
+        sessionPermissions[key] = preset;
+      }
+    }
+  }
+  return { version: 1, backends, sessionPermissions };
+}
+function isRecord20(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // packages/plugin/src/acp/gateway.ts
 var APPROVAL_TTL_MS2 = 5 * 6e4;
 var BACKEND_STABLE_MS = 3e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
-var CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes"]);
-var isCatalogBackend = (value) => typeof value === "string" && CATALOG_BACKENDS.has(value);
+var STRICT_CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes"]);
 var ACP_DIRECTORY_ENTRY_LIMIT = 500;
 var MAX_BUFFERED_ACP_FRAMES = 200;
 var ACP_FRAME_BUFFER_TTL_MS = 5 * 6e4;
@@ -97207,24 +98365,32 @@ var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
   "tool_call_update"
 ]);
 var AcpRemoteGateway = class {
-  constructor(config2, logger2, createAcp = (binary, targetLogger, backend) => {
-    if (backend.id === "antigravity") {
-      return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-    }
-    if (backend.id === "claude") return new ClaudeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-    if (backend.id === "hermes") return new HermesAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-    if (backend.id === "pi") return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd });
-    if (backend.id === "opencode") {
-      return new OpencodeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
-    }
-    return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: "cursor" });
-  }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner) {
+  constructor(config2, logger2, createAcp, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner, workspaceStore = new AcpWorkspaceStore()) {
     this.config = config2;
     this.logger = logger2;
-    this.createAcp = createAcp;
     this.restartDelaysMs = restartDelaysMs;
     this.terminalEnabled = terminalEnabled;
     this.terminalSpawner = terminalSpawner;
+    this.workspaceStore = workspaceStore;
+    this.customCreateAcp = createAcp !== void 0;
+    this.createAcp = createAcp ?? ((binary, targetLogger, backend) => {
+      if (backend.id === "antigravity") {
+        if (isLegacyAntigravityStreamJsonArgs(backend.args)) {
+          return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+        }
+        return new AntigravityNativeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+      }
+      if (backend.id === "claude") return new ClaudeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+      if (backend.id === "hermes") return new HermesAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+      if (backend.id === "pi") return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd });
+      if (backend.id === "opencode") {
+        return new OpencodeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+      }
+      if (backend.id === "cursor") {
+        return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: "cursor" });
+      }
+      return new ClaudeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd }, backend.id);
+    });
   }
   backendInstances = /* @__PURE__ */ new Map();
   sessionCwds = /* @__PURE__ */ new Map();
@@ -97265,10 +98431,34 @@ var AcpRemoteGateway = class {
   historyInvalidatedAt = /* @__PURE__ */ new Map();
   pendingHistoryReads = /* @__PURE__ */ new Map();
   backendHistoryChains = /* @__PURE__ */ new Map();
-  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
+  backendDiagnostics = /* @__PURE__ */ new Map();
+  backendErrors = /* @__PURE__ */ new Map();
+  customCreateAcp;
+  createAcp;
+  /** Allow all valid enabled ACP adapters, including custom `settings.acp.add` backends. */
   enabledBackends() {
     if (!this.config.enabled) return [];
-    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor", "pi", "claude", "opencode", "hermes"].includes(item.id)).map((item) => item.id);
+    return this.config.backends.filter((item) => item.enabled && item.id !== "codex" && item.id !== "kimi" && isValidAcpBackendId(item.id)).map((item) => item.id);
+  }
+  diagnostics() {
+    const result = {};
+    for (const backend of this.config.backends) {
+      if (backend.id === "codex" || backend.id === "kimi") continue;
+      const inst = this.backendInstances.get(backend.id);
+      const ready = this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && inst?.client.isReady() === true;
+      const state2 = !this.config.enabled || !backend.enabled ? "disabled" : ready ? "ready" : "unavailable";
+      const clientDiag = inst?.client.diagnostics?.();
+      const storedDiag = this.backendDiagnostics.get(backend.id);
+      const errorCode5 = ready ? void 0 : this.backendErrors.get(backend.id) ?? clientDiag?.errorCode ?? storedDiag?.errorCode;
+      const auth = ready ? clientDiag ?? { authStatus: "authenticated" } : storedDiag ?? clientDiag ?? { authStatus: "unknown" };
+      result[backend.id] = {
+        state: state2,
+        ...errorCode5 ? { errorCode: errorCode5 } : {},
+        auth,
+        capabilities: inst?.client.capabilities?.() ?? {}
+      };
+    }
+    return result;
   }
   start() {
     if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
@@ -97319,17 +98509,18 @@ var AcpRemoteGateway = class {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     const workspaceBridge = new WorkspaceBridge(async (rawId) => {
-      const match = rawId.match(/^(acp|cursor|pi|opencode|claude|hermes):(.+)$/);
-      const session2 = match ? this.sessionCwds.get(match[2]) : void 0;
-      const backend = match?.[1] === "acp" ? "antigravity" : match?.[1] === "pi" ? "pi" : match?.[1] === "opencode" ? "opencode" : match?.[1] === "claude" ? "claude" : match?.[1] === "hermes" ? "hermes" : "cursor";
-      if (!session2 || session2.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
-      this.requireAcp(backend);
-      this.requireSessionOwner(context.connectionId, match[2]);
+      const parsed = parsePublicSessionId(rawId);
+      const session2 = parsed ? this.sessionCwds.get(parsed.nativeId) : void 0;
+      if (!parsed || !session2 || session2.backend !== parsed.backend) {
+        throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+      }
+      this.requireAcp(parsed.backend);
+      this.requireSessionOwner(context.connectionId, parsed.nativeId);
       return session2.cwd;
     }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
       domain: "ACP",
-      owns: (value) => typeof value === "string" && /^(acp|cursor|pi|opencode|claude|hermes):/.test(value),
-      parse: (value) => typeof value === "string" && /^(acp|cursor|pi|opencode|claude|hermes):[A-Za-z0-9_-]{1,240}$/.test(value) ? { sessionId: value, nativeId: value } : void 0
+      owns: (value) => typeof value === "string" && parsePublicSessionId(value) !== void 0,
+      parse: (value) => typeof value === "string" && parsePublicSessionId(value, true) !== void 0 ? { sessionId: value, nativeId: value } : void 0
     });
     this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(
       workspaceBridge,
@@ -97379,11 +98570,11 @@ var AcpRemoteGateway = class {
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
     });
     if (typeof call.params.backend === "string") {
-      const prefix = typeof call.params.sessionId === "string" ? /^(acp|cursor|pi|claude|opencode|hermes):/.exec(call.params.sessionId)?.[1] : void 0;
-      if (prefix && (prefix === "acp" ? "antigravity" : prefix) !== call.params.backend) {
+      const parsedPrefix = typeof call.params.sessionId === "string" ? parsePublicSessionId(call.params.sessionId) : void 0;
+      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
-      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude|opencode|hermes):/, "") : sessionIdFromParams(call.method, call.params);
+      const sessionId2 = call.method === "dsh/sessionHistory" && parsedPrefix ? parsedPrefix.nativeId : sessionIdFromParams(call.method, call.params);
       const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
       if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
@@ -97394,6 +98585,54 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
       this.requireAcp(requestedBackend);
       return this.initializeResult(call.params, requestedBackend);
+    }
+    if (call.method === "dsh/workspaceCreate") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const canonical = await this.requireExistingDirectory(String(call.params.path));
+      assertCurrent();
+      const title = typeof call.params.title === "string" ? call.params.title : void 0;
+      const entry = await this.workspaceStore.upsertWorkspace(backend, canonical, title);
+      return { path: entry.path, title: entry.title ?? (basename7(entry.path) || "workspace"), updatedAt: entry.updatedAt };
+    }
+    if (call.method === "dsh/workspaceRename") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const canonical = await this.requireExistingDirectory(String(call.params.path)).catch(() => String(call.params.path));
+      assertCurrent();
+      const entry = await this.workspaceStore.renameWorkspace(backend, canonical, String(call.params.title));
+      return { path: entry.path, title: entry.title ?? (basename7(entry.path) || "workspace"), updatedAt: entry.updatedAt };
+    }
+    if (call.method === "dsh/workspaceDelete") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const rawPath = String(call.params.path);
+      const canonical = await realpath5(rawPath).catch(() => rawPath);
+      assertCurrent();
+      await this.workspaceStore.deleteWorkspace(backend, canonical);
+      if (canonical !== rawPath) await this.workspaceStore.deleteWorkspace(backend, rawPath);
+      return { deleted: true, path: canonical };
+    }
+    if (call.method === "dsh/workspaceReorder") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const rawPaths = Array.isArray(call.params.paths) ? call.params.paths.filter((p) => typeof p === "string") : [];
+      const canonicalPaths = await Promise.all(rawPaths.map((p) => realpath5(p).catch(() => p)));
+      assertCurrent();
+      const paths = await this.workspaceStore.reorderWorkspaces(backend, canonicalPaths);
+      return { paths };
+    }
+    if (call.method === "dsh/sessionPin") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const pinnedSessionIds = await this.workspaceStore.pinSession(backend, String(call.params.sessionId));
+      return { pinnedSessionIds };
+    }
+    if (call.method === "dsh/sessionUnpin") {
+      const backend = String(call.params.backend);
+      this.requireAcp(backend);
+      const pinnedSessionIds = await this.workspaceStore.unpinSession(backend, String(call.params.sessionId));
+      return { pinnedSessionIds };
     }
     if (call.method === "dsh/sessionArchive") {
       const sessionId2 = String(call.params.sessionId);
@@ -97441,54 +98680,76 @@ var AcpRemoteGateway = class {
     }
     if (call.method === "dsh/workspaceList") {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
-      if (isCatalogBackend(requestedBackend)) {
+      const { workspaces: persisted, deletedPaths } = await this.workspaceStore.listWorkspaces(requestedBackend);
+      assertCurrent();
+      const merged = /* @__PURE__ */ new Map();
+      for (const item of persisted) {
+        const canonical = await this.requireExistingDirectory(item.path).catch(() => void 0);
+        assertCurrent();
+        if (!canonical || deletedPaths.has(canonical)) continue;
+        merged.set(canonical, { path: canonical, title: item.title ?? (basename7(canonical) || "workspace") });
+      }
+      if (this.isNativeCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename7(path) || "workspace" }));
-        if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
-        const defaultCandidates = /* @__PURE__ */ new Set();
-        const cwd3 = process.cwd();
-        if (cwd3) defaultCandidates.add(cwd3);
-        for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/srv/dsh-workspace", "/var/lib/dsh/local"]) {
+        for (const item of sessions) {
+          if (deletedPaths.has(item.cwd)) continue;
+          if (!merged.has(item.cwd)) {
+            merged.set(item.cwd, { path: item.cwd, title: basename7(item.cwd) || "workspace" });
+          }
+        }
+        if (merged.size === 0 && deletedPaths.size === 0 && (requestedBackend === "opencode" || requestedBackend === "cursor")) {
+          const defaultCandidates = /* @__PURE__ */ new Set();
+          const cwd2 = process.cwd();
+          if (cwd2) defaultCandidates.add(cwd2);
+          for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/srv/dsh-workspace", "/var/lib/dsh/local"]) {
+            try {
+              const s = await stat5(candidate);
+              if (s.isDirectory()) defaultCandidates.add(candidate);
+            } catch {
+            }
+          }
+          return [...defaultCandidates].map((path) => ({ path, title: basename7(path) || "workspace" }));
+        }
+        return [...merged.values()];
+      }
+      const candidates = /* @__PURE__ */ new Set();
+      if (merged.size === 0 && deletedPaths.size === 0) {
+        const cwd2 = process.cwd();
+        if (cwd2) candidates.add(cwd2);
+        for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
           try {
             const s = await stat5(candidate);
-            if (s.isDirectory()) defaultCandidates.add(candidate);
+            if (s.isDirectory()) candidates.add(candidate);
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename7(path) || "workspace" }));
       }
-      const candidates = /* @__PURE__ */ new Set();
-      const cwd2 = process.cwd();
-      if (cwd2) candidates.add(cwd2);
-      for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/var/lib/dsh/local"]) {
-        try {
-          const s = await stat5(candidate);
-          if (s.isDirectory()) candidates.add(candidate);
-        } catch {
-        }
-      }
-      const backend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
-      if (backend === "antigravity") {
+      if (requestedBackend === "antigravity") {
         try {
           const agyDirs = await discoverAntigravityWorkspaces();
           for (const d of agyDirs) {
-            candidates.add(d);
+            if (!deletedPaths.has(d)) candidates.add(d);
           }
         } catch {
         }
       }
-      const results = await Promise.all([...candidates].map(async (p) => {
-        let sessionCount = 0;
-        if (backend === "antigravity") {
+      for (const candidate of candidates) {
+        if (!deletedPaths.has(candidate) && !merged.has(candidate)) {
+          merged.set(candidate, { path: candidate, title: basename7(candidate) || "workspace" });
+        }
+      }
+      const results = await Promise.all([...merged.values()].map(async (entry) => {
+        let sessionCount = entry.sessionCount ?? 0;
+        if (requestedBackend === "antigravity") {
           try {
-            const sessions = await discoverAntigravitySessions(p, 100);
+            const sessions = await discoverAntigravitySessions(entry.path, 100);
             sessionCount = sessions.length;
           } catch {
           }
         }
         return {
-          path: p,
-          title: basename7(p) || "workspace",
+          path: entry.path,
+          title: entry.title,
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -97498,7 +98759,7 @@ var AcpRemoteGateway = class {
       const limit = typeof call.params.limit === "number" ? call.params.limit : 30;
       const path = String(call.params.path || "");
       const backend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
-      if (backend === "antigravity") {
+      if (backend === "antigravity" && !this.isNativeCatalogBackend("antigravity")) {
         if (path.trim() !== "" && call.params.prewarm !== false) {
           const cwd2 = await this.requireExistingDirectory(path);
           assertCurrent();
@@ -97513,31 +98774,45 @@ var AcpRemoteGateway = class {
         this.logger.info("ACP session list fetched", { count: items.length });
         return { items };
       }
-      if (isCatalogBackend(backend)) {
+      if (this.isNativeCatalogBackend(backend)) {
         const cwd2 = path ? await this.requireExistingDirectory(path) : void 0;
         const sessions = await this.listCatalogSessions(backend, cwd2);
         sessions.sort((a, b) => (Date.parse(b.updatedAt ?? "") || 0) - (Date.parse(a.updatedAt ?? "") || 0) || a.sessionId.localeCompare(b.sessionId));
-        return { items: sessions.slice(0, limit).map((item) => ({ conversationId: item.sessionId, title: item.title ?? "Untitled Session", createdAt: Date.parse(item.updatedAt ?? "") || 0, updatedAt: Date.parse(item.updatedAt ?? "") || 0, cwd: item.cwd })) };
+        const pinnedSessionIds = await this.workspaceStore.getPinnedSessions(backend);
+        return {
+          items: sessions.slice(0, limit).map((item) => ({
+            conversationId: item.sessionId,
+            title: item.title ?? "Untitled Session",
+            createdAt: Date.parse(item.updatedAt ?? "") || 0,
+            updatedAt: Date.parse(item.updatedAt ?? "") || 0,
+            cwd: item.cwd
+          })),
+          ...pinnedSessionIds.length > 0 ? { pinnedSessionIds } : {}
+        };
       }
       return { items: [] };
     }
     if (call.method === "dsh/sessionHistory") {
       const rawSessionId = String(call.params.sessionId);
-      const conversationId = rawSessionId.startsWith("hermes:") ? rawSessionId.slice("hermes:".length) : rawSessionId.startsWith("claude:") ? rawSessionId.slice(7) : rawSessionId.startsWith("pi:") ? rawSessionId.slice(3) : rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId.startsWith("opencode:") ? rawSessionId.slice("opencode:".length) : rawSessionId;
+      const parsedPrefix = parsePublicSessionId(rawSessionId);
+      const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId;
       const boundBackend = this.sessionBackends.get(conversationId);
       const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
-      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("hermes:") && backend !== "hermes" || rawSessionId.startsWith("claude:") && backend !== "claude" || rawSessionId.startsWith("pi:") && backend !== "pi" || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("opencode:") && backend !== "opencode" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
+      if (boundBackend !== void 0 && boundBackend !== backend || parsedPrefix && parsedPrefix.backend !== backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
       this.requireAcp(backend);
-      if (isCatalogBackend(backend)) {
+      const persistedPreset = this.sessionPermissions.get(conversationId) ?? await this.workspaceStore.getSessionPermission(conversationId);
+      if (persistedPreset) this.sessionPermissions.set(conversationId, persistedPreset);
+      if (this.isNativeCatalogBackend(backend)) {
         const cwd2 = await this.catalogSessionCwd(backend, conversationId);
         assertCurrent();
         const client = this.requireAcp(backend);
-        if (!client.history) throw new RpcError("METHOD_NOT_ALLOWED", "The ACP backend does not support history.");
+        if (!client.history) {
+          return { events: [], ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+        }
         const events2 = await this.readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent);
-        const preset2 = this.sessionPermissions.get(conversationId);
-        return { events: events2, ...preset2 ? { permissionPreset: preset2 } : {} };
+        return { events: events2, ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
       }
       if (backend !== "antigravity") return { events: [] };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
@@ -97545,8 +98820,7 @@ var AcpRemoteGateway = class {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length
       });
-      const preset = this.sessionPermissions.get(conversationId);
-      return { events, ...preset ? { permissionPreset: preset } : {} };
+      return { events, ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
@@ -97581,19 +98855,32 @@ var AcpRemoteGateway = class {
       const selected = this.sessionBackends.get(sessionId);
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
-      this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord19(part) && part.type === "image") && requested !== "antigravity" && requested !== "hermes") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      const client = this.requireAcp(requested);
+      const supportsImages = requested === "antigravity" || requested === "hermes" || client.capabilities?.()?.promptCapabilities?.image === true;
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord21(part) && part.type === "image") && !supportsImages) {
+        throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      }
+      if (sessionId !== void 0 && !this.sessionPermissions.has(sessionId)) {
+        const persistedPreset = await this.workspaceStore.getSessionPermission(sessionId);
+        assertCurrent();
+        if (persistedPreset) this.sessionPermissions.set(sessionId, persistedPreset);
+      }
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
       const boundBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
       if (typeof call.params.backend !== "string") throw new RpcError("INVALID_MESSAGE", "Session load requires an explicit backend.");
       const targetBackend = call.params.backend;
-      if ((targetBackend === "claude" || targetBackend === "hermes") && this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
+      if (this.isPerSessionIsolatedBackend(targetBackend) && this.promptsInProgress.has(sessionId)) {
+        throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
+      }
       if (boundBackend !== void 0 && targetBackend !== boundBackend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
-      if (isCatalogBackend(targetBackend)) await this.catalogSessionCwd(targetBackend, sessionId);
+      if (this.requiresCatalogCwd(targetBackend)) await this.catalogSessionCwd(targetBackend, sessionId);
+      else if (this.isNativeCatalogBackend(targetBackend) && !this.sessionCwds.has(sessionId)) {
+        await this.listCatalogSessions(targetBackend).catch(() => void 0);
+      }
       assertCurrent();
       this.requireSessionOwner(connectionId, sessionId);
       const acp = this.requireAcp(targetBackend);
@@ -97607,19 +98894,37 @@ var AcpRemoteGateway = class {
         }
         this.sessionOwners.set(loadedId, connectionId);
         if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
+        if (!this.sessionPermissions.has(loadedId)) {
+          const persistedPreset = await this.workspaceStore.getSessionPermission(loadedId);
+          assertCurrent();
+          if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset);
+        }
       }
       return sanitizeSessionResult(result);
     }
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
     }
-    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && isCatalogBackend(call.params.backend)) {
-      this.requireSessionOwner(connectionId, sessionId);
-      const backend = call.params.backend;
-      const cwd2 = await this.catalogSessionCwd(backend, sessionId);
-      assertCurrent();
-      await this.requireAcp(backend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
-      assertCurrent();
+    if (call.method === "dsh/sessionModels" || call.method === "dsh/selectModel" || call.method === "dsh/sessionModes" || call.method === "session/set_mode") {
+      const preloadBackend = typeof call.params.backend === "string" ? call.params.backend : sessionId ? this.sessionBackends.get(sessionId) : void 0;
+      if (preloadBackend !== void 0 && sessionId !== void 0 && this.requiresCatalogCwd(preloadBackend)) {
+        this.requireSessionOwner(connectionId, sessionId);
+        const cwd2 = await this.catalogSessionCwd(preloadBackend, sessionId);
+        assertCurrent();
+        await this.requireAcp(preloadBackend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+        assertCurrent();
+      } else if (preloadBackend === "cursor" && sessionId !== void 0) {
+        if (!this.sessionCwds.has(sessionId) && this.isNativeCatalogBackend("cursor")) {
+          await this.listCatalogSessions("cursor").catch(() => void 0);
+          assertCurrent();
+        }
+        const entry = this.sessionCwds.get(sessionId);
+        if (entry?.backend === "cursor") {
+          this.requireSessionOwner(connectionId, sessionId);
+          await this.requireAcp("cursor").call("session/load", { sessionId, cwd: entry.cwd, mcpServers: [] });
+          assertCurrent();
+        }
+      }
     }
     if (call.method === "dsh/selectModel") {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its model.");
@@ -97632,6 +98937,45 @@ var AcpRemoteGateway = class {
       this.sessionBackends.set(sessionId, session2.backend);
       return sanitizeSessionResult(result);
     }
+    if (call.method === "session/set_mode") {
+      if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its mode.");
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId) ?? this.defaultBackend();
+      const acp = this.requireAcp(backend);
+      const result = await acp.call("session/set_mode", { sessionId, modeId: call.params.modeId });
+      assertCurrent();
+      return sanitizeSessionResult(result);
+    }
+    if (call.method === "dsh/sessionModes" || call.method === "dsh/sessionCommands") {
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId) ?? this.defaultBackend();
+      return this.requireAcp(backend).call(call.method, { sessionId });
+    }
+    if (call.method === "session/fork") {
+      if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before forking the session.");
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId) ?? this.defaultBackend();
+      const acp = this.requireAcp(backend);
+      const caps = acp.capabilities?.();
+      if (!caps?.sessionCapabilities?.fork) {
+        throw new RpcError("METHOD_NOT_ALLOWED", `The ${backend} ACP backend does not support session fork.`);
+      }
+      if (!this.sessionCwds.has(sessionId)) {
+        if (this.requiresCatalogCwd(backend)) {
+          await this.catalogSessionCwd(backend, sessionId);
+        } else if (this.isNativeCatalogBackend(backend)) {
+          await this.listCatalogSessions(backend).catch(() => void 0);
+        }
+        assertCurrent();
+      }
+      const session2 = this.sessionCwds.get(sessionId);
+      const result = await acp.call("session/fork", { sessionId, ...session2 ? { cwd: session2.cwd } : {} });
+      assertCurrent();
+      const forkedId = readSessionId(result);
+      if (forkedId !== void 0) {
+        this.sessionOwners.set(forkedId, connectionId);
+        this.sessionBackends.set(forkedId, backend);
+        if (session2) this.sessionCwds.set(forkedId, { backend, cwd: session2.cwd });
+      }
+      return sanitizeSessionResult(result);
+    }
     if (call.method === "dsh/selectPermission") {
       this.requireSessionOwner(connectionId, sessionId);
       const preset = typeof call.params.preset === "string" ? call.params.preset : void 0;
@@ -97639,6 +98983,12 @@ var AcpRemoteGateway = class {
         throw new RpcError("INVALID_MESSAGE", "Unknown permission preset.");
       }
       this.sessionPermissions.set(sessionId, preset);
+      await this.workspaceStore.setSessionPermission(sessionId, preset);
+      assertCurrent();
+      const backend = typeof call.params.backend === "string" ? call.params.backend : this.sessionBackends.get(sessionId);
+      if (backend) {
+        await this.syncPermissionModeIfCompatible(backend, sessionId, preset).catch(() => void 0);
+      }
       return { preset };
     }
     if (call.method === "session/prompt" && sessionId !== void 0) {
@@ -97649,7 +98999,7 @@ var AcpRemoteGateway = class {
       this.promptsInProgress.set(sessionId, task);
       this.cancelledSessions.delete(sessionId);
       const preparationBackend = this.sessionBackends.get(sessionId);
-      if (preparationBackend === "pi" || preparationBackend === "claude" || preparationBackend === "hermes") {
+      if (preparationBackend && this.requiresPrePromptLoad(preparationBackend)) {
         const preparation = { cancelled: false };
         this.preparingPrompts.set(sessionId, preparation);
         try {
@@ -97708,7 +99058,8 @@ var AcpRemoteGateway = class {
       const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
       if (!current()) return;
-      const stopReason = isRecord19(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const stopReason = isRecord21(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const usage = isRecord21(result) ? sanitizeUsage(result.usage) : void 0;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -97722,6 +99073,7 @@ var AcpRemoteGateway = class {
           update: {
             sessionUpdate: "prompt_completed",
             stopReason,
+            ...usage ? { usage } : {},
             ...catchUp.length > 0 ? { catchUp } : {}
           }
         }
@@ -97861,14 +99213,13 @@ var AcpRemoteGateway = class {
   }
   /** Trusted, connection-scoped authority for the dedicated workspace uploader. */
   resolveUploadWorkspace(connectionId, publicId) {
-    const match = /^(acp|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId);
-    const backend = match?.[1] === "acp" ? "antigravity" : match?.[1];
-    const session2 = match ? this.sessionCwds.get(match[2]) : void 0;
-    if (!this.peers.has(connectionId) || !session2 || session2.backend !== backend || this.closed) {
+    const parsed = parsePublicSessionId(publicId);
+    const session2 = parsed ? this.sessionCwds.get(parsed.nativeId) : void 0;
+    if (!this.peers.has(connectionId) || !parsed || !session2 || session2.backend !== parsed.backend || this.closed) {
       throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
     }
-    this.requireAcp(backend);
-    this.requireSessionOwner(connectionId, match[2]);
+    this.requireAcp(parsed.backend);
+    this.requireSessionOwner(connectionId, parsed.nativeId);
     return session2.cwd;
   }
   async openToolStream(connectionId, sessionId, backend, endpoint, args, signal) {
@@ -97930,22 +99281,33 @@ var AcpRemoteGateway = class {
     const previous = this.config;
     const implemented = (value) => ({
       enabled: value.enabled,
-      backends: value.backends.filter((item) => ["cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id))
+      backends: value.backends.filter((item) => item.id !== "codex" && item.id !== "kimi" && isValidAcpBackendId(item.id))
     });
     this.config = config2;
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config2)) && this.pendingReconfiguration.size === 0) return;
     this.clearBackendRestarts();
-    const changed = /* @__PURE__ */ new Set([...this.pendingReconfiguration, ...previous.backends.filter((item) => {
-      const next = config2.backends.find((candidate) => candidate.id === item.id);
-      return previous.enabled !== config2.enabled || JSON.stringify(item) !== JSON.stringify(next);
-    }).map((item) => item.id)]);
-    for (const id6 of changed) this.pendingReconfiguration.add(id6);
+    const changed = /* @__PURE__ */ new Set([
+      ...this.pendingReconfiguration,
+      ...previous.backends.filter((item) => {
+        const next = config2.backends.find((candidate) => candidate.id === item.id);
+        return previous.enabled !== config2.enabled || JSON.stringify(item) !== JSON.stringify(next);
+      }).map((item) => item.id),
+      ...config2.backends.filter((item) => !previous.backends.some((prev) => prev.id === item.id)).map((item) => item.id)
+    ]);
+    for (const id6 of changed) {
+      this.pendingReconfiguration.add(id6);
+      this.backendDiagnostics.delete(id6);
+      this.backendErrors.delete(id6);
+    }
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
     await this.startPromise?.catch(() => void 0);
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id6]) => id6));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
     for (const [id6, session2] of this.sessionCwds) if (changed.has(session2.backend)) this.sessionCwds.delete(id6);
-    const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : sessionId.startsWith("pi:") ? "pi" : sessionId.startsWith("opencode:") ? "opencode" : sessionId.startsWith("claude:") ? "claude" : sessionId.startsWith("hermes:") ? "hermes" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
+    const terminalError = await this.workspaceState.dispose((sessionId) => {
+      const parsed = parsePublicSessionId(sessionId);
+      return changed.has(parsed ? parsed.backend : "cursor");
+    }).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
     for (const id6 of sessions) {
       this.sessionOwners.delete(id6);
       this.promptsInProgress.delete(id6);
@@ -98056,7 +99418,21 @@ var AcpRemoteGateway = class {
   }
   async launchBackendCandidate(backend, binary) {
     const id6 = backend.id;
-    const acp = this.createAcp(binary, this.logger, backend);
+    let effectiveBackend = backend;
+    if (!this.customCreateAcp && id6 === "antigravity") {
+      const hasLegacyArgs = isLegacyAntigravityStreamJsonArgs(backend.args);
+      const isDefaultNativeArgs = backend.args.length === 1 && backend.args[0] === "acp";
+      if (hasLegacyArgs || isDefaultNativeArgs) {
+        const supportsNative = await supportsAntigravityNativeAcp(binary);
+        if (this.closed || !this.backendCurrent(backend)) return;
+        if (hasLegacyArgs && supportsNative) {
+          effectiveBackend = { ...backend, args: ["acp"] };
+        } else if (isDefaultNativeArgs && !supportsNative) {
+          effectiveBackend = { ...backend, args: ["--input-format", "stream-json", "--output-format", "stream-json"] };
+        }
+      }
+    }
+    const acp = this.createAcp(binary, this.logger, effectiveBackend);
     this.startingClients.set(acp, backend);
     try {
       await acp.start();
@@ -98064,7 +99440,14 @@ var AcpRemoteGateway = class {
         await acp.close();
         return;
       }
+      const diag = acp.diagnostics?.();
+      if (diag) this.backendDiagnostics.set(id6, diag);
+      else this.backendDiagnostics.delete(id6);
+      this.backendErrors.delete(id6);
     } catch (error62) {
+      const diag = (error62 instanceof CursorAcpError ? error62.authDiagnostic : void 0) ?? acp.diagnostics?.();
+      if (diag) this.backendDiagnostics.set(id6, diag);
+      this.backendErrors.set(id6, errorCode3(error62));
       await acp.close();
       throw error62;
     } finally {
@@ -98151,7 +99534,7 @@ var AcpRemoteGateway = class {
       await peer.publishInbound(sessionId, {
         method: message.method,
         params: {
-          ...isRecord19(message.params) ? message.params : {},
+          ...isRecord21(message.params) ? message.params : {},
           requestHandle,
           sessionId,
           upstreamMethod: message.method
@@ -98179,8 +99562,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list2 = this.turnCatchUp.get(sessionId);
     if (list2 === void 0 || frame.method !== "session/update") return;
-    const params = isRecord19(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord19(params.update) ? params.update : params;
+    const params = isRecord21(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord21(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list2.push({ method: frame.method, params: frame.params });
@@ -98304,9 +99687,49 @@ var AcpRemoteGateway = class {
     if (selected !== void 0 && selected.client.isReady()) return selected.client;
     throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
   }
+  isNativeCatalogBackend(backend) {
+    if (backend === "antigravity") {
+      const client = this.backendInstances.get("antigravity")?.client;
+      return client !== void 0 && typeof client.history === "function";
+    }
+    return isValidAcpBackendId(backend);
+  }
+  requiresCatalogCwd(backend) {
+    if (STRICT_CATALOG_BACKENDS.has(backend)) return true;
+    if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
+    return backend !== "cursor" && isValidAcpBackendId(backend);
+  }
+  isPerSessionIsolatedBackend(backend) {
+    if (backend === "claude" || backend === "hermes") return true;
+    if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
+    return !["cursor", "pi", "opencode"].includes(backend) && isValidAcpBackendId(backend);
+  }
+  requiresPrePromptLoad(backend) {
+    if (backend === "pi" || backend === "claude" || backend === "hermes") return true;
+    if (backend === "antigravity") return this.isNativeCatalogBackend("antigravity");
+    return backend !== "cursor" && backend !== "opencode" && isValidAcpBackendId(backend);
+  }
+  async syncPermissionModeIfCompatible(backend, sessionId, preset) {
+    const client = this.backendInstances.get(backend)?.client;
+    if (!client) return;
+    const modes = await client.call("dsh/sessionModes", { sessionId }).catch(() => void 0);
+    if (!isRecord21(modes) || !Array.isArray(modes.availableModes)) return;
+    const current = typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
+    const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk"]);
+    if (current && !permissionModes.has(current)) return;
+    const ids = modes.availableModes.filter((item) => isRecord21(item) && typeof item.id === "string").map((item) => item.id);
+    const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "accept-edits", "acceptEdits"].find((id6) => ids.includes(id6)) : ids.find((id6) => id6 === "default");
+    if (target3 && target3 !== current) {
+      await client.call("session/set_mode", { sessionId, modeId: target3 });
+    }
+  }
   initializeResult(params, backend) {
     const requested = typeof params.protocolVersion === "number" ? params.protocolVersion : 1;
     const actualBackend = backend ?? this.defaultBackend();
+    const inst = this.backendInstances.get(actualBackend);
+    const caps = inst?.client.capabilities?.() ?? {};
+    const authMethods = inst?.client.authMethods?.() ?? [];
+    const supportsImage = actualBackend === "antigravity" || actualBackend === "hermes" || caps.promptCapabilities?.image === true;
     return {
       protocolVersion: requested,
       agentInfo: {
@@ -98315,11 +99738,13 @@ var AcpRemoteGateway = class {
       },
       backend: actualBackend,
       availableBackends: this.availableBackends(),
-      authMethods: [],
+      authMethods,
       capabilities: {
-        loadSession: true,
-        promptTypes: actualBackend === "antigravity" || actualBackend === "hermes" ? ["text", "image"] : ["text"],
-        methods: [...ACP_METHOD_ALLOWLIST]
+        loadSession: caps.loadSession ?? true,
+        promptTypes: supportsImage ? ["text", "image"] : ["text"],
+        methods: [...ACP_METHOD_ALLOWLIST],
+        ...caps.sessionCapabilities ? { sessionCapabilities: caps.sessionCapabilities } : {},
+        ...caps.steering ? { steering: true } : {}
       }
     };
   }
@@ -98358,13 +99783,24 @@ var AcpRemoteGateway = class {
     let cursor3;
     const seen = /* @__PURE__ */ new Set();
     for (let page = 0; page < 100; page++) {
-      const result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor3 ? { cursor: cursor3 } : {} });
+      let result;
+      try {
+        result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor3 ? { cursor: cursor3 } : {} });
+      } catch (error62) {
+        if (backend === "cursor" && !(error62 instanceof CursorAcpError && (error62.code === "ACP_AUTH_REQUIRED" || error62.authDiagnostic?.authStatus === "auth_required"))) {
+          return items;
+        }
+        throw error62;
+      }
       assertCurrent();
-      if (!isRecord19(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+      if (backend === "cursor" && isRecord21(result) && result.sessions === void 0 && Object.keys(result).length === 0) {
+        return items;
+      }
+      if (!isRecord21(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
       for (const item of result.sessions) {
-        if (!isRecord19(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        if (!isRecord21(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
         const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
         assertCurrent();
         if (!canonical || cwd2 && canonical !== cwd2) continue;
@@ -98422,7 +99858,7 @@ var AcpRemoteGateway = class {
   }
   async listDirectory(path) {
     const home = homedir6();
-    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
+    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join13(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve6(target3));
     const names = await readdir5(canonical);
     const entries = [];
@@ -98432,7 +99868,7 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join12(canonical, name2);
+      const child = join13(canonical, name2);
       try {
         const info = await stat5(child);
         if (!info.isDirectory()) continue;
@@ -98461,24 +99897,24 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input4) {
-  if (!isRecord19(input4) || typeof input4.method !== "string") {
+  if (!isRecord21(input4) || typeof input4.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input4.method, params: input4.params ?? {} };
 }
 function parseRespondEnvelope(input4) {
-  if (!isRecord19(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
+  if (!isRecord21(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
   return input4;
 }
 function permissionOptions(params) {
-  if (!isRecord19(params) || !Array.isArray(params.options) || params.options.length === 0) {
+  if (!isRecord21(params) || !Array.isArray(params.options) || params.options.length === 0) {
     throw new Error("Missing permission options");
   }
   const ids = /* @__PURE__ */ new Set();
   const options = params.options.map((option) => {
-    if (!isRecord19(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    if (!isRecord21(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
     ids.add(option.optionId);
     return { kind: option.kind, optionId: option.optionId };
   });
@@ -98497,28 +99933,73 @@ function mapPermissionDecision(params, pending) {
     if (!option) throw invalid();
     return { outcome: { outcome: "selected", optionId: option.optionId } };
   }
+  if (pending.method === "cursor/ask_question" && params.decision === "allow-once") {
+    if (params.result === void 0) return { outcome: { outcome: "answered" } };
+    if (!isRecord21(params.result)) throw invalid();
+    const outcomeRecord = isRecord21(params.result.outcome) ? params.result.outcome : params.result;
+    const outcomeKind = typeof outcomeRecord.outcome === "string" ? outcomeRecord.outcome : "answered";
+    if (outcomeKind !== "answered" && outcomeKind !== "selected") throw invalid();
+    const allowedKeys = /* @__PURE__ */ new Set(["outcome", "answers", "selectedOptionIds", "response"]);
+    if (Object.keys(outcomeRecord).some((key) => !allowedKeys.has(key))) throw invalid();
+    return {
+      outcome: {
+        outcome: outcomeKind,
+        ...outcomeRecord.answers !== void 0 ? { answers: outcomeRecord.answers } : {},
+        ...outcomeRecord.selectedOptionIds !== void 0 ? { selectedOptionIds: outcomeRecord.selectedOptionIds } : {},
+        ...typeof outcomeRecord.response === "string" ? { response: outcomeRecord.response } : {}
+      }
+    };
+  }
   const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
   if (params.result !== void 0) {
-    if (!isRecord19(params.result) || Object.keys(params.result).length !== 1 || !isRecord19(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+    if (!isRecord21(params.result) || Object.keys(params.result).length !== 1 || !isRecord21(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
   }
   return { outcome: { outcome } };
 }
 function readSessionId(value) {
-  if (!isRecord19(value)) return void 0;
+  if (!isRecord21(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord19(value)) return void 0;
-  if (isRecord19(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord21(value)) return void 0;
+  if (isRecord21(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord19(value)) return value;
+  if (!isRecord21(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
+    if (key === "sessionId" || key === "stopReason" || key === "mode" || key === "currentModeId" || key === "modes") {
+      next[key] = entry;
+    }
   }
   return Object.keys(next).length > 0 ? next : value;
+}
+function sanitizeUsage(value) {
+  if (!isRecord21(value)) return void 0;
+  const fields = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cachedReadTokens", "cachedWriteTokens", "reasoningTokens", "thoughtTokens", "totalTokens"];
+  const normalized = {};
+  for (const field of fields) {
+    const num = value[field];
+    if (typeof num === "number" && Number.isFinite(num) && num >= 0) {
+      if (field === "cachedReadTokens" && normalized.cacheReadTokens === void 0) normalized.cacheReadTokens = num;
+      else if (field === "cachedWriteTokens" && normalized.cacheWriteTokens === void 0) normalized.cacheWriteTokens = num;
+      else if (field === "thoughtTokens" && normalized.reasoningTokens === void 0) normalized.reasoningTokens = num;
+      else normalized[field] = num;
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : void 0;
+}
+function parsePublicSessionId(value, strictNativeId = false) {
+  const match = /^([a-z0-9][a-z0-9._-]{0,31}):(.+)$/i.exec(value);
+  if (!match) return void 0;
+  const prefix = match[1];
+  const nativeId = match[2];
+  if (strictNativeId && !/^[A-Za-z0-9_-]{1,240}$/.test(nativeId)) return void 0;
+  const backend = prefix === "acp" ? "antigravity" : prefix;
+  if (backend === "codex" || backend === "harness" || backend === "kimi") return void 0;
+  if (!isValidAcpBackendId(backend)) return void 0;
+  return { prefix, backend, nativeId };
 }
 function buildCrumbs(path, home) {
   const crumbs2 = [];
@@ -98541,21 +100022,21 @@ function cursorBinaryCandidates(configured) {
   const userHome = homedir6();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join12(userHome, ".local", "bin", "agy"),
+      join13(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join12(userHome, ".local", "bin", "agent"),
+      join13(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
   if (configured === "opencode") {
     return [
       // Official installer location (curl -fsSL https://opencode.ai/install | bash).
-      join12(userHome, ".opencode", "bin", "opencode"),
-      join12(userHome, ".local", "bin", "opencode"),
+      join13(userHome, ".opencode", "bin", "opencode"),
+      join13(userHome, ".local", "bin", "opencode"),
       "opencode"
     ];
   }
@@ -98573,17 +100054,17 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list2;
 }
-function isRecord19(value) {
+function isRecord21(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile3, execFileSync } from "node:child_process";
+import { execFile as execFile4, execFileSync } from "node:child_process";
 import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
-import { dirname as dirname5, join as join13, posix as posix2, win32 as win322 } from "node:path";
-import { promisify as promisify4 } from "node:util";
-var execFileAsync2 = promisify4(execFile3);
+import { dirname as dirname6, join as join14, posix as posix2, win32 as win322 } from "node:path";
+import { promisify as promisify5 } from "node:util";
+var execFileAsync3 = promisify5(execFile4);
 var BUILTIN_ACP_SPECS = Object.freeze({
   codex: Object.freeze({
     id: "codex",
@@ -98853,10 +100334,10 @@ function findExistingBinary(id6, options = {}) {
   return void 0;
 }
 function findNodeNpmCli(nodeExecPath = process.execPath) {
-  const nodeDir = dirname5(nodeExecPath);
+  const nodeDir = dirname6(nodeExecPath);
   const candidates = [
-    join13(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
-    join13(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     "D:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
     "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
   ];
@@ -98865,12 +100346,12 @@ function findNodeNpmCli(nodeExecPath = process.execPath) {
   }
   return void 0;
 }
-async function installOrConfigureBackend(backendId, options = {}) {
-  if (!isBuiltinAcpBackend(backendId)) {
+async function installOrConfigureBackend(backendId2, options = {}) {
+  if (!isBuiltinAcpBackend(backendId2)) {
     throw new Error("Unsupported ACP backend.");
   }
-  const spec = BUILTIN_ACP_SPECS[backendId];
-  const existing = findExistingBinary(backendId, options);
+  const spec = BUILTIN_ACP_SPECS[backendId2];
+  const existing = findExistingBinary(backendId2, options);
   if (existing) {
     return {
       action: "configured",
@@ -98893,7 +100374,7 @@ async function installOrConfigureBackend(backendId, options = {}) {
   const fileToExec = npmCli ? process.execPath : "npm";
   const argsToExec = npmCli ? [npmCli, "install", "-g", spec.npmPackage, "--no-fund", "--no-audit"] : ["install", "-g", spec.npmPackage, "--no-fund", "--no-audit"];
   const runner = options.execFileImpl ?? (async (file2, cmdArgs, opts) => {
-    return execFileAsync2(file2, cmdArgs, opts);
+    return execFileAsync3(file2, cmdArgs, opts);
   });
   try {
     await runner(fileToExec, argsToExec, {
@@ -98904,7 +100385,7 @@ async function installOrConfigureBackend(backendId, options = {}) {
   } catch {
     throw new Error(`Silent installation of ${spec.name} failed.`);
   }
-  const newlyInstalled = findExistingBinary(backendId, options);
+  const newlyInstalled = findExistingBinary(backendId2, options);
   if (newlyInstalled) {
     return {
       action: "installed",
@@ -99359,11 +100840,18 @@ var PluginControlRuntime = class {
     if (typeof value.id !== "string" || typeof value.command !== "string" || !Array.isArray(value.args) || !value.args.every((item) => typeof item === "string")) {
       throw new ClientModeError("INVALID_MESSAGE", "ACP name, command, and arguments are required.");
     }
+    const id6 = value.id.trim().toLowerCase();
+    const command = value.command.trim();
+    if (!command) throw new ClientModeError("INVALID_MESSAGE", "ACP command is required.");
+    if (id6 === "kimi") throw new ClientModeError("INVALID_MESSAGE", "Kimi is not implemented.");
+    if (!isValidAcpBackendId(id6)) {
+      throw new ClientModeError("INVALID_MESSAGE", "ACP backend id must match ^[a-z0-9][a-z0-9_-]{0,31}$ and cannot use reserved names.");
+    }
     const current = resolveConfig(this.settings.get());
-    if (value.id === "kimi") throw new ClientModeError("INVALID_MESSAGE", "Kimi is not implemented.");
-    if (current.acp?.backends.some((item) => item.id === value.id)) throw new ClientModeError("INVALID_MESSAGE", "ACP backend already exists.");
-    const backends = [...current.acp?.backends ?? [], { id: value.id, command: value.command, args: value.args, enabled: false }];
-    const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } });
+    if (current.acp?.backends.some((item) => item.id === id6)) throw new ClientModeError("INVALID_MESSAGE", "ACP backend already exists.");
+    const enabled = value.enabled === true;
+    const backends = [...current.acp?.backends ?? [], { id: id6, command, args: value.args, enabled }];
+    const next = resolveConfig({ ...editableConfig(current), acp: { enabled: enabled || (current.acp?.enabled ?? true), backends } });
     await this.settings.replace(editableConfig(next));
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
     return { ...await this.settingsView(), applies: "live" };
@@ -99404,7 +100892,7 @@ var PluginControlRuntime = class {
     const defaultArgsMap = {
       codex: ["app-server"],
       cursor: ["acp"],
-      antigravity: ["--input-format", "stream-json", "--output-format", "stream-json"],
+      antigravity: ["acp"],
       hermes: ["acp"],
       opencode: ["acp"],
       pi: [],
@@ -99484,6 +100972,7 @@ var PluginControlRuntime = class {
     const associations = await this.associations(config2);
     const role2 = config2.role === "client" ? "client" : "host";
     const association = associations[role2];
+    const acpDiagnostics = this.host?.acpDiagnostics?.();
     return {
       config: config2,
       deviceName: hostname4(),
@@ -99491,6 +100980,7 @@ var PluginControlRuntime = class {
       applies: "restart",
       associations,
       acpAvailability: Object.fromEntries((config2.acp?.backends ?? []).map((item) => [item.id, backendCommandAvailable(item.id, item.command ?? "")])),
+      ...acpDiagnostics === void 0 || Object.keys(acpDiagnostics).length === 0 ? {} : { acpDiagnostics },
       ...association === void 0 ? {} : { association },
       ...this.startupFailure === void 0 ? {} : {
         startupError: safeStartupError(this.startupFailure)
@@ -99605,18 +101095,18 @@ function editableConfig(config2) {
     ...config2.acp === void 0 ? {} : { acp: { enabled: config2.acp.enabled, backends: config2.acp.backends } }
   };
 }
-function isRecord20(value) {
+function isRecord22(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record9(value) {
-  if (!isRecord20(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord22(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
   return { ok: true, value };
 }
 function withUpdate(result, update) {
-  if (update === void 0 || !result.ok || !isRecord20(result.value)) return result;
+  if (update === void 0 || !result.ok || !isRecord22(result.value)) return result;
   return ok3({ ...result.value, update });
 }
 function fail5(error62) {
@@ -99633,12 +101123,12 @@ function fail5(error62) {
 }
 
 // packages/plugin/src/index.ts
-import { basename as basename9, dirname as dirname9 } from "node:path";
+import { basename as basename9, dirname as dirname10 } from "node:path";
 
 // packages/plugin/src/host-log-store.ts
-import { mkdir as mkdir4, open as open5, readFile as readFile5, rename as rename3, rm as rm4, stat as stat6, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir as mkdir5, open as open5, readFile as readFile6, rename as rename4, rm as rm4, stat as stat6, writeFile as writeFile4 } from "node:fs/promises";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname6, join as join14 } from "node:path";
+import { dirname as dirname7, join as join15 } from "node:path";
 var DEFAULT_MAX_ENTRIES = 1e3;
 var DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 var DEFAULT_MAX_BACKUPS = 2;
@@ -99646,10 +101136,10 @@ var MAX_LINE_CHARS = 8192;
 var TAIL_READ_BYTES = 512 * 1024;
 function resolveHostLogPath(options = {}) {
   const env = options.env ?? process.env;
-  const home = env.DSH_HOME || join14(options.homeDirectory ?? homedir8(), ".dsh");
+  const home = env.DSH_HOME || join15(options.homeDirectory ?? homedir8(), ".dsh");
   const rawProfile = options.profile ?? env.DSH_PROFILE ?? "";
   const profileSlug = rawProfile.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "host";
-  return join14(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
+  return join15(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
 }
 var HostLogStore = class {
   filePath;
@@ -99799,7 +101289,7 @@ var HostLogStore = class {
   async appendToDisk(payload) {
     const target3 = this.filePath;
     if (!this.dirEnsured) {
-      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      await mkdir5(dirname7(target3), { recursive: true, mode: 448 });
       this.dirEnsured = true;
     }
     if (!this.sizeVerified) {
@@ -99811,12 +101301,12 @@ var HostLogStore = class {
     if (this.currentBytes > 0 && this.currentBytes + byteLength > this.maxFileBytes) {
       await this.rotateFiles(target3);
     }
-    await writeFile3(target3, payload, { encoding: "utf8", flag: "a", mode: 384 });
+    await writeFile4(target3, payload, { encoding: "utf8", flag: "a", mode: 384 });
     this.currentBytes += byteLength;
   }
   async rotateFiles(target3) {
     if (this.maxBackups === 0) {
-      await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
+      await writeFile4(target3, "", { encoding: "utf8", mode: 384 });
       this.currentBytes = 0;
       return;
     }
@@ -99827,7 +101317,7 @@ var HostLogStore = class {
         await rm4(dest, { force: true }).catch(() => void 0);
       }
       try {
-        await rename3(src, dest);
+        await rename4(src, dest);
       } catch (error62) {
         if (!isEnoent(error62)) throw error62;
       }
@@ -99837,10 +101327,10 @@ var HostLogStore = class {
   async clearDisk() {
     const target3 = this.filePath;
     if (!this.dirEnsured) {
-      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      await mkdir5(dirname7(target3), { recursive: true, mode: 448 });
       this.dirEnsured = true;
     }
-    await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
+    await writeFile4(target3, "", { encoding: "utf8", mode: 384 });
     this.sizeVerified = true;
     for (let index = 1; index <= this.maxBackups; index++) {
       await rm4(`${target3}.${index}`, { force: true }).catch(() => void 0);
@@ -99886,7 +101376,7 @@ function parsePersistedLine(line, seq) {
 }
 async function readTailUtf8(filePath, totalSize, maxBytes) {
   if (totalSize <= maxBytes) {
-    return readFile5(filePath, "utf8");
+    return readFile6(filePath, "utf8");
   }
   const handle = await open5(filePath, "r");
   try {
@@ -100139,7 +101629,7 @@ function unavailable2() {
 
 // packages/plugin/src/host-pairing.ts
 import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
 var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
@@ -100171,7 +101661,7 @@ var HostPairing = class {
     this.adopt = adopt;
     this.fetcher = fetcher;
     this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
-    this.path = join15(directory, "host-pairing.json");
+    this.path = join16(directory, "host-pairing.json");
   }
   path;
   serverUrl;
@@ -100369,7 +101859,7 @@ var HostPairing = class {
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
+import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
@@ -100517,7 +102007,7 @@ var WorkspaceUploadHost = class {
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join17(root2, `.dsh-upload-${randomUUID16()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -100587,7 +102077,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join16(upload.root, name2));
+        await link2(upload.temp, join17(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -100898,9 +102388,9 @@ function diagnosticReason2(error62) {
   return message.replace(/\s+/g, " ").slice(0, 160) || "Unknown peer connection failure.";
 }
 function extractEndpoint(message) {
-  if (!isRecord21(message) || !isRecord21(message.payload)) return void 0;
+  if (!isRecord23(message) || !isRecord23(message.payload)) return void 0;
   const payload = message.payload;
-  if (isRecord21(payload.params)) {
+  if (isRecord23(payload.params)) {
     if (typeof payload.params.endpoint === "string") return payload.params.endpoint;
     if (typeof payload.params.method === "string") return payload.params.method;
   }
@@ -100908,7 +102398,7 @@ function extractEndpoint(message) {
   if (typeof payload.method === "string") return payload.method;
   return void 0;
 }
-function isRecord21(value) {
+function isRecord23(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function shortId2(value) {
@@ -103057,18 +104547,18 @@ function closeCode(code) {
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
 import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { dirname as dirname9, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
+import { mkdir as mkdir6, readdir as readdir6, stat as stat8 } from "node:fs/promises";
 import { homedir as homedir9, platform as platform2 } from "node:os";
-import { basename as basename8, dirname as dirname7, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
+import { basename as basename8, dirname as dirname8, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve8(path) === parse3(path).root) {
     throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
   }
-  await mkdir5(path, { recursive: true });
+  await mkdir6(path, { recursive: true });
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
@@ -103101,7 +104591,7 @@ function crumbs(path) {
   let current = path;
   while (current !== root2) {
     segments.unshift(basename8(current));
-    current = dirname7(current);
+    current = dirname8(current);
   }
   for (const segment of segments) {
     current = resolve8(current, segment);
@@ -103441,7 +104931,7 @@ var HarnessRemoteBridge = class {
       const record11 = await this.schedule.create(sessionId, request, AbortSignal.timeout(6e4));
       return { ok: true, value: record11 };
     } catch (error62) {
-      const published = isRecord22(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      const published = isRecord24(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
         return {
           ok: false,
@@ -103659,8 +105149,8 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord22(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord22(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord24(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord24(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
@@ -103680,8 +105170,8 @@ var HarnessRemoteBridge = class {
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
     const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord22(value) && value.name === parsed.data.args.name);
-    if (!isRecord22(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+    const row = result.value.find((value) => isRecord24(value) && value.name === parsed.data.args.name);
+    if (!isRecord24(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
       throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
     }
     if (remoteOwnedBundleRow(row, false)) {
@@ -103771,7 +105261,7 @@ var HarnessRemoteBridge = class {
     }
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
-    const rootPayload = isRecord22(payload) ? payload : {};
+    const rootPayload = isRecord24(payload) ? payload : {};
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
@@ -103781,7 +105271,7 @@ var HarnessRemoteBridge = class {
     if (!sessionWorkspace) {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
-    const options = isRecord22(args.options) ? args.options : void 0;
+    const options = isRecord24(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
@@ -103804,7 +105294,7 @@ var HarnessRemoteBridge = class {
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd);
       const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
-      const baseDir = dirname8(baseCandidate);
+      const baseDir = dirname9(baseCandidate);
       const targetCandidate = resolve9(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd);
     } else {
@@ -103815,8 +105305,8 @@ var HarnessRemoteBridge = class {
       }
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
-    let finalArgs = isRecord22(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
-    if (isRecord22(finalArgs.options)) {
+    let finalArgs = isRecord24(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
+    if (isRecord24(finalArgs.options)) {
       const { baseFile: _baseFile, ...restOptions } = finalArgs.options;
       finalArgs.options = restOptions;
     }
@@ -103828,11 +105318,11 @@ var HarnessRemoteBridge = class {
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
       const normalizedRange = { offset, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
-        finalArgs.options = { ...isRecord22(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        finalArgs.options = { ...isRecord24(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
       } else {
         finalArgs.range = normalizedRange;
-        if (isRecord22(finalArgs.options)) {
+        if (isRecord24(finalArgs.options)) {
           finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
       }
@@ -103841,7 +105331,7 @@ var HarnessRemoteBridge = class {
         finalArgs.length = boundedLength;
       }
     }
-    return isRecord22(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
+    return isRecord24(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -103893,7 +105383,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join17(currentPath, parts[i]);
+        currentPath = join18(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
@@ -103951,17 +105441,17 @@ function isPathOutside(rel) {
   return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
-  const options = isRecord22(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord22(options.range)) return options.range;
-  return isRecord22(args.range) ? args.range : args;
+  const options = isRecord24(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord24(options.range)) return options.range;
+  return isRecord24(args.range) ? args.range : args;
 }
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord22(payload) || !isRecord22(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord24(payload) || !isRecord24(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord22(payload) || !isRecord22(payload.args)) return payload;
+  if (!isRecord24(payload) || !isRecord24(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -103975,10 +105465,10 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   return payload;
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
-  if (endpoint !== "session/attachment" || !isRecord22(payload) || !isRecord22(payload.args)) return payload;
-  const request = isRecord22(payload.args.request) ? payload.args.request : void 0;
+  if (endpoint !== "session/attachment" || !isRecord24(payload) || !isRecord24(payload.args)) return payload;
+  const request = isRecord24(payload.args.request) ? payload.args.request : void 0;
   if (request === void 0) return payload;
-  const attachment = isRecord22(request.attachment) ? request.attachment : void 0;
+  const attachment = isRecord24(request.attachment) ? request.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
@@ -104010,7 +105500,7 @@ async function findSessionAttachmentReference(gateway, sessionId, attachmentId, 
       const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
       const reference = extractAttachmentReference(result, attachmentId);
       if (reference !== void 0) return reference;
-      if (result.ok === true && isRecord22(result.value)) {
+      if (result.ok === true && isRecord24(result.value)) {
         if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
           beforeSeq = result.value.beforeSeq;
           continue;
@@ -104034,7 +105524,7 @@ function extractAttachmentReference(result, attachmentId) {
   const value = result.value;
   let records;
   if (Array.isArray(value)) records = value;
-  else if (isRecord22(value)) {
+  else if (isRecord24(value)) {
     if (Array.isArray(value.records)) records = value.records;
     else if (Array.isArray(value.events)) records = value.events;
   }
@@ -104055,7 +105545,7 @@ function findImageReference(value, attachmentId, depth) {
     return void 0;
   }
   const block = value;
-  const candidate = isRecord22(block.attachment) ? block.attachment : block;
+  const candidate = isRecord24(block.attachment) ? block.attachment : block;
   const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
   if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
     return {
@@ -104205,7 +105695,7 @@ var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constru
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
 var MAX_UNKNOWN_PROJECTION_BYTES = 4096;
 function filterSessionProjections(session2) {
-  if (!isRecord22(session2) || !isRecord22(session2.projections) || !isRecord22(session2.projections.values)) {
+  if (!isRecord24(session2) || !isRecord24(session2.projections) || !isRecord24(session2.projections.values)) {
     return session2;
   }
   const originalValues = session2.projections.values;
@@ -104246,15 +105736,15 @@ function trimSessionCatalogRows(endpoint, items) {
   return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
 }
 function isListableRemoteSession(session2) {
-  return isRecord22(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+  return isRecord24(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
 }
 function updatedAtOf(session2) {
-  return isRecord22(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+  return isRecord24(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
 }
 function withSessionRowTitle(session2) {
-  if (!isRecord22(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
-  const values = isRecord22(session2.projections) ? session2.projections.values : void 0;
-  const title = isRecord22(values) ? values.title : void 0;
+  if (!isRecord24(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord24(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord24(values) ? values.title : void 0;
   return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
 }
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
@@ -104263,7 +105753,7 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
   if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
   const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
-  if (isRecord22(result.value)) {
+  if (isRecord24(result.value)) {
     let changed = false;
     const updated = { ...result.value };
     if (Array.isArray(result.value.items)) {
@@ -104287,27 +105777,27 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord22(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord24(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord22(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord22(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord24(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord24(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord22(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord24(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root2 = record10(payload);
-  const args = isRecord22(root2.args) ? root2.args : root2;
+  const args = isRecord24(root2.args) ? root2.args : root2;
   return record10(args.request ?? args._request ?? args);
 }
 function record10(value) {
-  return isRecord22(value) ? value : {};
+  return isRecord24(value) ? value : {};
 }
-function isRecord22(value) {
+function isRecord24(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -104316,7 +105806,7 @@ function isCompactSnapshot(value) {
 function remoteOwnedBundleRow(row, plugin) {
   const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
   if (remoteModule(plugin ? row.moduleName : row.name)) return true;
-  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord22(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord24(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
@@ -104330,11 +105820,11 @@ var MAX_OPERATIONS = 32;
 function requestIndexKey(ownerDeviceId, sessionId, requestId) {
   return `${ownerDeviceId}\0${sessionId}\0${requestId}`;
 }
-function isRecord23(value) {
+function isRecord25(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function commandIdOf(result) {
-  if (result?.ok !== true || !isRecord23(result.value)) return void 0;
+  if (result?.ok !== true || !isRecord25(result.value)) return void 0;
   return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
 }
 var RemoteCompactionOperations = class {
@@ -104597,13 +106087,13 @@ function clampBudget(value) {
   return Math.min(Math.max(value, MIN_BUDGET_MS), MAX_BUDGET_MS);
 }
 function isCommandSuccess(result) {
-  if (result.ok !== true || !isRecord23(result.value)) return false;
-  const command = isRecord23(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord25(result.value)) return false;
+  const command = isRecord25(result.value.result) ? result.value.result : void 0;
   return command?.kind === "success";
 }
 function commandText2(result) {
-  if (result.ok !== true || !isRecord23(result.value)) return void 0;
-  const command = isRecord23(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord25(result.value)) return void 0;
+  const command = isRecord25(result.value.result) ? result.value.result : void 0;
   return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
 }
 function sanitizeMessage(message) {
@@ -104613,31 +106103,31 @@ function delay(ms) {
   return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 function readCompactionConfirmation(result, acceptedAt, commandId) {
-  if (result.ok !== true || !isRecord23(result.value)) return { kind: "unknown" };
+  if (result.ok !== true || !isRecord25(result.value)) return { kind: "unknown" };
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record11 of [...records, ...legacy]) {
-    const event = isRecord23(record11) && isRecord23(record11.event) ? record11.event : record11;
-    if (isRecord23(event) && typeof event.type === "string") events.push(event);
+    const event = isRecord25(record11) && isRecord25(record11.event) ? record11.event : record11;
+    if (isRecord25(event) && typeof event.type === "string") events.push(event);
   }
   if (events.length === 0) return { kind: "unknown" };
   const resolvedCommandId = commandId ?? latestCompactCommandId(events, acceptedAt);
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
   const end = [...events].reverse().find((event) => {
     if (event.type !== "compaction/end") return false;
-    const data3 = isRecord23(event.data) ? event.data : void 0;
+    const data3 = isRecord25(event.data) ? event.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) return { kind: "not-yet" };
-  const data2 = isRecord23(end.data) ? end.data : {};
+  const data2 = isRecord25(end.data) ? end.data : {};
   const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function latestCompactCommandId(events, acceptedAt) {
   for (const event of [...events].reverse()) {
     if (event.type !== "command/run") continue;
-    const data2 = isRecord23(event.data) ? event.data : void 0;
+    const data2 = isRecord25(event.data) ? event.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
     const time3 = typeof event.time === "number" ? event.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
@@ -104647,7 +106137,7 @@ function latestCompactCommandId(events, acceptedAt) {
 }
 function errorText(error62) {
   if (typeof error62 === "string") return sanitizeMessage(error62);
-  if (isRecord23(error62)) {
+  if (isRecord25(error62)) {
     const message = error62.message ?? error62.error ?? error62.reason;
     if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
     try {
@@ -104694,7 +106184,15 @@ var HostPluginRuntime = class {
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
-    this.acp = new AcpRemoteGateway(config2.acp ?? { enabled: false, backends: [] }, logger2, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
+    this.acp = new AcpRemoteGateway(
+      config2.acp ?? { enabled: false, backends: [] },
+      logger2,
+      void 0,
+      void 0,
+      () => this.terminalEnabled,
+      this.terminalSpawner,
+      AcpWorkspaceStore.inDirectory(identities?.directory)
+    );
     this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
       const gateway = this.localGateway?.createPeer?.() ?? this.localGateway;
       if (gateway === void 0) throw new RpcError("HARNESS_UNAVAILABLE", "The Host Harness gateway is unavailable.");
@@ -105078,6 +106576,9 @@ var HostPluginRuntime = class {
   acpStatus() {
     return this.acp.status();
   }
+  acpDiagnostics() {
+    return this.acp.diagnostics();
+  }
   acpCall(input4) {
     return this.requireLocalAcpPeer().call(input4);
   }
@@ -105127,7 +106628,8 @@ var HostPluginRuntime = class {
       capabilities: this.hostCapabilities(),
       workspaceTypes: this.hostWorkspaceTypes(),
       codex: this.codex.status(),
-      acp: this.acp.status()
+      acp: this.acp.status(),
+      acpDiagnostics: this.acp.diagnostics()
     };
   }
   createServerConnection(identity3) {
@@ -105786,21 +107288,21 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord24(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
+  return listed.some((row) => isRecord26(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
-  if (!isRecord24(result) || !isRecord24(result.result)) return { status: "failed", message: "update-failed" };
+  if (!isRecord26(result) || !isRecord26(result.result)) return { status: "failed", message: "update-failed" };
   const application = result.result.application;
   if (application === "applied" || application === "restart-required") return { status: "started" };
   return { status: "failed", message: failureMessage(result.result.error) };
 }
 function failureMessage(error62) {
-  if (!isRecord24(error62)) return "update-failed";
+  if (!isRecord26(error62)) return "update-failed";
   const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
   const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
   return diagnostic === "" ? code : `${code}: ${diagnostic}`;
 }
-function isRecord24(value) {
+function isRecord26(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -105928,7 +107430,7 @@ function decodeBase64(value) {
 // packages/plugin/src/cli.ts
 import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -106020,7 +107522,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join18(directory, "device.json"))) {
+  if (!await exists3(join19(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -106080,9 +107582,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join18(directory, "device.json")),
-    exists3(join18(directory, "device.key")),
-    exists3(join18(directory, "server-credentials.json"))
+    exists3(join19(directory, "device.json")),
+    exists3(join19(directory, "device.key")),
+    exists3(join19(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
@@ -106621,7 +108123,7 @@ function resolveLogProfileName(ctx) {
   const baseDir = ctx.root?.baseDir;
   if (typeof baseDir === "string" && baseDir.trim().length > 0) {
     const trimmed = baseDir.trim();
-    if (basename9(dirname9(trimmed)) === "profiles") {
+    if (basename9(dirname10(trimmed)) === "profiles") {
       const segment = basename9(trimmed);
       if (segment.length > 0) return segment;
     }

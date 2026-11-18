@@ -267,7 +267,7 @@ export function MessageActions({ item, hideTime }: { item: ChatMessage; hideTime
             <IconBranchOutline size={14} color={colors.muted} />
           </Pressable>
         )}
-        {!botConversation && !pending && isDeepSeekHarness && item.usage !== undefined && (
+        {!botConversation && !pending && item.usage !== undefined && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.messageActions.usage}

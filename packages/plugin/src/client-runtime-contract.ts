@@ -1,6 +1,6 @@
 import type { ControlResult } from './control-result.js'
 import { RemoteClientCore } from '@dsh-remote/client-core'
-import type { CodexAppFrameData, CodexAppStreamClosedData, RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
+import type { AcpAuthDiagnostic, CodexAppFrameData, CodexAppStreamClosedData, RemoteWorkspaceTypeDescription } from '@dsh-remote/protocol'
 import type { RtcConnectionDiagnostics, RtcIceServer } from '@dsh-remote/webrtc'
 import { AdaptiveTransport, stunOnlyIceServers } from '@dsh-remote/webrtc'
 import type { ResolvedConfig } from './config.js'
@@ -89,7 +89,7 @@ export interface RemoteWorkspaceView {
 export interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+  backend?: string
   sessionId?: string
 }
 
@@ -141,6 +141,12 @@ export interface HostAuthorizationControl {
       mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
     }>
   }
+  acpDiagnostics?(): Record<string, {
+    state: 'ready' | 'unavailable' | 'disabled'
+    errorCode?: string
+    auth: AcpAuthDiagnostic
+    capabilities: Record<string, unknown>
+  }>
   hasStoredAuthorization?(): Promise<boolean>
   reconnectHost(): void
   clearHostAuthorization(): Promise<void>

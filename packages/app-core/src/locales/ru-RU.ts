@@ -776,6 +776,7 @@ const ruRU = {
     agentsTab: "Агенты", agentPlatform: "Платформа агентов", switchHarness: "Сменить Harness",
     backendUnavailable: (name: string) => `${name} не включён на подключённом хосте. Настройте или запустите его на компьютере.`,
     backendDescriptions: { harness: "Официальный фреймворк агентов DeepSeek", codex: "Агент для программирования OpenAI Codex", claude: "Агент Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Интерактивный агент Cursor IDE", antigravity: "Фреймворк разработки Antigravity", opencode: "Агент с открытым кодом OpenCode", pi: "Агент Personal Intelligence" },
+    customAcpDescription: 'Пользовательский ACP-агент',
   },
   plugins: {
     connectHostFirst: 'Сначала подключитесь к хосту',

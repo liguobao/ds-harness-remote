@@ -1,3 +1,4 @@
+import type { AcpAuthDiagnostic, AcpAuthMethod } from '@dsh-remote/protocol'
 import { CursorAcpClient, CursorAcpError, type CursorAcpLike, type CursorAcpInbound, type CursorAcpInboundHandler, type CursorAcpUnavailableHandler } from './cursor-process.js'
 import type { SafeLogger } from '../../logging.js'
 import { acpHistoryEvents } from '../history-events.js'
@@ -30,6 +31,15 @@ export class IsolatedAcpClient implements CursorAcpLike {
     this.catalog.onUnavailable(code => { for (const handler of this.unavailable) handler(code) })
   }
   isReady(): boolean { return !this.closed && this.catalog?.isReady() === true }
+  diagnostics(): AcpAuthDiagnostic {
+    return this.catalog?.diagnostics?.() ?? { authStatus: this.isReady() ? 'authenticated' : 'unknown' }
+  }
+  capabilities() {
+    return this.catalog?.capabilities?.() ?? {}
+  }
+  authMethods(): AcpAuthMethod[] {
+    return this.catalog?.authMethods?.() ?? []
+  }
   private async create(history = false): Promise<CursorAcpLike> {
     if (this.closed) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
     if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError('ACP_PROCESS_LIMIT', `Too many ${this.label} ACP sessions are active.`)
@@ -100,11 +110,17 @@ export class IsolatedAcpClient implements CursorAcpLike {
           || (method === 'session/load' && typeof (result as Record<string, unknown>).sessionId === 'string' && (result as Record<string, unknown>).sessionId !== id)) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid session.`)
         this.clients.set(id, client)
         const config = { ...(result as Record<string, any>) }
+        if (config.modes && Array.isArray(config.modes.availableModes) && !config.sessionModes) {
+          config.sessionModes = { ...config.modes }
+        }
         this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: {
           update: { sessionUpdate: 'config_option_update', configOptions: config.configOptions },
         } }, config)
-        for (const key of ['models', 'modes']) {
+        for (const key of ['models', 'modes', 'sessionModes']) {
           if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] }
+        }
+        if (typeof replayConfiguration.sessionModeConfigId === 'string') {
+          config.sessionModeConfigId = replayConfiguration.sessionModeConfigId
         }
         this.configurations.set(id, config)
         boundId = id
@@ -116,20 +132,49 @@ export class IsolatedAcpClient implements CursorAcpLike {
     const client = this.clients.get(String(p.sessionId))
     if (!client) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', `Load the ${this.label} session before using it.`)
     const id = String(p.sessionId)
+    if (method === 'dsh/sessionCommands') return client.call(method, params, timeoutMs)
+    if (method === 'dsh/sessionModes' || method === 'session/set_mode') {
+      if (this.backend === 'cursor') return client.call(method, params, timeoutMs)
+      const config = this.configurations.get(id)
+      const sessionModes = config?.sessionModes as { currentModeId?: string; availableModes?: Array<{ id: string; name: string; description?: string }> } | undefined
+      if (method === 'dsh/sessionModes') {
+        return sessionModes ?? { availableModes: [] }
+      }
+      if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', `Stop the ${this.label} reply before changing its mode.`)
+      const modeId = typeof p.modeId === 'string' ? p.modeId : undefined
+      if (!modeId || !sessionModes?.availableModes?.some(item => item.id === modeId)) {
+        throw new CursorAcpError('INVALID_MESSAGE', `The selected ${this.label} mode is unavailable.`)
+      }
+      this.busy.add(id)
+      try {
+        if (typeof config?.sessionModeConfigId === 'string') {
+          await client.call('session/set_config_option', {
+            sessionId: id,
+            configId: config.sessionModeConfigId,
+            value: modeId,
+          }, timeoutMs)
+        } else {
+          await client.call('session/set_mode', { sessionId: id, modeId }, timeoutMs)
+        }
+        if (config?.sessionModes) config.sessionModes.currentModeId = modeId
+        return { currentModeId: modeId }
+      } finally { this.busy.delete(id) }
+    }
     if (this.backend === 'cursor' && (method === 'dsh/sessionModels' || method === 'dsh/selectModel')) return client.call(method, params, timeoutMs)
     if (method === 'dsh/sessionModels') return this.models(id)
     if (method === 'dsh/selectModel') {
       if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', `Stop the ${this.label} reply before changing its model.`)
       const config = this.configurations.get(id)!
-      if (!config?.models?.availableModels?.some((item: any) => item.modelId === p.model)
-        || (p.reasoningEffort !== undefined && !config?.modes?.availableModes?.some((item: any) => item.id === p.reasoningEffort))) {
-        throw new CursorAcpError('INVALID_MESSAGE', `The ${this.label} model or thinking level is not available.`)
+      if (!config?.models?.availableModels?.some((item: any) => item.modelId === p.model)) {
+        throw new CursorAcpError('INVALID_MESSAGE', `The ${this.label} model is not available.`)
       }
       this.busy.add(id)
       try {
-        const modelResult = await client.call('session/set_config_option', { sessionId: id, configId: 'model', value: p.model })
-        this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: { update: { sessionUpdate: 'config_option_update', configOptions: (modelResult as { configOptions?: unknown }).configOptions } } })
-        if (this.configurations.get(id)?.models?.currentModelId !== p.model) throw new CursorAcpError('ACP_MODEL_NOT_CONFIRMED', `${this.label} did not confirm the model change.`)
+        if (config.models.currentModelId !== p.model) {
+          const modelResult = await client.call('session/set_config_option', { sessionId: id, configId: 'model', value: p.model })
+          this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: { update: { sessionUpdate: 'config_option_update', configOptions: (modelResult as { configOptions?: unknown }).configOptions } } })
+          if (this.configurations.get(id)?.models?.currentModelId !== p.model) throw new CursorAcpError('ACP_MODEL_NOT_CONFIRMED', `${this.label} did not confirm the model change.`)
+        }
         if (p.reasoningEffort !== undefined) {
           if (!this.configurations.get(id)?.modes?.availableModes?.some((item: any) => item.id === p.reasoningEffort)) throw new CursorAcpError('INVALID_MESSAGE', 'The selected model does not support this thinking level.')
           const thinkingResult = await client.call('session/set_config_option', { sessionId: id, configId: 'thought_level', value: p.reasoningEffort })
@@ -151,7 +196,10 @@ export class IsolatedAcpClient implements CursorAcpLike {
     const update = (message.params as { update?: Record<string, any> }).update
     const config = initial ?? this.configurations.get(id)
     if (!update || !config) return
-    if (update.sessionUpdate === 'current_mode_update' && typeof update.currentModeId === 'string') config.modes = { ...config.modes, currentModeId: update.currentModeId }
+    if (update.sessionUpdate === 'current_mode_update' && typeof update.currentModeId === 'string') {
+      config.modes = { ...config.modes, currentModeId: update.currentModeId }
+      if (config.sessionModes) config.sessionModes.currentModeId = update.currentModeId
+    }
     if (update.sessionUpdate === 'config_option_update' && Array.isArray(update.configOptions)) {
       for (const option of update.configOptions) {
         if (option?.type !== 'select' || !Array.isArray(option.options)) continue
@@ -161,6 +209,17 @@ export class IsolatedAcpClient implements CursorAcpLike {
           availableModels: options.map((item: any) => ({ modelId: item.value, name: item.name })) }
         if (option.id === 'thought_level') config.modes = { currentModeId: option.currentValue,
           availableModes: options.map((item: any) => ({ id: item.value, name: item.name })) }
+        if (option.id === 'mode' || option.category === 'mode') {
+          config.sessionModeConfigId = option.id
+          config.sessionModes = {
+            currentModeId: option.currentValue,
+            availableModes: options.map((item: any) => ({
+              id: item.value,
+              name: item.name,
+              ...(typeof item.description === 'string' ? { description: item.description } : {}),
+            })),
+          }
+        }
       }
     }
   }

@@ -8,6 +8,7 @@ import {
   readCodexHistoryPage,
 } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
+import { isAcpManagedBackend } from '../lib/workspace-key'
 import type { ChatItem } from '../types'
 import { withCodexPermissionState } from './codex-session-state'
 import { findApproval, findQuestion, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
@@ -160,7 +161,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
                 : state.selectedSession,
             }))
           }
-        } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
+        } else if (isAcpManagedBackend(session.backend)) {
           if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
           if (session.backend === 'pi' && images.length > 0) throw new Error(zhCN.runtime.piTextOnly)
           // Always re-bind the ACP stream on the current RemoteClientCore before
@@ -177,11 +178,13 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           }))
           // Host may return immediately with stopReason=in_progress so frames can
           // interleave; keep running until prompt_completed / failure.
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
-            ? runtime.connection.requireOpencode()
-            : session.backend === 'pi'
-              ? runtime.connection.requirePi()
-              : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
+            : session.backend === 'hermes' ? runtime.connection.requireHermes()
+            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
+            : session.backend === 'pi' ? runtime.connection.requirePi()
+            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
+            : session.backend === 'cursor' ? runtime.connection.requireCursor()
+            : runtime.connection.requireAcpBackend(session.backend)
           const promptResult = await acpClient.prompt(cursorNativeId(session), text, undefined, images.map(image => ({
             type: 'image' as const, mimeType: image.mediaType, data: image.data,
           })), session.backend)
@@ -247,7 +250,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           // Only a deterministic failure may claim the agent is idle again; an
           // unconfirmed outcome leaves `running` untouched (the prompt may have
           // started on the Host).
-          ...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') && !unconfirmed ? {
+          ...(isAcpManagedBackend(session.backend) && !unconfirmed ? {
             sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
             selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
           } : {}),
@@ -381,12 +384,14 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
         if (session?.backend === 'codex') {
           await runtime.connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
-        } else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude' || session?.backend === 'hermes') {
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
-            ? runtime.connection.requireOpencode()
-            : session.backend === 'pi'
-              ? runtime.connection.requirePi()
-              : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
+        } else if (isAcpManagedBackend(session?.backend)) {
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
+            : session.backend === 'hermes' ? runtime.connection.requireHermes()
+            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
+            : session.backend === 'pi' ? runtime.connection.requirePi()
+            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
+            : session.backend === 'cursor' ? runtime.connection.requireCursor()
+            : runtime.connection.requireAcpBackend(session.backend)
           await acpClient.respond(
             item.approvalId,
             outcome === 'allowed-once' ? 'allow-once' : 'reject-once',
@@ -411,7 +416,6 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       runtime.flushPendingMuxFrames()
       set({ busyAction: `question:${itemId}`, error: undefined })
       try {
-        const proxy = runtime.connection.requireProxy()
         const item = findQuestion(get().messages, itemId)
         if (item === undefined || item.frameRpcId === undefined) {
           throw new Error(zhCN.runtime.openSessionFirst)
@@ -425,11 +429,28 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             ...(freeText === undefined || freeText.length === 0 ? {} : { custom: freeText }),
           }
         })
-        await proxy.respondQuestion(item.frameRpcId, item.sessionId, { answers })
-        set(state => ({
-          messages: item.callId === undefined ? mapQuestionAnswered(state.messages, itemId) : state.messages,
-          busyAction: undefined,
-        }))
+        const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
+        if (isAcpManagedBackend(session?.backend)) {
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude()
+            : session.backend === 'hermes' ? runtime.connection.requireHermes()
+            : session.backend === 'opencode' ? runtime.connection.requireOpencode()
+            : session.backend === 'pi' ? runtime.connection.requirePi()
+            : session.backend === 'antigravity' ? runtime.connection.requireAntigravity()
+            : session.backend === 'cursor' ? runtime.connection.requireCursor()
+            : runtime.connection.requireAcpBackend(session.backend)
+          await acpClient.respond(item.frameRpcId, 'allow-once', { answers })
+          set(state => ({
+            messages: mapQuestionAnswered(state.messages, itemId),
+            busyAction: undefined,
+          }))
+        } else {
+          const proxy = runtime.connection.requireProxy()
+          await proxy.respondQuestion(item.frameRpcId, item.sessionId, { answers })
+          set(state => ({
+            messages: item.callId === undefined ? mapQuestionAnswered(state.messages, itemId) : state.messages,
+            busyAction: undefined,
+          }))
+        }
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
       } catch (error) {
         set({ busyAction: undefined, error: friendlyError(error) })

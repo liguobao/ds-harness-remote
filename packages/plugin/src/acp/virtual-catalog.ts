@@ -15,9 +15,9 @@ const CURSOR_PROVIDER = 'cursor'
 const OPENCODE_PROVIDER = 'opencode'
 
 /** Every ACP backend the Host can project into the Client's virtual Harness. */
-export type AcpCatalogBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+export type AcpCatalogBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
 
-const WORKSPACE_PREFIXES: Record<AcpCatalogBackend, string> = {
+const WORKSPACE_PREFIXES: Record<string, string> = {
   cursor: CURSOR_WORKSPACE_PREFIX,
   antigravity: AGY_WORKSPACE_PREFIX,
   pi: 'pi:cwd:',
@@ -26,7 +26,7 @@ const WORKSPACE_PREFIXES: Record<AcpCatalogBackend, string> = {
   hermes: HERMES_WORKSPACE_PREFIX,
 }
 
-const BACKEND_LABELS: Record<AcpCatalogBackend, string> = {
+const BACKEND_LABELS: Record<string, string> = {
   cursor: 'Cursor',
   antigravity: 'Antigravity',
   pi: 'Pi',
@@ -35,7 +35,7 @@ const BACKEND_LABELS: Record<AcpCatalogBackend, string> = {
   hermes: 'Hermes',
 }
 
-const BACKEND_PROVIDERS: Record<AcpCatalogBackend, string> = {
+const BACKEND_PROVIDERS: Record<string, string> = {
   cursor: CURSOR_PROVIDER,
   antigravity: 'antigravity',
   pi: 'pi',
@@ -45,15 +45,15 @@ const BACKEND_PROVIDERS: Record<AcpCatalogBackend, string> = {
 }
 
 export function acpWorkspacePrefix(backend: AcpCatalogBackend): string {
-  return WORKSPACE_PREFIXES[backend]
+  return WORKSPACE_PREFIXES[backend] ?? `${backend}:cwd:`
 }
 
 export function acpBackendLabel(backend: AcpCatalogBackend): string {
-  return BACKEND_LABELS[backend]
+  return BACKEND_LABELS[backend] ?? backend
 }
 
 export function acpBackendProvider(backend: AcpCatalogBackend): string {
-  return BACKEND_PROVIDERS[backend]
+  return BACKEND_PROVIDERS[backend] ?? backend
 }
 
 export const ACP_CATALOG_BACKENDS: readonly AcpCatalogBackend[] = ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes']
@@ -70,7 +70,7 @@ export interface AcpVirtualWorkspaceView {
 
 /** Build a backend-scoped virtual Workspace id for an absolute Host cwd. */
 export function acpCwdWorkspaceId(path: string, backend: AcpCatalogBackend): string {
-  if (!(backend in WORKSPACE_PREFIXES)) throw new Error("An explicit ACP workspace backend is required.")
+  if (!backend || typeof backend !== 'string') throw new Error("An explicit ACP workspace backend is required.")
   return `${acpWorkspacePrefix(backend)}${encodeURIComponent(path)}`
 }
 

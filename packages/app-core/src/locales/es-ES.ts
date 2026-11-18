@@ -768,6 +768,7 @@ const esES = {
     agentsTab: "Agentes", agentPlatform: "Plataforma de agentes", switchHarness: "Cambiar Harness",
     backendUnavailable: (name: string) => `${name} no está habilitado en el Host conectado. Configúralo o inícialo en el ordenador.`,
     backendDescriptions: { harness: "Framework oficial de agentes de DeepSeek", codex: "Agente de programación OpenAI Codex", claude: "Agente Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Agente interactivo de Cursor IDE", antigravity: "Framework de desarrollo Antigravity", opencode: "Agente de código abierto OpenCode", pi: "Agente Personal Intelligence" },
+    customAcpDescription: 'Agente ACP personalizado',
   },
   plugins: {
     title: 'Plugins',

@@ -15,4 +15,5 @@ export function createAntigravityAcpAdapter(
 }
 
 export { AntigravityAcpClient, AntigravityAcpError } from './antigravity-process.js'
+export { AntigravityNativeAcpClient, isLegacyAntigravityStreamJsonArgs, supportsAntigravityNativeAcp } from './antigravity-acp.js'
 export * from './antigravity/index.js'

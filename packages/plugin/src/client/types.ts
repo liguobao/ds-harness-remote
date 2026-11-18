@@ -1,3 +1,4 @@
+import type { AcpAuthDiagnostic } from '@dsh-remote/protocol'
 import type { LocaleKey } from '../client-locale.js'
 import type { RemoteFileContentProvider } from '../remote-file-content-provider.js'
 
@@ -15,7 +16,7 @@ export type RemoteTransportPreference = 'lan' | 'p2p' | 'turn' | 'relay'
 
 export interface RemoteStatus {
   mode: 'local' | 'remote'
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+  backend?: string
   target?: { deviceId: string; name: string }
   workspaceSelection?: RemoteWorkspaceSelection
   available: boolean
@@ -164,7 +165,7 @@ export interface CursorWorkspaceView extends RemoteWorkspaceView {
 export interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+  backend?: string
   sessionId?: string
 }
 
@@ -252,6 +253,12 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations?: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpDiagnostics?: Record<string, {
+    state: 'ready' | 'unavailable' | 'disabled'
+    errorCode?: string
+    auth: AcpAuthDiagnostic
+    capabilities: Record<string, unknown>
+  }>
   acpInstallResult?: {
     backend: string
     action: 'configured' | 'installed' | 'download_required'

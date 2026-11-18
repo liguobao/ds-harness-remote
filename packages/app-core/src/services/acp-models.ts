@@ -1,12 +1,13 @@
 import type { AgentAcpClient } from '@dsh-remote/client-core'
 import type { ModelSelection, SessionModels } from '../types'
 
-type ModelBackend = 'cursor' | 'claude' | 'pi' | 'opencode' | 'antigravity' | 'hermes'
+type ModelBackend = string
 
 export async function loadAcpModels(client: AgentAcpClient, sessionId: string, backend: ModelBackend): Promise<SessionModels> {
   const result = await client.sessionModels(sessionId, backend as Parameters<AgentAcpClient['sessionModels']>[1])
   if (!record(result) || !record(result.current) || result.current.provider !== backend
     || typeof result.current.model !== 'string' || !Array.isArray(result.groups)) throw new Error('Invalid ACP model catalog.')
+  const labels: Record<string, string> = { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes' }
   const groups = result.groups.flatMap(group => {
     if (!record(group) || group.id !== backend || !Array.isArray(group.models)) return []
     const models = group.models.flatMap(model => {
@@ -18,7 +19,7 @@ export async function loadAcpModels(client: AgentAcpClient, sessionId: string, b
         : undefined
       return [{ id: model.id, name: model.name, ...(reasoning === undefined ? {} : { reasoning }) }]
     })
-    return [{ id: backend, name: typeof group.name === 'string' ? group.name : { cursor: 'Cursor', claude: 'Claude', pi: 'Pi', opencode: 'OpenCode', antigravity: 'Antigravity', hermes: 'Hermes' }[backend], models }]
+    return [{ id: backend, name: typeof group.name === 'string' ? group.name : labels[backend] ?? backend, models }]
   })
   return { current: { provider: backend, model: result.current.model,
     ...(typeof result.current.reasoningEffort === 'string' ? { reasoningEffort: result.current.reasoningEffort } : {}) },

@@ -274,7 +274,7 @@ describe('AcpVirtualHarness', () => {
         const request = { sessionId, provider: backend, model: 'host/b' }
         expect(await target.dispatch('session/models', { args: { request } }, signal)).toMatchObject({ ok: true, value: { current } })
         expect(await target.dispatch('session/selectModel', { args: { request } }, signal)).toMatchObject({ ok: false })
-        expect(client.selectModel).toHaveBeenCalledWith(backend === 'cursor' ? 'acp_1' : 'remote-history', backend, { provider: backend, model: 'host/b' })
+        expect(client.selectModel).toHaveBeenCalledWith('remote-history', backend, { provider: backend, model: 'host/b' })
         expect(await target.dispatch('session/projections', { args: { request } }, signal)).toMatchObject({ ok: true,
           value: { values: { modelSelection: { next: current } } } })
         client.sessionModels.mockRejectedValueOnce(new Error('catalog failed'))
@@ -1383,7 +1383,7 @@ describe('AcpVirtualHarness', () => {
         .resolves.toEqual({ ok: true, value: { outcome: 'already-finished' } })
       expect(hostCarrier.dispatch).not.toHaveBeenCalled()
 
-      for (const blocked of ['workspace/pinSession', 'schedule/list', 'agentPresets/select', 'workspaceFiles/readRelated']) {
+      for (const blocked of ['schedule/list', 'workspaceFiles/readRelated', 'workspace/unarchiveSession']) {
         await expect(target.dispatch(blocked, { args: {} }, signal))
           .resolves.toMatchObject({ ok: false, error: { code: 'method-not-found' } })
       }

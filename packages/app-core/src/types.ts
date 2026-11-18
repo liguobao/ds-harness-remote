@@ -2,7 +2,7 @@ import type { TransportStats } from '@dsh-remote/protocol'
 import type { AdaptiveConnectionDetails } from '@dsh-remote/webrtc'
 import { strings as zhCN } from './locales/i18n'
 
-export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' | (string & {})
 
 export type ConnectionPhase =
   | 'disconnected'
@@ -216,6 +216,7 @@ export interface RemoteSession {
   origin?: 'subagent'
   cwd?: string
   agentPreset?: string
+  availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>
   projections?: {
     values?: Record<string, unknown>
   }

@@ -32,7 +32,7 @@ export const DEFAULT_ACP_IDES: readonly AcpIdeConfig[] = [
   { id: 'pi', command: 'pi-acp', args: [] },
   { id: 'cursor', command: 'agent', args: ['acp'] },
   { id: 'kimi', command: 'kimi', args: ['acp'] },
-  { id: 'antigravity', command: 'agy', args: ['--input-format', 'stream-json', '--output-format', 'stream-json'] },
+  { id: 'antigravity', command: 'agy', args: ['acp'] },
 ]
 
 /** JSON-RPC stdio bridge for ACP agents (Cursor/Kimi/Antigravity). Codex is not an ACP backend; it uses the codex.app.* App Server protocol. */

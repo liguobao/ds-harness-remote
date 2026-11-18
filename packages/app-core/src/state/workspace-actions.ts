@@ -13,12 +13,17 @@ import * as browseMemory from '../services/browse-memory'
 import { createNativeRpcId } from '../services/rpc-id'
 import { createCodexWorkspace, loadCodexCatalog } from '../services/codex'
 import {
+  createAcpWorkspace,
   createAntigravityWorkspace,
   createCursorWorkspace,
   createOpencodeWorkspace,
   createClaudeWorkspace,
   createHermesWorkspace,
   createPiWorkspace,
+  loadCursorCatalog,
+  loadCustomAcpCatalog,
+  mergeCursorCatalog,
+  mergeCustomAcpCatalog,
 } from '../services/cursor'
 import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
 import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
@@ -121,7 +126,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
       try {
         await connection.refreshBackends()
         if (!current()) return
-        let catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[] }
+        let catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }
         let archivedSessionIds: string[] | undefined
         let pinnedSessionIds: string[] | undefined
         const filterOpts = catalogOptions()
@@ -182,17 +187,44 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
               filterOpts,
             )
             break
-          case 'cursor':
-            catalog = filterVisibleAcpCatalog(
-              'cursor',
-              get().workspaces.filter(item => item.backend === 'cursor'),
-              get().sessions.filter(item => item.backend === 'cursor'),
-              filterOpts.deletedKeys,
-              filterOpts.platform,
-            )
+          case 'cursor': {
+            const cursorClient = (connection as unknown as { requireCursor?: () => Parameters<typeof loadCursorCatalog>[0] }).requireCursor
+            if (typeof cursorClient === 'function') {
+              catalog = mergeCursorCatalog(
+                await loadCursorCatalog(scope.bind(() => cursorClient()), get().workspaces, undefined, filterOpts),
+                get().workspaces,
+                get().sessions,
+                filterOpts,
+              )
+            } else {
+              catalog = filterVisibleAcpCatalog(
+                'cursor',
+                get().workspaces.filter(item => item.backend === 'cursor'),
+                get().sessions.filter(item => item.backend === 'cursor'),
+                filterOpts.deletedKeys,
+                filterOpts.platform,
+              )
+            }
             break
+          }
+          default: {
+            if (isAcpManagedBackend(backend)) {
+              const requireCustom = () => connection.requireAcpBackend(backend)
+              catalog = mergeCustomAcpCatalog(
+                backend,
+                await loadCustomAcpCatalog(backend, scope.bind(requireCustom), get().workspaces, undefined, filterOpts),
+                get().workspaces,
+                get().sessions,
+                filterOpts,
+              )
+            } else {
+              catalog = { workspaces: [], sessions: [] }
+            }
+            break
+          }
         }
         if (!current()) return
+        const backendPrefix = `${backend}:`
         set(state => ({
           codexAvailable: connection.hasCodex(),
           cursorAvailable: connection.hasCursor(),
@@ -201,10 +233,20 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           opencodeAvailable: connection.hasOpencode(),
           claudeAvailable: connection.hasClaude(),
           hermesAvailable: connection.hasHermes(),
+          customAcpBackends: connection.customAcpBackends?.() ?? [],
           workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
           sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
           ...(archivedSessionIds === undefined ? {} : { archivedSessionIds }),
-          ...(pinnedSessionIds === undefined ? {} : { pinnedSessionIds }),
+          ...(pinnedSessionIds !== undefined
+            ? { pinnedSessionIds }
+            : catalog.pinnedSessionIds !== undefined
+              ? {
+                  pinnedSessionIds: [
+                    ...state.pinnedSessionIds.filter(id => !id.startsWith(backendPrefix)),
+                    ...catalog.pinnedSessionIds,
+                  ],
+                }
+              : {}),
           selectedSession: catalog.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
           workspaceCatalog: { backend, loading: false },
         }))
@@ -228,9 +270,12 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (isAcpManagedBackend(target?.backend)) {
+        if (target !== undefined && isAcpManagedBackend(target.backend)) {
           const nextTitle = title.trim()
           if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
+          const acpClient = acpClientFor(connection, target.backend)
+          await ignoreMethodNotFound(() => acpClient?.renameWorkspace?.(target.path, target.backend!, nextTitle))
+          if (!scope.current()) return false
           set(state => ({
             workspaces: state.workspaces.map(item => item.workspaceId === workspaceId
               ? { ...item, title: nextTitle, updatedAt: new Date().toISOString() }
@@ -267,6 +312,9 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target !== undefined && isAcpManagedBackend(target.backend)) {
           const targetBackend = target.backend
           const targetPath = target.path
+          const acpClient = acpClientFor(connection, targetBackend)
+          await ignoreMethodNotFound(() => acpClient?.deleteWorkspace?.(targetPath, targetBackend))
+          if (!scope.current()) return false
           const sessionIds = new Set(target.sessionIds)
           const selected = get().selectedSession
           if (selected !== undefined && sessionIds.has(selected.sessionId)) {
@@ -326,6 +374,8 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
         if (isAcpManagedBackend(target?.backend) || isAcpManagedBackend(before?.backend)) {
+          const reorderBackend = isAcpManagedBackend(target?.backend) ? target.backend : before?.backend
+          let reorderedItems: WorkspaceView[] = []
           set(state => {
             const items = state.workspaces.slice()
             const from = items.findIndex(item => item.workspaceId === workspaceId)
@@ -336,8 +386,16 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
               ? items.length
               : items.findIndex(item => item.workspaceId === beforeWorkspaceId)
             items.splice(to < 0 ? items.length : to, 0, workspace)
+            reorderedItems = items
             return { workspaces: items, busyAction: undefined }
           })
+          if (reorderBackend !== undefined && isAcpManagedBackend(reorderBackend)) {
+            const acpClient = acpClientFor(connection, reorderBackend)
+            const paths = reorderedItems.filter(w => w.backend === reorderBackend).map(w => w.path)
+            if (paths.length > 0) {
+              await ignoreMethodNotFound(() => acpClient?.reorderWorkspaces?.(reorderBackend, paths))
+            }
+          }
           persistCatalogNow()
           return true
         }
@@ -519,8 +577,24 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             merge: mergeHermesCatalog,
           },
         } as const
-        if (backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes') {
-          const entry = directoryBackends[backend]
+        if (isAcpManagedBackend(backend)) {
+          const entry = (directoryBackends as Record<string, {
+            has: () => boolean
+            require: () => Parameters<typeof loadPiCatalog>[0]
+            unavailable: string
+            create: (p: string, title?: string) => WorkspaceView
+            load: typeof loadPiCatalog
+            merge: typeof mergePiCatalog
+          }>)[backend] ?? {
+            has: () => connection.hasAcpBackend?.(backend) ?? (backend === 'cursor' && connection.hasCursor()),
+            require: () => backend === 'cursor' ? connection.requireCursor() : connection.requireAcpBackend(backend),
+            unavailable: zhCN.runtime.cursorUnavailable,
+            create: (p: string, title?: string) => backend === 'cursor' ? createCursorWorkspace(p, title) : createAcpWorkspace(backend, p, title),
+            load: (client: Parameters<typeof loadPiCatalog>[0], remembered: WorkspaceView[], warmPath?: string, opts?: AcpCatalogFilterOptions) =>
+              backend === 'cursor' ? loadCursorCatalog(client, remembered, warmPath, opts) : loadCustomAcpCatalog(backend, client, remembered, warmPath, opts),
+            merge: (cat: { workspaces: WorkspaceView[]; sessions: RemoteSession[] }, ws: WorkspaceView[], ss: RemoteSession[], opts?: AcpCatalogFilterOptions) =>
+              backend === 'cursor' ? mergeCursorCatalog(cat, ws, ss, opts) : mergeCustomAcpCatalog(backend, cat, ws, ss, opts),
+          }
           if (!entry.has()) throw new Error(entry.unavailable)
           const memScope = browseMemory.browseScope?.(get())
           const platform = get().selectedDevice?.platform
@@ -530,6 +604,27 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           if (memScope) browseMemory.unmarkDeletedAcpWorkspace?.(memScope, backend, path, platform)
           const workspace = entry.create(path)
           try {
+            const client = entry.require() as Parameters<typeof loadPiCatalog>[0] & { createWorkspace?: (p: string, b: string, t?: string) => Promise<unknown> }
+            if (typeof client.createWorkspace === 'function') {
+              await ignoreMethodNotFound(() => client.createWorkspace!(path, backend, workspace.title))
+            }
+            if (backend === 'cursor' && typeof (client as { createWorkspace?: unknown }).createWorkspace !== 'function') {
+              // Preserve local Cursor workspace creation when older Host lacks persistence RPC.
+              const catalog = await entry.load(scope.bind(entry.require), [...get().workspaces, workspace], path, catalogOptions()).catch(() => ({ workspaces: [workspace], sessions: [] }))
+              if (!scope.current()) return undefined
+              let created = workspace
+              set(state => {
+                const merged = entry.merge(catalog, state.workspaces, state.sessions, catalogOptions())
+                created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+                return {
+                  workspaces: [...state.workspaces.filter(item => item.backend !== backend), ...merged.workspaces],
+                  sessions: [...state.sessions.filter(item => item.backend !== backend), ...merged.sessions],
+                  busyAction: undefined,
+                }
+              })
+              persistCatalogNow()
+              return created
+            }
             const catalog = await entry.load(scope.bind(entry.require), [...get().workspaces, workspace], path, catalogOptions())
             if (!scope.current()) {
               if (wasDeleted && memScope) browseMemory.markDeletedAcpWorkspace?.(memScope, backend, path, platform)
@@ -569,6 +664,32 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         return undefined
       }
     },
+  }
+}
+
+/** Best-effort Host ACP client resolver for optional persistence RPCs. */
+function acpClientFor(connection: AndroidRemoteRuntime, backend?: string) {
+  if (!backend) return undefined
+  try {
+    if (backend === 'cursor') return (connection as unknown as { requireCursor?: () => ReturnType<AndroidRemoteRuntime['requireCursor']> }).requireCursor?.()
+    if (backend === 'antigravity') return (connection as unknown as { requireAntigravity?: () => ReturnType<AndroidRemoteRuntime['requireAntigravity']> }).requireAntigravity?.()
+    if (backend === 'pi') return (connection as unknown as { requirePi?: () => ReturnType<AndroidRemoteRuntime['requirePi']> }).requirePi?.()
+    if (backend === 'opencode') return (connection as unknown as { requireOpencode?: () => ReturnType<AndroidRemoteRuntime['requireOpencode']> }).requireOpencode?.()
+    if (backend === 'claude') return (connection as unknown as { requireClaude?: () => ReturnType<AndroidRemoteRuntime['requireClaude']> }).requireClaude?.()
+    if (backend === 'hermes') return (connection as unknown as { requireHermes?: () => ReturnType<AndroidRemoteRuntime['requireHermes']> }).requireHermes?.()
+    return (connection as unknown as { requireAcpBackend?: (b: string) => ReturnType<AndroidRemoteRuntime['requireCursor']> }).requireAcpBackend?.(backend)
+  } catch {
+    return undefined
+  }
+}
+
+async function ignoreMethodNotFound<T>(fn: () => Promise<T> | undefined): Promise<T | undefined> {
+  try {
+    return await fn()
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : ''
+    if (code === 'METHOD_NOT_FOUND' || code === 'method-not-found') return undefined
+    throw error
   }
 }
 

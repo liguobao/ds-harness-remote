@@ -93,6 +93,10 @@ export class AndroidRemoteRuntime {
   hasClaude() { return this.client.hasClaude() }
   requireHermes() { return this.client.requireHermes() }
   hasHermes() { return this.client.hasHermes() }
+  acpBackendIds() { return this.client.acpBackendIds?.() ?? [] }
+  customAcpBackends() { return this.client.customAcpBackends?.() ?? [] }
+  hasAcpBackend(backend: string) { return this.client.hasAcpBackend?.(backend) ?? false }
+  requireAcpBackend(backend: string) { return this.client.requireAcpBackend(backend) }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
   promoteTransport(options?: { preferLan?: boolean }) { return this.client.promoteTransport?.(options) ?? Promise.resolve(false) }

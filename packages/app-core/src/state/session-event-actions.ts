@@ -7,7 +7,8 @@ import {
   updateCodexSession,
   withCodexPermission,
 } from '../services/codex'
-import { applyCursorFrame, cursorNativeId } from '../services/cursor'
+import { isAcpManagedBackend } from '../lib/workspace-key'
+import { applyCursorFrame, cursorNativeId, normalizeAcpTodos } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
@@ -277,41 +278,85 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
 
     handleCursorFrame(frame) {
       const session = get().selectedSession
-      if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && session.backend !== 'opencode' && session.backend !== 'claude' && session.backend !== 'hermes')) return
+      if (session === undefined || !isAcpManagedBackend(session.backend)) return
       const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
       if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
       const update = params === undefined
         ? undefined
         : (isRecord(params.update) ? params.update : params)
       let kind: string | undefined
-      if (update !== undefined && typeof update.sessionUpdate === 'string') {
+      if (frame.frame.method === 'cursor/update_todos') {
+        kind = 'cursor/update_todos'
+      } else if (update !== undefined && typeof update.sessionUpdate === 'string') {
         kind = update.sessionUpdate
         const catchUpCount = Array.isArray(update.catchUp) ? update.catchUp.length : 0
         // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
         console.info('[dsh-remote] acp frame:', session.backend, kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
       }
+      const nextTodos = kind === 'cursor/update_todos' || kind === 'plan'
+        ? normalizeAcpTodos((update ?? params)?.todos ?? (update ?? params)?.entries ?? (update ?? params)?.items)
+        : undefined
+      const nextMode = kind === 'current_mode_update' && update !== undefined
+        ? (typeof update.currentModeId === 'string' ? update.currentModeId
+          : typeof update.modeId === 'string' ? update.modeId
+          : typeof update.mode === 'string' ? update.mode : undefined)
+        : undefined
+      const nextCommands = kind === 'available_commands_update' && update !== undefined && Array.isArray(update.availableCommands)
+        ? update.availableCommands.flatMap(entry => isRecord(entry) && typeof entry.name === 'string' && entry.name.trim()
+          ? [{
+              name: entry.name.trim(),
+              ...(typeof entry.description === 'string' ? { description: entry.description } : {}),
+              ...(isRecord(entry.input) && typeof entry.input.hint === 'string' ? { input: { hint: entry.input.hint } } : {}),
+            }]
+          : [])
+        : undefined
+      const nextContextPressure = kind === 'usage_update' && update !== undefined
+        && typeof update.used === 'number' && typeof update.size === 'number'
+        ? { used: update.used, size: update.size, ratio: update.size > 0 ? Math.min(1, Math.max(0, update.used / update.size)) : 0 }
+        : undefined
+      const applySessionMetadata = (item: RemoteSession): RemoteSession => {
+        if (item.sessionId !== session.sessionId) return item
+        const nextValues = {
+          ...item.projections?.values,
+          ...(nextTodos !== undefined ? { todos: nextTodos } : {}),
+          ...(nextContextPressure !== undefined ? { contextPressure: nextContextPressure } : {}),
+        }
+        return {
+          ...item,
+          ...(kind === 'prompt_completed' || kind === 'prompt_failed' ? { running: false } : {}),
+          ...(nextMode !== undefined ? { agentPreset: nextMode } : {}),
+          ...(nextCommands !== undefined ? { availableCommands: nextCommands } : {}),
+          ...((nextTodos !== undefined || nextContextPressure !== undefined)
+            ? { projections: { ...item.projections, values: nextValues } }
+            : {}),
+        }
+      }
+      const sessionMetaChanged = kind === 'prompt_completed' || kind === 'prompt_failed'
+        || nextTodos !== undefined || nextMode !== undefined || nextCommands !== undefined || nextContextPressure !== undefined
       set(state => ({
         messages: {
           ...state.messages,
           [session.sessionId]: applyCursorFrame(state.messages[session.sessionId] ?? [], session.sessionId, frame),
         },
-        ...(kind === 'prompt_completed' || kind === 'prompt_failed'
+        ...(sessionMetaChanged
           ? {
-            sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
-            selectedSession: state.selectedSession?.sessionId === session.sessionId
-              ? { ...state.selectedSession, running: false }
-              : state.selectedSession,
+            sessions: state.sessions.map(applySessionMetadata),
+            selectedSession: state.selectedSession === undefined ? undefined : applySessionMetadata(state.selectedSession),
             ...(kind === 'prompt_failed'
               ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'hermes' ? zhCN.runtime.hermesUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
               : {}),
           }
           : {}),
       }))
-      if (session.backend === 'antigravity' && kind === 'prompt_completed') void runtime.refreshAntigravityCatalog()
-      if (session.backend === 'pi' && kind === 'prompt_completed') void runtime.refreshPiCatalog()
-      if (session.backend === 'opencode' && kind === 'prompt_completed') void runtime.refreshOpencodeCatalog()
-      if (session.backend === 'claude' && kind === 'prompt_completed') void runtime.refreshClaudeCatalog()
-      if (session.backend === 'hermes' && kind === 'prompt_completed') void runtime.refreshHermesCatalog()
+      if (kind === 'prompt_completed') {
+        if (session.backend === 'antigravity') void runtime.refreshAntigravityCatalog()
+        else if (session.backend === 'pi') void runtime.refreshPiCatalog()
+        else if (session.backend === 'opencode') void runtime.refreshOpencodeCatalog()
+        else if (session.backend === 'claude') void runtime.refreshClaudeCatalog()
+        else if (session.backend === 'hermes') void runtime.refreshHermesCatalog()
+        else if (session.backend === 'cursor') void runtime.refreshCursorCatalog()
+        else if (session.backend) void runtime.refreshCustomAcpCatalog(session.backend)
+      }
     },
   }
 }

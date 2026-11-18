@@ -36,7 +36,7 @@ export function SessionInfo({ visible, session, workspace, onClose, onOpenWorksp
         <SectionTitle>{strings.sessionInfo.workspaceInfo}</SectionTitle>
         <KeyValue label={strings.workspaces.title} value={workspace?.title ?? strings.chat.workspaceNone} onPress={onOpenWorkspace} />
         <KeyValue label={strings.sessionInfo.host} value={device?.name ?? strings.common.unavailable} />
-        <KeyValue label={strings.workspaces.type} value={strings.workspaces[backend === 'harness' ? 'dsh' : backend]} />
+        <KeyValue label={strings.workspaces.type} value={(strings.workspaces as Record<string, unknown>)[backend === 'harness' ? 'dsh' : backend] as string ?? backend} />
         <KeyValue label={strings.sessionInfo.workspaceDirectory} value={workspace?.path ?? strings.common.unavailable} mono />
         {session.cwd !== undefined && session.cwd !== workspace?.path && <KeyValue label={strings.sessionInfo.sessionDirectory} value={session.cwd} mono />}
         {workspace !== undefined && <KeyValue label={strings.devices.conversations} value={workspace.sessionIds.length.toLocaleString()} />}

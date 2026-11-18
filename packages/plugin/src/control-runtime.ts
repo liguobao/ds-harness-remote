@@ -25,7 +25,9 @@ import type { PluginUpdateSnapshot } from './update-check.js'
 import type { PluginSelfUpdateResult } from './plugin-self-update.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
+import { isValidAcpBackendId } from './acp/method-policy.js'
 import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
+import type { AcpAuthDiagnostic } from '@dsh-remote/protocol'
 import type { HostLogSnapshot, HostLogStore, PluginLogFilter } from './host-log-store.js'
 
 export interface PluginSettingsView {
@@ -36,6 +38,12 @@ export interface PluginSettingsView {
   association?: PluginAssociation
   associations: Partial<Record<'host' | 'client', PluginAssociation>>
   acpAvailability?: Record<string, boolean>
+  acpDiagnostics?: Record<string, {
+    state: 'ready' | 'unavailable' | 'disabled'
+    errorCode?: string
+    auth: AcpAuthDiagnostic
+    capabilities: Record<string, unknown>
+  }>
   acpInstallResult?: {
     backend: string
     action: 'configured' | 'installed' | 'download_required'
@@ -560,11 +568,18 @@ export class PluginControlRuntime {
     if (typeof value.id !== 'string' || typeof value.command !== 'string' || !Array.isArray(value.args) || !value.args.every(item => typeof item === 'string')) {
       throw new ClientModeError('INVALID_MESSAGE', 'ACP name, command, and arguments are required.')
     }
+    const id = value.id.trim().toLowerCase()
+    const command = value.command.trim()
+    if (!command) throw new ClientModeError('INVALID_MESSAGE', 'ACP command is required.')
+    if (id === 'kimi') throw new ClientModeError('INVALID_MESSAGE', 'Kimi is not implemented.')
+    if (!isValidAcpBackendId(id)) {
+      throw new ClientModeError('INVALID_MESSAGE', 'ACP backend id must match ^[a-z0-9][a-z0-9_-]{0,31}$ and cannot use reserved names.')
+    }
     const current = resolveConfig(this.settings.get())
-    if (value.id === 'kimi') throw new ClientModeError('INVALID_MESSAGE', 'Kimi is not implemented.')
-    if (current.acp?.backends.some(item => item.id === value.id)) throw new ClientModeError('INVALID_MESSAGE', 'ACP backend already exists.')
-    const backends = [...(current.acp?.backends ?? []), { id: value.id, command: value.command, args: value.args, enabled: false }]
-    const next = resolveConfig({ ...editableConfig(current), acp: { enabled: current.acp?.enabled ?? true, backends } })
+    if (current.acp?.backends.some(item => item.id === id)) throw new ClientModeError('INVALID_MESSAGE', 'ACP backend already exists.')
+    const enabled = value.enabled === true
+    const backends = [...(current.acp?.backends ?? []), { id, command, args: value.args, enabled }]
+    const next = resolveConfig({ ...editableConfig(current), acp: { enabled: enabled || (current.acp?.enabled ?? true), backends } })
     await this.settings.replace(editableConfig(next))
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()))
     return { ...await this.settingsView(), applies: 'live' }
@@ -607,7 +622,7 @@ export class PluginControlRuntime {
     const defaultArgsMap: Record<string, string[]> = {
       codex: ['app-server'],
       cursor: ['acp'],
-      antigravity: ['--input-format', 'stream-json', '--output-format', 'stream-json'],
+      antigravity: ['acp'],
       hermes: ['acp'],
       opencode: ['acp'],
       pi: [],
@@ -705,6 +720,7 @@ export class PluginControlRuntime {
     const associations = await this.associations(config)
     const role = config.role === 'client' ? 'client' : 'host'
     const association = associations[role]
+    const acpDiagnostics = this.host?.acpDiagnostics?.()
     return {
       config,
       deviceName: hostname(),
@@ -712,6 +728,7 @@ export class PluginControlRuntime {
       applies: 'restart',
       associations,
       acpAvailability: Object.fromEntries((config.acp?.backends ?? []).map(item => [item.id, backendCommandAvailable(item.id, item.command ?? '')])),
+      ...(acpDiagnostics === undefined || Object.keys(acpDiagnostics).length === 0 ? {} : { acpDiagnostics }),
       ...(association === undefined ? {} : { association }),
       ...(this.startupFailure === undefined ? {} : {
         startupError: safeStartupError(this.startupFailure),

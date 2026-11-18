@@ -1365,9 +1365,13 @@ Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cur
 
 业务 RPC 固定为 `agent.acp.call|respond|stream.*|transfer.*`，事件固定为
 `agent.acp.frame|stream.closed|catalog.changed`，所有 Client（包括 Web）使用同一独立 ACP 数据面。
-`agent.acp.call` 不是通用代理；编译期 allowlist 仅含 `initialize`、`session/new`、`session/load`、
-`session/prompt`、`session/cancel`、以及 Host 扩展 `dsh/directoryList`、`dsh/workspaceList`、
-`dsh/sessionList`、`dsh/sessionHistory`、`dsh/sessionArchive`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
+`agent.acp.call` 不是通用代理；编译期 allowlist 含 `initialize`、`session/new`、`session/load`、
+`session/fork`、`session/set_mode`、`session/prompt`、`session/cancel`，以及 Host 扩展
+`dsh/directoryList`、`dsh/workspaceList`、`dsh/workspaceCreate`、`dsh/workspaceRename`、
+`dsh/workspaceDelete`、`dsh/workspaceReorder`、`dsh/sessionList`、`dsh/sessionHistory`、
+`dsh/sessionModels`、`dsh/selectModel`、`dsh/sessionModes`、`dsh/sessionCommands`、
+`dsh/selectPermission`、`dsh/sessionPin`、`dsh/sessionUnpin`、`dsh/sessionArchive`、
+`dsh/toolCall`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
 不得通过 Harness ApiProxy / Typert 业务端点调用。
 
 `dsh/sessionHistory` 是只读访问：已认证且受信任的同账号连接通过 backend、会话目录 authority

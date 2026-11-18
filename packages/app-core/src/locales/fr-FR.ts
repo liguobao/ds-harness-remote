@@ -768,6 +768,7 @@ const frFR = {
     agentsTab: "Agents", agentPlatform: "Plateforme d’agents", switchHarness: "Changer de Harness",
     backendUnavailable: (name: string) => `${name} n’est pas activé sur l’hôte connecté. Configurez-le ou démarrez-le sur l’ordinateur.`,
     backendDescriptions: { harness: "Framework d’agents officiel DeepSeek", codex: "Agent de programmation OpenAI Codex", claude: "Agent Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Agent interactif de Cursor IDE", antigravity: "Framework de développement Antigravity", opencode: "Agent open source OpenCode", pi: "Agent Personal Intelligence" },
+    customAcpDescription: 'Agent ACP personnalisé',
   },
   plugins: {
     title: 'Plugins',

@@ -766,6 +766,7 @@ const zhCN = {
     agentsTab: "智能体", agentPlatform: "智能体平台", switchHarness: "切换 Harness",
     backendUnavailable: (name: string) => `当前连接的主机未启用 ${name} 服务，请在电脑端配置或启动该智能体。`,
     backendDescriptions: { harness: "官方 DeepSeek 智能体框架", codex: "OpenAI Codex 编程智能体", claude: "Anthropic Claude 智能体", hermes: "Nous Research Hermes Agent 智能体", cursor: "Cursor IDE 交互智能体", antigravity: "Antigravity 研发框架", opencode: "OpenCode 开源智能体", pi: "Personal Intelligence 智能体" },
+    customAcpDescription: '自定义 ACP 智能体',
   },
   plugins: {
     title: '插件',

@@ -4,6 +4,7 @@ import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, Harness
 import { LAN_UPLOAD_CAPABILITY, TRANSPORT_UPGRADE_CAPABILITY, classifyControlClose, wireFromTransportTier } from '@dsh-remote/protocol'
 import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
+import { registerAcpBackendId } from '../lib/session-backend'
 import { connectionFailure, connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
@@ -291,9 +292,14 @@ export class AndroidRemoteConnection {
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
     this.acpBackends.clear()
-    for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const) {
+    const candidateBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'])
+    for (const wt of features.workspaceTypes ?? []) {
+      if (wt.id !== 'codex' && wt.id !== 'harness') candidateBackends.add(wt.id)
+    }
+    for (const backend of candidateBackends) {
       if (remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, backend, `agent.acp.${backend}.v1`)) {
         this.acpBackends.add(backend)
+        registerAcpBackendId(backend)
       }
     }
     if (this.acpBackends.size > 0) this.cursor ??= new AgentAcpClient(core, features.capabilities)
@@ -368,14 +374,40 @@ export class AndroidRemoteConnection {
   }
 
   requireSessionTools(sessionId?: string): SessionTools {
-    if (sessionId?.startsWith('cursor:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'cursor')
-    if (sessionId?.startsWith('pi:')) return new AcpSessionTools(this.requirePi(), 'pi')
-    if (sessionId?.startsWith('antigravity:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'antigravity')
-    if (sessionId?.startsWith('claude:')) return new AcpSessionTools(this.requireClaude(), 'claude')
-    if (sessionId?.startsWith('hermes:')) return new AcpSessionTools(this.requireHermes(), 'hermes')
-    if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
+    for (const backend of this.acpBackends) {
+      if (sessionId?.startsWith(`${backend}:`) && this.cursor !== undefined) {
+        return new AcpSessionTools(this.cursor, backend)
+      }
+    }
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
+  }
+
+  acpBackendIds(): string[] {
+    return [...this.acpBackends]
+  }
+
+  customAcpBackends(): string[] {
+    return [...this.acpBackends].filter(id => !['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'].includes(id))
+  }
+
+  hasAcpBackend(backend: string): boolean {
+    return this.cursor !== undefined && this.acpBackends.has(backend)
+  }
+
+  requireAcpBackend(backend: string): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has(backend)) {
+      const messages: Record<string, string> = {
+        claude: strings.runtime.claudeUnavailable,
+        hermes: strings.runtime.hermesUnavailable,
+        opencode: strings.runtime.opencodeUnavailable,
+        pi: strings.runtime.piUnavailable,
+        antigravity: strings.runtime.antigravityUnavailable,
+        cursor: strings.runtime.cursorUnavailable,
+      }
+      throw new Error(messages[backend] ?? strings.runtime.cursorUnavailable)
+    }
+    return this.cursor
   }
 
   hasSessionEvents(): boolean {
