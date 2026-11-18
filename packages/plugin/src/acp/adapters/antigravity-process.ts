@@ -13,6 +13,8 @@ import type {
 } from './cursor-process.js'
 
 import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
+import { hasCliSession, syncCliSessionToDesktop, syncDesktopSessionForResume } from './antigravity/session-sync.js'
+import { DSH_AGY_DUAL_END_PATCH_V1 } from './antigravity/antigravity-paths.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
@@ -379,7 +381,33 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
     const args = [...this.args, '--add-dir', imageDirectory]
     if (this.activeConversationId) {
-      args.push('--conversation', this.activeConversationId)
+      const conversationId = this.activeConversationId
+      const syncOptions = this.brainDir === undefined ? {} : { cliBrainDir: this.brainDir }
+      try {
+        // agy reads only the CLI data root. Migrate a desktop-only session
+        // before handing --conversation to the process so resume finds it.
+        const result = await syncDesktopSessionForResume(conversationId, syncOptions)
+        if (result.status !== 'noop') {
+          this.logger?.info('Antigravity resume source check', {
+            conversationId,
+            status: result.status,
+            copiedFiles: result.copiedFiles.length,
+            patch: DSH_AGY_DUAL_END_PATCH_V1,
+          })
+        }
+      } catch (error) {
+        const usable = await hasCliSession(conversationId, syncOptions).catch(() => false)
+        if (!usable) {
+          throw new AntigravityAcpError('SESSION_SYNC_FAILED',
+            'The requested Antigravity session exists only on desktop and could not be synchronized.', { cause: error })
+        }
+        this.logger?.warn('Desktop session sync failed; continuing with the existing CLI session', {
+          conversationId,
+          error: String(error),
+        })
+      }
+      if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
+      args.push('--conversation', conversationId)
     }
     if (this.skipPermissions) {
       args.push('--dangerously-skip-permissions')
@@ -496,6 +524,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
       if (!child.killed) child.kill('SIGTERM')
       throw err
     }
+  }
+
+  /** Session sync options derived from this client's (optionally isolated) brain dir. */
+  private syncOptions(): { cliBrainDir?: string } {
+    return this.brainDir === undefined ? {} : { cliBrainDir: this.brainDir }
   }
 
   private sendPrompt(sessionId: string, promptText: string, timeoutMs: number): Promise<unknown> {
@@ -653,6 +686,14 @@ export class AntigravityAcpClient implements CursorAcpLike {
             await this.watcher?.flush()
           } catch {
             // ignore flush errors
+          }
+          // A resumed desktop session was copied into the CLI root so `agy`
+          // could continue it; mirror the advanced trajectory back so the
+          // desktop application shows this turn. Best-effort only.
+          try {
+            await syncCliSessionToDesktop(this.activeConversationId ?? '', this.syncOptions())
+          } catch (err) {
+            this.logger?.warn('Failed to mirror the CLI turn back to desktop', { error: String(err) })
           }
           if (result.status === 'ERROR') {
             current.reject(new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', String(result.error ?? 'Execution error')))

@@ -1,4 +1,7 @@
 export * from './types.js'
+export * from './antigravity-paths.js'
 export * from './transcript-watcher.js'
+export * from './transcript-loader.js'
+export * from './session-sync.js'
 export * from './executor.js'
 export * from './service.js'

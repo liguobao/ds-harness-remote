@@ -1,0 +1,7 @@
+# antigravity-dual-end-patch manifest（模板；由 regen-manifest 生成，勿手工改 sha）
+# 列: source_rel|target_rel|sha256|role|purpose
+# source_rel 相对 WORKTREE_ROOT；target_rel 相对 PLUGIN_DIR
+# primary 目标必须是 dist/index.js（dsh-plugin.json -> facets.host.entry）
+# 当前 sha=PENDING 表示“尚未生成”：check 会报 MISSING，apply 会拒绝执行。
+# 本地构建完成后运行: patch.sh regen-manifest
+packages/plugin/dist/index.js|dist/index.js|PENDING|primary|host entry（esbuild bundle；双端补丁核心目标）
