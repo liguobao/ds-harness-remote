@@ -1,6 +1,6 @@
 import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
 import { KeyCode } from '@ohos.multimodalInput.keyCode';
-import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
+import lazy { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
@@ -156,7 +156,7 @@ struct Index {
   /** 预览的是不是 PDF（走系统 PDF Kit 渲染）。 */
   @State previewIsPdf: boolean = false;
   @State pdfError: string = '';
-  private pdfController: pdfViewManager.PdfController = new pdfViewManager.PdfController();
+  private pdfController?: pdfViewManager.PdfController;
   /** 消息操作面板（自绘，替代系统 ActionSheet）。 */
   @State messageActionsOpen: boolean = false;
   @State messageActionText: string = '';
@@ -7077,14 +7077,12 @@ struct Index {
     this.runtime.filePreviewError = '';
     this.runtime.notify();
     this.runtime.readFileBuffer(path).then((buffer: ArrayBuffer) => {
-      this.pdfController.loadDocumentFromMemory(buffer).then(() => {
-        this.runtime.filePreviewLoading = false;
-        this.runtime.notify();
-      }).catch((error: Error) => {
-        this.pdfError = error.message;
-        this.runtime.filePreviewLoading = false;
-        this.runtime.notify();
-      });
+      const controller: pdfViewManager.PdfController = this.pdfController ?? new pdfViewManager.PdfController();
+      this.pdfController = controller;
+      return controller.loadDocumentFromMemory(buffer);
+    }).then(() => {
+      this.runtime.filePreviewLoading = false;
+      this.runtime.notify();
     }).catch((error: Error) => {
       this.pdfError = error.message;
       this.runtime.filePreviewLoading = false;
@@ -7363,7 +7361,7 @@ struct Index {
               .fontColor(this.pal().text2)
           }
           .padding({ top: 12, bottom: 12 })
-        } else if (this.previewIsPdf && this.pdfError.length === 0) {
+        } else if (this.previewIsPdf && this.pdfError.length === 0 && this.pdfController !== undefined) {
           PdfView({
             controller: this.pdfController,
             pageLayout: pdfService.PageLayout.LAYOUT_SINGLE,
