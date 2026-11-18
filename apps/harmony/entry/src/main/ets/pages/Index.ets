@@ -6531,7 +6531,9 @@ struct Index {
   MarkdownText(text: string, streaming: boolean) {
     Column({ space: 5 }) {
       ForEach(markdownLines(streaming ? text + '▍' : text), (line: MdLine, index: number) => {
-        if (line.imageSrc.length > 0) {
+        if (line.table.length > 0) {
+          this.MarkdownTable(line.table, line.columnWidths)
+        } else if (line.imageSrc.length > 0) {
           this.MdImage(line)
         } else if (line.code) {
           Text(line.text)
@@ -6588,10 +6590,39 @@ struct Index {
             .textAlign(TextAlign.Start)
             .copyOption(CopyOptions.LocalDevice)
         }
-      }, (line: MdLine, index: number) => index.toString())
+      }, (line: MdLine, index: number) => line.table.length > 0
+        ? index + ':' + JSON.stringify(line.table) : index.toString())
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  MarkdownTable(rows: string[][], widths: number[]) {
+    Scroll() {
+      Column() {
+        ForEach(rows, (cells: string[], rowIndex: number) => {
+          Row() {
+            ForEach(cells, (cell: string, columnIndex: number) => {
+              Text(cell)
+                .fontSize(this.fs(14))
+                .fontColor(this.pal().text)
+                .fontWeight(rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal)
+                .width(widths[columnIndex])
+                .padding(8)
+                .wordBreak(WordBreak.BREAK_WORD)
+                .copyOption(CopyOptions.LocalDevice)
+            }, (cell: string, columnIndex: number) => columnIndex.toString())
+          }
+          .alignItems(VerticalAlign.Top)
+          .backgroundColor(rowIndex === 0 ? this.pal().inputBg : Color.Transparent)
+          .border({ width: { bottom: 1 }, color: this.pal().border })
+        }, (cells: string[], rowIndex: number) => rowIndex.toString())
+      }
+    }
+    .width('100%')
+    .align(Alignment.Start)
+    .scrollable(ScrollDirection.Horizontal)
   }
 
   /** 手指按下/滑动：光斑跟到触点，并按 180ms 淡入。 */
@@ -9143,6 +9174,8 @@ class MdLine {
   imageAlt: string = '';
   /** 非空表示这一行整行就是一个链接。 */
   linkUrl: string = '';
+  table: string[][] = [];
+  columnWidths: number[] = [];
 }
 
 /** 一行里切出来的片段：要么是文字，要么是一张图。 */
@@ -9197,13 +9230,30 @@ function splitMdImages(body: string): MdSegment[] {
   return out;
 }
 
+/** 保留转义竖线，只用未转义的竖线分列。 */
+function markdownTableCells(line: string): string[] {
+  const body: string = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  return body.split(/(?<!\\)\|/).map((cell: string) => cell.trim().replace(/\\\|/g, '|'));
+}
+
+function appendMarkdownTableRow(table: MdLine, cells: string[]): void {
+  const row: string[] = [];
+  for (let column: number = 0; column < table.columnWidths.length; column++) {
+    const cell: string = (cells[column] ?? '').replace(/`|\*\*|__/g, '');
+    const measured: number = cell.replace(/[^\x00-\x7F]/g, 'xx').length * 7 + 16;
+    table.columnWidths[column] = Math.max(table.columnWidths[column], Math.min(260, measured));
+    row.push(cell);
+  }
+  table.table.push(row);
+}
+
 /** 把 Markdown 拆成可渲染的行，并去掉会裸露的标记符号。 */
 function markdownLines(source: string): MdLine[] {
   const out: MdLine[] = [];
   const raw: string[] = source.split(String.fromCharCode(10));
   let inCode: boolean = false;
-  for (const original of raw) {
-    const line: string = original.trimEnd();
+  for (let index: number = 0; index < raw.length; index++) {
+    const line: string = raw[index].trimEnd();
     if (line.trim().startsWith('```')) {
       inCode = !inCode;
       continue;
@@ -9219,6 +9269,23 @@ function markdownLines(source: string): MdLine[] {
     }
     if (line.trim().length === 0) {
       continue;
+    }
+    if (index + 1 < raw.length && /(?<!\\)\|/.test(line)) {
+      const header: string[] = markdownTableCells(line);
+      const divider: string[] = markdownTableCells(raw[index + 1]);
+      if (header.length === divider.length && divider.every((cell: string) => /^:?-+:?$/.test(cell))) {
+        const table: MdLine = new MdLine();
+        table.columnWidths = header.map(() => 96);
+        appendMarkdownTableRow(table, header);
+        index++;
+        while (index + 1 < raw.length && /(?<!\\)\|/.test(raw[index + 1])
+          && !raw[index + 1].trimStart().startsWith('```')) {
+          index++;
+          appendMarkdownTableRow(table, markdownTableCells(raw[index]));
+        }
+        out.push(table);
+        continue;
+      }
     }
     const entry: MdLine = new MdLine();
     let body: string = line.trim();
