@@ -59,14 +59,14 @@ async function start(pass = password, trustedProxyIps: readonly string[] = [], c
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
 }
 /** Send a raw HTTP/1.1 request so duplicate header lines stay separate (fetch merges them). */
-async function rawStatus(headerLines: string[]): Promise<number> {
+async function rawStatus(headerLines: string[], path = '/api/v1/auth/me'): Promise<number> {
   const port = (app.server.address() as { port: number }).port
   const crlf = String.fromCharCode(13, 10)
   const lines = [
-    'GET /api/v1/auth/me HTTP/1.1',
+    `GET ${path} HTTP/1.1`,
     `Host: 127.0.0.1:${port}`,
     ...headerLines,
-    'Connection: close',
+    `Connection: ${path === '/ws/v1/connect' ? 'Upgrade' : 'close'}`,
     '',
     '',
   ]
@@ -323,6 +323,30 @@ describe('account and device authorization', () => {
   })
 })
 describe('control authorization and encrypted relay', () => {
+  it('requires the complete native origin when NetStack omits the WebSocket port', async () => {
+    const hint = 'X-DSH-Native-Origin: http://localhost:8080'
+    await runScenarios([
+      { name: 'browser-same-origin', headers: ['Origin: http://localhost:8080'], status: 101 },
+      { name: 'native-without-origin', headers: [], status: 101 },
+      { name: 'harmony-with-complete-origin', headers: ['Origin: http://localhost', hint], status: 101 },
+      { name: 'missing-native-header', headers: ['Origin: http://localhost'], status: 403 },
+      { name: 'wrong-native-port', headers: ['Origin: http://localhost', 'X-DSH-Native-Origin: http://localhost:8081'], status: 403 },
+      { name: 'wrong-origin-host', headers: ['Origin: http://example.test', hint], status: 403 },
+      { name: 'wrong-origin-scheme', headers: ['Origin: https://localhost', hint], status: 403 },
+      { name: 'duplicate-native-header', headers: ['Origin: http://localhost', hint, hint], status: 403 },
+    ].map(({ name, headers, status }) => ({
+      name,
+      run: async () => {
+        expect(await rawStatus([
+          'Upgrade: websocket',
+          'Sec-WebSocket-Version: 13',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          ...headers,
+        ], '/ws/v1/connect')).toBe(status)
+      },
+    })))
+  })
+
   it('rejects invalid Control messages at the WebSocket boundary', async () => {
     await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type', 'duplicate-payload-field', 'noncanonical-handshake'].map(reason => ({
       name: reason,

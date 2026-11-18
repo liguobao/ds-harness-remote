@@ -10,6 +10,8 @@
 
 本客户端是独立实现，不代表与 Android、Codex 或 ACP 客户端完全等价。它不在手机上运行 Host，不改写 Host 的会话存储。协议以 [protocol.md](protocol.md)、共享包及 `fixtures/` 为准。
 
+鸿蒙原生 WebSocket 生成的 `Origin` 可能省略端口。自部署 Server 使用非默认端口时，鸿蒙客户端会在 `X-DSH-Native-Origin` 提供完整 origin。Server 仅在该值与配置完全一致，且系统生成的 `Origin` 仅省略端口时接受连接。请将 `DSH_SERVER_PUBLIC_URL` 配成设备使用的完整地址。
+
 ## 工程结构
 
 ```text

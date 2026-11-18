@@ -344,7 +344,10 @@ export class RelayTransport {
       ws.on('error', (err: Error) => {
         this.fail(new Error(`RelayTransport failed to connect to ${this.url}`));
       });
-      ws.connect(this.url, (err: Error, value: boolean) => {
+      // NetStack generates its own Origin without the port. Send the full
+      // HTTP origin in a separate header to avoid duplicating Origin.
+      const origin: string = this.url.replace(/^ws(s?):\/\/([^/]+).*$/, 'http$1://$2').toLowerCase();
+      ws.connect(this.url, { header: { 'X-DSH-Native-Origin': origin } }, (err: Error, value: boolean) => {
         if (err) {
           this.fail(new Error(`RelayTransport failed to connect to ${this.url}`));
         }
