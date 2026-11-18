@@ -101,8 +101,18 @@ it('persists Host-only policy and authorization metadata through refresh and leg
     await restored.clearAuthorization();
     await restored.loadStoredPolicy();
     expect(restored.pairingHostOnly()).toBe(true);
+    const identities = new IdentityStore({ directory: f.directory, role: 'host' });
+    const recoveredIdentity = await identities.reset('Host');
+    restored.bindIdentity(recoveredIdentity);
+    await restored.loadStoredPolicy();
+    expect(restored.pairingHostOnly()).toBe(true);
     await writeFile(join(f.directory, 'pairing-host-only.json'), '{"hostOnly":false}');
     await expect(assertOwnedRemoteStorage(f.directory)).rejects.toThrow();
+    const loggedOutIdentity = await identities.reset('Host', { clearPairingPolicy: true });
+    expect(loggedOutIdentity.deviceId).not.toBe(recoveredIdentity.deviceId);
+    restored.bindIdentity(loggedOutIdentity);
+    await restored.loadStoredPolicy();
+    expect(restored.pairingHostOnly()).toBe(false);
     api.close();
     restored.close();
 });

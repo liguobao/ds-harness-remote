@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Keyboard,
   Modal,
@@ -28,7 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native'
 import { deviceVersionSubtitle, platformIcon } from '../lib/device-display'
-import { canManageWorkspace } from '../lib/workspace-key'
+import { canManageWorkspace, isAbsoluteHostPath } from '../lib/workspace-key'
 import { useAppStore } from '../state/store'
 import type { AgentBackend, DirectoryListing, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
@@ -476,40 +476,53 @@ export function DirectoryBrowserModal({
 }) {
   const listDirectory = useAppStore(state => state.hostListDirectory)
   const [listing, setListing] = useState<DirectoryListing | undefined>(undefined)
+  const [pathInput, setPathInput] = useState('')
   const [showHidden, setShowHidden] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
+  const requestRef = useRef(0)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
   const browserSheetHeight = Math.round(windowHeight * (landscape || compactHeight ? DIRECTORY_SHEET_COMPACT_RATIO : DIRECTORY_SHEET_RATIO))
 
-  useEffect(() => {
-    if (!visible) return
-    let cancelled = false
-    setLoading(true)
-    setError(undefined)
-    void listDirectory(undefined).then(result => {
-      if (cancelled) return
-      if (result === undefined) { setLoading(false); return }
-      setListing(result)
-      setLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [visible, listDirectory])
-
-  const open = async (path: string) => {
+  const open = useCallback(async (path?: string) => {
+    const request = ++requestRef.current
     setLoading(true)
     setError(undefined)
     const result = await listDirectory(path)
-    if (result !== undefined) setListing(result)
+    if (request !== requestRef.current) return
+    if (result === undefined) {
+      setError(strings.workspaces.directoryOpenFailed)
+    } else {
+      setListing(result)
+      setPathInput(result.path)
+    }
     setLoading(false)
+  }, [listDirectory])
+
+  useEffect(() => {
+    if (!visible) return
+    setListing(undefined)
+    setPathInput('')
+    void open()
+    return () => { requestRef.current += 1 }
+  }, [visible, open])
+
+  const openTypedPath = () => {
+    const path = pathInput.trim()
+    if (!isAbsoluteHostPath(path) || path.includes('\0')) {
+      setError(strings.workspaces.directoryOpenFailed)
+      return
+    }
+    Keyboard.dismiss()
+    void open(path)
   }
 
   const entries = listing === undefined ? [] : listing.entries.filter(entry => showHidden || !entry.hidden)
 
   return (
-    <SheetModal visible={visible} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight, maxHeight: browserSheetHeight }]}>
+    <SheetModal visible={visible} onClose={onClose} avoidKeyboard backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight }]}>
         <View style={styles.grabber} />
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>
@@ -518,7 +531,20 @@ export function DirectoryBrowserModal({
         <GroupCard style={styles.browserPathCard}>
           <View style={styles.browserPath}>
             <FolderOpen size={18} color={colors.primary} strokeWidth={1.8} />
-            <Text style={styles.browserPathText} numberOfLines={1}>{listing?.path ?? strings.workspaces.loading}</Text>
+            <TextInput
+              accessibilityLabel={strings.workspaces.deviceDirectory}
+              style={styles.browserPathText}
+              value={pathInput}
+              onChangeText={value => { setPathInput(value); setError(undefined) }}
+              placeholder={loading ? strings.workspaces.loadingDirectory : strings.workspaces.deviceDirectory}
+              placeholderTextColor={colors.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+              returnKeyType="go"
+              onSubmitEditing={openTypedPath}
+            />
+            <Button label={strings.workspaces.goToFolder} variant="quiet" onPress={openTypedPath} disabled={loading || pathInput.trim().length === 0} />
           </View>
         </GroupCard>
         <View style={styles.crumbRow}>
@@ -559,7 +585,7 @@ export function DirectoryBrowserModal({
           />
           <Button
             label={strings.workspaces.chooseThisFolder}
-            disabled={listing === undefined || loading}
+            disabled={listing === undefined || loading || pathInput !== listing.path}
             onPress={() => { if (listing !== undefined) onChoose(listing.path) }}
           />
         </View>

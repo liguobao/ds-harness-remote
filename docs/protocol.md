@@ -752,6 +752,8 @@ Plugin Host 的 Harness 业务路由只接受 capability 对应的官方 Typert 
 `codex.app.*` RPC 和 event namespace；只有认证 Client Plugin 内的临时展示 target 可以把它包装成
 原生 Harness Session carrier，Android Client 则只能在本机内存中投影到已有移动端状态。Host、Server
 与 Android 都不得伪造或持久化第二份 Harness/CodeX Session。
+跨机器会话导入的受限写入见[跨机器会话传输](#跨机器会话传输)。
+
 工作区根目录写入只通过独立 `workspace.upload.v1` 的四个固定 RPC，
 不得将其加入 Harness / CodeX / ACP 的任意方法透传。参见 [Workspace upload](#workspace-upload)。
 旧 `system.info`、`workspace.get`、`sessions.*`、`session.*`、
@@ -1047,6 +1049,38 @@ carrier 或 Session 代际不一致时，Desktop Client 必须在选择目标、
 返回 `HARNESS_VERSION_INCOMPATIBLE`。
 
 当前兼容范围见[版本兼容](compatibility.zh.md)。Plugin Client 与 Android 必须在加密通道中探测 capability，不能从 clientVersion 推测或降级到已退役 ApiProxy。
+
+### 跨机器会话传输
+
+经已认证的 Noise 通道调用。源 Host 通过 `harness.transport.describe` 声明
+`session.transfer.export.v1`，目标 Host 声明 `session.transfer.import.v1`。
+两个能力独立。操作范围为单个普通 Harness 会话或源工作区的普通会话。
+
+| 方法 | 请求 | 成功结果 |
+| --- | --- | --- |
+| `session.transfer.export.open` | `{scope: {kind: "session", sessionId} \| {kind: "workspace", workspaceId}}` | `{handle, sessions: [{sessionId, throughSeq}], chunkBytes}` |
+| `session.transfer.export.read` | `{handle, sessionId, offset}` | `{offset, data, totalBytes?, sha256?}` |
+| `session.transfer.export.close` | `{handle}` | `{}` |
+| `session.transfer.import.open` | `{workspaceId, batchId, sourceSessionId, formatVersion: 1}` | `{handle, chunkBytes, maxBytes}` |
+| `session.transfer.import.chunk` | `{handle, offset, data}` | `{receivedBytes}` |
+| `session.transfer.import.commit` | `{handle, requestId, totalBytes, sha256}` | `{sessionId, workspaceAttached}` |
+| `session.transfer.import.status` | `{batchId, requestId}` | `{status: "unknown"}` 或 `{status: "completed", sessionId, workspaceAttached}`。失败的提交返回原 RPC 错误。 |
+| `session.transfer.import.abort` | `{handle}` | `{}` |
+
+源 Host 固定清单与包含边界 `throughSeq`，按会话将
+`{formatVersion: 1, version, createdAt, inheritedEventCount, events}`
+编码为 UTF-8 JSON，再 gzip 压缩。源端原会话与工作区只读。
+每次开始读取一条会话时 `offset` 从 0 开始。数据块为标准 Base64，
+字节偏移按压缩数据计算，最后一块返回总压缩字节数及其小写十六进制 SHA-256。
+导入按连续偏移上传。每块最多 256 KiB，每条会话压缩及解压后均最多 8 MiB，
+事件最多 50,000 条，一次工作区导出最多 2,048 条候选会话。
+工作区范围跳过子会话与没有可复制轮次的会话。
+
+目标 Host 校验数据及目标工作区，由官方 Harness 服务验证历史、持久化新会话并附加工作区。源会话 ID 只用于标识传输，目标 Host 生成新 ID。附件文件和跨会话关系
+暂不迁移。提交结果中的 `workspaceAttached: false` 表示历史已持久化，工作区附加失败。
+句柄绑定连接，闲置五分钟或连接关闭后释放。提交结果按设备、批次和请求 ID 在
+Host 进程内保留五分钟。断线后先查询结果，`unknown` 也可能表示结果已过期，
+此时客户端不得自动重提。状态查询可以等待进行中的提交结束。
 
 ## 18. 历史数据结构（已废弃）
 

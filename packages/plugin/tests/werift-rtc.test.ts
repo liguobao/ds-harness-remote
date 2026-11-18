@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { RtcDataChannelTransport } from '@dsh-remote/webrtc'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildExternalNativeRtcFactory, resolveNativeRtcRequireFrom } from '../src/native-rtc-helper.js'
 import {
   buildWeriftFactory,
@@ -108,6 +108,27 @@ describe('werift RTC backend', () => {
     }, ['198.18.0.1'])).toEqual(['192.168.31.238'])
   })
 
+  it('offers CGNAT IPv4 only on recognized Tailscale interfaces', () => {
+    const scenarios = [
+      { name: 'Linux Tailscale', interfaces: { tailscale0: [ipv4('100.64.0.8')] }, expected: ['100.64.0.8'] },
+      { name: 'Windows Tailscale', interfaces: { Tailscale: [ipv4('100.64.0.8')] }, expected: ['100.64.0.8'] },
+      {
+        name: 'macOS Tailscale',
+        interfaces: { utun5: [ipv4('100.64.0.8'), ipv4('10.0.0.1'), ipv6('fd7a:115c:a1e0::8')] },
+        expected: ['100.64.0.8'],
+      },
+      {
+        name: 'unrecognized tunnel and carrier CGNAT',
+        interfaces: { utun5: [ipv4('100.64.0.8'), ipv6('fd00::8')], eth0: [ipv4('100.64.0.9')] },
+        expected: [],
+      },
+    ]
+    for (const { name, interfaces, expected } of scenarios) {
+      expect(detectHostIpv4Candidates({ ...interfaces, en0: [ipv4('192.168.50.10')] }), name)
+        .toEqual(['192.168.50.10', ...expected])
+    }
+  })
+
   it('filters virtual Host candidates while preserving TURN fallback candidates', () => {
     const allowed = new Set(['192.168.50.10'])
 
@@ -160,6 +181,7 @@ describe('werift RTC backend', () => {
       interfaces: {
         bridge0: [ipv4('192.168.64.1')],
         en7: [ipv4('192.168.50.10')],
+        tailscale0: [ipv4('100.64.0.8')],
       },
     })
 
@@ -180,12 +202,17 @@ describe('werift RTC backend', () => {
     expect(config.iceUseIpv6).toBe(false)
     expect(config.iceUseLinkLocalAddress).toBe(false)
     expect(config.iceInterfaceAddresses).toBeUndefined()
-    expect(config.iceAdditionalHostAddresses).toEqual(['192.168.50.10'])
+    expect(config.iceAdditionalHostAddresses).toEqual(['192.168.50.10', '100.64.0.8'])
     expect(config.iceFilterCandidatePair?.({ localCandidate: { type: 'host', host: '192.168.50.10' } })).toBe(true)
+    expect(config.iceFilterCandidatePair?.({ localCandidate: { type: 'host', host: '100.64.0.8' } })).toBe(true)
     expect(config.iceFilterCandidatePair?.({ localCandidate: { type: 'host', host: '192.168.64.1' } })).toBe(false)
     expect(config.iceFilterCandidatePair?.({ localCandidate: { type: 'relay', host: '198.51.100.5' } })).toBe(true)
 
-    pc.onicecandidate = () => undefined
+    const advertise = vi.fn()
+    pc.onicecandidate = advertise
+    const tailscaleCandidate = { candidate: 'candidate:1 1 udp 2130706431 100.64.0.8 5000 typ host generation 0' }
+    CapturingWeriftPeerConnection.instances[0]!.onicecandidate?.({ candidate: { toJSON: () => tailscaleCandidate } })
+    expect(advertise).toHaveBeenCalledWith({ candidate: tailscaleCandidate })
     CapturingWeriftPeerConnection.instances[0]!.onicecandidate?.({
       candidate: { toJSON: () => ({ candidate: 'candidate:2 1 udp 2130706431 192.168.64.1 5001 typ host generation 0' }) },
     })
@@ -208,6 +235,55 @@ describe('werift RTC backend', () => {
       },
       reason: 'local-host-not-allowed',
     })
+  })
+
+  it.each([
+    { name: 'dual-stack Host', ipv4Available: true, globalIpv6Available: true },
+    { name: 'IPv6-only Host', ipv4Available: false, globalIpv6Available: true },
+    { name: 'Host without eligible IPv6', ipv4Available: true, globalIpv6Available: false },
+  ])('filters candidate publication and pairing on a $name', ({ ipv4Available, globalIpv6Available }) => {
+    const globalAddress = '240e:1234::1'
+    const ipv4Address = '192.168.50.10'
+    const factory = buildWeriftFactory({ RTCPeerConnection: CapturingWeriftPeerConnection }, {
+      interfaces: {
+        en0: [
+          ...(ipv4Available ? [ipv4(ipv4Address)] : []),
+          ...(globalIpv6Available ? [ipv6(globalAddress)] : []),
+          ipv6('fe80::1'),
+          ipv6('fd00::1'),
+        ],
+        utun0: [ipv6('240e:1234::2')],
+      },
+    })
+    const pc = factory.create({})
+    const config = CapturingWeriftPeerConnection.configs.at(-1) as {
+      iceUseIpv6: boolean
+      iceAdditionalHostAddresses: string[]
+      iceFilterCandidatePair: (pair: { localCandidate: { type: string; host: string } }) => boolean
+    }
+    expect(config.iceUseIpv6).toBe(globalIpv6Available)
+    expect(config.iceAdditionalHostAddresses).toEqual([
+      ...(ipv4Available ? [ipv4Address] : []),
+      ...(globalIpv6Available ? [globalAddress] : []),
+    ])
+
+    const advertise = vi.fn()
+    pc.onicecandidate = advertise
+    const raw = CapturingWeriftPeerConnection.instances.at(-1)!
+    for (const { host, type, allowed } of [
+      { host: ipv4Address, type: 'host', allowed: ipv4Available },
+      { host: globalAddress, type: 'host', allowed: globalIpv6Available },
+      { host: '240e:1234::2', type: 'host', allowed: false },
+      { host: 'fe80::1', type: 'host', allowed: false },
+      { host: 'fd00::1', type: 'host', allowed: false },
+      { host: '198.51.100.5', type: 'relay', allowed: true },
+    ]) {
+      expect(config.iceFilterCandidatePair({ localCandidate: { type, host } }), host).toBe(allowed)
+      const candidate = { candidate: `candidate:1 1 udp 2130706431 ${host} 5000 typ ${type}` }
+      advertise.mockClear()
+      raw.onicecandidate?.({ candidate: { toJSON: () => candidate } })
+      expect(advertise.mock.calls, host).toEqual(allowed ? [[{ candidate }]] : [])
+    }
   })
 
   it('loads and establishes an ordered DataChannel through the adapter', async () => {
@@ -360,5 +436,15 @@ function ipv4(address: string): NetworkInterfaceInfo {
     mac: '00:00:00:00:00:00',
     internal: false,
     cidr: `${address}/24`,
+  }
+}
+
+function ipv6(address: string): NetworkInterfaceInfo {
+  return {
+    ...ipv4(address),
+    family: 'IPv6',
+    netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+    cidr: `${address}/128`,
+    scopeid: 0,
   }
 }

@@ -61,6 +61,19 @@ export function isQuickPromptActionMode(value: unknown): value is QuickPromptAct
   return value === 'fill' || value === 'send'
 }
 
+export type BusySendMode = 'queue' | 'steer'
+
+export function isBusySendMode(value: unknown): value is BusySendMode {
+  return value === 'queue' || value === 'steer'
+}
+
+export function resolveHarnessSendMode(input: {
+  running: boolean
+  preferredMode: BusySendMode
+}): BusySendMode {
+  return input.running ? input.preferredMode : 'queue'
+}
+
 /**
  * Track whether the composer should promote from inline single-row mode
  * (`[+] [Input] [⚡] [↑]`) to the two-row stacked layout (`[Input]` above

@@ -43,7 +43,7 @@ export function parseAgyModels(output: string): AgyCatalog {
 
 export async function readAgyModels(binary: string): Promise<AgyCatalog> {
   try {
-    const result = await exec(binary, ['models'], { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8' })
+    const result = await exec(binary, ['models'], { timeout: 30_000, maxBuffer: 1024 * 1024, encoding: 'utf8', windowsHide: true })
     return parseAgyModels(result.stdout)
   } catch { throw new Error('The installed AGY model catalog is unavailable. Retry after checking the Host CLI.') }
 }

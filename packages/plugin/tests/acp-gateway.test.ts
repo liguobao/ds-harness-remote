@@ -29,26 +29,28 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
-  it('resolves upload roots only for a live peer, matching backend and session owner', async () => {
+  it.each(['cursor', 'antigravity'] as const)('resolves %s upload roots only for a live peer, matching backend and session owner', async backend => {
     const cwd = await realpath(process.cwd())
     const adapter = readyAcp()
     adapter.call = vi.fn(async () => ({ sessionId: 'upload-session' }))
-    const config = { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'fixture', args: [] }] }
+    const config = { enabled: true, backends: [{ id: backend, enabled: true, command: 'fixture', args: [] }] }
     const gateway = new AcpRemoteGateway(config, silentLogger(), () => adapter)
     await gateway.start()
     const owner = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'a' } as never, async () => undefined)!
     gateway.createPeer({ connectionId: 'other', peerDeviceId: 'b' } as never, async () => undefined)
+    const sessionId = `${backend}:upload-session`
     try {
-      await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd } })
-      expect(gateway.resolveUploadWorkspace('owner', 'cursor:upload-session')).toBe(cwd)
-      expect(() => gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toThrow()
+      await gateway.call('owner', { method: 'session/new', params: { backend, cwd } })
+      expect(gateway.resolveUploadWorkspace('owner', sessionId)).toBe(cwd)
+      if (backend === 'antigravity') expect(gateway.resolveUploadWorkspace('owner', 'acp:upload-session')).toBe(cwd)
+      expect(() => gateway.resolveUploadWorkspace('other', sessionId)).toThrow()
       expect(() => gateway.resolveUploadWorkspace('owner', 'claude:upload-session')).toThrow()
-      expect(() => gateway.resolveUploadWorkspace('owner', 'cursor:unknown')).toThrow()
+      expect(() => gateway.resolveUploadWorkspace('owner', `${backend}:unknown`)).toThrow()
       await owner.closeAll()
-      expect(() => gateway.resolveUploadWorkspace('owner', 'cursor:upload-session')).toThrow()
-      expect(gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toBe(cwd)
+      expect(() => gateway.resolveUploadWorkspace('owner', sessionId)).toThrow()
+      expect(gateway.resolveUploadWorkspace('other', sessionId)).toBe(cwd)
       await gateway.reconfigure({ enabled: false, backends: [] })
-      expect(() => gateway.resolveUploadWorkspace('other', 'cursor:upload-session')).toThrow()
+      expect(() => gateway.resolveUploadWorkspace('other', sessionId)).toThrow()
     } finally { await gateway.close() }
   })
 

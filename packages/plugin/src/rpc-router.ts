@@ -7,6 +7,7 @@ import {
   createRpcResponse,
   parseRemoteWorkspaceTypes,
   REMOTE_COMPACTION_CAPABILITY,
+  sessionTransferMethods,
   type RemoteMessage,
   type RemoteWorkspaceTypeDescription,
   type RpcErrorPayload,
@@ -24,6 +25,8 @@ import type { WorkspaceUploadHost } from './workspace-upload.js'
 import type { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { RemoteCompactionOperations, RemoteCompactionOwner } from './remote-compaction-operations.js'
 
+import type { SessionTransferPeer } from './session-transfer.js'
+
 export { RpcError } from './safe-error.js'
 
 const wireRequestSchema = z.object({ method: z.string().min(1), params: z.unknown() }).strict()
@@ -40,6 +43,7 @@ const compactionOperationSchema = z.object({
   operationId: z.string().uuid(),
 }).strict()
 const apiMethods = new Set([
+  ...sessionTransferMethods,
   'harness.transport.describe',
   'remote.history.configure',
   'harness.remote.call',
@@ -122,10 +126,12 @@ export class RpcRouter {
     private readonly compaction?: RemoteCompactionRoute,
     private readonly lanUpload?: LanUploadHost,
     private readonly transportUpgrade?: TransportUpgradeHost,
+    private readonly sessionTransfer?: SessionTransferPeer,
   ) {}
 
   async closePeerStreams(): Promise<void> {
     this.loopback?.closeAll()
+    this.sessionTransfer?.close()
     await Promise.all([
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
@@ -153,7 +159,7 @@ export class RpcRouter {
     const startedAt = performance.now()
     try {
       const result = await this.invoke(request.payload.method, request.payload.params)
-      const subMethod = typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
+      const subMethod = !request.payload.method.startsWith('session.transfer.') && typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
         ? String((request.payload.params as Record<string, unknown>).method)
         : undefined
       this.logger?.info('host rpc ok', {
@@ -165,6 +171,7 @@ export class RpcRouter {
     } catch (error: unknown) {
       const response = errorResponse(request.id, error)
       const failedEndpoint = !request.payload.method.startsWith('workspace.upload.')
+        && !request.payload.method.startsWith('session.transfer.')
         && typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
         ? String((request.payload.params as Record<string, unknown>).endpoint)
         : undefined
@@ -193,6 +200,7 @@ export class RpcRouter {
           ...(this.harnessRemote === undefined || !remoteAvailable ? [] : ['harness.remote.stream.transfer.v1']),
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
+          ...(this.sessionTransfer?.capabilities() ?? []),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
@@ -281,7 +289,12 @@ export class RpcRouter {
       case 'remote.transport.upgrade.activate': return this.requireTransportUpgrade().activate(params)
       case 'remote.transport.upgrade.drain': return this.requireTransportUpgrade().drain(params)
       case 'remote.transport.upgrade.abort': return this.requireTransportUpgrade().abort(params)
-      default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
+      default:
+        if (method.startsWith('session.transfer.')) {
+          if (!this.sessionTransfer) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Session transfer is unavailable on this Host.')
+          return this.sessionTransfer.call(method, params)
+        }
+        throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
   }
 

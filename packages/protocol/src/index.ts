@@ -203,7 +203,19 @@ export const controlFrameTypes = [
   'error',
 ] as const
 
+export const sessionTransferMethods = [
+  'session.transfer.export.open',
+  'session.transfer.export.read',
+  'session.transfer.export.close',
+  'session.transfer.import.open',
+  'session.transfer.import.chunk',
+  'session.transfer.import.commit',
+  'session.transfer.import.status',
+  'session.transfer.import.abort',
+] as const
+
 export const rpcMethods = [
+  ...sessionTransferMethods,
   'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
@@ -557,6 +569,8 @@ export const transportCapabilities = [
  * harness.remote.v3); advertising both is a protocol violation.
  */
 export const harnessCapabilityValues = [
+  'session.transfer.export.v1',
+  'session.transfer.import.v1',
   'remote.history.compact.v1',
   'remote.compaction.async.v1',
   'remote.session.events.v1',

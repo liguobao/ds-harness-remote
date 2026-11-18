@@ -85,7 +85,8 @@ class OwnedTerminal {
   private activityEpoch = 0
 
   constructor(readonly sessionId: string, readonly id: string, readonly cwd: string,
-    public cols: number, public rows: number, private readonly removed: () => void) {
+    public cols: number, public rows: number, private readonly removed: () => void,
+    private readonly rosterChanged: () => void) {
     this.screen = new headless.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true })
     this.screen.loadAddon(this.serializer)
   }
@@ -103,7 +104,10 @@ class OwnedTerminal {
     return result
   }
 
-  emit(value: Frame): void { for (const follower of this.followers) follower.push(value) }
+  emit(value: Frame): void {
+    for (const follower of this.followers) follower.push(value)
+    if (value.type === 'state') this.rosterChanged()
+  }
   invalidate(): void { this.activityEpoch++; this.idle = undefined }
 
   async pump(): Promise<void> {
@@ -214,8 +218,12 @@ class OwnedTerminal {
 /** Shared across encrypted connections; backend disposal also fences pending creations. */
 export class RemoteTerminalState {
   readonly terminals = new Map<string, OwnedTerminal>()
+  readonly rosters = new Map<string, Set<() => void>>()
   revision = 0
   constructor(readonly onRemoved: (key: string) => void = () => {}) {}
+  notifyRoster(sessionId: string): void {
+    for (const listener of this.rosters.get(sessionId) ?? []) listener()
+  }
   async dispose(matches: (sessionId: string) => boolean = () => true): Promise<void> {
     this.revision++
     const results = await Promise.allSettled([...this.terminals.values()].filter(terminal => matches(terminal.sessionId)).map(terminal => terminal.close()))
@@ -226,6 +234,7 @@ export class RemoteTerminalState {
 /** Official terminal shapes over backend-owned IDs, without creating Harness Agents. */
 export class RemoteTerminalController {
   private readonly subscriptions = new Set<TerminalFollower>()
+  private readonly rosterLifetime = new AbortController()
   constructor(private readonly shared: RemoteTerminalState, private readonly spawn: RemoteTerminalSpawner,
     private readonly enabled: () => boolean, private readonly scopeError: ScopeError) {}
 
@@ -233,7 +242,7 @@ export class RemoteTerminalController {
     this.check(signal)
     if (endpoint === 'terminal/environment') return { ok: true, value: { cwd, maxInputBytes: MAX_INPUT_BYTES, maxCols: MAX_COLS, maxRows: MAX_ROWS, scrollback: SCROLLBACK } }
     if (endpoint === 'terminal/shells') return { ok: true, value: await this.shells(signal) }
-    if (endpoint === 'terminal/list') return { ok: true, value: [...this.shared.terminals.values()].filter(item => item.sessionId === sessionId && item.shell && item.process).map(item => item.info()) }
+    if (endpoint === 'terminal/list') return { ok: true, value: this.roster(sessionId) }
     if (endpoint === 'terminal/create') return { ok: true, value: await this.create(sessionId, cwd, args, signal) }
     const id = identifier(args.id)
     if (endpoint === 'terminal/close') { await this.shared.terminals.get(`${sessionId}/${id}`)?.close(); return { ok: true } }
@@ -264,8 +273,9 @@ export class RemoteTerminalController {
     return { ok: true }
   }
 
-  async open(endpoint: string, sessionId: string, args: Record<string, unknown>, signal: AbortSignal): Promise<AsyncIterable<Frame>> {
+  async open(endpoint: string, sessionId: string, args: Record<string, unknown>, signal: AbortSignal): Promise<AsyncIterable<Frame | Frame[]>> {
     this.check(signal)
+    if (endpoint === 'terminal/watch') return this.watch(sessionId, AbortSignal.any([signal, this.rosterLifetime.signal]))
     const terminal = this.requireTerminal(sessionId, identifier(args.id))
     let follower: TerminalFollower
     const abort = () => follower.close()
@@ -308,7 +318,40 @@ export class RemoteTerminalController {
   }
 
   /** A connection only disposes its subscriptions; the Host still owns the shells. */
-  closeAll(): void { for (const subscription of [...this.subscriptions]) subscription.close() }
+  closeAll(): void {
+    this.rosterLifetime.abort()
+    for (const subscription of [...this.subscriptions]) subscription.close()
+  }
+
+  private roster(sessionId: string): Frame[] {
+    return [...this.shared.terminals.values()].filter(item => item.sessionId === sessionId && item.shell && item.process).map(item => item.info())
+  }
+
+  private async *watch(sessionId: string, signal: AbortSignal): AsyncIterable<Frame[]> {
+    const listeners = this.shared.rosters.get(sessionId) ?? new Set<() => void>()
+    let dirty = true
+    let wake: (() => void) | undefined
+    const notify = () => { dirty = true; wake?.() }
+    listeners.add(notify)
+    this.shared.rosters.set(sessionId, listeners)
+    signal.addEventListener('abort', notify, { once: true })
+    try {
+      while (!signal.aborted) {
+        this.check(signal)
+        if (dirty) {
+          dirty = false
+          yield this.roster(sessionId)
+        } else {
+          await new Promise<void>(resolve => { wake = resolve })
+          wake = undefined
+        }
+      }
+    } finally {
+      signal.removeEventListener('abort', notify)
+      listeners.delete(notify)
+      if (listeners.size === 0) this.shared.rosters.delete(sessionId)
+    }
+  }
 
   private async shells(signal: AbortSignal): Promise<TerminalShell[]> {
     try {
@@ -341,8 +384,9 @@ export class RemoteTerminalController {
         if (this.shared.terminals.get(key) === terminal) {
           this.shared.terminals.delete(key)
           this.shared.onRemoved(key)
+          this.shared.notifyRoster(sessionId)
         }
-      })
+      }, () => this.shared.notifyRoster(sessionId))
     this.shared.terminals.set(key, terminal)
     const allocationSignal = AbortSignal.any([signal, terminal.allocation.signal])
     terminal.pending = (async () => {
@@ -353,6 +397,7 @@ export class RemoteTerminalController {
       terminal.process = await this.spawn({ argv: [shell.path, ...shell.args], cwd,
         cols: terminal.cols, rows: terminal.rows, terminalType: 'xterm-256color', env: { DSH_SESSION_ID: sessionId }, signal: allocationSignal })
       this.check(allocationSignal)
+      this.shared.notifyRoster(sessionId)
       void terminal.pump()
       terminal.monitor()
     })()

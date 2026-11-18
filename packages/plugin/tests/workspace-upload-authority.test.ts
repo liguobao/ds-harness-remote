@@ -25,7 +25,7 @@ it('keeps CodeX/ACP namespace authority separate and never falls back to Harness
   expect(await resolve('codex:thread-1', controller.signal)).toBe('/codex')
   expect(codex).toHaveBeenCalledWith('thread-1')
   await expect(resolve('codex:../outside', controller.signal)).rejects.toThrow()
-  for (const id of ['acp:a', 'cursor:b', 'pi:c', 'opencode:d', 'claude:e']) expect(await resolve(id, controller.signal)).toBe('/acp')
+  for (const id of ['acp:a', 'antigravity:a', 'cursor:b', 'pi:c', 'opencode:d', 'claude:e']) expect(await resolve(id, controller.signal)).toBe('/acp')
   expect(dispatch).not.toHaveBeenCalled()
   controller.abort()
   await expect(resolve('visible', controller.signal)).rejects.toThrow()

@@ -6,9 +6,21 @@ import {
   paginateCodexNativeHistory,
   projectCodexNativeHistory,
 } from '../src/codex/virtual-harness.js'
+import { itemEvents } from '../src/codex/virtual-history.js'
 import { CodexSessionHistoryCache } from '../src/session-history-cache.js'
 
 describe('CodexVirtualHarness', () => {
+  it.each([
+    { summary: ['Checking files'], content: ['Raw trace'], expected: 'Checking files' },
+    { summary: [], content: ['Raw trace'], expected: 'Raw trace' },
+    { summary: ['Checking files'], expected: 'Checking files' },
+  ])('projects reasoning with $expected as a reasoning block', ({ expected, ...item }) => {
+    expect(itemEvents({ type: 'reasoning', id: 'reasoning-1', ...item }, 1, 1)).toMatchObject([{
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'reasoning', text: expected }] } },
+    }])
+  })
+
   it('forwards CodeX workspace files and terminal calls to the Host carrier', async () => {
     const client = fakeCodex()
     const hostCarrier = {

@@ -4,12 +4,20 @@
 
 ## Unreleased
 
+- Host 使用 werift 时，会自动尝试通过合格的公网 IPv6 地址进行 P2P 直连。
+- Hosts using werift automatically offer eligible public IPv6 addresses for direct P2P connections.
+
 ## 0.6.6 — 待发布 / Unreleased
 
 Android versionCode / iOS buildNumber: 74.
 
 ### 中文
 
+- 适配 DSH Desktop 0.2.2-rc.5，远程会话支持终端列表实时更新，原生 Harness 工作区可按文件名或路径搜索。
+- 使用官方托管服务时，可从远程工作台底栏打开会员方案页。
+- 修复移动端上传截图时的图片类型错配，以及 ACP 会话中的工作区文件引用和 Antigravity 文件上传。
+- 修复 Windows 后台运行 Remote Host 时探测命令弹出终端窗口、Claude ACP 一键安装包名失效，以及配对 Host 退出授权后仍无法登录账号的问题。
+- Codex 的思考内容进入可折叠的思考区。
 - 新增 iOS 客户端，与 Android 共享应用代码、会话与消息能力；支持 iPad 和多语言。iOS 签名与 TestFlight 分发由 Xcode Cloud 承担。
 - 新增 HarmonyOS 原生客户端，支持登录、主机选择、会话历史与流式消息、模型与权限选择、图片及工作区浏览；支持 WebRTC 与加密中继，鸿蒙功能范围仍与 Android 有差异，HAP 签名与安装要求见客户端说明。
 - 恢复移动端直连优先，兼容通过 P2P 通告 LAN 的旧 Server；Desktop 在支持的 Gateway 上并行准备直连与备用 TURN，在有界窗口内优先直连，中继回落后仍可带内升级。
@@ -24,6 +32,11 @@ Android versionCode / iOS buildNumber: 74.
 
 ### English
 
+- Support DSH Desktop 0.2.2-rc.5 with live remote terminal lists and file search by name or path in native Harness workspaces.
+- Open membership plans from the Remote workspace footer when connected to the official hosted service.
+- Fix image type mismatches when sending mobile screenshots, workspace file mentions in ACP sessions, and Antigravity file uploads.
+- Hide terminal windows opened by background Host probes on Windows, restore one-click Claude ACP installation, and allow Hosts to sign in after logging out of device pairing.
+- Show Codex reasoning in collapsible reasoning blocks.
 - Add an iOS client sharing application code, sessions and messaging with Android, with iPad and localization support. Xcode Cloud owns signing and TestFlight distribution.
 - Add a native HarmonyOS client with sign-in, Host selection, session history and streaming, model/permission selection, images and workspace browsing over WebRTC or encrypted Relay. Feature coverage differs from Android; see the HarmonyOS guide for signing and installation requirements.
 - Restore direct-first mobile connections, including older Servers advertising LAN through P2P. On supported Gateways, Desktop prepares direct and standby TURN connections concurrently and prefers direct within a bounded window. Relay fallback retains in-band upgrades.

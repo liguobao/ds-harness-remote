@@ -1,5 +1,5 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateKeyPair } from '@dsh-remote/crypto'
@@ -16,6 +16,24 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('reports a directory refresh lock without making an authentication request', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-directory-lock-'))
+    directories.push(directory)
+    await mkdir(join(directory, 'server-credentials.json.refresh-lock'))
+    const identity = hostIdentity()
+    const store = new ServerCredentialStore(directory)
+    await store.save({
+      serverUrl: 'https://dsh.r2049.cn',
+      deviceId: identity.deviceId,
+      authorizationMethod: 'account',
+      ...tokens({ accessTokenExpiresAt: Date.now() - 1 }),
+    })
+    const fetchMock = vi.fn<typeof fetch>()
+    const api = new HostServerApi('https://dsh.r2049.cn', store, fetchMock)
+    await expect(api.authenticate(identity)).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_LOCK_DIRECTORY', retryable: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('cancels runtime-owned HTTP work through response consumption and rejects requests after close', async () => {
     await runScenarios([
       { name: 'close before response headers', body: false, timeout: false },

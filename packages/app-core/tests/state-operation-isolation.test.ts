@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
-    'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveChatAppearance', 'loadChatAppearance', 'saveActivityDockMode', 'loadActivityDockMode', 'saveDrawerLayoutMode', 'loadDrawerLayoutMode', 'saveQuickPromptActionMode', 'loadQuickPromptActionMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
+    'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity', 'saveChatAppearance', 'loadChatAppearance', 'saveActivityDockMode', 'loadActivityDockMode', 'saveDrawerLayoutMode', 'loadDrawerLayoutMode', 'saveQuickPromptActionMode', 'loadQuickPromptActionMode', 'saveBusySendMode', 'loadBusySendMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
   createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(), loadHermes: vi.fn(),
@@ -172,6 +172,7 @@ describe('account directory operation isolation', () => {
       name: `${stage}/${transition}`,
       run: async () => {
         const store = accountFixture()
+        if (transition === 'sign-out' || transition === 'reset') store.set({ busySendMode: 'steer' })
         const gate = deferred<any>()
         if (stage === 'authenticate') mocks.authenticate.mockReturnValueOnce(gate.promise)
         else {
@@ -195,6 +196,12 @@ describe('account directory operation isolation', () => {
         expect(store.get().devices).toEqual([])
         expect(store.get().account).toBe(transition === 'login' ? 'B' : undefined)
         expect(store.get().reauthRequired).toBe(transition === 'reauth')
+        if (transition === 'sign-out') {
+          expect(mocks.storage.saveBusySendMode).toHaveBeenCalledWith('steer')
+          expect(store.get().busySendMode).toBe('steer')
+        } else if (transition === 'reset') {
+          expect(store.get().busySendMode).toBe('queue')
+        }
       },
     }))), prepare)
   })
@@ -381,6 +388,15 @@ describe('workspace operation isolation', () => {
     expect(fixture.get().messages).toEqual({})
     await fixture.get().refreshWorkspaces('cursor')
     expect(fixture.get().workspaces.map(item => item.workspaceId)).toEqual(['other'])
+  })
+
+  it('passes a different Windows drive path through to the Host directory picker', async () => {
+    const fixture = workspaceFixture()
+    const path = 'D:\\Repos\\My App'
+    const listing = { path, home: 'C:\\Users\\Dev', crumbs: [], entries: [], truncated: false }
+    fixture.proxy.hostListDirectory.mockResolvedValueOnce(listing)
+    await expect(fixture.get().hostListDirectory(path)).resolves.toEqual(listing)
+    expect(fixture.proxy.hostListDirectory).toHaveBeenCalledWith(path)
   })
 
   it('ignores retired rename/delete/move/directory and catalog completions, including errors', async () => {

@@ -179,6 +179,7 @@ export function isUsableExternalNode(candidate: string, requireFrom: string): bo
     env,
     encoding: 'utf8',
     timeout: 3_000,
+    windowsHide: true,
   })
   return probe.status === 0 && probe.stdout.startsWith('node:')
 }
@@ -223,6 +224,7 @@ class ExternalNativePeerConnection implements RtcPeerConnection {
       cwd: dirname(this.requireFrom),
       env: { ...process.env, DSH_REMOTE_RTC_HELPER_REQUIRE_FROM: this.requireFrom },
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }) as ChildProcessWithoutNullStreams
     this.child.stdout.setEncoding('utf8')
     this.child.stdout.on('data', chunk => this.handleStdout(String(chunk)))

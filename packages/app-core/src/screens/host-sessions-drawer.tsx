@@ -2049,7 +2049,7 @@ export function HostSessionsDrawer({
       />
       <RenameWorkspaceModal
         target={renameWorkspaceTarget}
-        busy={busy === 'rename-workspace'}
+        busy={renameWorkspaceTarget !== undefined && busy === `rename-workspace:${renameWorkspaceTarget.workspaceId}`}
         onClose={() => setRenameWorkspaceTarget(undefined)}
         onRename={renameWorkspace}
       />

@@ -571,7 +571,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
           onRawEvent(parsed)
         }
         this.handleAgyEvent(parsed)
-        void this.watcher?.flush()
+        void this.watcher?.flush().catch(() => undefined)
       } catch (err) {
         this.logger?.debug('Failed to parse agy stdout line', { code: 'INVALID_AGY_STREAM_EVENT' })
       }

@@ -3,9 +3,11 @@ import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
   applyQuickPromptDraft,
   composerEditable,
+  isBusySendMode,
   isQuickPromptActionMode,
   nextStackedOverflowLength,
   policyHintVisible,
+  resolveHarnessSendMode,
   shouldShowExpandCorner,
   shouldUseStackedComposer,
   submitIntent,
@@ -267,5 +269,16 @@ describe('Compact composer footer policy hint and moved controls localization', 
     expect(isQuickPromptActionMode('send')).toBe(true)
     expect(isQuickPromptActionMode('auto')).toBe(false)
     expect(isQuickPromptActionMode(undefined)).toBe(false)
+  })
+
+  it('validates busySendMode values and resolves runtime prompt delivery mode', () => {
+    expect(isBusySendMode('queue')).toBe(true)
+    expect(isBusySendMode('steer')).toBe(true)
+    expect(isBusySendMode('interrupt')).toBe(false)
+    expect(isBusySendMode(undefined)).toBe(false)
+
+    expect(resolveHarnessSendMode({ running: false, preferredMode: 'steer' })).toBe('queue')
+    expect(resolveHarnessSendMode({ running: true, preferredMode: 'queue' })).toBe('queue')
+    expect(resolveHarnessSendMode({ running: true, preferredMode: 'steer' })).toBe('steer')
   })
 })

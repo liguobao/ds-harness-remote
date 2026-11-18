@@ -1,7 +1,8 @@
-import { chmod, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, link, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import { z } from 'zod'
 import { uuidV7 } from './ids.js'
+import { CREDENTIALS_LOCK_DIRECTORY_MESSAGE } from './safe-error.js'
 
 const credentialSchema = z.object({
   schemaVersion: z.literal(1),
@@ -144,6 +145,11 @@ export class ServerCredentialsLockUnsupportedError extends Error {
   }
 }
 
+export class ServerCredentialsLockDirectoryError extends Error {
+  readonly code = 'SERVER_CREDENTIALS_LOCK_DIRECTORY'
+  constructor() { super(CREDENTIALS_LOCK_DIRECTORY_MESSAGE) }
+}
+
 export const SERVER_CREDENTIALS_QUEUE_MARKER = 'DSH_REFRESH_LOCK_V2\n'
 
 async function ensureQueueMarker(lock: string, deadline: number): Promise<void> {
@@ -153,6 +159,11 @@ async function ensureQueueMarker(lock: string, deadline: number): Promise<void> 
       await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER)
       return
     } catch (error) {
+      if (error instanceof ServerCredentialsLockUnsupportedError) {
+        // On Windows a hard link to an occupied directory can fail with EPERM.
+        await assertLockIsNotDirectory(lock)
+        throw error
+      }
       if (!(await isLockContention(error, lock))) throw error
       if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
@@ -219,10 +230,19 @@ async function readLockRecord(path: string): Promise<string | undefined> {
 }
 
 async function readQueueMarker(lock: string): Promise<string | undefined> {
+  await assertLockIsNotDirectory(lock)
   try { return await readLockRecord(lock) } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'EISDIR') return undefined
+    if (error instanceof Error && 'code' in error && error.code === 'EISDIR') throw new ServerCredentialsLockDirectoryError()
     throw error
   }
+}
+
+async function assertLockIsNotDirectory(lock: string): Promise<void> {
+  const metadata = await lstat(lock).catch(error => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (metadata?.isDirectory()) throw new ServerCredentialsLockDirectoryError()
 }
 
 async function ownerExited(pid: number): Promise<boolean> {

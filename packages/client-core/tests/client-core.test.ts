@@ -1776,9 +1776,29 @@ describe('HarnessAlphaClient file attachments', () => {
     expect(rpc.mock.calls[0]?.[1]).toEqual({ endpoint: 'fileUploads/upload', payload: { args: {
       agentId: 's1', request: { data: 'JVBERi0x', name: 'report.pdf' },
     } } })
+    expect(rpc.mock.calls[1]?.[1].payload.args.request.mode).toBe('queue')
     expect(rpc.mock.calls[1]?.[1].payload.args.request.content).toEqual([
       { type: 'file', receiptId: 'receipt-s1' }, { type: 'text', text: 'Read this' },
     ])
+  })
+
+  it('forwards explicit steer mode on sessionPrompt when requested', async () => {
+    const rpc = vi.fn(async () => ({ ok: true, value: {} }))
+    const client = new HarnessAlphaClient({ rpc } as any)
+    await client.sessionPrompt('s1', 'Interrupt now', 'request-steer-1', [], [], 'steer')
+    expect(rpc.mock.calls[0]?.[1]).toEqual({
+      endpoint: 'session/prompt',
+      payload: {
+        args: {
+          request: expect.objectContaining({
+            requestId: 'request-steer-1',
+            sessionId: 's1',
+            mode: 'steer',
+            content: [{ type: 'text', text: 'Interrupt now' }],
+          }),
+        },
+      },
+    })
   })
 })
 

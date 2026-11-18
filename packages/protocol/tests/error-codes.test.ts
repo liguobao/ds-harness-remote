@@ -251,6 +251,8 @@ describe('capability constants', () => {
 
   it('harnessCapabilityValues matches §17 universe of known values', () => {
     expect(harnessCapabilityValues).toEqual([
+      'session.transfer.export.v1',
+      'session.transfer.import.v1',
       'remote.history.compact.v1',
       'remote.compaction.async.v1',
       'remote.session.events.v1',

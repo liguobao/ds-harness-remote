@@ -746,29 +746,70 @@ function QuestionCard({ item, busy, onRespond }: {
 export function QueueDock({ items }: { items: { id?: string; rpcId?: string; preview: string }[] }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const [pendingById, setPendingById] = useState<Record<string, 'steer' | 'remove'>>({})
+  const pendingIdsRef = useRef<Set<string>>(new Set())
+
+  const handleQueueAction = async (itemId: string, action: 'steer' | 'remove', rpcId?: string) => {
+    if (pendingIdsRef.current.has(itemId)) return
+    pendingIdsRef.current.add(itemId)
+    triggerLightHaptic()
+    setPendingById(current => ({ ...current, [itemId]: action }))
+    try {
+      await useAppStore.getState().updateQueueItem(itemId, action, rpcId)
+    } finally {
+      pendingIdsRef.current.delete(itemId)
+      setPendingById(current => {
+        if (current[itemId] === undefined) return current
+        const next = { ...current }
+        delete next[itemId]
+        return next
+      })
+    }
+  }
+
   return (
     <View style={styles.queueDock} accessibilityRole="summary" accessibilityLabel={zhCN.chat.queueTitle(items.length)}>
       <View style={styles.queueDockHeader}>
         <ListTree size={14} color={colors.primary} />
         <Text style={styles.queueDockTitle}>{zhCN.chat.queueTitle(items.length)}</Text>
       </View>
-      {items.map((item, index) => (
-        <View key={item.id ?? `local:${index}`} style={styles.queueDockRow}>
-          <Text style={styles.queueDockText} numberOfLines={1}>{item.preview.trim().length > 0 ? item.preview.trim() : zhCN.chat.queuePending}</Text>
-          {item.id !== undefined && <>
-            {/* The stop-loss path: without remove/steer a mis-queued prompt can
-                only be stopped by killing the running task (official QueueDock
-                offers edit/remove/steer per row). */}
-            <IconButton label={zhCN.chat.queueSteer} icon={ArrowUp} dense
-              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer', item.rpcId)} />
-            <IconButton label={zhCN.chat.queueRemove} icon={X} dense
-              onPress={() => {
-                triggerLightHaptic()
-                void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)
-              }} />
-          </>}
-        </View>
-      ))}
+      {items.map((item, index) => {
+        const itemId = item.id
+        const pendingAction = itemId === undefined ? undefined : pendingById[itemId]
+        const actionDisabled = itemId === undefined || pendingAction !== undefined
+        return (
+          <View key={itemId ?? `local:${index}`} style={styles.queueDockRow}>
+            <Text style={styles.queueDockText} numberOfLines={1}>{item.preview.trim().length > 0 ? item.preview.trim() : zhCN.chat.queuePending}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.queueSteer}
+              accessibilityState={{ disabled: actionDisabled, busy: pendingAction === 'steer' }}
+              disabled={actionDisabled}
+              hitSlop={4}
+              onPress={() => { if (itemId !== undefined) void handleQueueAction(itemId, 'steer', item.rpcId) }}
+              style={({ pressed }) => [
+                styles.queueDockSteerButton,
+                pressed && !actionDisabled && styles.queueDockSteerPressed,
+                actionDisabled && styles.queueDockSteerDisabled,
+              ]}
+            >
+              {pendingAction === 'steer'
+                ? <ActivityIndicator size="small" color={colors.primary} style={{ transform: [{ scale: 0.7 }] }} />
+                : <ArrowUp size={13} color={colors.primary} strokeWidth={2.4} />}
+              <Text style={styles.queueDockSteerText}>{zhCN.chat.queueSteer}</Text>
+            </Pressable>
+            {itemId !== undefined && (
+              <IconButton
+                label={zhCN.chat.queueRemove}
+                icon={X}
+                dense
+                disabled={actionDisabled}
+                onPress={() => void handleQueueAction(itemId, 'remove', item.rpcId)}
+              />
+            )}
+          </View>
+        )
+      })}
     </View>
   )
 }

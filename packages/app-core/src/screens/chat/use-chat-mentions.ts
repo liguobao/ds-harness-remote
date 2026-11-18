@@ -51,10 +51,10 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
   useEffect(() => {
     const sessionId = session?.sessionId
     if (mentionType === null || sessionId === undefined) return
-    if (session?.backend === 'codex' || session?.backend === 'claude' || session?.backend === 'hermes' || connectionPhase !== 'connected') return
+    if (session?.backend === 'codex' || connectionPhase !== 'connected') return
     if (mentionType === 'command' && skillCatalog === undefined && skillRequestedRef.current !== sessionId) {
       skillRequestedRef.current = sessionId
-      void Promise.resolve().then(() => requireSessionTools().listSkills(sessionId))
+      void Promise.resolve().then(() => requireSessionTools(sessionId).listSkills(sessionId))
         .then(rows => { if (skillRequestedRef.current === sessionId) setSkillCatalog(rows) })
         .catch(() => { if (skillRequestedRef.current === sessionId) setSkillCatalogFailed(true) })
     }
@@ -242,7 +242,7 @@ interface WorkspaceFileRef {
 
 /** Shallow workspace tree for the `@` file menu: root entries plus one directory level. */
 async function loadWorkspaceFileRefs(sessionId: string): Promise<WorkspaceFileRef[]> {
-  const tools = requireSessionTools()
+  const tools = requireSessionTools(sessionId)
   const refs: WorkspaceFileRef[] = []
   const root = await tools.listFiles(sessionId, '')
   const directories = root.entries.filter(entry => entry.type === 'directory' && !entry.name.startsWith('.'))

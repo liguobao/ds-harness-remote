@@ -1,3 +1,4 @@
+import { SessionTransferHost, type TransferServices } from './session-transfer.js'
 import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
@@ -107,6 +108,7 @@ export class HostPluginRuntime {
     private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
     /** Host `schedule` service; absent on Hosts whose composition omits reminders. */
     private readonly schedule?: ScheduleCreateService,
+    transferServices?: () => TransferServices,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -154,6 +156,7 @@ export class HostPluginRuntime {
         }
       },
     })
+    const sessionTransfer = transferServices && new SessionTransferHost(transferServices)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
       const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer)
@@ -227,6 +230,7 @@ export class HostPluginRuntime {
         },
         lanUpload,
         context.createTransportUpgradeHost?.(send),
+        sessionTransfer?.peer(context.peerDeviceId),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -409,9 +413,12 @@ export class HostPluginRuntime {
     } catch (error) {
       revokeFailure = error
     }
-    this.identity = await this.identities.reset(this.config.deviceName)
+    this.identity = await this.identities.reset(this.config.deviceName, { clearPairingPolicy: true })
     this.serverApi?.bindIdentity(this.identity)
-    if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
+    if (this.serverApi !== undefined) {
+      await this.serverApi.loadStoredPolicy()
+      this.serverConnection = this.createServerConnection(this.identity)
+    }
     this.initializePairing()
     this.logger.info('Host authorization cleared')
     if (revokeFailure !== undefined) throw revokeFailure
@@ -702,7 +709,7 @@ export class HostPluginRuntime {
         if (existsSync('/usr/local/bin/opencode') || existsSync('/var/lib/dsh/.opencode/bin/opencode')) return true
       } catch {}
     }
-    try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
+    try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore', windowsHide: true }); return true } catch { return false }
   }
 
   private requireLocalCodexPeer(): CodexPeerBridge {

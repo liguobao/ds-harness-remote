@@ -1,6 +1,7 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
-import { RemoteTypertGateway, type RemoteClientCore } from '@dsh-remote/client-core'
+import { RemoteTypertGateway, type AgentAcpClient, type RemoteClientCore } from '@dsh-remote/client-core'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import { sessionPermissions } from '../src/services/session-permissions'
 import type { RemoteSession } from '../src/types'
 import { AcpSessionTools, HarnessSessionTools, OFFICE_PREVIEW_MAX_RESPONSE_BYTES, OFFICE_PREVIEW_TIMEOUT_MS } from '../src/services/session-tools'
@@ -152,4 +153,26 @@ it.each(['claude', 'hermes'] as const)('%s uses its own scope for files and term
   expect(workspaceToolCall).toHaveBeenLastCalledWith('saved', backend, 'workspaceFiles/list', { workspaceFileScopeId: `${backend}:saved`, path: '.' }, undefined)
   await tools.createTerminal(`${backend}:saved`, 'term', 80, 24)
   expect(workspaceToolCall).toHaveBeenLastCalledWith('saved', backend, 'terminal/create', { agentId: `${backend}:saved`, request: { id: 'term', cols: 80, rows: 24 } }, undefined)
+})
+
+it('finishes an ACP tool stream waiting for its next frame without yielding a phantom value', async () => {
+  let end!: () => void
+  const close = vi.fn(async () => undefined)
+  const openStream = vi.fn(async (_sessionId: string, onFrame: (frame: AgentAcpFrameData) => void, onClose: () => void) => {
+    end = onClose
+    onFrame({
+      streamId: 'terminal-stream',
+      frame: { method: 'dsh/workspaceTool', params: { value: { type: 'ready' } } },
+    })
+    return { close }
+  })
+  const tools = new AcpSessionTools({ openStream } as unknown as AgentAcpClient, 'cursor')
+  const stream = await tools.followTerminal('cursor:session', 'terminal', 'attachment', new AbortController().signal)
+  const iterator = stream[Symbol.asyncIterator]()
+  await expect(iterator.next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
+  const pending = iterator.next()
+  end()
+  await expect(pending).resolves.toEqual({ done: true, value: undefined })
+  await stream.close()
+  expect(close).toHaveBeenCalledOnce()
 })

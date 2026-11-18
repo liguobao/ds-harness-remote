@@ -96,6 +96,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activityDockMode: 'compact',
   drawerLayoutMode: 'compact',
   quickPromptActionMode: 'fill',
+  busySendMode: 'queue',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
   authPhase: 'idle',

@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -36,7 +36,7 @@ import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ActivityDockMode, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
-import type { QuickPromptActionMode } from '../services/storage'
+import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
@@ -691,6 +691,13 @@ export function SettingsScreen({
   const currentQuickPromptActionLabel = quickPromptActionMode === 'send'
     ? zhCN.settings.quickPromptActionSend
     : zhCN.settings.quickPromptActionFill
+  const busySendMode = useAppStore(state => state.busySendMode)
+  const setBusySendMode = useAppStore(state => state.setBusySendMode)
+  const [busySendSaving, setBusySendSaving] = useState(false)
+  const [busySendPickerOpen, setBusySendPickerOpen] = useState(false)
+  const currentBusySendLabel = busySendMode === 'steer'
+    ? zhCN.settings.busySendSteer
+    : zhCN.settings.busySendQueue
   const compactHistory = useAppStore(state => state.compactHistory)
   const setCompactHistory = useAppStore(state => state.setCompactHistory)
   const [compactSaving, setCompactSaving] = useState(false)
@@ -761,6 +768,14 @@ export function SettingsScreen({
     try { await setQuickPromptActionMode(value) }
     catch { Alert.alert(zhCN.settings.quickPromptActionSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setQuickPromptActionSaving(false) }
+  }
+
+  const toggleBusySendMode = async (value: BusySendMode) => {
+    if (busySendSaving || value === busySendMode) return
+    setBusySendSaving(true)
+    try { await setBusySendMode(value) }
+    catch { Alert.alert(zhCN.settings.busySendModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setBusySendSaving(false) }
   }
 
   const toggleStatusBar = async (visible: boolean) => {
@@ -900,6 +915,13 @@ export function SettingsScreen({
                 value={currentQuickPromptActionLabel}
                 chevron
                 onPress={() => setQuickPromptActionPickerOpen(true)}
+              />
+              <GroupRow
+                icon={ArrowUp}
+                label={zhCN.settings.busySendMode}
+                value={currentBusySendLabel}
+                chevron
+                onPress={() => setBusySendPickerOpen(true)}
               />
               <GroupRow
                 icon={PanelTop}
@@ -1271,6 +1293,41 @@ export function SettingsScreen({
                       onPress={() => {
                         setQuickPromptActionPickerOpen(false)
                         void toggleQuickPromptActionMode(option.value)
+                      }}
+                    />
+                  )
+                })}
+              </GroupCard>
+            </ScrollView>
+      </SheetModal>
+      <SheetModal
+        visible={busySendPickerOpen}
+        onClose={() => setBusySendPickerOpen(false)}
+        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
+      >
+            <View style={styles.languageHeader}>
+              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.busySendMode}</Text>
+              <IconButton label={zhCN.common.close} icon={X} onPress={() => setBusySendPickerOpen(false)} />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
+              <GroupCard>
+                {([
+                  { value: 'queue' as const, name: zhCN.settings.busySendQueue, detail: zhCN.settings.busySendQueueNote },
+                  { value: 'steer' as const, name: zhCN.settings.busySendSteer, detail: zhCN.settings.busySendSteerNote },
+                ]).map((option, index) => {
+                  const chosen = option.value === busySendMode
+                  return (
+                    <GroupRow
+                      key={option.value}
+                      first={index === 0}
+                      label={option.name}
+                      detail={option.detail}
+                      selected={chosen}
+                      chevron={false}
+                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                      onPress={() => {
+                        setBusySendPickerOpen(false)
+                        void toggleBusySendMode(option.value)
                       }}
                     />
                   )

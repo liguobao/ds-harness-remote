@@ -8,6 +8,7 @@
  */
 
 import { createSocket } from 'node:dgram'
+import { isIPv6 } from 'node:net'
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import type {
   RtcCandidateSummary,
@@ -20,7 +21,7 @@ import type {
   RtcSessionDescriptionInit,
   RtcStats,
 } from '@dsh-remote/webrtc'
-import { summarizeAddress, summarizeIceCandidate } from '@dsh-remote/webrtc'
+import { isTailscaleInterface, summarizeAddress, summarizeIceCandidate } from '@dsh-remote/webrtc'
 import { normalizeSdpMLineIndex } from '@dsh-remote/protocol'
 import { loadExternalNativeRtcFactory } from './native-rtc-helper.js'
 
@@ -230,23 +231,22 @@ export interface WeriftFactoryOptions {
 export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryOptions = {}): RtcPeerConnectionFactory {
   return {
     create(configuration) {
-      const hostIpv4Candidates = detectHostIpv4Candidates(
-        options.interfaces ?? networkInterfaces(),
-        options.preferredHostIpv4Candidates,
-      )
-      const allowedHostIpv4 = new Set(hostIpv4Candidates)
+      const interfaces = options.interfaces ?? networkInterfaces()
+      const hostIpv4Candidates = detectHostIpv4Candidates(interfaces, options.preferredHostIpv4Candidates)
+      const hostIpv6Candidates = detectHostIpv6Candidates(interfaces)
+      const allowedHostAddresses = new Set([...hostIpv4Candidates, ...hostIpv6Candidates])
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []) as RtcIceServer[],
         iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
-        iceUseIpv6: false,
+        iceUseIpv6: hostIpv6Candidates.length > 0,
         iceUseLinkLocalAddress: false,
-        ...(hostIpv4Candidates.length === 0
+        ...(allowedHostAddresses.size === 0
           ? {}
           : {
-              iceAdditionalHostAddresses: hostIpv4Candidates,
+              iceAdditionalHostAddresses: [...allowedHostAddresses],
               iceFilterCandidatePair: pair => {
-                const allowed = shouldUseCandidatePair(pair, allowedHostIpv4)
+                const allowed = shouldUseCandidatePair(pair, allowedHostAddresses)
                 if (!allowed) {
                   configuration.onDiagnostic?.({
                     type: 'candidate-pair-filtered',
@@ -264,7 +264,7 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
       raw.onicecandidate = event => {
         if (onIceCandidate === null) return
         const candidate = event.candidate === undefined ? null : event.candidate.toJSON()
-        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4)) {
+        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostAddresses)) {
           configuration.onDiagnostic?.({
             type: 'local-candidate-filtered',
             candidate: summarizeIceCandidate(candidate),
@@ -408,8 +408,8 @@ function normalizeNativeMessageData(data: unknown): ArrayBuffer | string {
  * On macOS a host exposes many interfaces (WiFi `en0`, Thunderbolt `en1-4`,
  * `bridge*`, Apple Wireless Direct Link `awdl0`/`llw0`, and several VPN `utun*`
  * tunnels whose small MTUs drop large SCTP packets). Let werift/ICE compare
- * real physical interfaces, but filter virtual and link-local Host candidates
- * before they can become nominated paths.
+ * physical interfaces and recognized Tailscale paths while filtering other
+ * virtual and link-local Host candidates.
  */
 export function detectHostIpv4Candidates(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[] | undefined>,
@@ -417,13 +417,15 @@ export function detectHostIpv4Candidates(
 ): string[] {
   const candidates: Array<{ name: string; ip: string; score: number }> = []
   const routePreference = new Map(preferredHostIpv4Candidates.map((ip, index) => [ip, 10_000 - index]))
-  for (const [name, addresses] of Object.entries(interfaces)) {
-    const interfaceScore = physicalInterfaceScore(name)
+  for (const [name, addresses = []] of Object.entries(interfaces)) {
+    const tailscale = isTailscaleInterface(name, addresses)
+    const interfaceScore = tailscale ? 0 : physicalInterfaceScore(name)
     if (interfaceScore === undefined) continue
-    for (const address of addresses ?? []) {
+    for (const address of addresses) {
       if (address.internal || !isIpv4Family(address.family)) continue
       const ip = address.address
       if (!isUsableIpv4(ip)) continue
+      if (tailscale ? !isCgnat(ip) : isCgnat(ip)) continue
       candidates.push({
         name,
         ip,
@@ -451,24 +453,38 @@ export async function detectRouteHostIpv4Candidates(
   return [...new Set(detected.filter((ip): ip is string => ip !== undefined && isUsableIpv4(ip)))]
 }
 
-function shouldUseCandidatePair(pair: WeriftCandidatePair, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (allowedHostIpv4.size === 0) return true
+function detectHostIpv6Candidates(interfaces: NodeJS.Dict<NetworkInterfaceInfo[] | undefined>): string[] {
+  const candidates: string[] = []
+  for (const [name, addresses = []] of Object.entries(interfaces)) {
+    if (physicalInterfaceScore(name) === undefined) continue
+    for (const { address, internal } of addresses) {
+      if (internal) continue
+      // Only global unicast candidates. Keep ULA and scoped addresses out of ICE.
+      if (/^[23][0-9a-f]{3}:/i.test(address) && !address.includes('%') && isIPv6(address)) {
+        candidates.push(address)
+      }
+    }
+  }
+  return candidates
+}
+
+function shouldUseCandidatePair(pair: WeriftCandidatePair, allowedHostAddresses: ReadonlySet<string>): boolean {
   const candidate = localCandidate(pair)
   if (candidate === undefined) return true
-  return shouldUseLocalCandidate(candidate, allowedHostIpv4)
+  return shouldUseLocalCandidate(candidate, allowedHostAddresses)
 }
 
-export function shouldAdvertiseCandidate(candidate: RtcIceCandidateInit, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (allowedHostIpv4.size === 0) return true
+export function shouldAdvertiseCandidate(candidate: RtcIceCandidateInit, allowedHostAddresses: ReadonlySet<string>): boolean {
+  if (allowedHostAddresses.size === 0) return true
   const parsed = parseIceCandidate(candidate)
   if (parsed === undefined) return true
-  return shouldUseLocalCandidate(parsed, allowedHostIpv4)
+  return shouldUseLocalCandidate(parsed, allowedHostAddresses)
 }
 
-function shouldUseLocalCandidate(candidate: WeriftCandidate, allowedHostIpv4: ReadonlySet<string>): boolean {
-  if (candidate.type === 'host') return candidate.host !== undefined && allowedHostIpv4.has(candidate.host)
+function shouldUseLocalCandidate(candidate: WeriftCandidate, allowedHostAddresses: ReadonlySet<string>): boolean {
+  if (candidate.type === 'host') return candidate.host !== undefined && allowedHostAddresses.has(candidate.host)
   if (candidate.type === 'srflx' && candidate.relatedAddress !== undefined) {
-    return allowedHostIpv4.has(candidate.relatedAddress)
+    return allowedHostAddresses.has(candidate.relatedAddress)
   }
   return true
 }
@@ -604,7 +620,7 @@ function isUsableIpv4(ip: string): boolean {
   if (parts[0] === 169 && parts[1] === 254) return false
   // Benchmark addresses are commonly assigned to proxy TUN interfaces.
   if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false
-  return !isCgnat(ip)
+  return true
 }
 
 function isCgnat(ip: string): boolean {

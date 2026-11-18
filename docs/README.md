@@ -25,6 +25,7 @@
 | 文档 | 权威范围 |
 | --- | --- |
 | [Remote Protocol v1](protocol.md) | Host、Client、Server 的线协议 |
+| [跨机器会话传输接入](session-transfer.md) | 双 Host 能力探测、分块转发和断线恢复 |
 | [Host 插件接入](plugin-integration.md) | 账号、设备身份、凭据、迁移与刷新 |
 | [端到端加密](end-to-end-encryption.md) | Noise、信任、密钥生命周期和可见元数据 |
 | [网络与传输](network.md) | LAN/P2P/TURN/Relay、降级和恢复 |

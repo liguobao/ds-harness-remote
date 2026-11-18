@@ -319,6 +319,9 @@ Plugin 在凭据文件旁保存 `server-credentials.json.refresh-lock` 文件。
 每个刷新进程用独立 Holder 文件排队。进程退出后，新进程清理已确认死亡的 Holder。
 获得队列后，Plugin 重新读取凭据，再执行刷新和原子落盘。等待 15 秒后仍未入队时，
 Plugin 返回 `SERVER_CREDENTIALS_BUSY`。进程状态不明时，Plugin 保留 Holder。
+如果旧版在 `server-credentials.json.refresh-lock` 路径留下目录，Plugin 会报告
+`SERVER_CREDENTIALS_LOCK_DIRECTORY`。先停止所有 Harness 实例，确认没有进程仍在使用该目录，
+再将这一个旧锁目录移到凭据目录之外，重启 Host。正常的 V2 标记文件和凭据文件应保留。
 硬链接不可用时，Plugin 返回 `SERVER_CREDENTIALS_LOCK_UNSUPPORTED`，不执行刷新。
 默认目录迁移和刷新共用目录外的闸门。迁移等待活跃刷新，并清理死亡 Holder。
 迁移识别队列写入留下的 `.tmp` 文件；这些文件不授予队列所有权。

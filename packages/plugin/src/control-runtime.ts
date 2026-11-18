@@ -815,6 +815,7 @@ function commandAvailable(command: string): boolean {
     execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], {
       stdio: 'ignore',
       timeout: 5000,
+      windowsHide: true,
     })
     return true
   } catch {
