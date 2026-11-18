@@ -20,7 +20,7 @@ import type {
   RtcSessionDescriptionInit,
   RtcStats,
 } from '@dsh-remote/webrtc'
-import { summarizeAddress, summarizeIceCandidate } from '@dsh-remote/webrtc'
+import { isTailscaleInterface, summarizeAddress, summarizeIceCandidate } from '@dsh-remote/webrtc'
 import { normalizeSdpMLineIndex } from '@dsh-remote/protocol'
 import { loadExternalNativeRtcFactory } from './native-rtc-helper.js'
 
@@ -408,8 +408,8 @@ function normalizeNativeMessageData(data: unknown): ArrayBuffer | string {
  * On macOS a host exposes many interfaces (WiFi `en0`, Thunderbolt `en1-4`,
  * `bridge*`, Apple Wireless Direct Link `awdl0`/`llw0`, and several VPN `utun*`
  * tunnels whose small MTUs drop large SCTP packets). Let werift/ICE compare
- * real physical interfaces, but filter virtual and link-local Host candidates
- * before they can become nominated paths.
+ * physical interfaces and recognized Tailscale paths while filtering other
+ * virtual and link-local Host candidates.
  */
 export function detectHostIpv4Candidates(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[] | undefined>,
@@ -417,13 +417,15 @@ export function detectHostIpv4Candidates(
 ): string[] {
   const candidates: Array<{ name: string; ip: string; score: number }> = []
   const routePreference = new Map(preferredHostIpv4Candidates.map((ip, index) => [ip, 10_000 - index]))
-  for (const [name, addresses] of Object.entries(interfaces)) {
-    const interfaceScore = physicalInterfaceScore(name)
+  for (const [name, addresses = []] of Object.entries(interfaces)) {
+    const tailscale = isTailscaleInterface(name, addresses)
+    const interfaceScore = tailscale ? 0 : physicalInterfaceScore(name)
     if (interfaceScore === undefined) continue
-    for (const address of addresses ?? []) {
+    for (const address of addresses) {
       if (address.internal || !isIpv4Family(address.family)) continue
       const ip = address.address
       if (!isUsableIpv4(ip)) continue
+      if (tailscale ? !isCgnat(ip) : isCgnat(ip)) continue
       candidates.push({
         name,
         ip,
@@ -604,7 +606,7 @@ function isUsableIpv4(ip: string): boolean {
   if (parts[0] === 169 && parts[1] === 254) return false
   // Benchmark addresses are commonly assigned to proxy TUN interfaces.
   if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false
-  return !isCgnat(ip)
+  return true
 }
 
 function isCgnat(ip: string): boolean {

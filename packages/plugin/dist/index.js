@@ -66729,13 +66729,21 @@ function summarizeIpv4Scope(parts) {
     return "private";
   return "public";
 }
+function isTailscaleInterface(name2, addresses) {
+  if (/^tailscale\d*$/i.test(name2))
+    return true;
+  return /^utun\d+$/i.test(name2) && addresses.some(({ address: address2, internal }) => !internal && isTailscaleIpv6(address2));
+}
+function isTailscaleIpv6(address2) {
+  return address2.toLowerCase().startsWith("fd7a:115c:a1e0:");
+}
 function summarizeIpv6Scope(address2) {
   const value = address2.toLowerCase();
   if (value === "::1")
     return "loopback";
   if (value.startsWith("fe80:"))
     return "link-local";
-  if (value.startsWith("fd7a:115c:a1e0:"))
+  if (isTailscaleIpv6(value))
     return "cgnat";
   if (value.startsWith("fc") || value.startsWith("fd"))
     return "private";
@@ -88090,13 +88098,15 @@ function normalizeNativeMessageData(data2) {
 function detectHostIpv4Candidates(interfaces, preferredHostIpv4Candidates = []) {
   const candidates = [];
   const routePreference = new Map(preferredHostIpv4Candidates.map((ip, index) => [ip, 1e4 - index]));
-  for (const [name2, addresses] of Object.entries(interfaces)) {
-    const interfaceScore = physicalInterfaceScore(name2);
+  for (const [name2, addresses = []] of Object.entries(interfaces)) {
+    const tailscale = isTailscaleInterface(name2, addresses);
+    const interfaceScore = tailscale ? 0 : physicalInterfaceScore(name2);
     if (interfaceScore === void 0) continue;
-    for (const address2 of addresses ?? []) {
+    for (const address2 of addresses) {
       if (address2.internal || !isIpv4Family(address2.family)) continue;
       const ip = address2.address;
       if (!isUsableIpv4(ip)) continue;
+      if (tailscale ? !isCgnat(ip) : isCgnat(ip)) continue;
       candidates.push({
         name: name2,
         ip,
@@ -88245,7 +88255,7 @@ function isUsableIpv4(ip) {
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false;
   if (parts[0] === 169 && parts[1] === 254) return false;
   if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false;
-  return !isCgnat(ip);
+  return true;
 }
 function isCgnat(ip) {
   const parts = ip.split(".").map(Number);

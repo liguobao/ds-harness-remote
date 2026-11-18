@@ -132,6 +132,8 @@ LAN 不是另一套业务协议，而是 WebRTC 最终选中的 candidate pair �
 
 P2P 使用 ICE/STUN 尝试让 Client 与 Host 直接交换 DataChannel 流量。它通常延迟更低，也减少 Server 带宽，但能否成功取决于 NAT 类型、防火墙、IPv4/IPv6、企业网络策略和运行时 WebRTC 支持。
 
+使用 werift 时，已识别的 Tailscale 网卡可提供 `100.64.0.0/10` IPv4 候选。macOS 的 `utun` 网卡通过同一接口上的 Tailscale IPv6 前缀识别。选中这条路径时显示为 P2P。
+
 ### TURN
 
 当直接 candidate pair 无法连通时，WebRTC 可以使用 Server 下发的短期 TURN credential。TURN 只转发 WebRTC 数据包；其上仍有 DataChannel 的 DTLS 和 DSH Remote 的 Noise E2EE。TURN 服务无法读取 Harness 业务明文。

@@ -126,10 +126,10 @@ function hiddenPeerReflexiveLanStats(): RtcStatsEntry[] {
   ]
 }
 
-function tailscaleP2pStats(localType: 'host' | 'prflx' = 'prflx'): RtcStatsEntry[] {
+function tailscaleP2pStats(localType: 'host' | 'prflx' = 'prflx', remoteAddress = 'fd7a:115c:a1e0::c'): RtcStatsEntry[] {
   return [
     { type: 'local-candidate', candidateType: localType, id: 'lc' },
-    { type: 'remote-candidate', candidateType: 'host', address: 'fd7a:115c:a1e0::c', id: 'rc' },
+    { type: 'remote-candidate', candidateType: 'host', address: remoteAddress, id: 'rc' },
     { type: 'candidate-pair', selected: true, nominated: true, localCandidateId: 'lc', remoteCandidateId: 'rc' },
   ]
 }
@@ -238,10 +238,10 @@ describe('detectSelectedTransport', () => {
       {
         name: 'does not treat host-to-host Tailscale overlay candidates as LAN',
         run: () => {
-          expect(detectSelectedPath(asStats(tailscaleP2pStats('host')))).toEqual({
-            transport: 'p2p',
-            mode: 'P2P',
-          })
+          for (const address of ['100.64.0.8', 'fd7a:115c:a1e0::c']) {
+            expect(detectSelectedPath(asStats(tailscaleP2pStats('host', address))), address)
+              .toEqual({ transport: 'p2p', mode: 'P2P' })
+          }
         },
       },
       {

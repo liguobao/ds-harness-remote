@@ -224,6 +224,21 @@ function summarizeIpv4Scope(parts: number[]): RtcAddressScope {
   return 'public'
 }
 
+export function isTailscaleInterface(
+  name: string,
+  addresses: readonly { address: string; internal: boolean }[],
+): boolean {
+  if (/^tailscale\d*$/i.test(name)) return true
+  // macOS Network Extensions use a generic utun name. Identify the interface
+  // by its Tailscale IPv6 address before offering its CGNAT IPv4 address.
+  return /^utun\d+$/i.test(name)
+    && addresses.some(({ address, internal }) => !internal && isTailscaleIpv6(address))
+}
+
+function isTailscaleIpv6(address: string): boolean {
+  return address.toLowerCase().startsWith('fd7a:115c:a1e0:')
+}
+
 function summarizeIpv6Scope(address: string): RtcAddressScope {
   const value = address.toLowerCase()
   if (value === '::1') return 'loopback'
@@ -231,7 +246,7 @@ function summarizeIpv6Scope(address: string): RtcAddressScope {
   // Tailscale assigns overlay addresses from fd7a:115c:a1e0::/48. They are
   // ULA-shaped, but a selected pair using them is not evidence of a physical
   // LAN path. Reuse the non-LAN cgnat scope used for Tailscale's IPv4 range.
-  if (value.startsWith('fd7a:115c:a1e0:')) return 'cgnat'
+  if (isTailscaleIpv6(value)) return 'cgnat'
   if (value.startsWith('fc') || value.startsWith('fd')) return 'private'
   if (value.startsWith('ff')) return 'reserved'
   return 'public'
