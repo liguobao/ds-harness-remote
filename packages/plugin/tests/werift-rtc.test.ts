@@ -237,6 +237,55 @@ describe('werift RTC backend', () => {
     })
   })
 
+  it.each([
+    { name: 'dual-stack Host', ipv4Available: true, globalIpv6Available: true },
+    { name: 'IPv6-only Host', ipv4Available: false, globalIpv6Available: true },
+    { name: 'Host without eligible IPv6', ipv4Available: true, globalIpv6Available: false },
+  ])('filters candidate publication and pairing on a $name', ({ ipv4Available, globalIpv6Available }) => {
+    const globalAddress = '240e:1234::1'
+    const ipv4Address = '192.168.50.10'
+    const factory = buildWeriftFactory({ RTCPeerConnection: CapturingWeriftPeerConnection }, {
+      interfaces: {
+        en0: [
+          ...(ipv4Available ? [ipv4(ipv4Address)] : []),
+          ...(globalIpv6Available ? [ipv6(globalAddress)] : []),
+          ipv6('fe80::1'),
+          ipv6('fd00::1'),
+        ],
+        utun0: [ipv6('240e:1234::2')],
+      },
+    })
+    const pc = factory.create({})
+    const config = CapturingWeriftPeerConnection.configs.at(-1) as {
+      iceUseIpv6: boolean
+      iceAdditionalHostAddresses: string[]
+      iceFilterCandidatePair: (pair: { localCandidate: { type: string; host: string } }) => boolean
+    }
+    expect(config.iceUseIpv6).toBe(globalIpv6Available)
+    expect(config.iceAdditionalHostAddresses).toEqual([
+      ...(ipv4Available ? [ipv4Address] : []),
+      ...(globalIpv6Available ? [globalAddress] : []),
+    ])
+
+    const advertise = vi.fn()
+    pc.onicecandidate = advertise
+    const raw = CapturingWeriftPeerConnection.instances.at(-1)!
+    for (const { host, type, allowed } of [
+      { host: ipv4Address, type: 'host', allowed: ipv4Available },
+      { host: globalAddress, type: 'host', allowed: globalIpv6Available },
+      { host: '240e:1234::2', type: 'host', allowed: false },
+      { host: 'fe80::1', type: 'host', allowed: false },
+      { host: 'fd00::1', type: 'host', allowed: false },
+      { host: '198.51.100.5', type: 'relay', allowed: true },
+    ]) {
+      expect(config.iceFilterCandidatePair({ localCandidate: { type, host } }), host).toBe(allowed)
+      const candidate = { candidate: `candidate:1 1 udp 2130706431 ${host} 5000 typ ${type}` }
+      advertise.mockClear()
+      raw.onicecandidate?.({ candidate: { toJSON: () => candidate } })
+      expect(advertise.mock.calls, host).toEqual(allowed ? [[{ candidate }]] : [])
+    }
+  })
+
   it('loads and establishes an ordered DataChannel through the adapter', async () => {
     const factory = await loadWeriftFactory()
     expect(factory).toBeDefined()

@@ -134,6 +134,8 @@ P2P 使用 ICE/STUN 尝试让 Client 与 Host 直接交换 DataChannel 流量。
 
 使用 werift 时，已识别的 Tailscale 网卡可提供 `100.64.0.0/10` IPv4 候选。macOS 的 `utun` 网卡通过同一接口上的 Tailscale IPv6 前缀识别。选中这条路径时显示为 P2P。
 
+Host 使用 werift 时，会自动收集并发布通过网卡过滤的全局单播 IPv6 Host 候选，尝试公网 IPv6 直连。直连不可用时，仍可按配置回退到 TURN 或 Relay。
+
 ### TURN
 
 当直接 candidate pair 无法连通时，WebRTC 可以使用 Server 下发的短期 TURN credential。TURN 只转发 WebRTC 数据包；其上仍有 DataChannel 的 DTLS 和 DSH Remote 的 Noise E2EE。TURN 服务无法读取 Harness 业务明文。

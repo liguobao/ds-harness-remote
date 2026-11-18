@@ -87194,6 +87194,7 @@ function normalizeTerminalEnvironment(endpoint, value) {
 
 // packages/plugin/src/werift-rtc.ts
 import { createSocket as createSocket4 } from "node:dgram";
+import { isIPv6 as isIPv63 } from "node:net";
 import { networkInterfaces as networkInterfaces2 } from "node:os";
 
 // packages/plugin/src/native-rtc-helper.ts
@@ -87840,21 +87841,20 @@ function buildNativeRtcFactory(RTCPeerConnection3) {
 function buildWeriftFactory(werift, options = {}) {
   return {
     create(configuration) {
-      const hostIpv4Candidates = detectHostIpv4Candidates(
-        options.interfaces ?? networkInterfaces2(),
-        options.preferredHostIpv4Candidates
-      );
-      const allowedHostIpv4 = new Set(hostIpv4Candidates);
+      const interfaces = options.interfaces ?? networkInterfaces2();
+      const hostIpv4Candidates = detectHostIpv4Candidates(interfaces, options.preferredHostIpv4Candidates);
+      const hostIpv6Candidates = detectHostIpv6Candidates(interfaces);
+      const allowedHostAddresses = /* @__PURE__ */ new Set([...hostIpv4Candidates, ...hostIpv6Candidates]);
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []),
         iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
-        iceUseIpv6: false,
+        iceUseIpv6: hostIpv6Candidates.length > 0,
         iceUseLinkLocalAddress: false,
-        ...hostIpv4Candidates.length === 0 ? {} : {
-          iceAdditionalHostAddresses: hostIpv4Candidates,
+        ...allowedHostAddresses.size === 0 ? {} : {
+          iceAdditionalHostAddresses: [...allowedHostAddresses],
           iceFilterCandidatePair: (pair) => {
-            const allowed = shouldUseCandidatePair(pair, allowedHostIpv4);
+            const allowed = shouldUseCandidatePair(pair, allowedHostAddresses);
             if (!allowed) {
               configuration.onDiagnostic?.({
                 type: "candidate-pair-filtered",
@@ -87871,7 +87871,7 @@ function buildWeriftFactory(werift, options = {}) {
       raw.onicecandidate = (event) => {
         if (onIceCandidate === null) return;
         const candidate = event.candidate === void 0 ? null : event.candidate.toJSON();
-        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostIpv4)) {
+        if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostAddresses)) {
           configuration.onDiagnostic?.({
             type: "local-candidate-filtered",
             candidate: summarizeIceCandidate(candidate),
@@ -88129,22 +88129,34 @@ async function detectRouteHostIpv4Candidates(targets, timeoutMs = 500) {
   }));
   return [...new Set(detected.filter((ip) => ip !== void 0 && isUsableIpv4(ip)))];
 }
-function shouldUseCandidatePair(pair, allowedHostIpv4) {
-  if (allowedHostIpv4.size === 0) return true;
+function detectHostIpv6Candidates(interfaces) {
+  const candidates = [];
+  for (const [name2, addresses = []] of Object.entries(interfaces)) {
+    if (physicalInterfaceScore(name2) === void 0) continue;
+    for (const { address: address2, internal } of addresses) {
+      if (internal) continue;
+      if (/^[23][0-9a-f]{3}:/i.test(address2) && !address2.includes("%") && isIPv63(address2)) {
+        candidates.push(address2);
+      }
+    }
+  }
+  return candidates;
+}
+function shouldUseCandidatePair(pair, allowedHostAddresses) {
   const candidate = localCandidate(pair);
   if (candidate === void 0) return true;
-  return shouldUseLocalCandidate(candidate, allowedHostIpv4);
+  return shouldUseLocalCandidate(candidate, allowedHostAddresses);
 }
-function shouldAdvertiseCandidate(candidate, allowedHostIpv4) {
-  if (allowedHostIpv4.size === 0) return true;
+function shouldAdvertiseCandidate(candidate, allowedHostAddresses) {
+  if (allowedHostAddresses.size === 0) return true;
   const parsed = parseIceCandidate(candidate);
   if (parsed === void 0) return true;
-  return shouldUseLocalCandidate(parsed, allowedHostIpv4);
+  return shouldUseLocalCandidate(parsed, allowedHostAddresses);
 }
-function shouldUseLocalCandidate(candidate, allowedHostIpv4) {
-  if (candidate.type === "host") return candidate.host !== void 0 && allowedHostIpv4.has(candidate.host);
+function shouldUseLocalCandidate(candidate, allowedHostAddresses) {
+  if (candidate.type === "host") return candidate.host !== void 0 && allowedHostAddresses.has(candidate.host);
   if (candidate.type === "srflx" && candidate.relatedAddress !== void 0) {
-    return allowedHostIpv4.has(candidate.relatedAddress);
+    return allowedHostAddresses.has(candidate.relatedAddress);
   }
   return true;
 }

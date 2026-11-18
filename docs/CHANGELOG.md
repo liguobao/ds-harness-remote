@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Host 使用 werift 时，会自动尝试通过合格的公网 IPv6 地址进行 P2P 直连。
+- Hosts using werift automatically offer eligible public IPv6 addresses for direct P2P connections.
+
 ## 0.6.6 — 待发布 / Unreleased
 
 Android versionCode / iOS buildNumber: 74.
