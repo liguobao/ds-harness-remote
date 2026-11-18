@@ -69,7 +69,11 @@ apps/harmony/scripts/smoke.sh <hdc-device-id>
 
 鸿蒙工作流也支持手动构建（默认未签名，可显式选择签名），需要安装 SDK、带 `self-hosted` / `harmonyos` 标签的 runner。它仅允许上游仓库运行，不自动执行 fork PR 的代码。手动构建目标分支前须审查代码；签名构建只针对可信代码。
 
-签名任务由以下仓库 Secrets 注入，缺失或不完整时必须失败：
+runner 可通过 `~/.config/harmony-env.sh` 导出 `HARMONY_CLT`、`DEVECO_SDK_HOME`、`JAVA_HOME` 与工具 PATH；workflow 会加载该文件并为后续步骤保留 SDK、JDK 环境。该文件由构建机维护，不包含签名口令。
+
+鸿蒙包名为 `dsh.r2049.huawei`，须与华为后台 APP ID、签名 Profile 一致。包名变更会被系统视为另一个应用，不会继承旧包名的本机数据。
+
+签名任务支持以下仓库 Secrets；配置了其中任何一项时，必须完整配置全部六项，缺失时失败：
 
 | Secret | 内容 |
 | --- | --- |
@@ -80,7 +84,9 @@ apps/harmony/scripts/smoke.sh <hdc-device-id>
 | `HARMONY_SIGNING_CERT_B64` | base64 编码的 `.cer` |
 | `HARMONY_SIGNING_PROFILE_B64` | base64 编码的 `.p7b` |
 
-脚本以受限权限写入签名材料；workflow 在任务结束时还原配置并删除材料。工作流存在不等于已经配置 runner 或完成构建；合并验收应查看目标提交的实际构建结果。
+当六项 Secrets 全部未配置时，workflow 从 runner 用户的 `~/.config/dsh-remote/harmony-signing/` 读取 `dsh-remote-release.p12`、`dsh-remote-release.cer`、`dsh-remote-release.p7b`、`store-password.txt`、`key-password.txt` 和 `key-alias.txt`。目录权限须为 `700`、文件权限为 `600`；缺少任何文件即失败。独立调用注入脚本时通过绝对路径 `HARMONY_SIGNING_SOURCE_DIR` 指定该目录。本机原始材料放在 checkout 目录外，不随任务清理或上传。
+
+脚本以受限权限写入签名材料，并为 SDK 生成临时 AES-GCM 口令包装和配套 `material/`，不在构建配置中写入明文口令；workflow 在任务结束时还原配置并删除材料。工作流存在不等于已经配置 runner 或完成构建；合并验收应查看目标提交的实际构建结果。
 
 ## 安全与维护
 

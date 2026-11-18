@@ -36,6 +36,11 @@ jobs:
 
       - name: Verify the HarmonyOS toolchain
         run: |
+          if [ -f "$HOME/.config/harmony-env.sh" ]; then
+            . "$HOME/.config/harmony-env.sh"
+            printf '%s\n' "$HARMONY_CLT/bin" "$HARMONY_CLT/hvigor/bin" "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+            printf 'DEVECO_SDK_HOME=%s\nJAVA_HOME=%s\n' "$DEVECO_SDK_HOME" "$JAVA_HOME" >> "$GITHUB_ENV"
+          fi
           command -v hvigorw
           command -v ohpm
           hvigorw --version
@@ -59,6 +64,7 @@ jobs:
           HARMONY_SIGNING_PROFILE_B64: ${{ secrets.HARMONY_SIGNING_PROFILE_B64 }}
         run: |
           umask 077
+          export HARMONY_SIGNING_SOURCE_DIR="$HOME/.config/dsh-remote/harmony-signing"
           node scripts/inject-signing.mjs
 
       - name: Build HAP
