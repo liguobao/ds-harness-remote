@@ -79265,8 +79265,10 @@ var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
   "IDENTITY_LOCKED",
   "STORAGE_CONFLICT",
   "SERVER_CREDENTIALS_INVALID",
-  "SERVER_CREDENTIALS_BUSY"
+  "SERVER_CREDENTIALS_BUSY",
+  "SERVER_CREDENTIALS_LOCK_DIRECTORY"
 ]);
+var CREDENTIALS_LOCK_DIRECTORY_MESSAGE = "The credential refresh lock is a directory. Stop all Harness instances, then move the old lock directory aside and restart.";
 var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
   "device identity is incomplete; repair it explicitly before reconnecting",
   "device public and private keys do not match",
@@ -79285,6 +79287,7 @@ function safeStartupError(error62) {
   if (code === "SERVER_CREDENTIALS_INVALID") {
     return { code, message: "Local Remote server credentials are invalid." };
   }
+  if (code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") return { code, message: CREDENTIALS_LOCK_DIRECTORY_MESSAGE };
   if (code === "SERVER_CREDENTIALS_BUSY") {
     return {
       code,
@@ -84724,7 +84727,7 @@ var ObservedState = class {
 import { platform } from "node:os";
 
 // packages/plugin/src/server-credentials.ts
-import { chmod, link, mkdir as mkdir2, readFile as readFile3, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
+import { chmod, link, lstat as lstat2, mkdir as mkdir2, readFile as readFile3, readdir, rename, rm as rm2, stat, writeFile } from "node:fs/promises";
 import { basename as basename3, dirname as dirname2, join as join3, sep } from "node:path";
 var credentialSchema = external_exports.object({
   schemaVersion: external_exports.literal(1),
@@ -84850,6 +84853,12 @@ var ServerCredentialsLockUnsupportedError = class extends Error {
     super("Credential lock cannot create a hard link in DSH_HOME. Use a writable local ext4 or XFS file system.");
   }
 };
+var ServerCredentialsLockDirectoryError = class extends Error {
+  code = "SERVER_CREDENTIALS_LOCK_DIRECTORY";
+  constructor() {
+    super(CREDENTIALS_LOCK_DIRECTORY_MESSAGE);
+  }
+};
 var SERVER_CREDENTIALS_QUEUE_MARKER = "DSH_REFRESH_LOCK_V2\n";
 async function ensureQueueMarker(lock, deadline) {
   for (; ; ) {
@@ -84857,6 +84866,10 @@ async function ensureQueueMarker(lock, deadline) {
       await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER);
       return;
     } catch (error62) {
+      if (error62 instanceof ServerCredentialsLockUnsupportedError) {
+        await assertLockIsNotDirectory(lock);
+        throw error62;
+      }
       if (!await isLockContention(error62, lock)) throw error62;
       if (await readQueueMarker(lock) === SERVER_CREDENTIALS_QUEUE_MARKER) return;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
@@ -84920,12 +84933,20 @@ async function readLockRecord(path) {
   }
 }
 async function readQueueMarker(lock) {
+  await assertLockIsNotDirectory(lock);
   try {
     return await readLockRecord(lock);
   } catch (error62) {
-    if (error62 instanceof Error && "code" in error62 && error62.code === "EISDIR") return void 0;
+    if (error62 instanceof Error && "code" in error62 && error62.code === "EISDIR") throw new ServerCredentialsLockDirectoryError();
     throw error62;
   }
+}
+async function assertLockIsNotDirectory(lock) {
+  const metadata = await lstat2(lock).catch((error62) => {
+    if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return void 0;
+    throw error62;
+  });
+  if (metadata?.isDirectory()) throw new ServerCredentialsLockDirectoryError();
 }
 async function ownerExited(pid) {
   if (pid < 1 || pid > 2147483647 || pid === process.pid) return false;
@@ -86370,7 +86391,7 @@ var HostServerApi = class {
       if (error62 instanceof ServerCredentialsBusyError) {
         throw new ServerApiError(error62.code, error62.message, true);
       }
-      if (error62 instanceof ServerCredentialsLockUnsupportedError) {
+      if (error62 instanceof ServerCredentialsLockUnsupportedError || error62 instanceof ServerCredentialsLockDirectoryError) {
         throw new ServerApiError(error62.code, error62.message, false);
       }
       throw error62;
@@ -89366,7 +89387,7 @@ var savedPairingSchema = external_exports.object({
 
 // packages/plugin/src/identity-store.ts
 import { createHash as createHash5 } from "node:crypto";
-import { chmod as chmod2, lstat as lstat2, mkdir as mkdir3, readFile as readFile4, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { chmod as chmod2, lstat as lstat3, mkdir as mkdir3, readFile as readFile4, readdir as readdir2, rename as rename2, rm as rm3, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { basename as basename4, dirname as dirname4, join as join5 } from "node:path";
 var identitySchema = external_exports.object({
@@ -89618,7 +89639,7 @@ async function prepareDefaultIdentityDirectoryLocked({ source, target: target3, 
   const old = await storageDirectoryStat(source);
   const current = await storageDirectoryStat(target3);
   const pinPath = join5(lockDirectory, "legacy-root.json");
-  const pinMetadata = await lstat2(pinPath).catch((error62) => {
+  const pinMetadata = await lstat3(pinPath).catch((error62) => {
     if (isNodeError(error62) && error62.code === "ENOENT") return void 0;
     throw error62;
   });
@@ -89724,6 +89745,9 @@ async function assertOwnedRemoteStorage(root2) {
     const canAutoHeal = role2 === "client" || directory === root2 && verifiedScopedIdentities > 0;
     const entries = (await readStorageEntries(directory)).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
+      if (entry.name === "server-credentials.json.refresh-lock" && entry.isDirectory()) {
+        throw new ServerCredentialsLockDirectoryError();
+      }
       if (entry.name.includes(".refresh-lock") && entry.name !== "server-credentials.json.refresh-lock" && !isRefreshQueueArtifact(entry.name)) {
         if (entry.isSymbolicLink()) throw rejected("STORAGE_CONFLICT");
         throw new IdentityInvalidError(
@@ -89733,7 +89757,7 @@ async function assertOwnedRemoteStorage(root2) {
       }
       if (isLockArtifact(entry.name)) {
         const lockPath = join5(directory, entry.name);
-        const metadata2 = await lstat2(lockPath);
+        const metadata2 = await lstat3(lockPath);
         if (!entry.isFile() || !metadata2.isFile() || metadata2.isSymbolicLink() || metadata2.nlink !== 1 || metadata2.size > 16 * 1024 * 1024) {
           throw rejected("STORAGE_CONFLICT");
         }
@@ -89747,7 +89771,7 @@ async function assertOwnedRemoteStorage(root2) {
       }
       const allowedFile = identityFiles.has(entry.name) || isOwnedTempArtifact(entry.name) || isRefreshQueueArtifact(entry.name) || isBackupArtifact(entry.name) || canAutoHeal && isIdentityTempArtifact(entry.name);
       if (!entry.isFile() || !allowedFile) throw rejected("STORAGE_CONFLICT", entry.name);
-      const metadata = await lstat2(join5(directory, entry.name));
+      const metadata = await lstat3(join5(directory, entry.name));
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 16 * 1024 * 1024 || metadata.nlink !== 1 && !await isVerifiedRefreshHardlink(directory, entry.name, entries.map((item) => item.name))) {
         throw rejected("STORAGE_CONFLICT", entry.name);
       }
@@ -89871,7 +89895,7 @@ async function isRepairableLegacyClientDirectory(directory, names) {
 }
 async function storageDirectoryStat(path) {
   try {
-    const entry = await lstat2(path, { bigint: true });
+    const entry = await lstat3(path, { bigint: true });
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new IdentityInvalidError("Remote storage must be a real directory; symbolic links are not migrated.", "STORAGE_CONFLICT");
     }
@@ -89890,7 +89914,7 @@ async function assertStorageIdle(directory) {
     const linkedTemps = [];
     for (const entry of before) {
       if (!isRefreshQueueTemp(entry.name)) continue;
-      const metadata = await lstat2(join5(currentDirectory, entry.name));
+      const metadata = await lstat3(join5(currentDirectory, entry.name));
       if (metadata.nlink === 2 && await isVerifiedRefreshHardlink(currentDirectory, entry.name, names)) {
         linkedTemps.push(join5(currentDirectory, entry.name));
       }
@@ -89978,8 +90002,8 @@ async function isVerifiedRefreshHardlink(directory, name2, names) {
   if (match === null || !names.includes(match[1]) || !ownerExited2(`${match[2]}
 `)) return false;
   const [source, published] = await Promise.all([
-    lstat2(join5(directory, temporary[0]), { bigint: true }),
-    lstat2(join5(directory, match[1]), { bigint: true })
+    lstat3(join5(directory, temporary[0]), { bigint: true }),
+    lstat3(join5(directory, match[1]), { bigint: true })
   ]);
   return source.isFile() && published.isFile() && source.nlink === 2n && published.nlink === 2n && source.dev === published.dev && source.ino === published.ino;
 }
@@ -90128,7 +90152,7 @@ function isScopedClientDirectory(directory) {
 async function hasVerifiedScopedIdentity(directory) {
   try {
     const serversPath = join5(directory, "servers");
-    const metadata = await lstat2(serversPath);
+    const metadata = await lstat3(serversPath);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
     for (const scope2 of await readdir2(serversPath, { withFileTypes: true })) {
       if (!scope2.isDirectory() || scope2.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope2.name)) continue;
@@ -90137,7 +90161,7 @@ async function hasVerifiedScopedIdentity(directory) {
         const roleDir = join5(serversPath, scope2.name, role2.name);
         try {
           for (const fileName of ["device.json", "device.key"]) {
-            const fileStat = await lstat2(join5(roleDir, fileName));
+            const fileStat = await lstat3(join5(roleDir, fileName));
             if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.nlink !== 1 || fileStat.size > 16 * 1024 * 1024) {
               throw new Error("invalid identity file metadata");
             }
@@ -90162,7 +90186,7 @@ async function canAutoHealClientIdentity(directory, allowServersDirectory = fals
     for (const entry of entries) {
       if (isLockArtifact(entry.name)) continue;
       const entryPath = join5(directory, entry.name);
-      const metadata = await lstat2(entryPath);
+      const metadata = await lstat3(entryPath);
       if (metadata.isSymbolicLink()) return false;
       if (allowServersDirectory && entry.name === "servers" && metadata.isDirectory()) continue;
       if (!metadata.isFile()) return false;
@@ -90216,7 +90240,7 @@ async function readStorageEntries(directory) {
   const result = [];
   for (const entry of entries) {
     if (isStorageMetadataArtifact(entry.name) && entry.isFile()) {
-      const metadata = await lstat2(join5(directory, entry.name));
+      const metadata = await lstat3(join5(directory, entry.name));
       if (metadata.isFile() && metadata.nlink === 1 && metadata.size <= 16 * 1024 * 1024) continue;
     }
     result.push(entry);
@@ -93732,7 +93756,7 @@ var IsolatedAcpClient = class {
 };
 
 // packages/plugin/src/workspace-bridge.ts
-import { realpath as realpath2, lstat as lstat3, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat as lstat4, readdir as readdir4, open as open4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute5, join as join8, relative as relative2, resolve as resolve4 } from "node:path";
 
 // packages/plugin/src/remote-terminal-controller.ts
@@ -94415,7 +94439,7 @@ var WorkspaceBridge = class {
         const result = [];
         for (const entry of entries.slice(0, 500)) {
           const item = join8(target3, entry.name);
-          const info2 = await lstat3(item);
+          const info2 = await lstat4(item);
           if (info2.isSymbolicLink()) continue;
           result.push({ name: entry.name, type: info2.isDirectory() ? "directory" : info2.isFile() ? "file" : "other", ...info2.isFile() ? { size: info2.size } : {} });
         }
@@ -94514,7 +94538,7 @@ var WorkspaceBridge = class {
     const rel = relative2(root2, candidate);
     if (rel.startsWith("..") || isAbsolute5(rel)) throw this.scopeError("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the CodeX workspace.");
     try {
-      const info = await lstat3(candidate);
+      const info = await lstat4(candidate);
       if (info.isSymbolicLink()) throw new Error();
       const canonical = await realpath2(candidate);
       const canonicalRel = relative2(root2, canonical);
@@ -100401,7 +100425,7 @@ var HostPairing = class {
 // packages/plugin/src/workspace-upload.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
+import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
@@ -100612,7 +100636,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat4(upload.temp);
+    const temp = await lstat5(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -100686,8 +100710,8 @@ var WorkspaceUploadHost = class {
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat4(upload.root);
-      const temp = await lstat4(upload.temp);
+      const root2 = await lstat5(upload.root);
+      const temp = await lstat5(upload.temp);
       if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
     } catch {
     }
@@ -101744,7 +101768,7 @@ var HostServerConnection = class {
             this.logger.error("failed to clear revoked Host authorization", { code: errorCode4(clearError) });
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code) || code === "UNSUPPORTED_VERSION") {
+        if (TERMINAL_AUTH_ERRORS.has(code) || code === "UNSUPPORTED_VERSION" || code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") {
           await this.dropTunnels();
           return;
         }
@@ -103089,7 +103113,7 @@ function closeCode(code) {
 // packages/plugin/src/harness-remote-bridge.ts
 import { randomUUID as randomUUID17 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { lstat as lstat6, realpath as realpath7, stat as stat9 } from "node:fs/promises";
 import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
@@ -103918,7 +103942,7 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat5(root2);
+      const rootLstat = await lstat6(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
@@ -103930,7 +103954,7 @@ var HarnessRemoteBridge = class {
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat5(currentPath);
+        const dirLstat = await lstat6(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -103938,7 +103962,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat5(candidate);
+      const targetLstat = await lstat6(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }

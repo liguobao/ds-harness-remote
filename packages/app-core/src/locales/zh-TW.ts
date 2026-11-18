@@ -926,6 +926,7 @@ const zhTW = {
     hermes: 'Hermes',
     deleteTitle: (title: string) => `刪除“${title}”？`, deleteBody: '將從這臺裝置上刪除該工作區及其中的所有對話。此操作無法撤銷。', delete: '刪除工作區', rename: '重新命名', moveUp: '上移', moveDown: '下移', expandWorkspace: (title: string) => `展開工作區“${title}”`, collapseWorkspace: (title: string) => `摺疊工作區“${title}”`, newSessionIn: (title: string) => `在“${title}”中新建對話`, deviceDirectory: '電腦上的專案目錄', browse: '選擇目錄', directoryHint: '在這裡新建的對話會使用該目錄。', codexDirectoryHint: '所選目錄會新增到電腦端 Codex 專案目錄。', cursorDirectoryHint: '所選目錄會作為 Cursor ACP 會話的工作目錄（僅儲存在本機連線期間）。', piDirectoryHint: '所選目錄會作為 Pi ACP 會話的工作目錄（僅儲存在本機連線期間）。', antigravityDirectoryHint: '使用所選目錄進行 AGY 對話，已有對話從電腦端載入。', opencodeDirectoryHint: '使用所選目錄進行 OpenCode 對話，已有對話從電腦端載入。', claudeDirectoryHint: '使用所選目錄進行 Claude 對話，已有對話從電腦端載入。',
     hermesDirectoryHint: '使用所選目錄進行 Hermes 對話，已有對話從電腦端載入。', renameTitle: '重新命名工作區', namePlaceholder: '輸入工作區名稱', saveName: '儲存', chooseFolder: '選擇專案目錄', loading: '正在載入…', loadingDirectory: '正在讀取目錄…', noFolders: '這裡沒有可選的資料夾', showHidden: '顯示隱藏資料夾', hideHidden: '隱藏隱藏資料夾', chooseThisFolder: '使用此目錄',
+    goToFolder: '前往', directoryOpenFailed: '無法開啟目錄。請選擇或輸入主機上已存在的絕對路徑。',
   },
   chat: {
     referenceChat: "引用對話", referenceChatDetail: "將其他 Bot 對話或 DSH 會話作為上下文", referenceChatSubtitle: "選擇一段其他 Bot 對話或 DSH 會話作為上下文",

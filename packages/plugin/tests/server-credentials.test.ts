@@ -7,7 +7,7 @@ import { promisify } from 'node:util'
 import { once } from 'node:events'
 import { build } from 'esbuild'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ServerCredentialStore } from '../src/server-credentials.js'
+import { ServerCredentialStore, assertRefreshQueueIdle } from '../src/server-credentials.js'
 
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -64,16 +64,30 @@ describe('credential refresh process lock', () => {
     expect((await readdir(path)).filter(name => name.includes('.refresh-lock.holder-'))).toEqual([])
   })
 
-  it.each(['directory', 'file'] as const)('does not take over a legacy %s lock', async kind => {
+  it('waits for a legacy file lock without taking it over', async () => {
     const path = await directory()
-    const lock = join(path, 'server-credentials.json.refresh-lock')
-    if (kind === 'directory') await mkdir(lock)
-    else await writeFile(lock, '123 00000000-0000-7000-8000-000000000000\n')
+    const lock = lockPath(path)
+    const legacy = '123 00000000-0000-7000-8000-000000000000\n'
+    await writeFile(lock, legacy)
     vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(16_000)
     const operation = vi.fn()
     await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject({ code: 'SERVER_CREDENTIALS_BUSY' })
     expect(operation).not.toHaveBeenCalled()
-    expect((await stat(lock)).isDirectory()).toBe(kind === 'directory')
+    await expect(readFile(lock, 'utf8')).resolves.toBe(legacy)
+  })
+
+  it.each(['EEXIST', 'EPERM'])('reports a directory lock when link returns %s', async code => {
+    const path = await directory()
+    const lock = lockPath(path)
+    await mkdir(lock)
+    await writeFile(join(lock, 'legacy-owner'), 'keep')
+    vi.mocked(link).mockRejectedValueOnce(Object.assign(new Error('occupied lock'), { code }))
+    const operation = vi.fn()
+    const expected = { code: 'SERVER_CREDENTIALS_LOCK_DIRECTORY', message: expect.stringContaining('Stop all Harness instances') }
+    await expect(new ServerCredentialStore(path).withRefreshLock(operation)).rejects.toMatchObject(expected)
+    await expect(assertRefreshQueueIdle(path)).rejects.toMatchObject(expected)
+    expect(operation).not.toHaveBeenCalled()
+    await expect(readdir(lock)).resolves.toEqual(['legacy-owner'])
   })
 
   it('recovers a lock after its owner process exits during refresh', async () => {

@@ -270,9 +270,19 @@ export class AcpSessionTools implements SessionTools {
   resizeTerminal(sessionId: string, id: string, attachmentId: string, cols: number, rows: number): Promise<void> { return this.call(sessionId, 'terminal/resize', { id, attachmentId, cols, rows }).then(() => undefined) }
   closeTerminal(sessionId: string, id: string): Promise<void> { return this.call(sessionId, 'terminal/close', { id }).then(() => undefined) }
   private async stream(sessionId: string, endpoint: AcpWorkspaceToolStreamEndpoint, args: Record<string, unknown>, signal: AbortSignal): Promise<RemoteGatewayStream> {
-    const values: unknown[] = []; const waiters: Array<(result: IteratorResult<unknown>) => void> = []; let done = false
-    const push = (value: unknown) => { const waiter = waiters.shift(); if (waiter) waiter({ done: false, value }); else values.push(value) }
-    const close = () => { done = true; for (const waiter of waiters.splice(0)) waiter({ done: true, value: undefined }) }
+    const values: unknown[] = []
+    const waiters: Array<(result: IteratorResult<unknown>) => void> = []
+    let done = false
+    const push = (value: unknown) => {
+      if (done) return
+      const waiter = waiters.shift()
+      if (waiter) waiter({ done: false, value })
+      else values.push(value)
+    }
+    const close = () => {
+      done = true
+      for (const waiter of waiters.splice(0)) waiter({ done: true, value: undefined })
+    }
     const nativeId = sessionId.replace(/^\w+:/u, '')
     const scope = `${this.backend === 'antigravity' ? 'acp' : this.backend}:${nativeId}`
     const scopedArgs = endpoint === 'terminal/retain' || endpoint === 'terminal/follow'
@@ -282,6 +292,23 @@ export class AcpSessionTools implements SessionTools {
       const params = frame.frame.params
       push(typeof params === 'object' && params !== null && 'value' in params ? (params as { value: unknown }).value : params)
     }, close, signal, { backend: this.backend, endpoint, args: scopedArgs })
-    return { [Symbol.asyncIterator]: async function* () { while (!done || values.length) { if (values.length) yield values.shift(); else if (done) return; else yield await new Promise<unknown>(resolve => waiters.push(result => resolve(result.value))) } }, close: async (notify = true) => { close(); if (notify) await stream.close() } }
+    return {
+      async *[Symbol.asyncIterator]() {
+        for (;;) {
+          if (values.length > 0) {
+            yield values.shift()
+            continue
+          }
+          if (done) return
+          const result = await new Promise<IteratorResult<unknown>>(resolve => waiters.push(resolve))
+          if (result.done) return
+          yield result.value
+        }
+      },
+      close: async (notify = true) => {
+        close()
+        if (notify) await stream.close()
+      },
+    }
   }
 }

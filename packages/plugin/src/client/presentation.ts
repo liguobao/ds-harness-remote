@@ -153,6 +153,7 @@ export function connectionErrorMessage(code: string, t: Translate): string {
   }
   if (code === 'CONNECTION_REPLACED') return t('connectionReplaced')
   if (code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
+  if (code === 'SERVER_CREDENTIALS_LOCK_DIRECTORY') return t('connectionCredentialsLockDirectory')
   if (code === 'DEVICE_REVOKED') return t('connectionDeviceRevoked')
   if (code === 'DEVICE_OWNERSHIP_REQUIRED') return t('connectionOwnershipRequired')
   if (code === 'RATE_LIMITED') return t('connectionRateLimited')
@@ -183,6 +184,7 @@ export function startupErrorMessage(error: { code: string; message: string }, t:
   if (error.code === 'IDENTITY_LOCKED') return t('identityLocked')
   if (error.code === 'STORAGE_CONFLICT') return storageConflictMessage(error.message, t)
   if (error.code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
+  if (error.code === 'SERVER_CREDENTIALS_LOCK_DIRECTORY') return t('connectionCredentialsLockDirectory')
   return error.message || t('remoteStartupFailed')
 }
 
@@ -202,6 +204,7 @@ export function messageOf(reason: unknown, t: Translate): string {
       return storageConflictMessage(message, t)
     }
     if (reason.code === 'SERVER_CREDENTIALS_BUSY') return t('connectionCredentialsBusy')
+    if (reason.code === 'SERVER_CREDENTIALS_LOCK_DIRECTORY') return t('connectionCredentialsLockDirectory')
   }
   return reason instanceof Error ? reason.message : String(reason)
 }

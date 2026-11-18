@@ -227,7 +227,10 @@ export class HostServerConnection {
             this.logger.error('failed to clear revoked Host authorization', { code: errorCode(clearError) })
           }
         }
-        if (TERMINAL_AUTH_ERRORS.has(code) || code === 'UNSUPPORTED_VERSION') { await this.dropTunnels(); return }
+        if (TERMINAL_AUTH_ERRORS.has(code) || code === 'UNSUPPORTED_VERSION' || code === 'SERVER_CREDENTIALS_LOCK_DIRECTORY') {
+          await this.dropTunnels()
+          return
+        }
         if (!this.config.reconnect.enabled) return
       }
       if (this.stopped) return
