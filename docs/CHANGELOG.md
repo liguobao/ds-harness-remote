@@ -28,6 +28,7 @@ Android versionCode / iOS buildNumber: 74.
 - Android 改善 Markdown 表格列对齐、活动坞弹层底色、标题居中、输入栏稳定性与快捷提示词模式。
 - 上传资源预算改为 Host 级跨连接共享，限制并发与资源占用；改善孤儿上传清理失败和配额窗口切换时的可用性。
 - 修复新版 Harness 的 npm 升级资格判断，并让 Session 能力探测避免读取历史。
+- 侧栏底部入口改用与其它 footer 插件共用的容量规则：整行能放下每个入口 112px 文字宽度时保持 42px 文字按钮，放不下时一起收成 36px 图标按钮；圆角、内边距与间距对齐宿主侧栏 token。
 
 ### English
 
@@ -51,6 +52,7 @@ Android versionCode / iOS buildNumber: 74.
 - Improve Android Markdown table alignment, activity sheets, centered titles, composer stability and quick-prompt mode.
 - Share upload resource budgets across Host connections and improve availability during orphan cleanup failures and quota-window rollover.
 - Recognize newer Harness registry-update eligibility and probe Session capabilities without loading history.
+- Adopt the shared sidebar-footer capacity contract: keep 42px labelled buttons while the row fits a 112px label box per entry, and collapse the whole row to 36px icon buttons otherwise, using the host sidebar radius, inline inset and gap.
 
 ### 贡献者 / Contributors
 

@@ -1,4 +1,5 @@
 import { mountAccountEntry } from './account-entry.js'
+import { watchFooterLane, type FooterForm } from './footer-lane.js'
 import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import { renderBodyPortal } from './portal.js'
@@ -37,6 +38,31 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
   const RemoteProgressView = createRemoteProgressView(React)
+
+  /**
+   * The footer row is shared with every other `sidebar.footer.action` occupant,
+   * and the host hands one occupant neither a row gap nor the peer count. The
+   * form therefore comes from the shared capacity contract so that all
+   * occupants reach the same answer without measuring a neighbour's choice:
+   * a 42px labelled row while the row can hold one label box per occupant, and
+   * the 36x36 icon target otherwise (see `footer-lane.ts`).
+   */
+  function useFooterLane(wide: boolean): [(node: HTMLElement | null) => void, FooterForm] {
+    const [form, setForm] = React.useState<FooterForm>(wide ? 'label' : 'icon')
+    const nodeRef = React.useRef<HTMLElement | null>(null)
+    const [seat, setSeat] = React.useState(0)
+    const attach = React.useCallback((node: HTMLElement | null) => {
+      if (nodeRef.current === node) return
+      nodeRef.current = node
+      setSeat(previous => previous + 1)
+    }, [])
+    React.useEffect(() => {
+      const node = nodeRef.current
+      if (node === null) return undefined
+      return watchFooterLane(node, () => wide, next => setForm(previous => (previous === next ? previous : next)))
+    }, [wide, seat])
+    return [attach, wide ? form : 'icon']
+  }
 
   /**
    * Renders the Compact entry at the end of the host account row. The host
@@ -78,6 +104,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     openSettings?: () => void
   }): unknown {
     const { t } = props
+    const [attachEntry, entryForm] = useFooterLane(props.wide)
     const connectionErrorMessageFor = (reason: unknown, translate: Translate): string => {
       if (typeof reason === 'object' && reason !== null && 'code' in reason) {
         const code = (reason as { code?: unknown }).code
@@ -1223,10 +1250,13 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       React.createElement('rect', { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
       React.createElement('path', { d: 'M8 21h8M12 17v4' }))
     const remoteActive = status?.mode === 'remote'
+    // `wide` is the sidebar being expanded; the row decides whether the seat
+    // also carries its label, so the two are kept apart here.
+    const labelled = props.wide && entryForm === 'label'
     // Wide entry: the button stretches full width and carries the update suffix
     // in the host's own update-indicator look. Rail/Compact entries are
     // icon-only, so they get the official 6px brand dot instead.
-    const updateSuffix = localUpdateAvailable && props.wide
+    const updateSuffix = localUpdateAvailable && labelled
       ? React.createElement('span', {
         className: 'dshRemoteUpdateSuffix',
         title: updateNotice, 'aria-hidden': true,
@@ -1235,20 +1265,20 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const updateDot = localUpdateAvailable
       ? React.createElement('span', { className: 'dshRemoteUpdateDot', title: t('updateBadge'), 'aria-hidden': true })
       : null
-    const entry = React.createElement('div', { className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${props.wide ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}` },
-      React.createElement(remoteActive && props.wide && !reauth ? 'div' : 'button', {
-        ...(remoteActive && props.wide && !reauth ? {} : {
+    const entry = React.createElement('div', { ref: attachEntry, className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${labelled ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}` },
+      React.createElement(remoteActive && labelled && !reauth ? 'div' : 'button', {
+        ...(remoteActive && labelled && !reauth ? {} : {
           type: 'button',
           disabled: remoteActive && busy,
           onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show()),
         }),
         className: 'dshRemoteModeButton',
-        title: props.wide ? remoteLabel : remoteActionLabel,
-        'aria-label': props.wide ? remoteLabel : remoteActionLabel,
-      }, computerIcon, props.wide
+        title: labelled ? remoteLabel : remoteActionLabel,
+        'aria-label': labelled ? remoteLabel : remoteActionLabel,
+      }, computerIcon, labelled
         ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
-        : null, props.wide ? updateSuffix : updateDot),
-      remoteActive && props.wide ? React.createElement('button', {
+        : null, labelled ? updateSuffix : updateDot),
+      remoteActive && labelled ? React.createElement('button', {
         type: 'button',
         className: 'dshRemoteExitLink',
         disabled: busy,
