@@ -17,7 +17,6 @@ import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
-const MAX_ACP_LINE_BYTES = 288 * 1024 * 1024
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
 
 export type SpawnAntigravityAcp = (binary: string, args: string[], cwd?: string) => ChildProcessWithoutNullStreams
@@ -389,7 +388,6 @@ export class AntigravityAcpClient implements CursorAcpLike {
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
 
-    let streamFailure: AntigravityAcpError | undefined
     let initResolved = false
     let rejectInit: ((error: Error) => void) | undefined
     const initPromise = new Promise<void>((resolve, reject) => {
@@ -417,37 +415,10 @@ export class AntigravityAcpClient implements CursorAcpLike {
       }
 
       child.stdout.on('data', chunk => {
-        if (this.process !== child) return
-        try {
-          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
-          if (!initResolved) checkInit(bytes)
-          else this.consumeStdout(bytes)
-        } catch (error) {
-          if (!(error instanceof AntigravityAcpError) || error.code !== 'ANTIGRAVITY_RESPONSE_TOO_LARGE') throw error
-          streamFailure = error
-          clearTimeout(timer)
-          rejectInit?.(error)
-          this.ready = false
-          this.process = undefined
-          this.stdoutBuffer = Buffer.alloc(0)
-          this.watcher?.stop()
-          this.watcher = undefined
-          if (this.currentPromptPending) {
-            clearTimeout(this.currentPromptPending.timer)
-            this.currentPromptPending.reject(error)
-            this.currentPromptPending = undefined
-          }
-          child.stdout.removeAllListeners('data')
-          // Ignore late output while still draining the retired child's pipe.
-          child.stdout.resume()
-          const killTimer = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-          }, 1_000)
-          killTimer.unref?.()
-          child.once('exit', () => clearTimeout(killTimer))
-          child.kill('SIGTERM')
-          this.logger?.warn('Antigravity ACP communication failed', { code: error.code })
-          if (!this.closed) this.notifyUnavailable(error.code)
+        if (!initResolved) {
+          checkInit(Buffer.from(chunk as Uint8Array))
+        } else {
+          this.consumeStdout(Buffer.from(chunk as Uint8Array))
         }
       })
     })
@@ -488,12 +459,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
 
     try {
       await initPromise
-      if (streamFailure) throw streamFailure
       this.ready = true
       this.warmNextSession()
       this.logger?.info('Antigravity ACP ready', { conversationId: this.activeConversationId })
     } catch (err) {
-      if (!child.killed) child.kill('SIGTERM')
+      child.kill('SIGTERM')
       throw err
     }
   }
@@ -552,11 +522,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   }
 
   private consumeStdout(chunk: Buffer, onRawEvent?: (event: Record<string, unknown>) => void): void {
-    // Check before allocating the combined buffer, including unterminated output.
-    if (this.stdoutBuffer.length + chunk.length > MAX_ACP_LINE_BYTES) {
-      throw new AntigravityAcpError('ANTIGRAVITY_RESPONSE_TOO_LARGE', 'Antigravity ACP emitted an oversized JSONL message.')
-    }
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer.concat([this.stdoutBuffer, chunk])
+    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk])
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(0x0a)
       if (newlineIndex === -1) break

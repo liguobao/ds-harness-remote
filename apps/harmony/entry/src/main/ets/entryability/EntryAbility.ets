@@ -20,9 +20,49 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', '%{public}s', 'Failed to set colorMode');
     }
     const runtime = getAppRuntime();
+    runtime.bindPushAbility(this);
+    this.handleNoticeWant(want);
     runtime.setSystemDark(this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     runtime.setSystemLandscape(this.context.config.direction === ConfigurationConstant.Direction.DIRECTION_HORIZONTAL);
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.handleNoticeWant(want);
+  }
+
+  private handleNoticeWant(want: Want): void {
+    const parameters = want.parameters;
+    if (parameters === undefined) return;
+    hilog.info(DOMAIN, 'DSHREMOTE', 'want param keys=%{public}s', Object.keys(parameters).join(','));
+    const token = parameters['dshNoticeToken'];
+    if (typeof token === 'string') getAppRuntime().handleNoticeWant(token);
+    const sid = this.extractPushSessionId(parameters);
+    if (sid.length > 0) {
+      hilog.info(DOMAIN, 'DSHREMOTE', 'push want session=%{public}s', sid);
+      getAppRuntime().handlePushNoticeWant(sid);
+    }
+  }
+
+  private extractPushSessionId(parameters: Record<string, Object>): string {
+    const direct = parameters['sessionId'];
+    if (typeof direct === 'string' && direct.length > 0) return direct;
+    const keys = Object.keys(parameters);
+    for (const k of keys) {
+      const val = parameters[k];
+      if (typeof val === 'string' && val.includes('sessionId')) {
+        try {
+          const parsed = JSON.parse(val) as Record<string, Object>;
+          const sid = parsed['sessionId'];
+          if (typeof sid === 'string' && sid.length > 0) return sid;
+        } catch (_) {}
+      } else if (typeof val === 'object' && val !== null) {
+        const rec = val as Record<string, Object>;
+        const sid = rec['sessionId'];
+        if (typeof sid === 'string' && sid.length > 0) return sid;
+      }
+    }
+    return '';
   }
 
   onDestroy(): void {
@@ -93,6 +133,7 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
     // 安全存储要在设备解锁后可用：回前台时补一次身份读取
     getAppRuntime().retryBootstrap(this.context);
+    getAppRuntime().refreshPushRegistration();
   }
 
   onBackground(): void {

@@ -1,3 +1,0 @@
-# Unified diff context lines use a leading space, including empty source lines.
-# Preserve the patch format while checking whitespace in normal source files.
-*.patch whitespace=-blank-at-eol,-blank-at-eof

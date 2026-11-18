@@ -29,7 +29,6 @@ interface WeriftModule {
 }
 
 interface WeriftConfig {
-  iceTransportPolicy?: 'all' | 'relay'
   iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }>
   iceAdditionalHostAddresses?: string[]
   iceFilterCandidatePair?: (pair: WeriftCandidatePair) => boolean
@@ -87,9 +86,9 @@ let cachedWerift: WeriftModule | undefined
 let cachedNativeFactory: RtcPeerConnectionFactory | undefined
 
 interface NativeRtcModule {
-  RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection
+  RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection
   default?: {
-    RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection
+    RTCPeerConnection?: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection
   }
 }
 
@@ -180,11 +179,11 @@ function isElectronRuntime(): boolean {
 }
 
 function buildNativeRtcFactory(
-  RTCPeerConnection: new (config?: { iceServers?: RtcIceServer[]; iceTransportPolicy?: 'all' | 'relay' }) => NativePeerConnection,
+  RTCPeerConnection: new (config?: { iceServers?: RtcIceServer[] }) => NativePeerConnection,
 ): RtcPeerConnectionFactory {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers, iceTransportPolicy: configuration.iceTransportPolicy })
+      const raw = new RTCPeerConnection({ iceServers: configuration.iceServers })
       return {
         get connectionState(): string { return raw.connectionState },
         get iceConnectionState(): string { return raw.iceConnectionState },
@@ -237,7 +236,6 @@ export function buildWeriftFactory(werift: WeriftModule, options: WeriftFactoryO
       const allowedHostIpv4 = new Set(hostIpv4Candidates)
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []) as RtcIceServer[],
-        iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
         iceUseIpv6: false,
         iceUseLinkLocalAddress: false,
@@ -585,7 +583,7 @@ function parseIceCandidate(candidate: RtcIceCandidateInit): WeriftCandidate | un
 
 function physicalInterfaceScore(name: string): number | undefined {
   const value = name.toLowerCase()
-  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo|flclash|mihomo|clash|meta|sing-?box|tailscale|zerotier|zt[0-9a-f]|wg\d|wintun|proton|surge)/.test(value)) {
+  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo)/.test(value)) {
     return undefined
   }
   if (/^(eth|eno|ens|enp)/.test(value)) return 500
@@ -602,8 +600,6 @@ function isUsableIpv4(ip: string): boolean {
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false
   if (parts[0] === 169 && parts[1] === 254) return false
-  // Benchmark addresses are commonly assigned to proxy TUN interfaces.
-  if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false
   return !isCgnat(ip)
 }
 

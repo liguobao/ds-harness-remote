@@ -9,9 +9,18 @@
 
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { image } from '@kit.ImageKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { camera, cameraPicker } from '@kit.CameraKit';
+import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { logInfo, logWarn } from '../util/Log';
+
+export class PickedFile {
+  name: string = '';
+  base64: string = '';
+  bytes: number = 0;
+  receiptId: string = '';
+}
 
 /** 一条待发送的图片。base64 是标准字母表（协议要求 canonical base64）。 */
 export class PickedImage {
@@ -44,6 +53,23 @@ export async function pickImages(maxCount: number): Promise<PickedImage[]> {
     }
   }
   return out;
+}
+
+/** 调用系统相机拍照，压完返回单图数组（取消则空数组）。 */
+export async function takePhoto(context: common.UIAbilityContext): Promise<PickedImage[]> {
+  const profile: cameraPicker.PickerProfile = {
+    cameraPosition: camera.CameraPosition.CAMERA_POSITION_BACK
+  };
+  const result: cameraPicker.PickerResult = await cameraPicker.pick(
+    context,
+    [cameraPicker.PickerMediaType.PHOTO],
+    profile
+  );
+  if (result.resultCode !== 0 || !result.resultUri || result.resultUri.length === 0) {
+    return [];
+  }
+  const picked: PickedImage = await loadAndCompress(result.resultUri);
+  return [picked];
 }
 
 /** 读本地 URI → 解码 → 等比缩到 MAX_EDGE → JPEG → base64。 */
@@ -134,4 +160,37 @@ export function mediaTypeOf(name: string): string {
     return 'image/gif';
   }
   return 'image/jpeg';
+}
+
+const MAX_PICK_FILE_BYTES = 2 * 1024 * 1024;
+
+/** 打开系统文档选择器，读取受限大小（<= 2MB）的文件字节。 */
+export async function pickDocuments(maxCount: number, context: common.UIAbilityContext): Promise<PickedFile[]> {
+  const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+  options.maxSelectNumber = maxCount > 0 ? maxCount : 1;
+  const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+  const uris: string[] = await docPicker.select(options);
+  const out: PickedFile[] = [];
+  for (const uri of uris) {
+    const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+    try {
+      const stat = fs.statSync(file.fd);
+      if (stat.size > MAX_PICK_FILE_BYTES) {
+        logWarn('document too large: ' + stat.size);
+        continue;
+      }
+      const bytes = new Uint8Array(stat.size);
+      fs.readSync(file.fd, bytes.buffer);
+      const picked = new PickedFile();
+      picked.name = decodeURIComponent(lastNameOf(uri));
+      picked.bytes = bytes.byteLength;
+      picked.base64 = new util.Base64Helper().encodeToStringSync(bytes);
+      out.push(picked);
+    } catch {
+      logWarn('document read failed');
+    } finally {
+      fs.closeSync(file);
+    }
+  }
+  return out;
 }

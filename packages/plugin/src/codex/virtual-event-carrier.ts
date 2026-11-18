@@ -58,9 +58,12 @@ export class CodexEventCarrier {
   async remoteEvents(signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     const queue = new AsyncValueQueue(signal)
     const clientId = `codex-events:${this.context.host.deviceId}:${Date.now().toString(36)}`
-    this.context.eventStreams.set(clientId, queue)
     const home = (await this.context.currentCatalog(signal)).workspaces[0]?.path ?? '/'
     queue.push({ type: 'ready', clientId, host: { home } })
+    this.context.eventStreams.set(clientId, queue)
+    for (const pending of this.context.pendingApprovals.values()) {
+      queue.push({ type: 'waterfall', event: 'approval/request', eventId: pending.requestHandle, agentId: pending.sessionId, request: pending.request })
+    }
     return queue.iterate(() => this.context.eventStreams.delete(clientId))
   }
 
@@ -76,6 +79,10 @@ export class CodexEventCarrier {
       agentId: input.agentId,
       request: input.request,
     })
+  }
+
+  cancelApproval(eventId: string): void {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: 'cancel', eventId })
   }
 
   async answerRemoteEvent(args: JsonRecord, signal: AbortSignal): Promise<undefined> {

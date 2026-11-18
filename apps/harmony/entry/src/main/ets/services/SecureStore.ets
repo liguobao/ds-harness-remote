@@ -800,6 +800,25 @@ export class SecureStore {
     }
   }
 
+  async saveNoticeTarget(slot: string, value: string): Promise<void> {
+    await this.putSync('noticeTarget.' + slot, value);
+  }
+
+  async consumeNoticeTarget(slot: string, token: string): Promise<string> {
+    const key: string = 'noticeTarget.' + slot;
+    const value: string = this.getSync(key, '');
+    if (value.length === 0) return '';
+    try {
+      const data: Record<string, Object> = JSON.parse(value) as Record<string, Object>;
+      if (data['token'] !== token) return '';
+    } catch (error) {
+      return '';
+    }
+    // Clear synchronously before awaiting the flush, so concurrent Wants cannot replay it.
+    await this.putSync(key, '');
+    return value;
+  }
+
   /** 上次连着的主机 deviceId（空 = 没有，别自动连）。 */
   loadLastHost(): string {
     return this.getSync(KEY_LAST_HOST, '');
@@ -874,7 +893,7 @@ export class SecureStore {
   }
 
   loadPet(): boolean {
-    return this.getSync(KEY_PET, '1') === '1';
+    return this.getSync(KEY_PET, '0') === '1';
   }
 
   savePet(enabled: boolean): void {

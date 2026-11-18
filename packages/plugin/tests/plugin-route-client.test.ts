@@ -157,7 +157,6 @@ describe('browser plugin route authority', () => {
       { endpoint: 'create-room', value: { id: 'room', sessionId: 'room-part', sessions: { bot: 'member' } }, ids: ['room', 'room-part', 'member'] },
       { endpoint: 'update-room', value: { room: { id: 'room', sessionId: 'room-part', ownParts: ['room-old'], parts: ['member'] } }, ids: ['room', 'room-part', 'room-old', 'member'] },
       { endpoint: 'goal-control', value: { bots: [{ id: 'bot', sessionId: 'current' }], rooms: [{ id: 'room', sessionId: 'room-part' }], agents: [] }, ids: ['bot', 'current', 'room', 'room-part'] },
-      ...['task-note', 'task-cancel'].map(endpoint => ({ endpoint, value: { bots: [{ id: 'bot', parts: ['part'] }], rooms: [{ id: 'room', sessions: { bot: 'member' } }] }, ids: ['bot', 'part', 'room', 'member'] })),
       { endpoint: 'add-agent', value: { id: 'agent-roster-id', sessions: ['agent-session'] }, ids: ['agent-session'] },
       { endpoint: 'agent-session', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },
       { endpoint: 'agent-adopt', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },

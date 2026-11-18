@@ -3227,7 +3227,7 @@ var require_stream = __commonJS({
       };
       duplex._final = function(callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open7() {
+          ws.once("open", function open8() {
             duplex._final(callback);
           });
           return;
@@ -3248,7 +3248,7 @@ var require_stream = __commonJS({
       };
       duplex._write = function(chunk, encoding, callback) {
         if (ws.readyState === ws.CONNECTING) {
-          ws.once("open", function open7() {
+          ws.once("open", function open8() {
             duplex._write(chunk, encoding, callback);
           });
           return;
@@ -7337,15 +7337,15 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id6, name2, block, kx, constants7, hash22 = "sha256") {
+function createAEADCipher(id6, name2, block, kx, constants9, hash22 = "sha256") {
   const cipher = new AEADCipher();
   cipher.id = id6;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
   cipher.hashAlgorithm = hash22;
-  cipher.keyLength = constants7.K_LEN;
-  cipher.nonceLength = constants7.N_MAX;
+  cipher.keyLength = constants9.K_LEN;
+  cipher.nonceLength = constants9.N_MAX;
   cipher.nonceImplicitLength = 4;
   cipher.nonceExplicitLength = 8;
   cipher.ivLength = cipher.nonceImplicitLength;
@@ -41443,11 +41443,11 @@ var require_dijkstra = __commonJS({
         var predecessors = {};
         var costs = {};
         costs[s] = 0;
-        var open7 = dijkstra.PriorityQueue.make();
-        open7.push(s, 0);
+        var open8 = dijkstra.PriorityQueue.make();
+        open8.push(s, 0);
         var closest, u, v, cost_of_s_to_u, adjacent_nodes, cost_of_e, cost_of_s_to_u_plus_cost_of_e, cost_of_s_to_v, first_visit;
-        while (!open7.empty()) {
-          closest = open7.pop();
+        while (!open8.empty()) {
+          closest = open8.pop();
           u = closest.value;
           cost_of_s_to_u = closest.cost;
           adjacent_nodes = graph[u] || {};
@@ -41459,7 +41459,7 @@ var require_dijkstra = __commonJS({
               first_visit = typeof costs[v] === "undefined";
               if (first_visit || cost_of_s_to_v > cost_of_s_to_u_plus_cost_of_e) {
                 costs[v] = cost_of_s_to_u_plus_cost_of_e;
-                open7.push(v, cost_of_s_to_u_plus_cost_of_e);
+                open8.push(v, cost_of_s_to_u_plus_cost_of_e);
                 predecessors[v] = u;
               }
             }
@@ -42469,7 +42469,7 @@ var require_crc = __commonJS({
 var require_parser = __commonJS({
   "node_modules/pngjs/lib/parser.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants9 = require_constants2();
     var CrcCalculator = require_crc();
     var Parser = module.exports = function(options, dependencies) {
       this._options = options;
@@ -42480,12 +42480,12 @@ var require_parser = __commonJS({
       this._palette = [];
       this._colorType = 0;
       this._chunks = {};
-      this._chunks[constants7.TYPE_IHDR] = this._handleIHDR.bind(this);
-      this._chunks[constants7.TYPE_IEND] = this._handleIEND.bind(this);
-      this._chunks[constants7.TYPE_IDAT] = this._handleIDAT.bind(this);
-      this._chunks[constants7.TYPE_PLTE] = this._handlePLTE.bind(this);
-      this._chunks[constants7.TYPE_tRNS] = this._handleTRNS.bind(this);
-      this._chunks[constants7.TYPE_gAMA] = this._handleGAMA.bind(this);
+      this._chunks[constants9.TYPE_IHDR] = this._handleIHDR.bind(this);
+      this._chunks[constants9.TYPE_IEND] = this._handleIEND.bind(this);
+      this._chunks[constants9.TYPE_IDAT] = this._handleIDAT.bind(this);
+      this._chunks[constants9.TYPE_PLTE] = this._handlePLTE.bind(this);
+      this._chunks[constants9.TYPE_tRNS] = this._handleTRNS.bind(this);
+      this._chunks[constants9.TYPE_gAMA] = this._handleGAMA.bind(this);
       this.read = dependencies.read;
       this.error = dependencies.error;
       this.metadata = dependencies.metadata;
@@ -42500,10 +42500,10 @@ var require_parser = __commonJS({
       };
     };
     Parser.prototype.start = function() {
-      this.read(constants7.PNG_SIGNATURE.length, this._parseSignature.bind(this));
+      this.read(constants9.PNG_SIGNATURE.length, this._parseSignature.bind(this));
     };
     Parser.prototype._parseSignature = function(data2) {
-      let signature = constants7.PNG_SIGNATURE;
+      let signature = constants9.PNG_SIGNATURE;
       for (let i = 0; i < signature.length; i++) {
         if (data2[i] !== signature[i]) {
           this.error(new Error("Invalid file signature"));
@@ -42520,7 +42520,7 @@ var require_parser = __commonJS({
         name2 += String.fromCharCode(data2[i]);
       }
       let ancillary = Boolean(data2[4] & 32);
-      if (!this._hasIHDR && type !== constants7.TYPE_IHDR) {
+      if (!this._hasIHDR && type !== constants9.TYPE_IHDR) {
         this.error(new Error("Expected IHDR on beggining"));
         return;
       }
@@ -42568,7 +42568,7 @@ var require_parser = __commonJS({
         this.error(new Error("Unsupported bit depth " + depth));
         return;
       }
-      if (!(colorType in constants7.COLORTYPE_TO_BPP_MAP)) {
+      if (!(colorType in constants9.COLORTYPE_TO_BPP_MAP)) {
         this.error(new Error("Unsupported color type"));
         return;
       }
@@ -42585,16 +42585,16 @@ var require_parser = __commonJS({
         return;
       }
       this._colorType = colorType;
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._colorType];
+      let bpp = constants9.COLORTYPE_TO_BPP_MAP[this._colorType];
       this._hasIHDR = true;
       this.metadata({
         width,
         height,
         depth,
         interlace: Boolean(interlace),
-        palette: Boolean(colorType & constants7.COLORTYPE_PALETTE),
-        color: Boolean(colorType & constants7.COLORTYPE_COLOR),
-        alpha: Boolean(colorType & constants7.COLORTYPE_ALPHA),
+        palette: Boolean(colorType & constants9.COLORTYPE_PALETTE),
+        color: Boolean(colorType & constants9.COLORTYPE_COLOR),
+        alpha: Boolean(colorType & constants9.COLORTYPE_ALPHA),
         bpp,
         colorType
       });
@@ -42618,7 +42618,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseTRNS = function(data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR) {
+      if (this._colorType === constants9.COLORTYPE_PALETTE_COLOR) {
         if (this._palette.length === 0) {
           this.error(new Error("Transparency chunk must be after palette"));
           return;
@@ -42632,10 +42632,10 @@ var require_parser = __commonJS({
         }
         this.palette(this._palette);
       }
-      if (this._colorType === constants7.COLORTYPE_GRAYSCALE) {
+      if (this._colorType === constants9.COLORTYPE_GRAYSCALE) {
         this.transColor([data2.readUInt16BE(0)]);
       }
-      if (this._colorType === constants7.COLORTYPE_COLOR) {
+      if (this._colorType === constants9.COLORTYPE_COLOR) {
         this.transColor([
           data2.readUInt16BE(0),
           data2.readUInt16BE(2),
@@ -42649,7 +42649,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseGAMA = function(data2) {
       this._crc.write(data2);
-      this.gamma(data2.readUInt32BE(0) / constants7.GAMMA_DIVISION);
+      this.gamma(data2.readUInt32BE(0) / constants9.GAMMA_DIVISION);
       this._handleChunkEnd();
     };
     Parser.prototype._handleIDAT = function(length) {
@@ -42661,7 +42661,7 @@ var require_parser = __commonJS({
     };
     Parser.prototype._parseIDAT = function(length, data2) {
       this._crc.write(data2);
-      if (this._colorType === constants7.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
+      if (this._colorType === constants9.COLORTYPE_PALETTE_COLOR && this._palette.length === 0) {
         throw new Error("Expected palette not found");
       }
       this.inflateData(data2);
@@ -43145,9 +43145,9 @@ var require_parser_async = __commonJS({
 var require_bitpacker = __commonJS({
   "node_modules/pngjs/lib/bitpacker.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants9 = require_constants2();
     module.exports = function(dataIn, width, height, options) {
-      let outHasAlpha = [constants7.COLORTYPE_COLOR_ALPHA, constants7.COLORTYPE_ALPHA].indexOf(
+      let outHasAlpha = [constants9.COLORTYPE_COLOR_ALPHA, constants9.COLORTYPE_ALPHA].indexOf(
         options.colorType
       ) !== -1;
       if (options.colorType === options.inputColorType) {
@@ -43167,11 +43167,11 @@ var require_bitpacker = __commonJS({
       }
       let data2 = options.bitDepth !== 16 ? dataIn : new Uint16Array(dataIn.buffer);
       let maxValue = 255;
-      let inBpp = constants7.COLORTYPE_TO_BPP_MAP[options.inputColorType];
+      let inBpp = constants9.COLORTYPE_TO_BPP_MAP[options.inputColorType];
       if (inBpp === 4 && !options.inputHasAlpha) {
         inBpp = 3;
       }
-      let outBpp = constants7.COLORTYPE_TO_BPP_MAP[options.colorType];
+      let outBpp = constants9.COLORTYPE_TO_BPP_MAP[options.colorType];
       if (options.bitDepth === 16) {
         maxValue = 65535;
         outBpp *= 2;
@@ -43195,24 +43195,24 @@ var require_bitpacker = __commonJS({
         let blue;
         let alpha = maxValue;
         switch (options.inputColorType) {
-          case constants7.COLORTYPE_COLOR_ALPHA:
+          case constants9.COLORTYPE_COLOR_ALPHA:
             alpha = data2[inIndex + 3];
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_COLOR:
+          case constants9.COLORTYPE_COLOR:
             red = data2[inIndex];
             green = data2[inIndex + 1];
             blue = data2[inIndex + 2];
             break;
-          case constants7.COLORTYPE_ALPHA:
+          case constants9.COLORTYPE_ALPHA:
             alpha = data2[inIndex + 1];
             red = data2[inIndex];
             green = red;
             blue = red;
             break;
-          case constants7.COLORTYPE_GRAYSCALE:
+          case constants9.COLORTYPE_GRAYSCALE:
             red = data2[inIndex];
             green = red;
             blue = red;
@@ -43245,8 +43245,8 @@ var require_bitpacker = __commonJS({
         for (let x = 0; x < width; x++) {
           let rgba = getRGBA(data2, inIndex);
           switch (options.colorType) {
-            case constants7.COLORTYPE_COLOR_ALPHA:
-            case constants7.COLORTYPE_COLOR:
+            case constants9.COLORTYPE_COLOR_ALPHA:
+            case constants9.COLORTYPE_COLOR:
               if (options.bitDepth === 8) {
                 outData[outIndex] = rgba.red;
                 outData[outIndex + 1] = rgba.green;
@@ -43263,8 +43263,8 @@ var require_bitpacker = __commonJS({
                 }
               }
               break;
-            case constants7.COLORTYPE_ALPHA:
-            case constants7.COLORTYPE_GRAYSCALE: {
+            case constants9.COLORTYPE_ALPHA:
+            case constants9.COLORTYPE_GRAYSCALE: {
               let grayscale = (rgba.red + rgba.green + rgba.blue) / 3;
               if (options.bitDepth === 8) {
                 outData[outIndex] = grayscale;
@@ -43437,7 +43437,7 @@ var require_filter_pack = __commonJS({
 var require_packer = __commonJS({
   "node_modules/pngjs/lib/packer.js"(exports, module) {
     "use strict";
-    var constants7 = require_constants2();
+    var constants9 = require_constants2();
     var CrcStream = require_crc();
     var bitPacker = require_bitpacker();
     var filter = require_filter_pack();
@@ -43450,23 +43450,23 @@ var require_packer = __commonJS({
       options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
       options.deflateFactory = options.deflateFactory || zlib.createDeflate;
       options.bitDepth = options.bitDepth || 8;
-      options.colorType = typeof options.colorType === "number" ? options.colorType : constants7.COLORTYPE_COLOR_ALPHA;
-      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants7.COLORTYPE_COLOR_ALPHA;
+      options.colorType = typeof options.colorType === "number" ? options.colorType : constants9.COLORTYPE_COLOR_ALPHA;
+      options.inputColorType = typeof options.inputColorType === "number" ? options.inputColorType : constants9.COLORTYPE_COLOR_ALPHA;
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants9.COLORTYPE_GRAYSCALE,
+        constants9.COLORTYPE_COLOR,
+        constants9.COLORTYPE_COLOR_ALPHA,
+        constants9.COLORTYPE_ALPHA
       ].indexOf(options.colorType) === -1) {
         throw new Error(
           "option color type:" + options.colorType + " is not supported at present"
         );
       }
       if ([
-        constants7.COLORTYPE_GRAYSCALE,
-        constants7.COLORTYPE_COLOR,
-        constants7.COLORTYPE_COLOR_ALPHA,
-        constants7.COLORTYPE_ALPHA
+        constants9.COLORTYPE_GRAYSCALE,
+        constants9.COLORTYPE_COLOR,
+        constants9.COLORTYPE_COLOR_ALPHA,
+        constants9.COLORTYPE_ALPHA
       ].indexOf(options.inputColorType) === -1) {
         throw new Error(
           "option input color type:" + options.inputColorType + " is not supported at present"
@@ -43490,7 +43490,7 @@ var require_packer = __commonJS({
     };
     Packer.prototype.filterData = function(data2, width, height) {
       let packedData = bitPacker(data2, width, height, this._options);
-      let bpp = constants7.COLORTYPE_TO_BPP_MAP[this._options.colorType];
+      let bpp = constants9.COLORTYPE_TO_BPP_MAP[this._options.colorType];
       let filteredData = filter(packedData, width, height, this._options, bpp);
       return filteredData;
     };
@@ -43510,8 +43510,8 @@ var require_packer = __commonJS({
     };
     Packer.prototype.packGAMA = function(gamma) {
       let buf = Buffer.alloc(4);
-      buf.writeUInt32BE(Math.floor(gamma * constants7.GAMMA_DIVISION), 0);
-      return this._packChunk(constants7.TYPE_gAMA, buf);
+      buf.writeUInt32BE(Math.floor(gamma * constants9.GAMMA_DIVISION), 0);
+      return this._packChunk(constants9.TYPE_gAMA, buf);
     };
     Packer.prototype.packIHDR = function(width, height) {
       let buf = Buffer.alloc(13);
@@ -43522,13 +43522,13 @@ var require_packer = __commonJS({
       buf[10] = 0;
       buf[11] = 0;
       buf[12] = 0;
-      return this._packChunk(constants7.TYPE_IHDR, buf);
+      return this._packChunk(constants9.TYPE_IHDR, buf);
     };
     Packer.prototype.packIDAT = function(data2) {
-      return this._packChunk(constants7.TYPE_IDAT, data2);
+      return this._packChunk(constants9.TYPE_IDAT, data2);
     };
     Packer.prototype.packIEND = function() {
-      return this._packChunk(constants7.TYPE_IEND, null);
+      return this._packChunk(constants9.TYPE_IEND, null);
     };
   }
 });
@@ -43539,7 +43539,7 @@ var require_packer_async = __commonJS({
     "use strict";
     var util = __require("util");
     var Stream = __require("stream");
-    var constants7 = require_constants2();
+    var constants9 = require_constants2();
     var Packer = require_packer();
     var PackerAsync = module.exports = function(opt) {
       Stream.call(this);
@@ -43550,7 +43550,7 @@ var require_packer_async = __commonJS({
     };
     util.inherits(PackerAsync, Stream);
     PackerAsync.prototype.pack = function(data2, width, height, gamma) {
-      this.emit("data", Buffer.from(constants7.PNG_SIGNATURE));
+      this.emit("data", Buffer.from(constants9.PNG_SIGNATURE));
       this.emit("data", this._packer.packIHDR(width, height));
       if (gamma) {
         this.emit("data", this._packer.packGAMA(gamma));
@@ -43874,7 +43874,7 @@ var require_packer_sync = __commonJS({
     if (!zlib.deflateSync) {
       hasSyncZlib = false;
     }
-    var constants7 = require_constants2();
+    var constants9 = require_constants2();
     var Packer = require_packer();
     module.exports = function(metaData, opt) {
       if (!hasSyncZlib) {
@@ -43885,7 +43885,7 @@ var require_packer_sync = __commonJS({
       let options = opt || {};
       let packer = new Packer(options);
       let chunks = [];
-      chunks.push(Buffer.from(constants7.PNG_SIGNATURE));
+      chunks.push(Buffer.from(constants9.PNG_SIGNATURE));
       chunks.push(packer.packIHDR(metaData.width, metaData.height));
       if (metaData.gamma) {
         chunks.push(packer.packGAMA(metaData.gamma));
@@ -64487,7 +64487,16 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// packages/protocol/dist/lan-upload.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/huawei-push.js
+var HUAWEI_PUSH_CAPABILITY = "push.huawei.v1";
+var huaweiPushRegisterSchema = external_exports.object({
+  token: external_exports.string().min(1).max(4096).regex(/^[^\u0000-\u001f\u007f]+$/u)
+}).strict();
+var huaweiPushUnregisterSchema = external_exports.object({}).strict();
+var huaweiPushRegisterResultSchema = external_exports.object({ registered: external_exports.literal(true) }).strict();
+var huaweiPushUnregisterResultSchema = external_exports.object({ unregistered: external_exports.literal(true) }).strict();
+
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/lan-upload.js
 var LAN_UPLOAD_CAPABILITY = "workspace.upload.lan.v1";
 var LAN_UPLOAD_MIN_BYTES = 1024 * 1024;
 var LAN_UPLOAD_TICKET_MS = 1e4;
@@ -64513,7 +64522,7 @@ function createLanUploadPrologue(offer) {
   return new TextEncoder().encode(JSON.stringify(["ds-harness-remote/lan-upload/v1", offer.connectionId, offer.sessionId, offer.uploadId, ticket]));
 }
 
-// packages/protocol/dist/transport-upgrade.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/transport-upgrade.js
 var TRANSPORT_UPGRADE_CAPABILITY = "remote.transport.upgrade.v1";
 var UPGRADE_SEQUENCE_HEADER_BYTES = 12;
 var MAX_REORDER_BUFFERED_FRAMES = 256;
@@ -64671,7 +64680,7 @@ var SequencedCiphertextReorderBuffer = class {
   }
 };
 
-// packages/protocol/dist/binary-upload.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/binary-upload.js
 var BINARY_UPLOAD_CAPABILITY = "workspace.upload.binary.v1";
 var BINARY_UPLOAD_CHUNK_BYTES = 256 * 1024;
 var BINARY_UPLOAD_MAGIC = new Uint8Array([68, 83, 72, 85, 80, 1, 0, 0]);
@@ -64715,7 +64724,7 @@ function isBinaryUploadRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/protocol/dist/loopback.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/loopback.js
 var LOOPBACK_CHUNK_BYTES = 64 * 1024;
 var LOOPBACK_MAX_BODY_BYTES = 1024 * 1024;
 var LOOPBACK_MAX_WS_BYTES = 256 * 1024;
@@ -64737,7 +64746,7 @@ var loopbackRequestSchema = external_exports.discriminatedUnion("op", [
   external_exports.object({ op: external_exports.literal("ws.send"), id, data, binary: external_exports.boolean() }).strict()
 ]);
 
-// packages/protocol/dist/wire-json.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/wire-json.js
 function parseWireJson(input4) {
   try {
     const text = typeof input4 === "string" ? input4 : new TextDecoder("utf-8", { fatal: true }).decode(input4);
@@ -64777,7 +64786,7 @@ function parseWireJson(input4) {
   }
 }
 
-// packages/protocol/dist/close-semantics.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
 var HEARTBEAT_TIMEOUT_CLOSE_CODE = 4009;
@@ -64805,7 +64814,7 @@ function classifyControlClose(code, reason) {
   };
 }
 
-// packages/protocol/dist/index.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
 var WEBRTC_LEASE_MS = 3e5;
@@ -64915,6 +64924,7 @@ var rpcMethods = [
   "fileviewer.call",
   "codex.app.call",
   "codex.app.respond",
+  "codex.app.approvals.claim",
   "codex.app.stream.open",
   "codex.app.stream.close",
   "codex.app.transfer.open",
@@ -65186,8 +65196,6 @@ var connectIncomingPayloadSchema = external_exports.object({
   relayEpoch: external_exports.number().int().nonnegative().optional()
 });
 var connectAcceptedPayloadSchema = external_exports.object({
-  webrtcFallbackTimeoutMs: external_exports.number().int().positive().max(2147483647).optional(),
-  parallelConnections: external_exports.boolean().optional(),
   relayRecoveryTicket: external_exports.string().min(1).max(4096).optional(),
   recoveryTicket: external_exports.string().min(1).max(4096).optional(),
   connectionId: external_exports.string().min(1),
@@ -65485,7 +65493,7 @@ function cryptoRandomId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-// packages/client-core/dist/remote-gateway.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id6, capability) {
   if (!capabilities.includes(capability))
@@ -65512,7 +65520,7 @@ function createRemoteId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// packages/client-core/dist/codex-client.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/client-core/dist/codex-client.js
 var MAX_DISPLAY_ITEM_TEXT = 256 * 1024;
 var CODEX_IMAGE_MEDIA_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 var DATA_IMAGE_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
@@ -65595,6 +65603,12 @@ var CodexRemoteClient = class {
   }
   async respond(requestHandle, decision, signal) {
     await this.core.rpc("codex.app.respond", { requestHandle, decision }, signal);
+  }
+  async claimApprovals(streamId, signal) {
+    const result = await this.core.rpc("codex.app.approvals.claim", { streamId }, signal);
+    if (!isRecord(result) || !Array.isArray(result.frames))
+      throw new Error("Invalid Codex approval claim response.");
+    return result.frames.filter((frame) => isRecord(frame) && typeof frame.method === "string");
   }
   async subscribe(threadId, onFrame, signal, onClose) {
     const streamId = createRemoteId();
@@ -66125,7 +66139,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/client-core/dist/acp-client.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
 var AgentAcpClient = class {
   core;
@@ -66261,25 +66275,7 @@ var AgentAcpClient = class {
   }
   async openStream(sessionId, onFrame, onClosed, signal, tool) {
     const streamId = createRemoteId();
-    let closed = false;
-    let opened = false;
-    let unsubscribe = () => void 0;
-    let unsubscribeCoreClose = () => void 0;
-    const onAbort = () => {
-      if (!markClosed())
-        return;
-      void this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
-    };
-    const markClosed = () => {
-      if (closed)
-        return false;
-      closed = true;
-      unsubscribe();
-      unsubscribeCoreClose();
-      signal?.removeEventListener("abort", onAbort);
-      return true;
-    };
-    unsubscribe = this.core.onEvent((event) => {
+    const unsubscribe = this.core.onEvent((event) => {
       if (event.event === "agent.acp.frame" && isRecord2(event.data)) {
         const data2 = event.data;
         if (tool ? data2.streamId !== streamId : !frameMatchesSubscription(data2, streamId, sessionId))
@@ -66287,40 +66283,24 @@ var AgentAcpClient = class {
         onFrame(data2);
       }
       if (event.event === "agent.acp.stream.closed" && isRecord2(event.data) && event.data.streamId === streamId) {
-        if (!markClosed())
-          return;
         onClosed?.(event.data);
       }
-    });
-    unsubscribeCoreClose = this.core.onClose(() => {
-      if (!opened) {
-        markClosed();
-        return;
-      }
-      if (!markClosed())
-        return;
-      onClosed?.({ streamId, reason: "peer-disconnected" });
     });
     try {
       await this.core.rpc("agent.acp.stream.open", { streamId, sessionId, ...tool ? { tool } : {} }, signal);
       if (signal?.aborted) {
-        markClosed();
+        unsubscribe();
         await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
         throw signal.reason;
       }
-      opened = true;
-      if (!closed) {
-        signal?.addEventListener("abort", onAbort, { once: true });
-      }
     } catch (error62) {
-      markClosed();
+      unsubscribe();
       throw error62;
     }
     return {
       streamId,
       close: async () => {
-        if (!markClosed())
-          return;
+        unsubscribe();
         await this.core.rpc("agent.acp.stream.close", { streamId }).catch(() => void 0);
       }
     };
@@ -66414,113 +66394,7 @@ function canonicalBase64ToBytes(value) {
   return bytes;
 }
 
-// packages/webrtc/dist/direct-preferred-race.js
-var DirectPreferredRace = class {
-  signal;
-  windowMs;
-  result;
-  resolve;
-  reject;
-  settled = false;
-  windowExpired = false;
-  directFailed = false;
-  turnFailed = false;
-  standby;
-  windowTimer;
-  deadlineTimer;
-  deadlineAt;
-  started = /* @__PURE__ */ new Set();
-  abort = () => this.finish(void 0, new Error("RTC race aborted"));
-  constructor(signal, windowMs = 3e3, deadlineMs = 12e3, deferWindow = false) {
-    this.signal = signal;
-    this.windowMs = windowMs;
-    this.result = new Promise((resolve10, reject) => {
-      this.resolve = resolve10;
-      this.reject = reject;
-    });
-    this.deadlineAt = Date.now() + deadlineMs;
-    this.armDeadline(deadlineMs);
-    signal.addEventListener("abort", this.abort, { once: true });
-    if (signal.aborted)
-      this.abort();
-    else if (!deferWindow)
-      this.startWindow();
-  }
-  /** Preserve each configured RTC budget without allowing repeated events to prolong it. */
-  startAttempt(attempt, timeoutMs) {
-    if (this.settled || this.started.has(attempt))
-      return;
-    this.started.add(attempt);
-    if (attempt === "direct")
-      this.startWindow();
-    const deadline = Date.now() + timeoutMs;
-    if (deadline > this.deadlineAt) {
-      this.deadlineAt = deadline;
-      clearTimeout(this.deadlineTimer);
-      this.armDeadline(timeoutMs);
-    }
-  }
-  armDeadline(delayMs) {
-    this.deadlineTimer = setTimeout(() => {
-      this.windowExpired = true;
-      if (!this.chooseStandby())
-        this.finish(void 0, new Error("RTC race timed out"));
-    }, delayMs);
-  }
-  startWindow() {
-    if (this.settled || this.windowTimer !== void 0)
-      return;
-    this.windowTimer = setTimeout(() => {
-      this.windowExpired = true;
-      this.chooseStandby();
-    }, this.windowMs);
-  }
-  ready(attempt, value) {
-    if (this.settled || (attempt === "direct" ? this.directFailed : this.turnFailed))
-      return;
-    if (attempt === "direct")
-      this.finish({ attempt, value });
-    else {
-      this.standby = value;
-      this.chooseStandby();
-    }
-  }
-  failed(attempt) {
-    if (this.settled)
-      return;
-    if (attempt === "direct")
-      this.directFailed = true;
-    else {
-      this.turnFailed = true;
-      this.standby = void 0;
-    }
-    if (this.directFailed && this.turnFailed)
-      this.finish(void 0, new Error("Both RTC attempts failed"));
-    else
-      this.chooseStandby();
-  }
-  chooseStandby() {
-    if (this.standby === void 0 || !(this.windowExpired || this.directFailed))
-      return false;
-    this.finish({ attempt: "turn", value: this.standby });
-    return true;
-  }
-  finish(winner, error62) {
-    if (this.settled)
-      return;
-    this.settled = true;
-    clearTimeout(this.windowTimer);
-    clearTimeout(this.deadlineTimer);
-    this.signal.removeEventListener("abort", this.abort);
-    this.standby = void 0;
-    if (winner)
-      this.resolve(winner);
-    else
-      this.reject(error62 ?? new Error("RTC race failed"));
-  }
-};
-
-// packages/webrtc/dist/websocket-backpressure.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
   const started = Date.now();
   while ((socket.bufferedAmount ?? 0) > 512 * 1024) {
@@ -66532,7 +66406,7 @@ async function waitForRelayCapacity(socket) {
     throw new Error("Relay transport closed");
 }
 
-// packages/webrtc/dist/transport.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/transport.js
 var BaseTransport = class {
   handlers = /* @__PURE__ */ new Set();
   closeHandlers = /* @__PURE__ */ new Set();
@@ -66554,7 +66428,7 @@ var BaseTransport = class {
   }
 };
 
-// packages/webrtc/dist/util.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/util.js
 function toBase64Url(bytes) {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   const base643 = typeof btoa === "function" ? btoa(binary) : Buffer.from(bytes).toString("base64");
@@ -66568,7 +66442,7 @@ function fromBase64Url(value) {
   return new Uint8Array(Buffer.from(padded, "base64"));
 }
 
-// packages/webrtc/dist/rtc-adapter.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/rtc-adapter.js
 var RTC_DATA_CHANNEL_LABEL = "dsh";
 var RTC_DATA_CHANNEL_OPTIONS = { ordered: true };
 function browserRtcFactory(options = {}) {
@@ -66804,7 +66678,7 @@ function adaptDataChannel(raw, sendBinary) {
   };
 }
 
-// packages/webrtc/dist/rtc-chunking.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/rtc-chunking.js
 var RTC_CHUNK_MAGIC = new Uint8Array([82, 84, 67, 72]);
 var RTC_CHUNK_HEADER_BYTES = 12;
 var RTC_CHUNK_PAYLOAD_BYTES = 8 * 1024;
@@ -66913,7 +66787,7 @@ function isChunk(frame) {
   return true;
 }
 
-// packages/webrtc/dist/rtc-data-channel.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/rtc-data-channel.js
 var DEFAULT_NEGOTIATE_TIMEOUT_MS = 8e3;
 var SELECTED_PATH_RETRY_COUNT = 5;
 var SELECTED_PATH_RETRY_DELAY_MS = 50;
@@ -67632,7 +67506,7 @@ function sleep(ms) {
   return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
-// packages/webrtc/dist/control-lease.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/control-lease.js
 var WEBRTC_LEASE_MS2 = 3e5;
 var ControlLease = class {
   connectionId;
@@ -67714,7 +67588,7 @@ var ControlLease = class {
   }
 };
 
-// packages/webrtc/dist/adaptive-transport.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/adaptive-transport.js
 var DEFAULT_CAPABILITIES = [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", "harness.api.v1"];
 var DEFAULT_PREFERRED_TRANSPORTS = ["lan", "p2p", "turn", "relay"];
 var AdaptiveTransport = class extends BaseTransport {
@@ -67780,7 +67654,7 @@ var AdaptiveTransport = class extends BaseTransport {
       const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
       this.options.signal?.addEventListener("abort", onAbort, { once: true });
       this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
-      this.handshakeTimer = setTimeout(() => this.failConnection(Object.assign(new Error("Adaptive control handshake timed out"), { code: "TRANSPORT_SETUP_FAILED" })), this.options.handshakeTimeoutMs ?? 15e3);
+      this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
       const socket = this.socket;
       socket.onmessage = (event) => {
         if (this.socket === socket)
@@ -67799,7 +67673,7 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       socket.onerror = () => {
         if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(Object.assign(new Error("Control socket failed"), { code: "TRANSPORT_SETUP_FAILED" }), { reason: "control-error" });
+          this.controlLost(new Error("Control socket failed"), { reason: "control-error" });
       };
       socket.onclose = (event) => {
         if (this.lifetime === lifetime && this.socket === socket)
@@ -67948,11 +67822,6 @@ var AdaptiveTransport = class extends BaseTransport {
           throw new Error("connect.accepted did not include a connectionId");
         }
         this.connectionId = payload.connectionId;
-        if (this.options.useServerNegotiateTimeout && typeof payload.webrtcFallbackTimeoutMs === "number") {
-          this.serverNegotiateTimeoutMs = payload.webrtcFallbackTimeoutMs;
-        }
-        if (payload.parallelConnections === true)
-          this.options.onParallelConnections?.();
         if (this.negotiatedCapabilities.includes(WEBRTC_RESUME_CAPABILITY))
           this.recoveryTicket = payload.recoveryTicket;
         if (this.negotiatedCapabilities.includes(RELAY_RESUME_CAPABILITY))
@@ -68043,8 +67912,7 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.connectionId === void 0)
       return;
     const preferred = this.negotiatedTransports();
-    const lanRequested = (this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS).includes("lan");
-    const wantWebRtc = !this.options.forceRelay && (!this.options.relayFirst || lanRequested) && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
+    const wantWebRtc = !this.options.forceRelay && !this.options.relayFirst && this.webrtcEnabled && (preferred.includes("lan") || preferred.includes("p2p") || preferred.includes("turn"));
     let selected = "relay";
     this.lastRtcDiagnostics = void 0;
     if (wantWebRtc) {
@@ -68075,8 +67943,6 @@ var AdaptiveTransport = class extends BaseTransport {
         await this.rtc?.close();
         throwIfAborted(signal);
         this.rtc = void 0;
-        if (this.options.failOnWebRtcFallback)
-          throw Object.assign(new Error("WebRTC attempt failed"), { code: "RTC_NEGOTIATION_FAILED", cause: reason });
         if (!preferred.includes("relay"))
           throw reason;
         this.dataMode = "relay";
@@ -68126,9 +67992,8 @@ var AdaptiveTransport = class extends BaseTransport {
       iceServers = [];
     }
     throwIfAborted(signal);
-    const negotiatedMs = this.options.useServerNegotiateTimeout ? Math.min(2147483647, this.serverNegotiateTimeoutMs ?? this.options.negotiateTimeoutMs ?? 8e3) : negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
+    const negotiatedMs = negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs);
     const effectiveNegotiateTimeoutMs = iceServers.length === 0 ? Math.min(negotiatedMs ?? DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS, DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS) : negotiatedMs;
-    this.options.onWebRtcStarted?.(effectiveNegotiateTimeoutMs ?? 8e3);
     const rtc = new RtcDataChannelTransport({
       role: "initiator",
       factory,
@@ -68516,7 +68381,7 @@ function throwIfAborted(signal) {
     throw new Error("Adaptive connection was aborted");
 }
 
-// packages/webrtc/dist/serial-send.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/webrtc/dist/serial-send.js
 var SerialSend = class {
   tail = Promise.resolve();
   bytes = 0;
@@ -68537,7 +68402,7 @@ var SerialSend = class {
   }
 };
 
-// packages/client-core/dist/index.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/client-core/dist/index.js
 var RemoteClientError = class extends Error {
   code;
   constructor(code, message, options) {
@@ -69648,6 +69513,17 @@ var AcpEventCarrier = class {
       clientId: id6,
       host: { home: workspace2?.path ?? "/" }
     });
+    for (const pending of this.context.pendingApprovals.values()) {
+      if (pending.request !== void 0 && (pending.expiresAt === void 0 || pending.expiresAt > Date.now())) {
+        queue.push({
+          type: "waterfall",
+          event: "approval/request",
+          eventId: pending.requestHandle,
+          agentId: pending.sessionId,
+          request: pending.request
+        });
+      }
+    }
     return queue.iterate(() => this.context.eventStreams.delete(id6));
   }
   emitRemoteEvent(event, args) {
@@ -69712,149 +69588,105 @@ var AcpLiveProjection = class {
   constructor(context) {
     this.context = context;
   }
-  findFollow(sessionId) {
-    for (const follow of this.context.follows) {
-      if (follow.sessionId === sessionId) return follow;
-    }
-    return void 0;
-  }
-  createFollowState(session2, queue, hasConsumer, stepOpen) {
-    return {
-      sessionId: session2.sessionId,
+  async sessionFollow(request, signal) {
+    const sessionId = extractSessionId(request);
+    const session2 = this.context.ensureSessionRegistered(sessionId) ?? this.context.sessions.get(sessionId);
+    if (session2 === void 0) throw new Error("The Session was not found.");
+    await this.context.hydrateSession(session2);
+    this.context.rememberOpenedSession?.(session2.sessionId);
+    const history = this.context.historyPage(session2, {
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50
+    });
+    const queue = new AsyncValueQueue(signal);
+    const follow = {
+      sessionId,
       acpSessionId: session2.acpSessionId,
       queue,
-      hasConsumer,
-      nextSeq: session2.events.length === 0 ? 0 : Math.max(...session2.events.map((entry) => entry.event.seq)) + 1,
+      nextSeq: session2.events.length,
       turn: Math.max(0, ...session2.events.map((entry) => isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
-      stepOpen,
+      stepOpen: session2.running,
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: "",
-      accumulatedReasoning: "",
       activeToolCalls: /* @__PURE__ */ new Set(),
       piToolOutputs: /* @__PURE__ */ new Map(),
       piToolCalls: /* @__PURE__ */ new Map()
     };
-  }
-  snapshotFrame(session2, history, follow) {
-    const step = this.context.backend === "pi" ? follow.piStep ?? 1 : 1;
-    const assistantStream = follow.assistantAttempt === void 0 ? { revision: follow.assistantStreamRevision } : {
-      revision: follow.assistantStreamRevision,
-      activeAttempt: {
-        attemptId: follow.assistantAttempt.attemptId,
-        startedAfterSeq: follow.assistantAttempt.startedAfterSeq,
-        turn: follow.turn,
-        step,
-        nextIndex: follow.assistantAttempt.nextIndex,
-        stream: [...follow.assistantAttempt.stream]
-      }
-    };
-    return {
+    this.context.follows.add(follow);
+    queue.push({
       type: "snapshot",
       header: history.header,
       cursor: history.cursor,
       records: history.records,
       hasMore: history.hasMore,
       projections: {
-        asOfSeq: session2.projectionSeq ?? -1,
+        asOfSeq: history.cursor,
         values: {
           title: session2.title ?? acpBackendLabel(this.context.backend),
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
-          modelSelection: this.context.modelSelectionProjection(session2.sessionId),
-          permissions: this.context.permissionsProjection(session2.sessionId),
+          modelSelection: this.context.modelSelectionProjection(sessionId),
+          permissions: this.context.permissionsProjection(sessionId),
           imageLimits: acpImageLimits(this.context.backend)
         }
       },
-      assistantStream
-    };
-  }
-  handleRemoteStreamClosed(session2, follow, reason) {
-    if (follow.closed) return;
-    session2.running = false;
-    this.context.emitRemoteEvent("api-session/status", [session2.sessionId, false]);
-    this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(reason), true);
-  }
-  async sessionFollow(request, signal) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.context.lookupSession(requestedId);
-    if (session2 === void 0) throw new Error("The Session was not found.");
-    const sessionId = session2.sessionId;
-    await this.context.hydrateSession(session2);
-    this.context.rememberOpenedSession?.(sessionId);
-    const history = this.context.historyPage(session2, {
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50
+      assistantStream: { revision: 0 }
     });
-    const queue = new AsyncValueQueue(signal);
-    const existing = this.findFollow(sessionId);
-    if (existing !== void 0) {
-      const priorQueue = existing.queue;
-      existing.queue = queue;
-      existing.hasConsumer = true;
-      priorQueue.close();
-      queue.push(this.snapshotFrame(session2, history, existing));
-      return queue.iterate(() => {
-        if (existing.queue === queue) {
-          existing.closed = true;
-          this.context.follows.delete(existing);
-          void existing.close?.().catch(() => void 0);
-        }
-      });
-    }
-    const follow = this.createFollowState(session2, queue, true, session2.running);
-    this.context.follows.add(follow);
-    queue.push(this.snapshotFrame(session2, history, follow));
     try {
       const stream = await this.context.client.openStream(
         session2.acpSessionId,
         (frame) => this.acceptAcpFrame(follow, frame),
-        (closed) => this.handleRemoteStreamClosed(session2, follow, closed.reason),
+        (closed) => {
+          session2.running = false;
+          this.context.emitRemoteEvent("api-session/status", [sessionId, false]);
+          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
+        },
         signal
       );
-      if (follow.closed || !this.context.follows.has(follow)) {
-        await stream.close().catch(() => void 0);
-      } else {
-        follow.close = () => stream.close();
-      }
+      follow.close = () => stream.close();
     } catch (error62) {
       this.context.follows.delete(follow);
-      follow.closed = true;
-      follow.queue.close();
+      queue.close();
       throw error62;
     }
     return queue.iterate(() => {
-      if (follow.queue === queue) {
-        follow.closed = true;
-        this.context.follows.delete(follow);
-        void follow.close?.().catch(() => void 0);
-      }
+      this.context.follows.delete(follow);
+      void follow.close?.().catch(() => void 0);
     });
   }
   async ensureFollow(session2) {
-    if (this.findFollow(session2.sessionId) !== void 0) return;
+    if ([...this.context.follows].some((follow2) => follow2.sessionId === session2.sessionId)) return;
     const controller = new AbortController();
     const queue = new AsyncValueQueue(controller.signal);
-    const follow = this.createFollowState(session2, queue, false, false);
+    const follow = {
+      sessionId: session2.sessionId,
+      acpSessionId: session2.acpSessionId,
+      queue,
+      nextSeq: session2.events.length === 0 ? 0 : Math.max(...session2.events.map((entry) => entry.event.seq)) + 1,
+      turn: Math.max(0, ...session2.events.map((entry) => isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
+      stepOpen: false,
+      streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: "",
+      activeToolCalls: /* @__PURE__ */ new Set(),
+      piToolOutputs: /* @__PURE__ */ new Map(),
+      piToolCalls: /* @__PURE__ */ new Map()
+    };
     this.context.follows.add(follow);
-    try {
-      const stream = await this.context.client.openStream(
-        session2.acpSessionId,
-        (frame) => this.acceptAcpFrame(follow, frame),
-        (closed) => this.handleRemoteStreamClosed(session2, follow, closed.reason)
-      );
-      if (follow.closed || !this.context.follows.has(follow)) {
-        await stream.close().catch(() => void 0);
-        return;
+    const stream = await this.context.client.openStream(
+      session2.acpSessionId,
+      (frame) => this.acceptAcpFrame(follow, frame),
+      (closed) => {
+        if (this.context.backend === "pi") {
+          session2.running = false;
+          this.context.emitRemoteEvent("api-session/status", [session2.sessionId, false]);
+        }
+        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
       }
-      follow.close = async () => {
-        controller.abort();
-        await stream.close();
-      };
-    } catch (error62) {
-      this.context.follows.delete(follow);
-      follow.closed = true;
-      follow.queue.close();
-      throw error62;
-    }
+    );
+    follow.close = async () => {
+      controller.abort();
+      await stream.close();
+    };
   }
   acceptAcpFrame(follow, frame) {
     const method = frame.frame.method;
@@ -69863,7 +69695,6 @@ var AcpLiveProjection = class {
       this.acceptSessionUpdate(follow, params);
       return;
     }
-    if (follow.closed) return;
     if (method === "session/request_permission" || method === "cursor/ask_question" || method === "cursor/create_plan") {
       this.acceptApproval(follow, params, method);
     }
@@ -69878,10 +69709,9 @@ var AcpLiveProjection = class {
       }
       return;
     }
-    if (follow.closed) return;
     if (kind === "model_selection" && isRecord4(update.selected) && update.selected.provider === this.context.backend && typeof update.selected.model === "string") {
       this.context.selectedModels.set(follow.sessionId, update.selected);
-      this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq(follow.sessionId));
+      this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq());
       return;
     }
     if (kind === "agent_message_chunk" || kind === "agent_message") {
@@ -69958,41 +69788,19 @@ var AcpLiveProjection = class {
         return;
       }
       if (kind === "tool_call_update" && !terminal) return;
-      if (!terminal && follow.activeToolCalls.has(callId)) return;
-      if (!terminal || !follow.activeToolCalls.has(callId)) {
-        this.pushEvent(follow, "tool/call", {
-          turn: follow.turn,
-          step: 1,
-          callId,
-          name: toolName,
-          arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
-          toolCallId: callId,
-          toolName,
-          status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
-        });
-      }
-      if (terminal) {
-        const output2 = piToolResult(update);
-        const content = output2.content.length > 0 ? output2.content : typeof update.rawOutput === "string" && update.rawOutput.length > 0 ? [{ type: "text", text: update.rawOutput }] : [];
-        this.pushEvent(follow, "tool/result", {
-          turn: follow.turn,
-          step: 1,
-          message: {
-            id: `${callId}:result`,
-            role: "user",
-            content: [{
-              type: "tool-result",
-              toolCallId: callId,
-              content,
-              ...output2.isError ? { isError: true } : {}
-            }],
-            source: { kind: "tool", callId }
-          }
-        });
-        follow.activeToolCalls.delete(callId);
-      } else {
-        follow.activeToolCalls.add(callId);
-      }
+      if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
+      this.pushEvent(follow, "tool/call", {
+        turn: follow.turn,
+        step: 1,
+        callId,
+        name: toolName,
+        arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
+        toolCallId: callId,
+        toolName,
+        status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
+      });
+      if (terminal) follow.activeToolCalls.delete(callId);
+      else follow.activeToolCalls.add(callId);
       if (session2 !== void 0) session2.updatedAt = Date.now();
       return;
     }
@@ -70029,17 +69837,12 @@ var AcpLiveProjection = class {
       void this.context.client.respond(requestHandle, "allow-once").catch(() => void 0);
       return;
     }
-    this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
     const toolName = method === "cursor/create_plan" ? string4(params.name) ?? "plan" : method === "cursor/ask_question" ? string4(params.title) ?? "question" : string4(params.toolName) ?? string4(record2(params.toolCall).title) ?? "permission";
     const reason = method === "cursor/create_plan" ? string4(params.overview) ?? string4(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string4(params.reason) ?? string4(record2(record2(params.toolCall).rawInput).message);
-    this.context.emitApproval({
-      eventId: requestHandle,
-      agentId: follow.sessionId,
-      request: {
-        toolName,
-        ...reason === void 0 ? {} : { reason }
-      }
-    });
+    const request = { toolName, ...reason === void 0 ? {} : { reason } };
+    const expiresAt = typeof params.expiresAt === "number" ? params.expiresAt : void 0;
+    this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId, request, expiresAt });
+    this.context.emitApproval({ eventId: requestHandle, agentId: follow.sessionId, request });
   }
   pushAssistantChunk(follow, chunk) {
     let attempt = follow.assistantAttempt;
@@ -70117,7 +69920,6 @@ var AcpLiveProjection = class {
       this.ensurePiStep(follow, true);
       follow.piReasoning = (follow.piReasoning ?? "") + delta;
     }
-    follow.accumulatedReasoning = (follow.accumulatedReasoning ?? "") + delta;
     if (!follow.stepOpen) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -70146,35 +69948,21 @@ var AcpLiveProjection = class {
     }
     if (advanceAfterTools) follow.piAfterTools = false;
   }
-  finishReason(outcome) {
-    if (outcome.kind === "error") return { kind: "error", failure: outcome.error };
-    if (outcome.kind === "aborted") {
-      return {
-        kind: "aborted",
-        failure: { code: "ABORTED", message: `${acpBackendLabel(this.context.backend)} reply interrupted.` }
-      };
-    }
-    return { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
-  }
   finishPiAssistant(follow, outcome = { kind: "completed" }) {
     if (!follow.streamActive) return;
-    const isPi = this.context.backend === "pi";
-    const step = isPi ? follow.piStep ?? 1 : 1;
-    const reasoningText = follow.accumulatedReasoning ?? follow.piReasoning ?? "";
     const blocks = [
-      { index: follow.reasoningBlockIndex, type: "reasoning", text: reasoningText },
+      { index: follow.reasoningBlockIndex, type: "reasoning", text: follow.piReasoning ?? "" },
       { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
     ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
-    for (const { index, type, text } of blocks) {
-      this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
-    }
-    this.pushAssistantChunk(follow, { type: "finish", reason: this.finishReason(outcome) });
+    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
+    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "Pi reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
+    this.pushAssistantChunk(follow, { type: "finish", reason });
     const selection = this.context.modelSelection(follow.sessionId);
     const seq = this.pushEvent(follow, "assistant/message", {
       turn: follow.turn,
-      step,
+      step: follow.piStep ?? 1,
       message: {
-        id: isPi ? `${follow.sessionId}:${follow.turn}:${step}` : `${follow.sessionId}:${follow.turn}`,
+        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
         role: "assistant",
         content: blocks.map(({ type, text }) => ({ type, text })),
         source: { kind: "model", provider: selection.provider, model: selection.model }
@@ -70186,35 +69974,80 @@ var AcpLiveProjection = class {
     follow.blockIndex = void 0;
     follow.reasoningBlockIndex = void 0;
     follow.accumulatedText = "";
-    follow.accumulatedReasoning = "";
     follow.piReasoning = "";
   }
-  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }, remoteClosed = false) {
-    if (follow.closed) return;
+  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }) {
     const session2 = this.context.sessions.get(follow.sessionId);
     if (session2 !== void 0) session2.running = false;
-    const isPi = this.context.backend === "pi";
-    const step = isPi ? follow.piStep ?? 1 : 1;
-    this.finishPiAssistant(follow, outcome);
-    if (follow.stepOpen) {
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
-    }
-    follow.stepOpen = false;
-    if (isPi) {
+    if (this.context.backend === "pi") {
+      this.finishPiAssistant(follow, outcome);
+      if (follow.stepOpen) {
+        this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
+        this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
+      }
+      follow.stepOpen = false;
       follow.piStep = 1;
       follow.piAfterTools = false;
+      follow.piToolOutputs.clear();
+      follow.piToolCalls.clear();
+      follow.activeToolCalls.clear();
+      if (session2 !== void 0) this.context.syncSessionCache?.(session2);
+      return;
     }
+    if (follow.streamActive) {
+      if (follow.reasoningBlockIndex !== void 0) {
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.reasoningBlockIndex,
+          block: { type: "reasoning", text: "" }
+        });
+        follow.reasoningBlockIndex = void 0;
+      }
+      if (follow.blockIndex !== void 0) {
+        const fullText2 = follow.accumulatedText;
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.blockIndex,
+          block: { type: "text", text: fullText2 }
+        });
+      }
+      this.pushAssistantChunk(follow, {
+        type: "finish",
+        reason: { kind: "stop" }
+      });
+      const fullText = follow.accumulatedText;
+      const selection = this.context.modelSelection(follow.sessionId);
+      const stream = follow.assistantAttempt?.stream ?? [];
+      const assistantMessageSeq = this.pushEvent(follow, "assistant/message", {
+        turn: follow.turn,
+        step: 1,
+        message: {
+          id: `${follow.sessionId}:${follow.turn}`,
+          role: "assistant",
+          content: [{ type: "text", text: fullText }],
+          source: { kind: "model", provider: selection.provider, model: selection.model }
+        },
+        stream
+      });
+      this.endAssistantAttempt(follow, {
+        kind: "committed",
+        eventType: "assistant/message",
+        seq: assistantMessageSeq
+      });
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
+    } else if (follow.stepOpen) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
+    }
+    follow.streamActive = false;
+    follow.stepOpen = false;
+    follow.blockIndex = void 0;
+    follow.reasoningBlockIndex = void 0;
+    follow.accumulatedText = "";
     follow.piToolOutputs.clear();
     follow.piToolCalls.clear();
-    follow.activeToolCalls.clear();
     if (session2 !== void 0) this.context.syncSessionCache?.(session2);
-    if (remoteClosed || !follow.hasConsumer) {
-      follow.closed = true;
-      this.context.follows.delete(follow);
-      follow.queue.close();
-      void follow.close?.().catch(() => void 0);
-    }
   }
   pushEvent(follow, type, data2) {
     const session2 = this.context.sessions.get(follow.sessionId);
@@ -70330,7 +70163,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.historyCache = historyCache;
     const owner = this;
     this.live = new AcpLiveProjection({
-      lookupSession: (...args) => owner.lookupSession(...args),
+      ensureSessionRegistered: (...args) => owner.ensureSessionRegistered(...args),
       get sessions() {
         return owner.sessions;
       },
@@ -70350,7 +70183,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       get selectedModels() {
         return owner.selectedModels;
       },
-      publishProjection: (...args) => owner.publishProjection(...args),
+      publishProjection: (...args) => owner.events.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
       refreshSessionTitle: (...args) => owner.titles.refresh(...args),
       applySessionTitle: (...args) => owner.titles.applyNative(...args),
@@ -70401,11 +70234,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       backend,
       client,
       this.sessions,
-      (sessionId, title) => {
-        const session2 = this.sessions.get(sessionId);
-        if (session2 !== void 0) this.syncSessionCache(session2);
-        this.publishProjection(sessionId, "title", title);
-      }
+      (sessionId, title) => this.events.publishProjection(sessionId, "title", title)
     );
     this.unsubscribeArchived = client.onSessionArchived?.((data2) => {
       if (this.closed || data2.backend !== this.backend) return;
@@ -70616,15 +70445,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "directoryPicker/list":
           return business(await this.listDirectory(requestArg(args), signal));
         case "skills/list":
-          return business(success2({ skills: [] }));
+          return business(success2({ items: [] }));
         case "job/kill":
-          return business(success2({ outcome: "already-finished" }));
+          return this.hostCarrier === void 0 ? business(success2({ outcome: "already-finished" })) : await this.hostCarrier.dispatch(endpoint, payload, signal);
         case "commands/list":
           return business(this.commandList(requestArg(args)));
         case "commands/execute":
           return business(await this.executeCommand(requestArg(args)));
         default:
-          return this.hostCarrier !== void 0 && isAllowedHostCarrierDispatch(endpoint) ? await this.hostCarrier.dispatch(endpoint, payload, signal) : fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`);
+          return this.hostCarrier === void 0 ? fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
       }
     } catch (error62) {
       return failFrom(error62);
@@ -70647,9 +70476,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (endpoint === "session/follow") return this.live.sessionFollow(requestArg(args), signal);
     if (endpoint === "$events") return this.events.remoteEvents(signal);
     if (endpoint === "job/list" || endpoint === "job/follow") return this.events.emptyJobStream(endpoint, signal);
-    if (this.hostCarrier !== void 0 && isAllowedHostCarrierOpen(endpoint)) {
-      return this.hostCarrier.open(endpoint, payload, signal);
-    }
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
     throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true,
       code: "method-not-found",
@@ -70675,7 +70502,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const follows = [...this.follows];
     this.follows.clear();
     for (const follow of follows) {
-      follow.closed = true;
       follow.queue.close();
       await follow.close?.().catch(() => void 0);
     }
@@ -70758,25 +70584,39 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const session2 = this.registerSession(created.sessionId, cwd2, workspace2?.title);
     this.attachSessionToWorkspace(cwd2, session2.sessionId);
     this.publishWorkspaceBaseline();
-    const summarySeq = this.nextProjectionSeq(session2.sessionId);
-    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, summarySeq)]);
-    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), this.nextProjectionSeq(session2.sessionId));
-    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), this.nextProjectionSeq(session2.sessionId));
+    const seq = this.nextProjectionSeq();
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, seq)]);
+    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), seq);
+    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), seq);
     return success2({ sessionId: session2.sessionId });
   }
-  lookupSession(sessionId) {
-    const direct = this.sessions.get(sessionId);
-    if (direct !== void 0) return direct;
+  ensureSessionRegistered(sessionId) {
+    let session2 = this.sessions.get(sessionId);
+    if (session2 !== void 0) return session2;
+    const prefix = sessionPrefix(this.backend);
     if (this.backend !== "cursor") {
-      return this.sessions.get(`${sessionPrefix(this.backend)}${sessionId}`);
+      if (sessionId.startsWith(prefix)) {
+        const acpSessionId = sessionId.slice(prefix.length);
+        const workspace2 = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
+        const cwd2 = workspace2?.path ?? "/";
+        session2 = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
+        if (workspace2 && !workspace2.sessionIds.includes(sessionId)) {
+          workspace2.sessionIds.unshift(sessionId);
+          workspace2.sessionCount = workspace2.sessionIds.length;
+          this.publishWorkspaceBaseline();
+        }
+        return session2;
+      }
+      const prefixed = `${prefix}${sessionId}`;
+      const found = this.sessions.get(prefixed);
+      if (found !== void 0) return found;
     }
     return void 0;
   }
   async prompt(request, signal) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.lookupSession(requestedId);
+    const sessionId = extractSessionId(request);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
-    const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
     const text = extractPromptText(array2(request.content));
     let images;
@@ -70788,30 +70628,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     if (text === void 0 && images.length === 0) return failure2("attachment-error", "A prompt or image is required.");
     const imageBlocks = images.map((image) => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice(6)}`));
-    const hadFollow = [...this.follows].some((f) => f.sessionId === sessionId);
-    const prevEventsLen = session2.events.length;
-    const prevBlank = session2.blank;
-    const prevHydrated = session2.hydrated;
-    const prevRunning = session2.running;
-    const prevUpdatedAt = session2.updatedAt;
-    const prevTitle = session2.title;
-    const prevTitleFromPrompt = session2.titleFromPrompt;
-    const prevTitleOverridden = session2.titleOverridden;
-    const prevAttachmentIds = new Set(this.imageAttachments.keys());
     this.cacheImageAttachments(sessionId, imageBlocks);
     const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
-    try {
-      await this.live.ensureFollow(session2);
-    } catch (error62) {
-      for (const id6 of [...this.imageAttachments.keys()]) {
-        if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
-      }
-      throw error62;
-    }
+    await this.live.ensureFollow(session2);
     const follow = [...this.follows].find((f) => f.sessionId === sessionId);
-    const prevTurn = follow?.turn;
-    const prevStepOpen = follow?.stepOpen;
-    const prevNextSeq = follow?.nextSeq;
     if (follow !== void 0) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -70832,56 +70652,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.syncSessionCache(session2);
     this.events.emitRemoteEvent("api-session/status", [sessionId, true]);
     this.publishWorkspaceBaseline();
-    try {
-      await this.client.prompt(session2.acpSessionId, text ?? "", signal, images, this.backend);
-    } catch (error62) {
-      if (!follow?.streamActive && session2.events.length === prevEventsLen + 3) {
-        session2.events.length = prevEventsLen;
-        session2.blank = prevBlank;
-        session2.hydrated = prevHydrated;
-        session2.running = prevRunning;
-        session2.updatedAt = prevUpdatedAt;
-        const titleChanged = session2.title !== prevTitle;
-        session2.title = prevTitle;
-        session2.titleFromPrompt = prevTitleFromPrompt;
-        session2.titleOverridden = prevTitleOverridden;
-        if (titleChanged) {
-          this.publishProjection(sessionId, "title", prevTitle ?? this.backendLabel());
-        }
-        for (const id6 of [...this.imageAttachments.keys()]) {
-          if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
-        }
-        if (follow !== void 0) {
-          follow.turn = prevTurn;
-          follow.stepOpen = prevStepOpen;
-          follow.nextSeq = prevNextSeq;
-          if (!hadFollow || follow.hasConsumer) {
-            follow.closed = true;
-            this.follows.delete(follow);
-            follow.queue.close();
-            void follow.close?.().catch(() => void 0);
-          }
-        }
-      } else {
-        session2.running = false;
-        if (follow !== void 0 && !follow.closed && (follow.stepOpen || follow.streamActive)) {
-          const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" ? error62.code : "ACP_PROMPT_FAILED";
-          const message = error62 instanceof Error ? error62.message : String(error62);
-          this.live.closeFollowAfterRemoteStreamClosed(follow, { kind: "error", error: { code, message } });
-        }
-      }
-      this.events.emitRemoteEvent("api-session/status", [sessionId, false]);
-      this.syncSessionCache(session2);
-      this.publishWorkspaceBaseline();
-      throw error62;
-    }
+    await this.client.prompt(session2.acpSessionId, text ?? "", signal, images, this.backend);
     return success2({ accepted: true });
   }
   async cancel(request, signal) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.lookupSession(requestedId);
+    const sessionId = extractSessionId(request);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
-    const sessionId = session2.sessionId;
     await this.client.cancel(session2.acpSessionId, signal);
     session2.running = false;
     for (const follow of this.follows) {
@@ -70894,18 +70671,17 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success2({ accepted: true });
   }
   async renameSession(request) {
-    const requestedId = extractSessionId(request);
+    const sessionId = extractSessionId(request);
     const title = string4(request.title)?.trim();
-    const session2 = this.lookupSession(requestedId);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
-    if (!title) return failure2("bad-request", "A Session title is required.");
+    if (title === void 0) return failure2("bad-request", "A Session title is required.");
     session2.title = title;
     session2.titleOverridden = true;
     session2.updatedAt = Date.now();
     this.syncSessionCache(session2);
-    const seq = this.nextProjectionSeq(session2.sessionId);
-    this.events.publishProjection(session2.sessionId, "title", title, seq);
-    return success2({ title, seq });
+    this.events.publishProjection(sessionId, "title", title);
+    return success2({ sessionId });
   }
   cacheImageAttachments(sessionId, content) {
     for (const value of content) {
@@ -70917,13 +70693,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
   }
   async attachment(request) {
-    const requestedId = extractSessionId(request);
+    const sessionId = extractSessionId(request);
     const attachmentId = string4(request.attachmentId) ?? string4(record2(request.attachment).attachmentId);
-    const session2 = this.lookupSession(requestedId);
+    const session2 = this.ensureSessionRegistered(sessionId);
     if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
     const cached2 = this.imageAttachments.get(attachmentId);
-    return cached2?.sessionId === session2.sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
+    return cached2?.sessionId === sessionId ? success2({ attachment: cached2.attachment, data: cached2.data }) : failure2("attachment-error", "The image attachment is unavailable or expired.");
   }
   async hydrateSession(session2) {
     if (this.backend === "cursor" || session2.blank || session2.events.length > 0 && !session2.staleHistory) return;
@@ -71008,14 +70784,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
   }
   async sessionHistory(request) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.lookupSession(requestedId);
+    const sessionId = extractSessionId(request);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
-    const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
     const beforeSeq = optionalInteger(request.beforeSeq);
     if (beforeSeq === void 0) {
-      this.rememberOpenedSession(sessionId);
+      this.rememberOpenedSession(session2.sessionId);
     }
     const page = this.historyPage(session2, {
       beforeSeq,
@@ -71025,7 +70800,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       ...page,
       events: page.records.map((entry) => ({ event: entry.event })),
       projections: {
-        asOfSeq: session2.projectionSeq ?? -1,
+        asOfSeq: page.cursor,
         values: {
           title: session2.title ?? acpBackendLabel(this.backend),
           sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
@@ -71037,15 +70812,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
   }
   async sessionProjections(request) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.lookupSession(requestedId);
+    const sessionId = extractSessionId(request);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return success2(null);
     await this.hydrateSession(session2);
-    return success2(this.sessionSummary(session2, session2.projectionSeq ?? -1).projections);
+    return success2(this.sessionSummary(session2, session2.events.at(-1)?.event.seq ?? -1).projections);
   }
   async sessionPage(request) {
-    const requestedId = extractSessionId(request);
-    const session2 = this.lookupSession(requestedId);
+    const sessionId = extractSessionId(request);
+    const session2 = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session2);
     const page = this.historyPage(session2, {
@@ -71168,10 +70943,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const title = this.backend === "antigravity" ? "Antigravity" : this.backend === "opencode" ? "OpenCode" : workspace2.title;
     const session2 = this.registerSession(sessionId, cwd2, title);
     this.attachSessionToWorkspace(cwd2, session2.sessionId);
-    const summarySeq = this.nextProjectionSeq(session2.sessionId);
-    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, summarySeq)]);
-    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), this.nextProjectionSeq(session2.sessionId));
-    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), this.nextProjectionSeq(session2.sessionId));
+    const seq = this.nextProjectionSeq();
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session2, seq)]);
+    this.events.publishProjection(session2.sessionId, "title", session2.title ?? this.backendLabel(), seq);
+    this.events.publishProjection(session2.sessionId, "modelSelection", this.modelSelectionProjection(session2.sessionId), seq);
     this.publishWorkspaceBaseline();
     return session2;
   }
@@ -71187,7 +70962,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
-    return [...this.sessions.values()].filter((session2) => allowed.has(session2.sessionId) && !this.archivedSessionIds.has(session2.sessionId)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId)).map((session2) => this.sessionSummary(session2, session2.projectionSeq ?? -1));
+    return [...this.sessions.values()].filter((session2) => allowed.has(session2.sessionId) && !this.archivedSessionIds.has(session2.sessionId)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId)).map((session2) => this.sessionSummary(session2, 0));
   }
   sortWorkspaceSessions(workspace2) {
     workspace2.sessionIds.sort((a, b) => (this.sessions.get(b)?.updatedAt ?? 0) - (this.sessions.get(a)?.updatedAt ?? 0) || a.localeCompare(b));
@@ -71247,7 +71022,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.selectedPermissions.set(resolved, preset);
       this.selectedPermissions.set(sessionId, preset);
     }
-    const seq = this.nextProjectionSeq(resolved);
+    const seq = this.nextProjectionSeq();
     this.events.publishProjection(resolved, "permissions", this.permissionsProjection(resolved), seq);
     if (resolved !== sessionId) {
       this.events.publishProjection(sessionId, "permissions", this.permissionsProjection(resolved), seq);
@@ -71336,7 +71111,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed);
     const session2 = this.sessions.get(sessionId);
     if (session2 !== void 0) this.syncSessionCache(session2);
-    const seq = this.nextProjectionSeq(sessionId);
+    const seq = this.nextProjectionSeq();
     this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
     if (rawSessionId && rawSessionId !== sessionId) {
       this.events.publishProjection(rawSessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
@@ -71351,41 +71126,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       queue.push({ type: "archived", archivedSessionIds: [...this.archivedSessionIds] });
     }
   }
-  publishProjection(sessionId, key, value, seq = this.nextProjectionSeq(sessionId)) {
-    this.events.publishProjection(sessionId, key, value, seq);
-  }
-  nextProjectionSeq(sessionId) {
+  nextProjectionSeq() {
     this.lastProjectionSeq += 1;
-    if (sessionId !== void 0) {
-      const session2 = this.lookupSession(sessionId);
-      if (session2 !== void 0) session2.projectionSeq = this.lastProjectionSeq;
-    }
     return this.lastProjectionSeq;
   }
 };
-var ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES = [
-  "settings/",
-  "pluginManager/",
-  "pluginMarket/",
-  "pluginRecommendations/",
-  "pluginRegistryProbe/",
-  "credentials/",
-  "llm/",
-  "speech/",
-  "account/"
-];
-var ALLOWED_HOST_CARRIER_DISPATCH_EXACT = /* @__PURE__ */ new Set([
-  "pluginInventory/list",
-  "permissionPresets/catalog"
-]);
-function isAllowedHostCarrierDispatch(endpoint) {
-  return ALLOWED_HOST_CARRIER_DISPATCH_EXACT.has(endpoint) || ALLOWED_HOST_CARRIER_DISPATCH_PREFIXES.some((prefix) => endpoint.startsWith(prefix));
-}
-function isAllowedHostCarrierOpen(endpoint) {
-  return endpoint === "remoteAccess/follow" || endpoint.startsWith("account/") || endpoint.startsWith("settings/");
-}
 
 // packages/plugin/src/client-runtime-contract.ts
+var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
 var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
   "ACCOUNT_AUTH_REQUIRED",
@@ -71562,7 +71310,6 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     claude,
     ...hermes ? { hermes: true } : {},
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
-    ...capabilities.has("agent.acp.opencode.archive.v1") ? { acpOpencodeArchive: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
     pluginRoute: capabilities.has("plugin.route.v1")
   };
@@ -71592,6 +71339,7 @@ var ClientCodexStreams = class {
     const stream = {
       target: remote === void 0 ? { kind: "local" } : { kind: "remote", client: remote.client },
       frames: [],
+      approvalHandles: /* @__PURE__ */ new Set(),
       unsubscribe: () => void 0,
       close: async () => {
         if (remote === void 0) {
@@ -71646,6 +71394,14 @@ var ClientCodexStreams = class {
   };
   appendCodexFrame(stream, data2) {
     if (!isRecord5(data2) || !isRecord5(data2.frame) || typeof data2.frame.method !== "string") return;
+    const method = data2.frame.method;
+    if ((method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") && isRecord5(data2.frame.params)) {
+      const handle = data2.frame.params.requestHandle;
+      if (typeof handle === "string" && handle.length > 0) {
+        if (stream.approvalHandles.has(handle)) return;
+        stream.approvalHandles.add(handle);
+      }
+    }
     if (stream.frames.length >= 256) {
       stream.closed = "overflow";
     } else {
@@ -71672,6 +71428,20 @@ var ClientCodexStreams = class {
     if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
     const stream = this.context.codexStreams.get(value.streamId);
     if (stream === void 0) throw new ClientModeError("STREAM_NOT_FOUND", "The Codex stream is not open.");
+    if (stream.claim === void 0 && stream.closed === void 0) {
+      stream.claim = (async () => {
+        try {
+          const result = stream.target.kind === "remote" ? await stream.target.client.rpc("codex.app.approvals.claim", { streamId: value.streamId }) : await this.context.host?.codexClaimApprovals?.({ streamId: value.streamId });
+          if (this.context.codexStreams.get(value.streamId) !== stream || stream.closed !== void 0) return;
+          if (isRecord5(result) && Array.isArray(result.frames)) {
+            for (const frame of result.frames) this.appendCodexFrame(stream, { frame });
+          }
+        } catch {
+        }
+      })();
+    }
+    await stream.claim;
+    if (this.context.codexStreams.get(value.streamId) !== stream) throw new ClientModeError("STREAM_NOT_FOUND", "The Codex stream is not open.");
     if (stream.frames.length === 0 && stream.closed === void 0) await waitForCodexFrames(stream, signal);
     const frames = stream.frames.splice(0, 100);
     return {
@@ -71703,91 +71473,6 @@ var ClientCodexStreams = class {
     }));
   }
 };
-
-// packages/plugin/src/preferred-connection.ts
-async function connectPreferredTransport(create, signal) {
-  const lifetime = new AbortController();
-  const cancel = () => lifetime.abort();
-  signal?.addEventListener("abort", cancel, { once: true });
-  if (signal?.aborted) cancel();
-  const race = new DirectPreferredRace(lifetime.signal, 3e3, 25e3, true);
-  const candidates = /* @__PURE__ */ new Map();
-  const unsubscribes = [];
-  let fatal;
-  let chosen;
-  let finished = false;
-  let succeeded = false;
-  const begin = (attempt) => {
-    if (finished || lifetime.signal.aborted || candidates.has(attempt)) return;
-    try {
-      const transport = create(attempt, {
-        signal: lifetime.signal,
-        failOnWebRtcFallback: true,
-        useServerNegotiateTimeout: true,
-        onParallelConnections: attempt === "direct" ? () => begin("turn") : void 0,
-        onWebRtcStarted: (timeoutMs) => race.startAttempt(attempt, timeoutMs)
-      });
-      candidates.set(attempt, transport);
-      let ready = false;
-      unsubscribes.push(transport.onClose(() => {
-        if (ready) race.failed(attempt);
-      }));
-      void transport.connect().then(() => {
-        if (finished || lifetime.signal.aborted) return;
-        const mode2 = transport.getStats().mode;
-        if (attempt === "direct" ? mode2 !== "LAN" && mode2 !== "P2P" : mode2 !== "TURN") {
-          race.failed(attempt);
-          void transport.close();
-          if (attempt === "direct") begin("turn");
-          return;
-        }
-        ready = true;
-        race.ready(attempt, transport);
-      }).catch((error62) => {
-        if (finished || lifetime.signal.aborted) return;
-        const candidateFailed = ["RTC_NEGOTIATION_FAILED", "TRANSPORT_SETUP_FAILED"].includes(error62?.code) || error62?.code === "TRANSPORT_CLOSED" && error62?.retryable === true;
-        if (!candidateFailed) {
-          fatal = error62;
-          lifetime.abort();
-          return;
-        }
-        race.failed(attempt);
-        void transport.close().then(() => {
-          if (attempt === "direct") begin("turn");
-        });
-      });
-    } catch (error62) {
-      fatal = error62;
-      lifetime.abort();
-    }
-  };
-  begin("direct");
-  try {
-    try {
-      chosen = (await race.result).value;
-      signal?.throwIfAborted();
-      if (!chosen.getStats().connected) throw new Error("Selected RTC closed");
-      succeeded = true;
-      return chosen;
-    } catch (error62) {
-      if (fatal) throw fatal;
-      signal?.throwIfAborted();
-      finished = true;
-      for (const candidate of candidates.values()) void candidate.close();
-      chosen = create("relay", { signal });
-      await chosen.connect();
-      signal?.throwIfAborted();
-      succeeded = true;
-      return chosen;
-    }
-  } finally {
-    finished = true;
-    signal?.removeEventListener("abort", cancel);
-    for (const unsubscribe of unsubscribes) unsubscribe();
-    for (const candidate of candidates.values()) if (candidate !== chosen || !succeeded) void candidate.close();
-    if (!succeeded) void chosen?.close();
-  }
-}
 
 // node_modules/@noble/ciphers/esm/cryptoNode.js
 import * as nc from "node:crypto";
@@ -73394,7 +73079,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     const msg = concatBytes(...msgs);
     return modN_LE(cHash(domain2(msg, ensureBytes("context", context), !!prehash)));
   }
-  function sign2(msg, secretKey2, options = {}) {
+  function sign3(msg, secretKey2, options = {}) {
     msg = ensureBytes("message", msg);
     if (prehash)
       msg = prehash(msg);
@@ -73499,7 +73184,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   return Object.freeze({
     keygen,
     getPublicKey,
-    sign: sign2,
+    sign: sign3,
     verify,
     utils,
     Point,
@@ -78636,7 +78321,7 @@ function noiseIk() {
   ]]);
 }
 
-// packages/crypto/dist/noise.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/crypto/dist/noise.js
 var NOISE_IK_PROTOCOL = "Noise_IK_25519_ChaChaPoly_SHA256";
 var NoiseIkSession = class {
   handshake;
@@ -78782,7 +78467,7 @@ function constantTimeEqual(left, right) {
   return different === 0;
 }
 
-// packages/crypto/dist/index.js
+// ../../../../../Users/aplier/Downloads/dsh-remote/ds-harness-remote/packages/crypto/dist/index.js
 function generateKeyPair(privateKeyBytes) {
   const privateKey = privateKeyBytes ?? x25519.utils.randomPrivateKey();
   if (privateKey.byteLength !== 32)
@@ -78996,7 +78681,8 @@ var ClientConnection = class {
           targetDeviceId: shortId(target3.deviceId)
         });
       }
-      const createTransport = (attempt, hooks = {}) => new AdaptiveTransport(
+      let webRtcFallback = false;
+      const createTransport = (attempt) => new AdaptiveTransport(
         websocketUrl(this.context.server.baseUrl),
         {
           role: "client",
@@ -79006,10 +78692,11 @@ var ClientConnection = class {
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === "relay",
           preferredTransports: preferredTransportsForAttempt(attempt),
+          negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
           ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
           fetchIceServers: async (connectionId) => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
-          ...hooks,
           onWebRtcFallback: (error62, diagnostics) => {
+            webRtcFallback = true;
             this.context.logger.warn(attempt === "direct" ? "remote Harness direct WebRTC failed; trying TURN" : "remote Harness TURN WebRTC failed; using relay", {
               targetDeviceId: shortId(target3.deviceId),
               attempt,
@@ -79025,27 +78712,39 @@ var ClientConnection = class {
           }
         }
       );
-      const stopProgressTimer = options.background ? () => void 0 : this.beginAttemptProgress(progressRunId, "direct");
+      const attempts = this.context.config.forceRelay || rtcFactory === void 0 ? ["relay"] : ["direct", "turn", "relay"];
       let transport;
-      try {
-        signal?.throwIfAborted();
-        if (this.context.config.forceRelay || rtcFactory === void 0) {
-          transport = createTransport("relay", { signal });
-          await transport.connect();
-        } else {
-          transport = await connectPreferredTransport(createTransport, signal);
+      for (const attempt of attempts) {
+        webRtcFallback = false;
+        const stopProgressTimer = options.background ? () => void 0 : this.beginAttemptProgress(progressRunId, attempt);
+        try {
+          transport = createTransport(attempt);
+          client = new RemoteClientCore(new ClientSecureTransport(transport, identity3, target3), 6e4);
+          closed = false;
+          closeError = void 0;
+          client.onClose((error62) => {
+            closed = true;
+            closeError = error62;
+          });
+          const attemptClient = client;
+          signal?.throwIfAborted();
+          await attemptClient.connect();
+          signal?.throwIfAborted();
+        } finally {
+          stopProgressTimer();
         }
-        client = new RemoteClientCore(new ClientSecureTransport(transport, identity3, target3), 6e4);
-        closed = false;
-        closeError = void 0;
-        client.onClose((error62) => {
-          closed = true;
-          closeError = error62;
-        });
-        await client.connect();
-        signal?.throwIfAborted();
-      } finally {
-        stopProgressTimer();
+        if (attempt === "relay" || !webRtcFallback) break;
+        await client.close();
+        client = void 0;
+        transport = void 0;
+        if (attempt === "turn") {
+          this.context.logger.info("remote Harness relay fallback re-established", {
+            targetDeviceId: shortId(target3.deviceId)
+          });
+        }
+      }
+      if (client === void 0 || transport === void 0) {
+        throw new ClientModeError("CONNECTION_FAILED", "Unable to establish a remote transport.", true);
       }
       const connectedClient = client;
       const connectedTransport = transport;
@@ -79820,9 +79519,6 @@ var BOT_REMOTE_OPERATIONS = [
   "capability-approve",
   "capability-delete",
   "capability-save",
-  "changes-check",
-  "changes-diff",
-  "changes-summary",
   "chat",
   "computer-allow-foreground",
   "computer-app-answer",
@@ -79867,7 +79563,6 @@ var BOT_REMOTE_OPERATIONS = [
   "efforts",
   "exchange",
   "exchange-text",
-  "file-download",
   "file-text",
   "folder-list",
   "folder-pick",
@@ -79875,7 +79570,6 @@ var BOT_REMOTE_OPERATIONS = [
   "goal-control",
   "goal-draft",
   "group-rows",
-  "group-search",
   "hello",
   "im-add",
   "im-chat",
@@ -79899,7 +79593,6 @@ var BOT_REMOTE_OPERATIONS = [
   "mail-rule-set",
   "mail-send-answer",
   "mail-sign-in-code",
-  "markdown-image",
   "memory-add",
   "memory-ask",
   "memory-edit",
@@ -79921,7 +79614,6 @@ var BOT_REMOTE_OPERATIONS = [
   "provider-add",
   "provider-key",
   "provider-models",
-  "provider-models-save",
   "provider-remove",
   "providers",
   "remove-agent",
@@ -79929,19 +79621,14 @@ var BOT_REMOTE_OPERATIONS = [
   "resume",
   "room-chat",
   "room-progress",
-  "room-todo",
   "run-stats",
   "schedule-create",
   "schedule-delete",
   "schedules",
   "secret-allow",
   "secret-cancel",
-  "secret-decrypt",
   "secret-delete",
-  "secret-encrypt",
   "secret-set",
-  "secret-store",
-  "secret-unlock",
   "secret-update",
   "section-delete",
   "section-order",
@@ -79959,8 +79646,6 @@ var BOT_REMOTE_OPERATIONS = [
   "stop-chat",
   "stop-member-work",
   "stop-room-work",
-  "task-cancel",
-  "task-note",
   "team-workspace",
   "thinking",
   "update-bot",
@@ -81179,9 +80864,12 @@ var CodexEventCarrier = class {
   async remoteEvents(signal) {
     const queue = new AsyncValueQueue2(signal);
     const clientId = `codex-events:${this.context.host.deviceId}:${Date.now().toString(36)}`;
-    this.context.eventStreams.set(clientId, queue);
     const home = (await this.context.currentCatalog(signal)).workspaces[0]?.path ?? "/";
     queue.push({ type: "ready", clientId, host: { home } });
+    this.context.eventStreams.set(clientId, queue);
+    for (const pending of this.context.pendingApprovals.values()) {
+      queue.push({ type: "waterfall", event: "approval/request", eventId: pending.requestHandle, agentId: pending.sessionId, request: pending.request });
+    }
     return queue.iterate(() => this.context.eventStreams.delete(clientId));
   }
   emitRemoteEvent(event, args) {
@@ -81195,6 +80883,9 @@ var CodexEventCarrier = class {
       agentId: input4.agentId,
       request: input4.request
     });
+  }
+  cancelApproval(eventId) {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: "cancel", eventId });
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string5(args.eventId);
@@ -81754,6 +81445,7 @@ var CodexLiveProjection = class {
       turn: history.nextTurn,
       stepOpen: history.activeTurnId !== void 0,
       startedItems: /* @__PURE__ */ new Set(),
+      invalidatedApprovals: /* @__PURE__ */ new Set(),
       completedItems: /* @__PURE__ */ new Set(),
       streamedBlocks: /* @__PURE__ */ new Map(),
       nextBlockIndex: 0,
@@ -81798,6 +81490,14 @@ var CodexLiveProjection = class {
         throw new Error("The CodeX virtual Harness is closed.");
       }
       follow.close = () => stream.close();
+      if (stream.streamId !== void 0 && this.context.client.claimApprovals !== void 0) {
+        try {
+          const approvals = await this.context.client.claimApprovals(stream.streamId, signal);
+          for (const frame of approvals) this.acceptCodexFrame(follow, frame);
+        } catch (error62) {
+          if (!isRecord6(error62) || error62.code !== "METHOD_NOT_FOUND") throw error62;
+        }
+      }
       void this.context.refreshAndPublishWorkspaces().catch(() => void 0);
     } catch (error62) {
       this.context.follows.delete(follow);
@@ -81812,6 +81512,14 @@ var CodexLiveProjection = class {
   }
   acceptCodexFrame(follow, frame) {
     const params = record5(frame.params);
+    if (frame.method === "dsh/approval/resolved") {
+      const handle = string5(params.requestHandle);
+      if (handle !== void 0) {
+        follow.invalidatedApprovals.add(handle);
+        if (this.context.pendingApprovals.delete(handle)) this.context.cancelApproval(handle);
+      }
+      return;
+    }
     if (frame.method === "thread/name/updated") {
       const name2 = string5(params.threadName);
       if (name2 === void 0) return;
@@ -81970,17 +81678,15 @@ var CodexLiveProjection = class {
     }
     if (frame.method === "item/commandExecution/requestApproval" || frame.method === "item/fileChange/requestApproval") {
       const requestHandle = string5(params.requestHandle);
-      if (requestHandle === void 0) return;
+      if (requestHandle === void 0 || follow.invalidatedApprovals.has(requestHandle)) return;
       const command = commandText(params.command);
-      this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
-      this.context.emitApproval({
-        eventId: requestHandle,
-        agentId: follow.sessionId,
-        request: {
-          toolName: frame.method.includes("fileChange") ? "CodeX file change" : "CodeX command",
-          ...command === void 0 ? {} : { reason: command }
-        }
-      });
+      const request = {
+        toolName: frame.method.includes("fileChange") ? "CodeX file change" : "CodeX command",
+        ...command === void 0 ? {} : { reason: command }
+      };
+      if (this.context.pendingApprovals.has(requestHandle)) return;
+      this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId, request });
+      this.context.emitApproval({ eventId: requestHandle, agentId: follow.sessionId, request });
     }
   }
   acceptCompletedItem(follow, item, settleAssistant) {
@@ -82263,6 +81969,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         return owner.pendingApprovals;
       },
       emitApproval: (...args) => owner.events.emitApproval(...args),
+      cancelApproval: (...args) => owner.events.cancelApproval(...args),
       get imageAttachments() {
         return owner.imageAttachments;
       },
@@ -86090,7 +85797,7 @@ function parseIpv6(value) {
 }
 
 // packages/plugin/src/version.ts
-var PLUGIN_VERSION = "0.6.6";
+var PLUGIN_VERSION = "0.6.5";
 
 // packages/plugin/src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -86997,7 +86704,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error62) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open7 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open8 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -87006,7 +86713,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open7,
+      open: open8,
       failure: (error62) => this.failure(error62),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -87033,12 +86740,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open7 = this.originalOpen;
-      const rc1 = usesRc1Arity(open7);
+      const open8 = this.originalOpen;
+      const rc1 = usesRc1Arity(open8);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open7, this.runtime, callArgs) : open7.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open8, this.runtime, callArgs) : open8.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -87122,8 +86829,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open7) {
-  return open7.length >= 5;
+function usesRc1Arity(open8) {
+  return open8.length >= 5;
 }
 function endedUplink() {
   return {
@@ -87142,9 +86849,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open7 = runtime.openWireStream;
-  if (open7 !== void 0) {
-    return usesRc1Arity(open7) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open7.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open7.call(runtime, endpoint, payload, signal);
+  const open8 = runtime.openWireStream;
+  if (open8 !== void 0) {
+    return usesRc1Arity(open8) ? (endpoint, payload, signal, uplink, peer) => peer === void 0 ? Promise.reject(missingPeerError(endpoint)) : open8.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open8.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -87320,7 +87027,7 @@ var ExternalNativePeerConnection = class {
     this.child.on("exit", () => this.handleExit());
     this.child.on("error", (error62) => this.handleExit(error62));
     this.child.stdin.on("error", (error62) => this.handleExit(error62));
-    this.ready = this.request("init", { iceServers: configuration.iceServers ?? [], iceTransportPolicy: configuration.iceTransportPolicy }).then(() => void 0);
+    this.ready = this.request("init", { iceServers: configuration.iceServers ?? [] }).then(() => void 0);
   }
   connectionState = "new";
   iceConnectionState = "new";
@@ -87628,7 +87335,7 @@ async function handle(command) {
   const { id, method, payload = {} } = command
   try {
     if (method === 'init') {
-      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [], iceTransportPolicy: payload.iceTransportPolicy })
+      pc = new RTCPeerConnection({ iceServers: payload.iceServers ?? [] })
       pc.onconnectionstatechange = emitState
       pc.oniceconnectionstatechange = emitState
       pc.onicegatheringstatechange = emitState
@@ -87755,7 +87462,7 @@ function isElectronRuntime() {
 function buildNativeRtcFactory(RTCPeerConnection3) {
   return {
     create(configuration) {
-      const raw = new RTCPeerConnection3({ iceServers: configuration.iceServers, iceTransportPolicy: configuration.iceTransportPolicy });
+      const raw = new RTCPeerConnection3({ iceServers: configuration.iceServers });
       return {
         get connectionState() {
           return raw.connectionState;
@@ -87839,7 +87546,6 @@ function buildWeriftFactory(werift, options = {}) {
       const allowedHostIpv4 = new Set(hostIpv4Candidates);
       const raw = new werift.RTCPeerConnection({
         iceServers: orderIceServersForWerift(configuration.iceServers ?? []),
-        iceTransportPolicy: configuration.iceTransportPolicy,
         iceUseIpv4: true,
         iceUseIpv6: false,
         iceUseLinkLocalAddress: false,
@@ -88229,7 +87935,7 @@ function parseIceCandidate(candidate) {
 }
 function physicalInterfaceScore(name2) {
   const value = name2.toLowerCase();
-  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo|flclash|mihomo|clash|meta|sing-?box|tailscale|zerotier|zt[0-9a-f]|wg\d|wintun|proton|surge)/.test(value)) {
+  if (/^(utun|tun|tap|ppp|bridge|awdl|llw|gif|stf|anpi|ap\d|vmnet|veth|docker|br-|vboxnet|lo)/.test(value)) {
     return void 0;
   }
   if (/^(eth|eno|ens|enp)/.test(value)) return 500;
@@ -88244,7 +87950,6 @@ function isUsableIpv4(ip) {
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false;
   if (parts[0] === 169 && parts[1] === 254) return false;
-  if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false;
   return !isCgnat(ip);
 }
 function isCgnat(ip) {
@@ -88889,7 +88594,7 @@ var ClientModeRuntime = class {
         name: remote.target.name
       },
       backend,
-      remoteAcpCapabilities(remote.features),
+      remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend)
     );
@@ -88943,7 +88648,7 @@ var ClientModeRuntime = class {
         name: remote.target.name
       },
       backend,
-      remoteAcpCapabilities(remote.features),
+      remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend)
     );
@@ -89285,12 +88990,6 @@ var ClientModeRuntime = class {
     }, error62);
   }
 };
-function remoteAcpCapabilities(features) {
-  return [
-    ...features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [],
-    ...features.acpOpencodeArchive ? ["agent.acp.opencode.archive.v1"] : []
-  ];
-}
 
 // packages/plugin/src/control-runtime.ts
 import { hostname as hostname4 } from "node:os";
@@ -89836,7 +89535,7 @@ async function assertOwnedRemoteStorage(root2) {
 }
 async function isRepairableLegacyClientDirectory(directory, names) {
   for (const name2 of names) {
-    if (name2 === "server-credentials.json" || name2 === "host-pairing.json" || name2 === "pairing-host-only.json" || name2.startsWith("server-credentials.json.") || name2.startsWith("host-pairing.json.") || name2.startsWith("pairing-host-only.json.")) {
+    if (name2 === "server-credentials.json" || name2 === "host-pairing.json" || name2 === "huawei-push.json" || name2 === "pairing-host-only.json" || name2.startsWith("server-credentials.json.") || name2.startsWith("host-pairing.json.") || name2.startsWith("huawei-push.json.") || name2.startsWith("pairing-host-only.json.")) {
       return false;
     }
   }
@@ -90172,7 +89871,7 @@ async function removeIdentityRecords(directory) {
   } catch {
     return;
   }
-  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => unlink(join5(directory, name2)).catch(() => void 0)));
+  await Promise.all(entries.filter((name2) => isOwnedIdentityRecord(name2)).map((name2) => name2 === "huawei-push.json" || name2.startsWith("huawei-push.json.") ? unlink(join5(directory, name2)) : unlink(join5(directory, name2)).catch(() => void 0)));
 }
 function isTakeoverLockArtifact(name2) {
   return /^device\.lock\.takeover-[0-9a-f]{16}$/.test(name2);
@@ -90224,8 +89923,8 @@ function isIdentityTempArtifact(name2) {
   return (name2.startsWith("device.json.") || name2.startsWith("device.key.")) && name2.endsWith(".tmp");
 }
 function isOwnedIdentityRecord(name2) {
-  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json") return true;
-  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.")) && name2.endsWith(".tmp");
+  if (name2 === "device.json" || name2 === "device.key" || name2 === "trusted-peers.json" || name2 === "host-pairing.json" || name2 === "huawei-push.json") return true;
+  return (name2.startsWith("device.json.") || name2.startsWith("device.key.") || name2.startsWith("trusted-peers.json.") || name2.startsWith("host-pairing.json.") || name2.startsWith("huawei-push.json.")) && name2.endsWith(".tmp");
 }
 async function removeStaleTemporaries(directory) {
   let entries;
@@ -90411,7 +90110,7 @@ var CodexAppServerError = class extends Error {
   }
 };
 var CodexAppServerClient = class {
-  constructor(binary, logger2, spawnAppServer = (binary2) => spawn2(binary2, ["app-server", "-c", "thread_unload_delay_secs=0"], {
+  constructor(binary, logger2, spawnAppServer = (binary2) => spawn2(binary2, ["app-server"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
   })) {
@@ -90537,7 +90236,7 @@ var CodexAppServerClient = class {
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { method, resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
       this.write({ id: id6, method, params });
@@ -90588,7 +90287,7 @@ var CodexAppServerClient = class {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(safeUpstreamError(value.error, pending.method));
+        pending.reject(safeUpstreamError(value.error));
       } else {
         pending.resolve(value.result);
       }
@@ -90626,14 +90325,11 @@ var CodexAppServerClient = class {
 };
 var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
 var CODEX_UNMATERIALIZED_THREAD_MESSAGE = "Codex thread has no turns yet.";
-function safeUpstreamError(value, method) {
+function safeUpstreamError(value) {
   if (!isRecord12(value) || typeof value.message !== "string") {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex App Server rejected the request.");
   }
   const message = value.message.toLowerCase();
-  if (method === "thread/goal/get" && (value.code === -32601 || message === "goals feature is disabled" || message.startsWith("unknown variant `thread/goal/get`") || message.startsWith("ephemeral thread does not support goals:"))) {
-    return new CodexAppServerError("CODEX_GOALS_UNAVAILABLE", "Codex Goals are not available for this thread.");
-  }
   if (message.includes("active writer")) {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex thread already has an active writer.");
   }
@@ -90839,14 +90535,6 @@ function compactBotRound(text) {
 var LIMIT = 512;
 var MARKER = "\n[Compact history: output omitted]";
 var ROUND_BUDGET = 128 * 1024;
-var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set([
-  "tool/call",
-  "tool/result",
-  "tool/ptc-dispatch",
-  "tool/ptc-dispatch-start",
-  "tool/code-dispatch",
-  "tool/code-dispatch-start"
-]);
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 function preservedRound(text, budget) {
   if (budget.remaining < LIMIT) return void 0;
@@ -90865,7 +90553,7 @@ function toolValue(value, budget) {
   if (!object3(value)) return value;
   const result = { ...value };
   for (const [key, child] of Object.entries(value)) {
-    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta", "code"].includes(key)) {
+    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta"].includes(key)) {
       result[key] = typeof child === "string" ? summary2(child, budget) : { summary: summary2(child, budget) };
     } else if (key === "content" && Array.isArray(child)) {
       let previews = 0;
@@ -90884,81 +90572,24 @@ function toolValue(value, budget) {
   }
   return result;
 }
-function compactMessageSource(value, isInjectedUser) {
-  if (!object3(value)) return value;
-  let next = value;
-  if ("replayState" in next) {
-    const { replayState: _replayState, ...rest } = next;
-    next = rest;
-  }
-  if (isInjectedUser) {
-    const { entries: _entries, sections: _sections, changes: _changes, baselineIdentity: _baselineIdentity, ...rest } = next;
-    next = rest;
-  }
-  return next;
-}
-function streamUsage(stream) {
-  if (!Array.isArray(stream)) return void 0;
-  for (let index = stream.length - 1; index >= 0; index--) {
-    const row = stream[index];
-    if (object3(row) && row.type === "chunk" && object3(row.chunk) && row.chunk.type === "usage") {
-      return object3(row.chunk.usage) ? row.chunk.usage : void 0;
-    }
-  }
-  return void 0;
-}
-function messageValue(value, budget, isInjectedUser = false) {
-  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget, isInjectedUser));
+function messageValue(value, budget) {
+  if (Array.isArray(value)) return value.map((item) => messageValue(item, budget));
   if (!object3(value)) return value;
   if (value.type === "tool-call" || value.type === "tool-result") return toolValue(value, budget);
-  if (isInjectedUser && value.type === "text" && typeof value.text === "string" && value.text.length > LIMIT) {
-    return { ...value, text: summary2(value.text, budget) };
-  }
-  const out = {};
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "stream") continue;
-    if (key === "source") out[key] = compactMessageSource(child, isInjectedUser);
-    else out[key] = messageValue(child, budget, isInjectedUser);
-  }
-  if (value.usage === void 0 || value.usage === null) {
-    const usage = streamUsage(value.stream);
-    if (usage !== void 0) out.usage = messageValue(usage, budget, isInjectedUser);
-  }
-  return out;
-}
-function isInjectedUserEvent(event) {
-  const data2 = object3(event.data) ? event.data : void 0;
-  const msg = data2 && object3(data2.message) ? data2.message : data2;
-  const src = msg && object3(msg.source) ? msg.source : void 0;
-  return Boolean(src && typeof src.kind === "string" && src.kind !== "user");
-}
-function requestHeaderEvent(event) {
-  if (!object3(event.data) || !object3(event.data.header)) return event;
-  const { tools: _tools, system: _system, ...restHeader } = event.data.header;
-  return { ...event, data: { ...event.data, header: restHeader } };
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, messageValue(child, budget)]));
 }
 function project(value, budget) {
   if (Array.isArray(value)) return value.map((item) => project(item, budget));
   if (!object3(value)) return value;
-  if (object3(value.event)) {
-    const eventType = String(value.event.type);
-    if (TOOL_EVENT_TYPES.has(eventType)) {
-      const { view, ...rest } = value;
-      const event = toolValue(value.event, budget);
-      const data2 = object3(event.data) ? event.data : {};
-      const title = object3(view) && object3(view.view) ? view.view.title : void 0;
-      return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
-    }
-    if (eventType === "request/header") return { ...value, event: requestHeaderEvent(value.event) };
-    if (eventType === "assistant/message") return { ...value, event: messageValue(value.event, budget, false) };
-    if (eventType === "user/message") return { ...value, event: messageValue(value.event, budget, isInjectedUserEvent(value.event)) };
+  if (object3(value.event) && ["tool/call", "tool/result"].includes(String(value.event.type))) {
+    const { view, ...rest } = value;
+    const event = toolValue(value.event, budget);
+    const data2 = object3(event.data) ? event.data : {};
+    const title = object3(view) && object3(view.view) ? view.view.title : void 0;
+    return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
   }
-  if (typeof value.type === "string") {
-    if (TOOL_EVENT_TYPES.has(value.type)) return toolValue(value, budget);
-    if (value.type === "request/header") return requestHeaderEvent(value);
-    if (value.type === "assistant/message") return messageValue(value, budget, false);
-    if (value.type === "user/message") return messageValue(value, budget, isInjectedUserEvent(value));
-  }
+  if (typeof value.type === "string" && ["tool/call", "tool/result"].includes(value.type)) return toolValue(value, budget);
+  if (typeof value.type === "string" && ["user/message", "assistant/message"].includes(value.type)) return messageValue(value, budget);
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, project(child, budget)]));
 }
 function compactHistory(value) {
@@ -91084,6 +90715,15 @@ var CodexPeerBridge = class {
     this.requireOpen();
     return this.domain.respond(this.context.connectionId, input4);
   }
+  async claimApprovals(input4) {
+    this.requireOpen();
+    const params = streamCloseSchema.parse(input4);
+    const threadId = this.streams.get(params.streamId);
+    if (threadId === void 0) throw new RpcError("CODEX_STREAM_NOT_FOUND", "An open Codex stream is required.");
+    const frames = await this.domain.claimApprovals(this.context.connectionId, threadId);
+    this.requireOpen();
+    return { frames };
+  }
   async openStream(input4) {
     this.requireOpen();
     const params = streamOpenSchema.parse(input4);
@@ -91091,21 +90731,17 @@ var CodexPeerBridge = class {
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
     }
-    await this.domain.useThread(params.threadId, async () => {
-      await this.domain.call(this.context.connectionId, {
-        method: "thread/read",
-        params: { threadId: params.threadId, includeTurns: false }
-      });
-      this.requireOpen();
-      this.streams.set(params.streamId, params.threadId);
+    await this.domain.call(this.context.connectionId, {
+      method: "thread/read",
+      params: { threadId: params.threadId, includeTurns: false }
     });
+    this.requireOpen();
+    this.streams.set(params.streamId, params.threadId);
     return { opened: true, streamId: params.streamId, threadId: params.threadId };
   }
-  async closeStream(input4) {
+  closeStream(input4) {
     const params = streamCloseSchema.parse(input4);
-    const threadId = this.streams.get(params.streamId);
     this.streams.delete(params.streamId);
-    if (threadId !== void 0) await this.domain.releaseThread(threadId);
     return { closed: true, streamId: params.streamId };
   }
   openTransfer(input4) {
@@ -91238,7 +90874,6 @@ var CodexPeerBridge = class {
       const data2 = { streamId, frame };
       if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId);
-        void this.domain.releaseThread(threadId);
         await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
         this.logger?.warn("Codex stream closed after oversized frame", { streamId });
         continue;
@@ -91313,110 +90948,6 @@ function concatChunks(chunks, totalBytes) {
   return output2;
 }
 
-// packages/plugin/src/codex/thread-lifecycle.ts
-var CodexThreadLifecycle = class {
-  constructor(retained, unsubscribe, released, failed, closeTimeoutMs = 5e3) {
-    this.retained = retained;
-    this.unsubscribe = unsubscribe;
-    this.released = released;
-    this.failed = failed;
-    this.closeTimeoutMs = closeTimeoutMs;
-  }
-  threads = /* @__PURE__ */ new Map();
-  async use(threadId, action) {
-    const state2 = this.state(threadId);
-    state2.uses += 1;
-    try {
-      await state2.release;
-      if (this.threads.get(threadId) !== state2) throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
-      return await action();
-    } finally {
-      state2.uses -= 1;
-      await this.settle(threadId, state2);
-    }
-  }
-  active(threadId, active2) {
-    const state2 = this.state(threadId);
-    state2.active = active2;
-    state2.activityVersion += 1;
-    if (!active2) void this.settle(threadId, state2);
-  }
-  starting(threadId) {
-    const state2 = this.state(threadId);
-    const version2 = state2.activityVersion;
-    return (accepted) => {
-      if (accepted && this.threads.get(threadId) === state2 && state2.activityVersion === version2) {
-        state2.active = true;
-      }
-    };
-  }
-  async retry(threadId) {
-    const state2 = this.threads.get(threadId);
-    if (state2 !== void 0) await this.settle(threadId, state2);
-  }
-  async release(threadId) {
-    const state2 = this.state(threadId);
-    state2.pending = true;
-    await this.settle(threadId, state2);
-  }
-  closed(threadId) {
-    const state2 = this.threads.get(threadId);
-    state2?.closed?.();
-    if (state2 !== void 0) {
-      state2.active = false;
-      state2.activityVersion += 1;
-      state2.pending = false;
-      state2.release = void 0;
-      state2.closed = void 0;
-      if (state2.uses === 0) this.threads.delete(threadId);
-    }
-    this.released(threadId);
-  }
-  reset() {
-    const states = [...this.threads.values()];
-    this.threads.clear();
-    for (const state2 of states) state2.closed?.();
-  }
-  state(threadId) {
-    let state2 = this.threads.get(threadId);
-    if (state2 === void 0) {
-      state2 = { uses: 0, active: false, activityVersion: 0, pending: false };
-      this.threads.set(threadId, state2);
-    }
-    return state2;
-  }
-  async settle(threadId, state2) {
-    if (this.threads.get(threadId) !== state2 || state2.release !== void 0) return;
-    if (state2.uses > 0 || state2.active || this.retained(threadId)) return;
-    if (!state2.pending) {
-      this.threads.delete(threadId);
-      return;
-    }
-    const release = this.unload(threadId, state2);
-    state2.release = release;
-    await release.catch((error62) => this.failed(error62));
-  }
-  async unload(threadId, state2) {
-    let timer2;
-    const closed = new Promise((resolve10, reject) => {
-      state2.closed = resolve10;
-      timer2 = setTimeout(() => reject(new RpcError("CODEX_THREAD_CLOSING", "The CodeX thread is still closing. Please retry shortly.")), this.closeTimeoutMs);
-      timer2.unref?.();
-    });
-    void closed.catch(() => void 0);
-    try {
-      const result = await this.unsubscribe(threadId);
-      if (typeof result === "object" && result !== null && "status" in result && result.status === "notLoaded") {
-        this.closed(threadId);
-      } else {
-        await closed;
-      }
-    } finally {
-      clearTimeout(timer2);
-    }
-  }
-};
-
 // packages/plugin/src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
@@ -91439,20 +90970,11 @@ var CodexRemoteDomain = class {
   unsubscribeInbound;
   unsubscribeUnavailable;
   peers = /* @__PURE__ */ new Map();
-  peerThreads = /* @__PURE__ */ new Map();
-  threadGoals = /* @__PURE__ */ new Map();
-  threadLifecycle = new CodexThreadLifecycle(
-    (threadId) => this.hasSubscriber(threadId) || this.threadGoals.get(threadId)?.active === true || [...this.approvals.values()].some((approval) => approval.threadId === threadId),
-    (threadId) => this.callUpstream("thread/unsubscribe", { threadId }),
-    (threadId) => {
-      this.threadGoals.delete(threadId);
-      for (const threads of this.peerThreads.values()) threads.delete(threadId);
-    },
-    (error62) => this.logger.warn("Codex thread release could not be confirmed", { code: errorCode2(error62) })
-  );
+  approvalNotifier;
   peerDeviceIds = /* @__PURE__ */ new Map();
   turnOwners = /* @__PURE__ */ new Map();
   turnWatchdogs = /* @__PURE__ */ new Map();
+  offlineLeaseTimers = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
   approvalExpiryTimer;
@@ -91525,6 +91047,15 @@ var CodexRemoteDomain = class {
       throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available.");
     }
   }
+  setApprovalNotifier(notifier) {
+    this.approvalNotifier = notifier;
+  }
+  notifyApproval(deviceId, threadId) {
+    try {
+      void Promise.resolve(this.approvalNotifier?.({ deviceId, backend: "codex", sessionId: `codex:${threadId}` })).catch(() => void 0);
+    } catch {
+    }
+  }
   createPeer(context, publish) {
     const bridge = new CodexPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
@@ -91535,55 +91066,9 @@ var CodexRemoteDomain = class {
     const envelope = parseCallEnvelope(input4);
     const call = parseCodexCall(envelope.method, envelope.params);
     const assertCurrent = this.captureCallScope(connectionId);
-    const action = async () => {
-      const result = await this.callInternal(connectionId, call, assertCurrent);
-      assertCurrent();
-      return result;
-    };
-    const threadId = threadIdFromParams(call.params);
-    return threadId === void 0 ? action() : this.threadLifecycle.use(threadId, action);
-  }
-  useThread(threadId, action) {
-    return this.threadLifecycle.use(threadId, action);
-  }
-  releaseThread(threadId) {
-    if (!this.isAvailable() || this.closed) return Promise.resolve();
-    const tracked = this.threadGoals.has(threadId);
-    return this.threadLifecycle.use(threadId, async () => {
-      if (tracked && !this.threadGoals.has(threadId)) return;
-      if (await this.refreshThreadGoal(threadId)) await this.threadLifecycle.release(threadId);
-    });
-  }
-  async refreshThreadGoal(threadId) {
-    const appServer = this.requireAppServer();
-    const previous = this.threadGoals.get(threadId) ?? { active: true };
-    this.threadGoals.set(threadId, previous);
-    let active2 = true;
-    try {
-      const result = await this.callUpstream("thread/goal/get", { threadId }, 5e3);
-      if (!isRecord14(result) || !("goal" in result)) {
-        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Goal.");
-      }
-      active2 = result.goal === null ? false : goalRetainsThread(result.goal, threadId);
-    } catch (error62) {
-      if (errorCode2(error62) === "CODEX_GOALS_UNAVAILABLE") active2 = false;
-      else this.logger.warn("Codex Goal state could not be confirmed", { code: errorCode2(error62) });
-    }
-    if (this.closed || this.appServer !== appServer || !this.isAvailable() || !this.threadGoals.has(threadId)) return false;
-    if (this.threadGoals.get(threadId) === previous) this.threadGoals.set(threadId, { active: active2 });
-    return true;
-  }
-  rememberThread(connectionId, threadId, releaseDetached = false) {
-    if (!this.peers.has(connectionId)) {
-      if (releaseDetached) void this.releaseThread(threadId);
-      return;
-    }
-    let threads = this.peerThreads.get(connectionId);
-    if (threads === void 0) {
-      threads = /* @__PURE__ */ new Set();
-      this.peerThreads.set(connectionId, threads);
-    }
-    threads.add(threadId);
+    const result = await this.callInternal(connectionId, call, assertCurrent);
+    assertCurrent();
+    return result;
   }
   captureCallScope(connectionId) {
     const appServer = this.requireAppServer();
@@ -91599,7 +91084,6 @@ var CodexRemoteDomain = class {
   }
   async callInternal(connectionId, call, assertCurrent) {
     assertCurrent();
-    const attached = this.peers.has(connectionId);
     if (call.method === "account/read") {
       return sanitizeAccount(await this.callUpstream(call.method, call.params));
     }
@@ -91633,8 +91117,6 @@ var CodexRemoteDomain = class {
         ...codexThreadPermissionParams(permission),
         serviceName: "deepseek_harness_remote"
       });
-      const createdId = extractThread(result)?.id;
-      if (typeof createdId === "string") this.rememberThread(connectionId, createdId, attached);
       assertCurrent();
       if (extractThread(result)?.id === void 0) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
@@ -91675,7 +91157,6 @@ var CodexRemoteDomain = class {
     }
     const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
     assertCurrent();
-    if (threadId !== void 0) this.rememberThread(connectionId, threadId);
     if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
       const owner = this.turnOwners.get(threadId);
       if (owner !== void 0 && owner.connectionId !== connectionId) {
@@ -91689,8 +91170,8 @@ var CodexRemoteDomain = class {
     if (call.method === "thread/unsubscribe") {
       const bridge = this.peers.get(connectionId);
       bridge?.removeThreadSubscriptions(threadId);
-      await this.releaseThread(threadId);
-      return { status: "unsubscribed" };
+      if (this.hasSubscriber(threadId)) return { status: "unsubscribed" };
+      return this.callUpstream(call.method, call.params);
     }
     let claimed = false;
     let previousOwner;
@@ -91706,7 +91187,6 @@ var CodexRemoteDomain = class {
       previousOwner = claim2.previous;
       claimedOwner = this.turnOwners.get(threadId);
     }
-    const finishStart = call.method === "turn/start" && threadId !== void 0 ? this.threadLifecycle.starting(threadId) : void 0;
     try {
       const permission = codexPermission(call.params);
       const upstreamParams = call.method === "thread/resume" && allowedThread !== void 0 ? {
@@ -91733,11 +91213,6 @@ var CodexRemoteDomain = class {
         }
         throw error62;
       }
-      finishStart?.(true);
-      if (call.method === "thread/fork") {
-        const createdId = extractThread(result)?.id;
-        if (typeof createdId === "string") this.rememberThread(connectionId, createdId, attached);
-      }
       assertCurrent();
       if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
         await this.assertResultThreadAllowed(result);
@@ -91759,8 +91234,7 @@ var CodexRemoteDomain = class {
       }
       return result;
     } catch (error62) {
-      finishStart?.(errorCode2(error62) === "CODEX_REQUEST_TIMEOUT");
-      if (claimed && threadId !== void 0 && this.turnOwners.get(threadId) === claimedOwner) {
+      if (claimed && threadId !== void 0 && this.turnOwners.get(threadId) === claimedOwner && (call.method !== "turn/start" || this.peers.has(connectionId))) {
         if (previousOwner === void 0) this.turnOwners.delete(threadId);
         else this.turnOwners.set(threadId, previousOwner);
         if (previousOwner === void 0) this.clearTurnWatchdog(threadId);
@@ -91778,37 +91252,104 @@ var CodexRemoteDomain = class {
     this.approvals.delete(params.requestHandle);
     this.scheduleApprovalExpiry();
     await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
-    await this.threadLifecycle.retry(approval.threadId);
     return { resolved: true };
   }
+  async claimApprovals(connectionId, threadId) {
+    const deviceId = this.peerDeviceIds.get(connectionId);
+    const peer = this.peers.get(connectionId);
+    if (deviceId === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
+      throw new RpcError("CODEX_CONNECTION_CLOSED", "An authenticated subscribed connection is required.");
+    }
+    await this.expireApprovals();
+    if (this.peers.get(connectionId) !== peer || this.peerDeviceIds.get(connectionId) !== deviceId) {
+      throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
+    }
+    const frames = [];
+    const currentOwner = this.turnOwners.get(threadId);
+    if (currentOwner?.peerDeviceId !== deviceId || currentOwner.connectionId !== connectionId && this.peers.has(currentOwner.connectionId)) return frames;
+    for (const [oldHandle, approval] of [...this.approvals]) {
+      if (approval.threadId !== threadId || approval.peerDeviceId !== deviceId) continue;
+      if (approval.connectionId !== void 0 && approval.connectionId !== connectionId) continue;
+      let handle = oldHandle;
+      if (approval.connectionId === void 0) {
+        handle = randomUUID13();
+        this.approvals.delete(oldHandle);
+        approval.connectionId = connectionId;
+        this.approvals.set(handle, approval);
+        const owner = this.turnOwners.get(threadId);
+        if (owner?.peerDeviceId === deviceId) {
+          this.turnOwners.set(threadId, { ...owner, connectionId });
+          this.clearOfflineLease(threadId);
+        }
+      }
+      frames.push({ method: approval.method, params: sanitizeApprovalParams(approval.params, handle) });
+    }
+    return frames;
+  }
   async detachPeer(connectionId) {
-    const threadIds = this.peerThreads.get(connectionId) ?? /* @__PURE__ */ new Set();
-    this.peerThreads.delete(connectionId);
-    const bridge = this.peers.get(connectionId);
-    if (bridge !== void 0) this.peers.delete(connectionId);
+    const deviceId = this.peerDeviceIds.get(connectionId);
+    this.peers.delete(connectionId);
     this.peerDeviceIds.delete(connectionId);
+    for (const approval of this.approvals.values()) {
+      if (approval.connectionId === connectionId) approval.connectionId = void 0;
+      else if (approval.connectionId !== void 0 || approval.peerDeviceId !== deviceId || this.turnOwners.get(approval.threadId)?.connectionId !== connectionId) continue;
+      this.notifyApproval(approval.peerDeviceId, approval.threadId);
+    }
     for (const [threadId, owner] of this.turnOwners) {
       if (owner.connectionId !== connectionId) continue;
+      this.clearOfflineLease(threadId);
+      const timer2 = setTimeout(() => {
+        this.offlineLeaseTimers.delete(threadId);
+        const current = this.turnOwners.get(threadId);
+        if (current?.connectionId !== connectionId || current.peerDeviceId !== owner.peerDeviceId || this.peers.has(connectionId)) return;
+        this.turnOwners.delete(threadId);
+        this.clearTurnWatchdog(threadId);
+        const appServer = this.appServer;
+        for (const [handle, approval] of this.approvals) {
+          if (approval.threadId !== threadId) continue;
+          this.invalidateApproval(handle, approval);
+          void appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+        }
+        this.scheduleApprovalExpiry();
+        if (current.turnId !== void 0) {
+          void appServer?.call("turn/interrupt", { threadId, turnId: current.turnId }).catch(() => void 0);
+        }
+      }, APPROVAL_TTL_MS);
+      timer2.unref?.();
+      this.offlineLeaseTimers.set(threadId, timer2);
+    }
+  }
+  clearOfflineLease(threadId) {
+    const timer2 = this.offlineLeaseTimers.get(threadId);
+    if (timer2 !== void 0) clearTimeout(timer2);
+    this.offlineLeaseTimers.delete(threadId);
+  }
+  async revokeDevice(deviceId) {
+    const appServer = this.appServer;
+    const removed = [];
+    for (const [handle, approval] of this.approvals) {
+      if (approval.peerDeviceId !== deviceId) continue;
+      this.invalidateApproval(handle, approval);
+      removed.push(approval);
+    }
+    for (const [threadId, owner] of this.turnOwners) {
+      if (owner.peerDeviceId !== deviceId) continue;
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
+      this.clearOfflineLease(threadId);
     }
-    const appServer = this.appServer;
-    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
-    for (const [handle, approval] of pending) {
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    const closePeers = [];
+    for (const [connectionId, peer] of this.peers) {
+      if (this.peerDeviceIds.get(connectionId) === deviceId) closePeers.push(peer.closeAll());
     }
     this.scheduleApprovalExpiry();
-    await Promise.all([...threadIds].map((threadId) => this.releaseThread(threadId)));
+    await Promise.all([...closePeers, ...removed.map((approval) => appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0))]);
   }
   async reconfigure(config2) {
     if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
     if (JSON.stringify(this.config) === JSON.stringify(config2)) return;
     this.config = config2;
     this.available = false;
-    this.threadLifecycle.reset();
-    this.peerThreads.clear();
-    this.threadGoals.clear();
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
     await this.startPromise?.catch(() => void 0);
@@ -91831,9 +91372,6 @@ var CodexRemoteDomain = class {
     if (this.closed) return;
     this.closed = true;
     this.available = false;
-    this.threadLifecycle.reset();
-    this.peerThreads.clear();
-    this.threadGoals.clear();
     this.state = this.config.enabled ? "unavailable" : "disabled";
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
@@ -91903,9 +91441,6 @@ var CodexRemoteDomain = class {
   async handleAppServerUnavailable(appServer, code) {
     if (this.closed || this.appServer !== appServer) return;
     this.available = false;
-    this.threadLifecycle.reset();
-    this.peerThreads.clear();
-    this.threadGoals.clear();
     this.state = "restarting";
     this.unavailableCode = code;
     this.clearAllTurnWatchdogs();
@@ -91966,47 +91501,39 @@ var CodexRemoteDomain = class {
       return;
     }
     const threadId = extractThreadId(message.params);
-    if (threadId !== void 0 && (message.method === "thread/goal/updated" || message.method === "thread/goal/cleared")) {
-      const active2 = message.method !== "thread/goal/cleared" && (!isRecord14(message.params) || goalRetainsThread(message.params.goal, threadId));
-      this.threadGoals.set(threadId, { active: active2 });
-      await this.threadLifecycle.retry(threadId);
-    }
     if (message.method === "thread/settings/updated" && threadId !== void 0) {
       this.rememberPermission(threadId, message.params);
     }
-    if (message.method === "thread/closed" && threadId !== void 0) {
-      this.permissionPresets.delete(threadId);
-      this.turnOwners.delete(threadId);
-      this.clearTurnWatchdog(threadId);
-      this.threadLifecycle.closed(threadId);
-    }
+    if (message.method === "thread/closed" && threadId !== void 0) this.permissionPresets.delete(threadId);
     if (message.method === "turn/completed" && threadId !== void 0) {
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
-      this.threadLifecycle.active(threadId, false);
+      this.clearOfflineLease(threadId);
+      for (const [handle, approval] of this.approvals) {
+        if (approval.threadId !== threadId) continue;
+        this.invalidateApproval(handle, approval);
+        void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+      }
+      this.scheduleApprovalExpiry();
     }
     if (message.method === "thread/status/changed" && threadId !== void 0 && isTerminalThreadStatus(message.params)) {
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
+      this.clearOfflineLease(threadId);
       for (const [handle, approval] of this.approvals) {
         if (approval.threadId !== threadId) continue;
-        this.approvals.delete(handle);
+        this.invalidateApproval(handle, approval);
         void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
       }
       this.scheduleApprovalExpiry();
-      this.threadLifecycle.active(threadId, false);
     }
     if (message.method === "turn/started" && threadId !== void 0) {
-      this.threadLifecycle.active(threadId, true);
       const owner = this.turnOwners.get(threadId);
       const turnId = extractTurnId(message.params);
       if (owner !== void 0) {
         this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
       }
       this.armTurnWatchdog(threadId);
-    }
-    if (message.method === "thread/status/changed" && threadId !== void 0 && isRecord14(message.params) && isRecord14(message.params.status) && message.params.status.type === "active") {
-      this.threadLifecycle.active(threadId, true);
     }
     if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
     if (threadId === void 0) return;
@@ -92079,29 +91606,32 @@ var CodexRemoteDomain = class {
     const threadId = extractThreadId(message.params);
     const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
     const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
-    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
+    if (threadId === void 0 || owner === void 0) {
       await appServer.respond(message.id, { decision: "decline" });
       return;
     }
     const requestHandle = randomUUID13();
-    this.approvals.set(requestHandle, {
+    const approval = {
       upstreamId: message.id,
-      connectionId: owner.connectionId,
+      connectionId: peer !== void 0 && peer.hasThreadSubscription(threadId) ? owner.connectionId : void 0,
+      peerDeviceId: owner.peerDeviceId,
+      params: sanitizeApprovalParams(message.params, requestHandle),
       threadId,
       method: message.method,
       expiresAt: Date.now() + APPROVAL_TTL_MS
-    });
+    };
+    this.approvals.set(requestHandle, approval);
     this.scheduleApprovalExpiry();
-    try {
-      await peer.publishInbound(threadId, {
-        method: message.method,
-        params: sanitizeApprovalParams(message.params, requestHandle)
-      });
-    } catch (error62) {
-      this.approvals.delete(requestHandle);
-      this.scheduleApprovalExpiry();
-      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
-      throw error62;
+    if (peer === void 0) this.notifyApproval(approval.peerDeviceId, threadId);
+    if (approval.connectionId !== void 0 && peer !== void 0) {
+      try {
+        await peer.publishInbound(threadId, { method: message.method, params: approval.params });
+      } catch {
+        if (this.approvals.get(requestHandle) === approval) {
+          approval.connectionId = void 0;
+          if (!this.peers.has(owner.connectionId)) this.notifyApproval(approval.peerDeviceId, threadId);
+        }
+      }
     }
   }
   readKnownThread(threadId) {
@@ -92269,6 +91799,7 @@ var CodexRemoteDomain = class {
       }
       if (owner.connectionId !== connectionId) {
         this.turnOwners.set(threadId, { ...owner, connectionId, peerDeviceId, ...turnId === void 0 ? {} : { turnId } });
+        this.clearOfflineLease(threadId);
         return { claimed: true, previous: owner };
       }
       if (turnId !== void 0 && owner.turnId === void 0) this.turnOwners.set(threadId, { ...owner, turnId });
@@ -92279,6 +91810,7 @@ var CodexRemoteDomain = class {
     }
     if (owner?.connectionId === connectionId) return { claimed: false };
     this.turnOwners.set(threadId, owner === void 0 ? nextOwner : { ...owner, connectionId, peerDeviceId });
+    this.clearOfflineLease(threadId);
     return { claimed: true, previous: owner };
   }
   rememberTurnId(threadId, connectionId, turnId) {
@@ -92290,13 +91822,21 @@ var CodexRemoteDomain = class {
   hasSubscriber(threadId) {
     return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
   }
+  invalidateApproval(handle, approval) {
+    if (this.approvals.get(handle) !== approval) return;
+    this.approvals.delete(handle);
+    const peer = approval.connectionId === void 0 ? void 0 : this.peers.get(approval.connectionId);
+    if (peer !== void 0) {
+      void peer.publishInbound(approval.threadId, {
+        method: "dsh/approval/resolved",
+        params: { threadId: approval.threadId, requestHandle: handle }
+      }).catch(() => void 0);
+    }
+  }
   resolveUpstreamApproval(params) {
     if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
-      if (approval.upstreamId === params.requestId) {
-        this.approvals.delete(handle);
-        void this.threadLifecycle.retry(approval.threadId);
-      }
+      if (approval.upstreamId === params.requestId) this.invalidateApproval(handle, approval);
     }
   }
   async expireApprovals() {
@@ -92304,9 +91844,8 @@ var CodexRemoteDomain = class {
     const appServer = this.appServer;
     for (const [handle, approval] of this.approvals) {
       if (approval.expiresAt > now) continue;
-      this.approvals.delete(handle);
+      this.invalidateApproval(handle, approval);
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-      await this.threadLifecycle.retry(approval.threadId);
     }
     this.scheduleApprovalExpiry();
   }
@@ -92344,6 +91883,8 @@ var CodexRemoteDomain = class {
   clearAllTurnWatchdogs() {
     for (const timer2 of this.turnWatchdogs.values()) clearTimeout(timer2);
     this.turnWatchdogs.clear();
+    for (const timer2 of this.offlineLeaseTimers.values()) clearTimeout(timer2);
+    this.offlineLeaseTimers.clear();
   }
   /**
    * App Server can drop a turn without `turn/completed` (observed on HTTP 503).
@@ -92357,7 +91898,7 @@ var CodexRemoteDomain = class {
     this.turnOwners.delete(threadId);
     for (const [handle, approval] of this.approvals) {
       if (approval.threadId !== threadId) continue;
-      this.approvals.delete(handle);
+      this.invalidateApproval(handle, approval);
       void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
     }
     this.scheduleApprovalExpiry();
@@ -92382,10 +91923,10 @@ var CodexRemoteDomain = class {
     }
     return this.appServer;
   }
-  async callUpstream(method, params, timeoutMs) {
+  async callUpstream(method, params) {
     const appServer = this.requireAppServer();
     try {
-      const result = await appServer.call(method, params, timeoutMs);
+      const result = await appServer.call(method, params);
       if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
         throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
       }
@@ -92788,10 +92329,6 @@ function extractThreadId(params) {
   if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
   if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
-}
-function goalRetainsThread(goal, threadId) {
-  if (!isRecord14(goal) || goal.threadId !== threadId || typeof goal.status !== "string") return true;
-  return !["complete", "paused", "blocked", "usageLimited", "budgetLimited"].includes(goal.status);
 }
 function isTerminalThreadStatus(params) {
   if (!isRecord14(params) || !isRecord14(params.status) || typeof params.status.type !== "string") return false;
@@ -95240,7 +94777,6 @@ var TranscriptWatcher = class extends EventEmitter2 {
 // packages/plugin/src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS2 = 2e4;
-var MAX_ACP_LINE_BYTES2 = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES3 = 4 * 1024;
 var AntigravityAcpError = class extends Error {
   constructor(code, message, options) {
@@ -95574,7 +95110,6 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     this.process = child;
     this.stdoutBuffer = Buffer6.alloc(0);
     this.stderrBytes = 0;
-    let streamFailure;
     let initResolved = false;
     let rejectInit;
     const initPromise = new Promise((resolve10, reject) => {
@@ -95600,36 +95135,10 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         });
       };
       child.stdout.on("data", (chunk) => {
-        if (this.process !== child) return;
-        try {
-          const bytes = Buffer6.isBuffer(chunk) ? chunk : Buffer6.from(chunk);
-          if (!initResolved) checkInit(bytes);
-          else this.consumeStdout(bytes);
-        } catch (error62) {
-          if (!(error62 instanceof AntigravityAcpError) || error62.code !== "ANTIGRAVITY_RESPONSE_TOO_LARGE") throw error62;
-          streamFailure = error62;
-          clearTimeout(timer2);
-          rejectInit?.(error62);
-          this.ready = false;
-          this.process = void 0;
-          this.stdoutBuffer = Buffer6.alloc(0);
-          this.watcher?.stop();
-          this.watcher = void 0;
-          if (this.currentPromptPending) {
-            clearTimeout(this.currentPromptPending.timer);
-            this.currentPromptPending.reject(error62);
-            this.currentPromptPending = void 0;
-          }
-          child.stdout.removeAllListeners("data");
-          child.stdout.resume();
-          const killTimer = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-          }, 1e3);
-          killTimer.unref?.();
-          child.once("exit", () => clearTimeout(killTimer));
-          child.kill("SIGTERM");
-          this.logger?.warn("Antigravity ACP communication failed", { code: error62.code });
-          if (!this.closed) this.notifyUnavailable(error62.code);
+        if (!initResolved) {
+          checkInit(Buffer6.from(chunk));
+        } else {
+          this.consumeStdout(Buffer6.from(chunk));
         }
       });
     });
@@ -95666,12 +95175,11 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     });
     try {
       await initPromise;
-      if (streamFailure) throw streamFailure;
       this.ready = true;
       this.warmNextSession();
       this.logger?.info("Antigravity ACP ready", { conversationId: this.activeConversationId });
     } catch (err5) {
-      if (!child.killed) child.kill("SIGTERM");
+      child.kill("SIGTERM");
       throw err5;
     }
   }
@@ -95726,10 +95234,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     watcher.start();
   }
   consumeStdout(chunk, onRawEvent) {
-    if (this.stdoutBuffer.length + chunk.length > MAX_ACP_LINE_BYTES2) {
-      throw new AntigravityAcpError("ANTIGRAVITY_RESPONSE_TOO_LARGE", "Antigravity ACP emitted an oversized JSONL message.");
-    }
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer6.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = Buffer6.concat([this.stdoutBuffer, chunk]);
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(10);
       if (newlineIndex === -1) break;
@@ -95981,7 +95486,7 @@ function unavailable() {
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
-var MAX_ACP_LINE_BYTES3 = 288 * 1024 * 1024;
+var MAX_ACP_LINE_BYTES2 = 288 * 1024 * 1024;
 var MAX_STDERR_CAPTURE_BYTES4 = 4 * 1024;
 var OpencodeAcpError = class extends Error {
   constructor(code, message, options) {
@@ -96329,7 +95834,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   consumeStdout(chunk) {
     this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES3) {
+    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES2) {
       this.handleProcessFailure(
         "OPENCODE_RESPONSE_TOO_LARGE",
         new Error("OpenCode ACP emitted an oversized JSONL message.")
@@ -97232,6 +96737,11 @@ var AcpRemoteGateway = class {
   terminalOwners = /* @__PURE__ */ new Map();
   workspaceTools = /* @__PURE__ */ new Map();
   peers = /* @__PURE__ */ new Map();
+  peerDevices = /* @__PURE__ */ new Map();
+  peerKeys = /* @__PURE__ */ new Map();
+  approvalNotifier;
+  revokedDevices = /* @__PURE__ */ new Set();
+  approvalLeases = /* @__PURE__ */ new Map();
   sessionOwners = /* @__PURE__ */ new Map();
   sessionBackends = /* @__PURE__ */ new Map();
   sessionPermissions = /* @__PURE__ */ new Map();
@@ -97265,6 +96775,16 @@ var AcpRemoteGateway = class {
   historyInvalidatedAt = /* @__PURE__ */ new Map();
   pendingHistoryReads = /* @__PURE__ */ new Map();
   backendHistoryChains = /* @__PURE__ */ new Map();
+  /** Advisory wake-up only; approval data and decisions stay on the authenticated channel. */
+  setApprovalNotifier(notifier) {
+    this.approvalNotifier = notifier;
+  }
+  notifyApproval(deviceId, backend, sessionId) {
+    try {
+      void Promise.resolve(this.approvalNotifier?.({ deviceId, backend, sessionId })).catch(() => void 0);
+    } catch {
+    }
+  }
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends() {
     if (!this.config.enabled) return [];
@@ -97317,7 +96837,10 @@ var AcpRemoteGateway = class {
   }
   createPeer(context, publish) {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger);
+    if (this.revokedDevices.has(context.peerDeviceId)) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP device was revoked.");
     this.peers.set(context.connectionId, bridge);
+    this.peerDevices.set(context.connectionId, context.peerDeviceId);
+    if (context.peerIdentityKey) this.peerKeys.set(context.connectionId, context.peerIdentityKey);
     const workspaceBridge = new WorkspaceBridge(async (rawId) => {
       const match = rawId.match(/^(acp|cursor|pi|opencode|claude|hermes):(.+)$/);
       const session2 = match ? this.sessionCwds.get(match[2]) : void 0;
@@ -97821,10 +97344,13 @@ var AcpRemoteGateway = class {
     const params = parseRespondEnvelope(input4);
     const pending = this.approvals.get(params.requestHandle);
     if (pending === void 0 || pending.expiresAt <= Date.now()) {
-      this.approvals.delete(params.requestHandle);
+      if (pending !== void 0) {
+        this.approvals.delete(params.requestHandle);
+        void pending.client.respondError(pending.upstreamId, -32800, "Remote approval expired.").catch(() => void 0);
+      }
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
-    if (pending.connectionId !== connectionId) {
+    if (pending.connectionId !== connectionId || pending.deviceId !== this.peerDevices.get(connectionId) || pending.identityKey !== this.peerKeys.get(connectionId) || this.revokedDevices.has(pending.deviceId)) {
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
     if (this.sessionOwners.get(pending.sessionId) !== connectionId || this.sessionBackends.get(pending.sessionId) !== pending.backend || this.requireAcp(pending.backend) !== pending.client) {
@@ -97841,17 +97367,57 @@ var AcpRemoteGateway = class {
     return { resolved: true };
   }
   dropPeer(connectionId) {
+    const deviceId = this.peerDevices.get(connectionId);
+    const identityKey = this.peerKeys.get(connectionId);
     this.peers.delete(connectionId);
+    this.peerDevices.delete(connectionId);
+    this.peerKeys.delete(connectionId);
     void this.workspaceTools.get(connectionId)?.close();
     this.workspaceTools.delete(connectionId);
     for (const [sessionId, owner] of this.sessionOwners) {
-      if (owner === connectionId) this.sessionOwners.delete(sessionId);
+      if (owner !== connectionId) continue;
+      this.sessionOwners.delete(sessionId);
+      const hasApproval = [...this.approvals.values()].some((item) => item.sessionId === sessionId);
+      if (deviceId && identityKey && !this.revokedDevices.has(deviceId) && (hasApproval || this.promptsInProgress.has(sessionId))) {
+        this.approvalLeases.set(sessionId, { deviceId, identityKey, expiresAt: Date.now() + APPROVAL_TTL_MS2 });
+        const backend = this.sessionBackends.get(sessionId);
+        if (hasApproval && backend) this.notifyApproval(deviceId, backend, sessionId);
+      } else {
+        this.rejectSessionApprovals(sessionId, "Remote peer disconnected.");
+      }
+    }
+    this.scheduleApprovalExpiry();
+  }
+  /** Called synchronously after a trusted device is revoked, before connections close. */
+  revokeDevice(deviceId) {
+    this.revokedDevices.add(deviceId);
+    for (const [sessionId, owner] of this.sessionOwners) {
+      if (this.peerDevices.get(owner) === deviceId) this.cancelledSessions.add(sessionId);
+    }
+    for (const [sessionId, lease] of this.approvalLeases) {
+      if (lease.deviceId === deviceId) {
+        this.approvalLeases.delete(sessionId);
+        this.cancelledSessions.add(sessionId);
+        this.rejectSessionApprovals(sessionId, "Remote device revoked.");
+      }
     }
     for (const [handle, approval] of this.approvals) {
-      if (approval.connectionId === connectionId) {
+      if (approval.deviceId === deviceId) {
         this.approvals.delete(handle);
-        void approval.client.respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
+        void approval.client.respondError(approval.upstreamId, -32800, "Remote device revoked.").catch(() => void 0);
       }
+    }
+    this.scheduleApprovalExpiry();
+  }
+  /** Unblock new authenticated connections after the caller has completed revocation and connection cleanup. */
+  finishDeviceRevocation(deviceId) {
+    this.revokedDevices.delete(deviceId);
+  }
+  rejectSessionApprovals(sessionId, reason) {
+    for (const [handle, approval] of this.approvals) {
+      if (approval.sessionId !== sessionId) continue;
+      this.approvals.delete(handle);
+      void approval.client.respondError(approval.upstreamId, -32800, reason).catch(() => void 0);
     }
   }
   tools(connectionId) {
@@ -97900,8 +97466,25 @@ var AcpRemoteGateway = class {
    * stream open / prompt can resume and buffered frames can replay.
    */
   claimSession(connectionId, sessionId) {
+    const deviceId = this.peerDevices.get(connectionId);
+    if (deviceId && this.revokedDevices.has(deviceId)) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP device was revoked.");
     const owner = this.sessionOwners.get(sessionId);
     if (owner === void 0) {
+      const lease = this.approvalLeases.get(sessionId);
+      if (lease !== void 0) {
+        if (lease.expiresAt <= Date.now()) {
+          this.approvalLeases.delete(sessionId);
+          this.cancelledSessions.add(sessionId);
+          this.rejectSessionApprovals(sessionId, "Remote approval lease expired.");
+        } else if (!this.peerDevices.get(connectionId) || this.peerDevices.get(connectionId) !== lease.deviceId || this.peerKeys.get(connectionId) !== lease.identityKey) {
+          throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote device owns this session.");
+        } else {
+          this.approvalLeases.delete(sessionId);
+          for (const approval of this.approvals.values()) {
+            if (approval.sessionId === sessionId && approval.deviceId === lease.deviceId && approval.identityKey === lease.identityKey) approval.connectionId = connectionId;
+          }
+        }
+      }
       this.sessionOwners.set(sessionId, connectionId);
       return;
     }
@@ -97915,7 +97498,6 @@ var AcpRemoteGateway = class {
     if (peer === void 0) return;
     this.pruneFrameBuffer(sessionId);
     const buffered = this.recentFrames.get(sessionId) ?? [];
-    if (buffered.length === 0) return;
     this.recentFrames.delete(sessionId);
     this.logger.info("Replaying buffered ACP frames", {
       sessionId: shortSessionId(sessionId),
@@ -97923,6 +97505,11 @@ var AcpRemoteGateway = class {
     });
     for (const frame of buffered) {
       await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
+    }
+    for (const approval of this.approvals.values()) {
+      if (approval.sessionId === sessionId && approval.connectionId === connectionId && approval.deviceId === this.peerDevices.get(connectionId) && approval.identityKey === this.peerKeys.get(connectionId) && approval.expiresAt > Date.now() && this.sessionOwners.get(sessionId) === connectionId && this.isSessionBackendReady(sessionId)) {
+        await peer.publishInbound(sessionId, approval.frame);
+      }
     }
   }
   async reconfigure(config2) {
@@ -97948,6 +97535,7 @@ var AcpRemoteGateway = class {
     const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : sessionId.startsWith("pi:") ? "pi" : sessionId.startsWith("opencode:") ? "opencode" : sessionId.startsWith("claude:") ? "claude" : sessionId.startsWith("hermes:") ? "hermes" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
     for (const id6 of sessions) {
       this.sessionOwners.delete(id6);
+      this.approvalLeases.delete(id6);
       this.promptsInProgress.delete(id6);
       const preparation = this.preparingPrompts.get(id6);
       if (preparation) preparation.cancelled = true;
@@ -97986,6 +97574,9 @@ var AcpRemoteGateway = class {
     this.sessionCwds.clear();
     const terminals = this.workspaceState.dispose().then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped."));
     this.sessionOwners.clear();
+    this.peerDevices.clear();
+    this.peerKeys.clear();
+    this.approvalLeases.clear();
     this.sessionBackends.clear();
     this.recentFrames.clear();
     this.turnCatchUp.clear();
@@ -98117,7 +97708,11 @@ var AcpRemoteGateway = class {
     const owner = sessionId === void 0 ? void 0 : this.sessionOwners.get(sessionId);
     const peer = owner === void 0 ? void 0 : this.peers.get(owner);
     const client = this.requireAcp(backend);
-    if (sessionId === void 0 || this.cancelledSessions.has(sessionId) || owner === void 0 || peer === void 0 || boundBackend !== backend || !["session/request_permission", "cursor/create_plan", "cursor/ask_question"].includes(message.method) || message.method.startsWith("cursor/") && backend !== "cursor") {
+    const lease = sessionId === void 0 ? void 0 : this.approvalLeases.get(sessionId);
+    const liveDevice = owner === void 0 ? void 0 : this.peerDevices.get(owner);
+    const deviceId = peer === void 0 ? lease && lease.expiresAt > Date.now() ? lease.deviceId : void 0 : liveDevice;
+    const identityKey = peer === void 0 ? lease?.identityKey : owner === void 0 ? void 0 : this.peerKeys.get(owner);
+    if (sessionId === void 0 || this.cancelledSessions.has(sessionId) || !deviceId || !identityKey || this.revokedDevices.has(deviceId) || peer === void 0 && !lease || boundBackend !== backend || !["session/request_permission", "cursor/create_plan", "cursor/ask_question"].includes(message.method) || message.method.startsWith("cursor/") && backend !== "cursor") {
       await client.respondError(message.id, -32602, "The ACP request has no active owner or supported method.");
       return;
     }
@@ -98136,30 +97731,38 @@ var AcpRemoteGateway = class {
       return;
     }
     const requestHandle = randomUUID15();
-    this.approvals.set(requestHandle, {
+    const expiresAt = Math.min(Date.now() + APPROVAL_TTL_MS2, peer === void 0 ? lease.expiresAt : Infinity);
+    const frame = {
+      method: message.method,
+      params: { ...isRecord19(message.params) ? message.params : {}, requestHandle, sessionId, upstreamMethod: message.method, expiresAt }
+    };
+    const pending = {
       upstreamId: message.id,
-      connectionId: owner,
+      connectionId: owner ?? "",
+      deviceId,
+      identityKey,
       sessionId,
       method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS2,
+      expiresAt,
       backend,
       client,
-      options
-    });
+      options,
+      frame
+    };
+    this.approvals.set(requestHandle, pending);
     this.scheduleApprovalExpiry();
+    if (peer === void 0) {
+      this.notifyApproval(deviceId, backend, sessionId);
+      return;
+    }
     try {
-      await peer.publishInbound(sessionId, {
-        method: message.method,
-        params: {
-          ...isRecord19(message.params) ? message.params : {},
-          requestHandle,
-          sessionId,
-          upstreamMethod: message.method
-        }
-      });
+      await peer.publishInbound(sessionId, frame);
     } catch {
-      this.approvals.delete(requestHandle);
-      await client.respondError(message.id, -32800, "Remote approval delivery failed.");
+      const currentLease = this.approvalLeases.get(sessionId);
+      if (this.approvals.get(requestHandle) === pending && (!currentLease || currentLease.deviceId !== deviceId || currentLease.identityKey !== identityKey)) {
+        this.approvals.delete(requestHandle);
+        await client.respondError(message.id, -32800, "Remote approval delivery failed.");
+      }
     }
   }
   async publishToSession(sessionId, frame) {
@@ -98208,6 +97811,13 @@ var AcpRemoteGateway = class {
   }
   async handleUnavailable(backend, code) {
     if (this.closed) return;
+    for (const [sessionId, ownerBackend] of this.sessionBackends) {
+      if (ownerBackend === backend) {
+        this.approvalLeases.delete(sessionId);
+        this.cancelledSessions.add(sessionId);
+        this.rejectSessionApprovals(sessionId, "ACP backend unavailable.");
+      }
+    }
     const sessions = /* @__PURE__ */ new Set();
     for (const [sessionId, ownerBackend] of this.sessionBackends) {
       if (ownerBackend === backend && !this.promptsInProgress.has(sessionId)) sessions.add(sessionId);
@@ -98271,7 +97881,9 @@ var AcpRemoteGateway = class {
       if (min === void 0 || item.expiresAt < min) return item.expiresAt;
       return min;
     }, void 0);
-    if (next === void 0) return;
+    const leaseNext = [...this.approvalLeases.values()].reduce((min, item) => min === void 0 || item.expiresAt < min ? item.expiresAt : min, void 0);
+    const deadline = next === void 0 ? leaseNext : leaseNext === void 0 ? next : Math.min(next, leaseNext);
+    if (deadline === void 0) return;
     this.approvalExpiryTimer = setTimeout(() => {
       const now = Date.now();
       for (const [handle, approval] of this.approvals) {
@@ -98280,8 +97892,15 @@ var AcpRemoteGateway = class {
           void approval.client.respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
         }
       }
+      for (const [sessionId, lease] of this.approvalLeases) {
+        if (lease.expiresAt <= now) {
+          this.approvalLeases.delete(sessionId);
+          this.cancelledSessions.add(sessionId);
+          this.rejectSessionApprovals(sessionId, "Remote approval lease expired.");
+        }
+      }
       this.scheduleApprovalExpiry();
-    }, Math.max(0, next - Date.now()));
+    }, Math.max(0, deadline - Date.now()));
     this.approvalExpiryTimer.unref?.();
   }
   requireAcp(backend) {
@@ -98333,7 +97952,7 @@ var AcpRemoteGateway = class {
     }
     const owner = this.sessionOwners.get(sessionId);
     if (owner === void 0) {
-      this.sessionOwners.set(sessionId, connectionId);
+      this.claimSession(connectionId, sessionId);
       return;
     }
     if (owner !== connectionId && isSessionMutation(method)) {
@@ -100137,9 +99756,286 @@ function unavailable2() {
   return new RpcError("FEATURE_NOT_SUPPORTED", "LAN upload is unavailable on this connection.");
 }
 
-// packages/plugin/src/host-pairing.ts
-import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+// packages/plugin/src/huawei-push-registry.ts
+import { randomUUID as randomUUID16 } from "node:crypto";
+import { constants as constants7 } from "node:fs";
+import { chmod as chmod3, lstat as lstat4, open as open6, readFile as readFile6, rename as rename4, unlink as unlink2 } from "node:fs/promises";
 import { join as join15 } from "node:path";
+
+// packages/plugin/src/huawei-push-auth.ts
+import { constants as constants6, createPrivateKey as createPrivateKey4, sign as sign2 } from "node:crypto";
+var AUDIENCE = "https://oauth-login.cloud.huawei.com/oauth2/v3/token";
+function parseHuaweiPushServiceAccount(value) {
+  let data2;
+  try {
+    data2 = JSON.parse(value);
+  } catch {
+    throw new Error("Invalid Huawei Push service account configuration");
+  }
+  return validateHuaweiPushServiceAccount(data2);
+}
+function validateHuaweiPushServiceAccount(data2) {
+  if (typeof data2 !== "object" || data2 === null || Array.isArray(data2)) {
+    throw new Error("Invalid Huawei Push service account configuration");
+  }
+  const fields = data2;
+  for (const field of ["project_id", "key_id", "sub_account", "private_key"]) {
+    if (typeof fields[field] !== "string" || fields[field].trim().length === 0) {
+      throw new Error("Invalid Huawei Push service account configuration");
+    }
+  }
+  return {
+    project_id: fields.project_id,
+    key_id: fields.key_id,
+    sub_account: fields.sub_account,
+    private_key: fields.private_key
+  };
+}
+function createHuaweiPushJwt(account, now = Date.now()) {
+  account = validateHuaweiPushServiceAccount(account);
+  const issuedAt = Math.floor(now / 1e3);
+  if (!Number.isSafeInteger(issuedAt) || issuedAt < 0 || !Number.isSafeInteger(issuedAt + 3600)) throw new Error("Invalid JWT issue time");
+  let privateKey;
+  try {
+    privateKey = createPrivateKey4(account.private_key);
+    if (privateKey.asymmetricKeyType !== "rsa" || (privateKey.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) throw new Error();
+  } catch {
+    throw new Error("Invalid Huawei Push service account private key");
+  }
+  const encode21 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const input4 = `${encode21({ kid: account.key_id, typ: "JWT", alg: "PS256" })}.${encode21({ aud: AUDIENCE, iss: account.sub_account, iat: issuedAt, exp: issuedAt + 3600 })}`;
+  try {
+    const signature = sign2("sha256", Buffer.from(input4), {
+      key: privateKey,
+      padding: constants6.RSA_PKCS1_PSS_PADDING,
+      saltLength: 32
+    });
+    return `${input4}.${signature.toString("base64url")}`;
+  } catch {
+    throw new Error("Unable to sign Huawei Push authorization token");
+  }
+}
+
+// packages/plugin/src/huawei-push-sender.ts
+async function sendHuaweiWakeup(account, deviceToken, optionsOrFetcher = fetch, maybeFetcher = fetch) {
+  const options = typeof optionsOrFetcher === "function" ? {} : optionsOrFetcher;
+  const fetcher = typeof optionsOrFetcher === "function" ? optionsOrFetcher : maybeFetcher;
+  if (!/^[0-9]+$/.test(account.project_id) || !deviceToken || deviceToken.length > 4096) {
+    throw new Error("Invalid Huawei Push destination");
+  }
+  const jwt2 = createHuaweiPushJwt(account);
+  const clickAction = options.sessionId ? {
+    actionType: 1,
+    action: "action.dshremote.open_session",
+    data: { sessionId: options.sessionId, ...options.eventType ? { eventType: options.eventType } : {} }
+  } : { actionType: 0 };
+  try {
+    const response = await fetcher(`https://push-api.cloud.huawei.com/v3/${account.project_id}/messages:send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt2}`, "push-type": "0" },
+      body: JSON.stringify({
+        payload: {
+          notification: {
+            category: "WORK",
+            title: options.title || "\u8FDC\u7A0B\u4F1A\u8BDD",
+            body: options.body || "\u8BF7\u6253\u5F00\u5E94\u7528\u67E5\u770B\u65B0\u52A8\u6001",
+            clickAction
+          }
+        },
+        target: { token: [deviceToken] },
+        pushOptions: { testMessage: false }
+      }),
+      redirect: "error",
+      signal: AbortSignal.timeout(1e4)
+    });
+    await response.body?.cancel().catch(() => void 0);
+    return { httpStatus: response.status };
+  } catch {
+    return { httpStatus: null };
+  }
+}
+
+// packages/plugin/src/huawei-push-registry.ts
+var recordSchema = external_exports.object({ deviceId: external_exports.string().min(1).max(128), identityKey: external_exports.string().min(1).max(256), membershipId: external_exports.string().min(1).max(256), token: external_exports.string().min(1).max(4096) }).strict();
+var fileSchema = external_exports.object({ version: external_exports.literal(1), hostId: external_exports.string().min(1).max(128), records: external_exports.array(recordSchema).max(256) }).strict();
+var HuaweiPushRegistry = class {
+  constructor(identities, deviceFor) {
+    this.identities = identities;
+    this.deviceFor = deviceFor;
+  }
+  queue = Promise.resolve();
+  run(action, lock = true) {
+    const next = this.queue.then(() => lock ? withIdentityLock(this.identities.directory, async () => {
+      await this.assertHostIdentity();
+      return action();
+    }) : action());
+    this.queue = next.then(() => void 0, () => void 0);
+    return next;
+  }
+  async assertHostIdentity() {
+    try {
+      const disk = JSON.parse(await readFile6(join15(this.identities.directory, "device.json"), "utf8"));
+      const current = this.identities.current();
+      if (disk.deviceId !== current.deviceId || disk.publicKey !== current.publicKey) throw new Error();
+    } catch {
+      throw new Error("Push identity unavailable");
+    }
+  }
+  async assertStoredPeer(peer, membershipId) {
+    try {
+      const file2 = JSON.parse(await readFile6(join15(this.identities.directory, "trusted-peers.json"), "utf8"));
+      if (!Array.isArray(file2.peers) || !file2.peers.some((item) => {
+        if (typeof item !== "object" || item === null) return false;
+        const record11 = item;
+        return record11.deviceId === peer.deviceId && record11.publicKey === peer.identityKey && record11.membershipId === membershipId;
+      })) throw new Error();
+    } catch {
+      throw new Error("Push identity unavailable");
+    }
+  }
+  peer(peer) {
+    const trusted = this.identities.trustedPeer(peer.deviceId);
+    if (!trusted || trusted.publicKey !== peer.identityKey || !trusted.membershipId) throw new Error("Push identity unavailable");
+    return trusted;
+  }
+  async authorized(peer) {
+    const trusted = this.peer(peer);
+    const remote = await this.deviceFor(peer.deviceId);
+    if (remote.role !== "client" || remote.deviceId !== peer.deviceId || remote.identityKey !== peer.identityKey || remote.membershipId !== trusted.membershipId) throw new Error("Push identity unavailable");
+    if (this.peer(peer).membershipId !== trusted.membershipId) throw new Error("Push identity unavailable");
+    return trusted;
+  }
+  async register(peer, token) {
+    if (typeof token !== "string" || token.length < 1 || token.length > 4096 || /[\u0000-\u001f\u007f]/u.test(token)) throw new Error("Invalid push registration");
+    const trusted = await this.authorized(peer);
+    return this.run(async () => {
+      if (this.peer(peer).membershipId !== trusted.membershipId) throw new Error("Push identity unavailable");
+      await this.assertStoredPeer(peer, trusted.membershipId);
+      const records = (await this.read()).filter((record11) => record11.deviceId !== peer.deviceId);
+      if (records.length >= 256) throw new Error("Push registry full");
+      records.push({ deviceId: peer.deviceId, identityKey: peer.identityKey, membershipId: trusted.membershipId, token });
+      await this.write(records);
+    });
+  }
+  async unregister(peer) {
+    return this.run(async () => {
+      const trusted = this.peer(peer);
+      await this.assertStoredPeer(peer, trusted.membershipId);
+      const records = await this.read();
+      await this.write(records.filter((record11) => record11.deviceId !== peer.deviceId || record11.identityKey !== peer.identityKey));
+    });
+  }
+  async revoke(deviceId, revoke) {
+    let attempted = false;
+    try {
+      return await this.run(async () => {
+        let result;
+        let failed = false;
+        attempted = true;
+        try {
+          result = await revoke();
+        } catch {
+          failed = true;
+        }
+        try {
+          await this.write((await this.read()).filter((record11) => record11.deviceId !== deviceId));
+        } catch {
+          failed = true;
+        }
+        if (failed) throw new Error("Push revocation incomplete");
+        return result;
+      });
+    } catch {
+      if (!attempted) await revoke();
+      throw new Error("Push revocation incomplete");
+    }
+  }
+  /** Hold the queue across reset so no old connection can re-register during it. */
+  async reset(reset) {
+    return this.run(reset, false);
+  }
+  async registeredDeviceIds() {
+    return this.run(async () => (await this.read()).map((item) => item.deviceId));
+  }
+  /** All failures are closed; an accepted HTTP request may still be in flight at revocation. */
+  async send(deviceId, account, options) {
+    const record11 = await this.run(async () => (await this.read()).find((item) => item.deviceId === deviceId));
+    if (!record11) return void 0;
+    const peer = { deviceId: record11.deviceId, identityKey: record11.identityKey };
+    let trusted;
+    try {
+      trusted = await this.authorized(peer);
+    } catch {
+      return void 0;
+    }
+    if (trusted.membershipId !== record11.membershipId) return void 0;
+    const token = await this.run(async () => {
+      if (this.peer(peer).membershipId !== record11.membershipId) return void 0;
+      await this.assertStoredPeer(peer, record11.membershipId);
+      const current = (await this.read()).find((item) => item.deviceId === deviceId);
+      if (!current || current.identityKey !== record11.identityKey || current.membershipId !== record11.membershipId || current.token !== record11.token) return void 0;
+      return current.token;
+    });
+    return token === void 0 ? void 0 : sendHuaweiWakeup(account, token, options);
+  }
+  path() {
+    return join15(this.identities.directory, "huawei-push.json");
+  }
+  async read() {
+    let file2;
+    try {
+      const stat11 = await lstat4(this.path());
+      if (!stat11.isFile() || stat11.nlink !== 1 || (stat11.mode & 63) !== 0 || stat11.size > 2e6) throw new Error("Push registry unavailable");
+      file2 = await open6(this.path(), constants7.O_RDONLY | constants7.O_NOFOLLOW);
+    } catch (error62) {
+      if (error62.code === "ENOENT") return [];
+      throw new Error("Push registry unavailable");
+    }
+    try {
+      const parsed = fileSchema.parse(JSON.parse(await file2.readFile("utf8")));
+      if (parsed.hostId !== this.identities.current().deviceId) return [];
+      if (new Set(parsed.records.map((item) => item.deviceId)).size !== parsed.records.length) throw new Error();
+      return parsed.records;
+    } catch {
+      throw new Error("Push registry unavailable");
+    } finally {
+      await file2.close();
+    }
+  }
+  async write(records) {
+    const path = this.path();
+    const temporary = `${path}.${randomUUID16()}.tmp`;
+    let handle;
+    try {
+      handle = await open6(temporary, constants7.O_WRONLY | constants7.O_CREAT | constants7.O_EXCL | constants7.O_NOFOLLOW, 384);
+      await handle.writeFile(JSON.stringify({ version: 1, hostId: this.identities.current().deviceId, records }));
+      await handle.sync();
+      await handle.close();
+      handle = void 0;
+      await rename4(temporary, path);
+      await chmod3(path, 384);
+      const directory = await open6(this.identities.directory, constants7.O_RDONLY);
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    } catch {
+      await handle?.close().catch(() => void 0);
+      await unlink2(temporary).catch(() => void 0);
+      throw new Error("Push registry unavailable");
+    }
+  }
+};
+
+// packages/plugin/src/service.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir11 } from "node:os";
+import { join as join19 } from "node:path";
+
+// packages/plugin/src/host-pairing.ts
+import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey5, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
 var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
@@ -100150,7 +100046,7 @@ function rawKey(text) {
   return bytes;
 }
 function pairingProof(privateKey, serverKey, id6, path, raw, side = "host") {
-  const local = createPrivateKey4({ key: Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), rawKey(privateKey)]), format: "der", type: "pkcs8" });
+  const local = createPrivateKey5({ key: Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), rawKey(privateKey)]), format: "der", type: "pkcs8" });
   const peer = createPublicKey2({ key: Buffer.concat([Buffer.from("302a300506032b656e032100", "hex"), rawKey(serverKey)]), format: "der", type: "spki" });
   const shared = diffieHellman2({ privateKey: local, publicKey: peer });
   const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(id6), Buffer.from("dsh-pairing-v1/" + side), 32));
@@ -100171,7 +100067,7 @@ var HostPairing = class {
     this.adopt = adopt;
     this.fetcher = fetcher;
     this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
-    this.path = join15(directory, "host-pairing.json");
+    this.path = join16(directory, "host-pairing.json");
   }
   path;
   serverUrl;
@@ -100366,71 +100262,10 @@ var HostPairing = class {
 };
 
 // packages/plugin/src/workspace-upload.ts
-import { randomUUID as randomUUID16 } from "node:crypto";
-import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
-
-// packages/plugin/src/workspace-upload-budget.ts
-import { statfs } from "node:fs/promises";
-var HOST_UPLOAD_ACTIVE_LIMIT = 4;
-var HOST_UPLOAD_RESERVED_BYTES = 4 * 1024 * 1024 * 1024;
-var SESSION_UPLOAD_RESERVED_BYTES = 2 * 1024 * 1024 * 1024;
-var UPLOAD_DISK_FREE_BYTES = 32 * 1024 * 1024;
-var WorkspaceUploadBudget = class {
-  constructor(limits = {
-    active: HOST_UPLOAD_ACTIVE_LIMIT,
-    reservedBytes: HOST_UPLOAD_RESERVED_BYTES,
-    sessionBytes: SESSION_UPLOAD_RESERVED_BYTES,
-    diskFreeBytes: UPLOAD_DISK_FREE_BYTES
-  }, freeBytes = async (root2) => {
-    const disk = await statfs(root2);
-    return disk.bavail * disk.bsize;
-  }) {
-    this.limits = limits;
-    this.freeBytes = freeBytes;
-  }
-  active = /* @__PURE__ */ new Set();
-  queue = Promise.resolve();
-  reserve(root2, dev, sessionId, bytes) {
-    const next = this.queue.then(async () => {
-      const free = await this.freeBytes(root2);
-      const active2 = [...this.active];
-      const reserved = active2.reduce((sum, entry2) => sum + entry2.total, 0);
-      const onDisk = active2.filter((entry2) => entry2.dev === dev).reduce((sum, entry2) => sum + entry2.remaining, 0);
-      const session2 = active2.filter((entry2) => entry2.sessionId === sessionId).reduce((sum, entry2) => sum + entry2.total, 0);
-      if (active2.length >= this.limits.active || reserved + bytes > this.limits.reservedBytes || session2 + bytes > this.limits.sessionBytes || !Number.isFinite(free) || free - onDisk - bytes < this.limits.diskFreeBytes) throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
-      const entry = { sessionId, dev, remaining: bytes, total: bytes };
-      this.active.add(entry);
-      let done = false;
-      return {
-        checkDisk: async () => {
-          const current = await this.freeBytes(root2);
-          const other = [...this.active].filter((item) => item.dev === dev).reduce((sum, item) => sum + item.remaining, 0);
-          if (!Number.isFinite(current) || current - other < this.limits.diskFreeBytes)
-            throw new RpcError("UPLOAD_LIMIT", "The workspace upload could not be completed.");
-        },
-        consume: (amount) => {
-          entry.remaining -= amount;
-        },
-        commit: () => {
-          if (done) return;
-          done = true;
-          this.active.delete(entry);
-        },
-        release: () => {
-          if (done) return;
-          done = true;
-          this.active.delete(entry);
-        }
-      };
-    });
-    this.queue = next.catch(() => void 0);
-    return next;
-  }
-};
-
-// packages/plugin/src/workspace-upload.ts
+import { randomUUID as randomUUID17 } from "node:crypto";
+import { constants as constants8 } from "node:fs";
+import { link as link2, lstat as lstat5, open as open7, realpath as realpath6, stat as stat7, unlink as unlink3 } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
@@ -100440,12 +100275,11 @@ var openParams = scope.extend({ name: external_exports.string().min(1), totalByt
 var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
 var binaryChunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
 var WorkspaceUploadHost = class {
-  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now, budget = new WorkspaceUploadBudget()) {
+  constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now) {
     this.resolveRoot = resolveRoot;
     this.ttlMs = ttlMs;
     this.transportMode = transportMode;
     this.now = now;
-    this.budget = budget;
     this.timer = setInterval(() => {
       void this.serialize(() => this.expire()).catch(() => void 0);
     }, Math.min(ttlMs, 3e4));
@@ -100516,20 +100350,10 @@ var WorkspaceUploadHost = class {
     const root2 = await realpath6(sourceRoot);
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
-    const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
-    let handle;
-    try {
-      handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
-    } catch (error62) {
-      reservation.release();
-      throw error62;
-    }
+    const temp = join17(root2, `.dsh-upload-${randomUUID17()}.part`);
+    const handle = await open7(temp, constants8.O_CREAT | constants8.O_EXCL | constants8.O_RDWR | (constants8.O_NOFOLLOW ?? 0), 384);
     const upload = {
-      sessionId: p.sessionId,
-      name: p.name,
-      totalBytes: p.totalBytes,
-      encoding: p.encoding,
+      ...p,
       received: 0,
       touched: this.now(),
       root: root2,
@@ -100539,8 +100363,7 @@ var WorkspaceUploadHost = class {
       temp,
       handle,
       authorityCheckedAt: 0,
-      authorityBytes: 0,
-      reservation
+      authorityBytes: 0
     };
     this.uploads.set(p.uploadId, upload);
     await this.validateRoot(upload);
@@ -100550,11 +100373,9 @@ var WorkspaceUploadHost = class {
     const p = binary ? binaryChunkParams.parse(input4) : chunkParams.parse(input4);
     const upload = this.requireUpload(p);
     if (binary !== (upload.encoding === "binary-v1")) throw failure4("UPLOAD_INVALID_CHUNK");
-    const data2 = decodeChunk(p.data);
-    if (p.offset !== upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
-    if (data2.length > upload.totalBytes - upload.received) throw failure4("UPLOAD_INVALID_CHUNK");
+    const data2 = typeof p.data === "string" ? Buffer.from(p.data, "base64") : Buffer.from(p.data.buffer, p.data.byteOffset, p.data.byteLength);
+    if (!data2.length || data2.length > (binary ? BINARY_UPLOAD_CHUNK_BYTES : WORKSPACE_UPLOAD_CHUNK) || !binary && data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure4("UPLOAD_INVALID_CHUNK");
     await this.validateRoot(upload, this.authorityExpired(upload));
-    await upload.reservation.checkDisk();
     let written = 0;
     while (written < data2.length) {
       const result = await upload.handle.write(data2, written, data2.length - written, upload.received + written);
@@ -100563,7 +100384,6 @@ var WorkspaceUploadHost = class {
     }
     this.assertLive();
     upload.received += data2.length;
-    upload.reservation.consume(data2.length);
     upload.touched = this.now();
     return { uploadId: p.uploadId, receivedBytes: upload.received };
   }
@@ -100579,7 +100399,7 @@ var WorkspaceUploadHost = class {
     await this.validateRoot(upload);
     await upload.handle.sync();
     const original = await upload.handle.stat();
-    const temp = await lstat4(upload.temp);
+    const temp = await lstat5(upload.temp);
     if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure4("UPLOAD_WORKSPACE_CHANGED");
     const extension2 = extname(upload.name);
     const stem = upload.name.slice(0, upload.name.length - extension2.length);
@@ -100587,7 +100407,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join16(upload.root, name2));
+        await link2(upload.temp, join17(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -100595,7 +100415,6 @@ var WorkspaceUploadHost = class {
       const result = { name: name2, path: `./${name2}`, bytes: upload.totalBytes };
       this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: this.now() });
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value);
-      upload.reservation.commit();
       await this.discard(p.uploadId, upload);
       return result;
     }
@@ -100649,13 +100468,12 @@ var WorkspaceUploadHost = class {
   }
   async discard(id6, upload) {
     this.uploads.delete(id6);
-    upload.reservation.release();
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
     try {
-      const root2 = await lstat4(upload.root);
-      const temp = await lstat4(upload.temp);
-      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink2(upload.temp);
+      const root2 = await lstat5(upload.root);
+      const temp = await lstat5(upload.temp);
+      if (original && root2.isDirectory() && root2.dev === upload.dev && root2.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink3(upload.temp);
     } catch {
     }
   }
@@ -100667,13 +100485,6 @@ var WorkspaceUploadHost = class {
 };
 function failure4(code) {
   return new RpcError(code, "The workspace upload could not be completed.");
-}
-function decodeChunk(value) {
-  const data2 = typeof value === "string" ? Buffer.from(value, "base64") : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
-  const limit = typeof value === "string" ? WORKSPACE_UPLOAD_CHUNK : BINARY_UPLOAD_CHUNK_BYTES;
-  if (data2.length === 0 || data2.length > limit) throw failure4("UPLOAD_INVALID_CHUNK");
-  if (typeof value === "string" && data2.toString("base64") !== value) throw failure4("UPLOAD_INVALID_CHUNK");
-  return data2;
 }
 function validName(name2) {
   return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
@@ -101146,6 +100957,8 @@ var compactionOperationSchema = external_exports.object({
   operationId: external_exports.string().uuid()
 }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
+  "push.huawei.register",
+  "push.huawei.unregister",
   "harness.transport.describe",
   "remote.history.configure",
   "harness.remote.call",
@@ -101163,6 +100976,7 @@ var apiMethods = /* @__PURE__ */ new Set([
   "fileviewer.call",
   "codex.app.call",
   "codex.app.respond",
+  "codex.app.approvals.claim",
   "codex.app.stream.open",
   "codex.app.stream.close",
   "codex.app.transfer.open",
@@ -101203,7 +101017,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, huaweiPush) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -101218,6 +101032,7 @@ var RpcRouter = class {
     this.compaction = compaction;
     this.lanUpload = lanUpload;
     this.transportUpgrade = transportUpgrade;
+    this.huaweiPush = huaweiPush;
   }
   active = 0;
   async closePeerStreams() {
@@ -101248,7 +101063,7 @@ var RpcRouter = class {
     const startedAt = performance.now();
     try {
       const result = await this.invoke(request.payload.method, request.payload.params);
-      const subMethod = typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
+      const subMethod = !request.payload.method.startsWith("push.huawei.") && typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
       this.logger?.info("host rpc ok", {
         method: request.payload.method,
         ...subMethod ? { subMethod } : {},
@@ -101257,7 +101072,7 @@ var RpcRouter = class {
       return createRpcResponse(request.id, result);
     } catch (error62) {
       const response = errorResponse2(request.id, error62);
-      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
+      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && !request.payload.method.startsWith("push.huawei.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
       const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
@@ -101274,6 +101089,18 @@ var RpcRouter = class {
   }
   async invoke(method, params) {
     switch (method) {
+      case "push.huawei.register": {
+        if (!this.huaweiPush) throw new RpcError("FEATURE_NOT_SUPPORTED", "Push registration is unavailable.");
+        const parsed = huaweiPushRegisterSchema.parse(params);
+        await this.huaweiPush.registry.register(this.huaweiPush.peer, parsed.token);
+        return { registered: true };
+      }
+      case "push.huawei.unregister": {
+        if (!this.huaweiPush) throw new RpcError("FEATURE_NOT_SUPPORTED", "Push registration is unavailable.");
+        huaweiPushUnregisterSchema.parse(params);
+        await this.huaweiPush.registry.unregister(this.huaweiPush.peer);
+        return { unregistered: true };
+      }
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
         const hostCapabilities = (await this.capabilities()).filter((capability) => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY);
@@ -101284,7 +101111,8 @@ var RpcRouter = class {
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
-          ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
+          ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY],
+          ...this.huaweiPush === void 0 ? [] : [HUAWEI_PUSH_CAPABILITY]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -101348,6 +101176,8 @@ var RpcRouter = class {
         return this.requireCodex().call(params);
       case "codex.app.respond":
         return this.requireCodex().respond(params);
+      case "codex.app.approvals.claim":
+        return this.requireCodex().claimApprovals(params);
       case "codex.app.stream.open":
         return this.requireCodex().openStream(params);
       case "codex.app.stream.close":
@@ -103054,10 +102884,10 @@ function closeCode(code) {
 }
 
 // packages/plugin/src/harness-remote-bridge.ts
-import { randomUUID as randomUUID17 } from "node:crypto";
+import { randomUUID as randomUUID18 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { lstat as lstat6, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { dirname as dirname8, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
@@ -103167,8 +102997,6 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "agentPresets/select",
   "commands/execute",
   "commands/list",
-  "cotTranslation/limits",
-  "cotTranslation/translate",
   "credentials/describe",
   "credentials/set",
   "credentials/unset",
@@ -103565,7 +103393,6 @@ var HarnessRemoteBridge = class {
     const params = streamOpenSchema3.parse(input4);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
-    if (params.endpoint.startsWith("cotTranslation/")) throw new RpcError("METHOD_NOT_ALLOWED", "Translation endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
@@ -103595,7 +103422,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID18(), host: { home: homedir10() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -103734,7 +103561,7 @@ var HarnessRemoteBridge = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
-    const transferId = randomUUID17();
+    const transferId = randomUUID18();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
     const completed = new Promise((resolve10, reject) => {
@@ -103885,7 +103712,7 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
     }
     try {
-      const rootLstat = await lstat5(root2);
+      const rootLstat = await lstat6(root2);
       if (rootLstat.isSymbolicLink() || !rootLstat.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The workspace root is invalid or a symlink.", "root-invalid");
       }
@@ -103893,11 +103720,11 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join17(currentPath, parts[i]);
+        currentPath = join18(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
-        const dirLstat = await lstat5(currentPath);
+        const dirLstat = await lstat6(currentPath);
         if (dirLstat.isSymbolicLink()) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "symlink");
         }
@@ -103905,7 +103732,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "An ancestor directory is invalid or a symlink.", "not-regular-file");
         }
       }
-      const targetLstat = await lstat5(candidate);
+      const targetLstat = await lstat6(candidate);
       if (targetLstat.isSymbolicLink()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "symlink");
       }
@@ -104320,7 +104147,7 @@ function remoteOwnedBundleRow(row, plugin) {
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
-import { randomUUID as randomUUID18 } from "node:crypto";
+import { randomUUID as randomUUID19 } from "node:crypto";
 var MIN_BUDGET_MS = 6e4;
 var MAX_BUDGET_MS = 72e5;
 var DEFAULT_BUDGET_MS = 18e5;
@@ -104420,7 +104247,7 @@ var RemoteCompactionOperations = class {
       resolveCommandSettled = resolve10;
     });
     return {
-      operationId: randomUUID18(),
+      operationId: randomUUID19(),
       requestId: params.requestId,
       sessionId: params.sessionId,
       ownerDeviceId: owner.deviceId,
@@ -104692,6 +104519,10 @@ var HostPluginRuntime = class {
     this.pluginRoutes = pluginRoutes;
     this.schedule = schedule;
     this.terminalEnabled = config2.terminal.enabled;
+    this.huaweiPush = new HuaweiPushRegistry(identities, async (deviceId) => {
+      if (!this.serverApi) throw new Error("Push authority unavailable");
+      return this.serverApi.deviceFor(deviceId, AbortSignal.timeout(1e4));
+    });
     this.loopbackPorts = [...config2.loopback.ports];
     this.codex = new CodexRemoteDomain(config2.codex, logger2);
     this.acp = new AcpRemoteGateway(config2.acp ?? { enabled: false, backends: [] }, logger2, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
@@ -104771,7 +104602,7 @@ var HostPluginRuntime = class {
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
         (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
         (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
-      ), void 0, context.transportMode, Date.now, this.uploadBudget);
+      ), void 0, context.transportMode);
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId,
         peerIdentityKey: context.peerIdentityKey,
@@ -104796,7 +104627,8 @@ var HostPluginRuntime = class {
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
         },
         lanUpload,
-        context.createTransportUpgradeHost?.(send)
+        context.createTransportUpgradeHost?.(send),
+        context.peerIdentityKey && this.serverApi ? { registry: this.huaweiPush, peer: { deviceId: context.peerDeviceId, identityKey: context.peerIdentityKey } } : void 0
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -104805,12 +104637,12 @@ var HostPluginRuntime = class {
   }
   connections;
   terminalOwners = /* @__PURE__ */ new Map();
-  uploadBudget = new WorkspaceUploadBudget();
   loopbackHosts = /* @__PURE__ */ new Set();
   terminalEnabled;
   loopbackPorts;
   identity;
   serverApi;
+  huaweiPush;
   serverConnection;
   harnessVersion;
   pairing;
@@ -104828,6 +104660,9 @@ var HostPluginRuntime = class {
   localAcpPeer;
   localAcpPublish = async () => void 0;
   warnedMissingHostApi = false;
+  huaweiPushAccount;
+  huaweiPushAbort;
+  huaweiPushLastSent = /* @__PURE__ */ new Map();
   setTerminalEnabled(enabled) {
     this.terminalEnabled = enabled;
   }
@@ -104873,6 +104708,10 @@ var HostPluginRuntime = class {
       this.initializePairing();
       this.serverConnection = this.createServerConnection(this.identity);
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start();
+    }
+    this.huaweiPushAccount = loadHuaweiPushAccount(this.logger);
+    if (this.huaweiPushAccount !== void 0) {
+      this.startHuaweiPushWatcher();
     }
   }
   currentIdentity() {
@@ -104970,7 +104809,7 @@ var HostPluginRuntime = class {
       await this.serverConnection?.stop();
       await this.pairing?.discard();
       this.pairing = void 0;
-      this.identity = await this.identities.reset(this.config.deviceName);
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName));
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
       this.initializePairing();
@@ -104992,7 +104831,7 @@ var HostPluginRuntime = class {
     } catch (error62) {
       revokeFailure = error62;
     }
-    this.identity = await this.identities.reset(this.config.deviceName);
+    this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName));
     this.serverApi?.bindIdentity(this.identity);
     if (this.serverApi !== void 0) this.serverConnection = this.createServerConnection(this.identity);
     this.initializePairing();
@@ -105011,7 +104850,7 @@ var HostPluginRuntime = class {
       await this.serverConnection?.stop();
       await this.pairing?.discard();
       this.pairing = void 0;
-      this.identity = await this.identities.reset(this.config.deviceName);
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName));
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
       this.initializePairing();
@@ -105030,7 +104869,7 @@ var HostPluginRuntime = class {
       await this.serverConnection?.stop();
       await this.pairing?.discard();
       this.pairing = void 0;
-      this.identity = await this.identities.reset(this.config.deviceName);
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName));
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
       this.initializePairing();
@@ -105051,15 +104890,126 @@ var HostPluginRuntime = class {
     return result;
   }
   async revokePeer(deviceId) {
-    const revoked = await this.identities.revokePeer(deviceId);
-    if (revoked) await this.connections.revoke(deviceId);
-    return revoked;
+    const codexRevocation = this.codex.revokeDevice(deviceId);
+    this.acp.revokeDevice(deviceId);
+    await codexRevocation;
+    return this.huaweiPush.revoke(deviceId, async () => {
+      let revoked;
+      try {
+        revoked = await this.identities.revokePeer(deviceId);
+      } finally {
+        await this.connections.revoke(deviceId);
+      }
+      this.acp.finishDeviceRevocation(deviceId);
+      return revoked;
+    });
+  }
+  async sendHuaweiWakeup(deviceId, account, options) {
+    return this.huaweiPush.send(deviceId, account, options);
+  }
+  startHuaweiPushWatcher() {
+    if (this.localGateway?.supportsCarrier !== true || this.huaweiPushAbort !== void 0) return;
+    const controller = new AbortController();
+    this.huaweiPushAbort = controller;
+    void this.runHuaweiPushEventLoop(controller.signal);
+  }
+  async runHuaweiPushEventLoop(signal) {
+    const runningSessions = /* @__PURE__ */ new Set();
+    while (!this.closed && !signal.aborted) {
+      const gateway = this.localGateway?.createPeer?.() ?? this.localGateway;
+      if (gateway === void 0) return;
+      let iterator;
+      try {
+        const stream = await gateway.open("$events", { args: {} }, signal);
+        iterator = stream[Symbol.asyncIterator]();
+        while (!this.closed && !signal.aborted) {
+          const next = await iterator.next();
+          if (next.done) break;
+          this.handleHuaweiPushEventFrame(next.value, runningSessions);
+        }
+      } catch {
+      } finally {
+        await iterator?.return?.().catch(() => void 0);
+        if (gateway !== this.localGateway) {
+          await gateway.dispose?.().catch(() => void 0);
+        }
+      }
+      if (!this.closed && !signal.aborted) {
+        await new Promise((resolve10) => setTimeout(resolve10, 3e3));
+      }
+    }
+  }
+  handleHuaweiPushEventFrame(value, runningSessions) {
+    if (!isPlainRecord(value) || typeof value.type !== "string") return;
+    if (value.type === "emit" && typeof value.event === "string" && Array.isArray(value.args)) {
+      const sessionId = typeof value.args[0] === "string" ? value.args[0] : "";
+      if (sessionId.length === 0) return;
+      if (value.event === "api-session/status" && typeof value.args[1] === "boolean") {
+        if (value.args[1]) {
+          runningSessions.add(sessionId);
+        } else if (runningSessions.delete(sessionId)) {
+          void this.notifyOfflineHuaweiPeers({
+            title: "\u4F1A\u8BDD\u5DF2\u5B8C\u6210",
+            body: "\u667A\u80FD\u4F53\u5DF2\u5B8C\u6210\u56DE\u590D\uFF0C\u70B9\u51FB\u67E5\u770B",
+            sessionId,
+            eventType: "done"
+          });
+        }
+        return;
+      }
+      if (value.event === "api-session/error") {
+        runningSessions.delete(sessionId);
+        void this.notifyOfflineHuaweiPeers({
+          title: "\u4F1A\u8BDD\u6267\u884C\u5F02\u5E38",
+          body: "\u4F1A\u8BDD\u8FD0\u884C\u51FA\u9519\uFF0C\u70B9\u51FB\u67E5\u770B\u8BE6\u60C5",
+          sessionId,
+          eventType: "error"
+        });
+      }
+      return;
+    }
+    if (value.type === "waterfall" && typeof value.event === "string" && typeof value.agentId === "string" && value.agentId.length > 0) {
+      const isApproval = value.event.includes("approval");
+      const isQuestion = value.event.includes("question");
+      if (!isApproval && !isQuestion) return;
+      void this.notifyOfflineHuaweiPeers({
+        title: isApproval ? "\u9700\u8981\u60A8\u7684\u786E\u8BA4" : "\u667A\u80FD\u4F53\u7B49\u5F85\u56DE\u590D",
+        body: isApproval ? "\u667A\u80FD\u4F53\u8BF7\u6C42\u64CD\u4F5C\u6388\u6743\uFF0C\u70B9\u51FB\u5904\u7406" : "\u6709\u65B0\u7684\u63D0\u95EE\u9700\u8981\u60A8\u4ECB\u5165\u56DE\u7B54",
+        sessionId: value.agentId,
+        eventType: isApproval ? "approval" : "question"
+      });
+    }
+  }
+  async notifyOfflineHuaweiPeers(options) {
+    const account = this.huaweiPushAccount;
+    if (account === void 0 || this.closed) return;
+    const active2 = new Set(this.connections.peerDeviceIds());
+    const registered = await this.huaweiPush.registeredDeviceIds().catch(() => []);
+    const now = Date.now();
+    for (const deviceId of registered) {
+      if (active2.has(deviceId)) continue;
+      const dedupeKey = `${deviceId}:${options.sessionId ?? ""}:${options.eventType ?? ""}`;
+      const prev = this.huaweiPushLastSent.get(dedupeKey) ?? 0;
+      if (now - prev < 4e3) continue;
+      this.huaweiPushLastSent.set(dedupeKey, now);
+      try {
+        const res = await this.huaweiPush.send(deviceId, account, options);
+        if (res !== void 0) {
+          this.logger.info("huawei push sent", { deviceId: shortId4(deviceId), eventType: options.eventType, httpStatus: res.httpStatus });
+        }
+      } catch {
+        this.logger.warn("huawei push failed", { deviceId: shortId4(deviceId), eventType: options.eventType });
+      }
+    }
   }
   codexStatus() {
     return this.codex.status();
   }
   codexCall(input4) {
     return this.requireLocalCodexPeer().call(input4);
+  }
+  codexClaimApprovals(input4) {
+    return this.requireLocalCodexPeer().claimApprovals(input4);
   }
   codexRespond(input4) {
     return this.requireLocalCodexPeer().respond(input4);
@@ -105098,6 +105048,8 @@ var HostPluginRuntime = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.huaweiPushAbort?.abort();
+    this.huaweiPushAbort = void 0;
     this.pairing?.close();
     this.serverApi?.close();
     await this.serverConnection?.stop();
@@ -105293,6 +105245,30 @@ function shortId4(value) {
 }
 function isPlainRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function loadHuaweiPushAccount(logger2) {
+  const candidates = [];
+  const envRaw = process.env.DSH_HUAWEI_PUSH_ACCOUNT?.trim();
+  if (envRaw) candidates.push(envRaw);
+  for (const file2 of ["huawei-push-sa.json", "huawei-push.json"]) {
+    try {
+      const content = readFileSync2(join19(homedir11(), ".dsh", file2), "utf8").trim();
+      if (content) candidates.push(content);
+    } catch {
+    }
+  }
+  for (const raw of candidates) {
+    try {
+      const account = parseHuaweiPushServiceAccount(raw);
+      const projectOverride = process.env.DSH_HUAWEI_PUSH_PROJECT_ID?.trim();
+      const resolved = projectOverride && /^[0-9]+$/.test(projectOverride) ? { ...account, project_id: projectOverride } : account;
+      logger2.info("huawei push account loaded", { projectId: resolved.project_id });
+      return resolved;
+    } catch {
+      logger2.warn("huawei push account invalid");
+    }
+  }
+  return void 0;
 }
 
 // packages/plugin/src/plugin-route-dispatcher.ts
@@ -105656,7 +105632,7 @@ var PluginUpdateChecker = class {
 };
 
 // packages/plugin/src/plugin-self-update.ts
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { randomUUID as randomUUID20 } from "node:crypto";
 
 // packages/plugin/src/version-compare.ts
 var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -105702,7 +105678,7 @@ function compareVersions(left, right) {
 // packages/plugin/src/plugin-self-update.ts
 var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
 var LocalPluginUpgrade = class {
-  constructor(checker, manager, subscribe, requestId = randomUUID19) {
+  constructor(checker, manager, subscribe, requestId = randomUUID20) {
     this.checker = checker;
     this.manager = manager;
     this.subscribe = subscribe;
@@ -105928,7 +105904,7 @@ function decodeBase64(value) {
 // packages/plugin/src/cli.ts
 import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join20 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -106020,7 +105996,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join18(directory, "device.json"))) {
+  if (!await exists3(join20(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -106080,9 +106056,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join18(directory, "device.json")),
-    exists3(join18(directory, "device.key")),
-    exists3(join18(directory, "server-credentials.json"))
+    exists3(join20(directory, "device.json")),
+    exists3(join20(directory, "device.key")),
+    exists3(join20(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();

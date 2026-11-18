@@ -12,7 +12,8 @@ export interface CodexClientLike {
     onFrame: (frame: { method: string; params: unknown }) => void,
     signal?: AbortSignal,
     onClose?: (reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected') => void,
-  ): Promise<{ close(): Promise<void> }>
+  ): Promise<{ streamId?: string; close(): Promise<void> }>
+  claimApprovals?(streamId: string, signal?: AbortSignal): Promise<Array<{ method: string; params: unknown }>>
   respond(requestHandle: string, decision: 'accept' | 'decline' | 'cancel', signal?: AbortSignal): Promise<void>
 }
 

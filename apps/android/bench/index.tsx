@@ -1,7 +1,7 @@
-import '@dsh-remote/app-core/polyfills'
-import { LanUploadRoutes } from '@dsh-remote/app-core/services/lan-upload'
-import { nativeWebSocketSender } from '@dsh-remote/app-core/services/native-websocket-binary'
-import { uploadStagedFileToWorkspace, bytesToBase64 } from '@dsh-remote/app-core/screens/chat-files'
+import '../src/polyfills'
+import { LanUploadRoutes } from '../src/services/lan-upload'
+import { nativeWebSocketSender } from '../src/services/native-websocket-binary'
+import { uploadStagedFileToWorkspace, bytesToBase64 } from '../src/screens/chat-files'
 // Dedicated Gradle entry. Never imported by the shipping application.
 import React, { useEffect, useState } from 'react'
 import { ScrollView, Text } from 'react-native'
@@ -13,8 +13,8 @@ import { generateKeyPair, NoiseIkSession, fromBase64Url } from '@dsh-remote/cryp
 import { createRpcRequest, encodeMessage, decodeMessage, SecureMessageCodec, type RpcMethod } from '@dsh-remote/protocol'
 import { RtcChunkCodec } from '../../../packages/webrtc/src/rtc-chunking'
 import { encodeBulkFrame, BULK_DATA_BYTES } from '../../../scripts/transport-bench/stream-codec'
-import { nativeChaChaEncryptor } from '@dsh-remote/app-core/services/native-chacha-poly'
-import { createNativeRtcSender } from '@dsh-remote/app-core/services/native-rtc-binary'
+import { nativeChaChaEncryptor } from '../src/services/native-chacha-poly'
+import { createNativeRtcSender } from '../src/services/native-rtc-binary'
 
 registerGlobals()
 const url = process.env.EXPO_PUBLIC_DSH_BENCH_URL!

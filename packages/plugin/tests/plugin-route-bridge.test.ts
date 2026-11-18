@@ -2,7 +2,7 @@ import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import type { PluginRouteDispatcher } from '../src/plugin-route-bridge.js'
 import { PluginRouteBridge } from '../src/plugin-route-bridge.js'
-import upstreamEndpoints from './fixtures/ds-bot-v0.3.8-endpoints.json' with { type: 'json' }
+import upstreamEndpoints from './fixtures/ds-bot-v0.3.6-endpoints.json' with { type: 'json' }
 import { RpcError } from '../src/rpc-router.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
@@ -38,7 +38,7 @@ describe('PluginRouteBridge', () => {
     })))
   })
 
-  it('admits DS-Bot v0.3.8 endpoints and refuses unknown operations before dispatch', async () => {
+  it('admits DS-Bot v0.3.6 endpoints and refuses unknown operations before dispatch', async () => {
     await runScenarios([
       ...[...upstreamEndpoints, 'state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules', 'schedule-create', 'schedule-delete', 'memory-view', 'memory-history', 'memory-ask', 'memory-forget', 'memory-restore', 'folders', 'folder-list', 'team-workspace', 'set-prefs', 'browser-takeover', 'browser-give-back', 'browser-stop', 'providers', 'local-agents', 'btw', 'btw-cancel', 'btw-delete', 'room-continue', 'chat', 'run-stats', 'stop-room-work', 'goal-draft', 'goal-control', 'side-new', 'side-ask', 'side-cancel', 'side-close', 'dismiss-view', 'resume', 'bot-new-part', 'bot-open-part', 'exchange-text', 'file-text', 'thinking', 'room-progress', 'group-rows'].map(endpoint => ({
         name: `admit ${endpoint}`, body: { endpoint, payload: {} }, allowed: true,

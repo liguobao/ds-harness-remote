@@ -1,6 +1,7 @@
 import { RemoteClientCore, RemoteClientError, RemoteEvent } from './RemoteClientCore';
-import { jsonStr, jsonValue, asRecord, asBool } from '../protocol/Types';
-import { randomId } from '../crypto/Bytes';
+import { jsonStr, jsonValue, asRecord, asBool, asArray } from '../protocol/Types';
+import { randomId, utf8Encode } from '../crypto/Bytes';
+import { DIRECT_REMOTE_CALL_BYTES, TransferError, callChunkedTransfer } from './TransferCodec';
 
 /** Gateway-level failure raised by RemoteGateway and HarnessAlphaClient. */
 export class RemoteGatewayError extends Error {
@@ -142,35 +143,146 @@ export class RemoteGatewayStream {
   }
 }
 
+/** Advertised agent backend entry inside `harness.transport.describe.workspaceTypes`. */
+export class RemoteWorkspaceTypeDesc {
+  id: string = '';
+  capability: string = '';
+  available: boolean = false;
+  reason: string = '';
+}
+
 /** Negotiated Host capability profile (subset used by this client). */
 export class RemoteHostFeatures {
   apiProxy: boolean = false;
+  apiTransfer: boolean = false;
   remoteGateway: boolean = false;
   sessionFormat: number = 0;
+  remoteTransfer: boolean = false;
+  fileViewer: boolean = false;
+  sessionEvents: boolean = false;
+  pluginRoute: boolean = false;
+  huaweiPush: boolean = false;
+  binaryUploads: boolean = false;
+  asyncCompaction: boolean = false;
   capabilities: string[] = [];
+  workspaceTypes: RemoteWorkspaceTypeDesc[] = [];
+  hasWorkspaceTypesField: boolean = false;
+
+  hasCapability(cap: string): boolean {
+    return this.capabilities.includes(cap);
+  }
+
+  supportsWorkspaceType(id: string, capability: string): boolean {
+    if (!this.hasCapability(capability)) {
+      return false;
+    }
+    if (!this.hasWorkspaceTypesField) {
+      return true;
+    }
+    let matchCount = 0;
+    let available = false;
+    for (const item of this.workspaceTypes) {
+      if (item.id === id) {
+        matchCount += 1;
+        if (item.capability === capability && item.available) {
+          available = true;
+        }
+      }
+    }
+    return matchCount === 1 && available;
+  }
 }
 
 /** Client-side Typert Gateway carrier over the authenticated Remote channel. */
 export class RemoteGateway {
   private client: RemoteClientCore;
+  private features: RemoteHostFeatures = new RemoteHostFeatures();
 
   constructor(client: RemoteClientCore) {
     this.client = client;
   }
 
-  /** One `harness.remote.call` round trip; unwraps the Gateway result envelope. */
-  async call(endpoint: string, payload: Object, timeoutMs?: number): Promise<Object> {
+  getClient(): RemoteClientCore {
+    return this.client;
+  }
+
+  getFeatures(): RemoteHostFeatures {
+    return this.features;
+  }
+
+  /**
+   * One `harness.remote.call` round trip with automatic chunked transfer fallback
+   * for large payloads or `RESPONSE_TOO_LARGE`. Unwraps the Gateway result envelope.
+   */
+  async call(endpoint: string, payload: Object, timeoutMs?: number, maxResponseBytes?: number): Promise<Object> {
     const params: Record<string, Object> = {
       'endpoint': endpoint,
       'payload': payload
     };
+    const encoded: Uint8Array = utf8Encode(JSON.stringify(params));
     let response: Object;
     try {
-      response = await this.client.rpc('harness.remote.call', params, timeoutMs, endpoint);
+      if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES) {
+        response = await callChunkedTransfer(
+          this.client, 'harness.remote.transfer', randomId(), encoded, timeoutMs, maxResponseBytes);
+      } else {
+        try {
+          response = await this.client.rpc('harness.remote.call', params, timeoutMs, endpoint);
+        } catch (innerError) {
+          if (innerError instanceof RemoteClientError && innerError.code === 'RESPONSE_TOO_LARGE') {
+            response = await callChunkedTransfer(
+              this.client, 'harness.remote.transfer', randomId(), encoded, timeoutMs, maxResponseBytes);
+          } else {
+            throw toGatewayError(innerError as Object);
+          }
+        }
+      }
     } catch (error) {
-      throw toGatewayError(error);
+      throw toGatewayError(error as Object);
     }
     return parseGatewayResult(response);
+  }
+
+  async submitCompaction(sessionId: string, requestId: string, budgetMs?: number): Promise<Object> {
+    const params: Record<string, Object> = {
+      'sessionId': sessionId,
+      'requestId': requestId
+    };
+    if (budgetMs !== undefined && budgetMs > 0) {
+      params['budgetMs'] = budgetMs;
+    }
+    try {
+      return await this.client.rpc('harness.remote.compaction.submit', params, undefined,
+        'harness.remote.compaction.submit');
+    } catch (error) {
+      throw toGatewayError(error as Object);
+    }
+  }
+
+  async compactionStatus(sessionId: string, operationId: string): Promise<Object> {
+    const params: Record<string, Object> = {
+      'sessionId': sessionId,
+      'operationId': operationId
+    };
+    try {
+      return await this.client.rpc('harness.remote.compaction.status', params, undefined,
+        'harness.remote.compaction.status');
+    } catch (error) {
+      throw toGatewayError(error as Object);
+    }
+  }
+
+  async cancelCompaction(sessionId: string, operationId: string): Promise<Object> {
+    const params: Record<string, Object> = {
+      'sessionId': sessionId,
+      'operationId': operationId
+    };
+    try {
+      return await this.client.rpc('harness.remote.compaction.cancel', params, undefined,
+        'harness.remote.compaction.cancel');
+    } catch (error) {
+      throw toGatewayError(error as Object);
+    }
   }
 
   /** Open one `harness.remote.stream`; frames flow through `handler`. */
@@ -198,20 +310,23 @@ export class RemoteGateway {
   async probeHostFeatures(): Promise<RemoteHostFeatures> {
     const features: RemoteHostFeatures = new RemoteHostFeatures();
     features.apiProxy = true;
+    features.apiTransfer = true;
     features.capabilities = ['harness.api.v1'];
     let value: Object;
     try {
       value = await this.client.rpc('harness.transport.describe', {});
     } catch (error) {
       if (error instanceof RemoteClientError && error.code === 'METHOD_NOT_FOUND') {
+        this.features = features;
         return features;
       }
-      throw toGatewayError(error);
+      throw toGatewayError(error as Object);
     }
     const root: Record<string, Object> | undefined = asRecord(value);
     if (root === undefined) {
       throw new RemoteGatewayError('INVALID_MESSAGE', 'The remote Host returned invalid transport capabilities.');
     }
+    features.capabilities = [];
     const rawCapabilities: Object | undefined = root['capabilities'];
     if (Array.isArray(rawCapabilities)) {
       const list = rawCapabilities as Object[];
@@ -231,12 +346,53 @@ export class RemoteGateway {
       features.sessionFormat = 3;
     }
     features.apiProxy = apiProxy;
+    features.apiTransfer = features.capabilities.includes('harness.api.transfer.v1') || apiProxy;
     features.remoteGateway = remoteV1 || remoteV3;
+    features.remoteTransfer = features.capabilities.includes('harness.remote.transfer.v1');
+    features.fileViewer = features.capabilities.includes('fileviewer.read.v1');
+    features.sessionEvents = features.capabilities.includes('harness.remote.session-events.v1');
+    features.pluginRoute = features.capabilities.includes('plugin.route.v1');
+    features.huaweiPush = features.capabilities.includes('push.huawei.v1');
+    features.binaryUploads = features.capabilities.includes('workspace.upload.v1')
+      && features.capabilities.includes('workspace.upload.binary.v1');
+    features.asyncCompaction = features.capabilities.includes('harness.remote.compaction.v1');
+    const rawWorkspaceTypes: Object | undefined = root['workspaceTypes'];
+    if (rawWorkspaceTypes !== undefined) {
+      features.hasWorkspaceTypesField = true;
+      features.workspaceTypes = parseWorkspaceTypes(rawWorkspaceTypes);
+    }
     if (!apiProxy && !features.remoteGateway) {
       throw new RemoteGatewayError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.');
     }
+    this.features = features;
     return features;
   }
+}
+
+function parseWorkspaceTypes(raw: Object): RemoteWorkspaceTypeDesc[] {
+  const arr: Object[] | undefined = asArray(raw);
+  if (arr === undefined || arr.length > 64) {
+    return [];
+  }
+  const out: RemoteWorkspaceTypeDesc[] = [];
+  for (const item of arr) {
+    const rec: Record<string, Object> | undefined = asRecord(item);
+    if (rec === undefined) {
+      continue;
+    }
+    const id: string = jsonStr(rec, 'id', '');
+    const capability: string = jsonStr(rec, 'capability', '');
+    if (id.length === 0 || capability.length === 0) {
+      continue;
+    }
+    const desc: RemoteWorkspaceTypeDesc = new RemoteWorkspaceTypeDesc();
+    desc.id = id;
+    desc.capability = capability;
+    desc.available = asBool(rec['available']) === true;
+    desc.reason = jsonStr(rec, 'reason', '');
+    out.push(desc);
+  }
+  return out;
 }
 
 function parseGatewayResult(response: Object): Object {
@@ -264,6 +420,9 @@ function parseGatewayResult(response: Object): Object {
 export function toGatewayError(error: Object): RemoteGatewayError {
   if (error instanceof RemoteGatewayError) {
     return error;
+  }
+  if (error instanceof TransferError) {
+    return new RemoteGatewayError(error.code, error.message);
   }
   if (error instanceof RemoteClientError) {
     return new RemoteGatewayError(error.code, error.message);

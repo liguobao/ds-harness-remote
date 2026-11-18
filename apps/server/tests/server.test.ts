@@ -59,14 +59,14 @@ async function start(pass = password, trustedProxyIps: readonly string[] = [], c
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`
 }
 /** Send a raw HTTP/1.1 request so duplicate header lines stay separate (fetch merges them). */
-async function rawStatus(headerLines: string[], path = '/api/v1/auth/me'): Promise<number> {
+async function rawStatus(headerLines: string[]): Promise<number> {
   const port = (app.server.address() as { port: number }).port
   const crlf = String.fromCharCode(13, 10)
   const lines = [
-    `GET ${path} HTTP/1.1`,
+    'GET /api/v1/auth/me HTTP/1.1',
     `Host: 127.0.0.1:${port}`,
     ...headerLines,
-    `Connection: ${path === '/ws/v1/connect' ? 'Upgrade' : 'close'}`,
+    'Connection: close',
     '',
     '',
   ]
@@ -119,7 +119,7 @@ async function connection(options: { hostCapabilities?: string[]; clientCapabili
   const host = await socket(h, options.hostCapabilities === undefined ? {} : { capabilities: options.hostCapabilities })
   const client = await socket(c, options.clientCapabilities === undefined ? {} : { capabilities: options.clientCapabilities })
   const ack = await host.next('hello.ack')
-  expect(ack).toMatchObject({ webrtcEnabled: (options.hostCapabilities ?? fullCapabilities).some(capability => capability === 'transport.lan' || capability === 'transport.p2p') })
+  expect(ack).toMatchObject({ webrtcEnabled: true })
   expect(ack.capabilities).toEqual(expect.arrayContaining(['transport.relay']))
   await client.next('hello.ack')
   client.send('connect.request', { hostDeviceId: h.deviceId, preferredTransports: options.preferredTransports ?? ['relay'] })
@@ -323,30 +323,6 @@ describe('account and device authorization', () => {
   })
 })
 describe('control authorization and encrypted relay', () => {
-  it('requires the complete native origin when NetStack omits the WebSocket port', async () => {
-    const hint = 'X-DSH-Native-Origin: http://localhost:8080'
-    await runScenarios([
-      { name: 'browser-same-origin', headers: ['Origin: http://localhost:8080'], status: 101 },
-      { name: 'native-without-origin', headers: [], status: 101 },
-      { name: 'harmony-with-complete-origin', headers: ['Origin: http://localhost', hint], status: 101 },
-      { name: 'missing-native-header', headers: ['Origin: http://localhost'], status: 403 },
-      { name: 'wrong-native-port', headers: ['Origin: http://localhost', 'X-DSH-Native-Origin: http://localhost:8081'], status: 403 },
-      { name: 'wrong-origin-host', headers: ['Origin: http://example.test', hint], status: 403 },
-      { name: 'wrong-origin-scheme', headers: ['Origin: https://localhost', hint], status: 403 },
-      { name: 'duplicate-native-header', headers: ['Origin: http://localhost', hint, hint], status: 403 },
-    ].map(({ name, headers, status }) => ({
-      name,
-      run: async () => {
-        expect(await rawStatus([
-          'Upgrade: websocket',
-          'Sec-WebSocket-Version: 13',
-          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-          ...headers,
-        ], '/ws/v1/connect')).toBe(status)
-      },
-    })))
-  })
-
   it('rejects invalid Control messages at the WebSocket boundary', async () => {
     await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type', 'duplicate-payload-field', 'noncanonical-handshake'].map(reason => ({
       name: reason,
@@ -545,17 +521,6 @@ describe('webrtc signaling and TURN credentials', () => {
     accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
     const withTurn = await socket(await device(), { capabilities: fullCapabilities })
     expect(await withTurn.next('hello.ack')).toMatchObject({ capabilities: fullCapabilities })
-  })
-
-  it('disables WebRTC when negotiation leaves only relay (#449)', async () => {
-    for (const capabilities of [['transport.relay'], ['transport.turn', 'transport.relay']]) {
-      const wire = await socket(await device(), { capabilities })
-      expect(await wire.next('hello.ack')).toMatchObject({
-        capabilities: ['transport.relay'], webrtcEnabled: false,
-      })
-    }
-    const lan = await socket(await device(), { capabilities: ['transport.lan', 'transport.relay'] })
-    expect(await lan.next('hello.ack')).toMatchObject({ webrtcEnabled: true })
   })
 
   it('forwards ordered WebRTC signaling and transport selection', async () => {

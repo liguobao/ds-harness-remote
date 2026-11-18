@@ -132,8 +132,6 @@ export class Gateway {
     this.maxFramesPerSec = normalizeMaxFramesPerSec(options.maxFramesPerSec)
     this.logger = options.logger ?? new Logger('gateway', options.logLevel ?? 'info')
     this.turnEnabled = options.turnEnabled === true
-    const publicUrl = new URL(origin)
-    const portlessOrigin = publicUrl.port === '' ? undefined : `${publicUrl.protocol}//${publicUrl.hostname}`
 
     store.onInvalidate = id => this.disconnect(id, 'AUTH_INVALID')
     server.on('upgrade', (req, socket, head) => {
@@ -141,12 +139,7 @@ export class Gateway {
       // The route still requires an exact match: a query string is rejected
       // (exactly as before) but only its parsed pathname is ever logged.
       const pathRejected = req.url !== '/ws/v1/connect'
-      const requestOrigin = req.headers.origin
-      // HarmonyOS NetStack omits the port from its generated Origin. Browser
-      // WebSocket clients cannot set the companion header.
-      const harmonyOrigin = portlessOrigin !== undefined && requestOrigin === portlessOrigin
-        && req.headers['x-dsh-native-origin'] === origin
-      const originRejected = Boolean(requestOrigin) && requestOrigin !== origin && !harmonyOrigin
+      const originRejected = Boolean(req.headers.origin) && req.headers.origin !== origin
       if (pathRejected || originRejected || this.wss.clients.size >= 256) {
         this.logger.warn('ws_upgrade_rejected', {
           // Parsed pathname only: the raw URL may carry credentials in its query.
@@ -455,9 +448,8 @@ export class Gateway {
             heartbeatIntervalMs: this.heartbeatIntervalMs,
             maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES,
             maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
-            capabilities: peer.capabilities,
-            webrtcEnabled: peer.capabilities.some(capability =>
-              capability === 'transport.lan' || capability === 'transport.p2p' || capability === 'transport.turn'),
+            capabilities: this.negotiatedCapabilities(p.capabilities),
+            webrtcEnabled: true,
             webrtcFallbackTimeoutMs: WEBRTC_FALLBACK_TIMEOUT_MS,
           }))
           return

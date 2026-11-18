@@ -4,6 +4,10 @@
       {
         "name": "ohos.net.network_config",
         "resource": "$profile:network_config"
+      },
+      {
+        "name": "client_id",
+        "value": ""
       }
     ],
     "name": "entry",
@@ -49,6 +53,7 @@
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
         "orientation": "auto_rotation_restricted",
+        "launchType": "singleton",
         "backgroundModes": [
           "dataTransfer"
         ],
@@ -60,6 +65,11 @@
             ],
             "actions": [
               "ohos.want.action.home"
+            ]
+          },
+          {
+            "actions": [
+              "action.dshremote.open_session"
             ]
           }
         ]

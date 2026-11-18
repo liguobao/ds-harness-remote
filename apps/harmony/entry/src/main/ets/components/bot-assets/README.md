@@ -1,0 +1,1 @@
+Character paths and ink colors from [DeepSeek-Bot v0.2.0](https://github.com/Fei2411/DeepSeek-Bot/tree/v0.2.0/ds-bot/src/client), by Fei2411 and contributors, under Apache-2.0 (see LICENSE). Extracted from characters.js and inks.js; rendered as static native SVGs. Default appearance selection in ../avatar.tsx follows the upstream ID hashing algorithm.

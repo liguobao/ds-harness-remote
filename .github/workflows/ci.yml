@@ -1,23 +1,12 @@
 name: CI
 
-# Verification only — signing and TestFlight distribution happen in Xcode
-# Cloud (see docs/ios-xcode-cloud.md).
-#
-# Pushes to any branch keep a fork able to verify without a pull request.
-# Documentation-only changes skip CI entirely, and a v* tag does not run this
-# workflow at all: a tag is the release signal consumed by Xcode Cloud and, on
-# the upstream repository, by release.yml.
 on:
   push:
     branches:
-      - "**"
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+      - main
+    tags:
+      - "v*"
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -33,75 +22,39 @@ env:
 
 jobs:
   changes:
-    name: Detect client changes
+    name: Detect Android changes
     runs-on: ubuntu-latest
     outputs:
       android: ${{ steps.detect.outputs.android }}
-      ios: ${{ steps.detect.outputs.ios }}
     steps:
-      # A branch push needs the commit range to diff, which requires history.
-      # Pull requests read the file list from the API and need no clone.
-      - name: Check out repository
-        if: github.event_name == 'push'
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Detect client changes
+      - name: Detect Android changes
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          # An explicit manual run always exercises both clients.
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
             echo "android=true" >> "$GITHUB_OUTPUT"
-            echo "ios=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            # A new branch, or a force push whose parent is gone, has no usable
-            # range. Build both rather than silently skipping verification.
-            if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]] \
-              || ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              echo "android=true" >> "$GITHUB_OUTPUT"
-              echo "ios=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            files=$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA") || {
-              echo "::error::Failed to diff against $BEFORE_SHA; cannot detect client changes"
-              exit 1
-            }
-          else
-            files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename') || {
-              echo "::error::Failed to list pull request files; cannot detect client changes"
-              exit 1
-            }
-          fi
+          files=$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename') || {
+            echo "::error::Failed to list pull request files; cannot detect Android changes"
+            exit 1
+          }
 
           android=false
-          ios=false
           while IFS= read -r file_path; do
             case "$file_path" in
-              .github/workflows/ci.yml|packages/app-core/*|packages/client-core/*|packages/crypto/*|packages/protocol/*|packages/webrtc/*|patches/*|package.json|pnpm-lock.yaml|pnpm-workspace.yaml)
+              .github/workflows/ci.yml|apps/android/*|packages/client-core/*|packages/crypto/*|packages/protocol/*|packages/webrtc/*|package.json|pnpm-lock.yaml|pnpm-workspace.yaml)
                 android=true
-                ios=true
                 break
-                ;;
-              apps/android/*)
-                android=true
-                ;;
-              apps/ios/*)
-                ios=true
                 ;;
             esac
           done <<< "$files"
 
           echo "android=$android" >> "$GITHUB_OUTPUT"
-          echo "ios=$ios" >> "$GITHUB_OUTPUT"
 
 
   quality:
@@ -259,6 +212,57 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  server-image:
+    name: Build Server container
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Log in to GitHub Container Registry
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   android-apk:
     name: Package Android APK
     needs:
@@ -319,7 +323,7 @@ jobs:
       - name: Verify bundled Android renderers
         env:
           DSH_REQUIRE_INTELLIGENT_UI: 'true'
-        run: node packages/app-core/scripts/verify-intelligent-ui-renderer.mjs
+        run: node apps/android/scripts/verify-intelligent-ui-renderer.mjs
 
       - name: Generate Android project
         run: pnpm --dir apps/android exec expo prebuild --platform android --no-install
@@ -349,112 +353,3 @@ jobs:
           path: artifacts/android/dsh-remote-android.apk
           if-no-files-found: error
           retention-days: 14
-
-  ios-build:
-    name: Build iOS (unsigned)
-    needs:
-      - changes
-      - quality
-    if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      # Expo SDK 57 needs a current Xcode. Rather than pinning a path that may
-      # not exist on a future image, take the runner default and log what is
-      # installed; pod install fails loudly if the toolchain is too old.
-      - name: Show Xcode toolchain
-        run: |
-          xcodebuild -version
-          xcodebuild -showsdks | sed -n '1,12p'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 9.15.4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24.9.0
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build workspace packages
-        run: pnpm --filter './packages/**' -r build
-
-      - name: Check out Intelligent UI renderer source
-        uses: actions/checkout@v7
-        with:
-          repository: dreamfarer-space/deepseek-harness-intelligent-ui
-          # Pinned upstream PR #82 merge commit; update only after auditing the new artifact.
-          ref: f3735efffd823f8c34817f4e8554743ac3276225
-          path: .deps/deepseek-harness-intelligent-ui
-
-      - name: Verify pinned Intelligent UI renderer
-        run: |
-          test "$(git -C .deps/deepseek-harness-intelligent-ui rev-parse HEAD)" = "f3735efffd823f8c34817f4e8554743ac3276225" || { echo '::error::Unexpected renderer source commit'; exit 1; }
-          test "$(git -C .deps/deepseek-harness-intelligent-ui hash-object renderer/renderer.js)" = "ebac4a4c2199383458d4e1fa2121be0e6043c5c0" || { echo '::error::Unexpected renderer file content'; exit 1; }
-
-      - name: Bundle local renderers
-        env:
-          DSH_INTELLIGENT_UI_RENDERER_BUNDLE: ${{ github.workspace }}/.deps/deepseek-harness-intelligent-ui/renderer/renderer.js
-          DSH_REQUIRE_INTELLIGENT_UI: 'true'
-        run: pnpm --filter @dsh-remote/app-core run build:renderers
-
-      - name: Verify bundled renderers
-        env:
-          DSH_REQUIRE_INTELLIGENT_UI: 'true'
-        run: node packages/app-core/scripts/verify-intelligent-ui-renderer.mjs
-
-      # No APPLE_TEAM_ID: app.config.js omits appleTeamId, so the generated
-      # project carries no DEVELOPMENT_TEAM and signing stays off below.
-      - name: Generate iOS project
-        run: pnpm --dir apps/ios exec expo prebuild --platform ios --no-install
-
-      - name: Cache CocoaPods
-        uses: actions/cache@v4
-        with:
-          path: apps/ios/ios/Pods
-          key: ${{ runner.os }}-pods-${{ hashFiles('apps/ios/ios/Podfile.lock') }}
-          restore-keys: ${{ runner.os }}-pods-
-
-      - name: Install CocoaPods
-        env:
-          EXPO_USE_PRECOMPILED_MODULES: '1'
-        # Run from inside apps/ios/ios, matching the layout the Expo Podfile
-        # assumes: its backtick node resolution and use_native_modules! both
-        # evaluate relative to the working directory, and invoking with
-        # --project-directory from the repository root breaks them.
-        working-directory: apps/ios/ios
-        run: pod install
-
-      # The "[CP-User] Build ExpoModulesJSI xcframework" build phase compiles an
-      # SPM package through a nested `xcodebuild -quiet`, which swallows the real
-      # compiler error on failure. Building the slices here surfaces it, and the
-      # build phase then hits its per-slice hash cache.
-      - name: Pre-build ExpoModulesJSI xcframework
-        working-directory: apps/ios
-        run: |
-          JSI_PACKAGE="$(node -p "require('path').dirname(require.resolve('expo-modules-jsi/package.json', { paths: [require('path').dirname(require.resolve('expo/package.json'))] }))")"
-          PODS_ROOT="$PWD/ios/Pods" "${JSI_PACKAGE}/apple/scripts/build-xcframework.sh"
-
-      - name: Build unsigned
-        working-directory: apps/ios/ios
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -workspace DSHRemote.xcworkspace \
-            -scheme DSHRemote \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build \
-            | xcbeautify

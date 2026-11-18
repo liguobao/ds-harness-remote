@@ -628,15 +628,12 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(localeNamespace, { zh, en, ru, uk }), 'ds-harness-remote: dictionaries')
       ctx.effect(() => installStyle(clientModuleId), 'ds-harness-remote: client styles')
       ctx.effect(() => installTerminalAvailabilityNotice(statusFeed, t), 'ds-harness-remote: terminal availability notice')
-      const nativeTitlebar = document.documentElement.hasAttribute('data-windows-titlebar')
-        || document.documentElement.dataset.platform === 'darwin'
-      const headerSlot = nativeTitlebar ? 'shell.overlay' : 'conversation.session.header.utilities'
-      ctx.slots.inject(headerSlot, () => ctx.slots.register({
-        name: headerSlot,
+      ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+        name: 'shell.overlay',
         id: 'ds-harness-remote-global-context',
         order: 20,
         locale: localeNamespace,
-        inject: () => ({ control, statusFeed, onSignIn: openRemote, inline: !nativeTitlebar }),
+        inject: () => ({ control, statusFeed, onSignIn: openRemote }),
       }, RemoteSessionHeaderAction))
       ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
         name: 'sidebar.footer.action',

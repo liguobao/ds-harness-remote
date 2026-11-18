@@ -63,6 +63,9 @@ interface PendingApproval {
   backend: string
   client: CursorAcpLike
   options: Array<{ kind: string; optionId: string }>
+  deviceId: string
+  identityKey: string
+  frame: { method: string; params: unknown }
 }
 
 interface BufferedAcpFrame {
@@ -110,6 +113,11 @@ export class AcpRemoteGateway {
   private readonly terminalOwners = new Map<string, string>()
   private readonly workspaceTools = new Map<string, AcpWorkspaceTools>()
   private readonly peers = new Map<string, AcpPeerBridge>()
+  private readonly peerDevices = new Map<string, string>()
+  private readonly peerKeys = new Map<string, string>()
+  private approvalNotifier?: (notice: { deviceId: string; backend: string; sessionId: string }) => void | Promise<void>
+  private readonly revokedDevices = new Set<string>()
+  private readonly approvalLeases = new Map<string, { deviceId: string; identityKey: string; expiresAt: number }>()
   private readonly sessionOwners = new Map<string, string>()
   private readonly sessionBackends = new Map<string, string>()
   private readonly sessionPermissions = new Map<string, string>()
@@ -164,6 +172,17 @@ export class AcpRemoteGateway {
     private readonly terminalEnabled: () => boolean = () => false,
     private readonly terminalSpawner?: RemoteTerminalSpawner,
   ) {}
+
+  /** Advisory wake-up only; approval data and decisions stay on the authenticated channel. */
+  setApprovalNotifier(notifier: ((notice: { deviceId: string; backend: string; sessionId: string }) => void | Promise<void>) | undefined): void {
+    this.approvalNotifier = notifier
+  }
+
+  private notifyApproval(deviceId: string, backend: string, sessionId: string): void {
+    try {
+      void Promise.resolve(this.approvalNotifier?.({ deviceId, backend, sessionId })).catch(() => undefined)
+    } catch { /* Notification failure does not grant or resolve an approval. */ }
+  }
 
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends(): string[] {
@@ -229,7 +248,10 @@ export class AcpRemoteGateway {
 
   createPeer(context: PeerConnectionContext, publish: PublishAcpFrame): AcpPeerBridge | undefined {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
+    if (this.revokedDevices.has(context.peerDeviceId)) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP device was revoked.')
     this.peers.set(context.connectionId, bridge)
+    this.peerDevices.set(context.connectionId, context.peerDeviceId)
+    if (context.peerIdentityKey) this.peerKeys.set(context.connectionId, context.peerIdentityKey)
     const workspaceBridge = new WorkspaceBridge(async rawId => {
       const match = rawId.match(/^(acp|cursor|pi|opencode|claude|hermes):(.+)$/)
       const session = match ? this.sessionCwds.get(match[2]!) : undefined
@@ -819,10 +841,13 @@ export class AcpRemoteGateway {
     const params = parseRespondEnvelope(input)
     const pending = this.approvals.get(params.requestHandle)
     if (pending === undefined || pending.expiresAt <= Date.now()) {
-      this.approvals.delete(params.requestHandle)
+      if (pending !== undefined) {
+        this.approvals.delete(params.requestHandle)
+        void pending.client.respondError(pending.upstreamId, -32800, 'Remote approval expired.').catch(() => undefined)
+      }
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
-    if (pending.connectionId !== connectionId) {
+    if (pending.connectionId !== connectionId || pending.deviceId !== this.peerDevices.get(connectionId) || pending.identityKey !== this.peerKeys.get(connectionId) || this.revokedDevices.has(pending.deviceId)) {
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
     if (this.sessionOwners.get(pending.sessionId) !== connectionId
@@ -842,17 +867,60 @@ export class AcpRemoteGateway {
   }
 
   dropPeer(connectionId: string): void {
+    const deviceId = this.peerDevices.get(connectionId)
+    const identityKey = this.peerKeys.get(connectionId)
     this.peers.delete(connectionId)
+    this.peerDevices.delete(connectionId)
+    this.peerKeys.delete(connectionId)
     void this.workspaceTools.get(connectionId)?.close()
     this.workspaceTools.delete(connectionId)
     for (const [sessionId, owner] of this.sessionOwners) {
-      if (owner === connectionId) this.sessionOwners.delete(sessionId)
+      if (owner !== connectionId) continue
+      this.sessionOwners.delete(sessionId)
+      const hasApproval = [...this.approvals.values()].some(item => item.sessionId === sessionId)
+      if (deviceId && identityKey && !this.revokedDevices.has(deviceId) && (hasApproval || this.promptsInProgress.has(sessionId))) {
+        this.approvalLeases.set(sessionId, { deviceId, identityKey, expiresAt: Date.now() + APPROVAL_TTL_MS })
+        const backend = this.sessionBackends.get(sessionId)
+        if (hasApproval && backend) this.notifyApproval(deviceId, backend, sessionId)
+      } else {
+        this.rejectSessionApprovals(sessionId, 'Remote peer disconnected.')
+      }
+    }
+    this.scheduleApprovalExpiry()
+  }
+
+  /** Called synchronously after a trusted device is revoked, before connections close. */
+  revokeDevice(deviceId: string): void {
+    this.revokedDevices.add(deviceId)
+    for (const [sessionId, owner] of this.sessionOwners) {
+      if (this.peerDevices.get(owner) === deviceId) this.cancelledSessions.add(sessionId)
+    }
+    for (const [sessionId, lease] of this.approvalLeases) {
+      if (lease.deviceId === deviceId) {
+        this.approvalLeases.delete(sessionId)
+        this.cancelledSessions.add(sessionId)
+        this.rejectSessionApprovals(sessionId, 'Remote device revoked.')
+      }
     }
     for (const [handle, approval] of this.approvals) {
-      if (approval.connectionId === connectionId) {
+      if (approval.deviceId === deviceId) {
         this.approvals.delete(handle)
-        void approval.client.respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
+        void approval.client.respondError(approval.upstreamId, -32800, 'Remote device revoked.').catch(() => undefined)
       }
+    }
+    this.scheduleApprovalExpiry()
+  }
+
+  /** Unblock new authenticated connections after the caller has completed revocation and connection cleanup. */
+  finishDeviceRevocation(deviceId: string): void {
+    this.revokedDevices.delete(deviceId)
+  }
+
+  private rejectSessionApprovals(sessionId: string, reason: string): void {
+    for (const [handle, approval] of this.approvals) {
+      if (approval.sessionId !== sessionId) continue
+      this.approvals.delete(handle)
+      void approval.client.respondError(approval.upstreamId, -32800, reason).catch(() => undefined)
     }
   }
 
@@ -908,8 +976,25 @@ export class AcpRemoteGateway {
    * stream open / prompt can resume and buffered frames can replay.
    */
   private claimSession(connectionId: string, sessionId: string): void {
+    const deviceId = this.peerDevices.get(connectionId)
+    if (deviceId && this.revokedDevices.has(deviceId)) throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP device was revoked.')
     const owner = this.sessionOwners.get(sessionId)
     if (owner === undefined) {
+      const lease = this.approvalLeases.get(sessionId)
+      if (lease !== undefined) {
+        if (lease.expiresAt <= Date.now()) {
+          this.approvalLeases.delete(sessionId)
+          this.cancelledSessions.add(sessionId)
+          this.rejectSessionApprovals(sessionId, 'Remote approval lease expired.')
+        } else if (!this.peerDevices.get(connectionId) || this.peerDevices.get(connectionId) !== lease.deviceId || this.peerKeys.get(connectionId) !== lease.identityKey) {
+          throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote device owns this session.')
+        } else {
+          this.approvalLeases.delete(sessionId)
+          for (const approval of this.approvals.values()) {
+            if (approval.sessionId === sessionId && approval.deviceId === lease.deviceId && approval.identityKey === lease.identityKey) approval.connectionId = connectionId
+          }
+        }
+      }
       this.sessionOwners.set(sessionId, connectionId)
       return
     }
@@ -924,7 +1009,6 @@ export class AcpRemoteGateway {
     if (peer === undefined) return
     this.pruneFrameBuffer(sessionId)
     const buffered = this.recentFrames.get(sessionId) ?? []
-    if (buffered.length === 0) return
     this.recentFrames.delete(sessionId)
     this.logger.info('Replaying buffered ACP frames', {
       sessionId: shortSessionId(sessionId),
@@ -932,6 +1016,13 @@ export class AcpRemoteGateway {
     })
     for (const frame of buffered) {
       await peer.publishInbound(sessionId, { method: frame.method, params: frame.params })
+    }
+    for (const approval of this.approvals.values()) {
+      if (approval.sessionId === sessionId && approval.connectionId === connectionId
+        && approval.deviceId === this.peerDevices.get(connectionId) && approval.identityKey === this.peerKeys.get(connectionId) && approval.expiresAt > Date.now()
+        && this.sessionOwners.get(sessionId) === connectionId && this.isSessionBackendReady(sessionId)) {
+        await peer.publishInbound(sessionId, approval.frame)
+      }
     }
   }
 
@@ -957,6 +1048,7 @@ export class AcpRemoteGateway {
       .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
     for (const id of sessions) {
       this.sessionOwners.delete(id)
+      this.approvalLeases.delete(id)
       this.promptsInProgress.delete(id)
       const preparation = this.preparingPrompts.get(id)
       if (preparation) preparation.cancelled = true
@@ -1000,6 +1092,9 @@ export class AcpRemoteGateway {
     this.sessionCwds.clear()
     const terminals = this.workspaceState.dispose().then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped.'))
     this.sessionOwners.clear()
+    this.peerDevices.clear()
+    this.peerKeys.clear()
+    this.approvalLeases.clear()
     this.sessionBackends.clear()
     this.recentFrames.clear()
     this.turnCatchUp.clear()
@@ -1138,7 +1233,11 @@ export class AcpRemoteGateway {
     const owner = sessionId === undefined ? undefined : this.sessionOwners.get(sessionId)
     const peer = owner === undefined ? undefined : this.peers.get(owner)
     const client = this.requireAcp(backend)
-    if (sessionId === undefined || this.cancelledSessions.has(sessionId) || owner === undefined || peer === undefined || boundBackend !== backend
+    const lease = sessionId === undefined ? undefined : this.approvalLeases.get(sessionId)
+    const liveDevice = owner === undefined ? undefined : this.peerDevices.get(owner)
+    const deviceId = peer === undefined ? (lease && lease.expiresAt > Date.now() ? lease.deviceId : undefined) : liveDevice
+    const identityKey = peer === undefined ? lease?.identityKey : owner === undefined ? undefined : this.peerKeys.get(owner)
+    if (sessionId === undefined || this.cancelledSessions.has(sessionId) || !deviceId || !identityKey || this.revokedDevices.has(deviceId) || (peer === undefined && !lease) || boundBackend !== backend
       || !['session/request_permission', 'cursor/create_plan', 'cursor/ask_question'].includes(message.method)
       || (message.method.startsWith('cursor/') && backend !== 'cursor')) {
       await client.respondError(message.id, -32602, 'The ACP request has no active owner or supported method.')
@@ -1159,22 +1258,30 @@ export class AcpRemoteGateway {
       return
     }
     const requestHandle = randomUUID()
-    this.approvals.set(requestHandle, {
-      upstreamId: message.id, connectionId: owner, sessionId, method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS, backend, client, options,
-    })
+    const expiresAt = Math.min(Date.now() + APPROVAL_TTL_MS, peer === undefined ? lease!.expiresAt : Infinity)
+    const frame = {
+      method: message.method,
+      params: { ...(isRecord(message.params) ? message.params : {}), requestHandle, sessionId, upstreamMethod: message.method, expiresAt },
+    }
+    const pending: PendingApproval = {
+      upstreamId: message.id, connectionId: owner ?? '', deviceId, identityKey, sessionId, method: message.method,
+      expiresAt, backend, client, options, frame,
+    }
+    this.approvals.set(requestHandle, pending)
     this.scheduleApprovalExpiry()
+    if (peer === undefined) {
+      this.notifyApproval(deviceId, backend, sessionId)
+      return
+    }
     try {
-      await peer.publishInbound(sessionId, {
-        method: message.method,
-        params: {
-          ...(isRecord(message.params) ? message.params : {}),
-          requestHandle, sessionId, upstreamMethod: message.method,
-        },
-      })
+      await peer.publishInbound(sessionId, frame)
     } catch {
-      this.approvals.delete(requestHandle)
-      await client.respondError(message.id, -32800, 'Remote approval delivery failed.')
+      // A disconnect may race the send. Preserve only a lease belonging to this device.
+      const currentLease = this.approvalLeases.get(sessionId)
+      if (this.approvals.get(requestHandle) === pending && (!currentLease || currentLease.deviceId !== deviceId || currentLease.identityKey !== identityKey)) {
+        this.approvals.delete(requestHandle)
+        await client.respondError(message.id, -32800, 'Remote approval delivery failed.')
+      }
     }
   }
 
@@ -1234,6 +1341,13 @@ export class AcpRemoteGateway {
 
   private async handleUnavailable(backend: string, code: string): Promise<void> {
     if (this.closed) return
+    for (const [sessionId, ownerBackend] of this.sessionBackends) {
+      if (ownerBackend === backend) {
+        this.approvalLeases.delete(sessionId)
+        this.cancelledSessions.add(sessionId)
+        this.rejectSessionApprovals(sessionId, 'ACP backend unavailable.')
+      }
+    }
     // Scope and close the failed backend's streams before any await: a restart can
     // install a replacement adapter while this handler is suspended, and its own
     // streams must not be failed by the previous generation.
@@ -1315,7 +1429,9 @@ export class AcpRemoteGateway {
       if (min === undefined || item.expiresAt < min) return item.expiresAt
       return min
     }, undefined)
-    if (next === undefined) return
+    const leaseNext = [...this.approvalLeases.values()].reduce<number | undefined>((min, item) => min === undefined || item.expiresAt < min ? item.expiresAt : min, undefined)
+    const deadline = next === undefined ? leaseNext : leaseNext === undefined ? next : Math.min(next, leaseNext)
+    if (deadline === undefined) return
     this.approvalExpiryTimer = setTimeout(() => {
       const now = Date.now()
       for (const [handle, approval] of this.approvals) {
@@ -1324,8 +1440,15 @@ export class AcpRemoteGateway {
           void approval.client.respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
         }
       }
+      for (const [sessionId, lease] of this.approvalLeases) {
+        if (lease.expiresAt <= now) {
+          this.approvalLeases.delete(sessionId)
+          this.cancelledSessions.add(sessionId)
+          this.rejectSessionApprovals(sessionId, 'Remote approval lease expired.')
+        }
+      }
       this.scheduleApprovalExpiry()
-    }, Math.max(0, next - Date.now()))
+    }, Math.max(0, deadline - Date.now()))
     this.approvalExpiryTimer.unref?.()
   }
 
@@ -1380,9 +1503,7 @@ export class AcpRemoteGateway {
     if (method === 'session/load') { this.requireSessionOwner(connectionId, sessionId); return }
     const owner = this.sessionOwners.get(sessionId)
     if (owner === undefined) {
-      // Allow reclaim after the owning peer disconnected; the ACP process still
-      // holds the session.
-      this.sessionOwners.set(sessionId, connectionId)
+      this.claimSession(connectionId, sessionId)
       return
     }
     if (owner !== connectionId && isSessionMutation(method)) {

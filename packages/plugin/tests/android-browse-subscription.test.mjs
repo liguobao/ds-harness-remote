@@ -5,13 +5,13 @@ import { BaseTransport } from '@dsh-remote/webrtc'
 import { CodexPeerBridge } from '../src/codex/peer-bridge.ts'
 
 const { client } = vi.hoisted(() => ({ client: { request: vi.fn(), subscribe: vi.fn() } }))
-vi.mock('@dsh-remote/app-core/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}) }))
-vi.mock('@dsh-remote/app-core/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
+vi.mock('../../../apps/android/src/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}) }))
+vi.mock('../../../apps/android/src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
   async configureHistory() {}
   requireCodex() { return client }
 } }))
-import { SessionRuntime } from '@dsh-remote/app-core/state/session-runtime'
-import { createSessionActions } from '@dsh-remote/app-core/state/session-actions'
+import { SessionRuntime } from '../../../apps/android/src/state/session-runtime.ts'
+import { createSessionActions } from '../../../apps/android/src/state/session-actions.ts'
 
 function deferred() {
   let resolve
@@ -42,8 +42,6 @@ describe('Android browsing through the Host bridge', () => {
         return { thread: thread(input.params.threadId) }
       }),
       detachPeer: vi.fn(async () => undefined),
-      useThread: async (_threadId, action) => action(),
-      releaseThread: vi.fn(async () => undefined),
     }
     const bridge = new CodexPeerBridge(domain,
       { connectionId: 'browse-peer', peerDeviceId: 'phone' }, async () => undefined)
@@ -54,7 +52,7 @@ describe('Android browsing through the Host bridge', () => {
       async send(data) {
         const request = JSON.parse(new TextDecoder().decode(data))
         const result = request.payload.method === 'codex.app.stream.open'
-          ? await bridge.openStream(request.payload.params) : await bridge.closeStream(request.payload.params)
+          ? await bridge.openStream(request.payload.params) : bridge.closeStream(request.payload.params)
         this.emit(encodeMessage(createRpcResponse(request.id, result)))
       }
     }

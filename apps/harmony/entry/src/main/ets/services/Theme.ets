@@ -1,3 +1,35 @@
+import { common2D, drawing } from '@kit.ArkGraphics2D';
+
+const TINT_FILTER_CACHE: Map<string, drawing.ColorFilter> = new Map();
+
+/**
+ * Tint an SVG vector icon via SRC_IN blend mode so stroked outlines remain crisp and hollow
+ * instead of having HarmonyOS Image.fillColor() fill interior transparent regions.
+ */
+export function iconTintFilter(hex: string): drawing.ColorFilter {
+  const cached: drawing.ColorFilter | undefined = TINT_FILTER_CACHE.get(hex);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const clean: string = hex.startsWith('#') ? hex.slice(1) : hex;
+  let alpha: number = 255;
+  let rgbStart: number = 0;
+  if (clean.length === 8) {
+    alpha = parseInt(clean.slice(0, 2), 16);
+    rgbStart = 2;
+  }
+  const red: number = clean.length >= rgbStart + 6 ? parseInt(clean.slice(rgbStart, rgbStart + 2), 16) : 15;
+  const green: number = clean.length >= rgbStart + 6 ? parseInt(clean.slice(rgbStart + 2, rgbStart + 4), 16) : 15;
+  const blue: number = clean.length >= rgbStart + 6 ? parseInt(clean.slice(rgbStart + 4, rgbStart + 6), 16) : 15;
+  const color: common2D.Color = { alpha, red, green, blue };
+  const filter: drawing.ColorFilter = drawing.ColorFilter.createBlendModeColorFilter(
+    color,
+    drawing.BlendMode.SRC_IN
+  );
+  TINT_FILTER_CACHE.set(hex, filter);
+  return filter;
+}
+
 /**
  * Semantic color palette swapped by theme (dark / light / follow-system).
  * Accents, gradients and status colors stay constant across themes.
@@ -11,6 +43,8 @@ export class Palette {
   backdrop: string = '';
   /** Card / row / bubble surfaces. */
   card: string = '';
+  /** User-sent message bubble surface (matching Android theme.userBubble). */
+  userBubble: string = '';
   /** Ghost chips and quiet buttons. */
   chip: string = '';
   /** Text input background. */
@@ -29,17 +63,18 @@ export class Palette {
 
 export function darkPalette(): Palette {
   const p: Palette = new Palette();
-  p.bg = '#070B16';
-  p.panel = '#0B101E';
-  p.backdrop = 'rgba(2,5,12,0.55)';
-  p.card = 'rgba(255,255,255,0.045)';
-  p.chip = 'rgba(255,255,255,0.06)';
-  p.inputBg = 'rgba(255,255,255,0.07)';
-  p.border = 'rgba(255,255,255,0.08)';
-  p.borderStrong = 'rgba(255,255,255,0.12)';
-  p.text = '#EAF0FB';
-  p.text2 = '#9AA5B8';
-  p.text3 = '#6B7280';
+  p.bg = '#0B0D11';
+  p.panel = '#161A21';
+  p.backdrop = 'rgba(0,0,0,0.62)';
+  p.card = 'rgba(255,255,255,0.05)';
+  p.userBubble = '#1E2430';
+  p.chip = '#232832';
+  p.inputBg = '#1D222B';
+  p.border = '#2B313C';
+  p.borderStrong = '#394150';
+  p.text = '#F2F4F7';
+  p.text2 = '#A2A9B6';
+  p.text3 = '#7A8291';
   return p;
 }
 
@@ -57,6 +92,7 @@ export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
   out.panel = p.panel;
   out.backdrop = p.backdrop;
   out.card = p.card;
+  out.userBubble = p.userBubble;
   out.chip = p.chip;
   out.inputBg = p.inputBg;
   out.border = p.border;
@@ -90,16 +126,17 @@ export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
 
 export function lightPalette(): Palette {
   const p: Palette = new Palette();
-  p.bg = '#F2F5FA';
+  p.bg = '#F8F8F8';
   p.panel = '#FFFFFF';
-  p.backdrop = 'rgba(15,23,42,0.35)';
+  p.backdrop = 'rgba(15,15,15,0.42)';
   p.card = '#FFFFFF';
-  p.chip = 'rgba(15,23,42,0.05)';
+  p.userBubble = '#ECEFF5';
+  p.chip = '#ECEFF4';
   p.inputBg = '#FFFFFF';
-  p.border = 'rgba(15,23,42,0.08)';
-  p.borderStrong = 'rgba(15,23,42,0.14)';
-  p.text = '#1B2437';
-  p.text2 = '#5B6478';
-  p.text3 = '#98A1B3';
+  p.border = '#EDEDED';
+  p.borderStrong = '#DCE1EA';
+  p.text = '#0F0F0F';
+  p.text2 = '#59606D';
+  p.text3 = '#8E96A4';
   return p;
 }

@@ -1,0 +1,10 @@
+{
+  "valid": [
+    { "method": "push.huawei.register", "params": { "token": "example-push-token" }, "result": { "registered": true } },
+    { "method": "push.huawei.unregister", "params": {}, "result": { "unregistered": true } }
+  ],
+  "invalid": [
+    { "method": "push.huawei.register", "params": { "token": "", "deviceId": "forged" } },
+    { "method": "push.huawei.unregister", "params": { "deviceId": "forged" } }
+  ]
+}

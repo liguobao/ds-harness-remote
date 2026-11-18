@@ -57,6 +57,12 @@ export class HarnessWorkspaceSnapshot {
   pinnedSessionIds: string[] = [];
 }
 
+export class HarnessTurnSummary {
+  turnId: string = '';
+  prompt: string = '';
+  response: string = '';
+}
+
 /** One remote Harness session row (`session/list` item). */
 export class HarnessRemoteSession {
   sessionId: string = '';
@@ -65,11 +71,17 @@ export class HarnessRemoteSession {
   blank: boolean = false;
   /** `'subagent'` 表示子代理会话；列表默认不展示（对齐 Desktop/Android）。 */
   origin: string = '';
+  parentSessionId: string = '';
   title: string = '';
   cwd: string = '';
   turns: number = 0;
+  /** Recent outline used by the DS-Bot inbox to display the latest visible message. */
+  turnOutline: HarnessTurnSummary[] = [];
   /** Projected context pressure in percent of the context window; 0 when unknown. */
   contextPercent: number = 0;
+  modelProvider: string = '';
+  modelId: string = '';
+  modelEffort: string = '';
 }
 
 /** One aggregated frame delivered to the UI reducer. */
@@ -142,6 +154,14 @@ export class HarnessAlphaClient {
     this.gateway = new RemoteGateway(core);
     this.onFrame = onFrame;
     this.hostSessionFormat = hostSessionFormat;
+  }
+
+  getGateway(): RemoteGateway {
+    return this.gateway;
+  }
+
+  getCore(): RemoteClientCore {
+    return this.core;
   }
 
   /** Open the `$events` stream (approval/question waterfalls). */
@@ -230,9 +250,18 @@ export class HarnessAlphaClient {
    * mode='queue' 排在本轮之后，mode='steer' 立刻插话打断当前轮的下一步行动。
    */
   async sessionPrompt(sessionId: string, text: string, requestId: string,
-    mode: string = 'queue', images: PromptImagePart[] = []): Promise<void> {
-    // 顺序照 DSH：图片在前、文字在后；空文字时只发图片（协议要求 content 至少一项）
+    mode: string = 'queue', images: PromptImagePart[] = [], receiptIds: string[] = []): Promise<void> {
+    // 顺序照 DSH / Android：已暂存文件（receiptId）在前、文字、图片；空文字时只发附件
     const content: Object[] = [];
+    for (const receiptId of receiptIds) {
+      if (receiptId.length > 0) {
+        const filePart: Record<string, Object> = {
+          'type': 'file',
+          'receiptId': receiptId
+        };
+        content.push(filePart);
+      }
+    }
     for (const image of images) {
       const part: Record<string, Object> = {
         'type': 'image',
@@ -724,11 +753,24 @@ export class HarnessAlphaClient {
     return forkedId;
   }
 
+  private sessionAddress(sessionId: string, parentSessionId?: string): Record<string, Object> {
+    if (parentSessionId !== undefined && parentSessionId.length > 0) {
+      return {
+        'kind': 'subagent',
+        'parentSessionId': parentSessionId,
+        'childSessionId': sessionId,
+        'mode': 'unknown'
+      };
+    }
+    return { 'kind': 'session', 'sessionId': sessionId };
+  }
+
   /** Page older history through `session/page` (needs a live follow cursor). */
-  async sessionPage(sessionId: string, beforeSeq: number, maxMessages: number): Promise<HistoryPage> {
+  async sessionPage(sessionId: string, beforeSeq: number, maxMessages: number,
+    parentSessionId?: string): Promise<HistoryPage> {
     const cursor: number | undefined = this.followCursors.get(sessionId);
     const throughSeq: number = cursor !== undefined ? cursor : beforeSeq;
-    const address: Record<string, Object> = { 'kind': 'session', 'sessionId': sessionId };
+    const address: Record<string, Object> = this.sessionAddress(sessionId, parentSessionId);
     const request: Record<string, Object> = {
       'address': address,
       'throughSeq': throughSeq,
@@ -750,9 +792,10 @@ export class HarnessAlphaClient {
    * Load one session: without `beforeSeq` opens a fresh `session/follow`
    * stream (snapshot + live events); with `beforeSeq` pages older history.
    */
-  async sessionHistory(sessionId: string, beforeSeq: number, maxMessages: number): Promise<HistoryPage> {
+  async sessionHistory(sessionId: string, beforeSeq: number, maxMessages: number,
+    parentSessionId?: string): Promise<HistoryPage> {
     if (beforeSeq >= 0) {
-      return this.sessionPage(sessionId, beforeSeq, maxMessages);
+      return this.sessionPage(sessionId, beforeSeq, maxMessages, parentSessionId);
     }
     const generation: number = ++this.followGeneration;
     await this.closeFollowStream();
@@ -761,7 +804,7 @@ export class HarnessAlphaClient {
     }
     let page: HistoryPage;
     try {
-      page = await this.openFollow(sessionId, maxMessages, generation);
+      page = await this.openFollow(sessionId, maxMessages, generation, parentSessionId);
     } catch (error) {
       // 偶发的一次「首帧没回来」（切直连的瞬间、主机刚好在回放大快照）不该直接糊用户一脸红条：
       // 关掉这条流，等 600ms 自动重开一次。只有第二次也失败才往上抛。
@@ -776,7 +819,7 @@ export class HarnessAlphaClient {
       if (generation !== this.followGeneration) {
         throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
       }
-      page = await this.openFollow(sessionId, maxMessages, generation);
+      page = await this.openFollow(sessionId, maxMessages, generation, parentSessionId);
     }
     if (generation !== this.followGeneration) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.');
@@ -784,7 +827,8 @@ export class HarnessAlphaClient {
     return page;
   }
 
-  private async openFollow(sessionId: string, maxMessages: number, generation: number): Promise<HistoryPage> {
+  private async openFollow(sessionId: string, maxMessages: number, generation: number,
+    parentSessionId?: string): Promise<HistoryPage> {
     logInfo('openFollow sessionId=' + sessionId + ' maxMessages=' + maxMessages);
     let firstFrameResolve: ((value: Object) => void) | undefined = undefined;
     let firstFrameReject: ((error: RemoteGatewayError) => void) | undefined = undefined;
@@ -825,11 +869,15 @@ export class HarnessAlphaClient {
           : new RemoteGatewayError('CANCELLED', 'The session follow closed.'));
         return;
       }
-      if (error !== undefined) {
+      if (this.followGeneration !== generation) {
+        return;
+      }
+      if (error !== undefined && error.code !== 'CANCELLED'
+        && error.message.indexOf('superseded') < 0) {
         this.emitStreamFailure(error);
       }
     };
-    const address: Record<string, Object> = { 'kind': 'session', 'sessionId': sessionId };
+    const address: Record<string, Object> = this.sessionAddress(sessionId, parentSessionId);
     const request: Record<string, Object> = {
       'address': address,
       'maxMessages': maxMessages
@@ -1139,6 +1187,11 @@ export class HarnessAlphaClient {
     this.onFrame(frame);
   }
 
+  async closeFollow(): Promise<void> {
+    this.followGeneration += 1;
+    await this.closeFollowStream();
+  }
+
   private async closeFollowStream(): Promise<void> {
     const follow: RemoteGatewayStream | undefined = this.followStream;
     this.followStream = undefined;
@@ -1288,6 +1341,7 @@ function normalizeSession(value: Object): HarnessRemoteSession | undefined {
   session.title = jsonStr(root, 'title', '');
   session.cwd = jsonStr(root, 'cwd', '');
   session.origin = jsonStr(root, 'origin', '');
+  session.parentSessionId = jsonStr(root, 'parentSessionId', '');
   const projections: Record<string, Object> | undefined = asRecord(root['projections']);
   const values: Record<string, Object> | undefined = projections !== undefined
     ? asRecord(projections['values']) : undefined;
@@ -1304,6 +1358,30 @@ function normalizeSession(value: Object): HarnessRemoteSession | undefined {
     }
   }
   if (values !== undefined) {
+    const selection = asRecord(values['modelSelection']);
+    if (selection !== undefined) {
+      const candidates: (Object | undefined)[] = [selection['next'], selection['lastUsed'], selection];
+      for (const value of candidates) {
+        const model = value !== undefined ? asRecord(value) : undefined;
+        if (model !== undefined && jsonStr(model, 'provider', '').length > 0 && jsonStr(model, 'model', '').length > 0) {
+          session.modelProvider = jsonStr(model, 'provider', '');
+          session.modelId = jsonStr(model, 'model', '');
+          session.modelEffort = jsonStr(model, 'reasoningEffort', '');
+          break;
+        }
+      }
+    }
+    const outline: Object[] = asArray(values['turnOutline']) ?? [];
+    for (const item of outline) {
+      const turn: Record<string, Object> | undefined = asRecord(item);
+      if (turn === undefined) continue;
+      const summary: HarnessTurnSummary = new HarnessTurnSummary();
+      const turnId: Object | undefined = turn['turn'];
+      summary.turnId = turnId !== undefined ? String(turnId) : '';
+      summary.response = jsonStr(turn, 'response', '');
+      summary.prompt = jsonStr(turn, 'prompt', '');
+      session.turnOutline.push(summary);
+    }
     const stats: Record<string, Object> | undefined = asRecord(values['sessionStats']);
     const turnsRaw: Object | undefined = stats !== undefined ? stats['turns'] : undefined;
     if (typeof turnsRaw === 'number' && turnsRaw > 0) {
@@ -1320,7 +1398,7 @@ function normalizeSession(value: Object): HarnessRemoteSession | undefined {
   return session;
 }
 
-function entriesFromRecords(records: Object[]): HarnessHistoryEntry[] {
+export function entriesFromRecords(records: Object[]): HarnessHistoryEntry[] {
   const entries: HarnessHistoryEntry[] = [];
   for (const record of records) {
     const root: Record<string, Object> | undefined = asRecord(record);

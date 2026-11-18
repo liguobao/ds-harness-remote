@@ -29,7 +29,7 @@ import {
 } from './virtual-history.js'
 import { turnEndReason } from './turn-end-reason.js'
 import type { CodexClientLike, JsonRecord } from './virtual-values.js'
-import { array, integer, nativeThreadId, optionalPositiveInteger, record, string } from './virtual-values.js'
+import { array, integer, isRecord, nativeThreadId, optionalPositiveInteger, record, string } from './virtual-values.js'
 
 /** Collaborates with one CodexVirtualHarness; never creates a second session or connection state. */
 export interface CodexLiveProjectionContext {
@@ -53,6 +53,7 @@ export interface CodexLiveProjectionContext {
   readonly refreshAndPublishWorkspaces: (force?: boolean) => Promise<void>
   readonly pendingApprovals: Map<string, PendingApproval>
   readonly emitApproval: (input: { eventId: string; agentId: string; request: JsonRecord; }) => void
+  readonly cancelApproval: (eventId: string) => void
   readonly imageAttachments: Map<string, CodexImageAttachmentEntry>
   readonly invalidateThreadHistory?: (threadId: string) => void
 }
@@ -80,6 +81,7 @@ export class CodexLiveProjection {
       turn: history.nextTurn,
       stepOpen: history.activeTurnId !== undefined,
       startedItems: new Set(),
+      invalidatedApprovals: new Set(),
       completedItems: new Set(),
       streamedBlocks: new Map(),
       nextBlockIndex: 0,
@@ -124,6 +126,14 @@ export class CodexLiveProjection {
         throw new Error('The CodeX virtual Harness is closed.')
       }
       follow.close = () => stream.close()
+      if (stream.streamId !== undefined && this.context.client.claimApprovals !== undefined) {
+        try {
+          const approvals = await this.context.client.claimApprovals(stream.streamId, signal)
+          for (const frame of approvals) this.acceptCodexFrame(follow, frame)
+        } catch (error) {
+          if (!isRecord(error) || error.code !== 'METHOD_NOT_FOUND') throw error
+        }
+      }
       void this.context.refreshAndPublishWorkspaces().catch(() => undefined)
     } catch (error) {
       this.context.follows.delete(follow)
@@ -139,6 +149,14 @@ export class CodexLiveProjection {
 
   acceptCodexFrame(follow: FollowState, frame: { method: string; params: unknown }): void {
     const params = record(frame.params)
+    if (frame.method === 'dsh/approval/resolved') {
+      const handle = string(params.requestHandle)
+      if (handle !== undefined) {
+        follow.invalidatedApprovals.add(handle)
+        if (this.context.pendingApprovals.delete(handle)) this.context.cancelApproval(handle)
+      }
+      return
+    }
     if (frame.method === 'thread/name/updated') {
       const name = string(params.threadName)
       if (name === undefined) return
@@ -318,17 +336,15 @@ export class CodexLiveProjection {
     if (frame.method === 'item/commandExecution/requestApproval'
       || frame.method === 'item/fileChange/requestApproval') {
       const requestHandle = string(params.requestHandle)
-      if (requestHandle === undefined) return
+      if (requestHandle === undefined || follow.invalidatedApprovals.has(requestHandle)) return
       const command = commandText(params.command)
-      this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId })
-      this.context.emitApproval({
-        eventId: requestHandle,
-        agentId: follow.sessionId,
-        request: {
-          toolName: frame.method.includes('fileChange') ? 'CodeX file change' : 'CodeX command',
-          ...(command === undefined ? {} : { reason: command }),
-        },
-      })
+      const request = {
+        toolName: frame.method.includes('fileChange') ? 'CodeX file change' : 'CodeX command',
+        ...(command === undefined ? {} : { reason: command }),
+      }
+      if (this.context.pendingApprovals.has(requestHandle)) return
+      this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId, request })
+      this.context.emitApproval({ eventId: requestHandle, agentId: follow.sessionId, request })
     }
   }
 
