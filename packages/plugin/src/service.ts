@@ -400,9 +400,12 @@ export class HostPluginRuntime {
     } catch (error) {
       revokeFailure = error
     }
-    this.identity = await this.identities.reset(this.config.deviceName)
+    this.identity = await this.identities.reset(this.config.deviceName, { clearPairingPolicy: true })
     this.serverApi?.bindIdentity(this.identity)
-    if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
+    if (this.serverApi !== undefined) {
+      await this.serverApi.loadStoredPolicy()
+      this.serverConnection = this.createServerConnection(this.identity)
+    }
     this.initializePairing()
     this.logger.info('Host authorization cleared')
     if (revokeFailure !== undefined) throw revokeFailure
@@ -688,7 +691,7 @@ export class HostPluginRuntime {
         if (existsSync('/usr/local/bin/opencode') || existsSync('/var/lib/dsh/.opencode/bin/opencode')) return true
       } catch {}
     }
-    try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
+    try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore', windowsHide: true }); return true } catch { return false }
   }
 
   private requireLocalCodexPeer(): CodexPeerBridge {

@@ -47,8 +47,8 @@ export const BUILTIN_ACP_SPECS: Readonly<Record<BuiltinAcpBackend, Readonly<Back
     id: 'claude',
     name: 'Claude',
     kind: 'npm_package',
-    npmPackage: '@anthropic-ai/claude-agent-acp',
-    downloadUrl: 'https://www.npmjs.com/package/@anthropic-ai/claude-agent-acp',
+    npmPackage: '@agentclientprotocol/claude-agent-acp',
+    downloadUrl: 'https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp',
   }),
   opencode: Object.freeze({
     id: 'opencode',
@@ -105,6 +105,7 @@ export function discoverSystemNpmPrefix(platform: NodeJS.Platform = process.plat
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf8',
       timeout: 3000,
+      windowsHide: true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     })
     const trimmed = out.trim()
@@ -274,6 +275,7 @@ export function lookupSystemPath(command: string, platform: NodeJS.Platform = pr
       stdio: ['ignore', 'pipe', 'ignore'],
       encoding: 'utf8',
       timeout: 5000,
+      windowsHide: true,
     })
     const firstLine = output.split(/\r?\n/).find(line => line.trim().length > 0)
     if (firstLine && defaultCheckExecutable(firstLine.trim(), platform)) {

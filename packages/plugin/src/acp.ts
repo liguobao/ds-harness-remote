@@ -41,7 +41,7 @@ export class StdioAcpAdapter {
   private child?: ChildProcessWithoutNullStreams
   private nextId = 1
   constructor(private readonly config: AcpIdeConfig) { this.backend = config.id }
-  private ensure() { if (!this.child) this.child = spawn(this.config.command, this.config.args ?? [], { cwd: this.config.cwd, stdio: 'pipe' }); return this.child }
+  private ensure() { if (!this.child) this.child = spawn(this.config.command, this.config.args ?? [], { cwd: this.config.cwd, stdio: 'pipe', windowsHide: true }); return this.child }
   async initialize(params: AcpInitializeParams): Promise<AcpInitializeResult> { await this.call('initialize', params); return { protocolVersion: 1, capability: 'agent.acp.v1', backend: this.backend, capabilities: ['session.new','session.load','session.prompt','session.cancel'] } }
   async sessionNew(params: AcpSessionParams) { const r = await this.call('session/new', params) as { sessionId?: string }; if (!r.sessionId) throw new Error('INVALID_MESSAGE'); return { sessionId: r.sessionId } }
   async sessionLoad(params: AcpSessionParams) { const r = await this.call('session/load', params) as { sessionId?: string }; if (!r.sessionId) throw new Error('INVALID_MESSAGE'); return { sessionId: r.sessionId } }

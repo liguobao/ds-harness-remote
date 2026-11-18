@@ -864,7 +864,7 @@ export class AcpRemoteGateway {
 
   /** Trusted, connection-scoped authority for the dedicated workspace uploader. */
   resolveUploadWorkspace(connectionId: string, publicId: string): string {
-    const match = /^(acp|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId)
+    const match = /^(acp|antigravity|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId)
     const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1]
     const session = match ? this.sessionCwds.get(match[2]!) : undefined
     if (!this.peers.has(connectionId) || !session || session.backend !== backend || this.closed) {
