@@ -208,60 +208,27 @@ export class AgentAcpClient {
     tool?: AgentAcpStreamOpenParams['tool'],
   ): Promise<AcpStream> {
     const streamId = createRemoteId()
-    let closed = false
-    let opened = false
-    let unsubscribe: () => void = () => undefined
-    let unsubscribeCoreClose: () => void = () => undefined
-    const onAbort = () => {
-      if (!markClosed()) return
-      void this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
-    }
-    const markClosed = () => {
-      if (closed) return false
-      closed = true
-      unsubscribe()
-      unsubscribeCoreClose()
-      signal?.removeEventListener('abort', onAbort)
-      return true
-    }
-    unsubscribe = this.core.onEvent(event => {
+    const unsubscribe = this.core.onEvent(event => {
       if (event.event === 'agent.acp.frame' && isRecord(event.data)) {
         const data = event.data as unknown as AgentAcpFrameData
         if (tool ? data.streamId !== streamId : !frameMatchesSubscription(data, streamId, sessionId)) return
         onFrame(data)
       }
       if (event.event === 'agent.acp.stream.closed' && isRecord(event.data) && event.data.streamId === streamId) {
-        if (!markClosed()) return
         onClosed?.(event.data as unknown as AgentAcpStreamClosedData)
       }
     })
-    unsubscribeCoreClose = this.core.onClose(() => {
-      if (!opened) {
-        markClosed()
-        return
-      }
-      if (!markClosed()) return
-      onClosed?.({ streamId, reason: 'peer-disconnected' })
-    })
     try {
       await this.core.rpc('agent.acp.stream.open', { streamId, sessionId, ...(tool ? { tool } : {}) }, signal)
-      if (signal?.aborted) {
-        markClosed()
-        await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
-        throw signal.reason
-      }
-      opened = true
-      if (!closed) {
-        signal?.addEventListener('abort', onAbort, { once: true })
-      }
+      if (signal?.aborted) { unsubscribe(); await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined); throw signal.reason }
     } catch (error) {
-      markClosed()
+      unsubscribe()
       throw error
     }
     return {
       streamId,
       close: async () => {
-        if (!markClosed()) return
+        unsubscribe()
         await this.core.rpc('agent.acp.stream.close', { streamId }).catch(() => undefined)
       },
     }

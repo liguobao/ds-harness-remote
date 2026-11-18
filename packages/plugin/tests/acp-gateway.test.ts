@@ -71,7 +71,7 @@ describe('AcpRemoteGateway', () => {
           await gateway.start()
           let finishClose!: () => void
           const closeGate = new Promise<void>(resolve => { finishClose = resolve })
-          const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, async event => {
+          const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, async event => {
             if (event === 'agent.acp.stream.closed') await closeGate
           })!
           if (transition === 'disconnect') await peer.openStream({ streamId: 'existing', sessionId: 'saved' })
@@ -105,7 +105,7 @@ describe('AcpRemoteGateway', () => {
     const gateway = new AcpRemoteGateway(initial, silentLogger(), binary => binary === 'previous' ? previous : next)
     await gateway.start()
     const publish = vi.fn(async () => undefined)
-    gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)
+    gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, publish)
     const prompt = { method: 'session/prompt', params: { backend: 'cursor', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } }
     try {
       await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd } })
@@ -276,6 +276,89 @@ describe('AcpRemoteGateway', () => {
     } finally { await fixture.gateway.close() }
   })
 
+  it('resumes pending and offline approvals only for the authenticated device, once', async () => {
+    const fixture = await approvalFixture()
+    try {
+      const first = await fixture.request()
+      fixture.gateway.dropPeer('owner')
+      await expect(fixture.gateway.respond('owner', { requestHandle: first, decision: 'allow-once' })).rejects.toThrow()
+      await expect(fixture.gateway.createPeer({ connectionId: 'intruder', peerDeviceId: 'other', peerIdentityKey: 'other-key' } as never, async () => undefined)!
+        .openStream({ streamId: 'intruder-stream', sessionId: 'session' })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      const wrongKey = fixture.gateway.createPeer({ connectionId: 'wrong-key', peerDeviceId: 'device', peerIdentityKey: 'replacement-key' } as never, async () => undefined)!
+      await expect(wrongKey.openStream({ streamId: 'wrong-key-stream', sessionId: 'session' })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      await fixture.emit({ kind: 'request', id: 8, method: 'session/request_permission', params: { sessionId: 'session', options: fixture.options } })
+      const replay = vi.fn(async () => undefined)
+      const reconnected = fixture.gateway.createPeer({ connectionId: 'new-owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, replay)!
+      await reconnected.openStream({ streamId: 'new-stream', sessionId: 'session' })
+      const frames = replay.mock.calls.map(call => (call as unknown as [string, { frame: { params: { requestHandle: string } } }])[1].frame.params.requestHandle)
+      expect(frames).toHaveLength(2)
+      expect(frames).toContain(first)
+      const second = frames.find(handle => handle !== first)!
+      await fixture.gateway.respond('new-owner', { requestHandle: first, decision: 'allow-once' })
+      await expect(fixture.gateway.respond('new-owner', { requestHandle: first, decision: 'allow-once' })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+      await fixture.gateway.respond('new-owner', { requestHandle: second, decision: 'reject-once' })
+      expect(fixture.acp.respond).toHaveBeenCalledTimes(2)
+    } finally { await fixture.gateway.close() }
+  })
+
+  it('invalidates approvals on device revocation and lease timeout', async () => {
+    for (const mode of ['revoke', 'timeout'] as const) {
+      const fixture = await approvalFixture()
+      try {
+        const handle = await fixture.request()
+        fixture.gateway.dropPeer('owner')
+        if (mode === 'revoke') fixture.gateway.revokeDevice('device')
+        else {
+          const state = fixture.gateway as unknown as { approvalLeases: Map<string, { expiresAt: number }> }
+          state.approvalLeases.get('session')!.expiresAt = Date.now() - 1
+        }
+        const publish = vi.fn(async () => undefined)
+        if (mode === 'revoke') {
+          expect(() => fixture.gateway.createPeer({ connectionId: 'new-owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, publish)).toThrow()
+        } else {
+          const peer = fixture.gateway.createPeer({ connectionId: 'new-owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, publish)!
+          await peer.openStream({ streamId: 'new-stream', sessionId: 'session' })
+          await expect(fixture.gateway.respond('new-owner', { requestHandle: handle, decision: 'allow-once' })).rejects.toThrow()
+        }
+        expect(fixture.acp.respond).not.toHaveBeenCalled()
+        expect(fixture.acp.respondError).toHaveBeenCalledWith(7, -32800, expect.any(String))
+      } finally { await fixture.gateway.close() }
+    }
+  })
+
+  it('expires offline leases and sends only advisory routing notices', async () => {
+    const fixture = await approvalFixture()
+    try {
+      vi.useFakeTimers()
+      const notice = vi.fn(() => { throw new Error('push failed') })
+      fixture.gateway.setApprovalNotifier(notice)
+      await fixture.request()
+      fixture.gateway.dropPeer('owner')
+      expect(notice).toHaveBeenCalledWith({ deviceId: 'device', backend: 'cursor', sessionId: 'session' })
+      await fixture.emit({ kind: 'request', id: 8, method: 'session/request_permission', params: { sessionId: 'session', options: fixture.options } })
+      expect(notice).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(fixture.acp.respondError).toHaveBeenCalledWith(7, -32800, expect.any(String))
+      expect(fixture.acp.respondError).toHaveBeenCalledWith(8, -32800, expect.any(String))
+      await fixture.emit({ kind: 'request', id: 9, method: 'session/request_permission', params: { sessionId: 'session', options: fixture.options } })
+      expect(fixture.acp.respondError).toHaveBeenCalledWith(9, -32602, expect.any(String))
+    } finally { vi.useRealTimers(); await fixture.gateway.close() }
+  })
+
+  it('fences live device revocation and backend loss before further decisions', async () => {
+    for (const reason of ['revocation', 'backend'] as const) {
+      const fixture = await approvalFixture()
+      try {
+        const handle = await fixture.request()
+        if (reason === 'revocation') fixture.gateway.revokeDevice('device')
+        else await (fixture.gateway as unknown as { handleUnavailable: (backend: string, code: string) => Promise<void> }).handleUnavailable('cursor', 'EXITED')
+        await expect(fixture.gateway.respond('owner', { requestHandle: handle, decision: 'allow-once' })).rejects.toThrow()
+        expect(fixture.acp.respond).not.toHaveBeenCalled()
+        expect(fixture.acp.respondError).toHaveBeenCalledWith(7, -32800, expect.any(String))
+      } finally { await fixture.gateway.close() }
+    }
+  })
+
   it('keeps unsupported one-shot decisions retryable and invalidates handles when a backend is rebuilt', async () => {
     const fixture = await approvalFixture()
     try {
@@ -301,7 +384,7 @@ describe('AcpRemoteGateway', () => {
     await gateway.start()
     try {
       const publish = vi.fn(async () => undefined)
-      gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)
+      gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, publish)
       await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd: process.cwd() } })
       inbound({ kind: 'request', id: 12, method: 'session/request_permission', params: { sessionId: 'bound-session', options: [{ kind: 'allow_once', optionId: 'allow' }] } })
       await (gateway as unknown as { inboundChain: Promise<void> }).inboundChain
@@ -605,7 +688,7 @@ describe('AcpRemoteGateway', () => {
           )
           await gateway.start()
           const peer = gateway.createPeer(
-            { connectionId: 'live-peer', peerDeviceId: 'device' } as never,
+            { connectionId: 'live-peer', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never,
             async () => undefined,
           )!
           await gateway.reconfigure({
@@ -1192,8 +1275,8 @@ async function approvalFixture(backend = 'cursor') {
   const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'agent', args: [] }] }, silentLogger(), () => acp)
   await gateway.start()
   const publish = vi.fn(async () => undefined), observer = vi.fn(async () => undefined)
-  const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)!
-  gateway.createPeer({ connectionId: 'observer', peerDeviceId: 'other' } as never, observer)
+  const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device', peerIdentityKey: 'device-key' } as never, publish)!
+  gateway.createPeer({ connectionId: 'observer', peerDeviceId: 'other', peerIdentityKey: 'other-key' } as never, observer)
   await gateway.call('owner', { method: 'session/new', params: { backend, cwd: process.cwd() } })
   await peer.openStream({ streamId: 'stream', sessionId: 'session' })
   const options = [{ kind: 'allow_once', optionId: 'real-allow' }, { kind: 'reject_once', optionId: 'reject' }, { kind: 'allow_always', optionId: 'persistent' }]

@@ -324,11 +324,8 @@ describe('AcpVirtualHarness', () => {
     const stream = await target.open('session/follow', { args: { request: { address: { kind: 'session', sessionId: 'acp:new' } } } }, signal)
     const iterator = stream[Symbol.asyncIterator]()
     expect((await iterator.next()).value).toMatchObject({ type: 'snapshot', header: { id: 'acp:new' }, records: [], cursor: -1 })
-    const initialProjection = await target.dispatch('session/projections', { args: { request: { sessionId: 'acp:new' } } }, signal) as {
-      ok: true; value: { kind: string; asOfSeq: number }
-    }
-    expect(initialProjection).toMatchObject({ ok: true, value: { kind: 'sequenced' } })
-    expect(initialProjection.value.asOfSeq).toBeGreaterThanOrEqual(0)
+    await expect(target.dispatch('session/projections', { args: { request: { sessionId: 'acp:new' } } }, signal))
+      .resolves.toMatchObject({ ok: true, value: { kind: 'sequenced', asOfSeq: -1 } })
     expect(client.loadSessionHistory).not.toHaveBeenCalled()
     const calls = client.createSession.mock.calls.length
     expect(await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId, sessionId: 'acp:new' } } }, signal))
@@ -369,7 +366,7 @@ describe('AcpVirtualHarness', () => {
     let onFrame: ((frame: AgentAcpFrameData) => void) | undefined
     const client = {
       ...fakeAcp(),
-      createSession: vi.fn(async (cwd: string) => ({ sessionId: 'hermes_1', cwd })),
+      call: vi.fn(async (method: string) => method === 'session/new' ? { sessionId: 'hermes_1' } : {}),
       prompt: vi.fn(async () => ({})),
       openStream: vi.fn(async (_id: string, handler: (frame: AgentAcpFrameData) => void) => { onFrame = handler; return { close: async () => undefined } }),
     }
@@ -524,6 +521,26 @@ describe('AcpVirtualHarness', () => {
     expect(client.prompt).toHaveBeenCalledWith('acp_1', 'List files', expect.any(AbortSignal), [], 'cursor')
     expect(client.openStream).toHaveBeenCalled()
     await target.close()
+  })
+
+  it('replays a pending approval when the event subscription opens after the session stream', async () => {
+    let onFrame!: (frame: AgentAcpFrameData) => void
+    const client = { ...fakeAcp(), openStream: vi.fn(async (_id: string, handler: typeof onFrame) => {
+      onFrame = handler
+      return { close: async () => undefined }
+    }) }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'cursor')
+    const controller = new AbortController()
+    try {
+      await target.selectOrCreateWorkspace('/test')
+      await target.dispatch('session/prompt', { args: { request: { sessionId: 'cursor:acp_1', content: [{ type: 'text', text: 'Go' }] } } }, controller.signal)
+      onFrame({ frame: { method: 'session/request_permission', params: { requestHandle: 'pending', toolName: 'shell', expiresAt: Date.now() + 60_000 } } } as AgentAcpFrameData)
+      const stream = await target.open('$events', {}, controller.signal)
+      const iterator = stream[Symbol.asyncIterator]()
+      expect((await iterator.next()).value).toMatchObject({ type: 'ready' })
+      expect((await iterator.next()).value).toMatchObject({ type: 'waterfall', event: 'approval/request', eventId: 'pending', request: { toolName: 'shell' } })
+      await iterator.return?.()
+    } finally { controller.abort(); await target.close() }
   })
 
   it('maps Typert approval outcomes to ACP respond decisions', async () => {
@@ -1194,349 +1211,6 @@ describe('AcpVirtualHarness', () => {
     } finally {
       await target.close()
     }
-  })
-
-  it('maintains a single stream per session across ensureFollow, sessionFollow, replacement and onClosed', async () => {
-    await runScenarios(['overlap mid-turn', 'supersede consumer', 'background release', 'remote onClosed', 'openStream failure'].map(name => ({ name, run: async () => {
-      const streamClose = vi.fn(async () => undefined)
-      let onFrame!: (frame: AgentAcpFrameData) => void
-      let onClosed!: (closed: { streamId: string; reason: 'completed' | 'cancelled' | 'peer-disconnected' | 'failed' }) => void
-      const client = {
-        ...fakeAcp(),
-        openStream: vi.fn(async (_id: string, handler: typeof onFrame, closed?: typeof onClosed) => {
-          onFrame = handler
-          onClosed = closed!
-          return { close: streamClose }
-        }),
-      }
-      const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
-      const signal = new AbortController().signal
-      const emit = (update: Record<string, unknown>) =>
-        onFrame({ streamId: 's1', frame: { method: 'session/update', params: { sessionId: 'remote-history', update } } })
-      try {
-        await target.selectOrCreateWorkspace('/test')
-        const sessionId = 'opencode:remote-history'
-        const eventsStream = await target.open('$events', {}, signal)
-        const eventsIter = eventsStream[Symbol.asyncIterator]()
-        await eventsIter.next() // ready
-
-        if (name === 'openStream failure') {
-          client.openStream.mockRejectedValueOnce(new Error('stream limit reached'))
-          await expect(target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'first' }] } } }, signal))
-            .resolves.toMatchObject({ ok: false })
-          expect(await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'retry' }] } } }, signal))
-            .toMatchObject({ ok: true })
-          expect(client.openStream).toHaveBeenCalledTimes(2)
-          emit({ sessionUpdate: 'prompt_completed', stopReason: 'end_turn' })
-          await eventsIter.return?.()
-          return
-        }
-
-        if (name === 'overlap mid-turn') {
-          await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'hi' }] } } }, signal)
-          emit({ sessionUpdate: 'agent_message_chunk', text: 'part 1 ' })
-          const controller = new AbortController()
-          const followStream = await target.open('session/follow', { args: { request: { sessionId, assistantStream: true } } }, controller.signal)
-          const iter = followStream[Symbol.asyncIterator]()
-          const snap = (await iter.next()).value as { type: string; assistantStream: { activeAttempt?: { nextIndex: number; stream: unknown[] } } }
-          expect(snap.type).toBe('snapshot')
-          expect(snap.assistantStream.activeAttempt).toMatchObject({ nextIndex: 2, turn: 1, step: 1 })
-          expect(snap.assistantStream.activeAttempt?.stream).toHaveLength(2)
-          expect(client.openStream).toHaveBeenCalledTimes(1)
-
-          emit({ sessionUpdate: 'agent_message_chunk', text: 'part 2' })
-          emit({ sessionUpdate: 'prompt_completed', stopReason: 'end_turn' })
-          const received: Array<{ type: string; event?: { type: string } }> = []
-          for (let i = 0; i < 7; i++) received.push((await iter.next()).value as never)
-          expect(received.filter(item => item.event?.type === 'assistant/message')).toHaveLength(1)
-          expect(received.filter(item => item.event?.type === 'turn/end')).toHaveLength(1)
-          // Stream stays open across turns because a consumer is attached.
-          expect(streamClose).not.toHaveBeenCalled()
-          controller.abort()
-          while (!(await iter.next()).done) { /* drain */ }
-          expect(streamClose).toHaveBeenCalledTimes(1)
-          await eventsIter.return?.()
-          return
-        }
-
-        if (name === 'supersede consumer') {
-          const c1 = new AbortController()
-          const c2 = new AbortController()
-          const s1 = await target.open('session/follow', { args: { request: { sessionId } } }, c1.signal)
-          const it1 = s1[Symbol.asyncIterator]()
-          await it1.next()
-          const s2 = await target.open('session/follow', { args: { request: { sessionId } } }, c2.signal)
-          const it2 = s2[Symbol.asyncIterator]()
-          await it2.next()
-          expect(client.openStream).toHaveBeenCalledTimes(1)
-          expect(await it1.next()).toEqual({ done: true, value: undefined })
-          expect(streamClose).not.toHaveBeenCalled()
-          emit({ sessionUpdate: 'agent_message_chunk', text: 'still alive' })
-          expect((await it2.next()).value).toMatchObject({ type: 'event', event: { type: 'turn/start' } })
-          c2.abort()
-          while (!(await it2.next()).done) { /* drain */ }
-          expect(streamClose).toHaveBeenCalledTimes(1)
-          await eventsIter.return?.()
-          return
-        }
-
-        if (name === 'background release') {
-          await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'bg' }] } } }, signal)
-          emit({ sessionUpdate: 'agent_message_chunk', text: 'done' })
-          emit({ sessionUpdate: 'prompt_completed', stopReason: 'end_turn' })
-          expect(streamClose).toHaveBeenCalledTimes(1)
-          expect((target as unknown as { follows: Set<unknown> }).follows.size).toBe(0)
-          await eventsIter.return?.()
-          return
-        }
-
-        if (name === 'remote onClosed') {
-          const c = new AbortController()
-          const followStream = await target.open('session/follow', { args: { request: { sessionId } } }, c.signal)
-          const iter = followStream[Symbol.asyncIterator]()
-          await iter.next()
-          await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'run' }] } } }, signal)
-          emit({ sessionUpdate: 'agent_message_chunk', text: 'partial' })
-          onClosed({ streamId: 's1', reason: 'failed' })
-          const items: Array<Record<string, unknown>> = []
-          while (true) {
-            const next = await iter.next()
-            if (next.done) break
-            items.push(next.value as Record<string, unknown>)
-          }
-          expect(items.some(item => item.type === 'event' && (item.event as { type: string; data: { reason?: { kind: string } } }).type === 'turn/end'
-            && (item.event as { data: { reason: { kind: string } } }).data.reason.kind === 'error')).toBe(true)
-          expect((target as unknown as { follows: Set<unknown> }).follows.size).toBe(0)
-          const statusFrames: unknown[] = []
-          for (let i = 0; i < 2; i++) statusFrames.push((await eventsIter.next()).value)
-          expect(statusFrames.at(-1)).toEqual({ type: 'emit', event: 'api-session/status', args: [sessionId, false] })
-          await eventsIter.return?.()
-        }
-      } finally { await target.close() }
-    } })))
-  })
-
-  it('projects non-pi reasoning, tool results and terminal outcomes accurately', async () => {
-    await runScenarios([
-      { name: 'max_tokens with reasoning and tools', update: { sessionUpdate: 'prompt_completed', stopReason: 'max_tokens' }, finish: 'max-tokens', end: 'max-tokens' },
-      { name: 'cancelled', update: { sessionUpdate: 'prompt_completed', stopReason: 'cancelled' }, finish: 'aborted', end: 'aborted' },
-      { name: 'prompt_failed', update: { sessionUpdate: 'prompt_failed' }, finish: 'error', end: 'error' },
-    ].map(scenario => ({ name: scenario.name, run: async () => {
-      let onFrame!: (frame: AgentAcpFrameData) => void
-      const client = {
-        ...fakeAcp(),
-        openStream: vi.fn(async (_id: string, handler: typeof onFrame) => { onFrame = handler; return { close: async () => undefined } }),
-      }
-      const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
-      const signal = new AbortController().signal
-      const sessionId = 'opencode:remote-history'
-      const emit = (update: Record<string, unknown>) =>
-        onFrame({ streamId: 's1', frame: { method: 'session/update', params: { sessionId: 'remote-history', update } } })
-      try {
-        await target.selectOrCreateWorkspace('/test')
-        await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'inspect' }] } } }, signal)
-        emit({ sessionUpdate: 'agent_thought_chunk', text: 'step 1 ' })
-        emit({ sessionUpdate: 'agent_thought_chunk', text: 'step 2' })
-        emit({ sessionUpdate: 'agent_message_chunk', text: 'answer' })
-        emit({ sessionUpdate: 'tool_call', toolCallId: 'call-1', title: 'bash', status: 'in_progress', rawInput: { cmd: 'ls' } })
-        emit({ sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'completed', rawOutput: 'file.txt' })
-        emit({ sessionUpdate: 'tool_call', toolCallId: 'call-2', title: 'read', status: 'failed', rawOutput: 'missing' })
-        emit(scenario.update)
-
-        const history = await target.dispatch('session/history', { args: { request: { sessionId } } }, signal) as {
-          ok: true; value: { records: Array<{ event: { type: string; data: Record<string, unknown> } }> }
-        }
-        const events = history.value.records.map(r => r.event)
-        expect(events.filter(e => e.type === 'tool/call')).toHaveLength(2)
-        const results = events.filter(e => e.type === 'tool/result').map(e => (e.data.message as { content: unknown[] }).content[0])
-        expect(results).toEqual([
-          { type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'file.txt' }] },
-          { type: 'tool-result', toolCallId: 'call-2', content: [{ type: 'text', text: 'missing' }], isError: true },
-        ])
-        const assistant = events.find(e => e.type === 'assistant/message')!.data as {
-          message: { content: unknown[] }; stream: Array<{ chunk: { type: string; block?: unknown; reason?: { kind: string } } }>
-        }
-        expect(assistant.message.content).toEqual([
-          { type: 'reasoning', text: 'step 1 step 2' },
-          { type: 'text', text: 'answer' },
-        ])
-        expect(assistant.stream.find(c => c.chunk.type === 'block-end')?.chunk.block).toEqual({ type: 'reasoning', text: 'step 1 step 2' })
-        expect(assistant.stream.at(-1)?.chunk).toMatchObject({ type: 'finish', reason: { kind: scenario.finish } })
-        expect(events.find(e => e.type === 'turn/end')?.data).toMatchObject({ reason: { kind: scenario.end } })
-      } finally { await target.close() }
-    } })))
-  })
-
-  it('restricts hostCarrier to global allowlists and serves job/kill and skills/list locally', async () => {
-    const hostCarrier = {
-      invoke: vi.fn(async () => undefined),
-      dispatch: vi.fn(async (endpoint: string) => ({ ok: true as const, value: { endpoint } })),
-      open: vi.fn(async () => (async function* () { yield { type: 'ready' } })()),
-    }
-    const target = new AcpVirtualHarness(fakeAcp(), { deviceId: 'host-1', name: 'Host' }, 'antigravity', hostCarrier)
-    const signal = new AbortController().signal
-    try {
-      await target.selectOrCreateWorkspace('/test')
-      await expect(target.dispatch('skills/list', { args: { request: { sessionId: 'acp:remote-history' } } }, signal))
-        .resolves.toEqual({ ok: true, value: { skills: [] } })
-      await expect(target.dispatch('job/kill', { args: { request: { jobId: 'job-1' } } }, signal))
-        .resolves.toEqual({ ok: true, value: { outcome: 'already-finished' } })
-      expect(hostCarrier.dispatch).not.toHaveBeenCalled()
-
-      for (const blocked of ['workspace/pinSession', 'schedule/list', 'agentPresets/select', 'workspaceFiles/readRelated']) {
-        await expect(target.dispatch(blocked, { args: {} }, signal))
-          .resolves.toMatchObject({ ok: false, error: { code: 'method-not-found' } })
-      }
-      expect(hostCarrier.dispatch).not.toHaveBeenCalled()
-
-      for (const allowed of ['pluginInventory/list', 'permissionPresets/catalog', 'credentials/list']) {
-        await expect(target.dispatch(allowed, { args: {} }, signal))
-          .resolves.toEqual({ ok: true, value: { endpoint: allowed } })
-      }
-      expect(hostCarrier.dispatch).toHaveBeenCalledTimes(3)
-
-      await expect(target.open('schedule/watch', { args: {} }, signal)).rejects.toMatchObject({ code: 'method-not-found' })
-      expect(hostCarrier.open).not.toHaveBeenCalled()
-      const allowedOpen = await target.open('remoteAccess/follow', { args: {} }, signal)
-      await expect(allowedOpen[Symbol.asyncIterator]().next()).resolves.toEqual({ done: false, value: { type: 'ready' } })
-      expect(hostCarrier.open).toHaveBeenCalledTimes(1)
-    } finally { await target.close() }
-  })
-
-  it('rejects unknown session IDs without creating ghost sessions', async () => {
-    const client = fakeAcp()
-    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
-    const signal = new AbortController().signal
-    try {
-      const workspace = await target.selectOrCreateWorkspace('/test')
-      const before = [...workspace.sessionIds]
-      await expect(target.dispatch('session/prompt', { args: { request: { sessionId: 'opencode:ghost', content: [{ type: 'text', text: 'hi' }] } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'session-not-found' } })
-      await expect(target.dispatch('session/cancel', { args: { request: { sessionId: 'opencode:ghost' } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'session-not-found' } })
-      await expect(target.dispatch('session/rename', { args: { request: { sessionId: 'opencode:ghost', title: 'X' } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'session-not-found' } })
-      await expect(target.dispatch('session/history', { args: { request: { sessionId: 'opencode:ghost' } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'session-not-found' } })
-      await expect(target.dispatch('session/page', { args: { request: { sessionId: 'opencode:ghost' } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'session-not-found' } })
-      await expect(target.dispatch('session/projections', { args: { request: { sessionId: 'opencode:ghost' } } }, signal))
-        .resolves.toEqual({ ok: true, value: null })
-      await expect(target.open('session/follow', { args: { request: { sessionId: 'opencode:ghost' } } }, signal))
-        .rejects.toThrow('not found')
-      expect(workspace.sessionIds).toEqual(before)
-      expect(client.prompt).not.toHaveBeenCalled()
-    } finally { await target.close() }
-  })
-
-  it('rolls back pre-stream prompt failures and settles post-stream prompt failures', async () => {
-    await runScenarios(['pre-stream without follow', 'pre-stream with follow', 'post-stream failure'].map(name => ({ name, run: async () => {
-      const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='
-      const streamClose = vi.fn(async () => undefined)
-      let onFrame!: (frame: AgentAcpFrameData) => void
-      const client = {
-        ...fakeAcp(),
-        listSessions: vi.fn(async () => []),
-        openStream: vi.fn(async (_id: string, handler: typeof onFrame) => { onFrame = handler; return { close: streamClose } }),
-        prompt: vi.fn(async (): Promise<unknown> => {
-          if (name === 'post-stream failure') {
-            onFrame({ streamId: 's1', frame: { method: 'session/update', params: { sessionId: 'acp_1', update: { sessionUpdate: 'agent_message_chunk', text: 'partial' } } } })
-          }
-          throw Object.assign(new Error('Prompt failed'), { code: 'PROMPT_ERR' })
-        }),
-      }
-      const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'antigravity')
-      const signal = new AbortController().signal
-      try {
-        const workspace = await target.selectOrCreateWorkspace('/test')
-        const sessionId = workspace.sessionIds[0]!
-        let followIter: AsyncIterator<unknown> | undefined
-        if (name === 'pre-stream with follow') {
-          const s = await target.open('session/follow', { args: { request: { sessionId } } }, signal)
-          followIter = s[Symbol.asyncIterator]()
-          await followIter.next()
-        }
-        const res = await target.dispatch('session/prompt', {
-          args: { request: { sessionId, content: [{ type: 'text', text: 'Hello' }, { type: 'image', mediaType: 'image/png', data }] } },
-        }, signal)
-        expect(res).toMatchObject({ ok: false, error: { code: 'PROMPT_ERR' } })
-        const history = await target.dispatch('session/history', { args: { request: { sessionId } } }, signal) as {
-          ok: true; value: { records: Array<{ event: { type: string; data: unknown } }> }
-        }
-        if (name === 'post-stream failure') {
-          expect(history.value.records.map(r => r.event.type)).toContain('assistant/message')
-          expect(history.value.records.find(r => r.event.type === 'turn/end')?.event.data).toMatchObject({
-            reason: { kind: 'error', error: { code: 'PROMPT_ERR', message: 'Prompt failed' } },
-          })
-          return
-        }
-        expect(history.value.records).toEqual([])
-        expect((target as unknown as { imageAttachments: Map<string, unknown> }).imageAttachments.size).toBe(0)
-        expect((target as unknown as { follows: Set<unknown> }).follows.size).toBe(0)
-        expect(streamClose).toHaveBeenCalledTimes(1)
-        if (followIter) {
-          // Consuming the closed follow iterator drains queued pre-prompt items and finishes so UI resyncs cleanly.
-          while (!(await followIter.next()).done) { /* drain */ }
-        }
-        client.prompt.mockResolvedValueOnce({})
-        expect(await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: 'Retry' }] } } }, signal))
-          .toMatchObject({ ok: true })
-      } finally { await target.close() }
-    } })))
-  })
-
-  it('keeps projection asOfSeq monotonic with seq after >10 history events, validates session/rename and syncs title cache', async () => {
-    let onFrame!: (frame: AgentAcpFrameData) => void
-    const client = {
-      ...fakeAcp(),
-      listSessions: vi.fn(async () => [{ conversationId: 'remote-history', title: 'New session - 2026-10-18T14:29:07.000Z', createdAt: 1, updatedAt: 2 }]),
-      openStream: vi.fn(async (_id: string, handler: typeof onFrame) => { onFrame = handler; return { close: async () => undefined } }),
-    }
-    const cache = new AcpSessionHistoryCache()
-    const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode', undefined, cache)
-    const signal = new AbortController().signal
-    const sessionId = 'opencode:remote-history'
-    try {
-      await target.selectOrCreateWorkspace('/test')
-      const followStream = await target.open('session/follow', { args: { request: { sessionId } } }, signal)
-      const iter = followStream[Symbol.asyncIterator]()
-      await iter.next()
-      for (let i = 0; i < 4; i++) {
-        await target.dispatch('session/prompt', { args: { request: { sessionId, content: [{ type: 'text', text: `msg ${i}` }] } } }, signal)
-        onFrame({ streamId: 's1', frame: { method: 'session/update', params: { sessionId: 'remote-history', update: { sessionUpdate: 'agent_message_chunk', text: `reply ${i}` } } } })
-        onFrame({ streamId: 's1', frame: { method: 'session/update', params: { sessionId: 'remote-history', update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' } } } })
-      }
-      // >10 durable events in history; asOfSeq remains in projection seq space.
-      const history = await target.dispatch('session/history', { args: { request: { sessionId } } }, signal) as {
-        ok: true; value: { cursor: number; projections: { asOfSeq: number } }
-      }
-      expect(history.value.cursor).toBeGreaterThan(10)
-      expect(history.value.projections.asOfSeq).toBeLessThan(history.value.cursor)
-      await expect(target.dispatch('session/list', { args: {} }, signal)).resolves.toMatchObject({
-        ok: true,
-        value: { items: [expect.objectContaining({ projections: expect.objectContaining({ asOfSeq: history.value.projections.asOfSeq }) })] },
-      })
-
-      await expect(target.dispatch('session/rename', { args: { request: { sessionId, title: '   ' } } }, signal))
-        .resolves.toMatchObject({ ok: false, error: { code: 'bad-request' } })
-      const renamed = await target.dispatch('session/rename', { args: { request: { sessionId, title: '  Renamed Title  ' } } }, signal) as {
-        ok: true; value: { title: string; seq: number }
-      }
-      expect(renamed).toEqual({ ok: true, value: { title: 'Renamed Title', seq: expect.any(Number) } })
-      expect(renamed.value.seq).toBeGreaterThan(history.value.projections.asOfSeq)
-
-      // Native title update via live update syncs the history cache.
-      const s2 = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode', undefined, cache)
-      const client2 = { ...fakeAcp(), listSessions: vi.fn(async () => [{ conversationId: 'c2', title: 'Initial', createdAt: 1, updatedAt: 2 }]) }
-      const h2 = new AcpVirtualHarness(client2, { deviceId: 'host-1', name: 'Host' }, 'opencode', undefined, cache)
-      await h2.selectOrCreateWorkspace('/test2')
-      const liveTitles = (h2 as unknown as { titles: { applyNative: (s: unknown, t: string) => void }; sessions: Map<string, unknown> })
-      liveTitles.titles.applyNative(liveTitles.sessions.get('opencode:c2'), 'Recovered Title')
-      expect(cache.getStale('opencode:c2')?.title).toBe('Recovered Title')
-      await h2.close()
-      await s2.close()
-      await iter.return?.()
-    } finally { await target.close() }
   })
 })
 

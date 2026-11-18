@@ -71,6 +71,12 @@ export class AcpEventCarrier {
       clientId: id,
       host: { home: workspace?.path ?? '/' },
     })
+    for (const pending of this.context.pendingApprovals.values()) {
+      if (pending.request !== undefined && (pending.expiresAt === undefined || pending.expiresAt > Date.now())) {
+        queue.push({ type: 'waterfall', event: 'approval/request', eventId: pending.requestHandle,
+          agentId: pending.sessionId, request: pending.request })
+      }
+    }
     return queue.iterate(() => this.context.eventStreams.delete(id))
   }
 

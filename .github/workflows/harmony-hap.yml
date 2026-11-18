@@ -1,6 +1,6 @@
 name: HarmonyOS HAP
 
-# SDK jobs run only for reviewed manual builds or the upstream release workflow.
+# SDK jobs run only when a maintainer dispatches reviewed code or creates a release tag.
 # Do not run untrusted fork pull requests on a self-hosted runner.
 on:
   workflow_dispatch:
@@ -14,14 +14,15 @@ on:
         description: Sign with repository secrets (trusted code only)
         type: boolean
         default: false
-  workflow_call:
+  push:
+    tags:
+      - 'harmony-v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   hap:
-    if: github.repository == 'liguobao/ds-harness-remote'
     name: Build HAP with HarmonyOS SDK
     runs-on: [self-hosted, harmonyos]
     timeout-minutes: 30
@@ -36,11 +37,6 @@ jobs:
 
       - name: Verify the HarmonyOS toolchain
         run: |
-          if [ -f "$HOME/.config/harmony-env.sh" ]; then
-            . "$HOME/.config/harmony-env.sh"
-            printf '%s\n' "$HARMONY_CLT/bin" "$HARMONY_CLT/hvigor/bin" "$JAVA_HOME/bin" >> "$GITHUB_PATH"
-            printf 'DEVECO_SDK_HOME=%s\nJAVA_HOME=%s\n' "$DEVECO_SDK_HOME" "$JAVA_HOME" >> "$GITHUB_ENV"
-          fi
           command -v hvigorw
           command -v ohpm
           hvigorw --version
@@ -50,11 +46,11 @@ jobs:
         run: ohpm install --all
 
       - name: Configure unsigned validation build
-        if: github.event_name != 'workflow_dispatch' || !inputs.signed
+        if: github.event_name == 'workflow_dispatch' && !inputs.signed
         run: node scripts/inject-signing.mjs --unsigned
 
       - name: Inject release signing material
-        if: github.event_name == 'workflow_dispatch' && inputs.signed
+        if: github.event_name == 'push' || inputs.signed
         env:
           HARMONY_SIGNING_STORE_B64: ${{ secrets.HARMONY_SIGNING_STORE_B64 }}
           HARMONY_SIGNING_STORE_PASSWORD: ${{ secrets.HARMONY_SIGNING_STORE_PASSWORD }}
@@ -64,7 +60,6 @@ jobs:
           HARMONY_SIGNING_PROFILE_B64: ${{ secrets.HARMONY_SIGNING_PROFILE_B64 }}
         run: |
           umask 077
-          export HARMONY_SIGNING_SOURCE_DIR="$HOME/.config/dsh-remote/harmony-signing"
           node scripts/inject-signing.mjs
 
       - name: Build HAP
@@ -79,26 +74,8 @@ jobs:
           path: apps/harmony/entry/build/default/outputs/default/*.hap
           if-no-files-found: error
 
-      - name: Stage unsigned release HAP
-        if: github.event_name == 'push'
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          mkdir -p build/release-assets
-          haps=(entry/build/default/outputs/default/*-unsigned.hap)
-          test "${#haps[@]}" -eq 1 && test -f "${haps[0]}"
-          cp "${haps[0]}" "build/release-assets/dsh-remote-harmony-${RELEASE_TAG}-unsigned.hap"
-
-      - name: Attach HAP to GitHub Release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: apps/harmony/build/release-assets/*.hap
-          fail_on_unmatched_files: true
-
       - name: Remove signing material and restore profile
         if: always()
         run: |
-          rm -rf .signing
           git restore -- build-profile.json5
+          rm -rf build/signing

@@ -726,7 +726,7 @@ export class ClientModeRuntime {
         name: remote.target.name,
       },
       backend,
-      remoteAcpCapabilities(remote.features),
+      remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [],
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend),
     )
@@ -788,7 +788,7 @@ export class ClientModeRuntime {
         name: remote.target.name,
       },
       backend,
-      remoteAcpCapabilities(remote.features),
+      remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [],
       this.remoteTypertGateway(remote),
       this.acpHistoryCache(remote.target.deviceId, backend),
     )
@@ -1165,13 +1165,6 @@ export class ClientModeRuntime {
       }
     }, error)
   }
-}
-
-function remoteAcpCapabilities(features: RemoteHostFeatures): string[] {
-  return [
-    ...(features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : []),
-    ...(features.acpOpencodeArchive ? ['agent.acp.opencode.archive.v1'] : []),
-  ]
 }
 
 export { probeRemoteHostFeatures, remoteHostFeatures } from './client-capabilities.js'

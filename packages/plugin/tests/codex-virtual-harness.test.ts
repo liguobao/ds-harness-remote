@@ -6,7 +6,39 @@ import {
   paginateCodexNativeHistory,
   projectCodexNativeHistory,
 } from '../src/codex/virtual-harness.js'
+import { CodexEventCarrier } from '../src/codex/virtual-event-carrier.js'
 import { CodexSessionHistoryCache } from '../src/session-history-cache.js'
+
+describe('Codex approval event stream', () => {
+  it('publishes ready before a consistent snapshot while catalog loading overlaps updates', async () => {
+    let release!: (value: unknown) => void
+    const catalog = new Promise(resolve => { release = resolve })
+    const pendingApprovals = new Map<string, { requestHandle: string; sessionId: string; request: Record<string, unknown> }>()
+    const carrier = new CodexEventCarrier({
+      host: { deviceId: 'host', name: 'Host' },
+      eventStreams: new Map(), pendingApprovals,
+      currentCatalog: () => catalog,
+    } as never)
+    const controller = new AbortController()
+    const opening = carrier.remoteEvents(controller.signal)
+    const request = { toolName: 'CodeX command' }
+    pendingApprovals.set('gone', { requestHandle: 'gone', sessionId: 'codex:thread', request })
+    carrier.emitApproval({ eventId: 'gone', agentId: 'codex:thread', request })
+    pendingApprovals.delete('gone')
+    carrier.cancelApproval('gone')
+    pendingApprovals.set('kept', { requestHandle: 'kept', sessionId: 'codex:thread', request })
+    carrier.emitApproval({ eventId: 'kept', agentId: 'codex:thread', request })
+    release({ workspaces: [] })
+    const stream = await opening
+    const iterator = stream[Symbol.asyncIterator]()
+    expect((await iterator.next()).value).toMatchObject({ type: 'ready' })
+    expect((await iterator.next()).value).toMatchObject({ type: 'waterfall', eventId: 'kept' })
+    carrier.cancelApproval('kept')
+    expect((await iterator.next()).value).toEqual({ type: 'cancel', eventId: 'kept' })
+    controller.abort()
+    await iterator.return?.()
+  })
+})
 
 describe('CodexVirtualHarness', () => {
   it('forwards CodeX workspace files and terminal calls to the Host carrier', async () => {

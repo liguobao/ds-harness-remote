@@ -329,8 +329,6 @@ interface AssistantStreamState {
 
 type SessionFollowHandle = StreamHandle & {
   sessionId: string
-  durableCursor: number
-  transientInGap: number
   assistant?: AssistantStreamState
 }
 
@@ -380,17 +378,14 @@ export class HarnessAlphaClient {
   async close(notifyRemote = true): Promise<void> {
     ++this.followGeneration
     this.questions.close(notifyRemote)
-    const follow = this.sessionFollow
-    const events = this.events
-    const control = this.control
+    await Promise.all([
+      this.closeHandle(this.sessionFollow, notifyRemote),
+      this.closeHandle(this.events, notifyRemote),
+      this.closeHandle(this.control, notifyRemote),
+    ])
     this.sessionFollow = undefined
     this.events = undefined
     this.control = undefined
-    await Promise.all([
-      this.closeHandle(follow, notifyRemote),
-      this.closeHandle(events, notifyRemote),
-      this.closeHandle(control, notifyRemote),
-    ])
     this.pendingEvents.clear()
     this.sessionsCache.clear()
     this.hasLoadedSessionList = false
@@ -811,12 +806,7 @@ export class HarnessAlphaClient {
     const generation = ++this.followGeneration
     await this.closeSessionFollow()
     if (generation !== this.followGeneration) throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
-    const handle: SessionFollowHandle = {
-      sessionId,
-      controller: new AbortController(),
-      durableCursor: -1,
-      transientInGap: 0,
-    }
+    const handle: SessionFollowHandle = { sessionId, controller: new AbortController() }
     this.sessionFollow = handle
     const opened = this.gateway.open('session/follow', {
       args: {
@@ -848,34 +838,12 @@ export class HarnessAlphaClient {
     const snapshot = first.value
     const cursor = typeof snapshot.cursor === 'number' ? snapshot.cursor : undefined
     if (cursor !== undefined) this.followCursors.set(sessionId, cursor)
-    handle.durableCursor = cursor ?? -1
-    handle.transientInGap = 0
-    const events = historyEntriesFromRecords(Array.isArray(snapshot.records) ? snapshot.records : [])
-    if (this.host.sessionFormat === 3) {
-      handle.assistant = assistantStreamBaseline(snapshot.assistantStream)
-      if (handle.assistant !== undefined && handle.assistant.nextIndex >= 0
-        && isRecord(snapshot.assistantStream) && isRecord(snapshot.assistantStream.activeAttempt)
-        && Array.isArray(snapshot.assistantStream.activeAttempt.stream)) {
-        const attempt = handle.assistant
-        const chunks = expandAssistantStreamRecords(snapshot.assistantStream.activeAttempt.stream)
-        for (const member of chunks.slice(0, attempt.nextIndex)) {
-          handle.transientInGap += 1
-          events.push({
-            event: {
-              type: 'assistant/chunk',
-              seq: nextTransientSeq(handle, attempt),
-              time: member.time,
-              data: { turn: attempt.turn, step: attempt.step, chunk: member.chunk },
-            },
-          })
-        }
-      }
-    }
+    if (this.host.sessionFormat === 3) handle.assistant = assistantStreamBaseline(snapshot.assistantStream)
     this.applyProjectionBaseline(sessionId, snapshot.projections)
     this.republishPendingSessionInteractions(sessionId, isRecord(snapshot.projections) && isRecord(snapshot.projections.values) && snapshot.projections.values.userQuestions !== undefined)
     void this.pumpSessionFollow(handle, iterator).catch(error => this.emitStreamFailure(handle, this.sessionFollow, error))
     return {
-      events,
+      events: historyEntriesFromRecords(Array.isArray(snapshot.records) ? snapshot.records : []),
       hasMore: snapshot.hasMore === true,
       ...(cursor === undefined ? {} : { throughSeq: cursor }),
     }
@@ -1192,15 +1160,7 @@ export class HarnessAlphaClient {
     handle.iterator = iterator
     while (this.events === handle) {
       const next = await iterator.next()
-      if (next.done) {
-        if (this.events === handle) {
-          this.events = undefined
-          if (!handle.controller.signal.aborted) {
-            this.emitFrame({ rpcId: '', payload: { type: 'stream/closed', reason: 'completed' } })
-          }
-        }
-        return
-      }
+      if (next.done) return
       this.routeEventFrame(next.value)
     }
   }
@@ -1212,15 +1172,7 @@ export class HarnessAlphaClient {
     handle.iterator = iterator
     while (this.control === handle) {
       const next = await iterator.next()
-      if (next.done) {
-        if (this.control === handle) {
-          this.control = undefined
-          if (!handle.controller.signal.aborted) {
-            this.emitFrame({ rpcId: '', payload: { type: 'stream/closed', reason: 'completed' } })
-          }
-        }
-        return
-      }
+      if (next.done) return
       this.routeControlFrame(next.value)
     }
   }
@@ -1249,12 +1201,7 @@ export class HarnessAlphaClient {
 
   private entriesFromSessionFollow(handle: SessionFollowHandle, value: unknown): HarnessHistoryEntry[] {
     if (this.host.sessionFormat !== 3 || !isRecord(value) || value.type !== 'assistant-stream') {
-      const entries = entriesFromFollowValue(value)
-      for (const entry of entries) {
-        handle.durableCursor = Math.max(handle.durableCursor, entry.event.seq)
-        handle.transientInGap = 0
-      }
-      return entries
+      return entriesFromFollowValue(value)
     }
     const frame = isRecord(value.frame) ? value.frame : undefined
     if (frame === undefined || typeof frame.type !== 'string') return []
@@ -1264,20 +1211,7 @@ export class HarnessAlphaClient {
     }
     const attempt = handle.assistant
     if (frame.type === 'end') {
-      if (attempt !== undefined && frame.attemptId === attempt.attemptId) {
-        handle.assistant = undefined
-        if (isRecord(frame.outcome) && frame.outcome.kind === 'abandoned') {
-          handle.transientInGap += 1
-          return [{
-            event: {
-              type: 'assistant/attempt-abandoned',
-              seq: nextTransientSeq(handle, attempt),
-              time: Date.now(),
-              data: { turn: attempt.turn, step: attempt.step, attemptId: attempt.attemptId },
-            },
-          }]
-        }
-      }
+      if (attempt !== undefined && frame.attemptId === attempt.attemptId) handle.assistant = undefined
       return []
     }
     if (frame.type !== 'chunk' || attempt === undefined
@@ -1286,11 +1220,10 @@ export class HarnessAlphaClient {
       || typeof frame.time !== 'number'
       || !isRecord(frame.chunk)) return []
     attempt.nextIndex += 1
-    handle.transientInGap += 1
     return [{
       event: {
         type: 'assistant/chunk',
-        seq: nextTransientSeq(handle, attempt),
+        seq: attempt.startedAfterSeq + 1 - 1 / (attempt.nextIndex + 1),
         time: frame.time,
         data: { turn: attempt.turn, step: attempt.step, chunk: frame.chunk },
       },
@@ -1513,9 +1446,6 @@ export class HarnessAlphaClient {
   }
 
   private emitStreamFailure(handle: StreamHandle, active: StreamHandle | undefined, error: unknown): void {
-    if (this.events === handle) this.events = undefined
-    if (this.control === handle) this.control = undefined
-    if (this.sessionFollow === handle) this.sessionFollow = undefined
     if (active !== handle || handle.controller.signal.aborted) return
     const failure = this.gateway.failure(error)
     this.emitFrame({ rpcId: '', payload: { type: 'stream/closed', reason: 'failed', error: failure } })
@@ -1803,61 +1733,6 @@ function assistantStreamAttempt(value: Record<string, unknown>, defaultNextIndex
         nextIndex,
       }
     : undefined
-}
-
-function nextTransientSeq(handle: SessionFollowHandle, attempt: AssistantStreamState): number {
-  const baseSeq = Math.max(handle.durableCursor, attempt.startedAfterSeq)
-  return baseSeq + 1 - 1 / (handle.transientInGap + 1)
-}
-
-function expandAssistantStreamRecords(stream: unknown[]): Array<{ time: number; chunk: Record<string, unknown> }> {
-  const chunks: Array<{ time: number; chunk: Record<string, unknown> }> = []
-  for (const record of stream) {
-    if (!isRecord(record) || typeof record.type !== 'string') continue
-    if (record.type === 'chunk') {
-      if (typeof record.time === 'number' && isRecord(record.chunk)) {
-        chunks.push({ time: record.time, chunk: record.chunk })
-      }
-      continue
-    }
-    if (typeof record.time0 !== 'number') continue
-    const dt = Array.isArray(record.dt) ? record.dt.filter((item): item is number => typeof item === 'number') : []
-    const chunkIndex = typeof record.index === 'number' ? record.index : undefined
-    if (record.type === 'text-chunks' || record.type === 'reasoning-chunks') {
-      const texts = Array.isArray(record.texts) ? record.texts.filter((item): item is string => typeof item === 'string') : []
-      let time = record.time0
-      for (let offset = 0; offset < texts.length; offset += 1) {
-        if (offset > 0) time += dt[offset - 1] ?? 0
-        chunks.push({
-          time,
-          chunk: {
-            type: record.type === 'text-chunks' ? 'text-delta' : 'reasoning-delta',
-            ...(chunkIndex === undefined ? {} : { index: chunkIndex }),
-            text: texts[offset]!,
-          },
-        })
-      }
-      continue
-    }
-    if (record.type === 'tool-call-chunks') {
-      const args = Array.isArray(record.args) ? record.args.filter((item): item is string => typeof item === 'string') : []
-      let time = record.time0
-      for (let offset = 0; offset < args.length; offset += 1) {
-        if (offset > 0) time += dt[offset - 1] ?? 0
-        chunks.push({
-          time,
-          chunk: {
-            type: 'tool-call-delta',
-            ...(chunkIndex === undefined ? {} : { index: chunkIndex }),
-            ...(typeof record.id === 'string' ? { id: record.id } : {}),
-            ...(typeof record.name === 'string' ? { name: record.name } : {}),
-            argumentsDelta: args[offset]!,
-          },
-        })
-      }
-    }
-  }
-  return chunks
 }
 
 function entriesFromChunkRun(event: Record<string, unknown>): HarnessHistoryEntry[] {

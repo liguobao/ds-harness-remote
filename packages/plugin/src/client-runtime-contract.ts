@@ -31,7 +31,6 @@ export interface RemoteHostFeatures {
   claude?: boolean
   hermes?: boolean
   acpModelLoadsSession?: boolean
-  acpOpencodeArchive?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
   pluginRoute: boolean
 }
@@ -39,6 +38,8 @@ export interface RemoteHostFeatures {
 export interface CodexLoopbackStream {
   target: { kind: 'remote'; client: RemoteClientCore } | { kind: 'local' }
   frames: Array<{ method: string; params: unknown }>
+  approvalHandles: Set<string>
+  claim?: Promise<void>
   closed?: string
   unsubscribe: () => void
   close: () => Promise<void>
@@ -156,6 +157,7 @@ export interface HostAuthorizationControl {
     publish: (event: 'codex.app.frame' | 'codex.app.stream.closed', data: CodexAppFrameData | CodexAppStreamClosedData) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<unknown>
+  codexClaimApprovals?(input: unknown): Promise<{ frames: Array<{ method: string; params: unknown }> }>
   codexCloseStream?(input: unknown): Promise<unknown>
 }
 

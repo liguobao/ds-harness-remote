@@ -344,10 +344,7 @@ export class RelayTransport {
       ws.on('error', (err: Error) => {
         this.fail(new Error(`RelayTransport failed to connect to ${this.url}`));
       });
-      // NetStack generates its own Origin without the port. Send the full
-      // HTTP origin in a separate header to avoid duplicating Origin.
-      const origin: string = this.url.replace(/^ws(s?):\/\/([^/]+).*$/, 'http$1://$2').toLowerCase();
-      ws.connect(this.url, { header: { 'X-DSH-Native-Origin': origin } }, (err: Error, value: boolean) => {
+      ws.connect(this.url, (err: Error, value: boolean) => {
         if (err) {
           this.fail(new Error(`RelayTransport failed to connect to ${this.url}`));
         }
@@ -638,10 +635,9 @@ export class RelayTransport {
     // 先试 LAN 直连：成功就不用中继的数据面（中继节点满容量时这是唯一活路）。
     // 注意别把它塞进「有中继端点」的分支里——本机服务器经常压根不下发 relayEndpoint，
     // 数据面直接跑在 Control WS 上，那种情况下以前永远不会尝试直连。
-    // 与共享 AdaptiveTransport 一致：请求 LAN 时保留直连优先意图，
-    // 即使旧 Server 通过 P2P 通告 LAN，也先尝试 signal.*，失败再回落中继。
-    const lanRequested: boolean = this.options.preferredTransports.indexOf('lan') >= 0;
-    if ((!this.options.relayFirst || lanRequested) && this.startRtcAttempt()) {
+    // relay-first 时 RTC 桥归 TransportUpgrader 独占：这里不发起 signal.* 协商，
+    // 先把中继数据面跑起来，等 RPC 阶段再原地升级。
+    if (!this.options.relayFirst && this.startRtcAttempt()) {
       return;
     }
     this.attachOrFinishRelay();
@@ -1259,8 +1255,7 @@ export class RelayTransport {
     // 走 else 分支（直接中继）时 dataMode 一直是空串 —— 传输徽标和诊断都显示空，
     // 而且迟到的 signal.answer 不会被「已回落中继」那条判断拦下，会把已关的 peer 再救活。
     if (mode.length > 0) {
-      // lan 标记所有 RTC 数据面；具体 LAN/P2P/TURN 等级由 rtcTransport 保存。
-      this.dataMode = mode === 'relay' ? 'relay' : 'lan';
+      this.dataMode = mode;
     }
     // 主机只有在收到 transport.selected 之后才会 resumePendingHandshake（启动 Noise responder），
     // 少这一帧时客户端会一直等 msg2，最终表现为“安全握手超时”。

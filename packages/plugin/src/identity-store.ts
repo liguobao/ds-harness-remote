@@ -637,9 +637,11 @@ async function isRepairableLegacyClientDirectory(directory: string, names: Reado
     if (
       name === 'server-credentials.json'
       || name === 'host-pairing.json'
+      || name === 'huawei-push.json'
       || name === 'pairing-host-only.json'
       || name.startsWith('server-credentials.json.')
       || name.startsWith('host-pairing.json.')
+      || name.startsWith('huawei-push.json.')
       || name.startsWith('pairing-host-only.json.')
     ) {
       return false
@@ -844,7 +846,7 @@ const LOCK_TIMEOUT_MS = 15_000
 const LOCK_RETRY_INITIAL_MS = 20
 const LOCK_RETRY_MAX_MS = 200
 
-async function withIdentityLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
+export async function withIdentityLock<T>(directory: string, operation: () => Promise<T>): Promise<T> {
   const lockPath = join(directory, LOCK_FILE_NAME)
   const deadline = Date.now() + LOCK_TIMEOUT_MS
   let delay = LOCK_RETRY_INITIAL_MS
@@ -1039,7 +1041,9 @@ async function removeIdentityRecords(directory: string): Promise<void> {
   }
   await Promise.all(entries
     .filter(name => isOwnedIdentityRecord(name))
-    .map(name => unlink(join(directory, name)).catch(() => undefined)))
+    .map(name => name === 'huawei-push.json' || name.startsWith('huawei-push.json.')
+      ? unlink(join(directory, name))
+      : unlink(join(directory, name)).catch(() => undefined)))
 }
 
 function isTakeoverLockArtifact(name: string): boolean {
@@ -1111,12 +1115,13 @@ function isIdentityTempArtifact(name: string): boolean {
 }
 
 function isOwnedIdentityRecord(name: string): boolean {
-  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json' || name === 'host-pairing.json') return true
+  if (name === 'device.json' || name === 'device.key' || name === 'trusted-peers.json' || name === 'host-pairing.json' || name === 'huawei-push.json') return true
   return (
     name.startsWith('device.json.')
     || name.startsWith('device.key.')
     || name.startsWith('trusted-peers.json.')
     || name.startsWith('host-pairing.json.')
+    || name.startsWith('huawei-push.json.')
   ) && name.endsWith('.tmp')
 }
 

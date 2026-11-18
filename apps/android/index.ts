@@ -1,10 +1,10 @@
-import '@dsh-remote/app-core/polyfills';
+import './src/polyfills';
 import { registerRootComponent } from 'expo';
 import { registerGlobals } from 'react-native-webrtc';
 import { AppRegistry } from 'react-native';
-import { foregroundService } from '@dsh-remote/app-core/services/foreground-service';
+import { foregroundService } from './src/services/foreground-service';
 
-import App from '@dsh-remote/app-core/app';
+import App from './App';
 
 registerGlobals();
 

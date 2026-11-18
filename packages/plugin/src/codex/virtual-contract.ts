@@ -58,6 +58,7 @@ export interface FollowState {
   turn: number
   stepOpen: boolean
   startedItems: Set<string>
+  invalidatedApprovals: Set<string>
   completedItems: Set<string>
   streamedBlocks: Map<string, StreamedBlock>
   nextBlockIndex: number
@@ -76,6 +77,7 @@ export interface FollowState {
 export interface PendingApproval {
   requestHandle: string
   sessionId: string
+  request: JsonRecord
 }
 
 export interface CodexImageAttachmentEntry {

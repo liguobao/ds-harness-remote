@@ -56,7 +56,6 @@ export interface AcpSessionState {
   staleHistory?: boolean
   blank: boolean
   running: boolean
-  projectionSeq?: number
   createdAt: number
   updatedAt: number
   events: Array<{ type: 'event'; event: NativeEvent }>
@@ -81,8 +80,6 @@ export interface FollowState {
   sessionId: string
   acpSessionId: string
   queue: AsyncValueQueue
-  hasConsumer: boolean
-  closed?: boolean
   nextSeq: number
   turn: number
   stepOpen: boolean
@@ -92,7 +89,6 @@ export interface FollowState {
   assistantStreamRevision: number
   assistantAttempt?: AssistantStreamAttempt
   accumulatedText: string
-  accumulatedReasoning?: string
   activeToolCalls: Set<string>
   piToolOutputs: Map<string, { text: string; overflow: boolean }>
   piToolCalls: Map<string, { name: string; input?: unknown }>
@@ -105,6 +101,8 @@ export interface FollowState {
 export interface PendingApproval {
   requestHandle: string
   sessionId: string
+  request?: JsonRecord
+  expiresAt?: number
 }
 
 export interface AcpClientLike {

@@ -1,4 +1,3 @@
-export { DirectPreferredRace } from './direct-preferred-race.js'
 import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
   PROTOCOL_VERSION,

@@ -17,7 +17,7 @@
 set -u
 DEV="${1:-}"
 WAIT="${2:-45}"
-BUNDLE="dsh.r2049.huawei"
+BUNDLE="io.github.liguobao.dshremote"
 ABILITY="EntryAbility"
 LOG_PATH="/data/app/el2/100/base/${BUNDLE}/haps/entry/files/link.log"
 

@@ -1,8 +1,13 @@
 import { LanUploadHost } from './lan-upload.js'
+import { HuaweiPushRegistry } from './huawei-push-registry.js'
+import { parseHuaweiPushServiceAccount, type HuaweiPushServiceAccount } from './huawei-push-auth.js'
+import type { HuaweiPushNoticeOptions } from './huawei-push-sender.js'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
 import { WorkspaceUploadHost } from './workspace-upload.js'
-import { WorkspaceUploadBudget } from './workspace-upload-budget.js'
 import { workspaceUploadRootResolver } from './workspace-upload-authority.js'
 import { LoopbackHost } from './loopback-host.js'
 import { TerminalPolicy } from './terminal-policy.js'
@@ -71,12 +76,12 @@ export interface HostRemoteStatus {
 export class HostPluginRuntime {
   readonly connections: ConnectionController
   private readonly terminalOwners = new Map<string, string>()
-  private readonly uploadBudget = new WorkspaceUploadBudget()
   private readonly loopbackHosts = new Set<LoopbackHost>()
   private terminalEnabled: boolean
   private loopbackPorts: readonly number[]
   private identity?: HostIdentity
   private readonly serverApi?: HostServerApi
+  private readonly huaweiPush: HuaweiPushRegistry
   private serverConnection?: HostServerConnection
   private harnessVersion?: string
   private pairing?: HostPairing
@@ -94,6 +99,9 @@ export class HostPluginRuntime {
   private localAcpPeer?: AcpPeerBridge
   private localAcpPublish: PublishAcpFrame = async () => undefined
   private warnedMissingHostApi = false
+  private huaweiPushAccount?: HuaweiPushServiceAccount
+  private huaweiPushAbort?: AbortController
+  private readonly huaweiPushLastSent = new Map<string, number>()
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -108,6 +116,10 @@ export class HostPluginRuntime {
     private readonly schedule?: ScheduleCreateService,
   ) {
     this.terminalEnabled = config.terminal.enabled
+    this.huaweiPush = new HuaweiPushRegistry(identities, async deviceId => {
+      if (!this.serverApi) throw new Error('Push authority unavailable')
+      return this.serverApi.deviceFor(deviceId, AbortSignal.timeout(10_000))
+    })
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
@@ -194,7 +206,7 @@ export class HostPluginRuntime {
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        ), undefined, context.transportMode, Date.now, this.uploadBudget)
+        ), undefined, context.transportMode)
       const lanUpload = context.peerIdentityKey && context.transportMode ? new LanUploadHost(workspaceUpload, {
         connectionId: context.connectionId, peerIdentityKey: context.peerIdentityKey,
         identity: () => this.currentIdentity(), mode: context.transportMode,
@@ -218,6 +230,7 @@ export class HostPluginRuntime {
         },
         lanUpload,
         context.createTransportUpgradeHost?.(send),
+        context.peerIdentityKey && this.serverApi ? { registry: this.huaweiPush, peer: { deviceId: context.peerDeviceId, identityKey: context.peerIdentityKey } } : undefined,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -275,6 +288,10 @@ export class HostPluginRuntime {
       this.initializePairing()
       this.serverConnection = this.createServerConnection(this.identity)
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
+    }
+    this.huaweiPushAccount = loadHuaweiPushAccount(this.logger)
+    if (this.huaweiPushAccount !== undefined) {
+      this.startHuaweiPushWatcher()
     }
   }
 
@@ -377,7 +394,7 @@ export class HostPluginRuntime {
       await this.serverConnection?.stop()
       await this.pairing?.discard()
       this.pairing = undefined
-      this.identity = await this.identities.reset(this.config.deviceName)
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName))
       this.serverApi!.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
       this.initializePairing()
@@ -400,7 +417,7 @@ export class HostPluginRuntime {
     } catch (error) {
       revokeFailure = error
     }
-    this.identity = await this.identities.reset(this.config.deviceName)
+    this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName))
     this.serverApi?.bindIdentity(this.identity)
     if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
     this.initializePairing()
@@ -420,7 +437,7 @@ export class HostPluginRuntime {
       await this.serverConnection?.stop()
       await this.pairing?.discard()
       this.pairing = undefined
-      this.identity = await this.identities.reset(this.config.deviceName)
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName))
       this.serverApi.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
       this.initializePairing()
@@ -440,7 +457,7 @@ export class HostPluginRuntime {
       await this.serverConnection?.stop()
       await this.pairing?.discard()
       this.pairing = undefined
-      this.identity = await this.identities.reset(this.config.deviceName)
+      this.identity = await this.huaweiPush.reset(() => this.identities.reset(this.config.deviceName))
       this.serverApi!.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
       this.initializePairing()
@@ -463,9 +480,127 @@ export class HostPluginRuntime {
   }
 
   async revokePeer(deviceId: string): Promise<boolean> {
-    const revoked = await this.identities.revokePeer(deviceId)
-    if (revoked) await this.connections.revoke(deviceId)
-    return revoked
+    const codexRevocation = this.codex.revokeDevice(deviceId)
+    this.acp.revokeDevice(deviceId)
+    await codexRevocation
+    return this.huaweiPush.revoke(deviceId, async () => {
+      let revoked: boolean
+      try {
+        revoked = await this.identities.revokePeer(deviceId)
+      } finally {
+        await this.connections.revoke(deviceId)
+      }
+      this.acp.finishDeviceRevocation(deviceId)
+      return revoked
+    })
+  }
+
+  async sendHuaweiWakeup(
+    deviceId: string,
+    account: HuaweiPushServiceAccount,
+    options?: HuaweiPushNoticeOptions,
+  ): Promise<{ httpStatus: number | null } | undefined> {
+    return this.huaweiPush.send(deviceId, account, options)
+  }
+
+  private startHuaweiPushWatcher(): void {
+    if (this.localGateway?.supportsCarrier !== true || this.huaweiPushAbort !== undefined) return
+    const controller = new AbortController()
+    this.huaweiPushAbort = controller
+    void this.runHuaweiPushEventLoop(controller.signal)
+  }
+
+  private async runHuaweiPushEventLoop(signal: AbortSignal): Promise<void> {
+    const runningSessions = new Set<string>()
+    while (!this.closed && !signal.aborted) {
+      const gateway = this.localGateway?.createPeer?.() ?? this.localGateway
+      if (gateway === undefined) return
+      let iterator: AsyncIterator<unknown> | undefined
+      try {
+        const stream = await gateway.open('$events', { args: {} }, signal)
+        iterator = stream[Symbol.asyncIterator]()
+        while (!this.closed && !signal.aborted) {
+          const next = await iterator.next()
+          if (next.done) break
+          this.handleHuaweiPushEventFrame(next.value, runningSessions)
+        }
+      } catch {
+        // Reconnect silently on transient gateway restarts.
+      } finally {
+        await iterator?.return?.().catch(() => undefined)
+        if (gateway !== this.localGateway) {
+          await gateway.dispose?.().catch(() => undefined)
+        }
+      }
+      if (!this.closed && !signal.aborted) {
+        await new Promise(resolve => setTimeout(resolve, 3_000))
+      }
+    }
+  }
+
+  private handleHuaweiPushEventFrame(value: unknown, runningSessions: Set<string>): void {
+    if (!isPlainRecord(value) || typeof value.type !== 'string') return
+    if (value.type === 'emit' && typeof value.event === 'string' && Array.isArray(value.args)) {
+      const sessionId = typeof value.args[0] === 'string' ? value.args[0] : ''
+      if (sessionId.length === 0) return
+      if (value.event === 'api-session/status' && typeof value.args[1] === 'boolean') {
+        if (value.args[1]) {
+          runningSessions.add(sessionId)
+        } else if (runningSessions.delete(sessionId)) {
+          void this.notifyOfflineHuaweiPeers({
+            title: '会话已完成',
+            body: '智能体已完成回复，点击查看',
+            sessionId,
+            eventType: 'done',
+          })
+        }
+        return
+      }
+      if (value.event === 'api-session/error') {
+        runningSessions.delete(sessionId)
+        void this.notifyOfflineHuaweiPeers({
+          title: '会话执行异常',
+          body: '会话运行出错，点击查看详情',
+          sessionId,
+          eventType: 'error',
+        })
+      }
+      return
+    }
+    if (value.type === 'waterfall' && typeof value.event === 'string' && typeof value.agentId === 'string' && value.agentId.length > 0) {
+      const isApproval = value.event.includes('approval')
+      const isQuestion = value.event.includes('question')
+      if (!isApproval && !isQuestion) return
+      void this.notifyOfflineHuaweiPeers({
+        title: isApproval ? '需要您的确认' : '智能体等待回复',
+        body: isApproval ? '智能体请求操作授权，点击处理' : '有新的提问需要您介入回答',
+        sessionId: value.agentId,
+        eventType: isApproval ? 'approval' : 'question',
+      })
+    }
+  }
+
+  private async notifyOfflineHuaweiPeers(options: HuaweiPushNoticeOptions): Promise<void> {
+    const account = this.huaweiPushAccount
+    if (account === undefined || this.closed) return
+    const active = new Set(this.connections.peerDeviceIds())
+    const registered = await this.huaweiPush.registeredDeviceIds().catch(() => [] as string[])
+    const now = Date.now()
+    for (const deviceId of registered) {
+      if (active.has(deviceId)) continue
+      const dedupeKey = `${deviceId}:${options.sessionId ?? ''}:${options.eventType ?? ''}`
+      const prev = this.huaweiPushLastSent.get(dedupeKey) ?? 0
+      if (now - prev < 4_000) continue
+      this.huaweiPushLastSent.set(dedupeKey, now)
+      try {
+        const res = await this.huaweiPush.send(deviceId, account, options)
+        if (res !== undefined) {
+          this.logger.info('huawei push sent', { deviceId: shortId(deviceId), eventType: options.eventType, httpStatus: res.httpStatus })
+        }
+      } catch {
+        this.logger.warn('huawei push failed', { deviceId: shortId(deviceId), eventType: options.eventType })
+      }
+    }
   }
 
   codexStatus(): ReturnType<CodexRemoteDomain['status']> {
@@ -474,6 +609,10 @@ export class HostPluginRuntime {
 
   codexCall(input: unknown): Promise<unknown> {
     return this.requireLocalCodexPeer().call(input)
+  }
+
+  codexClaimApprovals(input: unknown): Promise<{ frames: Array<{ method: string; params: unknown }> }> {
+    return this.requireLocalCodexPeer().claimApprovals(input)
   }
 
   codexRespond(input: unknown): Promise<{ resolved: true }> {
@@ -521,6 +660,8 @@ export class HostPluginRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.huaweiPushAbort?.abort()
+    this.huaweiPushAbort = undefined
     this.pairing?.close()
     this.serverApi?.close()
     await this.serverConnection?.stop()
@@ -730,4 +871,30 @@ function shortId(value: string): string { return value.length <= 12 ? value : `$
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function loadHuaweiPushAccount(logger: SafeLogger): HuaweiPushServiceAccount | undefined {
+  const candidates: string[] = []
+  const envRaw = process.env.DSH_HUAWEI_PUSH_ACCOUNT?.trim()
+  if (envRaw) candidates.push(envRaw)
+  for (const file of ['huawei-push-sa.json', 'huawei-push.json']) {
+    try {
+      const content = readFileSync(join(homedir(), '.dsh', file), 'utf8').trim()
+      if (content) candidates.push(content)
+    } catch {}
+  }
+  for (const raw of candidates) {
+    try {
+      const account = parseHuaweiPushServiceAccount(raw)
+      const projectOverride = process.env.DSH_HUAWEI_PUSH_PROJECT_ID?.trim()
+      const resolved = projectOverride && /^[0-9]+$/.test(projectOverride)
+        ? { ...account, project_id: projectOverride }
+        : account
+      logger.info('huawei push account loaded', { projectId: resolved.project_id })
+      return resolved
+    } catch {
+      logger.warn('huawei push account invalid')
+    }
+  }
+  return undefined
 }

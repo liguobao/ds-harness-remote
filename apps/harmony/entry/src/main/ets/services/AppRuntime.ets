@@ -1,4 +1,4 @@
-import { common } from '@kit.AbilityKit';
+import { common, UIAbility, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { notificationManager } from '@kit.NotificationKit';
@@ -12,8 +12,16 @@ import { TRANSPORT_UPGRADE_CAPABILITY } from '../protocol/TransportUpgrade';
 import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
-  DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessWorkspace,
+  DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessTurnSummary, HarnessWorkspace,
   HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart } from '../net/HarnessClient';
+import { AgentPresetOption, CompactionStatus, FeedbackEntry, FileUploadReceipt,
+  SessionToolsClient, SkillEntry, WorkspaceFileRef } from '../net/SessionToolsClient';
+import { QueueEntry, TodoEntry } from '../components/ProductivitySheets';
+import { BackendsRouter, UnifiedModelEntry, backendOfSessionId } from './BackendsRouter';
+import { CodexTimelineItem } from '../net/CodexClient';
+import { AcpTimelineItem } from '../net/AcpClient';
+import { BotRemoteClient, BotStateSnapshot } from '../net/BotClient';
+import { UI_TOOLS, UiArtifactSnapshot, UiToolInput, projectUiArtifacts } from '../util/UiArtifacts';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -25,6 +33,7 @@ import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
 import { NetTrace, TraceSample } from '../util/NetTrace';
 import { LinkLog } from './LinkLog';
 import { KeepAlive } from './KeepAlive';
+import { PushToken, PushTokenEvent } from './PushToken';
 
 // 首屏拉多少条历史：条数越多，主机经中继回放越久（更早的仍可 session/page 翻页）
 const INITIAL_HISTORY_COUNT: number = 30;
@@ -52,6 +61,12 @@ export const DEFAULT_ACCOUNT: string = 'admin@dsh.local';
 const MAX_TOOL_DETAIL_CHARS: number = 8000;
 
 /** One rendered question inside a `question` chat card. */
+class PendingNoticeTap {
+  token: string = '';
+  sequence: number = 0;
+  selectionVersion: number = 0;
+}
+
 export class ChatQuestion {
   id: string = '';
   question: string = '';
@@ -76,6 +91,8 @@ export class ChatItem {
   toolName: string = '';
   toolState: string = ''; // '' | 'running' | 'finished' | 'failed'
   summary: string = '';
+  toolArguments: string = '';
+  uiMetaJson: string = '';
   approvalId: string = '';
   approvalOutcome: string = ''; // '' pending | 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
   frameRpcId: string = '';
@@ -122,8 +139,38 @@ function commandReplyText(result: Record<string, Object> | undefined): string {
   return jsonStr(result, 'text', '');
 }
 
+export class AgentTeamMember {
+  id: string = '';
+  name: string = '';
+  description: string = '';
+  role: string = '';
+  phase: string = '';
+  sessionId: string = '';
+  error: string = '';
+}
+
+export class AgentTeamTask {
+  id: string = '';
+  subject: string = '';
+  status: string = 'pending';
+  ownerId: string = '';
+}
+
 export class AppRuntime {
   private store: SecureStore = new SecureStore();
+  private noticeStoreReady: boolean = false;
+  private pendingNoticeTaps: PendingNoticeTap[] = [];
+  private noticePublishQueue: Promise<void> = Promise.resolve();
+  private pendingNoticeHost: string = '';
+  private pendingNoticeHostKey: string = '';
+  private pendingNoticeSession: string = '';
+  private pendingNoticeServer: string = '';
+  private pendingNoticeAccount: string = '';
+  private pendingNoticeIdentity: string = '';
+  private pendingNoticeExpires: number = 0;
+  private pendingNoticeSelectionVersion: number = 0;
+  private noticeGeneration: number = 0;
+  private acceptedNoticeGeneration: number = 0;
   /** 应用沙箱目录（导出诊断文件用）。 */
   private filesDir: string = '';
   private config: StoredServerConfig | undefined = undefined;
@@ -190,6 +237,11 @@ export class AppRuntime {
   private sessionsSnapshotHost: string = '';
   /** 在会话页里重连时记下当前会话，连上后直接回到它，不从列表重新挑。 */
   private pendingResumeSessionId: string = '';
+  private pendingPushSessionId: string = '';
+  private pushAbility: UIAbility | undefined = undefined;
+  private pushService: PushToken | undefined = undefined;
+  pushRegistered: boolean = false;
+  private pushSyncRunning: boolean = false;
   /** 主机能力探测结果缓存：同一版本的主机能力是固定的，重连不必再问一遍（上游 #326 同一思路）。 */
   private featuresCacheKey: string = '';
   private featuresCacheValue: RemoteHostFeatures | undefined = undefined;
@@ -311,6 +363,7 @@ export class AppRuntime {
   /** 已加载历史里最早的 seq，session/page 的 beforeSeq 用它。 */
   private oldestHistorySeq: number = -1;
   /** 会话历史本地缓存（按最近使用淘汰），用于切换会话时立刻出内容 */
+  private selectedSessionModels: Map<string, ModelOption> = new Map<string, ModelOption>();
   private historyCache: Map<string, ChatItem[]> = new Map<string, ChatItem[]>();
   private historyOrder: string[] = [];
   /** 最近一次见到的真实工作区路径；新建会话时用它，避免传空 cwd */
@@ -325,7 +378,7 @@ export class AppRuntime {
   /** 主题着色：0 默认 · 1 深海 · 2 森林 · 3 暖沙 · 4 玫紫 */
   themeTint: number = 0;
   /** 桌宠（鲸娘）开关。 */
-  petEnabled: boolean = true;
+  petEnabled: boolean = false;
   /** 桌宠「完成」动作只亮一会儿，记录时刻。 */
   petDoneAt: number = 0;
   /** 会话输入草稿（sessionId -> 文本）。 */
@@ -352,6 +405,42 @@ export class AppRuntime {
   switchingTo: string = '';
   notificationsEnabled: boolean = true;
   appBackground: boolean = false;
+  private appBundleName: string = 'io.github.liguobao.dshremote';
+  sessionTools: SessionToolsClient | undefined = undefined;
+  hostFeatures: RemoteHostFeatures = new RemoteHostFeatures();
+  skillsCatalog: SkillEntry[] = [];
+  workspaceFileRefs: WorkspaceFileRef[] = [];
+  agentPresets: AgentPresetOption[] = [];
+  currentAgentPreset: string = '';
+  feedbackBySession: Map<string, Map<string, string>> = new Map();
+  feedbackVersion: number = 0;
+  compacting: boolean = false;
+  compactingOpId: string = '';
+  compactionMessage: string = '';
+  todosList: TodoEntry[] = [];
+  queueItems: QueueEntry[] = [];
+  agentTeamMembers: AgentTeamMember[] = [];
+  agentTeamTasks: AgentTeamTask[] = [];
+  currentParentSessionId: string = '';
+  backendsRouter: BackendsRouter = new BackendsRouter();
+  availableBackends: string[] = ['harness'];
+  selectedBackend: string = 'harness';
+  botClient: BotRemoteClient | undefined = undefined;
+  botMode: boolean = false;
+  botState: BotStateSnapshot = new BotStateSnapshot();
+  botStateVersion: number = 0;
+  botLoading: boolean = false;
+  private botStateRequest: Promise<boolean> | undefined = undefined;
+  private botRosterPending: boolean = false;
+  botSessionOutlines: Map<string, HarnessTurnSummary[]> = new Map<string, HarnessTurnSummary[]>();
+  private botOutlineRun: number = 0;
+  private sessionSelectionVersion: number = 0;
+  private sessionOpenVersion: number = 0;
+  botError: string = '';
+  selectedBotTargetId: string = '';
+  uiArtifacts: Map<string, UiArtifactSnapshot> = new Map<string, UiArtifactSnapshot>();
+  uiArtifactsVersion: number = 0;
+  private lastUiArtifactKey: string = '';
   /** 系统网络是否可用（断网时立刻把 UI 变灰，而不是等 socket 自己断）。 */
   networkOnline: boolean = true;
   /** 当前承载名：'Wi-Fi' | '移动数据' | '有线网络' | '无网络' | ''（未知）。 */
@@ -380,10 +469,50 @@ export class AppRuntime {
   onUiUpdate: (() => void) | undefined = undefined;
 
   notify(): void {
+    this.syncUiArtifacts();
     const callback: (() => void) | undefined = this.onUiUpdate;
     if (callback !== undefined) {
       callback();
     }
+  }
+
+  private syncUiArtifacts(): void {
+    const tail: ChatItem | undefined = this.messages.length > 0 ? this.messages[this.messages.length - 1] : undefined;
+    let settledCount = 0;
+    for (const item of this.messages) {
+      if (item.kind === 'tool' && item.toolState === 'finished' && UI_TOOLS.includes(item.toolName)) {
+        settledCount++;
+      }
+    }
+    const key = this.currentSessionId + ':' + this.messages.length + ':' + settledCount
+      + ':' + (tail !== undefined ? tail.id + ':' + tail.rev : '');
+    if (key === this.lastUiArtifactKey) {
+      return;
+    }
+    this.lastUiArtifactKey = key;
+    if (settledCount === 0) {
+      if (this.uiArtifacts.size > 0) {
+        this.uiArtifacts = new Map<string, UiArtifactSnapshot>();
+        this.uiArtifactsVersion++;
+      }
+      return;
+    }
+    const inputs: UiToolInput[] = [];
+    for (const item of this.messages) {
+      if (item.kind === 'tool' && item.toolState === 'finished' && UI_TOOLS.includes(item.toolName)) {
+        const u = new UiToolInput();
+        u.id = item.id;
+        u.toolName = item.toolName;
+        u.toolState = item.toolState;
+        u.toolArguments = item.toolArguments;
+        u.uiMetaJson = item.uiMetaJson;
+        u.seq = item.seq;
+        u.timestamp = item.timestamp;
+        inputs.push(u);
+      }
+    }
+    this.uiArtifacts = projectUiArtifacts(inputs);
+    this.uiArtifactsVersion++;
   }
 
   /** Whether the UI should render the dark palette. */
@@ -535,6 +664,9 @@ export class AppRuntime {
     }
     try {
       this.filesDir = context.filesDir;
+      if (context.applicationInfo !== undefined && context.applicationInfo.name.length > 0) {
+        this.appBundleName = context.applicationInfo.name;
+      }
     } catch (error) {
       this.filesDir = '';
     }
@@ -547,6 +679,12 @@ export class AppRuntime {
       this.config = await this.store.loadConfig();
       this.identity = await this.store.loadOrCreateIdentity();
       this.credentials = await this.store.loadCredentials();
+      this.noticeStoreReady = true;
+      const queuedTaps: PendingNoticeTap[] = this.pendingNoticeTaps;
+      this.pendingNoticeTaps = [];
+      for (const tap of queuedTaps) {
+        this.consumeNoticeTap(tap).catch(() => undefined);
+      }
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
       this.themeTint = this.store.loadThemeTint();
@@ -725,6 +863,7 @@ export class AppRuntime {
         this.phase = PHASE_CHAT;
         this.errorMsg = '';
         this.notify();
+        this.openPendingNotice();
         this.reuseThenVerify(deviceId);
         return;
       }
@@ -774,7 +913,8 @@ export class AppRuntime {
       // 那样会直接判「桥未就绪」回落中继，用户看到的就是"明明同网段却显示中继"。
       await this.waitForRtcBridge(2500);
       relayOptions.rtc = this.rtcBridge;
-      // LAN 请求保持直连优先；回落中继后仍可经认证 RPC 带内升级。
+      // relay-first：先在中继上完成认证，再经已认证 RPC 在带内升级到 TURN/P2P/LAN。
+      // 桥没就绪时保持老行为（没有直连尝试，数据面本来就在中继上）。
       relayOptions.relayFirst = this.rtcBridge !== undefined && this.rtcBridge.isReady();
       // WebRTC 要 TURN/STUN 配置时现取：接口要求 active connection，正好在 connect.accepted 之后
       relayOptions.fetchIceServers = (connectionId: string): Promise<string> => {
@@ -871,8 +1011,7 @@ export class AppRuntime {
       // 与主机并行协商 WebRTC 直连；切腿不重建 Noise、不重置订阅，失败就留在中继。
       const upgradeBridge: RtcBridge | undefined = this.rtcBridge;
       const upgradeCapable: boolean = features.capabilities.indexOf(TRANSPORT_UPGRADE_CAPABILITY) >= 0;
-      if (relayOptions.relayFirst && relay.transportKind() === 'relay'
-        && upgradeCapable && upgradeBridge !== undefined) {
+      if (relayOptions.relayFirst && upgradeCapable && upgradeBridge !== undefined) {
         const bearer: string = this.netMonitor !== undefined ? this.netMonitor.type : 'unknown';
         // Wi-Fi/有线/未知链路先按 LAN 思路只吃本地候选；蜂窝网络才去取 TURN 配置。
         const preferLan: boolean = bearer !== 'cellular';
@@ -928,11 +1067,18 @@ export class AppRuntime {
         // 老 Host 不认升级：relay-first 下没有 pre-auth 直连可回落，保持中继数据面。
         logInfo('host does not advertise ' + TRANSPORT_UPGRADE_CAPABILITY + '; staying on relay');
       }
+      let frameSource: HarnessAlphaClient | undefined = undefined;
       const harness: HarnessAlphaClient =
         new HarnessAlphaClient(core, features.sessionFormat, (frame: HarnessClientFrame) => {
-          this.handleFrame(frame);
+          if (frameSource !== undefined && this.harness === frameSource) this.handleFrame(frame);
         });
+      frameSource = harness;
       this.harness = harness;
+      this.hostFeatures = features;
+      this.sessionTools = new SessionToolsClient(harness.getGateway());
+      this.botClient = features.pluginRoute ? new BotRemoteClient(core) : undefined;
+      this.backendsRouter.configure(core, features);
+      this.availableBackends = this.backendsRouter.availableBackends();
       this.setConnectStage('订阅会话事件…');
       await harness.start();
       const tHarness: number = Date.now();
@@ -988,7 +1134,29 @@ export class AppRuntime {
       this.reconnecting = false;
       this.phase = PHASE_CHAT;
       this.notify();
-      await this.loadSessionsAfterConnect();
+      if (this.botRosterPending || this.botMode) {
+        this.botRosterPending = false;
+        if (this.botMode) {
+          this.refreshBotState().catch(() => undefined);
+        } else {
+          this.loadBotRoster().catch(() => undefined);
+        }
+      }
+      const pushTarget: string = this.pendingPushSessionId;
+      this.pendingPushSessionId = '';
+      if (pushTarget.length > 0) {
+        this.pendingResumeSessionId = pushTarget;
+      }
+      const sessionLoad: Promise<void> = this.loadSessionsAfterConnect();
+      this.openPendingNotice();
+      if (pushTarget.length > 0) {
+        if (this.botMode) {
+          this.setBotMode(false).catch(() => undefined);
+        }
+        this.openSession(pushTarget).catch(() => undefined);
+      }
+      this.syncPushRegistration().catch(() => undefined);
+      await sessionLoad;
       // 工作区快照实测要 6.4 秒，且与会话列表/首帧抢同一条中继：挪到首屏之后再做，
       // 抽屉打开时也会各自再拉一次，用户几乎察觉不到。
       setTimeout(() => {
@@ -1266,24 +1434,210 @@ export class AppRuntime {
     }
   }
 
-  /** 发一条完成通知；App 在前台或开关关闭时什么也不做。 */
-  private publishCompletionNotice(title: string, text: string): void {
-    if (!this.notificationsEnabled || !this.appBackground) {
+  /** Handle a Huawei Push Kit notification tap that carries a sessionId. */
+  handlePushNoticeWant(sessionId: string): void {
+    const clean: string = sessionId.trim();
+    if (clean.length === 0 || clean.length > 1024) return;
+    if (this.phase === PHASE_CHAT && this.harness !== undefined) {
+      if (this.botMode) {
+        this.setBotMode(false).catch(() => undefined);
+      }
+      this.openSession(clean).catch(() => undefined);
       return;
     }
-    const request: notificationManager.NotificationRequest = {
-      id: 101,
-      content: {
-        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-        normal: {
-          title: title,
-          text: text
+    this.pendingPushSessionId = clean;
+    this.pendingResumeSessionId = clean;
+  }
+
+  /** Bind the EntryAbility for PushKit token lifecycle. */
+  bindPushAbility(ability: UIAbility): void {
+    this.pushAbility = ability;
+    if (this.pushService !== undefined) return;
+    this.pushService = new PushToken(ability, (event: PushTokenEvent) => {
+      if (event === 'changed') {
+        this.syncPushRegistration().catch(() => undefined);
+      } else if (event === 'disabled') {
+        this.pushRegistered = false;
+        const core: RemoteClientCore | undefined = this.core;
+        if (core !== undefined && this.hostFeatures.huaweiPush) {
+          core.rpc('push.huawei.unregister', {}).catch(() => undefined);
+        }
+        this.notify();
+      }
+    });
+  }
+
+  refreshPushRegistration(): void {
+    if (this.pushService === undefined) return;
+    this.pushService.refresh().then((ok: boolean) => {
+      if (ok) {
+        this.syncPushRegistration().catch(() => undefined);
+      }
+    }).catch(() => undefined);
+  }
+
+  async syncPushRegistration(): Promise<void> {
+    if (this.pushSyncRunning || this.pushService === undefined || !this.notificationsEnabled) return;
+    const core: RemoteClientCore | undefined = this.core;
+    if (core === undefined || this.phase !== PHASE_CHAT || !this.hostFeatures.huaweiPush) return;
+    this.pushSyncRunning = true;
+    try {
+      const enabled: boolean = await notificationManager.isNotificationEnabled();
+      if (!enabled) {
+        const ctx: common.UIAbilityContext | undefined = this.pushAbility?.context;
+        const granted: boolean = ctx !== undefined ? await this.requestNotificationPermission(ctx) : false;
+        if (!granted) {
+          this.pushRegistered = false;
+          this.notify();
+          return;
         }
       }
-    };
-    notificationManager.publish(request).catch((error: Error) => {
+      const ok: boolean = await this.pushService.enable();
+      if (!ok || this.core !== core) return;
+      const token: string = await this.pushService.current();
+      if (token.length === 0 || this.core !== core) return;
+      await core.rpc('push.huawei.register', { 'token': token });
+      if (this.core === core) {
+        this.pushRegistered = true;
+        this.notify();
+        logInfo('huawei push registered on host');
+      }
+    } catch (error) {
+      if (this.core === core) {
+        this.pushRegistered = false;
+        logWarn('huawei push register failed: ' + errorMessage(error));
+      }
+    } finally {
+      this.pushSyncRunning = false;
+    }
+  }
+
+  /** A Want is only a capability; the target is read from private app storage. */
+  handleNoticeWant(token: string): void {
+    if (!/^(101|102|103):[0-9a-f-]{36}$/.test(token)) return;
+    const tap: PendingNoticeTap = new PendingNoticeTap();
+    tap.token = token;
+    tap.sequence = ++this.noticeGeneration;
+    tap.selectionVersion = this.sessionSelectionVersion;
+    if (!this.noticeStoreReady) {
+      // Bound input from the exported ability while storage is initializing.
+      if (this.pendingNoticeTaps.length < 32) this.pendingNoticeTaps.push(tap);
+      return;
+    }
+    this.consumeNoticeTap(tap).catch(() => undefined);
+  }
+
+  private async consumeNoticeTap(tap: PendingNoticeTap): Promise<void> {
+    const value: string = await this.store.consumeNoticeTarget(tap.token.substring(0, 3), tap.token);
+    if (value.length === 0 || tap.sequence <= this.acceptedNoticeGeneration ||
+      tap.selectionVersion !== this.sessionSelectionVersion) return;
+    try {
+      const data: Record<string, Object> = JSON.parse(value) as Record<string, Object>;
+      const host: string = jsonStr(data, 'host', '');
+      const session: string = jsonStr(data, 'session', '');
+      const hostKey: string = jsonStr(data, 'hostKey', '');
+      const expires: number = jsonNum(data, 'expires', 0);
+      if (this.config === undefined || this.identity === undefined ||
+        jsonStr(data, 'server', '') !== this.config.baseUrl ||
+        jsonStr(data, 'account', '') !== this.config.email ||
+        jsonStr(data, 'identity', '') !== this.identity.deviceId ||
+        host.length === 0 || host.length > 256 || hostKey.length === 0 ||
+        this.store.loadHostPins()[host] !== hostKey || session.length === 0 || session.length > 1024 ||
+        expires < Date.now()) return;
+      this.acceptedNoticeGeneration = tap.sequence;
+      this.pendingNoticeSelectionVersion = tap.selectionVersion;
+      this.pendingNoticeHost = host;
+      this.pendingNoticeHostKey = hostKey;
+      this.pendingNoticeSession = session;
+      this.pendingNoticeServer = this.config.baseUrl;
+      this.pendingNoticeAccount = this.config.email;
+      this.pendingNoticeIdentity = this.identity.deviceId;
+      this.pendingNoticeExpires = expires;
+      this.openPendingNotice();
+    } catch (error) {
+      logWarn('invalid notification target');
+    }
+  }
+
+  private openPendingNotice(): void {
+    if (this.pendingNoticeSession.length === 0) return;
+    if (this.pendingNoticeSelectionVersion !== this.sessionSelectionVersion || this.config === undefined ||
+      this.identity === undefined || this.config.baseUrl !== this.pendingNoticeServer ||
+      this.config.email !== this.pendingNoticeAccount ||
+      this.identity.deviceId !== this.pendingNoticeIdentity ||
+      this.store.loadHostPins()[this.pendingNoticeHost] !== this.pendingNoticeHostKey ||
+      Date.now() > this.pendingNoticeExpires) {
+      this.pendingNoticeHost = '';
+      this.pendingNoticeSession = '';
+      return;
+    }
+    if (this.phase !== PHASE_CHAT || this.harness === undefined ||
+      this.connectedDeviceId !== this.pendingNoticeHost) return;
+    const session: string = this.pendingNoticeSession;
+    this.pendingNoticeHost = '';
+    this.pendingNoticeSession = '';
+    if (this.botMode) this.setBotMode(false).catch(() => undefined);
+    this.openSession(session).catch(() => undefined);
+  }
+
+  /** Publish notices in order, preserving each event's original connection identity. */
+  publishBackgroundNotice(title: string, text: string, noticeId: number = 101, sessionId: string = ''): void {
+    if (!this.notificationsEnabled || !this.appBackground) return;
+    let token: string = '';
+    let recordJson: string = '';
+    const hostKey: string | undefined = this.store.loadHostPins()[this.connectedDeviceId];
+    if ((noticeId === 101 || noticeId === 102 || noticeId === 103) && this.noticeStoreReady &&
+      this.config !== undefined && this.identity !== undefined && this.connectedDeviceId.length > 0 &&
+      hostKey !== undefined && hostKey.length > 0 && sessionId.length > 0 && sessionId.length <= 1024) {
+      token = noticeId + ':' + randomId();
+      const record: Record<string, Object> = {
+        'token': token, 'host': this.connectedDeviceId, 'hostKey': hostKey, 'session': sessionId,
+        'server': this.config.baseUrl, 'account': this.config.email, 'identity': this.identity.deviceId,
+        'expires': Date.now() + 7 * 24 * 60 * 60 * 1000
+      };
+      recordJson = JSON.stringify(record);
+    }
+    this.noticePublishQueue = this.noticePublishQueue.then((): Promise<void> => {
+      return this.publishNoticeAsync(title, text, noticeId, token, recordJson);
+    }).catch(() => {
       logWarn('publish notification failed');
     });
+  }
+
+  private async publishNoticeAsync(title: string, text: string, noticeId: number,
+    token: string, recordJson: string): Promise<void> {
+    let agent: WantAgent | undefined = undefined;
+    if (token.length === 0 && this.noticeStoreReady && (noticeId === 101 || noticeId === 102 || noticeId === 103)) {
+      await this.store.saveNoticeTarget('' + noticeId, '');
+    }
+    if (token.length > 0) {
+      await this.store.saveNoticeTarget('' + noticeId, recordJson);
+      const wantInfo: wantAgent.WantAgentInfo = {
+        wants: [{ bundleName: this.appBundleName, abilityName: 'EntryAbility',
+          parameters: { 'dshNoticeToken': token } }],
+        actionType: wantAgent.OperationType.START_ABILITY,
+        requestCode: noticeId,
+        wantAgentFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
+      };
+      try {
+        agent = await wantAgent.getWantAgent(wantInfo);
+      } catch (error) {
+        logWarn('notification tap action unavailable');
+      }
+    }
+    const request: notificationManager.NotificationRequest = {
+      id: noticeId,
+      content: {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: { title: title, text: text }
+      }
+    };
+    if (agent !== undefined) request.wantAgent = agent;
+    await notificationManager.publish(request);
+  }
+
+  private publishCompletionNotice(title: string, text: string): void {
+    this.publishBackgroundNotice(title, text, 101, this.currentSessionId);
   }
 
   /** 读主机上的文件字节（不转文本），给 PDF 这类需要二进制的内容用。 */
@@ -1497,12 +1851,229 @@ export class AppRuntime {
     this.notify();
   }
 
+  setSelectedBackend(backend: string): void {
+    this.selectedBackend = backend;
+    this.notify();
+    this.loadWorkspaces().catch(() => undefined);
+  }
+
+  async setBotMode(enabled: boolean): Promise<void> {
+    this.botMode = enabled;
+    this.botError = '';
+    this.notify();
+    if (enabled) {
+      await this.refreshBotState();
+    }
+  }
+
+  /** Share only the in-flight state request for the current connection. */
+  private async requestBotState(): Promise<boolean> {
+    const client: BotRemoteClient | undefined = this.botClient;
+    if (client === undefined) {
+      if (this.phase === PHASE_CONNECTING || this.reconnecting) {
+        this.botRosterPending = true;
+        this.botLoading = true;
+        this.botError = '';
+      } else {
+        this.botLoading = false;
+        this.botError = '当前主机不支持 DS-Bot 插件路由';
+      }
+      this.notify();
+      return false;
+    }
+    if (this.botStateRequest !== undefined) {
+      return await this.botStateRequest;
+    }
+    this.botLoading = true;
+    this.botError = '';
+    this.notify();
+    const request: Promise<boolean> = this.fetchBotState(client);
+    this.botStateRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.botStateRequest === request) {
+        this.botStateRequest = undefined;
+      }
+    }
+  }
+
+  private async fetchBotState(client: BotRemoteClient): Promise<boolean> {
+    try {
+      const prev: BotStateSnapshot | undefined = this.botState.revision >= 0 ? this.botState : undefined;
+      const next: BotStateSnapshot = await client.loadState(prev);
+      if (this.botClient !== client) return false;
+      this.botState = next;
+      this.botStateVersion += 1;
+      this.botLoading = false;
+      this.botError = '';
+      this.notify();
+      this.loadMissingBotOutlines(client, next).catch(() => undefined);
+      logInfo('bot roster -> bots=' + next.bots.length + ' rooms=' + next.rooms.length + ' rev=' + next.revision);
+      return true;
+    } catch (error) {
+      if (this.botClient !== client) return false;
+      this.botLoading = false;
+      this.botError = errorMessage(error);
+      this.notify();
+      return false;
+    }
+  }
+
+  /** Fill missing roster previews without blocking the roster or opening sessions. */
+  private async loadMissingBotOutlines(client: BotRemoteClient, snapshot: BotStateSnapshot): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined) return;
+    const run: number = ++this.botOutlineRun;
+    const ids: string[] = [];
+    for (const bot of snapshot.bots) {
+      if (bot.sessionId.length > 0 && ids.indexOf(bot.sessionId) < 0) ids.push(bot.sessionId);
+    }
+    for (const room of snapshot.rooms) {
+      if (room.sessionId.length > 0 && ids.indexOf(room.sessionId) < 0) ids.push(room.sessionId);
+    }
+    for (const sessionId of ids.slice(0, 24)) {
+      if (this.botClient !== client || this.harness !== harness || this.botOutlineRun !== run) return;
+      const session: HarnessRemoteSession | undefined = this.sessions.find(
+        (item: HarnessRemoteSession): boolean => item.sessionId === sessionId);
+      if (session !== undefined && session.turnOutline.length > 0) continue;
+      try {
+        const raw: Record<string, Object> = await harness.sessionProjections(sessionId);
+        if (this.botClient !== client || this.harness !== harness || this.botOutlineRun !== run) return;
+        const values: Record<string, Object> | undefined = asRecord(raw['values']);
+        const turns: Object[] = values !== undefined ? (asArray(values['turnOutline']) ?? []) : [];
+        const outline: HarnessTurnSummary[] = [];
+        for (const item of turns) {
+          const turn: Record<string, Object> | undefined = asRecord(item);
+          if (turn === undefined) continue;
+          const row: HarnessTurnSummary = new HarnessTurnSummary();
+          const turnId: Object | undefined = turn['turn'];
+          row.turnId = turnId !== undefined ? String(turnId) : '';
+          row.response = jsonStr(turn, 'response', '');
+          row.prompt = jsonStr(turn, 'prompt', '');
+          outline.push(row);
+        }
+        if (outline.length > 0) {
+          this.botSessionOutlines.set(sessionId, outline);
+          this.botStateVersion += 1;
+          this.notify();
+        } else if (this.botSessionOutlines.delete(sessionId)) {
+          this.botStateVersion += 1;
+          this.notify();
+        }
+      } catch (error) {
+        // A preview is optional and must never delay or fail roster loading.
+      }
+    }
+  }
+
+  async refreshBotState(): Promise<void> {
+    const selectionVersion: number = this.sessionSelectionVersion;
+    const client: BotRemoteClient | undefined = this.botClient;
+    if (!await this.requestBotState() || this.botClient !== client || !this.botMode ||
+      this.sessionSelectionVersion !== selectionVersion || this.selectedBotTargetId.length > 0) return;
+    const next: BotStateSnapshot = this.botState;
+    if (next.bots.length > 0) {
+      let chosen = next.bots[0];
+      for (const b of next.bots) {
+        if (b.main) { chosen = b; break; }
+      }
+      this.selectedBotTargetId = chosen.id;
+      this.notify();
+      await this.openSession(chosen.sessionId);
+    } else if (next.rooms.length > 0) {
+      this.selectedBotTargetId = next.rooms[0].id;
+      this.notify();
+      await this.openSession(next.rooms[0].sessionId);
+    }
+  }
+
+  /** 抽屉 DS-Bot 标签：只刷新名册，不切换当前会话。 */
+  async loadBotRoster(): Promise<void> {
+    await this.requestBotState();
+  }
+
+  async selectBotTarget(targetId: string, sessionId: string): Promise<void> {
+    this.selectedBotTargetId = targetId;
+    this.botError = '';
+    this.notify();
+    if (sessionId.length > 0) {
+      await this.openSession(sessionId);
+    }
+  }
+
+  /** Create a new part explicitly, then open it only if the user has not switched away. */
+  async createBotPart(botId: string): Promise<void> {
+    const client: BotRemoteClient | undefined = this.botClient;
+    if (client === undefined) throw new Error('DS-Bot 连接不可用，请重试');
+    const selectionVersion: number = this.sessionSelectionVersion;
+    await client.call('bot-new-part', { 'botId': botId }, 15000);
+    if (this.botClient !== client) return;
+    // A request started before creation can contain the old part: let it finish,
+    // then obtain a fresh snapshot before considering a session switch.
+    const pending: Promise<boolean> | undefined = this.botStateRequest;
+    if (pending !== undefined) await pending;
+    if (this.botClient !== client || !await this.requestBotState()) return;
+    if (this.botClient !== client || !this.botMode || this.selectedBotTargetId !== botId ||
+      this.sessionSelectionVersion !== selectionVersion) return;
+    for (const bot of this.botState.bots) {
+      if (bot.id === botId && bot.sessionId.length > 0) {
+        await this.openSession(bot.sessionId);
+        return;
+      }
+    }
+  }
+
+  async sendBotMessage(targetId: string, text: string): Promise<void> {
+    const client = this.botClient;
+    if (client === undefined) {
+      this.botError = 'DS-Bot 连接不可用，请重试';
+      this.notify();
+      throw new Error(this.botError);
+    }
+    this.botError = '';
+    this.notify();
+    try {
+      await client.sendMessage(this.botState, targetId, text);
+    } catch (error) {
+      if (this.botClient === client) {
+        this.botError = errorMessage(error);
+        this.notify();
+      }
+      throw new Error(errorMessage(error));
+    }
+    if (this.botClient === client) {
+      await this.refreshBotState();
+    }
+  }
+
   async createNewSession(): Promise<void> {
     if (this.phase !== PHASE_CHAT) {
       return;
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     if (harness === undefined) {
+      return;
+    }
+    const selectionVersion: number = this.sessionSelectionVersion;
+    if (this.selectedBackend !== 'harness' && this.backendsRouter.isBackendAvailable(this.selectedBackend)) {
+      this.setBusy(true);
+      this.errorMsg = '';
+      this.notify();
+      try {
+        const cwd: string = this.resolveNewSessionCwd();
+        const created = await this.backendsRouter.createSession(this.selectedBackend, cwd.length > 0 ? cwd : '/');
+        if (this.harness === harness) {
+          this.sessions = [created].concat(this.sessions);
+          if (this.sessionSelectionVersion === selectionVersion) {
+            await this.openSession(created.sessionId);
+          }
+        }
+      } catch (error) {
+        this.errorMsg = errorMessage(error);
+      }
+      this.setBusy(false);
+      this.notify();
       return;
     }
     // 当前会话还空着就顺手归档：否则连点几次「新建」会在列表里堆一串「新会话」。
@@ -1519,6 +2090,14 @@ export class AppRuntime {
         + ' cwd=' + (cwd.length > 0 ? cwd : '(empty)'));
       const sessionId: string = await harness.sessionCreate(cwd, workspaceId);
       logInfo('session/create -> ' + sessionId);
+      if (this.harness !== harness || this.sessionSelectionVersion !== selectionVersion) {
+        if (this.harness === harness) {
+          this.refreshSessionsSoon();
+          this.setBusy(false);
+          this.notify();
+        }
+        return;
+      }
       this.currentSessionId = sessionId;
       this.currentSessionTitle = '新会话';
       this.messages = [];
@@ -1544,7 +2123,17 @@ export class AppRuntime {
     this.notify();
   }
 
-  async openSession(sessionId: string): Promise<void> {
+  private resolveParentSessionId(sessionId: string, hint?: string): string {
+    for (const s of this.sessions) {
+      if (s.sessionId === sessionId && s.origin === 'subagent' && s.parentSessionId.length > 0) {
+        return s.parentSessionId;
+      }
+    }
+    return hint !== undefined ? hint : '';
+  }
+
+  async openSession(sessionId: string, parentSessionIdHint?: string): Promise<void> {
+    this.sessionSelectionVersion += 1;
     if (this.phase !== PHASE_CHAT || sessionId === this.currentSessionId) {
       return;
     }
@@ -1563,19 +2152,22 @@ export class AppRuntime {
           break;
         }
       }
-      await this.openSessionInternal(harness, sessionId, title);
+      await this.openSessionInternal(harness, sessionId, title, parentSessionIdHint);
       this.rememberRecentSession(sessionId);
       this.hydrateHistoryImages().catch(() => undefined);
       this.clearRetry();
     } catch (error) {
-      this.errorMsg = this.sessionStreamHint(error);
-      this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
-        if (isTransportFailure(error)) {
-          this.reconnectAndReopen(sessionId);
-        } else {
-          this.reopenCurrentSession(sessionId);
-        }
-      });
+      const msg: string = errorMessage(error);
+      if (msg.indexOf('superseded') < 0 && !(error instanceof RemoteGatewayError && error.code === 'CANCELLED')) {
+        this.errorMsg = this.sessionStreamHint(error);
+        this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
+          if (isTransportFailure(error)) {
+            this.reconnectAndReopen(sessionId);
+          } else {
+            this.reopenCurrentSession(sessionId);
+          }
+        });
+      }
     }
     this.setBusy(false);
     this.notify();
@@ -1684,6 +2276,10 @@ export class AppRuntime {
    */
   private async trySlashCommand(harness: HarnessAlphaClient, sessionId: string,
     line: string): Promise<boolean> {
+    if (line.trim() === '/compact' && this.hostFeatures.asyncCompaction && this.sessionTools !== undefined) {
+      await this.runTrackedCompaction(sessionId);
+      return true;
+    }
     try {
       const result: Record<string, Object> | undefined = await harness.commandsExecute(sessionId, line);
       const text: string = commandReplyText(result);
@@ -1831,9 +2427,13 @@ export class AppRuntime {
     }
     try {
       const snapshot: HarnessWorkspaceSnapshot = await harness.workspaceList();
-      this.workspaces = snapshot.items;
+      const merged = await this.backendsRouter.loadExtraCatalog(this.sessions, snapshot.items);
+      this.workspaces = merged.workspaces;
       this.archivedSessionIds = snapshot.archivedSessionIds;
       this.pinnedSessionIds = snapshot.pinnedSessionIds;
+      if (merged.sessions.length > this.sessions.length) {
+        this.sessions = sortSessions(merged.sessions);
+      }
       this.notify();
     } catch (error) {
       logWarn('workspace/list unavailable');
@@ -1978,6 +2578,40 @@ export class AppRuntime {
     this.notify();
   }
 
+  /** Only stop a selected private Bot's currently open session. */
+  async stopBotGeneration(targetId: string, sessionId: string): Promise<void> {
+    const harness: HarnessAlphaClient | undefined = this.harness;
+    if (harness === undefined || !this.botMode || targetId !== this.selectedBotTargetId ||
+      sessionId.length === 0 || sessionId !== this.currentSessionId) {
+      throw new Error('当前 Bot 会话不可用或已切换');
+    }
+    let matchesBot: boolean = false;
+    for (const bot of this.botState.bots) {
+      if (bot.id === targetId && bot.sessionId === sessionId) {
+        matchesBot = true;
+        break;
+      }
+    }
+    if (!matchesBot) throw new Error('当前 Bot 会话不可用或已切换');
+    try {
+      if (backendOfSessionId(sessionId) !== 'harness') {
+        await this.backendsRouter.stop(sessionId);
+      } else {
+        await harness.sessionCancel(sessionId);
+      }
+      if (this.harness === harness && this.currentSessionId === sessionId) {
+        this.generating = false;
+        this.notify();
+      }
+    } catch (error) {
+      if (this.harness === harness && this.currentSessionId === sessionId) {
+        this.botError = errorMessage(error);
+        this.notify();
+      }
+      throw new Error(errorMessage(error));
+    }
+  }
+
   /** 中断当前轮。 */
   async stopGeneration(): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -1986,12 +2620,20 @@ export class AppRuntime {
       return;
     }
     try {
-      await harness.sessionCancel(sessionId);
-      this.generating = false;
-      this.notify();
+      if (backendOfSessionId(sessionId) !== 'harness') {
+        await this.backendsRouter.stop(sessionId);
+      } else {
+        await harness.sessionCancel(sessionId);
+      }
+      if (this.harness === harness && this.currentSessionId === sessionId) {
+        this.generating = false;
+        this.notify();
+      }
     } catch (error) {
-      this.errorMsg = errorMessage(error);
-      this.notify();
+      if (this.harness === harness && this.currentSessionId === sessionId) {
+        this.errorMsg = errorMessage(error);
+        this.notify();
+      }
     }
   }
 
@@ -2351,6 +2993,73 @@ export class AppRuntime {
       const values: Record<string, Object> | undefined = asRecord(raw['values']);
       const percent: number = values !== undefined ? findPercent(values) : findPercent(raw);
       this.contextPercent = percent > 0 ? percent : 0;
+      const sourceObj: Record<string, Object> = values !== undefined ? values : raw;
+      const nextTodos: TodoEntry[] = [];
+      const rawTodos: Object[] | undefined = asArray(sourceObj['todos']);
+      if (rawTodos !== undefined) {
+        for (const item of rawTodos) {
+          const rec = asRecord(item);
+          if (rec === undefined) continue;
+          const content = jsonStr(rec, 'content', jsonStr(rec, 'title', ''));
+          if (content.length === 0) continue;
+          const entry = new TodoEntry();
+          entry.content = content;
+          entry.status = jsonStr(rec, 'status', 'pending');
+          nextTodos.push(entry);
+        }
+      }
+      this.todosList = nextTodos;
+      const nextQueue: QueueEntry[] = [];
+      const rawQueue: Object[] | undefined = asArray(sourceObj['queued']) ?? asArray(sourceObj['queue']);
+      if (rawQueue !== undefined) {
+        for (const item of rawQueue) {
+          const rec = asRecord(item);
+          if (rec === undefined) continue;
+          const qid = jsonStr(rec, 'itemId', jsonStr(rec, 'id', ''));
+          if (qid.length === 0) continue;
+          const entry = new QueueEntry();
+          entry.id = qid;
+          entry.text = jsonStr(rec, 'text', jsonStr(rec, 'preview', qid));
+          nextQueue.push(entry);
+        }
+      }
+      this.queueItems = nextQueue;
+      const nextMembers: AgentTeamMember[] = [];
+      const nextTasks: AgentTeamTask[] = [];
+      const rawTeam: Record<string, Object> | undefined = asRecord(sourceObj['agentTeam']);
+      if (rawTeam !== undefined) {
+        const rawMembers: Object[] = asArray(rawTeam['members']) ?? [];
+        for (const rm of rawMembers) {
+          const rec = asRecord(rm);
+          if (rec === undefined) continue;
+          const id = jsonStr(rec, 'id', '');
+          if (id.length === 0) continue;
+          const member = new AgentTeamMember();
+          member.id = id;
+          member.name = jsonStr(rec, 'name', id);
+          member.description = jsonStr(rec, 'description', '');
+          member.role = jsonStr(rec, 'role', member.description);
+          member.phase = jsonStr(rec, 'phase', jsonStr(rec, 'status', ''));
+          member.sessionId = jsonStr(rec, 'sessionId', id);
+          member.error = jsonStr(rec, 'error', '');
+          nextMembers.push(member);
+        }
+        const rawTasks: Object[] = asArray(rawTeam['tasks']) ?? [];
+        for (const rt of rawTasks) {
+          const rec = asRecord(rt);
+          if (rec === undefined) continue;
+          const id = jsonStr(rec, 'id', '');
+          if (id.length === 0) continue;
+          const task = new AgentTeamTask();
+          task.id = id;
+          task.subject = jsonStr(rec, 'subject', jsonStr(rec, 'title', id));
+          task.status = jsonStr(rec, 'status', 'pending');
+          task.ownerId = jsonStr(rec, 'ownerId', jsonStr(rec, 'owner', ''));
+          nextTasks.push(task);
+        }
+      }
+      this.agentTeamMembers = nextMembers;
+      this.agentTeamTasks = nextTasks;
       this.notify();
     } catch (error) {
       // 投影是锦上添花，失败不打扰用户。
@@ -2364,8 +3073,32 @@ export class AppRuntime {
     if (harness === undefined) {
       return;
     }
+    const sessionId = this.currentSessionId;
+    if (backendOfSessionId(sessionId) !== 'harness') {
+      try {
+        const list = await this.backendsRouter.listModels(this.currentSessionId);
+        const mapped: ModelOption[] = [];
+        for (const item of list) {
+          const opt = new ModelOption();
+          opt.provider = item.provider;
+          opt.model = item.model;
+          opt.name = item.name;
+          opt.description = item.description;
+          opt.efforts = item.efforts;
+          mapped.push(opt);
+        }
+        if (this.harness !== harness || this.currentSessionId !== sessionId) return;
+        this.modelOptions = mapped;
+        this.modelCatalogLoaded = mapped.length > 0;
+        this.notify();
+      } catch {
+        logWarn('backend model catalog unavailable');
+      }
+      return;
+    }
     try {
       const raw: Record<string, Object> = await harness.modelCatalog();
+      if (this.harness !== harness || this.currentSessionId !== sessionId) return;
       this.modelCatalogRaw = raw;
       const options: ModelOption[] = [];
       const groups: Object[] | undefined = asArray(raw['groups']);
@@ -2413,7 +3146,7 @@ export class AppRuntime {
       }
       this.modelOptions = options;
       const fallback: Record<string, Object> | undefined = asRecord(raw['default']);
-      if (fallback !== undefined) {
+      if (fallback !== undefined && this.currentModelLabel.length === 0) {
         const defaultModel: string = jsonStr(fallback, 'model', '');
         if (defaultModel.length > 0) {
           this.currentModelLabel = defaultModel;
@@ -2536,7 +3269,18 @@ export class AppRuntime {
       return;
     }
     try {
-      await harness.selectModel(sessionId, provider, model, reasoningEffort);
+      if (backendOfSessionId(sessionId) !== 'harness') {
+        await this.backendsRouter.selectModel(sessionId, model, reasoningEffort);
+      } else {
+        await harness.selectModel(sessionId, provider, model, reasoningEffort);
+      }
+      const selected = new ModelOption();
+      selected.provider = provider;
+      selected.model = model;
+      selected.description = reasoningEffort;
+      if (this.harness !== harness) return;
+      this.selectedSessionModels.set(sessionId, selected);
+      if (this.currentSessionId !== sessionId) return;
       this.currentModelLabel = model;
       this.currentModelProvider = provider;
       this.currentModelEffort = reasoningEffort;
@@ -2566,14 +3310,199 @@ export class AppRuntime {
     }
   }
 
-  async sendPrompt(text: string, images: PromptImagePart[] = []): Promise<void> {
+  async runTrackedCompaction(sessionId: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined || sessionId.length === 0 || this.compacting) {
+      return;
+    }
+    this.compacting = true;
+    this.compactingOpId = '';
+    this.compactionMessage = '正在提交上下文压缩…';
+    this.notify();
+    try {
+      const submitted: CompactionStatus = await tools.submitCompaction(sessionId, randomId());
+      this.compactingOpId = submitted.operationId;
+      this.compactionMessage = '正在压缩上下文…';
+      this.notify();
+      let status: CompactionStatus = submitted;
+      let tries = 0;
+      while (status.state !== 'succeeded' && status.state !== 'failed'
+        && status.state !== 'cancelled' && status.state !== 'interrupted' && tries < 90) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        if (!this.compacting || this.sessionTools !== tools) {
+          return;
+        }
+        tries += 1;
+        try {
+          status = await tools.compactionStatus(sessionId, submitted.operationId);
+        } catch {
+          // Keep polling if a single status check blipped.
+        }
+      }
+      if (status.state === 'succeeded') {
+        this.messages = appendNotice(this.messages, 'compact:ok:' + submitted.operationId,
+          '上下文已压缩', 'info', status.message.length > 0 ? status.message : '已完成上下文精简', '', Date.now());
+      } else {
+        this.messages = appendNotice(this.messages, 'compact:end:' + submitted.operationId,
+          '上下文压缩未完成（' + status.state + '）', 'error', status.message, '/compact', Date.now());
+      }
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+    } finally {
+      this.compacting = false;
+      this.compactingOpId = '';
+      this.compactionMessage = '';
+      this.notify();
+    }
+  }
+
+  async cancelActiveCompaction(): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    const opId: string = this.compactingOpId;
+    const sessionId: string = this.currentSessionId;
+    if (tools === undefined || opId.length === 0 || sessionId.length === 0) {
+      return;
+    }
+    try {
+      await tools.cancelCompaction(sessionId, opId);
+    } catch {
+      // ignore
+    }
+    this.compacting = false;
+    this.compactingOpId = '';
+    this.compactionMessage = '';
+    this.notify();
+  }
+
+  feedbackOf(messageId: string): string {
+    const map = this.feedbackBySession.get(this.currentSessionId);
+    if (map === undefined) {
+      return '';
+    }
+    return map.get(messageId) ?? '';
+  }
+
+  async loadSessionFeedback(sessionId: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      const items: FeedbackEntry[] = await tools.messageFeedbackList(sessionId);
+      const map: Map<string, string> = new Map();
+      for (const item of items) {
+        map.set(item.messageId, item.rating);
+      }
+      this.feedbackBySession.set(sessionId, map);
+      this.feedbackVersion += 1;
+      this.notify();
+    } catch {
+      // Older Hosts may omit messageFeedback/list.
+    }
+  }
+
+  async submitFeedback(messageId: string, rating: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    const sessionId: string = this.currentSessionId;
+    if (tools === undefined || sessionId.length === 0 || messageId.length === 0) {
+      return;
+    }
+    try {
+      const saved: FeedbackEntry = await tools.messageFeedbackPut(sessionId, messageId, rating);
+      let map = this.feedbackBySession.get(sessionId);
+      if (map === undefined) {
+        map = new Map();
+        this.feedbackBySession.set(sessionId, map);
+      }
+      map.set(saved.messageId, saved.rating);
+      this.feedbackVersion += 1;
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  async loadSkillsCatalog(sessionId: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      this.skillsCatalog = await tools.listSkills(sessionId);
+      this.notify();
+    } catch {
+      // Optional on older hosts.
+    }
+  }
+
+  async loadWorkspaceFileRefs(sessionId: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      this.workspaceFileRefs = await tools.loadWorkspaceFileRefs(sessionId);
+      this.notify();
+    } catch {
+      // Optional on older hosts.
+    }
+  }
+
+  async loadAgentPresets(): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined) {
+      return;
+    }
+    try {
+      this.agentPresets = await tools.agentPresetList();
+      if (this.currentAgentPreset.length === 0) {
+        for (const p of this.agentPresets) {
+          if (p.isDefault) {
+            this.currentAgentPreset = p.id;
+            break;
+          }
+        }
+      }
+      this.notify();
+    } catch {
+      // Optional on older hosts.
+    }
+  }
+
+  async selectAgentPreset(presetId: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    const sessionId: string = this.currentSessionId;
+    if (tools === undefined || sessionId.length === 0) {
+      return;
+    }
+    try {
+      this.currentAgentPreset = await tools.agentPresetSelect(sessionId, presetId);
+      this.notify();
+    } catch (error) {
+      this.errorMsg = errorMessage(error);
+      this.notify();
+    }
+  }
+
+  async stagePromptFile(name: string, base64Data: string): Promise<FileUploadReceipt | undefined> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    const sessionId: string = this.currentSessionId;
+    if (tools === undefined || sessionId.length === 0) {
+      return undefined;
+    }
+    return tools.fileUpload(sessionId, base64Data, name);
+  }
+
+  async sendPrompt(text: string, images: PromptImagePart[] = [],
+    receiptIds: string[] = [], fileLabels: string[] = []): Promise<void> {
     const trimmed: string = text.trim();
-    if (trimmed.length === 0 && images.length === 0) {
+    if (trimmed.length === 0 && images.length === 0 && receiptIds.length === 0) {
       return;
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     const sessionId: string = this.currentSessionId;
-    if (this.phase !== PHASE_CHAT || this.reconnecting || harness === undefined || sessionId.length === 0) {
+    if (harness === undefined || sessionId.length === 0) {
       return;
     }
     const requestId: string = randomId();
@@ -2592,11 +3521,33 @@ export class AppRuntime {
       }
       item.images = previews;
     }
+    if (fileLabels.length > 0) {
+      item.files = fileLabels.slice();
+    }
     const next: ChatItem[] = this.messages.slice();
     next.push(item);
     this.messages = next;
+    const backend: string = backendOfSessionId(sessionId);
+    if (backend !== 'harness') {
+      this.generating = true;
+      this.errorMsg = '';
+      this.notify();
+      try {
+        const acpImgs: Record<string, Object>[] = [];
+        for (const img of images) {
+          acpImgs.push({ 'type': 'image', 'mimeType': img.mediaType, 'data': img.base64 });
+        }
+        await this.backendsRouter.prompt(sessionId, trimmed, this.steerMode, acpImgs);
+        this.clearRetry();
+      } catch (error) {
+        this.errorMsg = errorMessage(error);
+        this.generating = false;
+        this.notify();
+      }
+      return;
+    }
     // 以 / 开头且未生成中的单行输入，先按斜杠命令交给主机执行。
-    if (images.length === 0 && trimmed.startsWith('/') && !trimmed.includes('\n') && !this.generating) {
+    if (images.length === 0 && receiptIds.length === 0 && trimmed.startsWith('/') && !trimmed.includes('\n') && !this.generating) {
       const handled: boolean = await this.trySlashCommand(harness, sessionId, trimmed);
       if (handled) {
         return;
@@ -2607,7 +3558,7 @@ export class AppRuntime {
     this.notify();
     try {
       await harness.sessionPrompt(sessionId, trimmed, requestId,
-        this.steerMode ? 'steer' : 'queue', images);
+        this.steerMode ? 'steer' : 'queue', images, receiptIds);
       this.clearRetry();
     } catch (error) {
       this.errorMsg = errorMessage(error);
@@ -2621,7 +3572,7 @@ export class AppRuntime {
       }
       this.messages = kept;
       this.setRetry('重新发送', () => {
-        this.sendPrompt(trimmed, images);
+        this.sendPrompt(trimmed, images, receiptIds, fileLabels);
       });
       this.notify();
     }
@@ -2760,7 +3711,21 @@ export class AppRuntime {
     this.errorMsg = '';
     this.notify();
     try {
-      await harness.respondApproval(item.frameRpcId, item.sessionId, item.approvalId, outcome);
+      if (backendOfSessionId(this.currentSessionId) !== 'harness') {
+        await this.backendsRouter.respondApproval(this.currentSessionId, item.approvalId, allowed);
+        const copied = this.messages.slice();
+        for (let i = 0; i < copied.length; i++) {
+          if (copied[i].id === item.id) {
+            const up = cloneItem(copied[i]);
+            up.approvalOutcome = outcome;
+            copied[i] = up;
+            break;
+          }
+        }
+        this.messages = copied;
+      } else {
+        await harness.respondApproval(item.frameRpcId, item.sessionId, item.approvalId, outcome);
+      }
     } catch (error) {
       this.errorMsg = errorMessage(error);
     }
@@ -2967,8 +3932,10 @@ export class AppRuntime {
     }
     try {
       const sessions: HarnessRemoteSession[] = await harness.sessionList(12000);
+      const merged = await this.backendsRouter.loadExtraCatalog(sessions, this.workspaces);
       if (this.harness === harness && this.phase === PHASE_CHAT) {
-        this.sessions = sortSessions(sessions);
+        this.sessions = sortSessions(merged.sessions);
+        this.workspaces = merged.workspaces;
         this.rememberSessions(this.sessions);
         this.notify();
       }
@@ -3354,6 +4321,8 @@ export class AppRuntime {
   }
 
   private async pickInitialSession(): Promise<void> {
+    const selectionVersion: number = this.sessionSelectionVersion;
+    const harness: HarnessAlphaClient | undefined = this.harness;
     // 断线重连回来的：直接回原来那个会话，别按更新时间另挑一个
     const resume: string = this.pendingResumeSessionId;
     this.pendingResumeSessionId = '';
@@ -3381,6 +4350,7 @@ export class AppRuntime {
     try {
       await this.openSessionInternal(this.requireHarness(), best.sessionId, sessionTitle(best));
     } catch (error) {
+      if (this.sessionSelectionVersion !== selectionVersion || this.harness !== harness) return;
       logError('open initial session failed');
       this.currentSessionId = '';
       this.currentSessionTitle = '请选择会话';
@@ -3397,12 +4367,14 @@ export class AppRuntime {
    */
   private async resumeSessionEarly(harness: HarnessAlphaClient, sessionId: string,
     title: string): Promise<void> {
+    const selectionVersion: number = this.sessionSelectionVersion;
     try {
       await this.openSessionInternal(harness, sessionId, title);
       this.rememberRecentSession(sessionId);
       this.hydrateHistoryImages().catch(() => undefined);
       logInfo('resumed early -> ' + sessionId);
     } catch (error) {
+      if (this.sessionSelectionVersion !== selectionVersion || this.harness !== harness) return;
       logWarn('early resume failed');
       this.errorMsg = this.sessionStreamHint(error);
       this.setRetry(isTransportFailure(error) ? '重连并重新打开' : '重新打开会话', () => {
@@ -3426,6 +4398,7 @@ export class AppRuntime {
     if (harness === undefined || this.phase !== PHASE_CHAT) {
       return;
     }
+    const selectionVersion: number = this.sessionSelectionVersion;
     // 先把上次的列表画出来：主机的 session/list 实测 3~9 秒，
     // 让用户立刻看到侧栏有东西，比空着等强得多（拉到新列表会覆盖它）。
     if (this.sessions.length === 0) {
@@ -3445,8 +4418,14 @@ export class AppRuntime {
     this.pendingResumeSessionId = '';
     let earlyResume: Promise<void> | undefined = undefined;
     if (resume.length > 0) {
-      const resumeTitle: string = this.currentSessionTitle.length > 0
+      let resumeTitle: string = this.currentSessionTitle.length > 0
         ? this.currentSessionTitle : '正在恢复会话';
+      for (const session of this.sessions) {
+        if (session.sessionId === resume) {
+          resumeTitle = sessionTitle(session);
+          break;
+        }
+      }
       earlyResume = this.resumeSessionEarly(harness, resume, resumeTitle);
     }
     try {
@@ -3460,19 +4439,30 @@ export class AppRuntime {
       this.lastListError = undefined;
       this.setBusy(false);
       this.sessionsLoadFailed = false;
+      if (this.currentSessionId.length > 0
+        && (this.currentSessionTitle.length === 0 || this.currentSessionTitle === '正在恢复会话')) {
+        for (const session of this.sessions) {
+          if (session.sessionId === this.currentSessionId) {
+            this.currentSessionTitle = sessionTitle(session);
+            break;
+          }
+        }
+      }
       this.notify();
       if (earlyResume !== undefined) {
         // 已经在原会话里了，不再按更新时间另挑一个（那会把用户切到别的会话）
         await earlyResume;
         return;
       }
-      await this.pickInitialSession();
+      if (this.sessionSelectionVersion === selectionVersion) {
+        await this.pickInitialSession();
+      }
     } catch (error) {
-      this.lastListError = error;
-      logError('session list failed after connect');
       if (this.harness !== harness || this.phase !== PHASE_CHAT) {
         return;
       }
+      this.lastListError = error;
+      logError('session list failed after connect');
       // 同一台主机的上一次结果还留着：显示它并标成「待刷新」，
       // 别把侧栏清空——抖动几秒就恢复的情况下，清空比不动更吓人。
       const memorySnapshot: boolean = this.sessionsSnapshot.length > 0
@@ -3482,10 +4472,12 @@ export class AppRuntime {
       const keepSnapshot: boolean = memorySnapshot || diskSnapshot.length > 0;
       this.sessions = memorySnapshot ? this.sessionsSnapshot : diskSnapshot;
       this.sessionsLoadFailed = true;
-      this.currentSessionId = '';
-      this.currentSessionTitle = keepSnapshot ? '会话列表待刷新' : '会话列表加载失败';
-      this.messages = [];
-      this.generating = false;
+      if (this.sessionSelectionVersion === selectionVersion && earlyResume === undefined) {
+        this.currentSessionId = '';
+        this.currentSessionTitle = keepSnapshot ? '会话列表待刷新' : '会话列表加载失败';
+        this.messages = [];
+        this.generating = false;
+      }
       this.setBusy(false);
       if (isTransportFailure(error)) {
         // 加密通道还没就绪/已经断了：先体检链路，3 秒后自动重拉一次（用户不用手点）
@@ -3619,9 +4611,31 @@ export class AppRuntime {
   }
 
   private async openSessionInternal(harness: HarnessAlphaClient, sessionId: string,
-    title: string): Promise<void> {
+    title: string, parentSessionIdHint?: string): Promise<void> {
+    const openVersion: number = ++this.sessionOpenVersion;
+    const parentSessionId: string = this.resolveParentSessionId(sessionId, parentSessionIdHint);
     this.currentSessionId = sessionId;
+    this.currentParentSessionId = parentSessionId;
     this.currentSessionTitle = title;
+    this.currentModelLabel = '';
+    this.currentModelProvider = '';
+    this.currentModelEffort = '';
+    const selectedModel = this.selectedSessionModels.get(sessionId);
+    if (selectedModel !== undefined) {
+      this.currentModelProvider = selectedModel.provider;
+      this.currentModelLabel = selectedModel.model;
+      this.currentModelEffort = selectedModel.description;
+    } else {
+      for (const session of this.sessions) {
+        if (session.sessionId === sessionId) {
+          this.currentModelProvider = session.modelProvider;
+          this.currentModelLabel = session.modelId;
+          this.currentModelEffort = session.modelEffort;
+          break;
+        }
+      }
+    }
+    this.refreshModelCatalog().catch(() => undefined);
     // 换会话先清翻页游标：列表刚重建时可能触发 onReachStart，拿着上一个会话的 seq 去翻页
     // 会被主机拒（session/page ... is past cursor）——那是最典型的串会话。
     this.historyHasMore = false;
@@ -3638,8 +4652,61 @@ export class AppRuntime {
     this.generating = false;
     this.messages = cached !== undefined ? cached.slice() : [];
     this.notify();
-    const page: HistoryPage = await harness.sessionHistory(sessionId, -1, INITIAL_HISTORY_COUNT);
-    if (this.currentSessionId !== sessionId) {
+    const backend: string = backendOfSessionId(sessionId);
+    if (backend === 'codex') {
+      await harness.closeFollow();
+      if (this.harness !== harness || this.sessionOpenVersion !== openVersion) return;
+      const codexItems = await this.backendsRouter.openCodexSession(sessionId,
+        (liveItems: CodexTimelineItem[], gen: boolean) => {
+          if (this.harness !== harness || this.sessionOpenVersion !== openVersion || this.currentSessionId !== sessionId) return;
+          this.messages = chatItemsFromCodex(liveItems, sessionId);
+          this.generating = gen;
+          this.notify();
+        });
+      if (this.harness !== harness || this.sessionOpenVersion !== openVersion || this.currentSessionId !== sessionId) return;
+      this.messages = chatItemsFromCodex(codexItems, sessionId);
+      this.generating = this.backendsRouter.activeCodexTurnId.length > 0;
+      this.rememberHistory(sessionId, this.messages);
+      this.skillsCatalog = [];
+      this.workspaceFileRefs = [];
+      this.notify();
+      return;
+    }
+    if (backend !== 'harness') {
+      await harness.closeFollow();
+      if (this.harness !== harness || this.sessionOpenVersion !== openVersion) return;
+      let acpBaseItems: ChatItem[] = [];
+      const acpBundle = await this.backendsRouter.openAcpSession(sessionId,
+        (liveItems: AcpTimelineItem[], gen: boolean) => {
+          if (this.harness !== harness || this.sessionOpenVersion !== openVersion || this.currentSessionId !== sessionId) return;
+          this.messages = acpBaseItems.concat(chatItemsFromAcp(liveItems, sessionId));
+          this.generating = gen;
+          this.notify();
+        });
+      if (this.harness !== harness || this.sessionOpenVersion !== openVersion || this.currentSessionId !== sessionId) return;
+      if (acpBundle.nativeEntries.length > 0) {
+        acpBaseItems = foldHistory(acpBundle.nativeEntries);
+        this.messages = acpBaseItems.slice();
+        this.oldestHistorySeq = oldestSeqOf(acpBundle.nativeEntries);
+        this.scheduleImageHydration();
+      } else {
+        this.messages = chatItemsFromAcp(acpBundle.items, sessionId);
+      }
+      this.generating = false;
+      this.rememberHistory(sessionId, this.messages);
+      this.skillsCatalog = [];
+      this.workspaceFileRefs = [];
+      this.notify();
+      return;
+    }
+    this.backendsRouter.closeActiveStreams();
+    const page: HistoryPage = await harness.sessionHistory(
+      sessionId,
+      -1,
+      INITIAL_HISTORY_COUNT,
+      parentSessionId.length > 0 ? parentSessionId : undefined
+    );
+    if (this.harness !== harness || this.sessionOpenVersion !== openVersion || this.currentSessionId !== sessionId) {
       return;
     }
     this.messages = foldHistory(page.entries);
@@ -3666,11 +4733,18 @@ export class AppRuntime {
       }
     }
     this.generating = running;
+    this.skillsCatalog = [];
+    this.workspaceFileRefs = [];
     this.notify();
     this.refreshProjections().catch(() => undefined);
+    this.loadSessionFeedback(sessionId).catch(() => undefined);
+    this.loadAgentPresets().catch(() => undefined);
   }
 
   private teardownConnection(): void {
+    this.pushRegistered = false;
+    this.selectedSessionModels.clear();
+    this.backendsRouter.closeActiveStreams();
     // 连接没了就别再占着长时任务（通知栏那条也会跟着消失）
     KeepAlive.stop().catch(() => undefined);
     const unsubscribe: (() => void) | undefined = this.unsubscribeClose;
@@ -3696,6 +4770,24 @@ export class AppRuntime {
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     this.harness = undefined;
+    this.sessionTools = undefined;
+    this.botClient = undefined;
+    this.botStateRequest = undefined;
+    this.botRosterPending = false;
+    this.botOutlineRun += 1;
+    this.botSessionOutlines.clear();
+    this.botMode = false;
+    this.botState = new BotStateSnapshot();
+    this.botStateVersion += 1;
+    this.botLoading = false;
+    this.botError = '';
+    this.selectedBotTargetId = '';
+    this.uiArtifacts = new Map<string, UiArtifactSnapshot>();
+    this.lastUiArtifactKey = '';
+    this.uiArtifactsVersion++;
+    this.compacting = false;
+    this.compactingOpId = '';
+    this.compactionMessage = '';
     this.connectedHostName = '';
     this.connectedDeviceId = '';
     this.keepAliveDeviceId = '';
@@ -4442,6 +5534,32 @@ export class AppRuntime {
     this.notify();
   }
 
+  async createScheduleDirect(title: string, cronExpr: string, prompt: string): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    const sessionId: string = this.currentSessionId;
+    if (tools === undefined || sessionId.length === 0) return;
+    const req: Record<string, Object> = {
+      'title': title,
+      'cron': cronExpr,
+      'prompt': prompt
+    };
+    await tools.scheduleCreate(sessionId, req);
+    await this.loadSchedules();
+  }
+
+  async toggleScheduleInactive(schedule: HarnessSchedule): Promise<void> {
+    const tools: SessionToolsClient | undefined = this.sessionTools;
+    if (tools === undefined || schedule.id.length === 0) return;
+    const sid: string = schedule.sessionId.length > 0 ? schedule.sessionId : this.currentSessionId;
+    const req: Record<string, Object> = {
+      'sessionId': sid,
+      'id': schedule.id,
+      'inactive': !schedule.inactive
+    };
+    await tools.scheduleUpdate(req);
+    await this.loadSchedules();
+  }
+
   /** 删除一条定时任务，成功后从列表移除。 */
   async deleteSchedule(schedule: HarnessSchedule): Promise<void> {
     const harness: HarnessAlphaClient | undefined = this.harness;
@@ -4533,15 +5651,19 @@ export class AppRuntime {
     const payload: Record<string, Object> = frame.payload;
     const type: string = jsonStr(payload, 'type', '');
     if (type === 'session/event') {
+      // Follow events carry their source session; never attribute a late frame to the new selection.
+      if (jsonStr(payload, 'sessionId', '') !== this.currentSessionId || this.currentSessionId.length === 0) return;
       this.applyEventPayload(payload);
       return;
     }
     if (type === 'approval/requested') {
       const sessionId: string = jsonStr(payload, 'sessionId', '');
+      const toolName: string = jsonStr(payload, 'toolName', '工具执行');
       if (sessionId.length === 0 || sessionId === this.currentSessionId) {
         this.messages = addApproval(this.messages, payload, frame.rpcId);
         this.notify();
       }
+      this.publishBackgroundNotice('DSH 需要授权', '请求确认：' + toolName, 102, sessionId);
       return;
     }
     if (type === 'approval/resolved') {
@@ -4555,6 +5677,7 @@ export class AppRuntime {
         this.messages = addQuestion(this.messages, payload, frame.rpcId);
         this.notify();
       }
+      this.publishBackgroundNotice('DSH 等待你的回答', 'AI 有一个问题需要你确认', 103, sessionId);
       return;
     }
     if (type === 'question/resolved') {
@@ -4570,7 +5693,8 @@ export class AppRuntime {
       // 传输层自己断的（TRANSPORT_CLOSED/CLIENT_CLOSED）交给重连提示，别在聊天里再糊一条；
       // 业务失败（上下文超窗、提示被主机拒绝等）以前是彻底静默的，这里必须说出来。
       const transportLevel: boolean = code === 'TRANSPORT_CLOSED' || code === 'CLIENT_CLOSED'
-        || code === 'CONNECTION_FAILED';
+        || code === 'CONNECTION_FAILED' || code === 'CANCELLED'
+        || message.indexOf('superseded') >= 0;
       if (reason === 'failed' && !transportLevel && message.length > 0) {
         if (looksLikeContextOverflow(code, message)) {
           this.messages = appendNotice(this.messages, 'stream:context',
@@ -4875,6 +5999,9 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.toolName = item.toolName;
   copy.toolState = item.toolState;
   copy.summary = item.summary;
+  copy.toolArguments = item.toolArguments;
+  copy.uiMetaJson = item.uiMetaJson;
+  copy.seq = item.seq;
   copy.approvalId = item.approvalId;
   copy.approvalOutcome = item.approvalOutcome;
   copy.frameRpcId = item.frameRpcId;
@@ -5077,6 +6204,9 @@ function appendNotice(items: ChatItem[], dedupeKey: string, text: string, notice
   hint: string, actionCommand: string, time: number): ChatItem[] {
   for (let i = items.length - 1; i >= 0 && i >= items.length - 3; i--) {
     const item: ChatItem = items[i];
+    if (item.kind === 'user') {
+      break;
+    }
     if (item.kind === 'notice' && item.id === dedupeKey) {
       return items;
     }
@@ -5273,6 +6403,12 @@ function applyToolEvent(items: ChatItem[], data: Record<string, Object>, time: n
   }
   const name: string = jsonStr(data, 'name', jsonStr(data, 'toolName', 'Tool'));
   const summary: string = jsonStr(data, 'summary', '');
+  const isUiTool: boolean = UI_TOOLS.includes(name);
+  const rawArgs: string = isUiTool ? jsonStr(data, 'arguments', jsonStr(data, 'argumentsDelta', '')) : '';
+  const metaRec: Record<string, Object> | undefined = isUiTool
+    ? (asRecord(data['meta']) ?? asRecord(data['uiResultMeta']))
+    : undefined;
+  const metaJson: string = metaRec !== undefined ? JSON.stringify(metaRec) : '';
   const failed: boolean = state === 'finished' && toolResultFailed(data);
   const next: ChatItem[] = items.slice();
   let index: number = -1;
@@ -5290,6 +6426,8 @@ function applyToolEvent(items: ChatItem[], data: Record<string, Object>, time: n
     created.toolName = name;
     created.toolState = failed ? 'failed' : state;
     created.summary = summary;
+    created.toolArguments = rawArgs;
+    created.uiMetaJson = metaJson;
     created.text = state === 'running' ? toolCallDetailOf(data) : toolResultDetailOf(data);
     created.timestamp = time > 0 ? time : Date.now();
     next.push(created);
@@ -5301,6 +6439,12 @@ function applyToolEvent(items: ChatItem[], data: Record<string, Object>, time: n
   }
   if (summary.length > 0) {
     updated.summary = summary;
+  }
+  if (rawArgs.length > 0) {
+    updated.toolArguments = rawArgs;
+  }
+  if (metaJson.length > 0) {
+    updated.uiMetaJson = metaJson;
   }
   updated.toolState = failed ? 'failed' : state;
   if (state === 'finished') {
@@ -5696,4 +6840,49 @@ function boundedText(text: string): string {
     return text;
   }
   return text.substring(0, MAX_TOOL_DETAIL_CHARS);
+}
+
+function chatItemsFromCodex(items: CodexTimelineItem[], sessionId: string): ChatItem[] {
+  const out: ChatItem[] = [];
+  for (const src of items) {
+    const item: ChatItem = new ChatItem();
+    item.id = src.id;
+    item.kind = src.kind;
+    item.role = src.kind === 'user' ? 'user' : 'assistant';
+    item.text = src.text;
+    item.reasoning = src.reasoning;
+    item.toolName = src.toolName;
+    item.toolState = src.toolState;
+    item.summary = src.summary;
+    item.approvalId = src.approvalId;
+    item.approvalOutcome = src.approvalOutcome;
+    item.reason = src.reason;
+    item.streaming = src.streaming;
+    item.timestamp = src.timestamp;
+    item.sessionId = sessionId;
+    out.push(item);
+  }
+  return out;
+}
+
+function chatItemsFromAcp(items: AcpTimelineItem[], sessionId: string): ChatItem[] {
+  const out: ChatItem[] = [];
+  for (const src of items) {
+    const item: ChatItem = new ChatItem();
+    item.id = src.id;
+    item.kind = src.kind;
+    item.role = src.kind === 'user' ? 'user' : 'assistant';
+    item.text = src.text;
+    item.reasoning = src.reasoning;
+    item.toolName = src.toolName;
+    item.toolState = src.toolState;
+    item.summary = src.summary;
+    item.approvalId = src.approvalId;
+    item.reason = src.reason;
+    item.streaming = src.streaming;
+    item.timestamp = src.timestamp;
+    item.sessionId = sessionId;
+    out.push(item);
+  }
+  return out;
 }

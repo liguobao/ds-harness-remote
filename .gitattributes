@@ -1,6 +1,2 @@
 # Generated bundles include third-party comments/templates with trailing spaces.
 packages/plugin/dist/*.js whitespace=-trailing-space linguist-generated
-
-# Unified diff context lines use a leading space, including empty source lines.
-# Preserve the patch format while checking whitespace in normal source files.
-*.patch whitespace=-blank-at-eol,-blank-at-eof

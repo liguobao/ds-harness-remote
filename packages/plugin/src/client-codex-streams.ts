@@ -34,6 +34,7 @@ export class ClientCodexStreams {
     const stream: CodexLoopbackStream = {
       target: remote === undefined ? { kind: 'local' } : { kind: 'remote', client: remote.client },
       frames: [],
+      approvalHandles: new Set(),
       unsubscribe: () => undefined,
       close: async () => {
         if (remote === undefined) {
@@ -95,6 +96,14 @@ export class ClientCodexStreams {
 
   appendCodexFrame(stream: CodexLoopbackStream, data: unknown): void {
     if (!isRecord(data) || !isRecord(data.frame) || typeof data.frame.method !== 'string') return
+    const method = data.frame.method
+    if ((method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') && isRecord(data.frame.params)) {
+      const handle = data.frame.params.requestHandle
+      if (typeof handle === 'string' && handle.length > 0) {
+        if (stream.approvalHandles.has(handle)) return
+        stream.approvalHandles.add(handle)
+      }
+    }
     if (stream.frames.length >= 256) {
       stream.closed = 'overflow'
     } else {
@@ -130,6 +139,24 @@ export class ClientCodexStreams {
     if (typeof value.streamId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Codex stream is required.')
     const stream = this.context.codexStreams.get(value.streamId)
     if (stream === undefined) throw new ClientModeError('STREAM_NOT_FOUND', 'The Codex stream is not open.')
+    // The first poll means the loopback consumer is ready to receive frames.
+    if (stream.claim === undefined && stream.closed === undefined) {
+      stream.claim = (async () => {
+        try {
+          const result = stream.target.kind === 'remote'
+            ? await stream.target.client.rpc('codex.app.approvals.claim', { streamId: value.streamId })
+            : await this.context.host?.codexClaimApprovals?.({ streamId: value.streamId })
+          if (this.context.codexStreams.get(value.streamId as string) !== stream || stream.closed !== undefined) return
+          if (isRecord(result) && Array.isArray(result.frames)) {
+            for (const frame of result.frames) this.appendCodexFrame(stream, { frame })
+          }
+        } catch {
+          // Older Hosts do not implement claim; live frames remain available.
+        }
+      })()
+    }
+    await stream.claim
+    if (this.context.codexStreams.get(value.streamId) !== stream) throw new ClientModeError('STREAM_NOT_FOUND', 'The Codex stream is not open.')
     if (stream.frames.length === 0 && stream.closed === undefined) await waitForCodexFrames(stream, signal)
     const frames = stream.frames.splice(0, 100)
     return {

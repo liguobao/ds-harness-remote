@@ -140,6 +140,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       refreshAndPublishWorkspaces: (...args) => owner.refreshAndPublishWorkspaces(...args),
       get pendingApprovals() { return owner.pendingApprovals },
       emitApproval: (...args) => owner.events.emitApproval(...args),
+      cancelApproval: (...args) => owner.events.cancelApproval(...args),
       get imageAttachments() { return owner.imageAttachments },
       invalidateThreadHistory: threadId => owner.historyCache.invalidateThread(threadId),
     })

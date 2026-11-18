@@ -71,7 +71,6 @@ export async function probeRemoteHostFeatures(
     claude,
     ...(hermes ? { hermes: true } : {}),
     ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
-    ...(capabilities.has('agent.acp.opencode.archive.v1') ? { acpOpencodeArchive: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
     pluginRoute: capabilities.has('plugin.route.v1'),
   }

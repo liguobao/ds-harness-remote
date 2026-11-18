@@ -1,3 +1,4 @@
+export * from './huawei-push.js'
 export { LAN_UPLOAD_CAPABILITY, LAN_UPLOAD_MIN_BYTES, LAN_UPLOAD_TICKET_MS, LAN_UPLOAD_CONNECT_MS, lanUploadScopeSchema, lanUploadRequestSchema, lanUploadOfferSchema, isLanUploadAddress, validateLanUploadOffer, createLanUploadPrologue, type LanUploadOffer } from './lan-upload.js'
 export {
   TRANSPORT_UPGRADE_CAPABILITY,
@@ -202,6 +203,7 @@ export const rpcMethods = [
   'fileviewer.call',
   'codex.app.call',
   'codex.app.respond',
+  'codex.app.approvals.claim',
   'codex.app.stream.open',
   'codex.app.stream.close',
   'codex.app.transfer.open',
@@ -428,8 +430,6 @@ export interface ConnectIncomingPayload {
 }
 
 export interface ConnectAcceptedPayload {
-  webrtcFallbackTimeoutMs?: number
-  parallelConnections?: boolean
   relayRecoveryTicket?: string
   recoveryTicket?: string
   connectionId: string
@@ -1199,8 +1199,6 @@ export const connectIncomingPayloadSchema = z.object({
 })
 
 export const connectAcceptedPayloadSchema = z.object({
-  webrtcFallbackTimeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
-  parallelConnections: z.boolean().optional(),
   relayRecoveryTicket: z.string().min(1).max(4096).optional(),
   recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),

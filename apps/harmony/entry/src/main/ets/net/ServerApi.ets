@@ -484,7 +484,7 @@ export class RemoteServerApi {
       } else if (method === 'DELETE') {
         verb = http.RequestMethod.DELETE;
       } else if (method === 'PATCH') {
-        verb = http.RequestMethod.PATCH;
+        verb = 'PATCH' as http.RequestMethod;
       }
       const options: http.HttpRequestOptions = {
         method: verb,

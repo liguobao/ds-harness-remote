@@ -1,6 +1,10 @@
 import type { LanUploadHost } from './lan-upload.js'
+import type { HuaweiPushPeer, HuaweiPushRegistry } from './huawei-push-registry.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
 import {
+  HUAWEI_PUSH_CAPABILITY,
+  huaweiPushRegisterSchema,
+  huaweiPushUnregisterSchema,
   BINARY_UPLOAD_CAPABILITY,
   LAN_UPLOAD_CAPABILITY,
   createRpcError,
@@ -40,6 +44,8 @@ const compactionOperationSchema = z.object({
   operationId: z.string().uuid(),
 }).strict()
 const apiMethods = new Set([
+  'push.huawei.register',
+  'push.huawei.unregister',
   'harness.transport.describe',
   'remote.history.configure',
   'harness.remote.call',
@@ -57,6 +63,7 @@ const apiMethods = new Set([
   'fileviewer.call',
   'codex.app.call',
   'codex.app.respond',
+  'codex.app.approvals.claim',
   'codex.app.stream.open',
   'codex.app.stream.close',
   'codex.app.transfer.open',
@@ -122,6 +129,7 @@ export class RpcRouter {
     private readonly compaction?: RemoteCompactionRoute,
     private readonly lanUpload?: LanUploadHost,
     private readonly transportUpgrade?: TransportUpgradeHost,
+    private readonly huaweiPush?: { registry: HuaweiPushRegistry; peer: HuaweiPushPeer },
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -153,7 +161,7 @@ export class RpcRouter {
     const startedAt = performance.now()
     try {
       const result = await this.invoke(request.payload.method, request.payload.params)
-      const subMethod = typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
+      const subMethod = !request.payload.method.startsWith('push.huawei.') && typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
         ? String((request.payload.params as Record<string, unknown>).method)
         : undefined
       this.logger?.info('host rpc ok', {
@@ -165,6 +173,7 @@ export class RpcRouter {
     } catch (error: unknown) {
       const response = errorResponse(request.id, error)
       const failedEndpoint = !request.payload.method.startsWith('workspace.upload.')
+        && !request.payload.method.startsWith('push.huawei.')
         && typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
         ? String((request.payload.params as Record<string, unknown>).endpoint)
         : undefined
@@ -185,6 +194,18 @@ export class RpcRouter {
 
   private async invoke(method: string, params: unknown): Promise<unknown> {
     switch (method) {
+      case 'push.huawei.register': {
+        if (!this.huaweiPush) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Push registration is unavailable.')
+        const parsed = huaweiPushRegisterSchema.parse(params)
+        await this.huaweiPush.registry.register(this.huaweiPush.peer, parsed.token)
+        return { registered: true }
+      }
+      case 'push.huawei.unregister': {
+        if (!this.huaweiPush) throw new RpcError('FEATURE_NOT_SUPPORTED', 'Push registration is unavailable.')
+        huaweiPushUnregisterSchema.parse(params)
+        await this.huaweiPush.registry.unregister(this.huaweiPush.peer)
+        return { unregistered: true }
+      }
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
         const hostCapabilities = (await this.capabilities()).filter(capability => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY)
@@ -194,6 +215,7 @@ export class RpcRouter {
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
+          ...(this.huaweiPush === undefined ? [] : [HUAWEI_PUSH_CAPABILITY]),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
@@ -247,6 +269,7 @@ export class RpcRouter {
       }
       case 'codex.app.call': return this.requireCodex().call(params)
       case 'codex.app.respond': return this.requireCodex().respond(params)
+      case 'codex.app.approvals.claim': return this.requireCodex().claimApprovals(params)
       case 'codex.app.stream.open': return this.requireCodex().openStream(params)
       case 'codex.app.stream.close': return this.requireCodex().closeStream(params)
       case 'codex.app.transfer.open': return this.requireCodex().openTransfer(params)

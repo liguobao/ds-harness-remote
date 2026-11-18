@@ -1,29 +1,48 @@
 import { KeyboardAvoidMode, UIContext, display, window, promptAction } from '@kit.ArkUI';
 import { KeyCode } from '@ohos.multimodalInput.keyCode';
-import lazy { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
+import { pdfService, pdfViewManager, PdfView } from '@kit.PDFKit';
 import { common, Want } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
-import { AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
+import { AgentTeamMember, AgentTeamTask, AppRuntime, ChatItem, ChatQuestion, DEFAULT_SERVER_URL, DEFAULT_ACCOUNT, PHASE_BOOT, PHASE_CHAT,
   PHASE_CONNECTING, PHASE_DEVICES, PHASE_SETUP, ModelOption, SlashCommand,
   getAppRuntime, errorMessage, maskSecrets } from '../services/AppRuntime';
 import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
-import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
-import { applyTint, darkPalette, lightPalette, Palette } from '../services/Theme';
+import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery, HarnessTurnSummary } from '../net/HarnessClient';
+import { applyTint, darkPalette, iconTintFilter, lightPalette, Palette } from '../services/Theme';
 import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import {
   Breakpoint, FoldState, breakpointOf, contentColumnWidth, deviceColumns, foldStateOf,
   isCompactWidth, isExpandedWidth, mascotVisible
 } from '../services/Adaptive';
-import { PickedImage, compressPixelMap, pickImages } from '../services/ImagePicker';
+import { PickedImage, PickedFile, compressPixelMap, pickImages, pickDocuments, takePhoto } from '../services/ImagePicker';
 import { SavedProfile } from '../services/SecureStore';
 import { PromptImagePart } from '../net/HarnessClient';
+import { AgentPresetOption, SkillEntry, WorkspaceFileRef } from '../net/SessionToolsClient';
 import { RtcBridge } from '../services/RtcBridge';
 import { heartbeatBodyOf } from '../services/Heartbeat';
+import { BotAvatar } from '../components/BotAvatar';
+import { botOutlinePreview } from '../util/BotPreview';
 import { isVisibleSession } from '../util/SessionVisibility';
+import { WorkspaceGroup, formatRelativeShort, groupSessionsByWorkspace } from '../util/WorkspaceGrouping';
+import { backendDisplayName, backendOfSessionId } from '../services/BackendsRouter';
+import {
+  BackendPickerSheet, ChatActionMenuSheet, DrawerOverflowMenu, SessionInfoSheet, backendPillShort
+} from '../components/AndroidMenusAndSheets';
+import { RichCodeBlockCard, RichMathBlockCard, RichTableBlockCard } from '../components/RichMessageView';
+import { WorkspaceFilesSheet } from '../components/WorkspaceFilesSheet';
+import { TerminalSheet } from '../components/TerminalSheet';
+import { ActivityDockSheet, PluginsAndSettingsSheet, TodoEntry } from '../components/ProductivitySheets';
+import { IntelligentUiArtifactCard } from '../components/IntelligentUiCard';
+import { BotModeView } from '../components/BotModeView';
+import { BotEntry, BotRoom, BotStateSnapshot } from '../net/BotClient';
+import { UI_TOOLS } from '../util/UiArtifacts';
+import { MentionToken, RichBlock, detectMention, fileMentionText, filterMentionItems,
+  formatQuoteDraftSnippet, formatQuoteText, parseRichBlocks, sessionMentionText } from '../util/MentionAndQuote';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
@@ -89,6 +108,40 @@ struct Index {
   @State pendingImages: PickedImage[] = [];
   /** 正在取图/压缩。 */
   @State pickingImages: boolean = false;
+  @State pendingFiles: PickedFile[] = [];
+  @State pickingFiles: boolean = false;
+  @State replyQuoteText: string = '';
+  @State compacting: boolean = false;
+  @State compactionMessage: string = '';
+  @State agentPresets: AgentPresetOption[] = [];
+  @State currentAgentPreset: string = '';
+  @State feedbackVersion: number = 0;
+  @State skillsCatalog: SkillEntry[] = [];
+  @State workspaceFileRefs: WorkspaceFileRef[] = [];
+  @State workspaceFilesOpen: boolean = false;
+  @State terminalOpen: boolean = false;
+  @State activityOpen: boolean = false;
+  @State pluginsOpen: boolean = false;
+  @State scheduleCreateOpen: boolean = false;
+  @State newSchedTitle: string = '';
+  @State newSchedCron: string = '0 9 * * *';
+  @State newSchedPrompt: string = '';
+  @State availableBackends: string[] = ['harness'];
+  @State selectedBackend: string = 'harness';
+  @State backendFilter: string = 'all';
+  @State botMode: boolean = false;
+  @State botCreateRequestVersion: number = 0;
+  @State drawerTab: string = 'agent';
+  @State botRosterFilter: string = 'all';
+  @State rosterBotList: BotEntry[] = [];
+  @State rosterRoomList: BotRoom[] = [];
+  @State rosterBusyIds: string[] = [];
+  @State botRosterSearch: string = '';
+  @State botStateVersion: number = 0;
+  @State botLoading: boolean = false;
+  @State botError: string = '';
+  @State selectedBotTargetId: string = '';
+  @State uiArtifactsVersion: number = 0;
   @State connectStage: string = '';
   /** 诊断用：设备型号（读不到就给 unknown）。 */
   private deviceModelLabel(): string {
@@ -110,6 +163,14 @@ struct Index {
   @State showModelPicker: boolean = false;
   /** 顶栏齿轮打开的面板。 */
   @State showSessionPanel: boolean = false;
+  @State backendPickerOpen: boolean = false;
+  @State drawerMenuOpen: boolean = false;
+  @State chatActionMenuOpen: boolean = false;
+  @State sessionInfoOpen: boolean = false;
+  @State drawerSearchOpen: boolean = false;
+  @State drawerFilterOpen: boolean = false;
+  @State expandedWorkspaceIds: string[] = [];
+  @State showAllWorkspaceIds: string[] = [];
   @State modelOptions: ModelOption[] = [];
   @State currentModelLabel: string = '';
   @State currentModelProvider: string = '';
@@ -156,15 +217,27 @@ struct Index {
   /** 预览的是不是 PDF（走系统 PDF Kit 渲染）。 */
   @State previewIsPdf: boolean = false;
   @State pdfError: string = '';
-  private pdfController?: pdfViewManager.PdfController;
+  private pdfController: pdfViewManager.PdfController = new pdfViewManager.PdfController();
   /** 消息操作面板（自绘，替代系统 ActionSheet）。 */
   @State messageActionsOpen: boolean = false;
+  @State messageActionId: string = '';
   @State messageActionText: string = '';
   @State messageActionKind: string = '';
   @State messageActionSeq: number = 0;
   @State messageActionTime: number = 0;
   /** 该消息里所有代码块拼起来的内容，空串表示没有代码。 */
   @State messageActionCode: string = '';
+  @State showModePicker: boolean = false;
+  @State agentTeamMembers: AgentTeamMember[] = [];
+  @State agentTeamTasks: AgentTeamTask[] = [];
+  @State agentTeamExpanded: boolean = false;
+  @State todosList: TodoEntry[] = [];
+  @State checklistExpanded: boolean = false;
+  @State subagentsModalOpen: boolean = false;
+  @State expandedActivityKeys: string[] = [];
+  @State recentGroupExpanded: boolean = false;
+  @State streamPulseStep: number = 0;
+  private streamPulseTimer: number = -1;
   /** 设备详情面板（点 ⋯ 菜单里的「查看详情」打开）。 */
   @State deviceDetailId: string = '';
   /** 会话列表只看收藏。 */
@@ -368,6 +441,22 @@ struct Index {
       this.schedulesOpen = false;
       return true;
     }
+    if (this.workspaceFilesOpen) {
+      this.workspaceFilesOpen = false;
+      return true;
+    }
+    if (this.terminalOpen) {
+      this.terminalOpen = false;
+      return true;
+    }
+    if (this.activityOpen) {
+      this.activityOpen = false;
+      return true;
+    }
+    if (this.pluginsOpen) {
+      this.pluginsOpen = false;
+      return true;
+    }
     if (this.tintPickerOpen) {
       this.tintPickerOpen = false;
       return true;
@@ -390,6 +479,13 @@ struct Index {
     }
     if (this.choiceOpen) {
       this.choiceOpen = false;
+      return true;
+    }
+    if (this.chatActionMenuOpen || this.sessionInfoOpen || this.backendPickerOpen || this.drawerMenuOpen) {
+      this.chatActionMenuOpen = false;
+      this.sessionInfoOpen = false;
+      this.backendPickerOpen = false;
+      this.drawerMenuOpen = false;
       return true;
     }
     if (this.showServerSwitch || this.showMoreMenu || this.showModelPicker
@@ -545,6 +641,14 @@ struct Index {
     this.loadingOlderHistory = this.runtime.loadingOlderHistory;
     this.messages = this.runtime.messages.slice();
     this.generating = this.runtime.generating;
+    if (this.generating && this.streamPulseTimer < 0) {
+      this.streamPulseTimer = setInterval(() => {
+        this.streamPulseStep = (this.streamPulseStep + 1) % 3;
+      }, 300);
+    } else if (!this.generating && this.streamPulseTimer >= 0) {
+      clearInterval(this.streamPulseTimer);
+      this.streamPulseTimer = -1;
+    }
     this.currentSessionId = this.runtime.currentSessionId;
     this.currentSessionTitle = this.runtime.currentSessionTitle;
     this.infoMsg = '';
@@ -571,10 +675,31 @@ struct Index {
       }
     }
     this.slashCommands = this.runtime.slashCommands;
+    this.skillsCatalog = this.runtime.skillsCatalog.slice();
+    this.workspaceFileRefs = this.runtime.workspaceFileRefs.slice();
+    this.compacting = this.runtime.compacting;
+    this.compactionMessage = this.runtime.compactionMessage;
+    this.agentPresets = this.runtime.agentPresets.slice();
+    this.currentAgentPreset = this.runtime.currentAgentPreset;
+    this.feedbackVersion = this.runtime.feedbackVersion;
+    this.availableBackends = this.runtime.availableBackends.slice();
+    this.selectedBackend = this.runtime.selectedBackend;
+    this.botMode = this.runtime.botMode;
+    this.botStateVersion = this.runtime.botStateVersion;
+    this.rosterBotList = this.runtime.botState.bots.slice();
+    this.rosterRoomList = this.runtime.botState.rooms.slice();
+    this.rosterBusyIds = this.runtime.botState.busyBotIds.concat(this.runtime.botState.busyRoomIds);
+    this.botLoading = this.runtime.botLoading;
+    this.botError = this.runtime.botError;
+    this.selectedBotTargetId = this.runtime.selectedBotTargetId;
+    this.uiArtifactsVersion = this.runtime.uiArtifactsVersion;
     this.modelOptions = this.runtime.modelOptions;
     this.currentModelLabel = this.runtime.currentModelLabel;
     this.currentModelProvider = this.runtime.currentModelProvider;
     this.currentModelEffort = this.runtime.currentModelEffort;
+    this.agentTeamMembers = this.runtime.agentTeamMembers.slice();
+    this.agentTeamTasks = this.runtime.agentTeamTasks.slice();
+    this.todosList = this.runtime.todosList.slice();
     this.textScaleMode = this.runtime.textScaleMode;
     this.profilesList = this.runtime.profiles.slice();
     this.textScaleValue = this.runtime.textScale();
@@ -734,17 +859,24 @@ struct Index {
   }
 
   private sendTap(): void {
-    if (this.phase !== PHASE_CHAT || this.reconnecting) {
+    if (this.reconnecting) {
       promptAction.showToast({ message: this.tr('正在重连，连上后再发') });
       return;
     }
-    const text: string = this.promptInput;
+    const rawText: string = this.promptInput;
+    const quote: string = this.replyQuoteText;
+    const text: string = quote.length > 0
+      ? (rawText.trim().length > 0 ? formatQuoteText(quote) + '\n\n' + rawText : formatQuoteText(quote))
+      : rawText;
     const picked: PickedImage[] = this.pendingImages;
-    if (text.trim().length === 0 && picked.length === 0) {
+    const pickedFiles: PickedFile[] = this.pendingFiles;
+    if (text.trim().length === 0 && picked.length === 0 && pickedFiles.length === 0) {
       return;
     }
     this.promptInput = '';
+    this.replyQuoteText = '';
     this.pendingImages = [];
+    this.pendingFiles = [];
     const parts: PromptImagePart[] = [];
     for (const image of picked) {
       const part: PromptImagePart = new PromptImagePart();
@@ -755,7 +887,11 @@ struct Index {
     }
     // 发出去就把草稿清掉：onChange 不会因为代码里清空而触发，不清的话切回来还是这段文字
     this.runtime.saveDraft(this.currentSessionId, '');
-    this.runtime.sendPrompt(text, parts);
+    if (pickedFiles.length > 0) {
+      this.uploadAndSendPrompt(text, parts, pickedFiles);
+    } else {
+      this.runtime.sendPrompt(text, parts);
+    }
     // 发送后输入框会从多行缩回单行、坞跟着变矮。必须等这一帧布局落定再滚，
     // 否则滚动是按旧高度算的，收回去之后新消息就矮到坞后面去了。
     this.stickToBottom = true;
@@ -767,6 +903,102 @@ struct Index {
         this.scrollChatToBottom();
       }
     }, 240);
+  }
+
+  private async uploadAndSendPrompt(text: string, parts: PromptImagePart[],
+    pickedFiles: PickedFile[]): Promise<void> {
+    const receiptIds: string[] = [];
+    const fileLabels: string[] = [];
+    for (const pf of pickedFiles) {
+      try {
+        const receipt = await this.runtime.stagePromptFile(pf.name, pf.base64);
+        if (receipt !== undefined && receipt.receiptId.length > 0) {
+          receiptIds.push(receipt.receiptId);
+          fileLabels.push(receipt.name.length > 0 ? receipt.name : pf.name);
+        }
+      } catch (error) {
+        this.errorMsg = error instanceof Error ? error.message : String(error);
+      }
+    }
+    await this.runtime.sendPrompt(text, parts, receiptIds, fileLabels);
+  }
+
+  private attachDocumentFile(): void {
+    if (this.pickingFiles) {
+      return;
+    }
+    this.pickingFiles = true;
+    const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    pickDocuments(3, context).then((picked: PickedFile[]) => {
+      this.pickingFiles = false;
+      if (picked.length > 0) {
+        this.pendingFiles = this.pendingFiles.concat(picked);
+        promptAction.showToast({ message: this.tr('已附加文件') });
+      }
+    }).catch((error: Error) => {
+      this.pickingFiles = false;
+      this.errorMsg = error.message;
+    });
+  }
+
+  private removePendingFile(index: number): void {
+    const next: PickedFile[] = this.pendingFiles.slice();
+    if (index >= 0 && index < next.length) {
+      next.splice(index, 1);
+      this.pendingFiles = next;
+    }
+  }
+
+  private activeMention(): MentionToken | undefined {
+    return detectMention(this.promptInput, this.promptInput.length);
+  }
+
+  private mergedCommandEntries(query: string): SlashCommand[] {
+    const all: SlashCommand[] = [];
+    const seen: Set<string> = new Set();
+    for (const cmd of this.slashCommands) {
+      all.push(cmd);
+      seen.add(cmd.name);
+    }
+    for (const sk of this.skillsCatalog) {
+      const cmdName: string = '/' + sk.name;
+      if (!seen.has(cmdName)) {
+        const sc = new SlashCommand();
+        sc.name = cmdName;
+        sc.description = (sk.description.length > 0 ? sk.description + ' · ' : '') + this.tr('技能');
+        all.push(sc);
+        seen.add(cmdName);
+      }
+    }
+    return filterMentionItems(all, query, (c: SlashCommand) => [c.name, c.description]);
+  }
+
+  private filteredSessionRefs(query: string): HarnessRemoteSession[] {
+    const candidates: HarnessRemoteSession[] = [];
+    for (const s of this.sessions) {
+      if (s.sessionId !== this.currentSessionId
+        && isVisibleSession(s.sessionId, s.blank, s.origin, this.currentSessionId, '')) {
+        candidates.push(s);
+      }
+    }
+    return filterMentionItems(candidates, query, (s: HarnessRemoteSession) => [s.title, s.cwd, s.sessionId]).slice(0, 12);
+  }
+
+  private filteredFileRefs(query: string): WorkspaceFileRef[] {
+    return filterMentionItems(this.workspaceFileRefs, query, (r: WorkspaceFileRef) => [r.path]).slice(0, 20);
+  }
+
+  private insertMentionReplacement(token: MentionToken, replacement: string): void {
+    const head: string = this.promptInput.slice(0, token.start);
+    this.promptInput = head + replacement;
+    this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+  }
+
+  private mdLineForBlock(blk: RichBlock): MdLine {
+    const line = new MdLine();
+    line.imageSrc = blk.imageSrc;
+    line.imageAlt = blk.imageAlt;
+    return line;
   }
 
   /** 从剪贴板取图：有图片就压一下挂到待发送区，没有就什么也不做。 */
@@ -829,6 +1061,182 @@ struct Index {
     const next: PickedImage[] = this.pendingImages.slice();
     next.splice(index, 1);
     this.pendingImages = next;
+  }
+
+  private captureCameraPhoto(): Promise<void> {
+    if (this.pickingImages) {
+      return Promise.resolve();
+    }
+    this.pickingImages = true;
+    const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    return takePhoto(context).then((picked: PickedImage[]) => {
+      this.pickingImages = false;
+      if (picked.length > 0) {
+        this.pendingImages = this.pendingImages.concat(picked);
+      }
+    }).catch((error: Error) => {
+      this.pickingImages = false;
+      this.errorMsg = this.tr('图片读取失败：') + error.message;
+    });
+  }
+
+  private recentDrawerSessions(): HarnessRemoteSession[] {
+    const visible = this.visibleSessions();
+    if (visible.length === 0) return [];
+    const pinned: HarnessRemoteSession[] = [];
+    const ordinary: HarnessRemoteSession[] = [];
+    for (const s of visible) {
+      if (this.pinnedIds.indexOf(s.sessionId) >= 0) {
+        pinned.push(s);
+      } else {
+        ordinary.push(s);
+      }
+    }
+    const merged: HarnessRemoteSession[] = pinned.concat(ordinary);
+    return merged.slice(0, 5);
+  }
+
+  private workspaceGroups(): WorkspaceGroup[] {
+    const wsFiltered: HarnessWorkspace[] = this.backendFilter === 'all' ? this.workspaces
+      : this.workspaces.filter((w: HarnessWorkspace): boolean => {
+        const cut: number = w.workspaceId.indexOf(':cwd:');
+        const bk: string = cut > 0 ? w.workspaceId.slice(0, cut) : 'harness';
+        return bk === this.backendFilter;
+      });
+    return groupSessionsByWorkspace(
+      wsFiltered,
+      this.visibleSessions(),
+      this.currentSessionId,
+      this.selectedWorkspaceId
+    );
+  }
+
+  private isWorkspaceExpanded(group: WorkspaceGroup): boolean {
+    if (this.expandedWorkspaceIds.indexOf(group.workspaceId) >= 0) {
+      return true;
+    }
+    return this.expandedWorkspaceIds.length === 0 && group.hasCurrent;
+  }
+
+  private toggleWorkspaceExpanded(group: WorkspaceGroup): void {
+    const currentList: string[] = this.expandedWorkspaceIds.slice();
+    if (currentList.length === 0) {
+      for (const g of this.workspaceGroups()) {
+        if (g.hasCurrent) {
+          currentList.push(g.workspaceId);
+        }
+      }
+    }
+    const idx: number = currentList.indexOf(group.workspaceId);
+    if (idx >= 0) {
+      currentList.splice(idx, 1);
+    } else {
+      currentList.push(group.workspaceId);
+    }
+    this.expandedWorkspaceIds = currentList.length > 0 ? currentList : ['__none__'];
+  }
+
+  private isWorkspaceShowingAll(workspaceId: string): boolean {
+    return this.showAllWorkspaceIds.indexOf(workspaceId) >= 0;
+  }
+
+  private visibleGroupSessions(group: WorkspaceGroup): HarnessRemoteSession[] {
+    if (this.isWorkspaceShowingAll(group.workspaceId) || this.sessionSearchActive) {
+      return group.sessions;
+    }
+    return group.sessions.slice(0, 3);
+  }
+
+  private toggleWorkspaceShowAll(workspaceId: string): void {
+    const next: string[] = this.showAllWorkspaceIds.slice();
+    const idx: number = next.indexOf(workspaceId);
+    if (idx >= 0) {
+      next.splice(idx, 1);
+    } else {
+      next.push(workspaceId);
+    }
+    this.showAllWorkspaceIds = next;
+  }
+
+  private currentWorkspaceGroup(): WorkspaceGroup | undefined {
+    const groups: WorkspaceGroup[] = this.workspaceGroups();
+    for (const g of groups) {
+      if (g.hasCurrent) {
+        return g;
+      }
+    }
+    return groups.length > 0 ? groups[0] : undefined;
+  }
+
+  private currentWorkspaceTitle(): string {
+    const g: WorkspaceGroup | undefined = this.currentWorkspaceGroup();
+    if (g !== undefined && g.title.length > 0) {
+      return g.title;
+    }
+    const s: HarnessRemoteSession | undefined = this.currentSessionInfo();
+    return s !== undefined && s.cwd.length > 0 ? cwdTail(s.cwd) : 'default-workspace';
+  }
+
+  private currentWorkspacePath(): string {
+    const g: WorkspaceGroup | undefined = this.currentWorkspaceGroup();
+    if (g !== undefined && g.path.length > 0) {
+      return g.path;
+    }
+    const s: HarnessRemoteSession | undefined = this.currentSessionInfo();
+    return s !== undefined ? s.cwd : '';
+  }
+
+  private currentWorkspaceCount(): number {
+    const g: WorkspaceGroup | undefined = this.currentWorkspaceGroup();
+    return g !== undefined ? g.totalCount : this.visibleSessions().length;
+  }
+
+  private currentWorkspaceType(): string {
+    const bk: string = this.currentSessionId.length > 0
+      ? backendOfSessionId(this.currentSessionId) : this.selectedBackend;
+    if (bk === 'harness') {
+      return 'DSH';
+    }
+    return backendDisplayName(bk);
+  }
+
+  private openWorkspaceMenu(group: WorkspaceGroup): void {
+    const ws: HarnessWorkspace | undefined = group.workspace;
+    if (ws === undefined) {
+      return;
+    }
+    ActionSheet.show({
+      title: group.title,
+      message: group.path,
+      sheets: [
+        {
+          title: this.tr('设为默认工作区'),
+          action: () => {
+            this.runtime.setSelectedWorkspace(ws.workspaceId);
+          }
+        },
+        {
+          title: this.tr('浏览文件'),
+          action: () => {
+            this.showBrowser = true;
+            this.runtime.openWorkspace(ws.workspaceId);
+          }
+        },
+        {
+          title: this.tr('重命名'),
+          action: () => {
+            this.editingWorkspaceId = ws.workspaceId;
+            this.workspaceTitleInput = ws.title;
+          }
+        },
+        {
+          title: this.tr('删除工作区'),
+          action: () => {
+            this.runtime.deleteWorkspace(ws.workspaceId);
+          }
+        }
+      ]
+    });
   }
 
   /** Display name of a host device: user alias wins over the server-registered name. */
@@ -1163,6 +1571,9 @@ struct Index {
       if (this.workspaceFilter.length > 0 && session.cwd !== this.workspaceFilter) {
         continue;
       }
+      if (this.backendFilter !== 'all' && backendOfSessionId(session.sessionId) !== this.backendFilter) {
+        continue;
+      }
       const archived: boolean = this.isArchivedSession(session.sessionId);
       if (archived && !this.showArchived && !this.sessionSearchActive) {
         continue;
@@ -1330,7 +1741,10 @@ struct Index {
 
   private drawerWidthVp(): number {
     const w: number = this.windowWidthVp > 0 ? this.windowWidthVp : 360;
-    return Math.round(w * 0.82);
+    if (isCompactWidth(this.breakpoint)) {
+      return Math.round(w);
+    }
+    return Math.round(Math.min(420, w * 0.82));
   }
 
   /** 松手后归位：过阈值就滑到底，否则弹回并卸载。 */
@@ -1698,35 +2112,7 @@ struct Index {
     if (key === this.chatRowsKey) {
       return this.chatRowsCache;
     }
-    const rows: ChatItem[] = [];
-    let index: number = 0;
-    while (index < source.length) {
-      const item: ChatItem = source[index];
-      if (item.kind !== 'tool') {
-        rows.push(item);
-        index += 1;
-        continue;
-      }
-      let end: number = index;
-      while (end < source.length && source[end].kind === 'tool') {
-        end += 1;
-      }
-      const count: number = end - index;
-      if (count < 2) {
-        rows.push(item);
-        index = end;
-        continue;
-      }
-      const head: ChatItem = source[index];
-      const expanded: boolean = this.isRunExpanded(head.id);
-      rows.push(this.toolRunItem(source, index, end, expanded));
-      if (expanded) {
-        for (let cursor: number = index; cursor < end; cursor += 1) {
-          rows.push(source[cursor]);
-        }
-      }
-      index = end;
-    }
+    const rows: ChatItem[] = source.slice();
     const merged: ChatItem[] = this.mergeAssistantRows(rows);
     this.chatRowsKey = key;
     this.chatRowsCache = merged;
@@ -1955,21 +2341,21 @@ struct Index {
         Column()
           .width('100%')
           .height('100%')
-          .radialGradient({ center: ['50%', '0%'], radius: '70%',
-            colors: [[this.isDarkUi ? 'rgba(77,107,254,0.18)' : 'rgba(77,107,254,0.10)', 0],
-              ['rgba(77,107,254,0)', 1]] })
-        Column()
-          .width('100%')
-          .height('100%')
-          .radialGradient({ center: ['50%', '100%'], radius: '58%',
-            colors: [[this.isDarkUi ? 'rgba(34,211,238,0.26)' : 'rgba(34,211,238,0.24)', 0],
-              ['rgba(34,211,238,0)', 1]] })
-        Column()
-          .width('100%')
-          .height('100%')
-          .radialGradient({ center: ['18%', '88%'], radius: '42%',
-            colors: [[this.isDarkUi ? 'rgba(147,97,255,0.18)' : 'rgba(147,97,255,0.12)', 0],
-              ['rgba(147,97,255,0)', 1]] })
+          .backgroundColor(this.pal().bg)
+        if (this.phase !== PHASE_CHAT) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .radialGradient({ center: ['50%', '0%'], radius: '70%',
+              colors: [[this.isDarkUi ? 'rgba(77,107,254,0.16)' : 'rgba(77,107,254,0.08)', 0],
+                ['rgba(77,107,254,0)', 1]] })
+          Column()
+            .width('100%')
+            .height('100%')
+            .radialGradient({ center: ['50%', '100%'], radius: '58%',
+              colors: [[this.isDarkUi ? 'rgba(77,107,254,0.14)' : 'rgba(77,107,254,0.10)', 0],
+                ['rgba(77,107,254,0)', 1]] })
+        }
       }
       // 背景层用绝对定位铺满整个窗口（含上下安全区），
       // 否则根容器的 padding 会把渐变内缩，底栏下方那块留白露出纯色底，突然后一块白
@@ -1986,6 +2372,48 @@ struct Index {
           this.DevicesScreen()
         } else if (this.phase === PHASE_CONNECTING) {
           this.ConnectingScreen()
+        } else if (this.botMode) {
+          BotModeView({
+            botClient: this.runtime.botClient,
+            readState: (): BotStateSnapshot => this.runtime.botState,
+            stateVersion: this.botStateVersion,
+            createRequestVersion: this.botCreateRequestVersion,
+            onCreateRequestHandled: () => {
+              this.botCreateRequestVersion = 0;
+            },
+            onCreateBotPart: async (botId: string): Promise<void> => {
+              await this.runtime.createBotPart(botId);
+            },
+            onStopBot: async (targetId: string, sessionId: string): Promise<void> => {
+              await this.runtime.stopBotGeneration(targetId, sessionId);
+            },
+            selectedTargetId: this.selectedBotTargetId,
+            messages: this.messages,
+            generating: this.generating,
+            loading: this.botLoading,
+            errorMsg: this.botError,
+            fontScale: this.textScaleValue,
+            dark: this.isDarkUi,
+            pal: this.pal(),
+            onSwitchAgentMode: () => {
+              this.drawerTab = 'agent';
+              this.runtime.setBotMode(false);
+            },
+            onOpenDrawer: () => {
+              this.drawerTab = 'bot';
+              this.runtime.loadBotRoster();
+              this.openDrawer();
+            },
+            onSelectTarget: (targetId: string, sessionId: string) => {
+              this.runtime.selectBotTarget(targetId, sessionId);
+            },
+            onRefreshState: () => {
+              this.runtime.refreshBotState();
+            },
+            onSendMessage: async (targetId: string, text: string) => {
+              await this.runtime.sendBotMessage(targetId, text);
+            }
+          })
         } else {
           if (this.showThreePane()) {
             Row() {
@@ -2129,6 +2557,70 @@ struct Index {
       if (this.schedulesOpen) {
         this.SchedulesOverlay()
       }
+      if (this.agentTeamExpanded && this.agentTeamMembers.length > 0) {
+        this.AgentTeamOverlay()
+      }
+      if (this.subagentsModalOpen && this.subagentSessions().length > 0) {
+        this.SubagentsOverlay()
+      }
+      if (this.workspaceFilesOpen) {
+        WorkspaceFilesSheet({
+          tools: this.runtime.sessionTools,
+          sessionId: this.currentSessionId,
+          dark: this.isDarkUi,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onClose: () => {
+            this.workspaceFilesOpen = false;
+          },
+          onInsertMention: (path: string, isDir: boolean) => {
+            const mention = fileMentionText(path, isDir);
+            if (mention !== undefined) {
+              this.promptInput = (this.promptInput.length > 0 && !/\s$/.test(this.promptInput)
+                ? this.promptInput + ' ' : this.promptInput) + mention;
+              this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+            }
+          }
+        })
+      }
+      if (this.terminalOpen) {
+        TerminalSheet({
+          tools: this.runtime.sessionTools,
+          sessionId: this.currentSessionId,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onClose: () => {
+            this.terminalOpen = false;
+          }
+        })
+      }
+      if (this.activityOpen) {
+        ActivityDockSheet({
+          tools: this.runtime.sessionTools,
+          sessionId: this.currentSessionId,
+          todos: this.runtime.todosList,
+          subagents: this.sessions.filter((s: HarnessRemoteSession) => s.origin === 'subagent'),
+          queueItems: this.runtime.queueItems,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onClose: () => {
+            this.activityOpen = false;
+          },
+          onOpenSession: (sid: string) => {
+            this.runtime.openSession(sid);
+          }
+        })
+      }
+      if (this.pluginsOpen) {
+        PluginsAndSettingsSheet({
+          tools: this.runtime.sessionTools,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onClose: () => {
+            this.pluginsOpen = false;
+          }
+        })
+      }
       if (this.sendModeOpen) {
         this.SendModeOverlay()
       }
@@ -2155,6 +2647,139 @@ struct Index {
       }
       if (this.deviceMenuId.length > 0) {
         this.DeviceMenuOverlay()
+      }
+      if (this.chatActionMenuOpen) {
+        ChatActionMenuSheet({
+          workspaceLabel: this.currentWorkspaceTitle(),
+          modeLabel: '',
+          permissionPreset: this.permissionPreset,
+          agentPresets: this.agentPresets,
+          currentAgentPreset: this.currentAgentPreset,
+          workspaces: this.workspaces,
+          selectedWorkspaceId: this.selectedWorkspaceId,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onTakePhoto: () => {
+            this.captureCameraPhoto();
+          },
+          onPickAlbum: () => {
+            this.attachImage();
+          },
+          onPickFile: () => {
+            this.attachDocumentFile();
+          },
+          onQuoteSession: () => {
+            const prefix: string = this.promptInput.length > 0 && !this.promptInput.endsWith(' ')
+              ? this.promptInput + ' @' : this.promptInput + '@';
+            this.promptInput = prefix;
+            this.runtime.loadWorkspaceFileRefs(this.currentSessionId);
+          },
+          onSelectWorkspace: (workspaceId: string) => {
+            this.runtime.setSelectedWorkspace(workspaceId);
+          },
+          onSelectMode: (presetId: string) => {
+            this.runtime.selectAgentPreset(presetId);
+          },
+          onOpenWorkspaceFiles: () => {
+            this.workspaceFilesOpen = true;
+          },
+          onOpenTerminal: () => {
+            this.terminalOpen = true;
+          },
+          onOpenActivity: () => {
+            this.activityOpen = true;
+          },
+          onSelectPermission: (preset: string) => {
+            this.runtime.selectPermission(preset);
+          },
+          onClose: () => {
+            this.chatActionMenuOpen = false;
+          }
+        })
+      }
+      if (this.sessionInfoOpen) {
+        SessionInfoSheet({
+          sessionTitle: this.currentSessionTitle,
+          workspaceTitle: this.currentWorkspaceTitle(),
+          hostName: this.connectedHostDisplay(),
+          workspaceType: this.currentWorkspaceType(),
+          workspacePath: this.currentWorkspacePath(),
+          sessionCount: this.currentWorkspaceCount(),
+          transportLabel: this.transportBadgeText(),
+          modelLabel: this.modelSummary(),
+          contextPercent: this.contextPercent,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onPickModel: () => {
+            this.runtime.refreshModelCatalog();
+            this.showModelPicker = true;
+          },
+          onRename: () => {
+            if (this.currentSessionId.length > 0) {
+              this.sessionTitleInput = this.currentSessionTitle;
+              this.renamingSession = true;
+            }
+          },
+          onCompact: () => {
+            this.runtime.sendPrompt('/compact');
+          },
+          onExportMarkdown: () => {
+            const data: pasteboard.PasteData = pasteboard.createData(
+              pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.sessionMarkdown());
+            pasteboard.getSystemPasteboard().setData(data).then(() => {
+              promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
+            }).catch(() => {
+              promptAction.showToast({ message: this.tr('复制失败') });
+            });
+          },
+          onSwitchHost: () => {
+            this.runtime.keepAliveToDevices();
+          },
+          onClose: () => {
+            this.sessionInfoOpen = false;
+          }
+        })
+      }
+      if (this.backendPickerOpen) {
+        BackendPickerSheet({
+          availableBackends: this.availableBackends,
+          selectedBackend: this.selectedBackend,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onSelect: (bk: string) => {
+            this.backendFilter = bk;
+            this.runtime.setSelectedBackend(bk);
+          },
+          onClose: () => {
+            this.backendPickerOpen = false;
+          }
+        })
+      }
+      if (this.drawerMenuOpen) {
+        DrawerOverflowMenu({
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          updateBadge: false,
+          onPlugins: () => {
+            this.pluginsOpen = true;
+          },
+          onSchedules: () => {
+            this.schedulesOpen = true;
+            this.runtime.loadSchedules();
+          },
+          onSettings: () => {
+            this.showSettings = true;
+          },
+          onAbout: () => {
+            this.diagnosticsOpen = true;
+          },
+          onCheckUpdate: () => {
+            promptAction.showToast({ message: this.tr('当前已是最新版本') + ` (v${appVersion})` });
+          },
+          onClose: () => {
+            this.drawerMenuOpen = false;
+          }
+        })
       }
       if (this.choiceOpen) {
         this.ChoiceSheetOverlay()
@@ -3911,57 +4536,212 @@ struct Index {
     })
   }
 
+  private connectingDevice(): RemoteHostDevice | undefined {
+    const id = this.connectedDeviceId;
+    for (const d of this.devices) {
+      if (d.deviceId === id) return d;
+    }
+    return this.devices.length > 0 ? this.devices[0] : undefined;
+  }
+
+  private connectingStepIndex(): number {
+    const stage = this.connectStage;
+    if (stage.indexOf('读取主机信息') >= 0 || stage.indexOf('检查主机在线') >= 0) return 0;
+    if (stage.indexOf('直连') >= 0 || stage.indexOf('路径') >= 0) return 1;
+    if (stage.indexOf('加密通道') >= 0 || stage.indexOf('主机能力') >= 0) return 2;
+    if (stage.indexOf('订阅') >= 0 || stage.indexOf('工作区') >= 0) return 3;
+    return this.connectElapsedSec < 2 ? 0 : 2;
+  }
+
+  @Builder
+  ConnectingStepRow(stepIdx: number, activeIdx: number, title: string, subtitle: string, isRouteRow: boolean, hasNext: boolean) {
+    Row({ space: 14 }) {
+      Column() {
+        Stack() {
+          Column()
+            .width(30)
+            .height(30)
+            .borderRadius(15)
+            .backgroundColor(stepIdx <= activeIdx ? '#3B66F5' : this.pal().chip)
+            .border({ width: stepIdx <= activeIdx ? 0 : 1, color: this.pal().borderStrong })
+          if (stepIdx < activeIdx) {
+            Text('✓')
+              .fontSize(14)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#FFFFFF')
+          } else if (stepIdx === activeIdx) {
+            LoadingProgress()
+              .width(18)
+              .height(18)
+              .color('#FFFFFF')
+          } else {
+            Text(String(stepIdx + 1))
+              .fontSize(12)
+              .fontColor(this.pal().text3)
+          }
+        }
+        .width(30)
+        .height(30)
+        if (hasNext) {
+          Column()
+            .width(2)
+            .height(28)
+            .backgroundColor(stepIdx < activeIdx ? '#3B66F5' : this.pal().borderStrong)
+            .margin({ top: 4, bottom: 4 })
+        }
+      }
+      .alignItems(HorizontalAlign.Center)
+
+      Column({ space: 4 }) {
+        Text(title)
+          .fontSize(this.fs(15))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.pal().text)
+        if (isRouteRow) {
+          Row({ space: 6 }) {
+            Text('LAN')
+              .fontSize(this.fs(13))
+              .fontWeight(this.connectedTransport === 'lan' ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.connectedTransport === 'lan' ? '#16A34A' : this.pal().text3)
+            Text('›')
+              .fontSize(this.fs(13))
+              .fontColor(this.pal().text3)
+            Text('P2P')
+              .fontSize(this.fs(13))
+              .fontWeight(this.connectedTransport === 'p2p' ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.connectedTransport === 'p2p' ? '#16A34A' : this.pal().text3)
+            Text('›')
+              .fontSize(this.fs(13))
+              .fontColor(this.pal().text3)
+            Text('TURN')
+              .fontSize(this.fs(13))
+              .fontColor(this.pal().text3)
+            Text('›')
+              .fontSize(this.fs(13))
+              .fontColor(this.pal().text3)
+            Text('Relay')
+              .fontSize(this.fs(13))
+              .fontWeight(this.connectedTransport !== 'lan' && this.connectedTransport !== 'p2p' && stepIdx >= 1 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.connectedTransport !== 'lan' && this.connectedTransport !== 'p2p' && stepIdx >= 1 ? '#16A34A' : this.pal().text3)
+          }
+        } else {
+          Text(subtitle)
+            .fontSize(this.fs(13))
+            .fontColor(this.pal().text3)
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .padding({ top: 3 })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+  }
+
   @Builder
   ConnectingScreen() {
-    Column({ space: 16 }) {
-      Blank()
-      this.LogoChip()
-      LoadingProgress()
-        .width(40)
-        .height(40)
-        .color('#22D3EE')
-      Text(this.tr('正在建立安全连接…'))
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.pal().text)
-        .letterSpacing(1)
-      Text((this.connectStage.length > 0 ? this.connectStage : this.tr('NOISE IK 握手 · 能力协商需要几秒'))
-        + (this.connectElapsedSec > 0 ? '  ·  ' + this.connectElapsedSec + 's' : ''))
-        .fontSize(12)
-        .fontColor(this.connectStage.length > 0 ? this.pal().text2 : this.pal().text3)
-        .letterSpacing(1)
-      Button(this.tr('取消'))
-        .height(36)
-        .fontSize(14)
-        .backgroundColor(this.pal().chip)
-        .fontColor(this.pal().text2)
-        .borderRadius(18)
-        .border({ width: 1, color: this.pal().borderStrong })
-        .padding({ left: 20, right: 20 })
-        .onClick(() => {
-          this.runtime.cancelConnect();
-        })
-      if (this.errorMsg.length > 0) {
-        Text(this.errorMsg)
-          .fontSize(13)
-          .fontColor('#F85749')
-          .textAlign(TextAlign.Center)
-        if (this.runtime.canRetry()) {
-          Button(this.runtime.retryLabel())
-            .height(36)
-            .fontSize(13)
-            .fontColor('#FFFFFF')
-            .padding({ left: 22, right: 22 })
-            .borderRadius(18)
-            .backgroundColor('#F85749')
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.pal().backdrop)
+
+      Column({ space: 14 }) {
+        Column()
+          .width(38)
+          .height(4)
+          .borderRadius(2)
+          .backgroundColor(this.pal().borderStrong)
+          .margin({ top: 4 })
+
+        Row({ space: 12 }) {
+          Text(this.tr('切换主机'))
+            .fontSize(this.fs(18))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+            .layoutWeight(1)
+          Text('↻')
+            .fontSize(this.fs(20))
+            .fontColor(this.pal().text2)
+            .padding(6)
             .onClick(() => {
               this.runtime.retryLastError();
             })
+          Text('✕')
+            .fontSize(this.fs(17))
+            .fontColor(this.pal().text2)
+            .padding(6)
+            .onClick(() => {
+              this.runtime.cancelConnect();
+            })
+        }
+        .width('100%')
+
+        Column({ space: 8 }) {
+          Row({ space: 6 }) {
+            Column()
+              .width(7)
+              .height(7)
+              .borderRadius(3.5)
+              .backgroundColor(this.connectingDevice()?.online === true ? '#16A34A' : '#3B66F5')
+            Text(this.connectingDevice()?.online === true ? this.tr('已就绪') : this.tr('正在建立安全连接…'))
+              .fontSize(this.fs(12.5))
+              .fontColor(this.pal().text2)
+          }
+          Text(this.connectingDevice()?.name ?? this.tr('主机'))
+            .fontSize(this.fs(22))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.pal().text)
+            .textAlign(TextAlign.Center)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if ((this.connectingDevice()?.harnessVersion ?? '').length > 0
+            || (this.connectingDevice()?.clientVersion ?? '').length > 0) {
+            Text(((this.connectingDevice()?.harnessVersion ?? '').length > 0
+              ? 'DSH ' + this.connectingDevice()!.harnessVersion + '   ' : '')
+              + ((this.connectingDevice()?.clientVersion ?? '').length > 0
+                ? 'Plugin ' + this.connectingDevice()!.clientVersion : ''))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text3)
+          }
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Center)
+        .padding({ top: 4, bottom: 8 })
+
+        Column({ space: 0 }) {
+          this.ConnectingStepRow(0, this.connectingStepIndex(), this.tr('验证设备'), this.tr('确认账号与设备访问权限'), false, true)
+          this.ConnectingStepRow(1, this.connectingStepIndex(), this.tr('选择连接路径'), '', true, true)
+          this.ConnectingStepRow(2, this.connectingStepIndex(), this.tr('建立安全通道'), this.tr('核对设备身份并完成加密握手'), false, true)
+          this.ConnectingStepRow(3, this.connectingStepIndex(), this.tr('读取工作区'), this.tr('同步工作区和对话列表'), false, false)
+        }
+        .width('100%')
+        .padding({ left: 8, right: 8, top: 4, bottom: 8 })
+
+        if (this.errorMsg.length > 0) {
+          Text(this.errorMsg)
+            .fontSize(this.fs(13))
+            .fontColor('#F85749')
+            .textAlign(TextAlign.Center)
+          if (this.runtime.canRetry()) {
+            Button(this.runtime.retryLabel())
+              .height(36)
+              .fontSize(this.fs(13))
+              .fontColor('#FFFFFF')
+              .padding({ left: 22, right: 22 })
+              .borderRadius(18)
+              .backgroundColor('#F85749')
+              .onClick(() => {
+                this.runtime.retryLastError();
+              })
+          }
         }
       }
-      Blank()
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 10, bottom: 28 })
+      .backgroundColor(this.pal().panel)
+      .borderRadius({ topLeft: 24, topRight: 24 })
     }
-    .padding(24)
     .width('100%')
     .height('100%')
   }
@@ -3970,58 +4750,58 @@ struct Index {
   ChatScreen() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column({ space: this.foldState === 'half' ? this.hingeGapVp() : 0 }) {
-      Row() {
-        Text('‹')
-          .fontSize(26)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.pal().text)
-          .width(38)
-          .height(38)
-          .textAlign(TextAlign.Center)
+      Row({ space: 8 }) {
+        if (!this.isLandscape) {
+          Row() {
+            Image($r('app.media.ic_menu'))
+              .width(19)
+              .height(19)
+              .fillColor(this.pal().text)
+          }
+          .width(40)
+          .height(40)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor(this.pal().card)
+          .borderRadius(20)
+          .border({ width: 0.5, color: this.pal().border })
+          .shadow({ radius: 8, color: this.isDarkUi ? 'rgba(0,0,0,0.30)' : 'rgba(15,23,42,0.06)',
+            offsetX: 0, offsetY: 2 })
           .onClick(() => {
-            // 只是回列表，连接保留：同一台主机再进来不重新认证
+            this.openDrawer();
+            this.runtime.loadWorkspaces();
+          })
+        } else {
+          Row() {
+            Text('‹')
+              .fontSize(22)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.pal().text)
+          }
+          .width(40)
+          .height(40)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor(this.pal().card)
+          .borderRadius(20)
+          .border({ width: 0.5, color: this.pal().border })
+          .onClick(() => {
             this.runtime.keepAliveToDevices();
           })
-        Column({ space: 2 }) {
-          Text(this.connectedHostDisplay())
-            .fontSize(17)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.pal().text)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .onHover((isHover: boolean) => {
-              this.headerNamePopup = isHover && this.connectedHostDisplay().length > 12;
-            })
-            .gesture(LongPressGesture()
-              .onAction(() => {
-                this.headerNamePopup = true;
-              }))
-            .bindPopup(this.headerNamePopup, {
-              message: this.connectedHostDisplay(),
-              placement: Placement.Bottom,
-              autoCancel: true,
-              onStateChange: (state: PopupStateChangeParam) => {
-                if (!state.isVisible) {
-                  this.headerNamePopup = false;
-                }
-              }
-            })
-          Row({ space: 5 }) {
-            Column()
-              .width(5)
-              .height(5)
-              .borderRadius(2.5)
-              .backgroundColor(this.generating ? '#22D3EE' : '#34D399')
-            if (this.renamingSession) {
+        }
+
+        Column({ space: 1 }) {
+          if (this.renamingSession) {
+            Row({ space: 6 }) {
               TextInput({ text: this.sessionTitleInput, placeholder: this.tr('会话名称') })
-                .height(30)
-                .fontSize(12)
+                .height(32)
+                .fontSize(13)
                 .backgroundColor(this.pal().inputBg)
                 .fontColor(this.pal().text)
-                .borderRadius(8)
+                .borderRadius(9)
                 .border({ width: 1, color: this.pal().borderStrong })
                 .padding({ left: 8, right: 8 })
-                .constraintSize({ maxWidth: 200 })
+                .layoutWeight(1)
                 .onChange((value: string) => {
                   this.sessionTitleInput = value;
                 })
@@ -4030,136 +4810,111 @@ struct Index {
                   this.renamingSession = false;
                 })
               Text('✓')
-                .fontSize(14)
+                .fontSize(15)
                 .fontColor('#34D399')
                 .padding({ left: 4, right: 4 })
                 .onClick(() => {
                   this.runtime.renameCurrentSession(this.sessionTitleInput);
                   this.renamingSession = false;
                 })
-            } else {
+            }
+            .width('100%')
+          } else {
+            Text(this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('新会话'))
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.pal().text)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .onClick(() => {
+                if (!this.runtime.modelCatalogLoaded) {
+                  this.runtime.refreshModelCatalog();
+                }
+                this.runtime.refreshPermissionState();
+                this.sessionInfoOpen = true;
+              })
+            if (this.generating || this.currentModelLabel.length > 0) {
               Row({ space: 4 }) {
-                Column()
-                  .width(6)
-                  .height(6)
-                  .borderRadius(3)
-                  .backgroundColor(this.connectionDotColor())
-                // 会话名过长时用 TextOverflow.MARQUEE 自己滚，不再硬截成「…」
-                Text(this.generating ? this.tr('正在生成…') : this.currentSessionTitle)
-                  .fontSize(12)
-                  .fontColor(this.generating ? '#22D3EE' : this.pal().text2)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.MARQUEE })
-                  .constraintSize({ maxWidth: 190 })
+                if (this.generating) {
+                  Column()
+                    .width(5)
+                    .height(5)
+                    .borderRadius(2.5)
+                    .backgroundColor('#4D6BFE')
+                  Text(this.tr('正在生成…'))
+                    .fontSize(11)
+                    .fontColor('#4D6BFE')
+                } else {
+                  Row({ space: 3 }) {
+                    Text(this.modelSummary())
+                      .fontSize(11)
+                      .fontColor(this.pal().text3)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Image($r('app.media.ic_lucide_chevron_down'))
+                      .width(11)
+                      .height(11)
+                      .colorFilter(iconTintFilter(this.pal().text3))
+                  }
+                  .alignItems(VerticalAlign.Center)
                   .onClick(() => {
-                    if (!this.generating && this.currentSessionId.length > 0) {
-                      this.sessionTitleInput = this.currentSessionTitle;
-                      this.renamingSession = true;
-                    }
+                    this.runtime.refreshModelCatalog();
+                    this.showModelPicker = true;
                   })
-                  .gesture(LongPressGesture().onAction(() => {
-                    if (this.currentSessionId.length === 0) {
-                      return;
-                    }
-                    ActionSheet.show({
-                      title: this.currentSessionTitle.length > 0 ? this.currentSessionTitle : this.tr('会话'),
-                      message: this.currentSessionId,
-                      sheets: [
-                        {
-                          title: this.tr('重命名'),
-                          action: () => {
-                            this.sessionTitleInput = this.currentSessionTitle;
-                            this.renamingSession = true;
-                          }
-                        },
-                        {
-                          title: this.tr('复制为 Markdown'),
-                          action: () => {
-                            const data: pasteboard.PasteData = pasteboard.createData(
-                              pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.sessionMarkdown());
-                            pasteboard.getSystemPasteboard().setData(data).then(() => {
-                              promptAction.showToast({ message: this.tr('会话 Markdown 已复制') });
-                            }).catch(() => {
-                              promptAction.showToast({ message: this.tr('复制失败') });
-                            });
-                          }
-                        },
-                        {
-                          title: this.tr('归档会话'),
-                          action: () => {
-                            this.runtime.archiveCurrentSession();
-                          }
-                        }
-                      ]
-                    });
-                  }))
+                }
               }
-              .alignItems(VerticalAlign.Center)
-              if (this.connectedTransport.length > 0) {
-                Text(this.transportBadgeText())
-                  .fontSize(9)
-                  .fontColor(this.transportBadgeColor())
-                  .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                  .backgroundColor(this.transportBadgeBg())
-                  .borderRadius(5)
-                  .margin({ left: 4 })
-                  // 点徽标看「走的是哪条路、多快、为什么没直连」，排障不用再翻日志
-                  .onClick(() => {
-                    this.linkDetailOpen = true;
-                  })
-              }
-              if (sessionBackendBadge(this.currentSessionId).length > 0) {
-                Text(sessionBackendBadge(this.currentSessionId))
-                  .fontSize(9)
-                  .fontColor('#8B5CF6')
-                  .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                  .backgroundColor('rgba(139,92,246,0.14)')
-                  .borderRadius(5)
-                  .margin({ left: 4 })
-              }
-              if (this.contextPercent > 0) {
-                Text(this.contextPercent + '%')
-                  .fontSize(10)
-                  .fontColor(this.contextPercent >= 80 ? '#F85749' : this.pal().text3)
-                  .padding({ left: 6, right: 6, top: 1, bottom: 1 })
-                  .backgroundColor(this.pal().inputBg)
-                  .borderRadius(6)
-              }
+              .justifyContent(FlexAlign.Center)
             }
           }
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Center)
-        // 三颗图标共用一套尺寸（22 的图形 + 40 的点击区），粗细与视觉重量才对得上
-        this.TopIcon($r('app.media.ic_settings'), () => {
-          if (!this.runtime.modelCatalogLoaded) {
-            this.runtime.refreshModelCatalog();
+        .padding({ left: 4, right: 4 })
+        .clip(true)
+
+        Row({ space: 2 }) {
+          Row() {
+            Image($r('app.media.ic_lucide_list_tree'))
+              .width(19)
+              .height(19)
+              .colorFilter(iconTintFilter(this.pal().text))
           }
-          this.runtime.refreshPermissionState();
-          this.showSessionPanel = true;
-        })
-        this.TopIcon($r('app.media.ic_plus'), () => {
-          this.showSessions = false;
-          this.drawerOpen = 0;
-          this.runtime.createNewSession();
-        })
-        if (!this.isLandscape) {
-          this.TopIcon($r('app.media.ic_menu'), () => {
-            this.openDrawer();
-            this.runtime.loadWorkspaces();
+          .width(34)
+          .height(34)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.trajectoryOpen = true;
+          })
+
+          Row() {
+            Image($r('app.media.ic_dsh_new_chat'))
+              .width(19)
+              .height(19)
+              .colorFilter(iconTintFilter(this.pal().text))
+          }
+          .width(34)
+          .height(34)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.showSessions = false;
+            this.drawerOpen = 0;
+            this.runtime.createNewSession();
           })
         }
+        .height(40)
+        .padding({ left: 4, right: 4 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(20)
+        .border({ width: 0.5, color: this.pal().border })
+        .shadow({ radius: 8, color: this.isDarkUi ? 'rgba(0,0,0,0.30)' : 'rgba(15,23,42,0.06)',
+          offsetX: 0, offsetY: 2 })
       }
       .width('100%')
       .height(56)
-      .padding({ left: 12, right: 12 })
-      // 顶栏横条：毛玻璃压住滚过来的消息，内容不硬切
-      .backgroundColor(this.isDarkUi ? 'rgba(18,22,34,0.72)' : 'rgba(247,249,255,0.76)')
-      .backgroundBlurStyle(BlurStyle.COMPONENT_THIN, {
-        colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-        adaptiveColor: AdaptiveColor.DEFAULT,
-        blurOptions: { grayscale: [0, 24] }
-      })
+      .padding({ left: 14, right: 14 })
+      .backgroundColor(this.pal().bg)
       Column()
         .width('100%')
         .height(0.5)
@@ -4330,22 +5085,51 @@ struct Index {
         }
         ForEach(this.chatRows(), (item: ChatItem, index: number) => {
           ListItem() {
-            Column({ space: 6 }) {
-              if (this.shouldShowDayDivider(index)) {
-                Text(dayDividerLabel(item.timestamp, this.en()))
-                  .fontSize(this.fs(10))
-                  .fontColor(this.pal().text3)
-                  .padding({ left: 10, right: 10, top: 3, bottom: 3 })
-                  .backgroundColor(this.pal().chip)
-                  .borderRadius(8)
-                  .margin({ top: 8, bottom: 2 })
+            if (!this.isFoldedIntoActivityGroup(index)) {
+              Column({ space: 6 }) {
+                if (this.shouldShowDayDivider(index)) {
+                  Text(dayDividerLabel(item.timestamp, this.en()))
+                    .fontSize(this.fs(10))
+                    .fontColor(this.pal().text3)
+                    .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                    .backgroundColor(this.pal().chip)
+                    .borderRadius(8)
+                    .margin({ top: 8, bottom: 2 })
+                }
+                if (this.isActivityGroupAnchor(index)) {
+                  this.ChatActivityGroupCard(index)
+                } else {
+                  this.MessageRow(item)
+                }
               }
-              this.MessageRow(item)
+              .width('100%')
+              .alignItems(HorizontalAlign.Center)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
           }
         }, (item: ChatItem) => `${item.id}#${item.rev}#${this.languageMode}`)
+        if (this.generating && (this.messages.length === 0 || !this.messages[this.messages.length - 1].streaming)) {
+          ListItem() {
+            Row({ space: 5 }) {
+              Text('•')
+                .fontSize(this.fs(18))
+                .fontColor('#4D6BFE')
+                .opacity(this.streamPulseStep === 0 ? 1 : 0.25)
+                .animation({ duration: 240, curve: Curve.EaseInOut })
+              Text('•')
+                .fontSize(this.fs(18))
+                .fontColor('#4D6BFE')
+                .opacity(this.streamPulseStep === 1 ? 1 : 0.25)
+                .animation({ duration: 240, curve: Curve.EaseInOut })
+              Text('•')
+                .fontSize(this.fs(18))
+                .fontColor('#4D6BFE')
+                .opacity(this.streamPulseStep === 2 ? 1 : 0.25)
+                .animation({ duration: 240, curve: Curve.EaseInOut })
+            }
+            .padding({ left: 4, top: 8, bottom: 8 })
+          }
+          .width('100%')
+        }
       }
       .layoutWeight(1)
       .width('100%')
@@ -4356,7 +5140,7 @@ struct Index {
       .cachedCount(6)
       // 底部留白要盖住「语境胶囊 + 输入坞」的高度，最后一条消息才不会被压在下面；
       // 键盘弹起时胶囊行收起，但仍要留够输入坞（约 46 + 16）的高度
-      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 74 : 132 })
+      .padding({ left: 16, right: 16, top: 8, bottom: this.keyboardVisible ? 88 : 154 })
       // PC/横屏常驻滑块，鼠标可以直接拖；竖屏手机上仍然滚才出现
       .scrollBar(this.isLandscape ? BarState.On : BarState.Auto)
       .scrollBarWidth(this.isLandscape ? 6 : 3)
@@ -4403,9 +5187,9 @@ struct Index {
           }
         }
       })
-      // 右往左横滑唤出会话抽屉：手势只挂在消息区，输入坞的触摸不再被抢
+      // 左往右横滑唤出会话抽屉（对齐 Android 端左侧抽屉）
       .gesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+        PanGesture({ direction: PanDirection.Horizontal, distance: 12 })
           .onActionStart(() => {
             if (this.isLandscape || this.showSessions) {
               this.drawerDragFromChat = false;
@@ -4415,11 +5199,11 @@ struct Index {
             this.drawerDragBase = 0;
           })
           .onActionUpdate((event: GestureEvent) => {
-            if (!this.drawerDragFromChat || event.offsetX >= 0) {
+            if (!this.drawerDragFromChat || event.offsetX <= 0) {
               return;
             }
             const width: number = this.drawerWidthVp();
-            const progress: number = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
+            const progress: number = Math.min(1, Math.max(0, this.drawerDragBase + event.offsetX / width));
             if (progress <= 0) {
               return;
             }
@@ -4446,72 +5230,75 @@ struct Index {
       .height('100%')
 
 
-      // 桌宠：右下角一只鲸娘，状态跟着干活/等你确认/刚做完走（素材用 emoji，零资源成本）
-      if (this.runtime.petEnabled) {
-        Row({ space: 4 }) {
-          Text(this.petFace())
-            .fontSize(this.runtime.petState() === 'working' ? 22 : 20)
-            // 干活时轻微「呼吸」，待命时静止；用 iterations: -1 做无限往返，不额外开定时器
-            .scale(this.runtime.petState() === 'working' ? { x: 1.12, y: 1.12 } : { x: 1, y: 1 })
-            .animation({
-              duration: 1100,
-              curve: Curve.EaseInOut,
-              iterations: this.runtime.petState() === 'working' ? -1 : 1,
-              playMode: PlayMode.Alternate
+      if (this.runtime.petEnabled && !this.keyboardVisible) {
+        Row({ space: 8 }) {
+          if (this.runtime.userTurnIndexes().length > 1) {
+            Row({ space: 4 }) {
+              Text('↑')
+                .fontSize(12)
+                .fontColor(this.pal().text2)
+                .padding({ left: 6, right: 6, top: 3, bottom: 3 })
+                .onClick(() => {
+                  this.jumpTurn(-1);
+                })
+              Text(this.turnPillText())
+                .fontSize(11)
+                .fontColor(this.pal().text3)
+                .maxLines(1)
+                .onClick(() => {
+                  this.stickToBottom = false;
+                })
+              Text('↓')
+                .fontSize(12)
+                .fontColor(this.pal().text2)
+                .padding({ left: 6, right: 6, top: 3, bottom: 3 })
+                .onClick(() => {
+                  this.jumpTurn(1);
+                })
+            }
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor(this.pal().card)
+            .borderRadius(14)
+            .border({ width: 1, color: this.pal().border })
+          }
+          if (this.runtime.petEnabled) {
+            Row({ space: 4 }) {
+              Text(this.petFace())
+                .fontSize(this.runtime.petState() === 'working' ? 18 : 16)
+                .scale(this.runtime.petState() === 'working' ? { x: 1.12, y: 1.12 } : { x: 1, y: 1 })
+                .animation({
+                  duration: 1100,
+                  curve: Curve.EaseInOut,
+                  iterations: this.runtime.petState() === 'working' ? -1 : 1,
+                  playMode: PlayMode.Alternate
+                })
+              if (this.petHint().length > 0) {
+                Text(this.petHint())
+                  .fontSize(10)
+                  .fontColor(this.pal().text3)
+              }
+            }
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().card)
+            .borderRadius(14)
+            .border({ width: 1, color: this.pal().border })
+            .onClick(() => {
+              promptAction.showToast({ message: this.petHint().length > 0
+                ? this.petHint() : this.tr('鲸娘在待命（设置里可关掉）') });
             })
-          if (this.petHint().length > 0) {
-            Text(this.petHint())
-              .fontSize(10)
-              .fontColor(this.pal().text3)
+            .gesture(LongPressGesture().onAction(() => {
+              const path: string = this.runtime.exportDiagnosticsToFile();
+              promptAction.showToast({ message: path.length > 0
+                ? this.tr('诊断已导出，可 hdc file recv 拉走') + '\n' + path
+                : this.tr('导出失败（存储不可用）') });
+            }))
           }
         }
-        .padding({ left: 8, right: 10, top: 4, bottom: 4 })
-        .backgroundColor(this.pal().card)
-        .borderRadius(14)
-        .border({ width: 1, color: this.pal().border })
-        .margin({ bottom: 4 })
-        .onClick(() => {
-          promptAction.showToast({ message: this.petHint().length > 0
-            ? this.petHint() : this.tr('鲸娘在待命（设置里可关掉）') });
-        })
-        // 长按桌宠 = 导出诊断文件（现场排障的快捷键，不用翻抽屉找诊断面板）
-        .gesture(LongPressGesture().onAction(() => {
-          const path: string = this.runtime.exportDiagnosticsToFile();
-          promptAction.showToast({ message: path.length > 0
-            ? this.tr('诊断已导出，可 hdc file recv 拉走') + '\n' + path
-            : this.tr('导出失败（存储不可用）') });
-        }))
-      }
-      // 轮次导航：↑ 上一轮 / ↓ 下一轮 + 当前位置与上一轮用量（对齐 dsh-Go 的轮次导航）
-      if (this.runtime.userTurnIndexes().length > 1) {
-        Row({ space: 6 }) {
-          Text('↑')
-            .fontSize(13)
-            .fontColor(this.pal().text2)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .onClick(() => {
-              this.jumpTurn(-1);
-            })
-          Text(this.turnPillText())
-            .fontSize(11)
-            .fontColor(this.pal().text3)
-            .maxLines(1)
-            .onClick(() => {
-              this.stickToBottom = false;
-            })
-          Text('↓')
-            .fontSize(13)
-            .fontColor(this.pal().text2)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .onClick(() => {
-              this.jumpTurn(1);
-            })
-        }
-        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-        .backgroundColor(this.pal().card)
-        .borderRadius(14)
-        .border({ width: 1, color: this.pal().border })
-        .margin({ bottom: 4 })
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+        .padding({ right: 16 })
+        .margin({ bottom: 158 })
+        .hitTestBehavior(HitTestMode.Transparent)
       }
       if (!this.stickToBottom) {
         Row() {
@@ -4530,7 +5317,7 @@ struct Index {
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
-        .margin({ bottom: 96 })
+        .margin({ bottom: 154 })
       }
       // 半折悬停（桌面立着那种）：输入坞限制在下半屏，上半留给消息，中间那道间隔就是铰链
       if (this.foldState === 'half') {
@@ -4550,6 +5337,406 @@ struct Index {
 
   /** 底部输入坞：不再是整条玻璃，图片键、输入框、发送键各自一块玻璃，中间留缝。 */
   /** 写作辅助：提示词库 / 全屏编辑（点输入坞上的 ✦ 打开）。 */
+  private subagentSessions(): HarnessRemoteSession[] {
+    return this.sessions.filter(
+      (s: HarnessRemoteSession) => s.origin === 'subagent' && s.parentSessionId === this.currentSessionId
+    );
+  }
+
+  private activeSubagentCount(): number {
+    let count = 0;
+    for (const s of this.subagentSessions()) {
+      if (s.running) count++;
+    }
+    return count;
+  }
+
+  private activeTeamMemberCount(): number {
+    let count = 0;
+    for (const m of this.agentTeamMembers) {
+      if (m.phase === 'provisioning' || this.teamMemberSession(m)?.running === true) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private completedTodoCount(): number {
+    let count = 0;
+    for (const td of this.todosList) {
+      if (td.status === 'completed') count++;
+    }
+    return count;
+  }
+
+  private isProcessCandidate(rows: ChatItem[], index: number): boolean {
+    const item = rows[index];
+    if (item.kind === 'tool') return true;
+    if (item.kind === 'assistant' && item.text.trim().length === 0 && item.images.length === 0
+      && item.reasoning.trim().length > 0) return true;
+    return false;
+  }
+
+  private isActivityGroupAnchor(index: number): boolean {
+    const rows = this.chatRows();
+    if (index < 0 || index >= rows.length) return false;
+    if (!this.isProcessCandidate(rows, index)) return false;
+    return index === 0 || !this.isProcessCandidate(rows, index - 1);
+  }
+
+  private isFoldedIntoActivityGroup(index: number): boolean {
+    const rows = this.chatRows();
+    if (index <= 0 || index >= rows.length) return false;
+    return this.isProcessCandidate(rows, index) && this.isProcessCandidate(rows, index - 1);
+  }
+
+  private activityGroupItems(anchorIndex: number): ChatItem[] {
+    const rows = this.chatRows();
+    const out: ChatItem[] = [];
+    for (let i = anchorIndex; i < rows.length; i++) {
+      if (!this.isProcessCandidate(rows, i)) break;
+      out.push(rows[i]);
+    }
+    return out;
+  }
+
+  private activityGroupSummary(items: ChatItem[]): string {
+    const tools = items.filter((it: ChatItem) => it.kind === 'tool');
+    const last = items[items.length - 1];
+    const rows = this.chatRows();
+    const closed = rows.indexOf(last) < rows.length - 1 || !this.generating;
+    if (tools.length > 0 && closed) {
+      return this.tr('已完成') + ' · ' + tools.length + ' ' + this.tr('次工具调用');
+    }
+    let cmdCount = 0;
+    let readCount = 0;
+    for (const tItem of tools) {
+      const lower = tItem.toolName.toLowerCase();
+      if (lower.indexOf('bash') >= 0 || lower.indexOf('exec') >= 0 || lower.indexOf('command') >= 0) {
+        cmdCount++;
+      } else if (lower.indexOf('read') >= 0 || lower.indexOf('grep') >= 0 || lower.indexOf('find') >= 0) {
+        readCount++;
+      }
+    }
+    const parts: string[] = [];
+    if (tools.length > 0) {
+      parts.push(this.tr('已调用工具') + ' × ' + tools.length);
+    }
+    if (cmdCount > 0) {
+      parts.push(this.tr('执行命令') + ' ' + cmdCount + ' ' + this.tr('次'));
+    }
+    if (readCount > 0) {
+      parts.push(this.tr('读取文件') + ' ' + readCount + ' ' + this.tr('次'));
+    }
+    return parts.length > 0 ? parts.join(' · ') : this.tr('思考过程');
+  }
+
+  @Builder
+  ChatActivityGroupCard(anchorIndex: number) {
+    Column({ space: 6 }) {
+      Row({ space: 8 }) {
+        if (this.activityGroupItems(anchorIndex).some((item: ChatItem) => item.toolState === 'running')) {
+          LoadingProgress().width(14).height(14).color('#4D6BFE')
+        } else {
+          Text('✓').fontSize(this.fs(13)).fontColor(this.pal().text3)
+        }
+        Text(this.activityGroupSummary(this.activityGroupItems(anchorIndex)))
+          .fontSize(this.fs(13))
+          .fontColor(this.pal().text2)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text(this.expandedActivityKeys.indexOf(this.chatRows()[anchorIndex].id) >= 0 ? '⌃' : '⌄')
+          .fontSize(this.fs(14))
+          .fontColor(this.pal().text3)
+      }
+      .width('100%')
+      .onClick(() => {
+        const key = this.chatRows()[anchorIndex].id;
+        const idx = this.expandedActivityKeys.indexOf(key);
+        if (idx >= 0) {
+          const next = this.expandedActivityKeys.slice();
+          next.splice(idx, 1);
+          this.expandedActivityKeys = next;
+        } else {
+          this.expandedActivityKeys = this.expandedActivityKeys.concat([key]);
+        }
+      })
+
+      if (this.expandedActivityKeys.indexOf(this.chatRows()[anchorIndex].id) < 0) {
+        ForEach(this.activityGroupItems(anchorIndex).filter((it: ChatItem) => it.kind === 'tool').slice(-1), (lastTool: ChatItem) => {
+          Row({ space: 6 }) {
+            if (lastTool.toolState === 'running') {
+              Text('• • •')
+                .fontSize(this.fs(11))
+                .fontColor('#4D6BFE')
+            } else {
+              Text(lastTool.toolState === 'failed' ? '✕' : '✓')
+                .fontSize(this.fs(11))
+                .fontColor(lastTool.toolState === 'failed' ? '#DC2626' : this.pal().text3)
+            }
+            Text(lastTool.toolName + (lastTool.summary.length > 0 ? ' · ' + lastTool.summary : ''))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .padding({ left: 22 })
+        }, (lastTool: ChatItem) => 'last-' + lastTool.id + '-' + lastTool.toolState)
+      } else {
+        Scroll() {
+        Column({ space: 4 }) {
+          ForEach(this.activityGroupItems(anchorIndex), (subItem: ChatItem) => {
+            if (subItem.kind === 'tool') {
+              this.ToolRow(subItem)
+            } else if (subItem.text.length > 0 || subItem.reasoning.length > 0) {
+              Text(subItem.text.length > 0 ? subItem.text : subItem.reasoning)
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .width('100%')
+            }
+          }, (subItem: ChatItem) => 'exp-' + subItem.id + '-' + subItem.rev)
+        }
+        .width('100%')
+        .padding({ top: 4 })
+        }
+        .constraintSize({ maxHeight: Math.min(400, this.windowHeightVp > 0 ? this.windowHeightVp / 2 : 400) })
+        .scrollBar(BarState.Auto)
+      }
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4, top: 6, bottom: 6 })
+  }
+
+  private teamMemberSession(member: AgentTeamMember): HarnessRemoteSession | undefined {
+    for (const s of this.sessions) {
+      if (s.sessionId === member.id || (member.sessionId.length > 0 && s.sessionId === member.sessionId)) {
+        return s;
+      }
+    }
+    return undefined;
+  }
+
+  private teamMemberRole(member: AgentTeamMember): string {
+    const desc = member.description.trim();
+    if (desc.length > 0) return desc;
+    if (member.name === 'lead') return this.tr('负责人');
+    if (member.name.length > 0) return member.name;
+    return member.id;
+  }
+
+  private teamMemberStatusLabel(member: AgentTeamMember): string {
+    if (member.phase === 'failed') return this.tr('失败');
+    if (member.phase === 'provisioning') return this.tr('准备中');
+    const sess = this.teamMemberSession(member);
+    if (sess !== undefined && sess.running) return this.tr('运行中');
+    return this.tr('空闲');
+  }
+
+  private teamMemberTask(member: AgentTeamMember): AgentTeamTask | undefined {
+    const owned: AgentTeamTask[] = this.agentTeamTasks.filter(
+      (task: AgentTeamTask) => task.ownerId === member.id && task.status !== 'deleted'
+    );
+    if (owned.length === 0) return undefined;
+    for (const t of owned) {
+      if (t.status === 'in_progress') return t;
+    }
+    for (const t of owned) {
+      if (t.status === 'pending') return t;
+    }
+    return owned[0];
+  }
+
+  @Builder
+  AgentTeamOverlay() {
+    Column() {
+      Blank()
+        .onClick(() => { this.agentTeamExpanded = false; })
+      Column({ space: 0 }) {
+        Row({ space: 8 }) {
+          Text('👥')
+            .fontSize(this.fs(15))
+          Text(this.tr('智能体团队'))
+            .fontSize(this.fs(15))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Text(this.activeTeamMemberCount() + '/' + this.agentTeamMembers.length)
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text3)
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+            .padding({ left: 8, right: 4, top: 2, bottom: 2 })
+            .onClick(() => { this.agentTeamExpanded = false; })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 14, bottom: 12 })
+
+        Divider()
+          .color(this.pal().border)
+          .strokeWidth(0.5)
+
+        Scroll() {
+          Column({ space: 2 }) {
+            ForEach(this.agentTeamMembers, (member: AgentTeamMember) => {
+              Row({ space: 10 }) {
+                Text(member.phase === 'failed' ? '✕'
+                  : (member.phase === 'provisioning' ? '◌'
+                    : (this.teamMemberSession(member)?.running === true ? '●' : '○')))
+                  .fontSize(this.fs(15))
+                  .fontColor(member.phase === 'failed' ? '#DC2626'
+                    : (this.teamMemberSession(member)?.running === true ? '#1E6CEB' : this.pal().text2))
+                Column({ space: 2 }) {
+                  Row({ space: 8 }) {
+                    Text(this.teamMemberRole(member))
+                      .fontSize(this.fs(14))
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(this.pal().text)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(this.teamMemberStatusLabel(member))
+                      .fontSize(this.fs(12))
+                      .fontColor(member.phase === 'failed' ? '#DC2626'
+                        : (this.teamMemberSession(member)?.running === true ? '#1E6CEB' : this.pal().text3))
+                  }
+                  if (this.teamMemberTask(member) !== undefined) {
+                    Text(this.teamMemberTask(member)!.subject)
+                      .fontSize(this.fs(12))
+                      .fontColor(this.pal().text3)
+                      .maxLines(2)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  if (member.phase === 'failed' && member.error.length > 0) {
+                    Text(member.error)
+                      .fontSize(this.fs(11))
+                      .fontColor('#DC2626')
+                      .maxLines(2)
+                  }
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+
+                if (this.teamMemberSession(member) !== undefined) {
+                  Text('›')
+                    .fontSize(this.fs(18))
+                    .fontColor(this.pal().text3)
+                }
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .onClick(() => {
+                const sess = this.teamMemberSession(member);
+                if (sess !== undefined) {
+                  this.agentTeamExpanded = false;
+                  this.runtime.openSession(sess.sessionId, this.currentSessionId).catch(() => undefined);
+                }
+              })
+            }, (member: AgentTeamMember) => member.id)
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: 300 })
+      }
+      .width('90%')
+      .backgroundColor(this.pal().panel)
+      .borderRadius(18)
+      .border({ width: 0.5, color: this.pal().borderStrong })
+      .shadow({ radius: 20, color: 'rgba(0,0,0,0.20)', offsetY: 6 })
+      Blank()
+        .onClick(() => { this.agentTeamExpanded = false; })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.pal().backdrop)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  SubagentsOverlay() {
+    Column() {
+      Blank()
+        .onClick(() => { this.subagentsModalOpen = false; })
+      Column({ space: 0 }) {
+        Row({ space: 8 }) {
+          Text('◌')
+            .fontSize(this.fs(15))
+            .fontColor('#4D6BFE')
+          Text(this.tr('子任务'))
+            .fontSize(this.fs(15))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Text(this.activeSubagentCount() + '/' + this.subagentSessions().length)
+            .fontSize(this.fs(14))
+            .fontColor(this.pal().text3)
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(this.fs(15))
+            .fontColor(this.pal().text3)
+            .padding({ left: 8, right: 4, top: 2, bottom: 2 })
+            .onClick(() => { this.subagentsModalOpen = false; })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 14, bottom: 12 })
+
+        Divider()
+          .color(this.pal().border)
+          .strokeWidth(0.5)
+
+        Scroll() {
+          Column({ space: 2 }) {
+            ForEach(this.subagentSessions(), (sub: HarnessRemoteSession) => {
+              Row({ space: 10 }) {
+                Text(sub.running ? '●' : '○')
+                  .fontSize(this.fs(14))
+                  .fontColor(sub.running ? '#1E6CEB' : this.pal().text2)
+                Column({ space: 2 }) {
+                  Row({ space: 8 }) {
+                    Text(formatSessionTitle(sub))
+                      .fontSize(this.fs(14))
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(this.pal().text)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+                    Text(sub.running ? this.tr('运行中') : this.tr('空闲'))
+                      .fontSize(this.fs(12))
+                      .fontColor(sub.running ? '#1E6CEB' : this.pal().text3)
+                  }
+                }
+                .layoutWeight(1)
+                Text('›')
+                  .fontSize(this.fs(18))
+                  .fontColor(this.pal().text3)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .onClick(() => {
+                this.subagentsModalOpen = false;
+                this.runtime.openSession(sub.sessionId, sub.parentSessionId).catch(() => undefined);
+              })
+            }, (sub: HarnessRemoteSession) => sub.sessionId)
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: 300 })
+      }
+      .width('90%')
+      .backgroundColor(this.pal().panel)
+      .borderRadius(18)
+      .border({ width: 0.5, color: this.pal().borderStrong })
+      .shadow({ radius: 20, color: 'rgba(0,0,0,0.20)', offsetY: 6 })
+      Blank()
+        .onClick(() => { this.subagentsModalOpen = false; })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.pal().backdrop)
+    .justifyContent(FlexAlign.Center)
+  }
+
   @Builder
   WritingMenuOverlay() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -4770,27 +5957,66 @@ struct Index {
   ComposerDock() {
     Column() {
       Column({ space: 8 }) {
-        // 键盘弹起时收起语境胶囊：它正好压在输入法候选条上方，会挡住半个候选框
-        if (!this.keyboardVisible && this.contextPills().length > 0) {
+      Column() {
+        if (this.compacting) {
           Row({ space: 8 }) {
-            ForEach(this.contextPills(), (pill: string) => {
-              // 语境提示做成纯文字：带底色的胶囊连排会看成一条横带，压在输入框上方很割裂
-              Text(pill)
-                .fontSize(this.fs(10))
-                .fontColor(this.pal().text3)
-                .maxLines(1)
-                .opacity(0.9)
-            }, (pill: string) => pill)
+            LoadingProgress()
+              .width(14)
+              .height(14)
+              .color('#22D3EE')
+            Text(this.compactionMessage.length > 0 ? this.compactionMessage : this.tr('正在压缩上下文…'))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.tr('取消压缩'))
+              .fontSize(this.fs(11))
+              .fontColor('#F85749')
+              .onClick(() => {
+                this.runtime.cancelActiveCompaction();
+              })
           }
           .width('100%')
-          .padding({ left: 20, right: 20, top: 2, bottom: 4 })
-          .justifyContent(FlexAlign.Start)
+          .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+          .backgroundColor(this.pal().card)
+          .borderRadius(10)
+          .border({ width: 0.5, color: this.pal().border })
+          .margin({ left: 16, right: 16, bottom: 4 })
         }
-      Column() {
-        if (this.promptInput.startsWith('/') && this.slashCommands.length > 0) {
+        if (this.replyQuoteText.length > 0) {
+          Row({ space: 8 }) {
+            Column()
+              .width(3)
+              .height(20)
+              .borderRadius(1.5)
+              .backgroundColor('#22D3EE')
+            Text(formatQuoteDraftSnippet(this.replyQuoteText, 56))
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Text('✕')
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text3)
+              .padding({ left: 6, right: 4 })
+              .onClick(() => {
+                this.replyQuoteText = '';
+              })
+          }
+          .width('100%')
+          .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+          .backgroundColor(this.pal().inputBg)
+          .borderRadius(10)
+          .border({ width: 0.5, color: this.pal().border })
+          .margin({ left: 16, right: 16, bottom: 4 })
+        }
+        if (this.activeMention() !== undefined && this.activeMention()!.type === 'command'
+          && this.mergedCommandEntries(this.activeMention()!.query).length > 0) {
           Scroll() {
             Row({ space: 8 }) {
-              ForEach(this.slashCommands, (command: SlashCommand) => {
+              ForEach(this.mergedCommandEntries(this.activeMention()!.query), (command: SlashCommand) => {
                 Row({ space: 6 }) {
                   Text(command.name)
                     .fontSize(this.fs(12))
@@ -4807,9 +6033,12 @@ struct Index {
                 .borderRadius(9)
                 .border({ width: 1, color: this.pal().border })
                 .onClick(() => {
-                  this.promptInput = command.name + ' ';
+                  const tok = this.activeMention();
+                  if (tok !== undefined) {
+                    this.insertMentionReplacement(tok, command.name + ' ');
+                  }
                 })
-              }, (command: SlashCommand) => command.name)
+              }, (command: SlashCommand) => 'cmd:' + command.name)
             }
             .padding({ left: 16, right: 16 })
           }
@@ -4817,6 +6046,94 @@ struct Index {
           .scrollBar(BarState.Off)
           .width('100%')
           .padding({ top: 4, bottom: 2 })
+        }
+        if (this.activeMention() !== undefined && this.activeMention()!.type === 'context'
+          && (this.filteredFileRefs(this.activeMention()!.query).length > 0
+            || this.filteredSessionRefs(this.activeMention()!.query).length > 0)) {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.filteredFileRefs(this.activeMention()!.query), (ref: WorkspaceFileRef) => {
+                Row({ space: 5 }) {
+                  Text(ref.kind === 'directory' ? '📁' : '📄')
+                    .fontSize(this.fs(11))
+                  Text(ref.path)
+                    .fontSize(this.fs(12))
+                    .fontColor('#22D3EE')
+                    .maxLines(1)
+                }
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(9)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  const tok = this.activeMention();
+                  const txt = fileMentionText(ref.path, ref.kind === 'directory');
+                  if (tok !== undefined && txt !== undefined) {
+                    this.insertMentionReplacement(tok, txt);
+                  }
+                })
+              }, (ref: WorkspaceFileRef) => 'fref:' + ref.path)
+              ForEach(this.filteredSessionRefs(this.activeMention()!.query), (s: HarnessRemoteSession) => {
+                Row({ space: 5 }) {
+                  Text('💬')
+                    .fontSize(this.fs(11))
+                  Text(s.title.length > 0 ? s.title : s.sessionId)
+                    .fontSize(this.fs(12))
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                }
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(9)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  const tok = this.activeMention();
+                  if (tok !== undefined) {
+                    const label: string = s.title.length > 0 ? s.title : s.sessionId;
+                    this.insertMentionReplacement(tok, sessionMentionText(s.sessionId, label));
+                  }
+                })
+              }, (s: HarnessRemoteSession) => 'sref:' + s.sessionId)
+            }
+            .padding({ left: 16, right: 16 })
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .padding({ top: 4, bottom: 2 })
+        }
+        if (this.pendingFiles.length > 0) {
+          Scroll() {
+            Row({ space: 8 }) {
+              ForEach(this.pendingFiles, (pf: PickedFile, idx: number) => {
+                Row({ space: 6 }) {
+                  Text('📄')
+                    .fontSize(this.fs(12))
+                  Text(pf.name)
+                    .fontSize(this.fs(11))
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                    .constraintSize({ maxWidth: 160 })
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text('✕')
+                    .fontSize(this.fs(11))
+                    .fontColor(this.pal().text3)
+                    .onClick(() => {
+                      this.removePendingFile(idx);
+                    })
+                }
+                .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+                .backgroundColor(this.pal().inputBg)
+                .borderRadius(10)
+                .border({ width: 1, color: this.pal().border })
+              }, (pf: PickedFile, idx: number) => idx + ':' + pf.name)
+            }
+            .padding({ left: 16, right: 16 })
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .padding({ top: 2, bottom: 2 })
         }
         if (this.pendingImages.length > 0) {
           Scroll() {
@@ -4864,135 +6181,157 @@ struct Index {
           .width('100%')
           .padding({ top: 2, bottom: 2 })
         }
-        // 每颗控件各自一块玻璃，中间留缝断开，不再连成一整条
-        Row({ space: this.compactDock() ? 6 : 12 }) {
-          // 图片：选相册里的图，压完挂在输入框上方，随下一次发送一起交给主机
-          Row() {
-            if (this.pickingImages) {
-              LoadingProgress()
-                .width(18)
-                .height(18)
-                .color('#22D3EE')
-            } else {
-              Image($r('app.media.ic_image'))
-                .width(20)
-                .height(20)
-                .fillColor(this.pal().text2)
+        if (this.todosList.length > 0) {
+          Column({ space: 6 }) {
+            Row({ space: 8 }) {
+              Text('☰')
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text2)
+              Text(this.tr('任务进度清单'))
+                .fontSize(this.fs(13))
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.pal().text)
+              Text(this.completedTodoCount() + '/' + this.todosList.length)
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text3)
+                .layoutWeight(1)
+              Text(this.checklistExpanded ? '⌃' : '⌄')
+                .fontSize(this.fs(14))
+                .fontColor(this.pal().text3)
+            }
+            .width('100%')
+            .onClick(() => {
+              this.checklistExpanded = !this.checklistExpanded;
+            })
+
+            if (this.checklistExpanded) {
+              Scroll() {
+                Column({ space: 4 }) {
+                  ForEach(this.todosList, (todo: TodoEntry, tdIdx: number) => {
+                    Row({ space: 8 }) {
+                      Text(todo.status === 'completed' ? '✓' : (todo.status === 'in_progress' ? '●' : '○'))
+                        .fontSize(this.fs(12))
+                        .fontColor(todo.status === 'completed' ? '#16A34A' : (todo.status === 'in_progress' ? '#4D6BFE' : this.pal().text3))
+                      Text(todo.content)
+                        .fontSize(this.fs(12))
+                        .fontColor(this.pal().text2)
+                        .maxLines(2)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .layoutWeight(1)
+                    }
+                    .width('100%')
+                    .padding({ top: 3, bottom: 3 })
+                  }, (todo: TodoEntry, tdIdx: number) => 'todo-' + tdIdx + '-' + todo.status + '-' + todo.content)
+                }
+                .width('100%')
+              }
+              .constraintSize({ maxHeight: 160 })
             }
           }
-          .width(this.compactDock() ? 40 : 46)
-          .height(this.compactDock() ? 40 : 46)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(this.compactDock() ? 20 : 23)
-          // 对齐资讯类 App 的底栏光感：厚材质 + 低白度过衬，让下层内容模糊透上来
-          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-            adaptiveColor: AdaptiveColor.DEFAULT,
-            blurOptions: { grayscale: [0, 12] }
-          })
-          .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
-          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
-          .shadow({ radius: 14,
-            color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.22)',
-            offsetX: 0, offsetY: 6 })
-          .clip(true)
-          .overlay(this.DockSpot(52), { align: Alignment.Center })
-          .onTouch((event: TouchEvent) => {
-            this.trackDockLight(event);
-          })
-          .onClick(() => {
-            this.attachImage();
-          })
-          // 提示词库入口：和图片键同规格的小圆玻璃
-          Row() {
-            Text('✦')
-              .fontSize(this.fs(15))
-              .fontColor(this.pal().text2)
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+          .backgroundColor(this.pal().card)
+          .borderRadius(16)
+          .border({ width: 0.5, color: this.pal().borderStrong })
+          .margin({ bottom: 4 })
+        }
+
+        if (this.subagentSessions().length > 0 || this.agentTeamMembers.length > 0) {
+          Row({ space: 8 }) {
+            if (this.subagentSessions().length > 0) {
+              Row({ space: 6 }) {
+                Text('◌')
+                  .fontSize(this.fs(12))
+                  .fontColor('#4D6BFE')
+                Text(this.tr('子任务'))
+                  .fontSize(this.fs(12))
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor('#4D6BFE')
+                Text(this.activeSubagentCount() + '/' + this.subagentSessions().length)
+                  .fontSize(this.fs(12))
+                  .fontColor('#4D6BFE')
+              }
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(16)
+              .border({ width: 1, color: '#4D6BFE' })
+              .onClick(() => {
+                this.subagentsModalOpen = true;
+              })
+            }
+            if (this.agentTeamMembers.length > 0) {
+              Row({ space: 6 }) {
+                Text('👥')
+                  .fontSize(this.fs(12))
+                Text(this.tr('智能体团队'))
+                  .fontSize(this.fs(12))
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.activeTeamMemberCount() > 0 ? '#4D6BFE' : this.pal().text2)
+                Text(this.activeTeamMemberCount() + '/' + this.agentTeamMembers.length)
+                  .fontSize(this.fs(12))
+                  .fontColor(this.activeTeamMemberCount() > 0 ? '#4D6BFE' : this.pal().text3)
+              }
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(16)
+              .border({ width: this.activeTeamMemberCount() > 0 ? 1 : 0.5,
+                color: this.activeTeamMemberCount() > 0 ? '#4D6BFE' : this.pal().borderStrong })
+              .onClick(() => {
+                this.agentTeamExpanded = true;
+              })
+            }
           }
-          .width(this.compactDock() ? 30 : 34)
-          .height(this.compactDock() ? 40 : 46)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(this.compactDock() ? 20 : 23)
-          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
-          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-            adaptiveColor: AdaptiveColor.DEFAULT,
-            blurOptions: { grayscale: [0, 12] }
-          })
-          .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
-          .onClick(() => {
-            // 一键出「写作辅助」面板：提示词库 / 全屏编辑（长按在鼠标与触控下都不稳，已弃用）
-            this.writingMenuOpen = true;
-          })
-          // 展开：只在有空间时给（手机上会挤占输入框宽度，长文交给全屏编辑入口）
-          if (!this.compactDock()) {
-          Row() {
-            Text('⤢')
-              .fontSize(this.fs(15))
-              .fontColor(this.pal().text2)
+          .width('100%')
+          .margin({ left: 4, bottom: 4 })
+        }
+
+        if (this.generating) {
+          Row({ space: 6 }) {
+            Image($r('app.media.ic_dsh_whale'))
+              .width(15)
+              .height(15)
+              .colorFilter(iconTintFilter('#4D6BFE'))
+            Text(this.tr('深度求索中'))
+              .fontSize(this.fs(12))
+              .fontColor('#4D6BFE')
+              .fontWeight(FontWeight.Medium)
+            Text('· · ·')
+              .fontSize(this.fs(13))
+              .fontColor('#4D6BFE')
+              .opacity(this.streamPulseStep % 2 === 0 ? 1 : 0.35)
+              .animation({ duration: 250, curve: Curve.EaseInOut })
           }
-          .width(this.compactDock() ? 30 : 34)
-          .height(this.compactDock() ? 40 : 46)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(this.compactDock() ? 20 : 23)
-          .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
-          .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-            colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-            adaptiveColor: AdaptiveColor.DEFAULT,
-            blurOptions: { grayscale: [0, 12] }
-          })
-          .border({ width: 1,
-            color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
-          .onClick(() => {
-            this.composerExpanded = true;
-          })
-          }
-          // 输入框自己就是一块玻璃；换行靠回车，高度随内容长到 5 行再内部滚动
+          .alignSelf(ItemAlign.Start)
+          .margin({ left: 6, bottom: 4 })
+        }
+        // 统一圆角输入卡片（对齐 Android 端 Composer 样式：顶部输入框 + 底部 [+][⚡][模型] 与发送键）
+        Column({ space: 6 }) {
           TextArea({ text: this.promptInput,
             placeholder: this.generating
               ? (this.compactDock() ? this.tr('正在生成…') : this.tr('正在生成，可插话…'))
               : (this.runtime.steerMode
                 ? (this.compactDock() ? this.tr('插话发送…') : this.tr('插话发送（长按发送键切换）'))
-                : (this.isWideLayout() ? this.tr('发送消息…（Enter 换行 · Ctrl+Enter 发送）')
-                  : this.tr('发送消息…'))) })
-            .layoutWeight(1)
-            .constraintSize({ minHeight: this.compactDock() ? 44 : 46,
-              maxHeight: this.isLandscape ? 160 : (this.isWideLayout() ? 240 : 132) })
-            // PC 键盘约定：Enter 换行，Ctrl+Enter（或 ⌘+Enter）发送，Shift+Enter 也按换行。
-            // 这里只拦「修饰键+Enter」，其余一律交给 TextArea 默认行为，换行不会被吃掉。
+                : (this.isWideLayout() ? this.tr('输入消息…') + ' (Ctrl+Enter)' : this.tr('输入消息…'))) })
+            .width('100%')
+            .constraintSize({ minHeight: 38,
+              maxHeight: this.isLandscape ? 160 : (this.isWideLayout() ? 240 : 128) })
             .onKeyEvent((event: KeyEvent) => {
               if (event.type !== KeyType.Down || event.keyCode !== KeyCode.KEYCODE_ENTER) {
                 return;
               }
-              // ArkUI 的 KeyEvent 没有 ctrlKey 字段，修饰键要走 getModifierKeyState
               const ctrl: boolean = event.getModifierKeyState !== undefined
                 ? event.getModifierKeyState(['Ctrl', 'Meta']) : false;
               if (ctrl) {
                 this.sendTap();
               }
             })
-            .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.40)')
-            .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-              colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-              adaptiveColor: AdaptiveColor.DEFAULT,
-              blurOptions: { grayscale: [0, 12] }
-            })
+            .backgroundColor(Color.Transparent)
             .fontColor(this.pal().text)
             .fontSize(this.fs(15))
             .lineHeight(this.fs(22))
             .placeholderColor(this.pal().text3)
-            .caretColor('#22D3EE')
-            .borderRadius(23)
-            .border({ width: 1,
-              color: this.isDarkUi ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.95)' })
-            .padding({ left: 18, right: 18, top: 12, bottom: 12 })
-            .clip(true)
-            // 生成中保持可输入：否则「插话」无从谈起。
+            .caretColor('#4D6BFE')
+            .padding({ left: 2, right: 2, top: 2, bottom: 2 })
             .enabled(true)
             .onFocus(() => {
               if (this.stickToBottom) {
@@ -5003,10 +6342,18 @@ struct Index {
             })
             .onChange((value: string) => {
               this.promptInput = value;
-              if (value === '/' && this.slashCommands.length === 0) {
-                this.runtime.loadSlashCommands();
+              const mention = detectMention(value, value.length);
+              if (mention !== undefined && mention.type === 'command') {
+                if (this.slashCommands.length === 0) {
+                  this.runtime.loadSlashCommands();
+                }
+                if (this.skillsCatalog.length === 0) {
+                  this.runtime.loadSkillsCatalog(this.currentSessionId);
+                }
+              } else if (mention !== undefined && mention.type === 'context'
+                && this.workspaceFileRefs.length === 0) {
+                this.runtime.loadWorkspaceFileRefs(this.currentSessionId);
               }
-              // 草稿落盘做个 400ms 防抖，别每敲一个字就写一次 preferences
               if (this.draftSaveTimer >= 0) {
                 clearTimeout(this.draftSaveTimer);
               }
@@ -5015,220 +6362,686 @@ struct Index {
                 this.runtime.saveDraft(this.currentSessionId, this.promptInput);
               }, 400);
             })
-            // 粘贴：剪贴板里是图片就直接挂到待发送区（文本仍按默认插入）
             .onPaste(() => {
               this.pasteImageFromClipboard();
             })
-            // 内边距不对称：左边留多点好读，右边贴着发送键留少点
-            .padding({ left: this.compactDock() ? 14 : 12, right: this.compactDock() ? 8 : 12,
-              top: 10, bottom: 10 })
-            // 跟手光斑：坐标就是这块自己的局部坐标
-            .overlay(this.DockSpot(96), { align: Alignment.Center })
-            .onTouch((event: TouchEvent) => {
-              this.trackDockLight(event);
+
+          Row({ space: 10 }) {
+            Row() {
+              if (this.pickingImages || this.pickingFiles) {
+                LoadingProgress()
+                  .width(16)
+                  .height(16)
+                  .color('#4D6BFE')
+              } else {
+                Image($r('app.media.ic_lucide_plus'))
+                  .width(19)
+                  .height(19)
+                  .colorFilter(iconTintFilter(this.pal().text))
+              }
+            }
+            .width(36)
+            .height(36)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .backgroundColor(this.pal().chip)
+            .borderRadius(18)
+            .onClick(() => {
+              this.chatActionMenuOpen = true;
             })
-            .onMouse((event: MouseEvent) => {
-              this.trackDockMouse(event);
+
+            Row() {
+              Image($r('app.media.ic_lucide_zap'))
+                .width(17)
+                .height(17)
+                .colorFilter(iconTintFilter(this.pal().text))
+            }
+            .width(36)
+            .height(36)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .backgroundColor(this.pal().chip)
+            .borderRadius(18)
+            .onClick(() => {
+              this.writingMenuOpen = true;
             })
-          if (this.generating && !this.compactDock()) {
-            Text('■')
-              .fontSize(this.fs(16))
-              .fontColor('#F85749')
-              .width(46)
-              .height(46)
-              .textAlign(TextAlign.Center)
-              .backgroundColor('rgba(248,87,73,0.12)')
-              .borderRadius(23)
-              .border({ width: 1, color: 'rgba(248,87,73,0.35)' })
-              .backgroundBlurStyle(BlurStyle.COMPONENT_THICK, {
-                colorMode: this.isDarkUi ? ThemeColorMode.DARK : ThemeColorMode.LIGHT,
-                adaptiveColor: AdaptiveColor.DEFAULT,
-                blurOptions: { grayscale: [0, 12] }
+
+            if (!this.compactDock()) {
+              Row() {
+                Text('⤢')
+                  .fontSize(14)
+                  .fontColor(this.pal().text2)
+              }
+              .width(34)
+              .height(34)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .backgroundColor(this.pal().chip)
+              .borderRadius(17)
+              .onClick(() => {
+                this.composerExpanded = true;
               })
-              .shadow({ radius: 12,
-                color: this.isDarkUi ? 'rgba(0,0,0,0.50)' : 'rgba(31,45,90,0.22)',
-                offsetX: 0, offsetY: 5 })
-              .clip(true)
-              .overlay(this.DockSpot(52), { align: Alignment.Center })
-              .onTouch((event: TouchEvent) => {
-                this.trackDockLight(event);
-              })
+            }
+
+            Row({ space: 4 }) {
+              Text(this.currentModelDisplay())
+                .fontSize(this.fs(11.5))
+                .fontColor(this.pal().text2)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: 112 })
+              Text('▾')
+                .fontSize(this.fs(10))
+                .fontColor(this.pal().text3)
+            }
+            .height(32)
+            .padding({ left: 10, right: 8 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(16)
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => {
+              this.runtime.refreshModelCatalog().catch(() => undefined);
+              this.showModelPicker = true;
+            })
+
+            Blank()
+
+            if (this.generating && this.promptInput.trim().length === 0
+              && this.pendingImages.length === 0 && this.pendingFiles.length === 0) {
+              Column() {
+                Column()
+                  .width(11)
+                  .height(11)
+                  .borderRadius(2.5)
+                  .backgroundColor('#FFFFFF')
+              }
+              .width(36)
+              .height(36)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+              .backgroundColor('#F85749')
+              .borderRadius(18)
               .onClick(() => {
                 this.runtime.stopGeneration();
               })
-          }
-          if (this.generating && this.compactDock() && this.promptInput.trim().length === 0
-            && this.pendingImages.length === 0) {
-            // 手机上生成中且没输入：最右边这颗键直接用成「停止」，垂直居中一颗键，不再另占位
-            Column() {
-              Column()
-                .width(13)
-                .height(13)
-                .borderRadius(3)
-                .backgroundColor('#FFFFFF')
-            }
-            .width(42)
-            .height(42)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-            .backgroundColor('#F85749')
-            .borderRadius(21)
-            .shadow({ radius: 12, color: 'rgba(248,87,73,0.40)', offsetX: 0, offsetY: 5 })
-            .onClick(() => {
-              this.runtime.stopGeneration();
-            })
-          } else {
-          Text('↑')
-            .fontSize(this.fs(20))
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-            .width(this.compactDock() ? 42 : 46)
-            .height(this.compactDock() ? 42 : 46)
-            .textAlign(TextAlign.Center)
-            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
-            .borderRadius(23)
-            .shadow({ radius: 12, color: 'rgba(77,107,254,0.45)', offsetX: 0, offsetY: 5 })
-            .clip(true)
-            .opacity(this.reconnecting ? 0.45 : 1)
-            .overlay(this.DockSpot(52), { align: Alignment.Center })
-            // 不给键盘焦点：焦点落到发送键上时，Enter/Space 会变成「发送」，
-            // PC 用户按 Enter 想换行却把消息发出去了。鼠标点它照样能发。
-            .focusable(false)
-            .onTouch((event: TouchEvent) => {
-              this.trackDockLight(event);
-            })
-            .onClick(() => {
-              this.sendTap();
-            })
-            .onKeyEvent((event: KeyEvent) => {
-              if (event.type === KeyType.Down
-                && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
-                this.sendTap();
+            } else {
+              Row() {
+                Image($r('app.media.ic_lucide_arrow_up'))
+                  .width(18)
+                  .height(18)
+                  .colorFilter(iconTintFilter((this.promptInput.trim().length > 0
+                    || this.pendingImages.length > 0 || this.pendingFiles.length > 0)
+                    ? '#FFFFFF' : this.pal().text3))
               }
-            })
-            .gesture(LongPressGesture().onAction(() => {
-              this.sendModeOpen = true;
-            }))
+              .width(36)
+              .height(36)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .backgroundColor((this.promptInput.trim().length > 0
+                || this.pendingImages.length > 0 || this.pendingFiles.length > 0)
+                ? '#4D6BFE' : this.pal().chip)
+              .borderRadius(18)
+              .opacity(this.reconnecting ? 0.45 : 1)
+              .focusable(false)
+              .onClick(() => {
+                this.sendTap();
+              })
+              .onKeyEvent((event: KeyEvent) => {
+                if (event.type === KeyType.Down
+                  && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
+                  this.sendTap();
+                }
+              })
+              .gesture(LongPressGesture().onAction(() => {
+                this.sendModeOpen = true;
+              }))
+            }
           }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
         }
         .width('100%')
+        .padding({ left: 14, right: 12, top: 10, bottom: 10 })
+        .backgroundColor(this.pal().card)
+        .borderRadius(24)
+        .border({ width: 0.5, color: this.pal().borderStrong })
+        .shadow({ radius: 14,
+          color: this.isDarkUi ? 'rgba(0,0,0,0.38)' : 'rgba(15,23,42,0.06)',
+          offsetX: 0, offsetY: 4 })
+
+        if (!this.keyboardVisible) {
+          Text(this.tr('对话全程加密，远程操作受 DeepSeek Harness 权限控制。'))
+            .fontSize(this.fs(10.5))
+            .fontColor(this.pal().text3)
+            .textAlign(TextAlign.Center)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .padding({ top: 6, bottom: 2 })
+        }
       }
-      // 这一层不再画玻璃：底板交给按钮行的每一块自己画，中间才断得开
       .width('100%')
       }
       .width('100%')
       .constraintSize({ maxWidth: this.chatMaxWidth() })
-      .padding({ left: 12, right: 12, top: 8, bottom: 0 })
+      .padding({ left: 12, right: 12, top: 6, bottom: 2 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
   }
 
-  /** Shared sessions list (header + rows); wrapped by the overlay or the landscape pane. */
+  private botSession(sessionId: string): HarnessRemoteSession | undefined {
+    return this.sessions.find((s: HarnessRemoteSession): boolean => s.sessionId === sessionId);
+  }
+
+  private botPreview(sessionId: string, explicit: string, fallback: string): string {
+    if (explicit.length > 0) return explicit;
+    const session: HarnessRemoteSession | undefined = this.botSession(sessionId);
+    const outline: HarnessTurnSummary[] = session !== undefined && session.turnOutline.length > 0
+      ? session.turnOutline : (this.runtime.botSessionOutlines.get(sessionId) ?? []);
+    const hiddenRaw: Object | undefined = this.runtime.botState.exchangeTurns[sessionId];
+    const hidden: Object[] = Array.isArray(hiddenRaw) ? hiddenRaw as Object[] : [];
+    const preview: string = botOutlinePreview(outline, hidden);
+    return preview.length > 0 ? preview : fallback;
+  }
+
+  private botSessionTime(sessionId: string): number {
+    return this.botSession(sessionId)?.updatedAt ?? 0;
+  }
+
+  /** Shared sessions drawer (header + tabs + collapsible workspace cards + host footer). */
+  private roomMembers(id: string): BotEntry[] {
+    const room: BotRoom | undefined = this.rosterRoomList.find((item: BotRoom): boolean => item.id === id);
+    const members: BotEntry[] = [];
+    if (room !== undefined) {
+      for (const memberId of room.members.slice(0, 3)) {
+        const bot: BotEntry | undefined = this.rosterBotList.find((item: BotEntry): boolean => item.id === memberId);
+        if (bot !== undefined) members.push(bot);
+      }
+    }
+    return members;
+  }
+
+  @Builder
+  BotRosterRow(id: string, sessionId: string, name: string, bot: BotEntry, isRoom: boolean,
+    main: boolean, pinned: boolean, busy: boolean, engine: string, preview: string, createdAt: number) {
+    Row({ space: 12 }) {
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        Stack({ alignContent: Alignment.TopStart }) {
+          if (isRoom) {
+            ForEach(this.roomMembers(id), (member: BotEntry, index: number) => {
+              BotAvatar({ bot: member, avatarSize: 35, dark: this.isDarkUi })
+                .position({ x: Math.min(13 * index, 13), y: index % 2 === 0 ? 0 : 13 })
+            }, (member: BotEntry) => member.id)
+            if (this.roomMembers(id).length === 0) {
+              Image($r('app.media.ic_lucide_users'))
+                .width(22)
+                .height(22)
+                .colorFilter(iconTintFilter(this.pal().text2))
+            }
+          } else {
+            BotAvatar({ bot: bot, avatarSize: 48, dark: this.isDarkUi })
+          }
+        }
+        .width(48)
+        .height(48)
+        if (main) {
+          Stack() {
+            Circle({ width: 16, height: 16 }).fill('#F5A623')
+            Image($r('app.media.ic_lucide_star'))
+              .width(9)
+              .height(9)
+              .colorFilter(iconTintFilter('#FFFFFF'))
+          }
+        } else if (busy) {
+          Column()
+            .width(11)
+            .height(11)
+            .borderRadius(6)
+            .backgroundColor('#1E9E6A')
+            .border({ width: 2, color: this.pal().panel })
+        }
+      }
+      .width(48)
+      .height(48)
+      Column({ space: 3 }) {
+        Row({ space: 6 }) {
+          Text(name)
+            .fontSize(this.fs(16))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          if (main) {
+            Image($r('app.media.ic_lucide_star'))
+              .width(13)
+              .height(13)
+              .colorFilter(iconTintFilter('#F5A623'))
+          }
+          Text(formatRelativeShort(createdAt))
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text3)
+        }
+        .width('100%')
+        Row({ space: 6 }) {
+          if (engine.length > 0) {
+            Text(engine)
+              .fontSize(this.fs(10))
+              .fontColor('#4D6BFE')
+              .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+              .backgroundColor('rgba(77,107,254,0.12)')
+              .borderRadius(8)
+          }
+          Text(preview.length > 0 ? preview : (isRoom ? this.tr('群聊') : ''))
+            .fontSize(this.fs(13))
+            .fontColor(this.pal().text2)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 11, bottom: 11 })
+    .backgroundColor(this.selectedBotTargetId === id ? 'rgba(77,107,254,0.10)' : Color.Transparent)
+    .onClick(() => {
+      this.runtime.selectBotTarget(id, sessionId);
+      this.runtime.setBotMode(true);
+      this.closeDrawer();
+    })
+  }
+
+  @Builder
+  BotRosterPane() {
+    Column() {
+      Row({ space: 8 }) {
+        Row({ space: 4 }) {
+          Text(this.botRosterFilter === 'bot' ? this.tr('机器人')
+            : (this.botRosterFilter === 'room' ? this.tr('群聊') : this.tr('全部')))
+            .fontSize(this.fs(13))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Image($r('app.media.ic_lucide_chevron_down'))
+            .width(13)
+            .height(13)
+            .colorFilter(iconTintFilter(this.pal().text2))
+        }
+        .padding({ left: 12, right: 10, top: 7, bottom: 7 })
+        .backgroundColor(this.pal().chip)
+        .borderRadius(16)
+        .onClick(() => {
+          this.botRosterFilter = this.botRosterFilter === 'all' ? 'bot'
+            : (this.botRosterFilter === 'bot' ? 'room' : 'all');
+        })
+        Row({ space: 6 }) {
+          Image($r('app.media.ic_lucide_search'))
+            .width(15)
+            .height(15)
+            .colorFilter(iconTintFilter(this.pal().text3))
+          TextInput({ text: this.botRosterSearch, placeholder: this.tr('搜索会话…') })
+            .layoutWeight(1)
+            .height(34)
+            .fontSize(this.fs(14))
+            .backgroundColor(Color.Transparent)
+            .padding({ left: 0, right: 0 })
+            .onChange((value: string) => {
+              this.botRosterSearch = value;
+            })
+        }
+        .layoutWeight(1)
+        .padding({ left: 12, right: 8 })
+        .height(36)
+        .backgroundColor(this.pal().chip)
+        .borderRadius(18)
+        Row() {
+          Image($r('app.media.ic_lucide_plus'))
+            .width(18)
+            .height(18)
+            .colorFilter(iconTintFilter(this.pal().text))
+        }
+        .width(36)
+        .height(36)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(this.pal().chip)
+        .borderRadius(18)
+        .onClick(() => {
+          this.botCreateRequestVersion += 1;
+          this.runtime.setBotMode(true);
+          this.closeDrawer();
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      Scroll() {
+       Column() {
+        if (this.rosterBotList.length === 0 && this.rosterRoomList.length === 0) {
+          Column() {
+            Text(this.runtime.botError.length > 0 ? this.runtime.botError : '…')
+              .fontSize(this.fs(13))
+              .fontColor(this.pal().text3)
+              .padding(20)
+          }
+        }
+        if (this.botRosterFilter !== 'room') {
+          ForEach(this.rosterBots(), (b: BotEntry) => {
+            Column() {
+              this.BotRosterRow(b.id, b.sessionId, b.name, b, false, b.main, b.pinned,
+                this.rosterBusyIds.indexOf(b.id) >= 0, b.engine, this.botPreview(b.sessionId, b.preview, b.role),
+                this.botSessionTime(b.sessionId))
+            }
+          }, (b: BotEntry) => `bot:${b.id}:${this.botStateVersion}:${this.botSessionTime(b.sessionId)}:${this.sessions.length}`)
+        }
+        if (this.botRosterFilter !== 'bot') {
+          ForEach(this.rosterRooms(), (r: BotRoom) => {
+            Column() {
+              this.BotRosterRow(r.id, r.sessionId, r.name, new BotEntry(), true, false, r.pinned,
+                this.rosterBusyIds.indexOf(r.id) >= 0, '', this.botPreview(r.sessionId, r.preview, ''),
+                this.botSessionTime(r.sessionId))
+            }
+          }, (r: BotRoom) => `room:${r.id}:${this.botStateVersion}:${this.botSessionTime(r.sessionId)}:${this.sessions.length}`)
+        }
+       }
+       .width('100%')
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+    }
+    .layoutWeight(1)
+    .width('100%')
+  }
+
+  private rosterBots(): BotEntry[] {
+    const q: string = this.botRosterSearch.trim().toLowerCase();
+    const out: BotEntry[] = this.rosterBotList.filter((b: BotEntry): boolean =>
+      !b.hidden && (q.length === 0 || b.name.toLowerCase().indexOf(q) >= 0));
+    return out.sort((a: BotEntry, b: BotEntry): number => {
+      const pa: number = (a.main ? 2 : 0) + (a.pinned ? 1 : 0);
+      const pb: number = (b.main ? 2 : 0) + (b.pinned ? 1 : 0);
+      return pb - pa;
+    });
+  }
+
+  private rosterRooms(): BotRoom[] {
+    const q: string = this.botRosterSearch.trim().toLowerCase();
+    return this.rosterRoomList.filter((r: BotRoom): boolean =>
+      !r.hidden && (q.length === 0 || r.name.toLowerCase().indexOf(q) >= 0));
+  }
+
+
   @Builder
   SessionsPanelBody() {
     Column() {
-      Row() {
-        Text('会话')
-          .fontSize(this.fs(18))
+      // 1. Brand Header: Official Whale SVG + DS Harness Remote + ⋮
+      Row({ space: 10 }) {
+        Image($r('app.media.ic_dsh_whale'))
+          .width(23)
+          .height(17)
+          .colorFilter(iconTintFilter(this.pal().text))
+        Text('DS Harness Remote')
+          .fontSize(this.fs(19))
           .fontWeight(FontWeight.Bold)
           .fontColor(this.pal().text)
-        if (this.runtime.favoriteSessions.length > 0) {
-          Text('★ ' + this.runtime.favoriteSessions.length)
-            .fontSize(this.fs(11))
-            .fontColor('#F5A623')
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor(this.favoriteOnly ? 'rgba(245,166,35,0.28)' : 'rgba(245,166,35,0.12)')
-            .borderRadius(7)
-            .margin({ left: 6 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Row() {
+          Image($r('app.media.ic_lucide_more_v'))
+            .width(18)
+            .height(18)
+            .colorFilter(iconTintFilter(this.pal().text))
+        }
+        .width(38)
+        .height(38)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(this.pal().card)
+        .borderRadius(19)
+        .border({ width: 0.5, color: this.pal().border })
+        .onClick(() => {
+          this.drawerMenuOpen = true;
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 10 })
+
+      // 2. Underline Mode Tabs: 智能体 | DS-Bot
+      if (this.runtime.hostFeatures.pluginRoute) {
+        Column() {
+          Row() {
+            Column() {
+              Row({ space: 6 }) {
+                Image($r('app.media.ic_lucide_grid'))
+                  .width(15)
+                  .height(15)
+                  .colorFilter(iconTintFilter(!(this.drawerTab === 'bot') ? this.pal().text : this.pal().text2))
+                Text(this.tr('智能体'))
+                  .fontSize(this.fs(15))
+                  .fontWeight(!(this.drawerTab === 'bot') ? FontWeight.Medium : FontWeight.Normal)
+                  .fontColor(!(this.drawerTab === 'bot') ? this.pal().text : this.pal().text2)
+              }
+              .height(40)
+              .alignItems(VerticalAlign.Center)
+              if (!(this.drawerTab === 'bot')) {
+                Column()
+                  .width(44)
+                  .height(2.5)
+                  .borderRadius(1.25)
+                  .backgroundColor('#4D6BFE')
+              } else {
+                Column().width(44).height(2.5)
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Center)
+            .onClick(() => {
+              this.drawerTab = 'agent';
+              if (this.botMode) {
+                this.runtime.setBotMode(false);
+              }
+            })
+
+            Column() {
+              Row({ space: 6 }) {
+                Image($r('app.media.ic_lucide_bot'))
+                  .width(16)
+                  .height(16)
+                  .colorFilter(iconTintFilter((this.drawerTab === 'bot') ? this.pal().text : this.pal().text2))
+                Text('DS-Bot')
+                  .fontSize(this.fs(15))
+                  .fontWeight((this.drawerTab === 'bot') ? FontWeight.Medium : FontWeight.Normal)
+                  .fontColor((this.drawerTab === 'bot') ? this.pal().text : this.pal().text2)
+              }
+              .height(40)
+              .alignItems(VerticalAlign.Center)
+              if ((this.drawerTab === 'bot')) {
+                Column()
+                  .width(44)
+                  .height(2.5)
+                  .borderRadius(1.25)
+                  .backgroundColor('#4D6BFE')
+              } else {
+                Column().width(44).height(2.5)
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Center)
+            .onClick(() => {
+              this.drawerTab = 'bot';
+              this.runtime.loadBotRoster();
+            })
+          }
+          .width('100%')
+          Column()
+            .width('100%')
+            .height(0.5)
+            .backgroundColor(this.pal().border)
+        }
+        .width('100%')
+      }
+
+      if (this.drawerTab === 'bot') {
+        this.BotRosterPane()
+      } else {
+      // 3. Workspace Toolbar: 工作区 [DeepSeek ⌄]     Search / Filter / Folder+
+      Row({ space: 8 }) {
+        Text(this.tr('工作区'))
+          .fontSize(this.fs(14))
+          .fontColor(this.pal().text2)
+        Row({ space: 4 }) {
+          Text(backendPillShort(this.selectedBackend))
+            .fontSize(this.fs(13))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.pal().text)
+          Image($r('app.media.ic_lucide_chevron_down'))
+            .width(13)
+            .height(13)
+            .colorFilter(iconTintFilter(this.pal().text2))
+        }
+        .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+        .backgroundColor(this.pal().chip)
+        .borderRadius(16)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.backendPickerOpen = true;
+        })
+
+        Blank()
+
+        Row() {
+          Image($r('app.media.ic_lucide_search'))
+            .width(18)
+            .height(18)
+            .colorFilter(iconTintFilter(this.drawerSearchOpen || this.sessionSearchActive ? '#4D6BFE' : this.pal().text2))
+        }
+        .width(34)
+        .height(34)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.drawerSearchOpen = !this.drawerSearchOpen;
+        })
+
+        Row() {
+          Image($r('app.media.ic_lucide_sliders_v'))
+            .width(18)
+            .height(18)
+            .colorFilter(iconTintFilter(this.drawerFilterOpen || this.favoriteOnly || this.showArchived ? '#4D6BFE' : this.pal().text2))
+        }
+        .width(34)
+        .height(34)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.drawerFilterOpen = !this.drawerFilterOpen;
+        })
+
+        Row() {
+          Image($r('app.media.ic_lucide_folder_plus'))
+            .width(18)
+            .height(18)
+            .colorFilter(iconTintFilter(this.pal().text2))
+        }
+        .width(34)
+        .height(34)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.workspacePathInput = this.runtime.browsePath.length > 0
+            ? this.runtime.browsePath : '';
+          this.workspaceNameDraft = '';
+          this.workspaceCreateOpen = true;
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 12, top: 12, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      if (this.drawerSearchOpen || this.sessionSearchActive) {
+        Row({ space: 8 }) {
+          TextInput({ text: this.sessionSearchInput, placeholder: this.tr('搜索会话…') })
+            .layoutWeight(1)
+            .height(36)
+            .fontSize(this.fs(13))
+            .backgroundColor(this.pal().card)
+            .fontColor(this.pal().text)
+            .placeholderColor(this.pal().text3)
+            .borderRadius(12)
+            .border({ width: 0.5, color: this.pal().border })
+            .padding({ left: 12, right: 12 })
+            .onChange((value: string) => {
+              this.sessionSearchInput = value;
+              this.sessionSearchActive = value.trim().length > 0;
+              if (this.searchDebounceTimer >= 0) {
+                clearTimeout(this.searchDebounceTimer);
+              }
+              this.searchDebounceTimer = setTimeout(() => {
+                this.searchDebounceTimer = -1;
+                this.runtime.searchSessions(this.sessionSearchInput);
+              }, 250);
+            })
+          if (this.sessionSearchActive) {
+            Text('清除')
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text3)
+              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(10)
+              .onClick(() => {
+                this.sessionSearchInput = '';
+                this.sessionSearchActive = false;
+                this.sessionSearchResults = [];
+                this.runtime.searchSessions('');
+              })
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 2, bottom: 8 })
+      }
+
+      if (this.drawerFilterOpen) {
+        Row({ space: 8 }) {
+          Text(this.tr('收藏') + ` (${this.runtime.favoriteSessions.length})`)
+            .fontSize(this.fs(12))
+            .fontColor(this.favoriteOnly ? '#4D6BFE' : this.pal().text2)
+            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+            .backgroundColor(this.favoriteOnly ? 'rgba(77,107,254,0.14)' : this.pal().card)
+            .borderRadius(10)
+            .border({ width: 0.5, color: this.pal().border })
             .onClick(() => {
               this.favoriteOnly = !this.favoriteOnly;
             })
-        }
-        if (this.archivedIds.length > 0) {
-          Text(this.showArchived
-            ? this.tr('收起归档')
-            : this.tr('已归档 ') + this.archivedIds.length)
-            .fontSize(this.fs(11))
-            .fontColor(this.showArchived ? '#22D3EE' : this.pal().text3)
-            .padding({ left: 7, right: 7, top: 2, bottom: 2 })
-            .backgroundColor(this.showArchived ? 'rgba(34,211,238,0.16)' : this.pal().inputBg)
-            .borderRadius(7)
-            .margin({ left: 6 })
+          Text((this.showArchived ? this.tr('收起归档') : this.tr('归档')) + ` (${this.archivedIds.length})`)
+            .fontSize(this.fs(12))
+            .fontColor(this.showArchived ? '#4D6BFE' : this.pal().text2)
+            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+            .backgroundColor(this.showArchived ? 'rgba(77,107,254,0.14)' : this.pal().card)
+            .borderRadius(10)
+            .border({ width: 0.5, color: this.pal().border })
             .onClick(() => {
               this.showArchived = !this.showArchived;
             })
         }
-        Text(`${this.visibleSessions().length}`)
-          .fontSize(this.fs(12))
-          .fontColor(this.pal().text3)
-          .margin({ left: 6 })
-        Blank()
-        Text('＋ 新建')
-          .fontSize(this.fs(13))
-          .fontColor('#22D3EE')
-          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-          .backgroundColor('rgba(34,211,238,0.10)')
-          .borderRadius(15)
-          .border({ width: 1, color: 'rgba(34,211,238,0.30)' })
-          .onClick(() => {
-            this.closeDrawer();
-            this.runtime.createNewSession();
-          })
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 8 })
       }
-      .width('100%')
-      .padding({ left: 18, right: 18, top: 16, bottom: 12 })
-      Row({ space: 8 }) {
-        TextInput({ text: this.sessionSearchInput, placeholder: this.tr('搜索会话…') })
-          .layoutWeight(1)
-          .height(36)
-          .fontSize(this.fs(13))
-          .backgroundColor(this.pal().inputBg)
-          .fontColor(this.pal().text)
-          .placeholderColor(this.pal().text3)
-          .borderRadius(10)
-          .border({ width: 1, color: this.pal().border })
-          .padding({ left: 12, right: 12 })
-          .onChange((value: string) => {
-            this.sessionSearchInput = value;
-            this.sessionSearchActive = value.trim().length > 0;
-            // 每敲一个字就走一次中继 RPC 太贵（一次 400~600ms），加 250ms 防抖
-            if (this.searchDebounceTimer >= 0) {
-              clearTimeout(this.searchDebounceTimer);
-            }
-            this.searchDebounceTimer = setTimeout(() => {
-              this.searchDebounceTimer = -1;
-              this.runtime.searchSessions(this.sessionSearchInput);
-            }, 250);
-          })
-        if (this.sessionSearchActive) {
-          Text('清除')
-            .fontSize(this.fs(12))
-            .fontColor(this.pal().text3)
-            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-            .backgroundColor(this.pal().inputBg)
-            .borderRadius(9)
-            .border({ width: 1, color: this.pal().border })
-            .onClick(() => {
-              this.sessionSearchInput = '';
-              this.sessionSearchActive = false;
-              this.sessionSearchResults = [];
-              this.runtime.searchSessions('');
-            })
-        }
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+
       if (this.editingWorkspaceId.length > 0) {
         Row({ space: 8 }) {
           TextInput({ text: this.workspaceTitleInput, placeholder: this.tr('工作区名称') })
             .layoutWeight(1)
             .height(34)
             .fontSize(this.fs(12))
-            .backgroundColor(this.pal().inputBg)
+            .backgroundColor(this.pal().card)
             .fontColor(this.pal().text)
             .borderRadius(9)
-            .border({ width: 1, color: this.pal().border })
+            .border({ width: 0.5, color: this.pal().border })
             .onChange((value: string) => {
               this.workspaceTitleInput = value;
             })
@@ -5242,318 +7055,357 @@ struct Index {
             })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 2, bottom: 6 })
+        .padding({ left: 16, right: 16, top: 2, bottom: 8 })
       }
-      if (this.workspaces.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text('跟随当前会话')
-              .fontSize(this.fs(11))
-              .fontColor(this.selectedWorkspaceId.length === 0 ? '#22D3EE' : this.pal().text3)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(this.selectedWorkspaceId.length === 0
-                ? 'rgba(34,211,238,0.12)' : this.pal().inputBg)
-              .borderRadius(9)
-              .border({ width: 1, color: this.selectedWorkspaceId.length === 0
-                ? 'rgba(34,211,238,0.45)' : this.pal().border })
-              .onClick(() => {
-                this.runtime.setSelectedWorkspace('');
-              })
-            Text('＋ ' + this.tr('新建'))
-              .fontSize(this.fs(11))
-              .fontColor('#22D3EE')
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor('rgba(34,211,238,0.10)')
-              .borderRadius(9)
-              .border({ width: 1, color: 'rgba(34,211,238,0.40)' })
-              .onClick(() => {
-                this.workspacePathInput = this.runtime.browsePath.length > 0
-                  ? this.runtime.browsePath : '';
-                this.workspaceNameDraft = '';
-                this.workspaceCreateOpen = true;
-              })
-            ForEach(this.workspaces, (workspace: HarnessWorkspace) => {
-              Text(workspace.title.length > 0 ? workspace.title : workspace.path)
-                .fontSize(this.fs(11))
-                .maxLines(1)
-                .constraintSize({ maxWidth: 140 })
-                .fontColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? '#22D3EE' : this.pal().text3)
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.selectedWorkspaceId === workspace.workspaceId
-                  ? 'rgba(34,211,238,0.12)' : this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.selectedWorkspaceId === workspace.workspaceId
-                  ? 'rgba(34,211,238,0.45)' : this.pal().border })
-                .onClick(() => {
-                  this.runtime.setSelectedWorkspace(workspace.workspaceId);
-                })
-                .gesture(LongPressGesture().onAction(() => {
-                  ActionSheet.show({
-                    title: workspace.title.length > 0 ? workspace.title : workspace.path,
-                    message: workspace.path,
-                    sheets: [
-                      {
-                        title: this.tr('浏览文件'),
-                        action: () => {
-                          this.showBrowser = true;
-                          this.runtime.openWorkspace(workspace.workspaceId);
-                        }
-                      },
-                      {
-                        title: this.tr('重命名'),
-                        action: () => {
-                          this.editingWorkspaceId = workspace.workspaceId;
-                          this.workspaceTitleInput = workspace.title;
-                        }
-                      },
-                      {
-                        title: this.tr('删除工作区'),
-                        action: () => {
-                          this.runtime.deleteWorkspace(workspace.workspaceId);
-                        }
-                      }
-                    ]
-                  });
-                }))
-            }, (workspace: HarnessWorkspace) => `${workspace.workspaceId}#${this.languageMode}`)
-          }
-          .padding({ left: 16, right: 16 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 2, bottom: 6 })
-      }
-      Column()
-        .width('100%')
-        .height(0.5)
-        .backgroundColor(this.pal().border)
-      if (!this.sessionSearchActive && this.runtime.recentSessions.length > 0) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('最近'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            ForEach(this.runtime.recentSessions, (id: string) => {
-              Text(this.recentSessionTitle(id))
-                .fontSize(this.fs(11))
-                .fontColor(this.pal().text2)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 120 })
-                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                .backgroundColor(this.pal().inputBg)
-                .borderRadius(9)
-                .border({ width: 1, color: this.pal().border })
-                .onClick(() => {
-                  this.closeDrawer();
-                  this.runtime.openSession(id);
-                })
-            }, (id: string) => 'recent-' + id)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-      }
-      if (!this.sessionSearchActive && this.sessionWorkspaces().length > 1) {
-        Scroll() {
-          Row({ space: 8 }) {
-            Text(this.tr('工作区'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-            Text(this.tr('全部'))
-              .fontSize(this.fs(11))
-              .fontColor(this.workspaceFilter.length === 0 ? '#22D3EE' : this.pal().text3)
-              .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-              .backgroundColor(this.workspaceFilter.length === 0
-                ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
-              .borderRadius(8)
-              .onClick(() => {
-                this.workspaceFilter = '';
-              })
-            ForEach(this.sessionWorkspaces(), (cwd: string) => {
-              Text(cwdTail(cwd))
-                .fontSize(this.fs(11))
-                .fontColor(this.workspaceFilter === cwd ? '#22D3EE' : this.pal().text3)
-                .maxLines(1)
-                .constraintSize({ maxWidth: 110 })
-                .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-                .backgroundColor(this.workspaceFilter === cwd
-                  ? 'rgba(34,211,238,0.14)' : this.pal().inputBg)
-                .borderRadius(8)
-                .onClick(() => {
-                  this.workspaceFilter = this.workspaceFilter === cwd ? '' : cwd;
-                })
-            }, (cwd: string) => 'ws-' + cwd)
-          }
-          .padding({ left: 16, right: 16, bottom: 6 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-      }
-      if (this.visibleSessions().length === 0) {
-        Column({ space: 6 }) {
+
+      // 4. Collapsible Grouped Workspace Cards
+      if (this.workspaceGroups().length === 0 && this.visibleSessions().length === 0) {
+        Column({ space: 8 }) {
           Text(this.sessionSearchActive ? this.tr('没有匹配的会话') : this.tr('还没有会话'))
-            .fontSize(this.fs(12))
+            .fontSize(this.fs(13))
             .fontColor(this.pal().text3)
           if (!this.sessionSearchActive) {
-            Text(this.tr('点右上角「新建」开一个'))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
+            Text('＋ ' + this.tr('新建'))
+              .fontSize(this.fs(13))
+              .fontColor('#4D6BFE')
+              .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+              .backgroundColor('rgba(77,107,254,0.12)')
+              .borderRadius(14)
+              .onClick(() => {
+                this.closeDrawer();
+                this.runtime.createNewSession();
+              })
           }
         }
+        .layoutWeight(1)
         .width('100%')
-        .padding({ top: 18, bottom: 12 })
+        .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-      }
-      List({ space: 8 }) {
-        ForEach(this.visibleSessions(),
-          (session: HarnessRemoteSession, index: number) => {
-          ListItem() {
-            Column() {
-            if (this.sessionGroupGap(index).length > 0) {
-              Text(this.tr(this.sessionGroupGap(index)))
-                .fontSize(this.fs(11))
-                .fontColor(this.pal().text3)
-                .width('100%')
-                .padding({ left: 4, top: index === 0 ? 0 : 10, bottom: 4 })
-            }
-            Row({ space: 10 }) {
-              Column()
-                .width(3)
-                .height(34)
-                .borderRadius(1.5)
-                .backgroundColor(session.sessionId === this.currentSessionId ? '#4D6BFE' : this.pal().chip)
-              Column({ space: 3 }) {
-                Text(formatSessionTitle(session))
-                  .fontSize(this.fs(14))
-                  .fontWeight(session.sessionId === this.currentSessionId ? FontWeight.Medium : FontWeight.Normal)
-                  .fontColor(session.sessionId === this.currentSessionId ? this.pal().text : this.pal().text2)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                Row({ space: 6 }) {
-                  Text(formatSessionTime(session.updatedAt))
+      } else {
+        List({ space: 10 }) {
+          if (this.recentDrawerSessions().length > 0 && !this.sessionSearchActive) {
+            ListItem() {
+              Column() {
+                Row({ space: 8 }) {
+                  Image($r('app.media.ic_lucide_folder'))
+                    .width(17)
+                    .height(17)
+                    .colorFilter(iconTintFilter(this.recentGroupExpanded ? '#4D6BFE' : this.pal().text2))
+                  Text(this.tr('最近访问'))
+                    .fontSize(this.fs(15))
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                  Text(`${this.recentDrawerSessions().length}`)
                     .fontSize(this.fs(11))
                     .fontColor(this.pal().text2)
-                  if (session.turns > 0 && !this.ultraCompactRows()) {
-                    Text(session.turns + this.tr(' 轮'))
-                      .fontSize(this.fs(10))
-                      .fontColor(this.pal().text3)
+                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                    .backgroundColor(this.pal().chip)
+                    .borderRadius(10)
+                  Blank()
+                  Row() {
+                    Image($r(this.recentGroupExpanded ? 'app.media.ic_lucide_chevron_down' : 'app.media.ic_lucide_chevron_right'))
+                      .width(16)
+                      .height(16)
+                      .colorFilter(iconTintFilter(this.pal().text3))
                   }
-                  if (cwdTail(session.cwd).length > 0 && !this.ultraCompactRows()) {
-                    Text(cwdTail(session.cwd))
-                      .fontSize(this.fs(10))
-                      .fontColor(this.pal().text3)
-                      .maxLines(1)
-                      .constraintSize({ maxWidth: 90 })
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  if (this.runtime.draftOf(session.sessionId).length > 0) {
-                    Text(this.tr('草稿'))
-                      .fontSize(this.fs(9))
-                      .fontColor('#F0A020')
-                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                      .backgroundColor('rgba(240,160,32,0.14)')
-                      .borderRadius(5)
-                  }
-                  if (session.running) {
-                    Row({ space: 3 }) {
-                      Column()
-                        .width(4)
-                        .height(4)
-                        .borderRadius(2)
-                        .backgroundColor('#34D399')
-                      Text('运行中')
-                        .fontSize(this.fs(10))
-                        .fontColor('#34D399')
+                  .width(24)
+                  .height(28)
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(VerticalAlign.Center)
+                }
+                .width('100%')
+                .padding({ left: 14, right: 10, top: 12, bottom: 12 })
+                .alignItems(VerticalAlign.Center)
+                .onClick(() => {
+                  this.recentGroupExpanded = !this.recentGroupExpanded;
+                })
+
+                if (this.recentGroupExpanded) {
+                  Column().width('100%').height(0.5).backgroundColor(this.pal().border)
+                  ForEach(this.recentDrawerSessions(), (session: HarnessRemoteSession, sIdx: number) => {
+                    Column() {
+                      if (sIdx > 0) {
+                        Column()
+                          .width('100%')
+                          .height(0.5)
+                          .backgroundColor(this.pal().border)
+                          .opacity(0.6)
+                      }
+                      Row({ space: 8 }) {
+                        if (session.sessionId === this.currentSessionId) {
+                          Column()
+                            .width(5)
+                            .height(5)
+                            .borderRadius(2.5)
+                            .backgroundColor('#4D6BFE')
+                        }
+                        Text(formatSessionTitle(session))
+                          .fontSize(this.fs(14))
+                          .fontWeight(session.sessionId === this.currentSessionId ? FontWeight.Medium : FontWeight.Normal)
+                          .fontColor(session.sessionId === this.currentSessionId ? '#4D6BFE' : this.pal().text)
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .layoutWeight(1)
+                        Text(formatRelativeShort(session.updatedAt))
+                          .fontSize(this.fs(12))
+                          .fontColor(this.pal().text3)
+                        if (this.pinnedIds.indexOf(session.sessionId) >= 0) {
+                          Text('📌')
+                            .fontSize(this.fs(11))
+                        }
+                      }
+                      .width('100%')
+                      .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+                      .backgroundColor(session.sessionId === this.currentSessionId ? 'rgba(77,107,254,0.08)' : Color.Transparent)
+                      .onClick(() => {
+                        this.closeDrawer();
+                        this.runtime.openSession(session.sessionId);
+                      })
                     }
+                    .width('100%')
+                  }, (session: HarnessRemoteSession) => 'recent-' + session.sessionId)
+                }
+              }
+              .width('100%')
+              .backgroundColor(this.pal().card)
+              .borderRadius(16)
+              .border({ width: 0.5, color: this.pal().border })
+              .clip(true)
+            }
+          }
+          ForEach(this.workspaceGroups(), (group: WorkspaceGroup) => {
+            ListItem() {
+              Column() {
+                Row({ space: 8 }) {
+                  Image($r('app.media.ic_lucide_folder'))
+                    .width(17)
+                    .height(17)
+                    .colorFilter(iconTintFilter(this.isWorkspaceExpanded(group) ? '#4D6BFE' : this.pal().text2))
+                  Text(group.title)
+                    .fontSize(this.fs(15))
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.pal().text)
+                    .maxLines(1)
+                    .constraintSize({ maxWidth: 165 })
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`${group.totalCount}`)
+                    .fontSize(this.fs(11))
+                    .fontColor(this.pal().text2)
+                    .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                    .backgroundColor(this.pal().chip)
+                    .borderRadius(10)
+                  Blank()
+                  Row() {
+                    Image($r('app.media.ic_lucide_plus'))
+                      .width(16)
+                      .height(16)
+                      .colorFilter(iconTintFilter(this.pal().text2))
                   }
-                  if (sessionBackendBadge(session.sessionId).length > 0) {
-                    Text(sessionBackendBadge(session.sessionId))
-                      .fontSize(this.fs(9))
-                      .fontColor('#8B5CF6')
-                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                      .backgroundColor('rgba(139,92,246,0.14)')
-                      .borderRadius(5)
+                  .width(28)
+                  .height(28)
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(VerticalAlign.Center)
+                  .onClick(() => {
+                    if (!group.isSynthetic) {
+                      this.runtime.setSelectedWorkspace(group.workspaceId);
+                    }
+                    this.closeDrawer();
+                    this.runtime.createNewSession();
+                  })
+                  if (!group.isSynthetic) {
+                    Row() {
+                      Image($r('app.media.ic_lucide_more_h'))
+                        .width(16)
+                        .height(16)
+                        .colorFilter(iconTintFilter(this.pal().text3))
+                    }
+                    .width(28)
+                    .height(28)
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(VerticalAlign.Center)
+                    .onClick(() => {
+                      this.openWorkspaceMenu(group);
+                    })
                   }
-                  if (this.isPinnedSession(session.sessionId)) {
-                    Text('置顶')
-                      .fontSize(this.fs(9))
-                      .fontColor('#4D6BFE')
-                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                      .backgroundColor('rgba(77,107,254,0.14)')
-                      .borderRadius(5)
+                  Row() {
+                    Image($r(this.isWorkspaceExpanded(group)
+                      ? 'app.media.ic_lucide_chevron_down' : 'app.media.ic_lucide_chevron_right'))
+                      .width(16)
+                      .height(16)
+                      .colorFilter(iconTintFilter(this.pal().text3))
                   }
-                  if (this.isArchivedSession(session.sessionId)) {
-                    Text(this.tr('已归档'))
-                      .fontSize(this.fs(9))
+                  .width(24)
+                  .height(28)
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(VerticalAlign.Center)
+                }
+                .width('100%')
+                .padding({ left: 14, right: 10, top: 12, bottom: 12 })
+                .alignItems(VerticalAlign.Center)
+                .onClick(() => {
+                  this.toggleWorkspaceExpanded(group);
+                })
+
+                if (this.isWorkspaceExpanded(group)) {
+                  Column().width('100%').height(0.5).backgroundColor(this.pal().border)
+                  if (group.sessions.length === 0) {
+                    Text(this.tr('还没有会话'))
+                      .fontSize(this.fs(12))
                       .fontColor(this.pal().text3)
-                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                      .backgroundColor(this.pal().inputBg)
-                      .borderRadius(5)
+                      .width('100%')
+                      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                  } else {
+                    ForEach(this.visibleGroupSessions(group), (session: HarnessRemoteSession, sIdx: number) => {
+                      Column() {
+                        if (sIdx > 0) {
+                          Column()
+                            .width('100%')
+                            .height(0.5)
+                            .backgroundColor(this.pal().border)
+                            .opacity(0.6)
+                        }
+                        Row({ space: 8 }) {
+                          if (session.sessionId === this.currentSessionId) {
+                            Column()
+                              .width(5)
+                              .height(5)
+                              .borderRadius(2.5)
+                              .backgroundColor('#4D6BFE')
+                          }
+                          Text(formatSessionTitle(session))
+                            .fontSize(this.fs(14))
+                            .fontWeight(session.sessionId === this.currentSessionId ? FontWeight.Medium : FontWeight.Normal)
+                            .fontColor(session.sessionId === this.currentSessionId ? '#4D6BFE' : this.pal().text)
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                            .layoutWeight(1)
+                          Text(formatRelativeShort(session.updatedAt))
+                            .fontSize(this.fs(12))
+                            .fontColor(this.pal().text3)
+                          Row() {
+                            Image($r('app.media.ic_lucide_more_h'))
+                              .width(15)
+                              .height(15)
+                              .colorFilter(iconTintFilter(this.pal().text3))
+                          }
+                          .width(26)
+                          .height(26)
+                          .justifyContent(FlexAlign.Center)
+                          .alignItems(VerticalAlign.Center)
+                          .onClick(() => {
+                            this.openSessionMenu(session);
+                          })
+                        }
+                        .width('100%')
+                        .padding({ left: 16, right: 10, top: 12, bottom: 12 })
+                        .alignItems(VerticalAlign.Center)
+                        .onClick(() => {
+                          this.closeDrawer();
+                          this.runtime.openSession(session.sessionId);
+                        })
+                        .gesture(LongPressGesture().onAction(() => {
+                          this.openSessionMenu(session);
+                        }))
+                      }
+                    }, (session: HarnessRemoteSession) => `${session.sessionId}#${this.languageMode}`)
+
+                    if (group.sessions.length > 3 && !this.sessionSearchActive) {
+                      Column().width('100%').height(0.5).backgroundColor(this.pal().border).opacity(0.6)
+                      Text(this.isWorkspaceShowingAll(group.workspaceId)
+                        ? this.tr('收起会话列表')
+                        : (this.tr('展开剩余 ') + (group.sessions.length - 3) + this.tr(' 个会话')))
+                        .fontSize(this.fs(13))
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor('#4D6BFE')
+                        .width('100%')
+                        .padding({ left: 16, right: 16, top: 11, bottom: 12 })
+                        .onClick(() => {
+                          this.toggleWorkspaceShowAll(group.workspaceId);
+                        })
+                    }
                   }
                 }
               }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              Text(this.runtime.isFavoriteSession(session.sessionId) ? '★' : '☆')
-                .fontSize(this.fs(14))
-                .fontColor(this.runtime.isFavoriteSession(session.sessionId) ? '#F5A623' : this.pal().text3)
-                .padding({ left: 6, right: 2, top: 6, bottom: 6 })
-                .onClick(() => {
-                  this.runtime.toggleFavoriteSession(session.sessionId);
-                })
+              .width('100%')
+              .backgroundColor(this.pal().card)
+              .borderRadius(16)
+              .border({ width: 0.5, color: this.pal().border })
             }
-            .width('100%')
-            .padding({ top: this.compactRows() ? 7 : 10, bottom: this.compactRows() ? 7 : 10,
-              left: 12, right: 12 })
-            .backgroundColor(session.sessionId === this.currentSessionId
-              ? 'rgba(77,107,254,0.14)'
-              : (this.hoverRowId === session.sessionId ? this.pal().inputBg : this.pal().card))
-            .onHover((isHover: boolean) => {
-              this.hoverRowId = isHover ? session.sessionId : '';
-            })
-            .borderRadius(this.compactRows() ? 12 : 14)
-            .opacity(this.isArchivedSession(session.sessionId) ? 0.6 : 1)
-            .border({ width: 1,
-              color: session.sessionId === this.currentSessionId
-                ? 'rgba(77,107,254,0.40)' : this.pal().border })
-            .focusable(true)
-            .onClick(() => {
-              this.closeDrawer();
-              this.runtime.openSession(session.sessionId);
-            })
-            .onKeyEvent((event: KeyEvent) => {
-              if (event.type === KeyType.Down
-                && (event.keyCode === KeyCode.KEYCODE_ENTER || event.keyCode === KeyCode.KEYCODE_SPACE)) {
-                this.runtime.openSession(session.sessionId);
-              }
-            })
-            // 长按（触屏）和右键（PC）都出同一个会话菜单
-            .gesture(LongPressGesture().onAction(() => {
-              this.openSessionMenu(session);
-            }))
-            .onMouse((event: MouseEvent) => {
-              if (event.action === MouseAction.Press && event.button === MouseButton.Right) {
-                this.openSessionMenu(session);
-              }
-            })
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-          }
-        }, (session: HarnessRemoteSession) => `${session.sessionId}#${this.languageMode}`)
+          }, (group: WorkspaceGroup) => `${group.workspaceId}#${group.totalCount}#${this.languageMode}`)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 4, bottom: 10 })
+        .scrollBar(BarState.Off)
       }
-      .layoutWeight(1)
+
+      }
+
+      // 5. Fixed Bottom Host & Settings Bar
+      Column() {
+        Column().width('100%').height(0.5).backgroundColor(this.pal().border)
+        Row({ space: 8 }) {
+          Row({ space: 8 }) {
+            Image($r('app.media.ic_lucide_laptop'))
+              .width(17)
+              .height(17)
+              .colorFilter(iconTintFilter(this.pal().text2))
+            Text(this.connectedHostDisplay())
+              .fontSize(this.fs(14))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.pal().text)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Row({ space: 4 }) {
+              Column()
+                .width(6)
+                .height(6)
+                .borderRadius(3)
+                .backgroundColor(this.reconnecting ? '#F5A623' : '#1E9E6A')
+              Text(this.reconnecting ? this.tr('重连中') : this.tr('在线'))
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text2)
+              Image($r('app.media.ic_lucide_chevrons_ud'))
+                .width(13)
+                .height(13)
+                .colorFilter(iconTintFilter(this.pal().text3))
+            }
+            .alignItems(VerticalAlign.Center)
+          }
+          .layoutWeight(1)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.closeDrawer();
+            this.runtime.keepAliveToDevices();
+          })
+
+          Row() {
+            Image($r('app.media.ic_lucide_settings_o'))
+              .width(19)
+              .height(19)
+              .colorFilter(iconTintFilter(this.pal().text2))
+          }
+          .width(38)
+          .height(38)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.showSettings = true;
+          })
+        }
+        .width('100%')
+        .height(52)
+        .padding({ left: 16, right: 10 })
+        .alignItems(VerticalAlign.Center)
+      }
       .width('100%')
-      .padding({ left: 12, right: 12, top: 10 })
-      .scrollBar(BarState.Off)
+      .backgroundColor(this.pal().panel)
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.pal().panel)
   }
 
   /**
@@ -5662,6 +7514,36 @@ struct Index {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
 
+      if (this.agentPresets.length > 0) {
+        Column({ space: 4 }) {
+          Text(this.tr('模式'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .width('100%')
+          Row({ space: 6 }) {
+            ForEach(this.agentPresets.slice(0, 4), (preset: AgentPresetOption) => {
+              Text(preset.name.length > 0 ? preset.name : preset.id)
+                .fontSize(this.fs(10))
+                .fontColor(preset.id === this.currentAgentPreset ? '#0B1220' : this.pal().text2)
+                .layoutWeight(1)
+                .textAlign(TextAlign.Center)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .padding({ left: 4, right: 4, top: 4, bottom: 4 })
+                .backgroundColor(preset.id === this.currentAgentPreset ? '#22D3EE' : this.pal().inputBg)
+                .borderRadius(8)
+                .border({ width: 1, color: this.pal().border })
+                .onClick(() => {
+                  this.runtime.selectAgentPreset(preset.id);
+                })
+            }, (preset: AgentPresetOption) => preset.id)
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+
       // 定时任务摘要：最多两条，其余进面板看
       if (this.runtime.schedulesSupported && this.runtime.schedules.length > 0) {
         Column({ space: 4 }) {
@@ -5707,6 +7589,46 @@ struct Index {
           .fontSize(this.fs(11))
           .fontColor(this.pal().text3)
           .width('100%')
+        Row({ space: 6 }) {
+          Text(this.tr('工作区文件'))
+            .fontSize(this.fs(11))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(8)
+            .onClick(() => {
+              this.workspaceFilesOpen = true;
+            })
+          Text(this.tr('远程终端'))
+            .fontSize(this.fs(11))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(8)
+            .onClick(() => {
+              this.terminalOpen = true;
+            })
+        }
+        Row({ space: 6 }) {
+          Text(this.tr('活动详情'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(8)
+            .onClick(() => {
+              this.activityOpen = true;
+            })
+          Text(this.tr('插件设置'))
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text2)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.pal().inputBg)
+            .borderRadius(8)
+            .onClick(() => {
+              this.pluginsOpen = true;
+            })
+        }
         Row({ space: 6 }) {
           Text(this.tr('定时任务'))
             .fontSize(this.fs(11))
@@ -6045,6 +7967,60 @@ struct Index {
         .width('100%')
         .padding({ left: 18, right: 18, top: 4, bottom: 12 })
 
+        // —— 生产力工具集：工作区文件 / 终端 / 活动 / 插件 ——
+        Row({ space: 6 }) {
+          Text(this.tr('工作区文件'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 7, bottom: 7 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(9)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.workspaceFilesOpen = true;
+            })
+          Text(this.tr('远程终端'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 7, bottom: 7 })
+            .backgroundColor('rgba(34,211,238,0.10)')
+            .borderRadius(9)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.terminalOpen = true;
+            })
+          Text(this.tr('活动详情'))
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text)
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 7, bottom: 7 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(9)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.activityOpen = true;
+            })
+          Text(this.tr('插件设置'))
+            .fontSize(this.fs(12))
+            .fontColor(this.pal().text)
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+            .padding({ top: 7, bottom: 7 })
+            .backgroundColor(this.pal().chip)
+            .borderRadius(9)
+            .onClick(() => {
+              this.showSessionPanel = false;
+              this.pluginsOpen = true;
+            })
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, bottom: 6 })
+
         // —— 定时任务 ——
         Row({ space: 10 }) {
           Column({ space: 3 }) {
@@ -6061,7 +8037,7 @@ struct Index {
           .layoutWeight(1)
           Text(this.tr('管理'))
             .fontSize(this.fs(12))
-            .fontColor('#22D3EE')
+            .fontColor('#4D6BFE')
             .padding({ left: 10, right: 10, top: 4, bottom: 4 })
             .onClick(() => {
               this.schedulesOpen = true;
@@ -6069,6 +8045,7 @@ struct Index {
             })
         }
         .width('100%')
+        .padding({ left: 18, right: 18, top: 8, bottom: 8 })
 
         // —— 连接 ——
         Row({ space: 10 }) {
@@ -6116,6 +8093,14 @@ struct Index {
   }
 
   /** 面板里的模型行文案：provider/model @effort。 */
+  private currentModelDisplay(): string {
+    if (this.currentModelLabel.length === 0) return this.tr('切换模型');
+    const option = this.modelOptions.find((item: ModelOption) =>
+      item.provider === this.currentModelProvider && item.model === this.currentModelLabel);
+    const name = option !== undefined && option.name.length > 0 ? option.name : this.currentModelLabel;
+    return this.currentModelEffort.length > 0 ? name + ' · ' + this.currentModelEffort : name;
+  }
+
   private modelSummary(): string {
     if (this.currentModelLabel.length === 0) {
       return this.runtime.modelCatalogLoaded ? this.tr('未选择') : this.tr('正在读取模型目录…');
@@ -6302,10 +8287,10 @@ struct Index {
     .height('100%')
   }
 
-  /** Portrait: sessions slide in from the right over a scrim. */
+  /** Portrait: sessions slide in from the left over a scrim (matching Android drawer). */
   @Builder
   SessionsOverlay() {
-    Stack({ alignContent: Alignment.End }) {
+    Stack({ alignContent: Alignment.Start }) {
       Column()
         .width('100%')
         .height('100%')
@@ -6320,11 +8305,11 @@ struct Index {
       .width(this.drawerWidthVp())
       .height('100%')
       .backgroundColor(this.pal().panel)
-      .border({ width: { left: 0.5 }, color: this.pal().borderStrong })
-      // 位移完全由手势进度决定：拉多少露多少，松手才补齐或弹回
-      .translate({ x: (1 - this.drawerOpen) * this.drawerWidthVp() })
+      .border({ width: { right: 0.5 }, color: this.pal().borderStrong })
+      // 位移完全由手势进度决定：从左侧滑入，拉多少露多少
+      .translate({ x: (this.drawerOpen - 1) * this.drawerWidthVp() })
       .gesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 8 })
+        PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
           .onActionStart(() => {
             this.drawerDragBase = this.drawerOpen;
             this.drawerDragFromChat = false;
@@ -6334,7 +8319,7 @@ struct Index {
               return;
             }
             const width: number = this.drawerWidthVp();
-            this.drawerOpen = Math.min(1, Math.max(0, this.drawerDragBase - event.offsetX / width));
+            this.drawerOpen = Math.min(1, Math.max(0, this.drawerDragBase + event.offsetX / width));
           })
           .onActionEnd(() => {
             this.settleDrawer(this.drawerOpen >= 0.55);
@@ -6363,9 +8348,7 @@ struct Index {
   MessageRow(item: ChatItem) {
     if (item.kind === 'user') {
       Row() {
-        // A definite-width inner row gives the bubble a hard wrap budget, so long
-        // text lines break inside the gradient instead of overflowing it.
-        Row() {
+        Column({ space: 2 }) {
           Column({ space: 6 }) {
             if (this.messageImages(item).length > 0) {
               Column({ space: 6 }) {
@@ -6385,11 +8368,11 @@ struct Index {
               if (this.heartbeatBody(item).length > 0) {
                 Text(this.heartbeatOpen(item) ? item.text : this.heartbeatBody(item))
                   .fontSize(this.fs(this.heartbeatOpen(item) ? 12 : 15))
-                  .fontColor('#FFFFFF')
+                  .fontColor(this.pal().text)
                   .textAlign(TextAlign.Start)
                 Text(this.heartbeatOpen(item) ? this.tr('收起巡检原文') : this.tr('查看巡检原文'))
                   .fontSize(this.fs(11))
-                  .fontColor('rgba(255,255,255,0.78)')
+                  .fontColor(this.pal().text2)
                   .padding({ top: 2, bottom: 2 })
                   .onClick(() => {
                     this.toggleHeartbeat(item);
@@ -6397,7 +8380,7 @@ struct Index {
               } else {
                 Text(item.text)
                   .fontSize(this.fs(15))
-                  .fontColor('#FFFFFF')
+                  .fontColor(this.pal().text)
                   .textAlign(TextAlign.Start)
               }
             }
@@ -6409,14 +8392,14 @@ struct Index {
                       .fontSize(12)
                     Text(label)
                       .fontSize(12)
-                      .fontColor('rgba(255,255,255,0.94)')
+                      .fontColor(this.pal().text2)
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                       .layoutWeight(1)
                   }
                   .width('100%')
                   .padding({ left: 8, right: 8, top: 5, bottom: 5 })
-                  .backgroundColor('rgba(255,255,255,0.16)')
+                  .backgroundColor(this.isDarkUi ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.05)')
                   .borderRadius(8)
                 }, (label: string, index: number) => index + ':' + label)
               }
@@ -6424,21 +8407,19 @@ struct Index {
             }
           }
           .padding({ top: 10, bottom: 10, left: 14, right: 14 })
-          .linearGradient({ angle: 135, colors: [['#3D5CF6', 0], ['#2E7CF0', 0.6], ['#22D3EE', 1]] })
-          .borderRadius({ topLeft: 18, topRight: 18, bottomLeft: 18, bottomRight: 6 })
+          .backgroundColor(this.pal().userBubble)
+          .borderRadius({ topLeft: 18, topRight: 6, bottomLeft: 18, bottomRight: 18 })
           .alignItems(HorizontalAlign.Start)
-          .shadow({ radius: 12, color: 'rgba(61,92,246,0.30)', offsetX: 0, offsetY: 3 })
           if (item.timestamp > 0) {
             Text(formatClock(item.timestamp))
               .fontSize(this.fs(10))
               .fontColor(this.pal().text3)
-              .width('80%')
               .textAlign(TextAlign.End)
-              .padding({ top: 2 })
+              .padding({ top: 2, right: 4 })
           }
         }
-        .width('80%')
-        .justifyContent(FlexAlign.End)
+        .constraintSize({ maxWidth: '82%' })
+        .alignItems(HorizontalAlign.End)
         .gesture(LongPressGesture().onAction(() => {
           this.offerMessageActions(item);
         }))
@@ -6526,49 +8507,46 @@ struct Index {
     .width('100%')
   }
 
-  /** 轻量 Markdown 渲染：代码块、标题、行内代码与粗体标记不再裸露。 */
+  /** 富文本 Markdown 渲染：语法高亮代码块、Mermaid 卡片、公式、表格、引用与图片。 */
   @Builder
   MarkdownText(text: string, streaming: boolean) {
-    Column({ space: 5 }) {
-      ForEach(markdownLines(streaming ? text + '▍' : text), (line: MdLine, index: number) => {
-        if (line.table.length > 0) {
-          this.MarkdownTable(line.table, line.columnWidths)
-        } else if (line.imageSrc.length > 0) {
-          this.MdImage(line)
-        } else if (line.code) {
-          Text(line.text)
-            .fontSize(this.fs(12))
-            .fontFamily('monospace')
+    Column({ space: 6 }) {
+      ForEach(parseRichBlocks(text), (blk: RichBlock, index: number) => {
+        if (blk.kind === 'image') {
+          this.MdImage(this.mdLineForBlock(blk))
+        } else if (blk.kind === 'code' || blk.kind === 'mermaid') {
+          RichCodeBlockCard({ blk: blk, dark: this.isDarkUi, fontScale: this.textScaleValue, pal: this.pal() })
+        } else if (blk.kind === 'math') {
+          RichMathBlockCard({ blk: blk, dark: this.isDarkUi, fontScale: this.textScaleValue, pal: this.pal() })
+        } else if (blk.kind === 'table') {
+          RichTableBlockCard({ blk: blk, dark: this.isDarkUi, fontScale: this.textScaleValue, pal: this.pal() })
+        } else if (blk.kind === 'quote') {
+          Text(blk.text)
+            .fontSize(this.fs(13))
             .fontColor(this.pal().text2)
             .width('100%')
-            .padding(8)
-            .backgroundColor(this.pal().inputBg)
+            .padding({ left: 10, right: 8, top: 6, bottom: 6 })
+            .backgroundColor(this.pal().card)
             .borderRadius(6)
-            .wordBreak(WordBreak.BREAK_ALL)
-            .textAlign(TextAlign.Start)
-            // 代码行：可选中，也可以长按整行复制（子组件的长按优先于消息菜单）
+            .border({ width: { left: 3 }, color: '#22D3EE' })
             .copyOption(CopyOptions.LocalDevice)
-            .gesture(LongPressGesture().onAction(() => {
-              const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, line.text);
-              pasteboard.getSystemPasteboard().setData(data).then(() => {
-                promptAction.showToast({ message: this.tr('已复制该行') });
-              }).catch(() => undefined);
-            }))
-        } else if (line.bullet) {
+        } else if (blk.kind === 'bullet') {
           Row({ space: 6 }) {
             Text('·')
               .fontSize(this.fs(15))
               .fontColor(this.pal().text3)
-            Text(line.text)
+            Text(blk.text)
               .fontSize(this.fs(15))
               .fontColor(this.pal().text)
               .layoutWeight(1)
               .wordBreak(WordBreak.BREAK_ALL)
               .textAlign(TextAlign.Start)
+              .copyOption(CopyOptions.LocalDevice)
           }
           .width('100%')
-        } else if (line.linkUrl.length > 0) {
-          Text(line.text)
+          .alignItems(VerticalAlign.Top)
+        } else if (blk.kind === 'link') {
+          Text(blk.text)
             .fontSize(this.fs(15))
             .fontColor('#22D3EE')
             .decoration({ type: TextDecorationType.Underline, color: '#22D3EE' })
@@ -6576,53 +8554,24 @@ struct Index {
             .textAlign(TextAlign.Start)
             .onClick(() => {
               const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
-              context.openLink(line.linkUrl).catch(() => {
+              context.openLink(blk.linkUrl).catch(() => {
                 promptAction.showToast({ message: this.tr('无法打开链接') });
               });
             })
         } else {
-          Text(line.text)
-            .fontSize(line.heading ? 17 : 15)
-            .fontWeight(line.heading ? FontWeight.Bold : FontWeight.Normal)
+          Text(blk.text)
+            .fontSize(this.fs(blk.kind === 'heading' ? 17 : 15))
+            .fontWeight(blk.kind === 'heading' ? FontWeight.Bold : FontWeight.Normal)
             .fontColor(this.pal().text)
             .width('100%')
             .wordBreak(WordBreak.NORMAL)
             .textAlign(TextAlign.Start)
             .copyOption(CopyOptions.LocalDevice)
         }
-      }, (line: MdLine, index: number) => line.table.length > 0
-        ? index + ':' + JSON.stringify(line.table) : index.toString())
+      }, (blk: RichBlock, index: number) => index + ':' + blk.kind + ':' + blk.text.length)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  MarkdownTable(rows: string[][], widths: number[]) {
-    Scroll() {
-      Column() {
-        ForEach(rows, (cells: string[], rowIndex: number) => {
-          Row() {
-            ForEach(cells, (cell: string, columnIndex: number) => {
-              Text(cell)
-                .fontSize(this.fs(14))
-                .fontColor(this.pal().text)
-                .fontWeight(rowIndex === 0 ? FontWeight.Bold : FontWeight.Normal)
-                .width(widths[columnIndex])
-                .padding(8)
-                .wordBreak(WordBreak.BREAK_WORD)
-                .copyOption(CopyOptions.LocalDevice)
-            }, (cell: string, columnIndex: number) => columnIndex.toString())
-          }
-          .alignItems(VerticalAlign.Top)
-          .backgroundColor(rowIndex === 0 ? this.pal().inputBg : Color.Transparent)
-          .border({ width: { bottom: 1 }, color: this.pal().border })
-        }, (cells: string[], rowIndex: number) => rowIndex.toString())
-      }
-    }
-    .width('100%')
-    .align(Alignment.Start)
-    .scrollable(ScrollDirection.Horizontal)
   }
 
   /** 手指按下/滑动：光斑跟到触点，并按 180ms 淡入。 */
@@ -7054,6 +9003,7 @@ struct Index {
 
   /** 长按消息：复制正文 / 从这里分叉（分叉不再占用长按默认动作）。 */
   private offerMessageActions(item: ChatItem): void {
+    this.messageActionId = item.id;
     this.messageActionText = item.text.length > 0 ? item.text : item.summary;
     this.messageActionKind = item.kind;
     this.messageActionSeq = item.seq;
@@ -7077,12 +9027,23 @@ struct Index {
     this.runtime.filePreviewError = '';
     this.runtime.notify();
     this.runtime.readFileBuffer(path).then((buffer: ArrayBuffer) => {
-      const controller: pdfViewManager.PdfController = this.pdfController ?? new pdfViewManager.PdfController();
-      this.pdfController = controller;
-      return controller.loadDocumentFromMemory(buffer);
-    }).then(() => {
-      this.runtime.filePreviewLoading = false;
-      this.runtime.notify();
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const tmpPdf: string = `${ctx.cacheDir}/preview_${Date.now()}.pdf`;
+      const f = fileIo.openSync(tmpPdf,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(f.fd, buffer);
+      } finally {
+        fileIo.closeSync(f);
+      }
+      this.pdfController.loadDocument(tmpPdf).then(() => {
+        this.runtime.filePreviewLoading = false;
+        this.runtime.notify();
+      }).catch((error: Error) => {
+        this.pdfError = error.message;
+        this.runtime.filePreviewLoading = false;
+        this.runtime.notify();
+      });
     }).catch((error: Error) => {
       this.pdfError = error.message;
       this.runtime.filePreviewLoading = false;
@@ -7150,27 +9111,108 @@ struct Index {
               this.MarkdownText(this.bubbleText(item), item.streaming)
             }
           }
-          if (item.timestamp > 0) {
-            Text(formatClock(item.timestamp))
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-              .padding({ top: 2 })
+          if (item.streaming) {
+            if (item.text.length === 0) {
+              Row({ space: 5 }) {
+                Text('•')
+                  .fontSize(this.fs(18))
+                  .fontColor('#4D6BFE')
+                  .opacity(this.streamPulseStep === 0 ? 1 : 0.25)
+                  .animation({ duration: 240, curve: Curve.EaseInOut })
+                Text('•')
+                  .fontSize(this.fs(18))
+                  .fontColor('#4D6BFE')
+                  .opacity(this.streamPulseStep === 1 ? 1 : 0.25)
+                  .animation({ duration: 240, curve: Curve.EaseInOut })
+                Text('•')
+                  .fontSize(this.fs(18))
+                  .fontColor('#4D6BFE')
+                  .opacity(this.streamPulseStep === 2 ? 1 : 0.25)
+                  .animation({ duration: 240, curve: Curve.EaseInOut })
+              }
+              .padding({ top: 2, bottom: 2 })
+            } else {
+              Column()
+                .width(2)
+                .height(15)
+                .borderRadius(1)
+                .backgroundColor('#4D6BFE')
+                .opacity(this.streamPulseStep % 2 === 0 ? 1 : 0.2)
+                .animation({ duration: 350, curve: Curve.EaseInOut })
+            }
+          }
+          if (item.timestamp > 0 || (!item.streaming && item.text.length > 0)) {
+            Row({ space: 16 }) {
+              if (!item.streaming && item.text.length > 0) {
+                Image($r('app.media.ic_dsh_copy'))
+                  .width(15)
+                  .height(15)
+                  .colorFilter(iconTintFilter(this.pal().text3))
+                  .onClick(() => {
+                    const data: pasteboard.PasteData = pasteboard.createData(
+                      pasteboard.MIMETYPE_TEXT_PLAIN, item.text);
+                    pasteboard.getSystemPasteboard().setData(data).then(() => {
+                      promptAction.showToast({ message: this.tr('已复制') });
+                    }).catch(() => undefined);
+                  })
+                Image($r('app.media.ic_lucide_share2'))
+                  .width(14)
+                  .height(14)
+                  .colorFilter(iconTintFilter(this.pal().text3))
+                  .onClick(() => {
+                    this.shareText(this.runtime.shareCardText(item));
+                  })
+              }
+              if (item.timestamp > 0) {
+                Row({ space: 4 }) {
+                  Image($r('app.media.ic_dsh_database'))
+                    .width(13)
+                    .height(13)
+                    .colorFilter(iconTintFilter(this.pal().text3))
+                  Text(formatClock(item.timestamp))
+                    .fontSize(this.fs(11))
+                    .fontColor(this.pal().text3)
+                }
+                .alignItems(VerticalAlign.Center)
+              }
+              if (!item.streaming && item.text.length > 0) {
+                Image($r('app.media.ic_lucide_thumbs_up'))
+                  .width(14)
+                  .height(14)
+                  .colorFilter(iconTintFilter(this.feedbackVersion >= 0 && this.runtime.feedbackOf(item.id) === 'positive'
+                    ? '#4D6BFE' : this.pal().text3))
+                  .onClick(() => {
+                    this.runtime.submitFeedback(item.id, 'positive');
+                    promptAction.showToast({ message: this.tr('反馈已记录') });
+                  })
+                Image($r('app.media.ic_lucide_thumbs_down'))
+                  .width(14)
+                  .height(14)
+                  .colorFilter(iconTintFilter(this.feedbackVersion >= 0 && this.runtime.feedbackOf(item.id) === 'negative'
+                    ? '#F85749' : this.pal().text3))
+                  .onClick(() => {
+                    this.runtime.submitFeedback(item.id, 'negative');
+                    promptAction.showToast({ message: this.tr('反馈已记录') });
+                  })
+              }
+            }
+            .padding({ top: 6 })
+            .alignItems(VerticalAlign.Center)
           }
           if (item.streaming && item.text.length === 0 && item.reasoning.length === 0) {
             Row({ space: 8 }) {
               LoadingProgress()
                 .width(14)
                 .height(14)
-                .color('#22D3EE')
+                .color('#4D6BFE')
               Text('正在思考…')
                 .fontSize(this.fs(12))
                 .fontColor(this.pal().text2)
             }
           }
         }
-        .padding({ top: 10, bottom: 10, left: 14, right: 14 })
-        .backgroundColor(this.pal().inputBg)
-        .borderRadius(16)
+        .width('100%')
+        .padding({ top: 4, bottom: 8, left: 2, right: 2 })
         .alignItems(HorizontalAlign.Start)
         .gesture(LongPressGesture().onAction(() => {
           this.offerMessageActions(item);
@@ -7184,8 +9226,8 @@ struct Index {
           this.hoverMessageId = isHover ? item.id : '';
         })
       }
-      .width('88%')
-      .constraintSize({ maxWidth: 780 })
+      .width('100%')
+      .constraintSize({ maxWidth: 820 })
       .justifyContent(FlexAlign.Start)
       if (this.hoverMessageId === item.id) {
         this.MessageQuickActions(item, false)
@@ -7282,13 +9324,45 @@ struct Index {
             this.messageActionsOpen = false;
           })
         }
-        this.MessageActionRow('❝', this.tr('引用到输入框'), false, () => {
-          const quoted: string = this.messageActionText.split('\n')
-            .map((line: string) => '> ' + line).join('\n') + '\n\n';
-          this.promptInput = quoted + this.promptInput;
-          this.runtime.saveDraft(this.currentSessionId, this.promptInput);
+        this.MessageActionRow('❝', this.tr('引用回复'), false, () => {
+          this.replyQuoteText = this.messageActionText;
           this.messageActionsOpen = false;
         })
+        if (this.messageActionKind === 'assistant' && this.messageActionId.length > 0) {
+          Row({ space: 8 }) {
+            Text('👍 ' + this.tr('有反应'))
+              .fontSize(this.fs(13))
+              .fontColor(this.feedbackVersion >= 0 && this.runtime.feedbackOf(this.messageActionId) === 'positive'
+                ? '#22D3EE' : this.pal().text)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .padding({ top: 10, bottom: 10 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.runtime.submitFeedback(this.messageActionId, 'positive');
+                promptAction.showToast({ message: this.tr('反馈已记录') });
+                this.messageActionsOpen = false;
+              })
+            Text('👎 ' + this.tr('点踩'))
+              .fontSize(this.fs(13))
+              .fontColor(this.feedbackVersion >= 0 && this.runtime.feedbackOf(this.messageActionId) === 'negative'
+                ? '#F85749' : this.pal().text)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .padding({ top: 10, bottom: 10 })
+              .backgroundColor(this.pal().card)
+              .borderRadius(12)
+              .border({ width: 1, color: this.pal().border })
+              .onClick(() => {
+                this.runtime.submitFeedback(this.messageActionId, 'negative');
+                promptAction.showToast({ message: this.tr('反馈已记录') });
+                this.messageActionsOpen = false;
+              })
+          }
+          .width('100%')
+        }
         if (this.messageActionSeq > 0 && this.runtime.currentSessionId.length > 0) {
           this.MessageActionRow('⑂', this.tr('从这里分叉'), false, () => {
             this.runtime.forkCurrentSession(this.messageActionSeq);
@@ -7361,7 +9435,7 @@ struct Index {
               .fontColor(this.pal().text2)
           }
           .padding({ top: 12, bottom: 12 })
-        } else if (this.previewIsPdf && this.pdfError.length === 0 && this.pdfController !== undefined) {
+        } else if (this.previewIsPdf && this.pdfError.length === 0) {
           PdfView({
             controller: this.pdfController,
             pageLayout: pdfService.PageLayout.LAYOUT_SINGLE,
@@ -7526,6 +9600,13 @@ struct Index {
               .color('#22D3EE')
           }
           Blank()
+          Text('+ ' + this.tr('新建任务'))
+            .fontSize(this.fs(12))
+            .fontColor('#22D3EE')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.scheduleCreateOpen = !this.scheduleCreateOpen;
+            })
           Text(this.tr('刷新'))
             .fontSize(this.fs(12))
             .fontColor('#22D3EE')
@@ -7542,6 +9623,56 @@ struct Index {
             })
         }
         .width('100%')
+        if (this.scheduleCreateOpen) {
+          Column({ space: 6 }) {
+            TextInput({ text: this.newSchedTitle, placeholder: this.tr('标题') })
+              .height(36)
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text)
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(8)
+              .onChange((v: string) => { this.newSchedTitle = v; })
+            TextInput({ text: this.newSchedCron, placeholder: this.tr('Cron 表达式（如 0 9 * * *）') })
+              .height(36)
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text)
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(8)
+              .onChange((v: string) => { this.newSchedCron = v; })
+            TextInput({ text: this.newSchedPrompt, placeholder: this.tr('执行指令') })
+              .height(36)
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text)
+              .backgroundColor(this.pal().inputBg)
+              .borderRadius(8)
+              .onChange((v: string) => { this.newSchedPrompt = v; })
+            Button(this.tr('创建'))
+              .height(34)
+              .fontSize(this.fs(12))
+              .backgroundColor('#22D3EE')
+              .fontColor('#0B1220')
+              .borderRadius(8)
+              .width('100%')
+              .onClick(() => {
+                if (this.newSchedTitle.trim().length > 0 && this.newSchedCron.trim().length > 0
+                  && this.newSchedPrompt.trim().length > 0) {
+                  this.runtime.createScheduleDirect(
+                    this.newSchedTitle.trim(), this.newSchedCron.trim(), this.newSchedPrompt.trim()
+                  ).then(() => {
+                    this.newSchedTitle = '';
+                    this.newSchedPrompt = '';
+                    this.scheduleCreateOpen = false;
+                  }).catch((err: Error) => {
+                    this.errorMsg = err.message;
+                  });
+                }
+              })
+          }
+          .width('100%')
+          .padding(10)
+          .backgroundColor(this.pal().card)
+          .borderRadius(10)
+        }
         Scroll() {
           Column({ space: 8 }) {
             if (!this.runtime.schedulesSupported) {
@@ -7610,6 +9741,15 @@ struct Index {
                     .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                     .onClick(() => {
                       this.runtime.loadScheduleHistory(schedule);
+                    })
+                  Text(schedule.inactive ? this.tr('启用') : this.tr('停用'))
+                    .fontSize(this.fs(11))
+                    .fontColor(schedule.inactive ? '#34D399' : '#F5A623')
+                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                    .onClick(() => {
+                      this.runtime.toggleScheduleInactive(schedule).catch((err: Error) => {
+                        this.errorMsg = err.message;
+                      });
                     })
                   Text(this.tr('删除'))
                     .fontSize(this.fs(11))
@@ -8645,55 +10785,68 @@ struct Index {
   /** 摊开后的单条工具调用：缩进对齐时间轴，只留一行摘要，不再是一块厚卡片。 */
   @Builder
   ToolRow(item: ChatItem) {
-    Row({ space: 8 }) {
-      if (item.toolState === 'running') {
-        LoadingProgress()
-          .width(10)
-          .height(10)
-          .color('#22D3EE')
-      } else {
-        Column()
-          .width(4)
-          .height(4)
-          .borderRadius(2)
-          .backgroundColor(item.toolState === 'failed' ? '#F85749' : this.pal().text3)
+    Column({ space: 6 }) {
+      Row({ space: 8 }) {
+        if (item.toolState === 'running') {
+          LoadingProgress()
+            .width(10)
+            .height(10)
+            .color('#22D3EE')
+        } else {
+          Column()
+            .width(4)
+            .height(4)
+            .borderRadius(2)
+            .backgroundColor(item.toolState === 'failed' ? '#F85749' : this.pal().text3)
+        }
+        Text(item.toolName)
+          .fontSize(this.fs(12))
+          .fontColor(this.pal().text2)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (item.summary.length > 0) {
+          Text(item.summary)
+            .fontSize(this.fs(11))
+            .fontColor(this.pal().text3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        } else if (item.text.length > 0) {
+          Text(item.text)
+            .fontSize(this.fs(10))
+            .fontColor(this.pal().text3)
+            .fontFamily('monospace')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        } else {
+          Blank()
+        }
       }
-      Text(item.toolName)
-        .fontSize(this.fs(12))
-        .fontColor(this.pal().text2)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-      if (item.summary.length > 0) {
-        Text(item.summary)
-          .fontSize(this.fs(11))
-          .fontColor(this.pal().text3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-      } else if (item.text.length > 0) {
-        Text(item.text)
-          .fontSize(this.fs(10))
-          .fontColor(this.pal().text3)
-          .fontFamily('monospace')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-      } else {
-        Blank()
+      .width('100%')
+      .padding({ top: 3, bottom: 3, left: 24, right: 6 })
+      .onClick(() => {
+        const payload: string = item.text.length > 0 ? item.text : item.summary;
+        if (payload.length === 0) {
+          return;
+        }
+        const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, payload);
+        pasteboard.getSystemPasteboard().setData(data).then(() => {
+          promptAction.showToast({ message: this.tr('已复制该条命令') });
+        }).catch(() => undefined);
+      })
+      if (this.uiArtifactsVersion >= 0 && this.runtime.uiArtifacts.has(item.id)) {
+        IntelligentUiArtifactCard({
+          snapshot: this.runtime.uiArtifacts.get(item.id)!,
+          fontScale: this.textScaleValue,
+          pal: this.pal(),
+          onSendPrompt: (promptText: string) => {
+            this.runtime.sendPrompt(promptText);
+          }
+        })
       }
     }
     .width('100%')
-    .padding({ top: 3, bottom: 3, left: 24, right: 6 })
-    .onClick(() => {
-      const payload: string = item.text.length > 0 ? item.text : item.summary;
-      if (payload.length === 0) {
-        return;
-      }
-      const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, payload);
-      pasteboard.getSystemPasteboard().setData(data).then(() => {
-        promptAction.showToast({ message: this.tr('已复制该条命令') });
-      }).catch(() => undefined);
-    })
   }
 
   @Builder
@@ -9172,8 +11325,6 @@ class MdLine {
   imageAlt: string = '';
   /** 非空表示这一行整行就是一个链接。 */
   linkUrl: string = '';
-  table: string[][] = [];
-  columnWidths: number[] = [];
 }
 
 /** 一行里切出来的片段：要么是文字，要么是一张图。 */
@@ -9228,30 +11379,13 @@ function splitMdImages(body: string): MdSegment[] {
   return out;
 }
 
-/** 保留转义竖线，只用未转义的竖线分列。 */
-function markdownTableCells(line: string): string[] {
-  const body: string = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
-  return body.split(/(?<!\\)\|/).map((cell: string) => cell.trim().replace(/\\\|/g, '|'));
-}
-
-function appendMarkdownTableRow(table: MdLine, cells: string[]): void {
-  const row: string[] = [];
-  for (let column: number = 0; column < table.columnWidths.length; column++) {
-    const cell: string = (cells[column] ?? '').replace(/`|\*\*|__/g, '');
-    const measured: number = cell.replace(/[^\x00-\x7F]/g, 'xx').length * 7 + 16;
-    table.columnWidths[column] = Math.max(table.columnWidths[column], Math.min(260, measured));
-    row.push(cell);
-  }
-  table.table.push(row);
-}
-
 /** 把 Markdown 拆成可渲染的行，并去掉会裸露的标记符号。 */
 function markdownLines(source: string): MdLine[] {
   const out: MdLine[] = [];
   const raw: string[] = source.split(String.fromCharCode(10));
   let inCode: boolean = false;
-  for (let index: number = 0; index < raw.length; index++) {
-    const line: string = raw[index].trimEnd();
+  for (const original of raw) {
+    const line: string = original.trimEnd();
     if (line.trim().startsWith('```')) {
       inCode = !inCode;
       continue;
@@ -9267,23 +11401,6 @@ function markdownLines(source: string): MdLine[] {
     }
     if (line.trim().length === 0) {
       continue;
-    }
-    if (index + 1 < raw.length && /(?<!\\)\|/.test(line)) {
-      const header: string[] = markdownTableCells(line);
-      const divider: string[] = markdownTableCells(raw[index + 1]);
-      if (header.length === divider.length && divider.every((cell: string) => /^:?-+:?$/.test(cell))) {
-        const table: MdLine = new MdLine();
-        table.columnWidths = header.map(() => 96);
-        appendMarkdownTableRow(table, header);
-        index++;
-        while (index + 1 < raw.length && /(?<!\\)\|/.test(raw[index + 1])
-          && !raw[index + 1].trimStart().startsWith('```')) {
-          index++;
-          appendMarkdownTableRow(table, markdownTableCells(raw[index]));
-        }
-        out.push(table);
-        continue;
-      }
     }
     const entry: MdLine = new MdLine();
     let body: string = line.trim();

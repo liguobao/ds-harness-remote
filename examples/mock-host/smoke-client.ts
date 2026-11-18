@@ -4,8 +4,8 @@ import { RemoteClientCore } from '@dsh-remote/client-core'
 import { generateKeyPair } from '@dsh-remote/crypto'
 import { PROTOCOL_VERSION } from '@dsh-remote/protocol'
 import { RelayTransport } from '@dsh-remote/webrtc'
-import { SecureTransport } from '@dsh-remote/app-core/services/secure-transport'
-import type { DeviceIdentity, RemoteDevice } from '@dsh-remote/app-core/types'
+import { SecureTransport } from '../../apps/android/src/services/secure-transport'
+import type { DeviceIdentity, RemoteDevice } from '../../apps/android/src/types'
 
 const baseUrl = (process.env.DSH_REMOTE_HTTP_SERVER ?? 'http://127.0.0.1:8080').replace(/\/$/, '')
 const email = process.env.DSH_REMOTE_ACCOUNT_EMAIL
