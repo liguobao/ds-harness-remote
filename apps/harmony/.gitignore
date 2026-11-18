@@ -1,6 +1,7 @@
 /oh_modules
 **/build
 /.hvigor
+/.signing/
 .cxx
 /.clangd
 /.clang-format

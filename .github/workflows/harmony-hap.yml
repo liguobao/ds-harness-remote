@@ -100,5 +100,5 @@ jobs:
       - name: Remove signing material and restore profile
         if: always()
         run: |
+          rm -rf .signing
           git restore -- build-profile.json5
-          rm -rf build/signing

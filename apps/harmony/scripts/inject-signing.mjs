@@ -17,7 +17,7 @@
  * Optional:
  *   HARMONY_SIGNING_SOURCE_DIR      runner-local signing files; used only when all
  *                                   six signing secrets are absent
- *   HARMONY_SIGNING_OUT_DIR         where material is written (default: build/signing)
+ *   HARMONY_SIGNING_OUT_DIR         where material is written (default: .signing)
  *   HARMONY_SIGNING_CONFIG_NAME     signingConfig name (default: release)
  *   HARMONY_BUILD_PROFILE           build-profile path (default: build-profile.json5)
  *
@@ -89,7 +89,8 @@ if (missing.length > 0) {
 }
 
 const outDirSetting = (process.env.HARMONY_SIGNING_OUT_DIR ?? '').trim()
-const outDirRaw = outDirSetting.length > 0 ? outDirSetting : join(projectRoot, 'build', 'signing')
+// Hvigor can clean the build directory before signing the HAP.
+const outDirRaw = outDirSetting.length > 0 ? outDirSetting : join(projectRoot, '.signing')
 const outDir = isAbsolute(outDirRaw) ? outDirRaw : resolve(projectRoot, outDirRaw)
 mkdirSync(outDir, { recursive: true, mode: 0o700 })
 
@@ -105,7 +106,7 @@ const certPath = materialise('HARMONY_SIGNING_CERT_B64', 'upload.cer')
 const profilePath = materialise('HARMONY_SIGNING_PROFILE_B64', 'upload.p7b')
 
 // Match the SDK's DecipherUtil format. These ephemeral wrapping keys live beside
-// the copied keystore and are removed with build/signing after the job.
+// the copied keystore and are removed with the signing directory after the job.
 function encryptPasswords(passwords) {
   const material = join(outDir, 'material')
   const writeMaterial = (parts, bytes) => {

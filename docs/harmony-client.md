@@ -86,7 +86,7 @@ runner 可通过 `~/.config/harmony-env.sh` 导出 `HARMONY_CLT`、`DEVECO_SDK_H
 
 当六项 Secrets 全部未配置时，workflow 从 runner 用户的 `~/.config/dsh-remote/harmony-signing/` 读取 `dsh-remote-release.p12`、`dsh-remote-release.cer`、`dsh-remote-release.p7b`、`store-password.txt`、`key-password.txt` 和 `key-alias.txt`。目录权限须为 `700`、文件权限为 `600`；缺少任何文件即失败。独立调用注入脚本时通过绝对路径 `HARMONY_SIGNING_SOURCE_DIR` 指定该目录。本机原始材料放在 checkout 目录外，不随任务清理或上传。
 
-脚本以受限权限写入签名材料，并为 SDK 生成临时 AES-GCM 口令包装和配套 `material/`，不在构建配置中写入明文口令；workflow 在任务结束时还原配置并删除材料。工作流存在不等于已经配置 runner 或完成构建；合并验收应查看目标提交的实际构建结果。
+脚本默认将临时签名材料写入被 Git 忽略的 `.signing/`，避开 Hvigor 清理的构建目录。SDK 使用临时 AES-GCM 口令包装和配套 `material/`，口令在构建配置中以密文保存。workflow 在任务结束时删除材料并还原构建配置。手动调用签名脚本时，构建结束后也要删除临时签名目录并还原构建配置。
 
 ## 安全与维护
 
