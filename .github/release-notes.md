@@ -4,6 +4,8 @@ Android versionCode / iOS buildNumber: **74**。此文档为发布准备，不�
 
 ## 中文
 
+- 适配 DSH Desktop 0.2.2-rc.5，远程会话支持终端列表实时更新，原生 Harness 工作区可按文件名或路径搜索。
+- 使用官方托管服务时，可从远程工作台底栏打开会员方案页。
 - 新增 iOS 客户端，与 Android 共享应用代码、会话与消息能力；支持 iPad 和多语言。iOS 签名与 TestFlight 分发由 Xcode Cloud 承担。
 - 新增 HarmonyOS 原生客户端，支持登录、主机选择、会话历史与流式消息、模型与权限选择、图片及工作区浏览；支持 WebRTC 与加密中继，鸿蒙功能范围仍与 Android 有差异，HAP 签名与安装要求见客户端说明。
 - 恢复移动端直连优先，兼容通过 P2P 通告 LAN 的旧 Server；Desktop 在支持的 Gateway 上并行准备直连与备用 TURN，在有界窗口内优先直连，中继回落后仍可带内升级。
@@ -18,6 +20,8 @@ Android versionCode / iOS buildNumber: **74**。此文档为发布准备，不�
 
 ## English
 
+- Support DSH Desktop 0.2.2-rc.5 with live remote terminal lists and file search by name or path in native Harness workspaces.
+- Open membership plans from the Remote workspace footer when connected to the official hosted service.
 - Add an iOS client sharing application code, sessions and messaging with Android, with iPad and localization support. Xcode Cloud owns signing and TestFlight distribution.
 - Add a native HarmonyOS client with sign-in, Host selection, session history and streaming, model/permission selection, images and workspace browsing over WebRTC or encrypted Relay. Feature coverage differs from Android; see the HarmonyOS guide for signing and installation requirements.
 - Restore direct-first mobile connections, including older Servers advertising LAN through P2P. On supported Gateways, Desktop prepares direct and standby TURN connections concurrently and prefers direct within a bounded window. Relay fallback retains in-band upgrades.

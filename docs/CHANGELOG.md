@@ -13,6 +13,8 @@ Android versionCode / iOS buildNumber: 74.
 
 ### 中文
 
+- 适配 DSH Desktop 0.2.2-rc.5，远程会话支持终端列表实时更新，原生 Harness 工作区可按文件名或路径搜索。
+- 使用官方托管服务时，可从远程工作台底栏打开会员方案页。
 - 修复移动端上传截图时的图片类型错配，以及 ACP 会话中的工作区文件引用和 Antigravity 文件上传。
 - 修复 Windows 后台运行 Remote Host 时探测命令弹出终端窗口、Claude ACP 一键安装包名失效，以及配对 Host 退出授权后仍无法登录账号的问题。
 - Codex 的思考内容进入可折叠的思考区。
@@ -30,6 +32,8 @@ Android versionCode / iOS buildNumber: 74.
 
 ### English
 
+- Support DSH Desktop 0.2.2-rc.5 with live remote terminal lists and file search by name or path in native Harness workspaces.
+- Open membership plans from the Remote workspace footer when connected to the official hosted service.
 - Fix image type mismatches when sending mobile screenshots, workspace file mentions in ACP sessions, and Antigravity file uploads.
 - Hide terminal windows opened by background Host probes on Windows, restore one-click Claude ACP installation, and allow Hosts to sign in after logging out of device pairing.
 - Show Codex reasoning in collapsible reasoning blocks.

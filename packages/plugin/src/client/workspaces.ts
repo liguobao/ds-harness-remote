@@ -31,6 +31,8 @@ import type {
   SidebarEntryStyle,
 } from './types.js'
 
+const hostedServerUrl = 'https://dsh.r2049.cn'
+
 export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalRenderer) {
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
@@ -143,7 +145,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     const [needsAuthorization, setNeedsAuthorization] = React.useState<boolean | undefined>(undefined)
     const [email, setEmail] = React.useState('')
     const [password, setPassword] = React.useState('')
-    const [loginServerUrl, setLoginServerUrl] = React.useState('https://dsh.r2049.cn')
+    const [loginServerUrl, setLoginServerUrl] = React.useState(hostedServerUrl)
     const [editingServer, setEditingServer] = React.useState(false)
     const [savingServer, setSavingServer] = React.useState(false)
     const serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? '')
@@ -1402,12 +1404,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                     }, t(savingServer ? 'saving' : 'save')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer,
-                      onClick: () => { resetLoginFlow(); setLoginServerUrl('https://dsh.r2049.cn'); void saveLoginServer('https://dsh.r2049.cn') },
+                      onClick: () => { resetLoginFlow(); setLoginServerUrl(hostedServerUrl); void saveLoginServer(hostedServerUrl) },
                     }, t('restoreDefaultServiceAddress')),
                     React.createElement('button', {
                       type: 'button', disabled: busy || savingServer,
                       onClick: () => {
-                        setLoginServerUrl(status?.serverUrl ?? 'https://dsh.r2049.cn')
+                        setLoginServerUrl(status?.serverUrl ?? hostedServerUrl)
                         setEditingServer(false)
                       },
                     }, t('cancelServiceAddressEdit')))
@@ -1526,10 +1528,22 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                       onClick: props.openSettings,
                       'aria-label': t('settings'), title: t('settings'),
                     }, t('settings')),
-                    React.createElement('button', {
-                      type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
-                      onClick: () => void logoutRemote(),
-                    }, t('exitRemoteAccount')))) : null)
+                    React.createElement('div', { className: 'dshRemoteAccountActions' },
+                      status?.serverUrl === hostedServerUrl && !status.host?.pairingHostOnly
+                        ? React.createElement('span', { className: 'dshRemoteAccountPlanHint' },
+                          React.createElement('span', { className: 'dshRemoteAccountPlanCopy' }, t('membershipPlansIntro')),
+                          React.createElement('a', {
+                            className: 'dshRemoteAccountPlan',
+                            href: `${hostedServerUrl}/pricing`,
+                            target: '_blank',
+                            rel: 'noreferrer',
+                          }, t('membershipPlans')),
+                          React.createElement('span', { className: 'dshRemoteAccountPlanCopy' }, t('membershipPlansOutro')))
+                        : null,
+                      React.createElement('button', {
+                        type: 'button', className: 'dshRemoteAccountExit', disabled: busy,
+                        onClick: () => void logoutRemote(),
+                      }, t('exitRemoteAccount'))))) : null)
                 : React.createElement('section', { className: 'dshRemoteBrowser', 'aria-label': t('chooseDirectory') },
                   React.createElement('div', { className: 'dshRemoteSectionHeading dshRemoteWorkspaceHeading' },
                     React.createElement('strong', null, t(addingWorkspace
