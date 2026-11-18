@@ -36,6 +36,18 @@ const sidebarEntryChoices: ReadonlyArray<{ value: SidebarEntryStyle; label: 'sid
   { value: 'compact', label: 'sidebarEntryCompact' },
 ]
 
+const BUILTIN_ACP_LABELS: Record<string, string> = {
+  codex: 'CodeX',
+  cursor: 'Cursor',
+  antigravity: 'AGY',
+  claude: 'Claude',
+  pi: 'Pi',
+  opencode: 'OpenCode',
+  hermes: 'Hermes',
+}
+
+const BUILTIN_ACP_SCAN_ONLY = new Set(['cursor', 'antigravity', 'hermes'])
+
 export function createRemotePluginOptions(React: ClientReact) {
   const ServerNotice = createServerNotice(React)
   const HostPairingPanel = createHostPairingPanel(React)
@@ -97,6 +109,7 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [newAcpCommand, setNewAcpCommand] = React.useState('')
     const [newAcpArgs, setNewAcpArgs] = React.useState('acp')
     const [addingAcp, setAddingAcp] = React.useState(false)
+    const [addAcpFormOpen, setAddAcpFormOpen] = React.useState(false)
     const [reconnectBusy, setReconnectBusy] = React.useState(false)
     const [hostStatus, setHostStatus] = React.useState<RemoteStatus['host'] | undefined>(undefined)
     const [hostName, setHostName] = React.useState('')
@@ -544,6 +557,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         setNewAcpId('')
         setNewAcpCommand('')
         setNewAcpArgs('acp')
+        setAddAcpFormOpen(false)
         setNotice({ key: 'acpAddedNotice' })
       } catch (reason) {
         setError(messageOf(reason, t))
@@ -704,7 +718,14 @@ export function createRemotePluginOptions(React: ClientReact) {
               className: 'dshRemoteLogToggleBtn',
               'aria-expanded': logsOpen,
               onClick: toggleLogsDrawer,
-            }, logsOpen ? (t('debugLogsToggleClose') + ' ▴') : (t('debugLogsToggleOpen') + ' ▾')),
+            },
+              React.createElement('span', null, logsOpen ? t('debugLogsToggleClose') : t('debugLogsToggleOpen')),
+              React.createElement('svg', {
+                className: 'dshRemoteLogToggleChevron',
+                viewBox: '0 0 16 16', width: 14, height: 14, fill: 'none',
+                stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round',
+                'aria-hidden': true,
+              }, React.createElement('path', { d: 'M4 6l4 4 4-4' }))),
             React.createElement('input', {
               type: 'checkbox', role: 'switch', checked: debugLogging,
               disabled: busy || debugBusy || !writable, 'aria-label': t('debugLogging'),
@@ -886,77 +907,131 @@ export function createRemotePluginOptions(React: ClientReact) {
         onClick: () => void setSidebarEntryStyle(choice.value),
       }, t(choice.label)))))
 
+    const acpEnabledCount = settingsView?.config.acp?.enabled === true
+      ? acpBackends.filter(item => item.enabled && acpAvailability[item.id] === true).length
+      : 0
+    const acpSummaryCount = acpBackends.length > 0 ? `${acpEnabledCount}/${acpBackends.length}` : undefined
+    const acpDocEndPunctuation = t('acpHint').includes('，') ? '。' : '.'
+
     const acpSetting = React.createElement('details', { className: 'dshRemoteAuthorizationSetting dshRemoteAcpSetting' },
       React.createElement('summary', null,
         React.createElement('div', { className: 'dshRemoteAcpSummaryText' },
           React.createElement('strong', null, t('agentBackends')),
-          React.createElement('p', null, t('acpHint'), React.createElement('a', {
-            href: 'https://github.com/liguobao/ds-harness-remote/blob/feat/cursor-remote/docs/acp-remote.md',
-            target: '_blank', rel: 'noopener noreferrer',
-            onClick: (event: Event) => event.stopPropagation(),
-          }, t('acpDocumentation'))))),
-      React.createElement('div', { className: 'dshRemoteAcpList' }, acpBackends.map(item => {
+          React.createElement('p', null,
+            t('acpHint'),
+            React.createElement('a', {
+              className: 'dshRemoteDocLink',
+              href: 'https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-remote.md',
+              target: '_blank', rel: 'noopener noreferrer',
+              onClick: (event: Event) => event.stopPropagation(),
+            }, t('acpDocumentation')),
+            acpDocEndPunctuation)),
+        React.createElement('span', { className: 'dshRemoteAcpSummaryMeta' },
+          acpSummaryCount === undefined ? null : React.createElement('span', { className: 'dshRemoteAcpCountText' }, acpSummaryCount),
+          React.createElement('span', { className: 'dshRemoteAcpChevron', 'aria-hidden': true },
+            React.createElement('svg', {
+              viewBox: '0 0 16 16', width: 16, height: 16, fill: 'none',
+              stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round',
+            }, React.createElement('path', { d: 'M4 6l4 4 4-4' }))))),
+      acpBackends.length === 0 ? null : React.createElement('div', { className: 'dshRemoteAcpList' }, acpBackends.map(item => {
         const diag = acpDiagnostics?.[item.id]
+        const isBuiltin = Object.prototype.hasOwnProperty.call(BUILTIN_ACP_LABELS, item.id)
+        const displayName = BUILTIN_ACP_LABELS[item.id] ?? item.id
+        const available = acpAvailability[item.id] === true
+        const checking = acpChecking[item.id] === true
+        const installing = acpInstalling[item.id] === true
+        const checkResult = acpCheckResults[item.id]
+        const showConfigure = writable && !busy && !available && isBuiltin
+        const statusMeta = checking
+          ? { cls: ' isChecking', label: t('checkingAcp') }
+          : checkResult !== undefined
+            ? { cls: checkResult ? ' isPassed' : ' isFailed', label: t(checkResult ? 'acpCheckPassed' : 'acpCheckFailed') }
+            : undefined
+        const diagDetail = diag && (diag.auth.authStatus === 'auth_required' || diag.state === 'unavailable')
+          ? [
+              diag.auth.authStatus === 'auth_required' ? `${t('acpAuthRequired')}: ` : '',
+              diag.auth.guidance ?? diag.errorCode ?? '',
+              diag.auth.loginCommand ? ` · ${t('acpLoginCommand', { command: diag.auth.loginCommand })}` : '',
+            ].join('').replace(/^ · /, '').trim()
+          : ''
         return React.createElement('div', { key: item.id, className: 'dshRemoteAcpRow' },
-          React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
-            React.createElement('div', null, React.createElement('strong', null, item.id === 'codex' ? 'CodeX' : item.id === 'cursor' ? 'Cursor' : item.id === 'antigravity' ? 'AGY' : item.id === 'claude' ? 'Claude' : item.id === 'pi' ? 'Pi' : item.id === 'opencode' ? 'OpenCode' : item.id === 'hermes' ? 'Hermes' : item.id), null),
-            React.createElement('span', { className: 'dshRemoteAcpCheckCell' },
-              // One entry per backend: while the command is unresolved this slot is
-              // the fix (scan / install), once it resolves it turns back into the
-              // read-only availability check. Keeping both visible at once made the
-              // row read as two competing actions.
-              writable && !busy && acpAvailability[item.id] !== true && ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id)
-                ? React.createElement('a', {
-                  href: `#install-acp-${item.id}`,
-                  className: `dshRemoteAcpInstallLink${acpInstalling[item.id] ? ' isInstalling' : ''}`,
-                  onClick: (event: Event) => { event.preventDefault(); void installOrConfigureAcp(item.id) },
-                }, acpInstalling[item.id] ? t('installingAcp') : (['cursor', 'antigravity', 'hermes'].includes(item.id) ? t('configureAcp') : t('installAcp')))
-                : React.createElement('a', { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? ' isChecking' : acpCheckResults[item.id] === undefined ? '' : acpCheckResults[item.id] ? ' isPassed' : ' isFailed'}`, onClick: (event: Event) => { event.preventDefault(); void checkAcp(item.id) } },
-                  acpChecking[item.id] ? t('checkingAcp') : acpCheckResults[item.id] === undefined ? t('checkAcp') : t(acpCheckResults[item.id] ? 'acpCheckPassed' : 'acpCheckFailed'))),
-            ['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id) ? null : React.createElement('a', { href: `#remove-acp-${item.id}`, className: 'dshRemoteAcpRemoveLink', onClick: (event: Event) => { event.preventDefault(); void removeAcp(item.id) } }, t('removeAcp')),
+          React.createElement('div', { className: 'dshRemoteAcpRowMain' },
+            React.createElement('div', { className: 'dshRemoteAcpRowInfo' },
+              React.createElement('strong', { className: 'dshRemoteAcpName' }, displayName),
+              statusMeta === undefined ? null : React.createElement('span', { className: `dshRemoteAcpStatus${statusMeta.cls}` }, statusMeta.label)),
+            React.createElement('div', { className: 'dshRemoteAcpRowActions' },
+              isBuiltin ? null : React.createElement('button', {
+                type: 'button',
+                className: 'dshRemoteAcpRemoveBtn',
+                disabled: busy || !writable,
+                onClick: () => void removeAcp(item.id),
+              }, t('removeAcp')),
+              showConfigure
+                ? React.createElement('button', {
+                  type: 'button',
+                  className: `dshRemoteAcpActionBtn isConfigure${installing ? ' isInstalling' : ''}`,
+                  disabled: installing,
+                  onClick: () => void installOrConfigureAcp(item.id),
+                }, installing ? t('installingAcp') : (BUILTIN_ACP_SCAN_ONLY.has(item.id) ? t('configureAcp') : t('installAcp')))
+                : React.createElement('button', {
+                  type: 'button',
+                  className: `dshRemoteAcpActionBtn${checking ? ' isChecking' : ''}`,
+                  disabled: checking,
+                  onClick: () => void checkAcp(item.id),
+                }, checking ? t('checkingAcp') : t('checkAcp'))),
             React.createElement('input', {
-              type: 'checkbox', role: 'switch', checked: settingsView?.config.acp?.enabled === true && item.enabled && acpAvailability[item.id] === true, 'aria-label': item.id, disabled: busy || !writable || acpChecking[item.id] === true || acpAvailability[item.id] !== true,
-              onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason, t)))
+              type: 'checkbox', role: 'switch', className: 'dshRemoteSwitch',
+              checked: settingsView?.config.acp?.enabled === true && item.enabled && available,
+              'aria-label': item.id,
+              disabled: busy || !writable || checking || !available,
+              onChange: (event: Event) => void props.control<PluginSettingsView>('settings.acp.set', { backend: item.id, enabled: (event.target as HTMLInputElement).checked }).then(view => { applyView(view); setAcpBackends((view.config.acp?.backends ?? []).map(v => ({ id: v.id, enabled: v.enabled !== false }))) }).catch(reason => setError(messageOf(reason, t))),
             })),
-          diag && (diag.auth.authStatus === 'auth_required' || diag.state === 'unavailable')
-            ? React.createElement('p', { className: 'dshRemoteSettingsState', role: 'status' },
-                diag.auth.authStatus === 'auth_required' ? `${t('acpAuthRequired')}: ` : '',
-                diag.auth.guidance ?? diag.errorCode ?? '',
-                diag.auth.loginCommand ? ` · ${t('acpLoginCommand', { command: diag.auth.loginCommand })}` : '')
-            : null)
+          diagDetail === '' ? null : React.createElement('p', { className: 'dshRemoteAcpDiag', role: 'status' }, diagDetail))
       })),
-      !writable ? null : React.createElement('div', { className: 'dshRemoteAcpAddForm' },
-        React.createElement('strong', null, t('addCustomAcp')),
-        React.createElement('div', { className: 'dshRemoteAcpAddInputs' },
-          React.createElement('input', {
-            type: 'text',
-            placeholder: t('acpIdHint'),
-            'aria-label': t('acpName'),
-            disabled: busy || addingAcp,
-            value: newAcpId,
-            onChange: (event: Event) => setNewAcpId((event.target as HTMLInputElement).value),
-          }),
-          React.createElement('input', {
-            type: 'text',
-            placeholder: t('acpCommand'),
-            'aria-label': t('acpCommand'),
-            disabled: busy || addingAcp,
-            value: newAcpCommand,
-            onChange: (event: Event) => setNewAcpCommand((event.target as HTMLInputElement).value),
-          }),
-          React.createElement('input', {
-            type: 'text',
-            placeholder: t('acpArguments'),
-            'aria-label': t('acpArguments'),
-            disabled: busy || addingAcp,
-            value: newAcpArgs,
-            onChange: (event: Event) => setNewAcpArgs((event.target as HTMLInputElement).value),
-          }),
-          React.createElement('button', {
-            type: 'button',
-            disabled: busy || addingAcp || newAcpId.trim() === '' || newAcpCommand.trim() === '',
-            onClick: () => void addCustomAcp(),
-          }, t('addAcp')))),
+      !writable ? null : !addAcpFormOpen
+        ? React.createElement('button', {
+          type: 'button',
+          className: 'dshRemoteAcpAddTrigger',
+          disabled: busy,
+          onClick: () => setAddAcpFormOpen(true),
+        }, `+ ${t('addCustomAcp')}`)
+        : React.createElement('div', { className: 'dshRemoteAcpAddForm' },
+          React.createElement('div', { className: 'dshRemoteAcpAddInputs' },
+            React.createElement('input', {
+              type: 'text',
+              placeholder: t('acpIdHint'),
+              'aria-label': t('acpName'),
+              disabled: busy || addingAcp,
+              value: newAcpId,
+              onChange: (event: Event) => setNewAcpId((event.target as HTMLInputElement).value),
+            }),
+            React.createElement('input', {
+              type: 'text',
+              placeholder: t('acpCommand'),
+              'aria-label': t('acpCommand'),
+              disabled: busy || addingAcp,
+              value: newAcpCommand,
+              onChange: (event: Event) => setNewAcpCommand((event.target as HTMLInputElement).value),
+            }),
+            React.createElement('input', {
+              type: 'text',
+              placeholder: t('acpArguments'),
+              'aria-label': t('acpArguments'),
+              disabled: busy || addingAcp,
+              value: newAcpArgs,
+              onChange: (event: Event) => setNewAcpArgs((event.target as HTMLInputElement).value),
+            }),
+            React.createElement('button', {
+              type: 'button',
+              disabled: busy || addingAcp || newAcpId.trim() === '' || newAcpCommand.trim() === '',
+              onClick: () => void addCustomAcp(),
+            }, t('addAcp')),
+            React.createElement('button', {
+              type: 'button',
+              className: 'isGhost',
+              disabled: addingAcp,
+              onClick: () => setAddAcpFormOpen(false),
+            }, t('cancelServiceAddressEdit')))),
         )
 
     if (props.view === 'summary') return React.createElement('span', null, t('pluginDescription'))
