@@ -2,11 +2,6 @@
 
 版本条目保留发布时的功能和验证范围；当前使用方式与限制见[文档入口](README.md)和[版本兼容](compatibility.zh.md)。
 
-## Unreleased
-
-- Host 使用 werift 时，会自动尝试通过合格的公网 IPv6 地址进行 P2P 直连。
-- Hosts using werift automatically offer eligible public IPv6 addresses for direct P2P connections.
-
 ## 0.6.6 — 待发布 / Unreleased
 
 Android versionCode / iOS buildNumber: 74.
@@ -15,6 +10,10 @@ Android versionCode / iOS buildNumber: 74.
 
 - 适配 DSH Desktop 0.2.2-rc.5，远程会话支持终端列表实时更新，原生 Harness 工作区可按文件名或路径搜索。
 - 使用官方托管服务时，可从远程工作台底栏打开会员方案页。
+- Android 在会话忙碌时可选择「排队发送」或「插话发送」，已排队的消息也可手动插入当前对话。
+- Antigravity 优先使用原生 `agy acp`，保留旧版适配器作为回退。扩展 ACP 会话的模式、权限和状态显示，并支持注册使用标准 stdio ACP 的自定义后端。
+- 新增跨机器复制 Harness 会话历史的 Host API。可复制单个会话或整个工作区的普通会话，导入后使用目标工作区，源 worktree 归属不随历史迁移。此能力需要客户端接入。
+- Host 使用 werift 时，可利用合格的公网 IPv6 和识别到的 Tailscale IPv4 地址尝试 P2P 直连。
 - 修复移动端上传截图时的图片类型错配，以及 ACP 会话中的工作区文件引用和 Antigravity 文件上传。
 - 修复 Windows 后台运行 Remote Host 时探测命令弹出终端窗口、Claude ACP 一键安装包名失效，以及配对 Host 退出授权后仍无法登录账号的问题。
 - Codex 的思考内容进入可折叠的思考区。
@@ -34,6 +33,10 @@ Android versionCode / iOS buildNumber: 74.
 
 - Support DSH Desktop 0.2.2-rc.5 with live remote terminal lists and file search by name or path in native Harness workspaces.
 - Open membership plans from the Remote workspace footer when connected to the official hosted service.
+- Android lets you queue a message or steer the active turn while a session is busy. You can also steer with a message that is already queued.
+- Prefer native `agy acp` for Antigravity with the legacy adapter as a fallback. Expand ACP mode and permission controls and session status, and support registering custom backends that use standard stdio ACP.
+- Add Host APIs for copying one Harness session or the ordinary sessions in a workspace across machines. Imported sessions use the destination workspace and leave source worktree ownership behind. These APIs require client integration.
+- Hosts using werift can attempt direct P2P connections over eligible public IPv6 and recognized Tailscale IPv4 addresses.
 - Fix image type mismatches when sending mobile screenshots, workspace file mentions in ACP sessions, and Antigravity file uploads.
 - Hide terminal windows opened by background Host probes on Windows, restore one-click Claude ACP installation, and allow Hosts to sign in after logging out of device pairing.
 - Show Codex reasoning in collapsible reasoning blocks.
