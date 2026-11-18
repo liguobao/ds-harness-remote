@@ -1,12 +1,14 @@
 import { z } from 'zod'
+import { isDeepStrictEqual } from 'node:util'
 import { RpcError } from './safe-error.js'
 import type { TypertRpcResult } from './typert-gateway-contract.js'
 import { parseCodexSessionId } from './codex/session-id.js'
 
 export const TERMINAL_CALLS = new Set(['terminal/environment', 'terminal/shells', 'terminal/list',
   'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close'])
-export const TERMINAL_STREAMS = new Set(['terminal/follow', 'terminal/retain'])
+export const TERMINAL_STREAMS = new Set(['terminal/follow', 'terminal/retain', 'terminal/watch'])
 const id = z.string().regex(/^[A-Za-z0-9_:-]{1,256}$/)
+const rosterPayload = z.object({ args: z.object({ sessionId: id }).strict() }).strict()
 
 /** Host-lifetime device ownership survives transport reconnects; never supplied by the client. */
 export class TerminalPolicy {
@@ -28,6 +30,10 @@ export class TerminalPolicy {
   check(endpoint: string, payload: unknown): { key?: string; created?: boolean; claim?: object } {
     if (!(typeof this.enabled === 'function' ? this.enabled() : this.enabled)) throw new RpcError('TERMINAL_DISABLED',
       'Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / 远程终端未开启，请在 Host 的 Remote 设置中开启「远程终端」，开关切换后立即保存并生效。')
+    if (endpoint === 'terminal/watch') {
+      rosterPayload.parse(payload)
+      return {}
+    }
     for (const [key, attachment] of this.attachments) if (this.owners.get(key) !== this.deviceId || this.claims.get(key) !== attachment.claim) this.attachments.delete(key)
     const args = z.object({ args: z.record(z.string(), z.unknown()) }).strict().parse(payload).args
     const rawSessionId = args.agentId ?? args.sessionId
@@ -68,10 +74,27 @@ export class TerminalPolicy {
     if (endpoint === 'terminal/list' && result.ok && Array.isArray(result.value)) {
       const args = (payload as { args: Record<string, unknown> }).args
       const session = args.sessionId ?? args.agentId
-      return { ok: true, value: result.value.filter(value => typeof value?.id === 'string'
-        && this.owners.get(`${session}/${value.id}`) === this.deviceId) }
+      return { ok: true, value: this.ownedRoster(session, result.value) }
     }
     return result
+  }
+
+  async *watch(payload: unknown, source: AsyncIterable<unknown>): AsyncIterable<unknown[]> {
+    const { args: { sessionId } } = rosterPayload.parse(payload)
+    let previous: unknown[] | undefined
+    for await (const value of source) {
+      this.check('terminal/watch', payload)
+      if (!Array.isArray(value)) throw new RpcError('INVALID_MESSAGE', 'The terminal roster is invalid.')
+      const roster = this.ownedRoster(sessionId, value)
+      if (isDeepStrictEqual(previous, roster)) continue
+      previous = roster
+      yield roster
+    }
+  }
+
+  private ownedRoster(session: unknown, value: unknown[]): unknown[] {
+    return value.filter(item => typeof item === 'object' && item !== null && 'id' in item
+      && typeof item.id === 'string' && this.owners.get(`${session}/${item.id}`) === this.deviceId)
   }
 
   private deny(): never { throw new RpcError('PERMISSION_DENIED', 'This terminal or input attachment belongs to another connection or device.') }

@@ -81000,7 +81000,7 @@ var HOST_WORKSPACE_ENDPOINTS = /* @__PURE__ */ new Set([
   "terminal/rename",
   "terminal/close"
 ]);
-var HOST_WORKSPACE_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/changes", "terminal/follow", "terminal/retain"]);
+var HOST_WORKSPACE_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/changes", "terminal/follow", "terminal/retain", "terminal/watch"]);
 function isHostWorkspaceEndpoint(endpoint) {
   return HOST_WORKSPACE_ENDPOINTS.has(endpoint);
 }
@@ -93972,13 +93972,14 @@ var TerminalFollower = class {
   }
 };
 var OwnedTerminal = class {
-  constructor(sessionId, id6, cwd2, cols, rows, removed) {
+  constructor(sessionId, id6, cwd2, cols, rows, removed, rosterChanged) {
     this.sessionId = sessionId;
     this.id = id6;
     this.cwd = cwd2;
     this.cols = cols;
     this.rows = rows;
     this.removed = removed;
+    this.rosterChanged = rosterChanged;
     this.screen = new import_headless.default.Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true });
     this.screen.loadAddon(this.serializer);
   }
@@ -94025,6 +94026,7 @@ var OwnedTerminal = class {
   }
   emit(value) {
     for (const follower of this.followers) follower.push(value);
+    if (value.type === "state") this.rosterChanged();
   }
   invalidate() {
     this.activityEpoch++;
@@ -94155,7 +94157,11 @@ var RemoteTerminalState = class {
     this.onRemoved = onRemoved;
   }
   terminals = /* @__PURE__ */ new Map();
+  rosters = /* @__PURE__ */ new Map();
   revision = 0;
+  notifyRoster(sessionId) {
+    for (const listener of this.rosters.get(sessionId) ?? []) listener();
+  }
   async dispose(matches = () => true) {
     this.revision++;
     const results = await Promise.allSettled([...this.terminals.values()].filter((terminal) => matches(terminal.sessionId)).map((terminal) => terminal.close()));
@@ -94170,11 +94176,12 @@ var RemoteTerminalController = class {
     this.scopeError = scopeError;
   }
   subscriptions = /* @__PURE__ */ new Set();
+  rosterLifetime = new AbortController();
   async call(endpoint, sessionId, cwd2, args, signal) {
     this.check(signal);
     if (endpoint === "terminal/environment") return { ok: true, value: { cwd: cwd2, maxInputBytes: MAX_INPUT_BYTES, maxCols: MAX_COLS, maxRows: MAX_ROWS, scrollback: SCROLLBACK } };
     if (endpoint === "terminal/shells") return { ok: true, value: await this.shells(signal) };
-    if (endpoint === "terminal/list") return { ok: true, value: [...this.shared.terminals.values()].filter((item) => item.sessionId === sessionId && item.shell && item.process).map((item) => item.info()) };
+    if (endpoint === "terminal/list") return { ok: true, value: this.roster(sessionId) };
     if (endpoint === "terminal/create") return { ok: true, value: await this.create(sessionId, cwd2, args, signal) };
     const id6 = identifier(args.id);
     if (endpoint === "terminal/close") {
@@ -94210,6 +94217,7 @@ var RemoteTerminalController = class {
   }
   async open(endpoint, sessionId, args, signal) {
     this.check(signal);
+    if (endpoint === "terminal/watch") return this.watch(sessionId, AbortSignal.any([signal, this.rosterLifetime.signal]));
     const terminal = this.requireTerminal(sessionId, identifier(args.id));
     let follower;
     const abort = () => follower.close();
@@ -94259,7 +94267,41 @@ var RemoteTerminalController = class {
   }
   /** A connection only disposes its subscriptions; the Host still owns the shells. */
   closeAll() {
+    this.rosterLifetime.abort();
     for (const subscription of [...this.subscriptions]) subscription.close();
+  }
+  roster(sessionId) {
+    return [...this.shared.terminals.values()].filter((item) => item.sessionId === sessionId && item.shell && item.process).map((item) => item.info());
+  }
+  async *watch(sessionId, signal) {
+    const listeners = this.shared.rosters.get(sessionId) ?? /* @__PURE__ */ new Set();
+    let dirty = true;
+    let wake;
+    const notify = () => {
+      dirty = true;
+      wake?.();
+    };
+    listeners.add(notify);
+    this.shared.rosters.set(sessionId, listeners);
+    signal.addEventListener("abort", notify, { once: true });
+    try {
+      while (!signal.aborted) {
+        this.check(signal);
+        if (dirty) {
+          dirty = false;
+          yield this.roster(sessionId);
+        } else {
+          await new Promise((resolve10) => {
+            wake = resolve10;
+          });
+          wake = void 0;
+        }
+      }
+    } finally {
+      signal.removeEventListener("abort", notify);
+      listeners.delete(notify);
+      if (listeners.size === 0) this.shared.rosters.delete(sessionId);
+    }
   }
   async shells(signal) {
     try {
@@ -94295,8 +94337,10 @@ var RemoteTerminalController = class {
         if (this.shared.terminals.get(key) === terminal) {
           this.shared.terminals.delete(key);
           this.shared.onRemoved(key);
+          this.shared.notifyRoster(sessionId);
         }
-      }
+      },
+      () => this.shared.notifyRoster(sessionId)
     );
     this.shared.terminals.set(key, terminal);
     const allocationSignal = AbortSignal.any([signal, terminal.allocation.signal]);
@@ -94316,6 +94360,7 @@ var RemoteTerminalController = class {
         signal: allocationSignal
       });
       this.check(allocationSignal);
+      this.shared.notifyRoster(sessionId);
       void terminal.pump();
       terminal.monitor();
     })();
@@ -94397,6 +94442,7 @@ var WorkspaceBridge = class {
       if (this.scope.owns(raw)) throw this.scopeError("SESSION_INVALID", "The CodeX session identifier is invalid.");
       return void 0;
     }
+    if (endpoint === "workspaceFiles/search") throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace search requires a native Harness session.");
     if (endpoint.startsWith("workspaceFiles/")) return this.fileCall(endpoint, session2.sessionId, args, signal);
     if (endpoint.startsWith("terminal/")) {
       if (!this.terminalEnabled()) throw new RpcError("TERMINAL_DISABLED", "Remote terminal is disabled on this Host.");
@@ -94416,7 +94462,7 @@ var WorkspaceBridge = class {
       return void 0;
     }
     if (endpoint === "workspaceFiles/changes") return this.watchChanges(session2.sessionId, args, signal);
-    if (endpoint === "terminal/retain" || endpoint === "terminal/follow") {
+    if (endpoint === "terminal/retain" || endpoint === "terminal/follow" || endpoint === "terminal/watch") {
       if (!this.terminalEnabled()) throw new RpcError("TERMINAL_DISABLED", "Remote terminal is disabled on this Host.");
       await this.rootFor(session2.sessionId, signal);
       return this.terminal.open(endpoint, session2.sessionId, args, signal);
@@ -94580,6 +94626,9 @@ function readLimit(args) {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? Math.min(value, MAX_READ_BYTES) : MAX_READ_BYTES;
 }
 
+// packages/plugin/src/terminal-policy.ts
+import { isDeepStrictEqual } from "node:util";
+
 // packages/plugin/src/codex/session-id.ts
 function parseCodexSessionId(value) {
   if (typeof value !== "string") return void 0;
@@ -94598,8 +94647,9 @@ var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/rename",
   "terminal/close"
 ]);
-var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
+var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain", "terminal/watch"]);
 var id4 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var rosterPayload = external_exports.object({ args: external_exports.object({ sessionId: id4 }).strict() }).strict();
 var TerminalPolicy = class _TerminalPolicy {
   constructor(enabled, deviceId, owners) {
     this.enabled = enabled;
@@ -94621,6 +94671,10 @@ var TerminalPolicy = class _TerminalPolicy {
       "TERMINAL_DISABLED",
       "Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / \u8FDC\u7A0B\u7EC8\u7AEF\u672A\u5F00\u542F\uFF0C\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002"
     );
+    if (endpoint === "terminal/watch") {
+      rosterPayload.parse(payload);
+      return {};
+    }
     for (const [key2, attachment] of this.attachments) if (this.owners.get(key2) !== this.deviceId || this.claims.get(key2) !== attachment.claim) this.attachments.delete(key2);
     const args = external_exports.object({ args: external_exports.record(external_exports.string(), external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
@@ -94655,9 +94709,24 @@ var TerminalPolicy = class _TerminalPolicy {
     if (endpoint === "terminal/list" && result.ok && Array.isArray(result.value)) {
       const args = payload.args;
       const session2 = args.sessionId ?? args.agentId;
-      return { ok: true, value: result.value.filter((value) => typeof value?.id === "string" && this.owners.get(`${session2}/${value.id}`) === this.deviceId) };
+      return { ok: true, value: this.ownedRoster(session2, result.value) };
     }
     return result;
+  }
+  async *watch(payload, source) {
+    const { args: { sessionId } } = rosterPayload.parse(payload);
+    let previous;
+    for await (const value of source) {
+      this.check("terminal/watch", payload);
+      if (!Array.isArray(value)) throw new RpcError("INVALID_MESSAGE", "The terminal roster is invalid.");
+      const roster = this.ownedRoster(sessionId, value);
+      if (isDeepStrictEqual(previous, roster)) continue;
+      previous = roster;
+      yield roster;
+    }
+  }
+  ownedRoster(session2, value) {
+    return value.filter((item) => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && this.owners.get(`${session2}/${item.id}`) === this.deviceId);
   }
   deny() {
     throw new RpcError("PERMISSION_DENIED", "This terminal or input attachment belongs to another connection or device.");
@@ -103213,6 +103282,15 @@ var transferReadSchema3 = external_exports.object({
 var directoryListSchema = external_exports.object({
   path: external_exports.string().min(1).max(4096).optional()
 }).strict();
+var workspaceSearchPayloadSchema = external_exports.object({ args: external_exports.object({
+  workspaceFileScopeId: external_exports.string().min(1),
+  request: external_exports.object({
+    query: external_exports.string(),
+    excludedPaths: external_exports.array(external_exports.string()),
+    includeHidden: external_exports.boolean(),
+    respectGitignore: external_exports.boolean()
+  }).strict()
+}).strict() }).strict();
 var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
@@ -103307,6 +103385,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspaceFiles/readBytes",
   "workspaceFiles/readAll",
   "workspaceFiles/readRelated",
+  "workspaceFiles/search",
   "workspaceFiles/changes",
   "officeToPdf/render",
   "officeToPdf/generation",
@@ -103429,7 +103508,13 @@ var HarnessRemoteBridge = class {
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
       nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal);
-      if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+      if (params.endpoint === "workspaceFiles/search") {
+        const search = workspaceSearchPayloadSchema.parse(nativePayload);
+        if (!await this.resolveWorkspaceRootForSession(search.args.workspaceFileScopeId, signal)) {
+          throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
+        }
+        nativePayload = search;
+      } else if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
       const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
@@ -103624,6 +103709,7 @@ var HarnessRemoteBridge = class {
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
     if (params.endpoint.startsWith("cotTranslation/")) throw new RpcError("METHOD_NOT_ALLOWED", "Translation endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
+    if (params.endpoint === "workspaceFiles/search") throw new RpcError("METHOD_NOT_ALLOWED", "Workspace search is not a stream.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness Remote stream is already open.");
@@ -103642,6 +103728,7 @@ var HarnessRemoteBridge = class {
       throw error62;
     }
     if (params.endpoint === "$events") source = this.remoteEventsWithFallback(source, controller.signal);
+    if (params.endpoint === "terminal/watch") source = this.terminal.watch(params.payload, source);
     void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow", params.transferFrames);
     return { opened: true, streamId: params.streamId };
   }

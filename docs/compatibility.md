@@ -19,6 +19,7 @@ The Host, bundled Remote Client and Android use the official Typert carrier. Hos
 
 - Harness 0.2.2 requires the complete `ImageAttachmentRef`; Android retains byte length and dimensions. The Host bridge sends attachmentId to older Harness. An older client unable to supply the verified reference is explicitly rejected by the new official Gateway.
 - Virtual `session/control` sends both legacy key/value and new changes; virtual `session/page` includes cursor and accepts `session/events`.
+- DSH Desktop 0.2.2-rc.5's `terminal/watch` returns only session terminals owned by the current device. Native Harness runs `workspaceFiles/search` inside the verified session workspace.
 - Local carriers require a live official owner Peer. Missing Peer or event services must fail explicitly; the standalone TUI bundle composes the official Remote APIs.
 - Both negotiated capability and `workspaceTypes.available` must permit a backend. Discovering a command or enabling a setting does not prove login or readiness.
 

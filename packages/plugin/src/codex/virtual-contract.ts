@@ -26,7 +26,7 @@ const HOST_WORKSPACE_ENDPOINTS = new Set([
   'terminal/list', 'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close',
 ])
 
-const HOST_WORKSPACE_STREAM_ENDPOINTS = new Set(['workspaceFiles/changes', 'terminal/follow', 'terminal/retain'])
+const HOST_WORKSPACE_STREAM_ENDPOINTS = new Set(['workspaceFiles/changes', 'terminal/follow', 'terminal/retain', 'terminal/watch'])
 
 export function isHostWorkspaceEndpoint(endpoint: string): boolean {
   return HOST_WORKSPACE_ENDPOINTS.has(endpoint)
