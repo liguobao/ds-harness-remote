@@ -378,10 +378,9 @@ export function ChatScreen({
   // editable offline, so only a conversation change collapses it.
   useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
   useEffect(() => { setComposerExpanded(false) }, [session?.sessionId])
-  // The mode (agent-preset) roster is deployment-level; fetch it once per connection.
+  // Fetch mode options only when a non-Codex session is active.
   useEffect(() => {
-    if (connection.phase !== 'connected' || session?.backend === 'codex') return
-    if (useAppStore.getState().agentPresetOptions !== undefined) return
+    if (connection.phase !== 'connected' || session === undefined || session.backend === 'codex') return
     void loadAgentPresets()
   }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
   const [composerExpanded, setComposerExpanded] = useState(false)
@@ -1014,7 +1013,8 @@ export function ChatScreen({
     }
   }
 
-  const supportsModeSelection = !['codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'].includes(session.backend ?? 'harness')
+  const supportsModeSelection = (session.backend ?? 'harness') === 'harness'
+    || (session.backend !== 'codex' && agentPresetOptions !== undefined && agentPresetOptions.length > 0)
   const currentAgentPresetId = session.agentPreset ?? agentPresetOptions?.find(option => option.isDefault)?.id
   const currentWorkspace = workspaces.find(workspace => workspace.sessionIds.includes(session.sessionId))
   const workspaceLabel = currentWorkspace?.title ?? strings.chat.workspaceNone

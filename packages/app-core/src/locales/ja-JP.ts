@@ -769,6 +769,7 @@ const jaJP = {
     agentsTab: "エージェント", agentPlatform: "エージェントプラットフォーム", switchHarness: "Harness を切り替え",
     backendUnavailable: (name: string) => `接続中のホストで ${name} が有効になっていません。パソコン側で設定または起動してください。`,
     backendDescriptions: { harness: "公式 DeepSeek エージェントフレームワーク", codex: "OpenAI Codex コーディングエージェント", claude: "Anthropic Claude エージェント", hermes: "Nous Research Hermes Agent", cursor: "Cursor IDE 対話型エージェント", antigravity: "Antigravity 開発フレームワーク", opencode: "OpenCode オープンソースエージェント", pi: "Personal Intelligence エージェント" },
+    customAcpDescription: 'カスタム ACP エージェント',
   },
   plugins: {
     title: 'プラグイン',

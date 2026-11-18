@@ -64,6 +64,7 @@ import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { isVisibleSession } from '../lib/session-visibility'
+import { isAcpManagedBackend } from '../lib/workspace-key'
 import { browseStatus } from '../lib/backend-groups'
 import { browseScope, saveHostMode, useBrowseMemory } from '../services/browse-memory'
 import {
@@ -231,11 +232,12 @@ export function HostSessionsDrawer({
   const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
   const claudeAvailable = useAppStore(state => state.claudeAvailable)
   const hermesAvailable = useAppStore(state => state.hermesAvailable)
+  const customAcpBackends = useAppStore(state => state.customAcpBackends ?? [])
   const availableBackends = useAppStore(state => [
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
-    state.hermesAvailable && 'hermes',
+    state.hermesAvailable && 'hermes', ...(state.customAcpBackends ?? []),
   ].filter(Boolean).join(','))
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
@@ -324,7 +326,9 @@ export function HostSessionsDrawer({
 
   const menuBackend = menuSession?.backend ?? 'harness'
   const canUseHarnessActions = !!menuSession && menuBackend === 'harness'
-  const menuIsPinned = !!menuSession && canUseHarnessActions && pinnedSessionIds.includes(menuSession.sessionId)
+  const canPinSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
+  const canForkSession = !!menuSession && (menuBackend === 'harness' || isAcpManagedBackend(menuBackend))
+  const menuIsPinned = !!menuSession && canPinSession && pinnedSessionIds.includes(menuSession.sessionId)
   const menuIsArchived = !!menuSession && canUseHarnessActions && archivedIds.includes(menuSession.sessionId)
 
   const closeDrawer = () => {
@@ -365,7 +369,7 @@ export function HostSessionsDrawer({
       case 'opencode': return useAppStore.getState().opencodeAvailable
       case 'claude': return useAppStore.getState().claudeAvailable
       case 'hermes': return useAppStore.getState().hermesAvailable
-      default: return false
+      default: return (useAppStore.getState().customAcpBackends ?? []).includes(target)
     }
   }
 
@@ -740,12 +744,15 @@ export function HostSessionsDrawer({
   }, [sessions, selected, backend, archivedIds, filterMode, searchQuery, orderBy, botTeamState])
 
   const sections = useMemo<DrawerSection[]>(() => {
+    const isRowPinned = (s: RemoteSession) => {
+      const b = s.backend ?? 'harness'
+      return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
+    }
     const partitionPinned = (items: RemoteSession[]) => {
       const pinned: RemoteSession[] = []
       const ordinary: RemoteSession[] = []
       for (const s of items) {
-        const isHarness = (s.backend ?? 'harness') === 'harness'
-        if (isHarness && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)) {
+        if (isRowPinned(s)) {
           pinned.push(s)
         } else {
           ordinary.push(s)
@@ -1505,7 +1512,8 @@ export function HostSessionsDrawer({
           const isLastInCard = index === section.data.length - 1 && !hasFooter
           const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
           const isHarness = (item.backend ?? 'harness') === 'harness'
-          const isPinned = isHarness && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)
+          const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
+          const isPinned = canPin && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)
           const isArchived = isHarness && archivedIds.includes(item.sessionId)
           const timeStr = formatRelativeTime(item.updatedAt)
           const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
@@ -1557,8 +1565,8 @@ export function HostSessionsDrawer({
                 const rowHeight = 46
                 const deltaSlots = Math.round(dy / rowHeight)
                 const pinnedCount = section.data.filter(s => {
-                  const isH = (s.backend ?? 'harness') === 'harness'
-                  return isH && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
+                  const b = s.backend ?? 'harness'
+                  return (b === 'harness' || isAcpManagedBackend(b)) && pinnedSessionIds.includes(s.sessionId) && !archivedIds.includes(s.sessionId)
                 }).length
                 const minSlot = dragState.isPinned ? 0 : pinnedCount
                 const maxSlot = dragState.isPinned ? Math.max(0, pinnedCount - 1) : Math.max(minSlot, section.data.length - 1)
@@ -1577,7 +1585,11 @@ export function HostSessionsDrawer({
                   const { fromIndex, overIndex, accountKey: currentAccountKey } = activeDrag
                   if (fromIndex !== overIndex) {
                     const targetSession = section.data[overIndex]
-                    const targetIsPinned = targetSession && (targetSession.backend ?? 'harness') === 'harness' && pinnedSessionIds.includes(targetSession.sessionId) && !archivedIds.includes(targetSession.sessionId)
+                    const targetBackend = targetSession?.backend ?? 'harness'
+                    const targetIsPinned = !!targetSession
+                      && (targetBackend === 'harness' || isAcpManagedBackend(targetBackend))
+                      && pinnedSessionIds.includes(targetSession.sessionId)
+                      && !archivedIds.includes(targetSession.sessionId)
                     if (targetSession && targetIsPinned === isPinned) {
                       const allGroupSessions = sessions.filter(s => {
                         if ((s.backend ?? 'harness') !== backend) return false
@@ -1693,7 +1705,7 @@ export function HostSessionsDrawer({
                 </Text>
               </View>
 
-              {canUseHarnessActions && (
+              {canPinSession && (
                 <Pressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
@@ -1743,7 +1755,7 @@ export function HostSessionsDrawer({
                 </Pressable>
               )}
 
-              {canUseHarnessActions && (
+              {canForkSession && (
                 <Pressable
                   accessibilityRole="menuitem"
                   accessibilityLabel={strings.sessions.forkSession}
@@ -1952,14 +1964,18 @@ export function HostSessionsDrawer({
             </View>
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
               <GroupCard>
-                {HARNESS_OPTIONS.filter(option => backends.includes(option.value)).map((option, index) => {
+                {[
+                  ...HARNESS_OPTIONS,
+                  ...customAcpBackends.map(id => ({ value: id as AgentBackend, name: harnessDisplayName(id) })),
+                ].filter(option => backends.includes(option.value)).map((option, index) => {
                   const chosen = option.value === backend
+                  const descriptionMap = strings.sessions.backendDescriptions as Record<string, string | undefined>
                   return (
                     <GroupRow
                       key={option.value}
                       first={index === 0}
                       label={option.name}
-                      detail={strings.sessions.backendDescriptions[option.value]}
+                      detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
                       selected={chosen}
                       chevron={false}
                       accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
@@ -1983,6 +1999,7 @@ export function HostSessionsDrawer({
         opencodeAvailable={opencodeAvailable}
         claudeAvailable={claudeAvailable}
         hermesAvailable={hermesAvailable}
+        customAcpBackends={customAcpBackends}
         initialBackend={backend}
         busy={
           busy === 'create-workspace'

@@ -1,4 +1,9 @@
-import type { AgentAcpFrameData, AgentAcpStreamClosedData } from '@dsh-remote/protocol'
+import type {
+  AcpAvailableCommand,
+  AcpContextUsage,
+  AgentAcpFrameData,
+  AgentAcpStreamClosedData,
+} from '@dsh-remote/protocol'
 import { acpImageLimits } from './image-content.js'
 import { piToolResult } from './pi-tool-result.js'
 import type { AcpCatalogBackend, AcpModelSelection } from './virtual-catalog.js'
@@ -7,6 +12,7 @@ import type {
   AcpClientLike,
   AcpPermissionPreset,
   AcpSessionState,
+  AcpTodoItem,
   FollowState,
   JsonRecord,
   NativeEvent,
@@ -120,6 +126,9 @@ export class AcpLiveProjection {
           modelSelection: this.context.modelSelectionProjection(session.sessionId),
           permissions: this.context.permissionsProjection(session.sessionId),
           imageLimits: acpImageLimits(this.context.backend),
+          ...(session.agentPreset !== undefined ? { agentPreset: session.agentPreset } : {}),
+          ...(session.todos !== undefined ? { todos: session.todos } : {}),
+          ...(session.contextUsage !== undefined ? { contextPressure: contextPressureProjection(session.contextUsage) } : {}),
         },
       },
       assistantStream,
@@ -245,6 +254,59 @@ export class AcpLiveProjection {
       }
       return
     }
+    if (kind === 'available_commands_update' && session !== undefined) {
+      const commands = normalizeAvailableCommands(update.availableCommands ?? update.commands)
+      if (commands !== undefined) {
+        session.availableCommands = commands
+        session.updatedAt = Date.now()
+      }
+      return
+    }
+    if (kind === 'current_mode_update' && session !== undefined) {
+      const modeId = string(update.currentModeId) ?? string(update.modeId) ?? string(update.mode)
+      if (modeId !== undefined && modeId.length > 0) {
+        session.agentPreset = modeId
+        if (session.modes !== undefined) {
+          session.modes = { ...session.modes, currentModeId: modeId }
+        }
+        session.updatedAt = Date.now()
+        this.context.publishProjection(
+          follow.sessionId,
+          'agentPreset',
+          modeId,
+          this.context.nextProjectionSeq(follow.sessionId),
+        )
+      }
+      return
+    }
+    if (kind === 'usage_update' && session !== undefined) {
+      const usage = normalizeContextUsage(update)
+      if (usage !== undefined) {
+        session.contextUsage = usage
+        session.updatedAt = Date.now()
+        this.context.publishProjection(
+          follow.sessionId,
+          'contextPressure',
+          contextPressureProjection(usage),
+          this.context.nextProjectionSeq(follow.sessionId),
+        )
+      }
+      return
+    }
+    if ((kind === 'cursor/update_todos' || kind === 'plan') && session !== undefined) {
+      const todos = normalizeAcpTodos(update.todos ?? update.entries ?? update.items)
+      if (todos !== undefined) {
+        session.todos = todos
+        session.updatedAt = Date.now()
+        this.context.publishProjection(
+          follow.sessionId,
+          'todos',
+          todos,
+          this.context.nextProjectionSeq(follow.sessionId),
+        )
+      }
+      return
+    }
     if (follow.closed) return
     if (kind === 'model_selection' && isRecord(update.selected)
       && update.selected.provider === this.context.backend && typeof update.selected.model === 'string') {
@@ -263,18 +325,18 @@ export class AcpLiveProjection {
       const status = string(update.status)
       const callId = string(update.toolCallId) ?? string(update.callId) ?? toolName
       const terminal = status === 'completed' || status === 'failed'
+      const termDelta = record(record(update._meta).terminal_output).data
       if (this.context.backend === 'pi') {
         const call = follow.piToolCalls.get(callId) ?? { name: toolName }
         if (typeof update.title === 'string') call.name = update.title
         if (update.rawInput !== undefined) call.input = update.rawInput
         follow.piToolCalls.set(callId, call)
         const output = piToolResult(update)
-        const delta = record(record(update._meta).terminal_output).data
-        if (typeof delta === 'string') {
+        if (typeof termDelta === 'string') {
           const buffered = follow.piToolOutputs.get(callId) ?? { text: '', overflow: false }
           if (!buffered.overflow) {
-            if (buffered.text.length + delta.length > 1_048_576) { buffered.text = ''; buffered.overflow = true }
-            else buffered.text += delta
+            if (buffered.text.length + termDelta.length > 1_048_576) { buffered.text = ''; buffered.overflow = true }
+            else buffered.text += termDelta
           }
           follow.piToolOutputs.set(callId, buffered)
         }
@@ -315,31 +377,67 @@ export class AcpLiveProjection {
         if (session !== undefined) session.updatedAt = Date.now()
         return
       }
-      if (kind === 'tool_call_update' && !terminal) return
-      if (!terminal && follow.activeToolCalls.has(callId)) return
-      if (!terminal || !follow.activeToolCalls.has(callId)) {
+      if (typeof termDelta === 'string') {
+        const buffered = follow.piToolOutputs.get(callId) ?? { text: '', overflow: false }
+        if (!buffered.overflow) {
+          if (buffered.text.length + termDelta.length > 1_048_576) { buffered.text = ''; buffered.overflow = true }
+          else buffered.text += termDelta
+        }
+        follow.piToolOutputs.set(callId, buffered)
+      }
+      const existingCall = follow.piToolCalls.get(callId)
+      const call = existingCall ?? { name: toolName }
+      if (typeof update.title === 'string') call.name = update.title
+      if (update.parameters !== undefined) call.input = update.parameters
+      else if (update.rawInput !== undefined) call.input = update.rawInput
+      follow.piToolCalls.set(callId, call)
+      if (!follow.activeToolCalls.has(callId)) {
+        if (!terminal && kind === 'tool_call_update' && status !== 'in_progress' && status !== 'pending') {
+          if (session !== undefined) session.updatedAt = Date.now()
+          return
+        }
+        if (!follow.stepOpen) {
+          follow.turn += 1
+          follow.stepOpen = true
+          this.pushEvent(follow, 'turn/start', { turn: follow.turn })
+          this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
+        }
         this.pushEvent(follow, 'tool/call', {
           turn: follow.turn,
           step: 1,
           callId,
-          name: toolName,
-          arguments: typeof update.parameters === 'object' && update.parameters !== null
-            ? JSON.stringify(update.parameters)
-            : typeof update.rawInput === 'object' && update.rawInput !== null
-              ? JSON.stringify(update.rawInput)
+          name: call.name,
+          arguments: typeof call.input === 'string'
+            ? call.input
+            : isRecord(call.input)
+              ? JSON.stringify(call.input)
               : '{}',
           toolCallId: callId,
-          toolName,
+          toolName: call.name,
           status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
         })
+        if (!terminal) follow.activeToolCalls.add(callId)
+      } else if (!terminal) {
+        if (session !== undefined) session.updatedAt = Date.now()
+        return
       }
       if (terminal) {
         const output = piToolResult(update)
+        const buffered = follow.piToolOutputs.get(callId)
         const content = output.content.length > 0
           ? output.content
-          : typeof update.rawOutput === 'string' && update.rawOutput.length > 0
-            ? [{ type: 'text' as const, text: update.rawOutput }]
-            : []
+          : buffered !== undefined
+            ? [{
+                type: 'text' as const,
+                text: buffered.overflow
+                  ? '[Tool output exceeds the live preview limit; reload history to read the bounded persisted result.]'
+                  : buffered.text,
+              }]
+            : typeof update.rawOutput === 'string' && update.rawOutput.length > 0
+              ? [{ type: 'text' as const, text: update.rawOutput }]
+              : update.rawOutput !== undefined && update.rawOutput !== null
+                ? [{ type: 'text' as const, text: JSON.stringify(update.rawOutput) }]
+                : []
         this.pushEvent(follow, 'tool/result', {
           turn: follow.turn,
           step: 1,
@@ -355,9 +453,9 @@ export class AcpLiveProjection {
             source: { kind: 'tool', callId },
           },
         })
+        follow.piToolOutputs.delete(callId)
+        follow.piToolCalls.delete(callId)
         follow.activeToolCalls.delete(callId)
-      } else {
-        follow.activeToolCalls.add(callId)
       }
       if (session !== undefined) session.updatedAt = Date.now()
       return
@@ -373,10 +471,11 @@ export class AcpLiveProjection {
       if (!hasLiveContent && Array.isArray(update.catchUp)) {
         for (const item of update.catchUp) {
           if (!isRecord(item) || typeof item.method !== 'string') continue
-          const params = isRecord(item.params) ? item.params : {}
-          if (item.method === 'session/update') this.acceptSessionUpdate(follow, params)
+          const catchUpParams = isRecord(item.params) ? item.params : {}
+          if (item.method === 'session/update') this.acceptSessionUpdate(follow, catchUpParams)
         }
       }
+      const usage = normalizeAcpUsage(update.usage)
       if (session !== undefined) {
         session.running = false
         session.updatedAt = Date.now()
@@ -384,7 +483,7 @@ export class AcpLiveProjection {
         this.context.publishWorkspaceBaseline()
         if (kind === 'prompt_completed') void this.context.refreshSessionTitle(session)
       }
-      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update))
+      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update), false, usage)
     }
   }
 
@@ -412,7 +511,18 @@ export class AcpLiveProjection {
       agentId: follow.sessionId,
       request: {
         toolName,
+        method,
         ...(reason === undefined ? {} : { reason }),
+        ...(method === 'cursor/ask_question' && Array.isArray(params.questions)
+          ? { questions: params.questions, ...(typeof params.title === 'string' ? { title: params.title } : {}) }
+          : {}),
+        ...(method === 'cursor/create_plan'
+          ? {
+              ...(typeof params.name === 'string' ? { name: params.name } : {}),
+              ...(typeof params.overview === 'string' ? { overview: params.overview } : {}),
+              ...(typeof params.plan === 'string' ? { plan: params.plan } : {}),
+            }
+          : {}),
       },
     })
   }
@@ -545,7 +655,11 @@ export class AcpLiveProjection {
     return { kind: outcome.kind === 'max-tokens' ? 'max-tokens' : 'stop' }
   }
 
-  finishPiAssistant(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
+  finishPiAssistant(
+    follow: FollowState,
+    outcome: PiTurnOutcome = { kind: 'completed' },
+    usage?: AcpMessageUsage,
+  ): void {
     if (!follow.streamActive) return
     const isPi = this.context.backend === 'pi'
     const step = isPi ? follow.piStep ?? 1 : 1
@@ -568,7 +682,9 @@ export class AcpLiveProjection {
         role: 'assistant',
         content: blocks.map(({ type, text }) => ({ type, text })),
         source: { kind: 'model', provider: selection.provider, model: selection.model },
+        ...(usage !== undefined ? { usage } : {}),
       },
+      ...(usage !== undefined ? { usage } : {}),
       stream: follow.assistantAttempt?.stream ?? [],
     })
     this.endAssistantAttempt(follow, { kind: 'committed', eventType: 'assistant/message', seq })
@@ -584,16 +700,21 @@ export class AcpLiveProjection {
     follow: FollowState,
     outcome: PiTurnOutcome = { kind: 'completed' },
     remoteClosed = false,
+    usage?: AcpMessageUsage,
   ): void {
     if (follow.closed) return
     const session = this.context.sessions.get(follow.sessionId)
     if (session !== undefined) session.running = false
     const isPi = this.context.backend === 'pi'
     const step = isPi ? follow.piStep ?? 1 : 1
-    this.finishPiAssistant(follow, outcome)
+    this.finishPiAssistant(follow, outcome, usage)
     if (follow.stepOpen) {
       this.pushEvent(follow, 'step/end', { turn: follow.turn, step })
-      this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: outcome })
+      this.pushEvent(follow, 'turn/end', {
+        turn: follow.turn,
+        reason: outcome,
+        ...(usage !== undefined ? { usage } : {}),
+      })
     }
     follow.stepOpen = false
     if (isPi) {
@@ -634,4 +755,107 @@ export class AcpLiveProjection {
     }
     return seq
   }
+}
+
+export interface AcpMessageUsage {
+  totalTokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
+}
+
+function nonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function normalizeAcpUsage(value: unknown): AcpMessageUsage | undefined {
+  if (!isRecord(value)) return undefined
+  const totalTokens = nonNegativeNumber(value.totalTokens)
+  const inputTokens = nonNegativeNumber(value.inputTokens)
+  const outputTokens = nonNegativeNumber(value.outputTokens)
+  const cacheReadTokens = nonNegativeNumber(value.cacheReadTokens ?? value.cachedReadTokens)
+  const cacheWriteTokens = nonNegativeNumber(value.cacheWriteTokens ?? value.cachedWriteTokens)
+  const reasoningTokens = nonNegativeNumber(value.reasoningTokens ?? value.thoughtTokens)
+  if (
+    totalTokens === undefined
+    && inputTokens === undefined
+    && outputTokens === undefined
+    && cacheReadTokens === undefined
+    && cacheWriteTokens === undefined
+    && reasoningTokens === undefined
+  ) {
+    return undefined
+  }
+  const computedTotal = totalTokens ?? (
+    (inputTokens ?? 0) + (outputTokens ?? 0) + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0) + (reasoningTokens ?? 0)
+  )
+  return {
+    totalTokens: computedTotal,
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+  }
+}
+
+function normalizeContextUsage(value: JsonRecord): AcpContextUsage | undefined {
+  const used = nonNegativeNumber(value.used)
+  const size = nonNegativeNumber(value.size)
+  if (used === undefined && size === undefined) return undefined
+  return {
+    used: used ?? 0,
+    size: size ?? 0,
+  }
+}
+
+export function contextPressureProjection(usage: AcpContextUsage): JsonRecord {
+  const ratio = usage.size > 0 ? Math.min(1, Math.max(0, usage.used / usage.size)) : 0
+  return {
+    used: usage.used,
+    size: usage.size,
+    ratio,
+  }
+}
+
+function normalizeAvailableCommands(value: unknown): AcpAvailableCommand[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items: AcpAvailableCommand[] = []
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.name !== 'string' || entry.name.trim().length === 0) continue
+    const input = isRecord(entry.input) && typeof entry.input.hint === 'string'
+      ? { hint: entry.input.hint }
+      : undefined
+    items.push({
+      name: entry.name.trim(),
+      ...(typeof entry.description === 'string' ? { description: entry.description } : {}),
+      ...(input !== undefined ? { input } : {}),
+    })
+  }
+  return items
+}
+
+export function normalizeAcpTodos(value: unknown): AcpTodoItem[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items: AcpTodoItem[] = []
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    const content = string(entry.content) ?? string(entry.title) ?? string(entry.label)
+    if (content === undefined || content.trim().length === 0) continue
+    const rawStatus = string(entry.status)
+    const status: AcpTodoItem['status'] = rawStatus === 'completed' || rawStatus === 'done'
+      ? 'completed'
+      : rawStatus === 'in_progress' || rawStatus === 'inProgress' || rawStatus === 'running'
+        ? 'in_progress'
+        : 'pending'
+    const priority = string(entry.priority)
+    items.push({
+      content: content.trim(),
+      status,
+      ...(priority !== undefined ? { priority } : {}),
+    })
+  }
+  return items
 }

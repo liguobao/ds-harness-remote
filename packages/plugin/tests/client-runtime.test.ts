@@ -1604,6 +1604,10 @@ describe('ClientModeRuntime Host account control', () => {
       }
       if (method === 'agent.acp.call') {
         if (params.method === 'dsh/sessionList') return { items: [{ conversationId: 'oc-1', title: 'OC 1', createdAt: 1, updatedAt: 2 }] }
+        if (params.method === 'dsh/workspaceCreate') {
+          const inner = params.params as { path?: string; title?: string } | undefined
+          return { path: inner?.path ?? '/repo-create', ...(inner?.title ? { title: inner.title } : {}) }
+        }
         if (params.method === 'session/new') return { sessionId: 'oc-new' }
       }
       throw new Error(`unexpected rpc ${method}`)

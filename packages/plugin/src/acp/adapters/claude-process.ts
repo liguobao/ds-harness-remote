@@ -1,13 +1,14 @@
 import { Buffer } from 'node:buffer'
 import type { SafeLogger } from '../../logging.js'
 import { CursorAcpClient, CursorAcpError, type CursorAcpOptions, type SpawnCursorAcp, type CursorAcpInboundHandler } from './cursor-process.js'
-import { claudeHistoryEvents } from './claude-history.js'
+import { acpHistoryEvents } from '../history-events.js'
 
 /** Host-local authentication; no interactive login or filesystem transcript reads.
  *
- * Also the standard-ACP client shape used by other pre-authenticated backends (Hermes):
- * one process per live session, a separate reader for history replay, and load-replay
- * suppression so a replayed transcript never mixes into a live turn's stream.
+ * Also the standard-ACP client shape used by other pre-authenticated backends (Hermes,
+ * native AGY ACP, and custom ACP backends): one process per live session, a separate
+ * reader for history replay, and load-replay suppression so a replayed transcript
+ * never mixes into a live turn's stream.
  */
 export class ClaudeAcpClient extends CursorAcpClient {
   private readonly live = new Map<string, unknown>()
@@ -19,7 +20,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
   private readonly makeClient: () => CursorAcpClient
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
-    options: Pick<CursorAcpOptions, 'args' | 'cwd'> = {}, backend: 'claude' | 'hermes' = 'claude') {
+    options: Pick<CursorAcpOptions, 'args' | 'cwd'> = {}, backend: string = 'claude') {
     const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend }
     super(binary, logger, spawnAcp, config)
     this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config)
@@ -28,8 +29,10 @@ export class ClaudeAcpClient extends CursorAcpClient {
   }
 
   /** History events and model catalogs are labelled with the backend that produced them. */
-  private readonly modelLabel: 'claude' | 'hermes'
-  private get label(): string { return this.modelLabel === 'hermes' ? 'Hermes' : 'Claude' }
+  private readonly modelLabel: string
+  private get label(): string {
+    return this.modelLabel === 'hermes' ? 'Hermes' : this.modelLabel === 'antigravity' ? 'Antigravity' : this.modelLabel === 'claude' ? 'Claude' : this.modelLabel
+  }
 
   override onInbound(handler: CursorAcpInboundHandler): () => void {
     return super.onInbound(message => {
@@ -58,7 +61,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
       this.loads.set(id, load)
       try { return await load } finally { this.loads.delete(id) }
     }
-    if (method === 'session/new') {
+    if (method === 'session/new' || method === 'session/fork') {
       this.checkSessionLimit()
       this.pendingNew++
       try {
@@ -90,7 +93,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
     let stopping: Promise<void> | undefined
     const stop = () => stopping ??= client.close()
     this.historyStop = stop
-    const updates: Parameters<typeof claudeHistoryEvents>[0] = []
+    const updates: Parameters<typeof acpHistoryEvents>[0] = []
     let bytes = 0
     let count = 0
     let overflow = false
@@ -116,7 +119,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       this.assertLoaded(result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
-      return claudeHistoryEvents(updates, sessionId, this.modelLabel)
+      return acpHistoryEvents(updates, sessionId, this.modelLabel)
     } catch (error) {
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       throw error

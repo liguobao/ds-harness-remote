@@ -769,6 +769,7 @@ const deDE = {
     agentsTab: "Agenten", agentPlatform: "Agentenplattform", switchHarness: "Harness wechseln",
     backendUnavailable: (name: string) => `${name} ist auf dem verbundenen Host nicht aktiviert. Richten Sie es am Computer ein oder starten Sie es dort.`,
     backendDescriptions: { harness: "Offizielles DeepSeek-Agenten-Framework", codex: "OpenAI-Codex-Coding-Agent", claude: "Anthropic-Claude-Agent", hermes: "Nous Research Hermes Agent", cursor: "Interaktiver Agent der Cursor IDE", antigravity: "Antigravity-Entwicklungsframework", opencode: "Open-Source-Agent OpenCode", pi: "Personal-Intelligence-Agent" },
+    customAcpDescription: 'Benutzerdefinierter ACP-Agent',
   },
   plugins: {
     title: 'Plugins',

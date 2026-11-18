@@ -1,23 +1,14 @@
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
 
-export type AcpManagedBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+export type AcpManagedBackend = Exclude<AgentBackend, 'harness' | 'codex'>
 
 export interface AcpCatalogFilterOptions {
   deletedKeys?: ReadonlySet<string>
   platform?: string
 }
 
-const ACP_MANAGED_BACKENDS: ReadonlySet<string> = new Set<AcpManagedBackend>([
-  'cursor',
-  'antigravity',
-  'pi',
-  'opencode',
-  'claude',
-  'hermes',
-])
-
 export function isAcpManagedBackend(backend?: AgentBackend): backend is AcpManagedBackend {
-  return backend !== undefined && ACP_MANAGED_BACKENDS.has(backend)
+  return backend !== undefined && backend !== 'harness' && backend !== 'codex'
 }
 
 /** Harness and ACP workspaces support manage actions; CodeX projects are host-derived and read-only. */
@@ -143,7 +134,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 /** Shared ACP workspace+session catalog loader with delete-tombstone suppression and stale-dir resilience. */
 export async function loadAcpDirectoryCatalog(spec: {
-  backend: Exclude<AcpManagedBackend, 'cursor'>
+  backend: AcpManagedBackend
   label: string
   client: AcpCatalogRpcClient
   remembered?: WorkspaceView[]
@@ -151,7 +142,7 @@ export async function loadAcpDirectoryCatalog(spec: {
   options?: AcpCatalogFilterOptions
   createWorkspace: (path: string, title?: string) => WorkspaceView
   createSession: (input: { acpSessionId: string; cwd?: string; title?: string }) => RemoteSession
-}): Promise<{ workspaces: WorkspaceView[]; sessions: RemoteSession[] }> {
+}): Promise<{ workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }> {
   const roots = await spec.client.call('dsh/workspaceList', { backend: spec.backend })
   if (!Array.isArray(roots)) throw new Error(`Invalid ${spec.label} workspace catalog.`)
   const workspaces = collectAcpWorkspaceMap(
@@ -164,6 +155,8 @@ export async function loadAcpDirectoryCatalog(spec: {
   )
   const warmKey = spec.warmPath === undefined ? undefined : normalizeAcpWorkspacePath(spec.warmPath, spec.options?.platform)
   const sessions = new Map<string, RemoteSession>()
+  let hasPinnedField = false
+  const pinnedSessionIds = new Set<string>()
   for (const [key, workspace] of workspaces) {
     const isWarm = workspace.path === spec.warmPath || key === warmKey
     let result: unknown
@@ -185,6 +178,13 @@ export async function loadAcpDirectoryCatalog(spec: {
     if (!isObjectRecord(result) || !Array.isArray(result.items)) {
       throw new Error(`Invalid ${spec.label} session catalog.`)
     }
+    if (Array.isArray(result.pinnedSessionIds)) {
+      hasPinnedField = true
+      for (const rawId of result.pinnedSessionIds) {
+        if (typeof rawId !== 'string' || !rawId) continue
+        pinnedSessionIds.add(rawId.includes(':') ? rawId : spec.createSession({ acpSessionId: rawId }).sessionId)
+      }
+    }
     const ids: string[] = []
     for (const row of result.items) {
       if (!isObjectRecord(row) || typeof row.conversationId !== 'string' || !row.conversationId) continue
@@ -199,18 +199,22 @@ export async function loadAcpDirectoryCatalog(spec: {
     }
     workspaces.set(key, { ...workspace, sessionIds: [...new Set(ids)] })
   }
-  return { workspaces: [...workspaces.values()], sessions: [...sessions.values()] }
+  return {
+    workspaces: [...workspaces.values()],
+    sessions: [...sessions.values()],
+    ...(hasPinnedField ? { pinnedSessionIds: [...pinnedSessionIds] } : {}),
+  }
 }
 
 /** Shared ACP catalog merge preserving active turns/blank sessions while enforcing deleted workspace suppression. */
 export function mergeAcpDirectoryCatalog(spec: {
   backend: Exclude<AcpManagedBackend, 'cursor'>
-  catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[] }
+  catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }
   workspaces: WorkspaceView[]
   sessions: RemoteSession[]
   options?: AcpCatalogFilterOptions
   keepExistingSession?: (session: RemoteSession, catalogIds: ReadonlySet<string>) => boolean
-}): { workspaces: WorkspaceView[]; sessions: RemoteSession[] } {
+}): { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] } {
   const catalogIds = new Set(spec.catalog.sessions.map(item => item.sessionId))
   const byId = new Map(
     spec.sessions
@@ -227,11 +231,14 @@ export function mergeAcpDirectoryCatalog(spec: {
     const previousIds = (previous?.sessionIds ?? []).filter(id => (spec.keepExistingSession ? byId.has(id) : true))
     roots.set(workspace.workspaceId, { ...workspace, sessionIds: [...new Set([...workspace.sessionIds, ...previousIds])] })
   }
-  return filterVisibleAcpCatalog(
-    spec.backend,
-    [...roots.values()],
-    [...byId.values()],
-    spec.options?.deletedKeys,
-    spec.options?.platform,
-  )
+  return {
+    ...filterVisibleAcpCatalog(
+      spec.backend,
+      [...roots.values()],
+      [...byId.values()],
+      spec.options?.deletedKeys,
+      spec.options?.platform,
+    ),
+    ...(spec.catalog.pinnedSessionIds !== undefined ? { pinnedSessionIds: spec.catalog.pinnedSessionIds } : {}),
+  }
 }

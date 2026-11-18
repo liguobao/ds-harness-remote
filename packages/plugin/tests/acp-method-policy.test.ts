@@ -9,10 +9,20 @@ describe('ACP method policy', () => {
       'dsh/toolCall',
       'dsh/sessionModels',
       'dsh/selectModel',
+      'dsh/sessionModes',
+      'dsh/sessionCommands',
       'dsh/selectPermission',
+      'dsh/workspaceCreate',
+      'dsh/workspaceRename',
+      'dsh/workspaceDelete',
+      'dsh/workspaceReorder',
+      'dsh/sessionPin',
+      'dsh/sessionUnpin',
       'initialize',
       'session/new',
       'session/load',
+      'session/fork',
+      'session/set_mode',
       'session/prompt',
       'session/cancel',
       'dsh/directoryList',
@@ -22,10 +32,14 @@ describe('ACP method policy', () => {
     ])
   })
 
-  it('accepts text-only prompts and rejects unknown methods', () => {
+  it('accepts text-only prompts, mode/workspace RPCs, custom backends, and rejects unknown methods', () => {
     expect(parseAcpCall('initialize', { protocolVersion: 1, backend: 'antigravity' })).toMatchObject({ method: 'initialize' })
     expect(parseAcpCall('session/new', { cwd: '/tmp/project', backend: 'antigravity' })).toMatchObject({ method: 'session/new' })
-    expect(parseAcpCall('session/load', { sessionId: 'sess_1', backend: 'antigravity' })).toMatchObject({ method: 'session/load' })
+    expect(parseAcpCall('session/load', { sessionId: 'sess_1', backend: 'custom-agent' })).toMatchObject({ method: 'session/load' })
+    expect(parseAcpCall('session/fork', { sessionId: 'sess_1', backend: 'claude' })).toMatchObject({ method: 'session/fork' })
+    expect(parseAcpCall('session/set_mode', { sessionId: 'sess_1', backend: 'antigravity', modeId: 'plan' })).toMatchObject({ method: 'session/set_mode' })
+    expect(parseAcpCall('dsh/workspaceCreate', { backend: 'custom-agent', path: '/tmp/project', title: 'Custom' })).toMatchObject({ method: 'dsh/workspaceCreate' })
+    expect(parseAcpCall('dsh/sessionPin', { backend: 'antigravity', sessionId: 'sess_1' })).toMatchObject({ method: 'dsh/sessionPin' })
     expect(parseAcpCall('session/prompt', {
       sessionId: 'sess_1',
       prompt: [{ type: 'text', text: 'hello' }],

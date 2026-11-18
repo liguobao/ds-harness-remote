@@ -168,6 +168,7 @@ export function CreateWorkspaceModal({
   opencodeAvailable,
   claudeAvailable,
   hermesAvailable,
+  customAcpBackends = [],
   initialBackend,
   busy,
   onClose,
@@ -182,6 +183,7 @@ export function CreateWorkspaceModal({
   opencodeAvailable: boolean
   claudeAvailable: boolean
   hermesAvailable: boolean
+  customAcpBackends?: readonly string[]
   initialBackend: AgentBackend
   busy: boolean
   onClose: () => void
@@ -214,8 +216,9 @@ export function CreateWorkspaceModal({
     else if (initialBackend === 'opencode' && opencodeAvailable) setBackend('opencode')
     else if (initialBackend === 'claude' && claudeAvailable) setBackend('claude')
     else if (initialBackend === 'hermes' && hermesAvailable) setBackend('hermes')
+    else if (customAcpBackends.includes(initialBackend)) setBackend(initialBackend)
     else setBackend('harness')
-  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, initialBackend, visible])
+  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable, hermesAvailable, customAcpBackends, initialBackend, visible])
 
   const dismissModal = () => {
     requestEpochRef.current += 1
@@ -255,6 +258,7 @@ export function CreateWorkspaceModal({
     ...(antigravityAvailable ? [{ value: 'antigravity' as const, label: strings.workspaces.antigravity, detail: 'Antigravity ACP', icon: Sparkles }] : []),
     ...(opencodeAvailable ? [{ value: 'opencode' as const, label: strings.workspaces.opencode, detail: 'OpenCode ACP', icon: Sparkles }] : []),
     ...(piAvailable ? [{ value: 'pi' as const, label: strings.workspaces.pi, detail: 'Pi ACP', icon: Sparkles }] : []),
+    ...customAcpBackends.map(id => ({ value: id as AgentBackend, label: id, detail: 'Custom ACP', icon: Sparkles })),
   ]
 
   const directoryHint = backend === 'codex'

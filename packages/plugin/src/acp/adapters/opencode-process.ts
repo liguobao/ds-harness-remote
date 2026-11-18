@@ -1,3 +1,11 @@
+import type { AcpAuthDiagnostic, AcpAuthMethod, AcpAvailableCommand } from '@dsh-remote/protocol'
+import {
+  buildAuthDiagnosticFromMetadata,
+  detectUpstreamAuthFailure,
+  parseAvailableCommands,
+  parseInitializeMetadata,
+  type AcpInitializeMetadata,
+} from './auth-diagnostics.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { realpath } from 'node:fs/promises'
@@ -72,6 +80,9 @@ export class OpencodeAcpClient implements CursorAcpLike {
   private nativeApi?: OpencodeNativeApi
   private readonly archivedSessions = new Set<string>()
   private readonly archivingSessions = new Set<string>()
+  private readonly sessionCommands = new Map<string, AcpAvailableCommand[]>()
+  private initMetadata?: AcpInitializeMetadata
+  private lastAuthDiagnostic?: AcpAuthDiagnostic
 
   constructor(
     private readonly binary: string = 'opencode',
@@ -79,6 +90,18 @@ export class OpencodeAcpClient implements CursorAcpLike {
     private readonly spawnAcp?: SpawnOpencodeAcp,
     private readonly options: { args?: string[]; cwd?: string; historyReader?: boolean } = {},
   ) {}
+
+  diagnostics(): AcpAuthDiagnostic {
+    return buildAuthDiagnosticFromMetadata('opencode', this.initMetadata, this.lastAuthDiagnostic, this.ready)
+  }
+
+  capabilities(): AcpInitializeMetadata['agentCapabilities'] {
+    return this.initMetadata?.agentCapabilities ?? {}
+  }
+
+  authMethods(): AcpAuthMethod[] {
+    return this.initMetadata?.authMethods ?? []
+  }
 
   start(): Promise<void> {
     if (this.closed) return Promise.reject(new OpencodeAcpError('OPENCODE_CLOSED', 'The OpenCode domain is closed.'))
@@ -177,7 +200,10 @@ export class OpencodeAcpClient implements CursorAcpLike {
       this.loads.set(id, load)
       try { return await load } finally { this.loads.delete(id) }
     }
-    if (method === 'session/new') return this.loadSession(method, params, budget)
+    if (method === 'session/new' || method === 'session/fork') return this.loadSession(method, params, budget)
+    if (method === 'dsh/sessionCommands') {
+      return { commands: id ? [...(this.sessionCommands.get(id) ?? [])] : [] }
+    }
     if (method === 'dsh/sessionModels' || method === 'dsh/selectModel') {
       const models = id ? this.models.get(id) : undefined
       if (!models) throw new OpencodeAcpError('ACP_SESSION_NOT_LOADED', 'Load the OpenCode session before selecting its model.')
@@ -188,6 +214,21 @@ export class OpencodeAcpClient implements CursorAcpLike {
         const result = await models.select(id!, p.model, p.reasoningEffort, (method, params) => this.request(method, params, budget))
         this.publish({ kind: 'notification', method: 'session/update', params: { sessionId: id,
           update: { sessionUpdate: 'model_selection', selected: result.selected } } })
+        return result
+      } finally { this.busy.delete(id!) }
+    }
+    if (method === 'dsh/sessionModes' || method === 'session/set_mode') {
+      const models = id ? this.models.get(id) : undefined
+      if (!models) throw new OpencodeAcpError('ACP_SESSION_NOT_LOADED', 'Load the OpenCode session before changing its mode.')
+      if (method === 'dsh/sessionModes') return models.modesCatalog()
+      if (this.busy.has(id!)) throw new OpencodeAcpError('PROMPT_IN_PROGRESS', 'Stop the OpenCode reply before changing its mode.')
+      this.busy.add(id!)
+      try {
+        const result = await models.setMode(id!, p.modeId, (method, params) => this.request(method, params, budget))
+        this.publish({ kind: 'notification', method: 'session/update', params: {
+          sessionId: id,
+          update: { sessionUpdate: 'current_mode_update', currentModeId: result.currentModeId },
+        } })
         return result
       } finally { this.busy.delete(id!) }
     }
@@ -346,7 +387,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     })
 
     try {
-      await this.request('initialize', {
+      const initResult = await this.request('initialize', {
         protocolVersion: 1,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
@@ -357,6 +398,8 @@ export class OpencodeAcpClient implements CursorAcpLike {
           version: PLUGIN_VERSION,
         },
       }, ACP_START_TIMEOUT_MS)
+      this.initMetadata = parseInitializeMetadata(initResult)
+      this.lastAuthDiagnostic = undefined
       if (this.closed || this.process !== child) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       this.ready = true
       this.logger?.info('OpenCode ACP ready')
@@ -428,7 +471,12 @@ export class OpencodeAcpClient implements CursorAcpLike {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(new OpencodeAcpError('OPENCODE_UPSTREAM_ERROR', safeUpstreamError(value.error)))
+        const authDiagnostic = detectUpstreamAuthFailure('opencode', value.error, this.initMetadata?.authMethods)
+        if (authDiagnostic) this.lastAuthDiagnostic = authDiagnostic
+        pending.reject(new OpencodeAcpError(
+          'OPENCODE_UPSTREAM_ERROR',
+          authDiagnostic?.guidance ?? safeUpstreamError(value.error),
+        ))
       } else {
         pending.resolve(value.result)
       }
@@ -447,6 +495,9 @@ export class OpencodeAcpClient implements CursorAcpLike {
     }
     if (inbound.kind === 'notification' && inbound.method === 'session/update' && isRecord(params) && typeof params.sessionId === 'string') {
       this.models.get(params.sessionId)?.update(params.update)
+      if (isRecord(params.update) && params.update.sessionUpdate === 'available_commands_update') {
+        this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update))
+      }
       // session/load replays belong to the separate history reader, not live UI.
       if (this.loads.has(params.sessionId) && !this.options.historyReader) return
     }

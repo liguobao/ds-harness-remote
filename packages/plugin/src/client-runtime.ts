@@ -100,7 +100,7 @@ export class ClientModeRuntime {
   private cursorVirtual?: AcpVirtualHarness
   private cursorVirtualSelection?: { targetDeviceId: string; workspaceId: string; backend: string }
   private readonly acpOpenedSessions = new Map<string, string>()
-  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor'
+  private acpVirtualBackend = 'cursor'
   private readonly remoteHistoryCaches = new Map<string, RemoteSessionHistoryCache>()
   private readonly codexHistoryCaches = new Map<string, CodexSessionHistoryCache>()
   private readonly acpHistoryCaches = new Map<string, AcpSessionHistoryCache>()
@@ -525,8 +525,12 @@ export class ClientModeRuntime {
       if (remote.features.codex) {
         await read('codex', () => discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), activeSignal))
       }
-      for (const backend of ['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'] as const) {
-        if (!remote.features[backend]) continue
+      const knownAcpBackends = new Set<string>(['cursor', 'antigravity', 'pi', 'opencode', 'claude', 'hermes'])
+      for (const wt of remote.features.workspaceTypes ?? []) {
+        if (wt.id !== 'codex' && wt.id !== 'harness' && wt.available) knownAcpBackends.add(wt.id)
+      }
+      for (const backend of knownAcpBackends) {
+        if (!hasAcpFeature(remote.features, backend)) continue
         // Use the existing ACP catalog RPC directly: optional UI discovery swallows
         // backend errors, whereas a tool must distinguish unavailable from empty.
         await read(backend, async () => {
@@ -693,10 +697,10 @@ export class ClientModeRuntime {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal)
   }
 
-  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
+  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     await this.refreshRemoteFeatures(remote)
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
     if (this.cursorVirtual !== undefined && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
@@ -711,11 +715,11 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     workspaceId: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor',
+    backend = 'cursor',
   ): Promise<Record<string, unknown>> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     await this.refreshRemoteFeatures(remote)
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
     this.assertLocalHarnessCarrierAvailable()
@@ -771,13 +775,13 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     path: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes' = 'cursor',
+    backend = 'cursor',
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
     if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', `A ${backend} project directory is required.`)
     const remote = await this.ensureConnected(targetDeviceId, signal)
     await this.refreshRemoteFeatures(remote)
-    if (!remote.features[backend]) {
+    if (!hasAcpFeature(remote.features, backend)) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', `The selected Host does not provide ${backend} workspaces.`)
     }
     this.assertLocalHarnessCarrierAvailable()
@@ -1165,6 +1169,16 @@ export class ClientModeRuntime {
       }
     }, error)
   }
+}
+
+function hasAcpFeature(features: RemoteHostFeatures, backend: string): boolean {
+  if (backend === 'cursor') return features.cursor
+  if (backend === 'antigravity') return features.antigravity
+  if (backend === 'pi') return Boolean(features.pi)
+  if (backend === 'opencode') return features.opencode
+  if (backend === 'claude') return Boolean(features.claude)
+  if (backend === 'hermes') return Boolean(features.hermes)
+  return features.workspaceTypes?.some(item => item.id === backend && item.available) ?? false
 }
 
 function remoteAcpCapabilities(features: RemoteHostFeatures): string[] {

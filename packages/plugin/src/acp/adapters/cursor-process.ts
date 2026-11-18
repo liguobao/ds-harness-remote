@@ -1,3 +1,11 @@
+import type { AcpAuthDiagnostic, AcpAuthMethod, AcpAvailableCommand } from '@dsh-remote/protocol'
+import {
+  buildAuthDiagnosticFromMetadata,
+  detectUpstreamAuthFailure,
+  parseAvailableCommands,
+  parseInitializeMetadata,
+  type AcpInitializeMetadata,
+} from './auth-diagnostics.js'
 import { AcpSessionModelState } from './session-models.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
@@ -36,22 +44,21 @@ export type CursorAcpUnavailableHandler = (code: string) => void
 export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 
 /** Backends that reuse this stdio client and must keep their own failure vocabulary. */
-export type AcpAdapterBackend = 'cursor' | 'pi' | 'claude' | 'hermes'
+export type AcpAdapterBackend = string
 
-const ADAPTER_LABELS: Readonly<Record<AcpAdapterBackend, string>> = Object.freeze({
+const ADAPTER_LABELS: Readonly<Record<string, string>> = Object.freeze({
   cursor: 'Cursor',
   pi: 'Pi',
   claude: 'Claude',
   hermes: 'Hermes',
+  antigravity: 'Antigravity',
 })
 
 export interface CursorAcpOptions {
-  modelBackend?: 'cursor' | 'claude' | 'hermes'
+  modelBackend?: string
   /**
-   * Backend that owns this process. Pi, Claude and Hermes reuse this client, so
-   * codes and log lines must name the backend that actually failed; otherwise a
-   * missing Pi/Claude binary is reported as `CURSOR_BINARY_UNAVAILABLE` while
-   * Cursor itself may be disabled.
+   * Backend that owns this process. Pi, Claude, Hermes, and custom backends reuse
+   * this client, so codes and log lines must name the backend that actually failed.
    */
   backend?: AcpAdapterBackend
 
@@ -66,6 +73,9 @@ export interface CursorAcpLike {
   isReady(): boolean
   /** Optional Host-local preparation; never a Cursor ACP wire method. */
   prewarmSession?(cwd: string): void
+  diagnostics?(): AcpAuthDiagnostic
+  capabilities?(): AcpInitializeMetadata['agentCapabilities']
+  authMethods?(): AcpAuthMethod[]
   call(method: string, params: unknown, timeoutMs?: number): Promise<unknown>
   respond(id: string | number, result: unknown): Promise<void>
   respondError(id: string | number, code: number, message: string): Promise<void>
@@ -75,10 +85,16 @@ export interface CursorAcpLike {
 }
 
 export class CursorAcpError extends Error {
-  constructor(readonly code: string, message: string, options?: ErrorOptions) {
+  constructor(
+    readonly code: string,
+    message: string,
+    options?: ErrorOptions & { authDiagnostic?: AcpAuthDiagnostic },
+  ) {
     super(message, options)
     this.name = 'CursorAcpError'
+    this.authDiagnostic = options?.authDiagnostic
   }
+  readonly authDiagnostic?: AcpAuthDiagnostic
 }
 
 /**
@@ -99,11 +115,26 @@ export class CursorAcpClient implements CursorAcpLike {
   private startPromise?: Promise<void>
   private readonly modelStates = new Map<string, AcpSessionModelState>()
   private readonly modelBusy = new Set<string>()
+  private readonly sessionCommands = new Map<string, AcpAvailableCommand[]>()
+  private initMetadata?: AcpInitializeMetadata
+  private lastAuthDiagnostic?: AcpAuthDiagnostic
 
   /** Backend that owns this process: failure codes and log lines must name it. */
   private get backend(): AcpAdapterBackend { return this.options.backend ?? 'cursor' }
-  private get adapterLabel(): string { return ADAPTER_LABELS[this.backend] }
+  private get adapterLabel(): string { return ADAPTER_LABELS[this.backend] ?? this.backend }
   private code(suffix: string): string { return `${this.backend.toUpperCase()}_${suffix}` }
+
+  diagnostics(): AcpAuthDiagnostic {
+    return buildAuthDiagnosticFromMetadata(this.backend, this.initMetadata, this.lastAuthDiagnostic, this.ready)
+  }
+
+  capabilities(): AcpInitializeMetadata['agentCapabilities'] {
+    return this.initMetadata?.agentCapabilities ?? {}
+  }
+
+  authMethods(): AcpAuthMethod[] {
+    return this.initMetadata?.authMethods ?? []
+  }
 
   constructor(
     private readonly binary: string,
@@ -128,8 +159,11 @@ export class CursorAcpClient implements CursorAcpLike {
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new CursorAcpError(this.code('UNAVAILABLE'), `${this.adapterLabel} ACP is not ready.`)
-    const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? undefined : 'cursor')
+    const backend = this.options.modelBackend ?? this.backend
     const id = isRecord(params) && typeof params.sessionId === 'string' ? params.sessionId : undefined
+    if (method === 'dsh/sessionCommands') {
+      return { commands: id ? [...(this.sessionCommands.get(id) ?? [])] : [] }
+    }
     if (backend && (method === 'dsh/sessionModels' || method === 'dsh/selectModel')) {
       const state = id ? this.modelStates.get(id) : undefined
       if (!state || !id) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', 'Load the ACP session before selecting a model.')
@@ -145,24 +179,55 @@ export class CursorAcpClient implements CursorAcpLike {
         return result
       } finally { this.modelBusy.delete(id) }
     }
+    if (backend && (method === 'dsh/sessionModes' || method === 'session/set_mode')) {
+      const state = id ? this.modelStates.get(id) : undefined
+      if (!state || !id) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', 'Load the ACP session before changing its mode.')
+      if (method === 'dsh/sessionModes') return state.modesCatalog()
+      if (this.modelBusy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its mode.')
+      const modeId = isRecord(params) ? params.modeId : undefined
+      this.modelBusy.add(id)
+      try {
+        const result = await state.setMode(id, modeId,
+          (method, params) => this.request(method, params, timeoutMs ?? ACP_REQUEST_TIMEOUT_MS))
+        for (const handler of this.inboundHandlers) handler({
+          kind: 'notification',
+          method: 'session/update',
+          params: { sessionId: id, update: { sessionUpdate: 'current_mode_update', currentModeId: result.currentModeId } },
+        })
+        return result
+      } finally { this.modelBusy.delete(id) }
+    }
     if (backend && method === 'session/prompt' && id) {
       if (this.modelBusy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'The ACP session is busy.')
       this.modelBusy.add(id)
       try { return await this.request(method, params, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS) }
       finally { this.modelBusy.delete(id) }
     }
-    if (method === 'session/cancel' && this.options.authenticationMethod === null) {
+    if (method === 'session/cancel') {
       this.write({ jsonrpc: '2.0', method, params })
       return {}
     }
     const budget = timeoutMs
       ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
-    const result = await this.request(method, params, budget)
-    if (backend && (method === 'session/new' || method === 'session/load')) {
+    const provisionalLoad = Boolean(backend && method === 'session/load' && id && !this.modelStates.has(id))
+    if (provisionalLoad && backend && id) {
+      this.modelStates.set(id, new AcpSessionModelState(backend))
+    }
+    let result: unknown
+    try {
+      result = await this.request(method, params, budget)
+    } catch (error) {
+      if (provisionalLoad && id) this.modelStates.delete(id)
+      throw error
+    }
+    if (backend && (method === 'session/new' || method === 'session/load' || method === 'session/fork')) {
       const returnedId = isRecord(result) && typeof result.sessionId === 'string' ? result.sessionId : undefined
       const sessionId = method === 'session/load' ? id : returnedId
-      if (!this.ready || !sessionId || (returnedId && returnedId !== sessionId)) throw new CursorAcpError('ACP_INVALID_SESSION', 'ACP returned an invalid session.')
-      const state = new AcpSessionModelState(backend)
+      if (!this.ready || !sessionId || (returnedId && returnedId !== sessionId)) {
+        if (provisionalLoad && id) this.modelStates.delete(id)
+        throw new CursorAcpError('ACP_INVALID_SESSION', 'ACP returned an invalid session.')
+      }
+      const state = (method === 'session/load' ? this.modelStates.get(sessionId) : undefined) ?? new AcpSessionModelState(backend)
       state.update(result)
       this.modelStates.set(sessionId, state)
     }
@@ -246,7 +311,7 @@ export class CursorAcpClient implements CursorAcpLike {
     })
 
     try {
-      await this.request('initialize', {
+      const initResult = await this.request('initialize', {
         protocolVersion: 1,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
@@ -257,11 +322,13 @@ export class CursorAcpClient implements CursorAcpLike {
           version: PLUGIN_VERSION,
         },
       }, ACP_START_TIMEOUT_MS)
+      this.initMetadata = parseInitializeMetadata(initResult)
       this.assertStarting(child)
       if (this.options.authenticationMethod !== null) {
         await this.request('authenticate', { methodId: this.options.authenticationMethod ?? 'cursor_login' }, ACP_START_TIMEOUT_MS)
       }
       this.assertStarting(child)
+      this.lastAuthDiagnostic = undefined
       this.ready = true
       this.logger?.info(`${this.adapterLabel} ACP ready`)
     } catch (error) {
@@ -342,7 +409,13 @@ export class CursorAcpClient implements CursorAcpLike {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(new CursorAcpError(this.code('UPSTREAM_ERROR'), safeUpstreamError(value.error, this.adapterLabel)))
+        const authDiagnostic = detectUpstreamAuthFailure(this.backend, value.error, this.initMetadata?.authMethods)
+        if (authDiagnostic) this.lastAuthDiagnostic = authDiagnostic
+        pending.reject(new CursorAcpError(
+          this.code('UPSTREAM_ERROR'),
+          authDiagnostic?.guidance ?? safeUpstreamError(value.error, this.adapterLabel),
+          authDiagnostic ? { authDiagnostic } : undefined,
+        ))
       } else {
         pending.resolve(value.result)
       }
@@ -357,6 +430,9 @@ export class CursorAcpClient implements CursorAcpLike {
       : { kind: 'notification', method: value.method, params }
     if (inbound.kind === 'notification' && inbound.method === 'session/update' && isRecord(params) && typeof params.sessionId === 'string') {
       this.modelStates.get(params.sessionId)?.update(params.update)
+      if (isRecord(params.update) && params.update.sessionUpdate === 'available_commands_update') {
+        this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update))
+      }
     }
     for (const handler of this.inboundHandlers) handler(inbound)
   }

@@ -769,6 +769,7 @@ const enUS = {
     agentsTab: "Agents", agentPlatform: "Agent platform", switchHarness: "Switch Harness",
     backendUnavailable: (name: string) => `${name} is not enabled on the connected Host. Set it up or start it on the computer.`,
     backendDescriptions: { harness: "Official DeepSeek agent framework", codex: "OpenAI Codex coding agent", claude: "Anthropic Claude agent", hermes: "Nous Research Hermes Agent", cursor: "Cursor IDE interactive agent", antigravity: "Antigravity development framework", opencode: "OpenCode open-source agent", pi: "Personal Intelligence agent" },
+    customAcpDescription: 'Custom ACP agent',
   },
   plugins: {
     title: 'Plugins',

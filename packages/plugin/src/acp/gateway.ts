@@ -1,3 +1,4 @@
+import type { AcpAuthDiagnostic } from '@dsh-remote/protocol'
 import { IsolatedAcpClient } from './adapters/isolated-process.js'
 import { WorkspaceBridge, WorkspaceBridgeState, type RemoteTerminalSpawner } from '../workspace-bridge.js'
 import { TerminalPolicy } from '../terminal-policy.js'
@@ -20,26 +21,30 @@ import { ClaudeAcpClient } from './adapters/claude-process.js'
 import { HermesAcpClient } from './adapters/hermes-process.js'
 import { PiAcpClient } from './adapters/pi-process.js'
 import { AntigravityAcpClient } from './adapters/antigravity-process.js'
+import {
+  AntigravityNativeAcpClient,
+  isLegacyAntigravityStreamJsonArgs,
+  supportsAntigravityNativeAcp,
+} from './adapters/antigravity-acp.js'
 import { OpencodeAcpClient, OpencodeAcpError } from './adapters/opencode-process.js'
 import {
   ACP_METHOD_ALLOWLIST,
   isSessionMutation,
+  isValidAcpBackendId,
   parseAcpCall,
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
 import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
+import { AcpWorkspaceStore } from './workspace-store.js'
 
 const APPROVAL_TTL_MS = 5 * 60_000
 // A backend that stayed up this long before failing starts a fresh retry budget.
 const BACKEND_STABLE_MS = 30_000
 
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
-/** Backends that expose a Host-side session catalog (session/list) and replayed history. */
-type CatalogBackend = 'pi' | 'claude' | 'opencode' | 'hermes'
-const CATALOG_BACKENDS: ReadonlySet<string> = new Set<CatalogBackend>(['pi', 'claude', 'opencode', 'hermes'])
-const isCatalogBackend = (value: unknown): value is CatalogBackend => typeof value === 'string' && CATALOG_BACKENDS.has(value)
+const STRICT_CATALOG_BACKENDS: ReadonlySet<string> = new Set(['pi', 'claude', 'opencode', 'hermes'])
 const ACP_DIRECTORY_ENTRY_LIMIT = 500
 const MAX_BUFFERED_ACP_FRAMES = 200
 const ACP_FRAME_BUFFER_TTL_MS = 5 * 60_000
@@ -144,13 +149,26 @@ export class AcpRemoteGateway {
   private readonly historyInvalidatedAt = new Map<string, number>()
   private readonly pendingHistoryReads = new Map<string, { client: CursorAcpLike; readEpoch: number; promise: Promise<unknown[]> }>()
   private readonly backendHistoryChains = new Map<string, Promise<void>>()
+  private readonly backendDiagnostics = new Map<string, AcpAuthDiagnostic>()
+  private readonly backendErrors = new Map<string, string>()
+  private readonly customCreateAcp: boolean
 
   constructor(
     public config: ResolvedAcpConfig,
     private readonly logger: SafeLogger,
-    private readonly createAcp: AcpFactory = (binary, targetLogger, backend) => {
+    createAcp?: AcpFactory,
+    private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
+    private readonly terminalEnabled: () => boolean = () => false,
+    private readonly terminalSpawner?: RemoteTerminalSpawner,
+    private readonly workspaceStore: AcpWorkspaceStore = new AcpWorkspaceStore(),
+  ) {
+    this.customCreateAcp = createAcp !== undefined
+    this.createAcp = createAcp ?? ((binary, targetLogger, backend) => {
       if (backend.id === 'antigravity') {
-        return new AntigravityAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+        if (isLegacyAntigravityStreamJsonArgs(backend.args)) {
+          return new AntigravityAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+        }
+        return new AntigravityNativeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       }
       if (backend.id === 'claude') return new ClaudeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'hermes') return new HermesAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
@@ -158,17 +176,56 @@ export class AcpRemoteGateway {
       if (backend.id === 'opencode') {
         return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       }
-      return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: 'cursor' })
-    },
-    private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
-    private readonly terminalEnabled: () => boolean = () => false,
-    private readonly terminalSpawner?: RemoteTerminalSpawner,
-  ) {}
+      if (backend.id === 'cursor') {
+        return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: 'cursor' })
+      }
+      return new ClaudeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd }, backend.id)
+    })
+  }
 
-  /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
+  private readonly createAcp: AcpFactory
+
+  /** Allow all valid enabled ACP adapters, including custom `settings.acp.add` backends. */
   enabledBackends(): string[] {
     if (!this.config.enabled) return []
-    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id)).map(item => item.id)
+    return this.config.backends
+      .filter(item => item.enabled && item.id !== 'codex' && item.id !== 'kimi' && isValidAcpBackendId(item.id))
+      .map(item => item.id)
+  }
+
+  diagnostics(): Record<string, {
+    state: 'disabled' | 'ready' | 'unavailable'
+    errorCode?: string
+    auth: AcpAuthDiagnostic
+    capabilities: Record<string, unknown>
+  }> {
+    const result: Record<string, {
+      state: 'disabled' | 'ready' | 'unavailable'
+      errorCode?: string
+      auth: AcpAuthDiagnostic
+      capabilities: Record<string, unknown>
+    }> = {}
+    for (const backend of this.config.backends) {
+      if (backend.id === 'codex' || backend.id === 'kimi') continue
+      const inst = this.backendInstances.get(backend.id)
+      const ready = this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && inst?.client.isReady() === true
+      const state: 'disabled' | 'ready' | 'unavailable' = !this.config.enabled || !backend.enabled
+        ? 'disabled'
+        : ready ? 'ready' : 'unavailable'
+      const clientDiag = inst?.client.diagnostics?.()
+      const storedDiag = this.backendDiagnostics.get(backend.id)
+      const errorCode = ready ? undefined : (this.backendErrors.get(backend.id) ?? clientDiag?.errorCode ?? storedDiag?.errorCode)
+      const auth: AcpAuthDiagnostic = ready
+        ? (clientDiag ?? { authStatus: 'authenticated' })
+        : (storedDiag ?? clientDiag ?? { authStatus: 'unknown' })
+      result[backend.id] = {
+        state,
+        ...(errorCode ? { errorCode } : {}),
+        auth,
+        capabilities: (inst?.client.capabilities?.() ?? {}) as Record<string, unknown>,
+      }
+    }
+    return result
   }
 
   start(): Promise<void> {
@@ -231,17 +288,18 @@ export class AcpRemoteGateway {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     const workspaceBridge = new WorkspaceBridge(async rawId => {
-      const match = rawId.match(/^(acp|cursor|pi|opencode|claude|hermes):(.+)$/)
-      const session = match ? this.sessionCwds.get(match[2]!) : undefined
-      const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1] === 'pi' ? 'pi' : match?.[1] === 'opencode' ? 'opencode'
-        : match?.[1] === 'claude' ? 'claude' : match?.[1] === 'hermes' ? 'hermes' : 'cursor'
-      if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
-      this.requireAcp(backend)
-      this.requireSessionOwner(context.connectionId, match![2]!)
+      const parsed = parsePublicSessionId(rawId)
+      const session = parsed ? this.sessionCwds.get(parsed.nativeId) : undefined
+      if (!parsed || !session || session.backend !== parsed.backend) {
+        throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
+      }
+      this.requireAcp(parsed.backend)
+      this.requireSessionOwner(context.connectionId, parsed.nativeId)
       return session.cwd
     }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
-      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor|pi|opencode|claude|hermes):/.test(value),
-      parse: value => typeof value === 'string' && /^(acp|cursor|pi|opencode|claude|hermes):[A-Za-z0-9_-]{1,240}$/.test(value)
+      domain: 'ACP',
+      owns: value => typeof value === 'string' && parsePublicSessionId(value) !== undefined,
+      parse: value => typeof value === 'string' && parsePublicSessionId(value, true) !== undefined
         ? { sessionId: value, nativeId: value } : undefined,
     })
     this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(workspaceBridge,
@@ -296,12 +354,12 @@ export class AcpRemoteGateway {
     })
 
     if (typeof call.params.backend === 'string') {
-      const prefix = typeof call.params.sessionId === 'string' ? /^(acp|cursor|pi|claude|opencode|hermes):/.exec(call.params.sessionId)?.[1] : undefined
-      if (prefix && (prefix === 'acp' ? 'antigravity' : prefix) !== call.params.backend) {
+      const parsedPrefix = typeof call.params.sessionId === 'string' ? parsePublicSessionId(call.params.sessionId) : undefined
+      if (parsedPrefix && parsedPrefix.backend !== call.params.backend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
-      const sessionId = call.method === 'dsh/sessionHistory'
-        ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude|opencode|hermes):/, '')
+      const sessionId = call.method === 'dsh/sessionHistory' && parsedPrefix
+        ? parsedPrefix.nativeId
         : sessionIdFromParams(call.method, call.params)
       const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
       if (boundBackend !== undefined && boundBackend !== call.params.backend) {
@@ -314,6 +372,60 @@ export class AcpRemoteGateway {
       const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
       this.requireAcp(requestedBackend)
       return this.initializeResult(call.params, requestedBackend)
+    }
+
+    if (call.method === 'dsh/workspaceCreate') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const canonical = await this.requireExistingDirectory(String(call.params.path))
+      assertCurrent()
+      const title = typeof call.params.title === 'string' ? call.params.title : undefined
+      const entry = await this.workspaceStore.upsertWorkspace(backend, canonical, title)
+      return { path: entry.path, title: entry.title ?? (basename(entry.path) || 'workspace'), updatedAt: entry.updatedAt }
+    }
+
+    if (call.method === 'dsh/workspaceRename') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const canonical = await this.requireExistingDirectory(String(call.params.path)).catch(() => String(call.params.path))
+      assertCurrent()
+      const entry = await this.workspaceStore.renameWorkspace(backend, canonical, String(call.params.title))
+      return { path: entry.path, title: entry.title ?? (basename(entry.path) || 'workspace'), updatedAt: entry.updatedAt }
+    }
+
+    if (call.method === 'dsh/workspaceDelete') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const rawPath = String(call.params.path)
+      const canonical = await realpath(rawPath).catch(() => rawPath)
+      assertCurrent()
+      await this.workspaceStore.deleteWorkspace(backend, canonical)
+      if (canonical !== rawPath) await this.workspaceStore.deleteWorkspace(backend, rawPath)
+      return { deleted: true, path: canonical }
+    }
+
+    if (call.method === 'dsh/workspaceReorder') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const rawPaths = Array.isArray(call.params.paths) ? call.params.paths.filter((p): p is string => typeof p === 'string') : []
+      const canonicalPaths = await Promise.all(rawPaths.map(p => realpath(p).catch(() => p)))
+      assertCurrent()
+      const paths = await this.workspaceStore.reorderWorkspaces(backend, canonicalPaths)
+      return { paths }
+    }
+
+    if (call.method === 'dsh/sessionPin') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const pinnedSessionIds = await this.workspaceStore.pinSession(backend, String(call.params.sessionId))
+      return { pinnedSessionIds }
+    }
+
+    if (call.method === 'dsh/sessionUnpin') {
+      const backend = String(call.params.backend)
+      this.requireAcp(backend)
+      const pinnedSessionIds = await this.workspaceStore.unpinSession(backend, String(call.params.sessionId))
+      return { pinnedSessionIds }
     }
 
     if (call.method === 'dsh/sessionArchive') {
@@ -366,59 +478,80 @@ export class AcpRemoteGateway {
 
     if (call.method === 'dsh/workspaceList') {
       const requestedBackend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
-      if (isCatalogBackend(requestedBackend)) {
+      const { workspaces: persisted, deletedPaths } = await this.workspaceStore.listWorkspaces(requestedBackend)
+      assertCurrent()
+      const merged = new Map<string, { path: string; title: string; sessionCount?: number }>()
+      for (const item of persisted) {
+        const canonical = await this.requireExistingDirectory(item.path).catch(() => undefined)
+        assertCurrent()
+        if (!canonical || deletedPaths.has(canonical)) continue
+        merged.set(canonical, { path: canonical, title: item.title ?? (basename(canonical) || 'workspace') })
+      }
+      if (this.isNativeCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend)
-        const discovered = [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
-        if (discovered.length > 0 || requestedBackend !== 'opencode') return discovered
-        const defaultCandidates = new Set<string>()
+        for (const item of sessions) {
+          if (deletedPaths.has(item.cwd)) continue
+          if (!merged.has(item.cwd)) {
+            merged.set(item.cwd, { path: item.cwd, title: basename(item.cwd) || 'workspace' })
+          }
+        }
+        if (merged.size === 0 && deletedPaths.size === 0 && (requestedBackend === 'opencode' || requestedBackend === 'cursor')) {
+          const defaultCandidates = new Set<string>()
+          const cwd = process.cwd()
+          if (cwd) defaultCandidates.add(cwd)
+          for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/srv/dsh-workspace', '/var/lib/dsh/local']) {
+            try {
+              const s = await stat(candidate)
+              if (s.isDirectory()) defaultCandidates.add(candidate)
+            } catch {
+              // ignore
+            }
+          }
+          return [...defaultCandidates].map(path => ({ path, title: basename(path) || 'workspace' }))
+        }
+        return [...merged.values()]
+      }
+      const candidates = new Set<string>()
+      if (merged.size === 0 && deletedPaths.size === 0) {
         const cwd = process.cwd()
-        if (cwd) defaultCandidates.add(cwd)
-        for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/srv/dsh-workspace', '/var/lib/dsh/local']) {
+        if (cwd) candidates.add(cwd)
+        for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/var/lib/dsh/local']) {
           try {
             const s = await stat(candidate)
-            if (s.isDirectory()) defaultCandidates.add(candidate)
+            if (s.isDirectory()) candidates.add(candidate)
           } catch {
             // ignore
           }
         }
-        return [...defaultCandidates].map(path => ({ path, title: basename(path) || 'workspace' }))
       }
-      const candidates = new Set<string>()
-      const cwd = process.cwd()
-      if (cwd) candidates.add(cwd)
-      for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/var/lib/dsh/local']) {
-        try {
-          const s = await stat(candidate)
-          if (s.isDirectory()) candidates.add(candidate)
-        } catch {
-          // ignore
-        }
-      }
-      const backend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
-      if (backend === 'antigravity') {
+      if (requestedBackend === 'antigravity') {
         try {
           const agyDirs = await discoverAntigravityWorkspaces()
           for (const d of agyDirs) {
-            candidates.add(d)
+            if (!deletedPaths.has(d)) candidates.add(d)
           }
         } catch {
           // ignore
         }
       }
-
-      const results = await Promise.all([...candidates].map(async p => {
-        let sessionCount = 0
-        if (backend === 'antigravity') {
+      for (const candidate of candidates) {
+        if (!deletedPaths.has(candidate) && !merged.has(candidate)) {
+          merged.set(candidate, { path: candidate, title: basename(candidate) || 'workspace' })
+        }
+      }
+      const results = await Promise.all([...merged.values()].map(async entry => {
+        let sessionCount = entry.sessionCount ?? 0
+        if (requestedBackend === 'antigravity') {
           try {
-            const sessions = await discoverAntigravitySessions(p, 100)
+            const sessions = await discoverAntigravitySessions(entry.path, 100)
             sessionCount = sessions.length
           } catch {
             // ignore
           }
         }
         return {
-          path: p,
-          title: basename(p) || 'workspace',
+          path: entry.path,
+          title: entry.title,
           ...(sessionCount > 0 ? { sessionCount } : {}),
         }
       }))
@@ -429,7 +562,7 @@ export class AcpRemoteGateway {
       const limit = typeof call.params.limit === 'number' ? call.params.limit : 30
       const path = String(call.params.path || '')
       const backend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
-      if (backend === 'antigravity') {
+      if (backend === 'antigravity' && !this.isNativeCatalogBackend('antigravity')) {
         // Workspace selection loads history before the user presses New.
         // Prepare one idle process in that directory without awaiting startup.
         if (path.trim() !== '' && call.params.prewarm !== false) {
@@ -446,47 +579,51 @@ export class AcpRemoteGateway {
         this.logger.info('ACP session list fetched', { count: items.length })
         return { items }
       }
-      if (isCatalogBackend(backend)) {
+      if (this.isNativeCatalogBackend(backend)) {
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
         const sessions = await this.listCatalogSessions(backend, cwd)
         sessions.sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)
           || a.sessionId.localeCompare(b.sessionId))
-        return { items: sessions.slice(0, limit).map(item => ({ conversationId: item.sessionId, title: item.title ?? 'Untitled Session', createdAt: Date.parse(item.updatedAt ?? '') || 0, updatedAt: Date.parse(item.updatedAt ?? '') || 0, cwd: item.cwd })) }
+        const pinnedSessionIds = await this.workspaceStore.getPinnedSessions(backend)
+        return {
+          items: sessions.slice(0, limit).map(item => ({
+            conversationId: item.sessionId,
+            title: item.title ?? 'Untitled Session',
+            createdAt: Date.parse(item.updatedAt ?? '') || 0,
+            updatedAt: Date.parse(item.updatedAt ?? '') || 0,
+            cwd: item.cwd,
+          })),
+          ...(pinnedSessionIds.length > 0 ? { pinnedSessionIds } : {}),
+        }
       }
       return { items: [] }
     }
 
     if (call.method === 'dsh/sessionHistory') {
       const rawSessionId = String(call.params.sessionId)
-      const conversationId = rawSessionId.startsWith('hermes:') ? rawSessionId.slice('hermes:'.length) : rawSessionId.startsWith('claude:') ? rawSessionId.slice(7) : rawSessionId.startsWith('pi:') ? rawSessionId.slice(3) : rawSessionId.startsWith('acp:')
-        ? rawSessionId.slice('acp:'.length)
-        : rawSessionId.startsWith('cursor:')
-          ? rawSessionId.slice('cursor:'.length)
-          : rawSessionId.startsWith('opencode:')
-            ? rawSessionId.slice('opencode:'.length)
-            : rawSessionId
+      const parsedPrefix = parsePublicSessionId(rawSessionId)
+      const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId
       const boundBackend = this.sessionBackends.get(conversationId)
       const backend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend ?? this.defaultBackend()
       if ((boundBackend !== undefined && boundBackend !== backend)
-        || (rawSessionId.startsWith('hermes:') && backend !== 'hermes')
-        || (rawSessionId.startsWith('claude:') && backend !== 'claude')
-        || (rawSessionId.startsWith('pi:') && backend !== 'pi')
-        || (rawSessionId.startsWith('cursor:') && backend !== 'cursor')
-        || (rawSessionId.startsWith('opencode:') && backend !== 'opencode')
-        || (rawSessionId.startsWith('acp:') && backend !== 'antigravity')) {
+        || (parsedPrefix && parsedPrefix.backend !== backend)) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       this.requireAcp(backend)
-      if (isCatalogBackend(backend)) {
+      const persistedPreset = this.sessionPermissions.get(conversationId)
+        ?? await this.workspaceStore.getSessionPermission(conversationId)
+      if (persistedPreset) this.sessionPermissions.set(conversationId, persistedPreset)
+      if (this.isNativeCatalogBackend(backend)) {
         const cwd = await this.catalogSessionCwd(backend, conversationId)
         assertCurrent()
         // History uses an isolated reader and must neither require nor claim
         // the live session's control ownership.
         const client = this.requireAcp(backend) as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
-        if (!client.history) throw new RpcError('METHOD_NOT_ALLOWED', 'The ACP backend does not support history.')
+        if (!client.history) {
+          return { events: [], ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
+        }
         const events = await this.readCatalogHistory(backend, client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> }, conversationId, cwd, assertCurrent)
-        const preset = this.sessionPermissions.get(conversationId)
-        return { events, ...(preset ? { permissionPreset: preset } : {}) }
+        return { events, ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
       }
       if (backend !== 'antigravity') return { events: [] }
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
@@ -494,8 +631,7 @@ export class AcpRemoteGateway {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length,
       })
-      const preset = this.sessionPermissions.get(conversationId)
-      return { events, ...(preset ? { permissionPreset: preset } : {}) }
+      return { events, ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
     }
 
     if (call.method === 'session/new') {
@@ -536,8 +672,18 @@ export class AcpRemoteGateway {
       const selected = this.sessionBackends.get(sessionId!)
       const requested = typeof call.params.backend === 'string' ? call.params.backend : selected ?? this.defaultBackend()
       if (selected !== undefined && selected !== requested) throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
-      this.requireAcp(requested)
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && requested !== 'antigravity' && requested !== 'hermes') throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
+      const client = this.requireAcp(requested)
+      const supportsImages = requested === 'antigravity'
+        || requested === 'hermes'
+        || client.capabilities?.()?.promptCapabilities?.image === true
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some(part => isRecord(part) && part.type === 'image') && !supportsImages) {
+        throw new RpcError('METHOD_NOT_ALLOWED', 'This ACP backend does not accept image prompts.')
+      }
+      if (sessionId !== undefined && !this.sessionPermissions.has(sessionId)) {
+        const persistedPreset = await this.workspaceStore.getSessionPermission(sessionId)
+        assertCurrent()
+        if (persistedPreset) this.sessionPermissions.set(sessionId, persistedPreset)
+      }
       this.sessionBackends.set(sessionId!, requested)
     }
 
@@ -545,11 +691,16 @@ export class AcpRemoteGateway {
       const boundBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
       if (typeof call.params.backend !== 'string') throw new RpcError('INVALID_MESSAGE', 'Session load requires an explicit backend.')
       const targetBackend = call.params.backend
-      if ((targetBackend === 'claude' || targetBackend === 'hermes') && this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
+      if (this.isPerSessionIsolatedBackend(targetBackend) && this.promptsInProgress.has(sessionId!)) {
+        throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
+      }
       if (boundBackend !== undefined && targetBackend !== boundBackend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
-      if (isCatalogBackend(targetBackend)) await this.catalogSessionCwd(targetBackend, sessionId!)
+      if (this.requiresCatalogCwd(targetBackend)) await this.catalogSessionCwd(targetBackend, sessionId!)
+      else if (this.isNativeCatalogBackend(targetBackend) && !this.sessionCwds.has(sessionId!)) {
+        await this.listCatalogSessions(targetBackend).catch(() => undefined)
+      }
       assertCurrent()
       this.requireSessionOwner(connectionId, sessionId!)
       const acp = this.requireAcp(targetBackend)
@@ -565,6 +716,11 @@ export class AcpRemoteGateway {
         }
         this.sessionOwners.set(loadedId, connectionId)
         if (targetBackend) this.sessionBackends.set(loadedId, targetBackend)
+        if (!this.sessionPermissions.has(loadedId)) {
+          const persistedPreset = await this.workspaceStore.getSessionPermission(loadedId)
+          assertCurrent()
+          if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset)
+        }
       }
       return sanitizeSessionResult(result)
     }
@@ -573,13 +729,31 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId)
     }
 
-    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && isCatalogBackend(call.params.backend)) {
-      this.requireSessionOwner(connectionId, sessionId!)
-      const backend = call.params.backend
-      const cwd = await this.catalogSessionCwd(backend, sessionId!)
-      assertCurrent()
-      await this.requireAcp(backend).call('session/load', { sessionId, cwd, mcpServers: [] })
-      assertCurrent()
+    if (
+      call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel'
+      || call.method === 'dsh/sessionModes' || call.method === 'session/set_mode'
+    ) {
+      const preloadBackend = typeof call.params.backend === 'string'
+        ? call.params.backend
+        : (sessionId ? this.sessionBackends.get(sessionId) : undefined)
+      if (preloadBackend !== undefined && sessionId !== undefined && this.requiresCatalogCwd(preloadBackend)) {
+        this.requireSessionOwner(connectionId, sessionId)
+        const cwd = await this.catalogSessionCwd(preloadBackend, sessionId)
+        assertCurrent()
+        await this.requireAcp(preloadBackend).call('session/load', { sessionId, cwd, mcpServers: [] })
+        assertCurrent()
+      } else if (preloadBackend === 'cursor' && sessionId !== undefined) {
+        if (!this.sessionCwds.has(sessionId) && this.isNativeCatalogBackend('cursor')) {
+          await this.listCatalogSessions('cursor').catch(() => undefined)
+          assertCurrent()
+        }
+        const entry = this.sessionCwds.get(sessionId)
+        if (entry?.backend === 'cursor') {
+          this.requireSessionOwner(connectionId, sessionId)
+          await this.requireAcp('cursor').call('session/load', { sessionId, cwd: entry.cwd, mcpServers: [] })
+          assertCurrent()
+        }
+      }
     }
 
     if (call.method === 'dsh/selectModel') {
@@ -596,6 +770,48 @@ export class AcpRemoteGateway {
       return sanitizeSessionResult(result)
     }
 
+    if (call.method === 'session/set_mode') {
+      if (this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'Stop the ACP reply before changing its mode.')
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!) ?? this.defaultBackend()
+      const acp = this.requireAcp(backend)
+      const result = await acp.call('session/set_mode', { sessionId, modeId: call.params.modeId })
+      assertCurrent()
+      return sanitizeSessionResult(result)
+    }
+
+    if (call.method === 'dsh/sessionModes' || call.method === 'dsh/sessionCommands') {
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!) ?? this.defaultBackend()
+      return this.requireAcp(backend).call(call.method, { sessionId })
+    }
+
+    if (call.method === 'session/fork') {
+      if (this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'Stop the ACP reply before forking the session.')
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!) ?? this.defaultBackend()
+      const acp = this.requireAcp(backend)
+      const caps = acp.capabilities?.()
+      if (!caps?.sessionCapabilities?.fork) {
+        throw new RpcError('METHOD_NOT_ALLOWED', `The ${backend} ACP backend does not support session fork.`)
+      }
+      if (!this.sessionCwds.has(sessionId!)) {
+        if (this.requiresCatalogCwd(backend)) {
+          await this.catalogSessionCwd(backend, sessionId!)
+        } else if (this.isNativeCatalogBackend(backend)) {
+          await this.listCatalogSessions(backend).catch(() => undefined)
+        }
+        assertCurrent()
+      }
+      const session = this.sessionCwds.get(sessionId!)
+      const result = await acp.call('session/fork', { sessionId, ...(session ? { cwd: session.cwd } : {}) })
+      assertCurrent()
+      const forkedId = readSessionId(result)
+      if (forkedId !== undefined) {
+        this.sessionOwners.set(forkedId, connectionId)
+        this.sessionBackends.set(forkedId, backend)
+        if (session) this.sessionCwds.set(forkedId, { backend, cwd: session.cwd })
+      }
+      return sanitizeSessionResult(result)
+    }
+
     if (call.method === 'dsh/selectPermission') {
       this.requireSessionOwner(connectionId, sessionId!)
       const preset = typeof call.params.preset === 'string' ? call.params.preset : undefined
@@ -603,6 +819,12 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'Unknown permission preset.')
       }
       this.sessionPermissions.set(sessionId!, preset)
+      await this.workspaceStore.setSessionPermission(sessionId!, preset)
+      assertCurrent()
+      const backend = typeof call.params.backend === 'string' ? call.params.backend : this.sessionBackends.get(sessionId!)
+      if (backend) {
+        await this.syncPermissionModeIfCompatible(backend, sessionId!, preset).catch(() => undefined)
+      }
       return { preset }
     }
 
@@ -618,7 +840,7 @@ export class AcpRemoteGateway {
       this.promptsInProgress.set(sessionId, task)
       this.cancelledSessions.delete(sessionId)
       const preparationBackend = this.sessionBackends.get(sessionId)
-      if (preparationBackend === 'pi' || preparationBackend === 'claude' || preparationBackend === 'hermes') {
+      if (preparationBackend && this.requiresPrePromptLoad(preparationBackend)) {
         const preparation = { cancelled: false }
         this.preparingPrompts.set(sessionId, preparation)
         try {
@@ -692,6 +914,7 @@ export class AcpRemoteGateway {
       const stopReason = isRecord(result) && typeof result.stopReason === 'string'
         ? result.stopReason
         : 'end_turn'
+      const usage = isRecord(result) ? sanitizeUsage(result.usage) : undefined
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
       this.logger.info('ACP prompt finished', {
         sessionId: shortSessionId(sessionId),
@@ -705,6 +928,7 @@ export class AcpRemoteGateway {
           update: {
             sessionUpdate: 'prompt_completed',
             stopReason,
+            ...(usage ? { usage } : {}),
             ...(catchUp.length > 0 ? { catchUp } : {}),
           },
         },
@@ -864,14 +1088,13 @@ export class AcpRemoteGateway {
 
   /** Trusted, connection-scoped authority for the dedicated workspace uploader. */
   resolveUploadWorkspace(connectionId: string, publicId: string): string {
-    const match = /^(acp|antigravity|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId)
-    const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1]
-    const session = match ? this.sessionCwds.get(match[2]!) : undefined
-    if (!this.peers.has(connectionId) || !session || session.backend !== backend || this.closed) {
+    const parsed = parsePublicSessionId(publicId)
+    const session = parsed ? this.sessionCwds.get(parsed.nativeId) : undefined
+    if (!this.peers.has(connectionId) || !parsed || !session || session.backend !== parsed.backend || this.closed) {
       throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
     }
-    this.requireAcp(backend!)
-    this.requireSessionOwner(connectionId, match![2]!)
+    this.requireAcp(parsed.backend)
+    this.requireSessionOwner(connectionId, parsed.nativeId)
     return session.cwd
   }
 
@@ -938,22 +1161,35 @@ export class AcpRemoteGateway {
   async reconfigure(config: ResolvedAcpConfig): Promise<void> {
     if (this.closed) throw new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.')
     const previous = this.config
-    const implemented = (value: ResolvedAcpConfig) => ({ enabled: value.enabled,
-      backends: value.backends.filter(item => ['cursor', 'antigravity', 'pi', 'claude', 'opencode', 'hermes'].includes(item.id)) })
+    const implemented = (value: ResolvedAcpConfig) => ({
+      enabled: value.enabled,
+      backends: value.backends.filter(item => item.id !== 'codex' && item.id !== 'kimi' && isValidAcpBackendId(item.id)),
+    })
     this.config = config
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
     this.clearBackendRestarts()
-    const changed = new Set([...this.pendingReconfiguration, ...previous.backends.filter(item => {
-      const next = config.backends.find(candidate => candidate.id === item.id)
-      return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
-    }).map(item => item.id)])
-    for (const id of changed) this.pendingReconfiguration.add(id)
+    const changed = new Set([
+      ...this.pendingReconfiguration,
+      ...previous.backends.filter(item => {
+        const next = config.backends.find(candidate => candidate.id === item.id)
+        return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
+      }).map(item => item.id),
+      ...config.backends.filter(item => !previous.backends.some(prev => prev.id === item.id)).map(item => item.id),
+    ])
+    for (const id of changed) {
+      this.pendingReconfiguration.add(id)
+      this.backendDiagnostics.delete(id)
+      this.backendErrors.delete(id)
+    }
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
     await this.startPromise?.catch(() => undefined)
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
-    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : sessionId.startsWith('pi:') ? 'pi' : sessionId.startsWith('opencode:') ? 'opencode' : sessionId.startsWith('claude:') ? 'claude' : sessionId.startsWith('hermes:') ? 'hermes' : 'cursor'))
+    const terminalError = await this.workspaceState.dispose(sessionId => {
+      const parsed = parsePublicSessionId(sessionId)
+      return changed.has(parsed ? parsed.backend : 'cursor')
+    })
       .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
     for (const id of sessions) {
       this.sessionOwners.delete(id)
@@ -1073,7 +1309,21 @@ export class AcpRemoteGateway {
 
   private async launchBackendCandidate(backend: ResolvedAcpBackendConfig, binary: string): Promise<void> {
     const id = backend.id
-    const acp = this.createAcp(binary, this.logger, backend)
+    let effectiveBackend = backend
+    if (!this.customCreateAcp && id === 'antigravity') {
+      const hasLegacyArgs = isLegacyAntigravityStreamJsonArgs(backend.args)
+      const isDefaultNativeArgs = backend.args.length === 1 && backend.args[0] === 'acp'
+      if (hasLegacyArgs || isDefaultNativeArgs) {
+        const supportsNative = await supportsAntigravityNativeAcp(binary)
+        if (this.closed || !this.backendCurrent(backend)) return
+        if (hasLegacyArgs && supportsNative) {
+          effectiveBackend = { ...backend, args: ['acp'] }
+        } else if (isDefaultNativeArgs && !supportsNative) {
+          effectiveBackend = { ...backend, args: ['--input-format', 'stream-json', '--output-format', 'stream-json'] }
+        }
+      }
+    }
+    const acp = this.createAcp(binary, this.logger, effectiveBackend)
     this.startingClients.set(acp, backend)
     try {
       await acp.start()
@@ -1081,7 +1331,14 @@ export class AcpRemoteGateway {
         await acp.close()
         return
       }
+      const diag = acp.diagnostics?.()
+      if (diag) this.backendDiagnostics.set(id, diag)
+      else this.backendDiagnostics.delete(id)
+      this.backendErrors.delete(id)
     } catch (error) {
+      const diag = (error instanceof CursorAcpError ? error.authDiagnostic : undefined) ?? acp.diagnostics?.()
+      if (diag) this.backendDiagnostics.set(id, diag)
+      this.backendErrors.set(id, errorCode(error))
       await acp.close()
       throw error
     } finally {
@@ -1352,9 +1609,60 @@ export class AcpRemoteGateway {
     throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
   }
 
+  private isNativeCatalogBackend(backend: string): boolean {
+    if (backend === 'antigravity') {
+      const client = this.backendInstances.get('antigravity')?.client
+      return client !== undefined && typeof (client as { history?: unknown }).history === 'function'
+    }
+    return isValidAcpBackendId(backend)
+  }
+
+  private requiresCatalogCwd(backend: string): boolean {
+    if (STRICT_CATALOG_BACKENDS.has(backend)) return true
+    if (backend === 'antigravity') return this.isNativeCatalogBackend('antigravity')
+    return backend !== 'cursor' && isValidAcpBackendId(backend)
+  }
+
+  private isPerSessionIsolatedBackend(backend: string): boolean {
+    if (backend === 'claude' || backend === 'hermes') return true
+    if (backend === 'antigravity') return this.isNativeCatalogBackend('antigravity')
+    return !['cursor', 'pi', 'opencode'].includes(backend) && isValidAcpBackendId(backend)
+  }
+
+  private requiresPrePromptLoad(backend: string): boolean {
+    if (backend === 'pi' || backend === 'claude' || backend === 'hermes') return true
+    if (backend === 'antigravity') return this.isNativeCatalogBackend('antigravity')
+    return backend !== 'cursor' && backend !== 'opencode' && isValidAcpBackendId(backend)
+  }
+
+  private async syncPermissionModeIfCompatible(backend: string, sessionId: string, preset: 'workspace-write' | 'danger-full-access'): Promise<void> {
+    const client = this.backendInstances.get(backend)?.client
+    if (!client) return
+    const modes = await client.call('dsh/sessionModes', { sessionId }).catch(() => undefined)
+    if (!isRecord(modes) || !Array.isArray(modes.availableModes)) return
+    const current = typeof modes.currentModeId === 'string' ? modes.currentModeId : undefined
+    const permissionModes = new Set(['default', 'accept-edits', 'auto', 'acceptEdits', 'bypassPermissions', 'dontAsk'])
+    if (current && !permissionModes.has(current)) return
+    const ids = modes.availableModes
+      .filter((item): item is { id: string } => isRecord(item) && typeof item.id === 'string')
+      .map(item => item.id)
+    const target = preset === 'danger-full-access'
+      ? ['auto', 'bypassPermissions', 'accept-edits', 'acceptEdits'].find(id => ids.includes(id))
+      : ids.find(id => id === 'default')
+    if (target && target !== current) {
+      await client.call('session/set_mode', { sessionId, modeId: target })
+    }
+  }
+
   private initializeResult(params: Record<string, unknown>, backend?: string): Record<string, unknown> {
     const requested = typeof params.protocolVersion === 'number' ? params.protocolVersion : 1
     const actualBackend = backend ?? this.defaultBackend()
+    const inst = this.backendInstances.get(actualBackend)
+    const caps = inst?.client.capabilities?.() ?? {}
+    const authMethods = inst?.client.authMethods?.() ?? []
+    const supportsImage = actualBackend === 'antigravity'
+      || actualBackend === 'hermes'
+      || caps.promptCapabilities?.image === true
     return {
       protocolVersion: requested,
       agentInfo: {
@@ -1363,11 +1671,13 @@ export class AcpRemoteGateway {
       },
       backend: actualBackend,
       availableBackends: this.availableBackends(),
-      authMethods: [],
+      authMethods,
       capabilities: {
-        loadSession: true,
-        promptTypes: (actualBackend === 'antigravity' || actualBackend === 'hermes') ? ['text', 'image'] : ['text'],
+        loadSession: caps.loadSession ?? true,
+        promptTypes: supportsImage ? ['text', 'image'] : ['text'],
         methods: [...ACP_METHOD_ALLOWLIST],
+        ...(caps.sessionCapabilities ? { sessionCapabilities: caps.sessionCapabilities } : {}),
+        ...(caps.steering ? { steering: true } : {}),
       },
     }
   }
@@ -1394,7 +1704,7 @@ export class AcpRemoteGateway {
     this.claimSession(connectionId, sessionId)
   }
 
-  private captureCatalogClient(backend: CatalogBackend) {
+  private captureCatalogClient(backend: string) {
     const client = this.requireAcp(backend)
     const instance = this.backendInstances.get(backend)
     return { client, assertCurrent: () => {
@@ -1404,14 +1714,26 @@ export class AcpRemoteGateway {
     } }
   }
 
-  private async listCatalogSessions(backend: CatalogBackend, cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
+  private async listCatalogSessions(backend: string, cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
     const { client, assertCurrent } = this.captureCatalogClient(backend)
     const items: Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }> = []
     let cursor: string | undefined
     const seen = new Set<string>()
     for (let page = 0; page < 100; page++) {
-      const result = await client.call('session/list', { ...(cwd ? { cwd } : {}), ...(cursor ? { cursor } : {}) })
+      let result: unknown
+      try {
+        result = await client.call('session/list', { ...(cwd ? { cwd } : {}), ...(cursor ? { cursor } : {}) })
+      } catch (error) {
+        // Older Cursor CLI releases or minimal mock adapters may not implement session/list.
+        if (backend === 'cursor' && !(error instanceof CursorAcpError && (error.code === 'ACP_AUTH_REQUIRED' || error.authDiagnostic?.authStatus === 'auth_required'))) {
+          return items
+        }
+        throw error
+      }
       assertCurrent()
+      if (backend === 'cursor' && isRecord(result) && result.sessions === undefined && Object.keys(result).length === 0) {
+        return items
+      }
       if (!isRecord(result) || !Array.isArray(result.sessions)
         || (result.nextCursor != null && (typeof result.nextCursor !== 'string' || result.nextCursor.length === 0))) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session catalog response is invalid.')
@@ -1442,7 +1764,7 @@ export class AcpRemoteGateway {
     return items
   }
 
-  private async catalogSessionCwd(backend: CatalogBackend, sessionId: string): Promise<string> {
+  private async catalogSessionCwd(backend: string, sessionId: string): Promise<string> {
     const { assertCurrent } = this.captureCatalogClient(backend)
     if (!this.sessionCwds.has(sessionId)) await this.listCatalogSessions(backend)
     assertCurrent()
@@ -1572,6 +1894,23 @@ function mapPermissionDecision(params: ReturnType<typeof parseRespondEnvelope>, 
     if (!option) throw invalid()
     return { outcome: { outcome: 'selected', optionId: option.optionId } }
   }
+  if (pending.method === 'cursor/ask_question' && params.decision === 'allow-once') {
+    if (params.result === undefined) return { outcome: { outcome: 'answered' } }
+    if (!isRecord(params.result)) throw invalid()
+    const outcomeRecord = isRecord(params.result.outcome) ? params.result.outcome : params.result
+    const outcomeKind = typeof outcomeRecord.outcome === 'string' ? outcomeRecord.outcome : 'answered'
+    if (outcomeKind !== 'answered' && outcomeKind !== 'selected') throw invalid()
+    const allowedKeys = new Set(['outcome', 'answers', 'selectedOptionIds', 'response'])
+    if (Object.keys(outcomeRecord).some(key => !allowedKeys.has(key))) throw invalid()
+    return {
+      outcome: {
+        outcome: outcomeKind,
+        ...(outcomeRecord.answers !== undefined ? { answers: outcomeRecord.answers } : {}),
+        ...(outcomeRecord.selectedOptionIds !== undefined ? { selectedOptionIds: outcomeRecord.selectedOptionIds } : {}),
+        ...(typeof outcomeRecord.response === 'string' ? { response: outcomeRecord.response } : {}),
+      },
+    }
+  }
   const outcome = pending.method === 'cursor/create_plan'
     ? params.decision === 'allow-once' ? 'accepted' : params.decision === 'cancel' ? 'cancelled' : 'rejected'
     : 'cancelled'
@@ -1598,9 +1937,39 @@ function sanitizeSessionResult(value: unknown): unknown {
   if (!isRecord(value)) return value
   const next: Record<string, unknown> = {}
   for (const [key, entry] of Object.entries(value)) {
-    if (key === 'sessionId' || key === 'stopReason' || key === 'mode') next[key] = entry
+    if (key === 'sessionId' || key === 'stopReason' || key === 'mode' || key === 'currentModeId' || key === 'modes') {
+      next[key] = entry
+    }
   }
   return Object.keys(next).length > 0 ? next : value
+}
+
+function sanitizeUsage(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined
+  const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'cachedReadTokens', 'cachedWriteTokens', 'reasoningTokens', 'thoughtTokens', 'totalTokens'] as const
+  const normalized: Record<string, number> = {}
+  for (const field of fields) {
+    const num = value[field]
+    if (typeof num === 'number' && Number.isFinite(num) && num >= 0) {
+      if (field === 'cachedReadTokens' && normalized.cacheReadTokens === undefined) normalized.cacheReadTokens = num
+      else if (field === 'cachedWriteTokens' && normalized.cacheWriteTokens === undefined) normalized.cacheWriteTokens = num
+      else if (field === 'thoughtTokens' && normalized.reasoningTokens === undefined) normalized.reasoningTokens = num
+      else normalized[field] = num
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined
+}
+
+function parsePublicSessionId(value: string, strictNativeId = false): { prefix: string; backend: string; nativeId: string } | undefined {
+  const match = /^([a-z0-9][a-z0-9._-]{0,31}):(.+)$/i.exec(value)
+  if (!match) return undefined
+  const prefix = match[1]!
+  const nativeId = match[2]!
+  if (strictNativeId && !/^[A-Za-z0-9_-]{1,240}$/.test(nativeId)) return undefined
+  const backend = prefix === 'acp' ? 'antigravity' : prefix
+  if (backend === 'codex' || backend === 'harness' || backend === 'kimi') return undefined
+  if (!isValidAcpBackendId(backend)) return undefined
+  return { prefix, backend, nativeId }
 }
 
 function buildCrumbs(path: string, home: string): AcpDirectoryEntry[] {

@@ -1,6 +1,8 @@
 import type {
+  AcpAvailableCommand,
   AcpModelSelection,
   AcpSessionModels,
+  AcpSessionModes,
   AcpWorkspaceToolCallEndpoint,
   AgentAcpStreamOpenParams,
   AgentAcpFrameData,
@@ -82,11 +84,11 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async sessionModels(sessionId: string, backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' | 'hermes', signal?: AbortSignal): Promise<AcpSessionModels> {
+  async sessionModels(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<AcpSessionModels> {
     return this.call('dsh/sessionModels', { sessionId, backend }, signal) as Promise<AcpSessionModels>
   }
 
-  async selectModel(sessionId: string, backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' | 'hermes', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
+  async selectModel(sessionId: string, backend: AcpAgentBackend, selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
     if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
     if (backend === 'antigravity' && !this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
       await this.call('session/load', { sessionId, backend }, signal)
@@ -99,11 +101,89 @@ export class AgentAcpClient {
     return result.selected as unknown as AcpModelSelection
   }
 
-  async selectPermission(sessionId: string, backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' | 'hermes', preset: string, signal?: AbortSignal): Promise<unknown> {
+  async sessionModes(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<AcpSessionModes> {
+    const result = await this.call('dsh/sessionModes', { sessionId, backend }, signal)
+    if (!isRecord(result) || !Array.isArray(result.availableModes)) {
+      return { availableModes: [] }
+    }
+    return {
+      ...(typeof result.currentModeId === 'string' ? { currentModeId: result.currentModeId } : {}),
+      availableModes: result.availableModes.flatMap(item => (
+        isRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+          ? [{ id: item.id, name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+          : []
+      )),
+    }
+  }
+
+  async setMode(sessionId: string, backend: AcpAgentBackend, modeId: string, signal?: AbortSignal): Promise<{ currentModeId?: string }> {
+    const result = await this.call('session/set_mode', { sessionId, backend, modeId }, signal)
+    return isRecord(result) && typeof result.currentModeId === 'string' ? { currentModeId: result.currentModeId } : { currentModeId: modeId }
+  }
+
+  async sessionCommands(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<AcpAvailableCommand[]> {
+    const result = await this.call('dsh/sessionCommands', { sessionId, backend }, signal)
+    if (!isRecord(result) || !Array.isArray(result.commands)) return []
+    return result.commands.flatMap(item => (
+      isRecord(item) && typeof item.name === 'string'
+        ? [{ name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+        : []
+    ))
+  }
+
+  async forkSession(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<{ sessionId: string }> {
+    const result = await this.call('session/fork', { sessionId, backend }, signal)
+    const forkedId = readString(result, 'sessionId')
+    if (forkedId === undefined) throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session/fork did not return sessionId.')
+    return { sessionId: forkedId }
+  }
+
+  async createWorkspace(path: string, backend: AcpAgentBackend, title?: string, signal?: AbortSignal): Promise<{ path: string; title?: string }> {
+    const result = await this.call('dsh/workspaceCreate', { backend, path, ...(title ? { title } : {}) }, signal)
+    if (!isRecord(result) || typeof result.path !== 'string') {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace creation failed.')
+    }
+    return result as { path: string; title?: string }
+  }
+
+  async renameWorkspace(path: string, backend: AcpAgentBackend, title: string, signal?: AbortSignal): Promise<{ path: string; title?: string }> {
+    const result = await this.call('dsh/workspaceRename', { backend, path, title }, signal)
+    if (!isRecord(result) || typeof result.path !== 'string') {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace rename failed.')
+    }
+    return result as { path: string; title?: string }
+  }
+
+  async deleteWorkspace(path: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<void> {
+    await this.call('dsh/workspaceDelete', { backend, path }, signal)
+  }
+
+  async reorderWorkspaces(backend: AcpAgentBackend, paths: string[], signal?: AbortSignal): Promise<string[]> {
+    const result = await this.call('dsh/workspaceReorder', { backend, paths }, signal)
+    return isRecord(result) && Array.isArray(result.paths)
+      ? result.paths.filter((item): item is string => typeof item === 'string')
+      : paths
+  }
+
+  async pinSession(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<string[]> {
+    const result = await this.call('dsh/sessionPin', { backend, sessionId }, signal)
+    return isRecord(result) && Array.isArray(result.pinnedSessionIds)
+      ? result.pinnedSessionIds.filter((item): item is string => typeof item === 'string')
+      : []
+  }
+
+  async unpinSession(sessionId: string, backend: AcpAgentBackend, signal?: AbortSignal): Promise<string[]> {
+    const result = await this.call('dsh/sessionUnpin', { backend, sessionId }, signal)
+    return isRecord(result) && Array.isArray(result.pinnedSessionIds)
+      ? result.pinnedSessionIds.filter((item): item is string => typeof item === 'string')
+      : []
+  }
+
+  async selectPermission(sessionId: string, backend: AcpAgentBackend, preset: string, signal?: AbortSignal): Promise<unknown> {
     return this.call('dsh/selectPermission', { sessionId, backend, preset }, signal)
   }
 
-  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async workspaceToolCall(sessionId: string, backend: AcpAgentBackend, endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     return this.call('dsh/toolCall', { sessionId, backend, endpoint, args }, signal)
   }
 
@@ -153,6 +233,20 @@ export class AgentAcpClient {
     backend?: AcpAgentBackend,
     signal?: AbortSignal,
   ): Promise<unknown[]> {
+    const details = await this.loadSessionDetails(sessionId, backend, signal)
+    return details.events
+  }
+
+  async loadSessionDetails(
+    sessionId: string,
+    backend?: AcpAgentBackend,
+    signal?: AbortSignal,
+  ): Promise<{
+    events: unknown[]
+    permissionPreset?: string
+    modes?: AcpSessionModes
+    commands?: AcpAvailableCommand[]
+  }> {
     const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
@@ -163,7 +257,32 @@ export class AgentAcpClient {
     if ((backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
-    return isRecord(result) && Array.isArray(result.events) ? result.events : []
+    if (!isRecord(result)) return { events: [] }
+    const events = Array.isArray(result.events) ? result.events : []
+    const permissionPreset = typeof result.permissionPreset === 'string' ? result.permissionPreset : undefined
+    const modes = isRecord(result.modes) && Array.isArray(result.modes.availableModes)
+      ? {
+          ...(typeof result.modes.currentModeId === 'string' ? { currentModeId: result.modes.currentModeId } : {}),
+          availableModes: result.modes.availableModes.flatMap(item => (
+            isRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+              ? [{ id: item.id, name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+              : []
+          )),
+        }
+      : undefined
+    const commands = Array.isArray(result.commands)
+      ? result.commands.flatMap(item => (
+          isRecord(item) && typeof item.name === 'string'
+            ? [{ name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+            : []
+        ))
+      : undefined
+    return {
+      events,
+      ...(permissionPreset ? { permissionPreset } : {}),
+      ...(modes ? { modes } : {}),
+      ...(commands ? { commands } : {}),
+    }
   }
 
   async createSession(

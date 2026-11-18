@@ -1,7 +1,7 @@
 import type { AcpVirtualWorkspaceView } from './virtual-catalog.js'
 import { nativeWorkspace } from './virtual-catalog.js'
 import type { AcpClientLike, AcpSessionState, JsonRecord, PendingApproval } from './virtual-contract.js'
-import { AsyncValueQueue, record, string } from './virtual-contract.js'
+import { AsyncValueQueue, isRecord, record, string } from './virtual-contract.js'
 
 /** Collaborates with one AcpVirtualHarness; never creates a second session or connection state. */
 export interface AcpEventCarrierContext {
@@ -17,6 +17,7 @@ export interface AcpEventCarrierContext {
   readonly sessions: Map<string, AcpSessionState>
   readonly nextProjectionSeq: () => number
   readonly archivedSessionIds: ReadonlySet<string>
+  readonly pinnedSessionIds: ReadonlySet<string>
 }
 
 export class AcpEventCarrier {
@@ -30,7 +31,7 @@ export class AcpEventCarrier {
       value: {
         items: this.context.visibleWorkspaces().map(nativeWorkspace),
         archivedSessionIds: [...this.context.archivedSessionIds],
-        pinnedSessionIds: [],
+        pinnedSessionIds: [...this.context.pinnedSessionIds],
       },
     })
     return queue.iterate(() => this.context.workspaceStreams.delete(queue))
@@ -95,12 +96,15 @@ export class AcpEventCarrier {
     const pending = this.context.pendingApprovals.get(eventId)
     if (pending === undefined) return undefined
     this.context.pendingApprovals.delete(eventId)
-    const decision = outcome.kind === 'result' && outcome.value === 'allowed-once'
+    const decision = outcome.kind === 'result' && (outcome.value === 'allowed-once' || outcome.value === 'answered' || isRecord(outcome.value))
       ? 'allow-once'
       : outcome.kind === 'result' && outcome.value === 'cancelled'
         ? 'cancel'
         : 'reject-once'
-    await this.context.client.respond(pending.requestHandle, decision, undefined, signal)
+    const result = outcome.kind === 'result' && isRecord(outcome.value)
+      ? { outcome: { outcome: 'answered', ...outcome.value } }
+      : undefined
+    await this.context.client.respond(pending.requestHandle, decision, result, signal)
     return undefined
   }
 

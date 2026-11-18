@@ -1,16 +1,168 @@
 import type { AgentAcpClient } from '@dsh-remote/client-core'
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+import { loadAcpDirectoryCatalog, mergeAcpDirectoryCatalog, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
 import type {
+  AgentBackend,
   ApprovalActivity,
+  AskUserQuestionItem,
   ChatItem,
   ChatMessage,
   HistoryEntry,
   NativeSessionEvent,
+  QuestionActivity,
   RemoteSession,
   ToolActivity,
   WorkspaceView,
 } from '../types'
 import { foldHistory } from '../state/event-reducer'
+
+export function acpWorkspaceId(backend: AcpManagedBackend, path: string): string {
+  return `${backend}:cwd:${encodeURIComponent(path)}`
+}
+
+export function acpWorkspacePath(backend: AcpManagedBackend, workspaceId: string): string | undefined {
+  const prefix = `${backend}:cwd:`
+  if (!workspaceId.startsWith(prefix)) return undefined
+  try {
+    return decodeURIComponent(workspaceId.slice(prefix.length))
+  } catch {
+    return undefined
+  }
+}
+
+export function createAcpWorkspace(backend: AcpManagedBackend, path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: acpWorkspaceId(backend, path),
+    backend,
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createAcpSession(input: {
+  backend: AcpManagedBackend
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  const supportsImages = input.backend === 'antigravity' || input.backend === 'hermes'
+  return {
+    sessionId: `${input.backend}:${input.acpSessionId}`,
+    backend: input.backend,
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: {
+        backend: input.backend,
+        ...(supportsImages ? {
+          imageLimits: {
+            maxImageBytes: 8 * 1024 * 1024,
+            maxImagesPerMessage: 4,
+            maxMessageImageBytes: 32 * 1024 * 1024,
+            maxImagePixels: 40_000_000,
+            maxImageDimension: 8192,
+            mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+          },
+        } : {}),
+      },
+    },
+  }
+}
+
+export async function loadCursorCatalog(
+  client: AgentAcpClient,
+  remembered: WorkspaceView[] = [],
+  warmPath?: string,
+  options?: AcpCatalogFilterOptions,
+): Promise<{ workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }> {
+  return loadAcpDirectoryCatalog({
+    backend: 'cursor',
+    label: 'Cursor',
+    client,
+    remembered,
+    warmPath,
+    options,
+    createWorkspace: createCursorWorkspace,
+    createSession: createCursorSession,
+  })
+}
+
+export function mergeCursorCatalog(
+  catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] },
+  workspaces: WorkspaceView[],
+  sessions: RemoteSession[],
+  options?: AcpCatalogFilterOptions,
+): { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] } {
+  return mergeAcpDirectoryCatalog({
+    backend: 'cursor',
+    catalog,
+    workspaces,
+    sessions,
+    options,
+  })
+}
+
+export async function loadCustomAcpCatalog(
+  backend: AcpManagedBackend,
+  client: AgentAcpClient,
+  remembered: WorkspaceView[] = [],
+  warmPath?: string,
+  options?: AcpCatalogFilterOptions,
+): Promise<{ workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] }> {
+  return loadAcpDirectoryCatalog({
+    backend,
+    label: backend,
+    client,
+    remembered,
+    warmPath,
+    options,
+    createWorkspace: (path, title) => createAcpWorkspace(backend, path, title),
+    createSession: input => createAcpSession({ backend, ...input }),
+  })
+}
+
+export function mergeCustomAcpCatalog(
+  backend: AcpManagedBackend,
+  catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] },
+  workspaces: WorkspaceView[],
+  sessions: RemoteSession[],
+  options?: AcpCatalogFilterOptions,
+): { workspaces: WorkspaceView[]; sessions: RemoteSession[]; pinnedSessionIds?: string[] } {
+  return mergeAcpDirectoryCatalog({
+    backend,
+    catalog,
+    workspaces,
+    sessions,
+    options,
+  })
+}
+
+export async function readAcpHistory(
+  client: AgentAcpClient,
+  sessionId: string,
+  backend: AgentBackend,
+): Promise<{ events: unknown[]; modes?: { currentModeId?: string; availableModes?: Array<{ id: string; name?: string; description?: string }> }; availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>; permissionPreset?: string }> {
+  if (typeof client.loadSessionDetails === 'function') {
+    const details = await client.loadSessionDetails(sessionId, backend)
+    return {
+      events: details.events,
+      ...(details.modes !== undefined ? { modes: details.modes } : {}),
+      ...(details.commands !== undefined ? { availableCommands: details.commands } : {}),
+      ...(details.permissionPreset !== undefined ? { permissionPreset: details.permissionPreset } : {}),
+    }
+  }
+  const events = await client.loadSessionHistory(sessionId, backend)
+  return { events }
+}
 
 export function cursorWorkspaceId(path: string): string {
   return `cursor:cwd:${encodeURIComponent(path)}`
@@ -144,6 +296,9 @@ export function createClaudeWorkspace(path: string, title?: string): WorkspaceVi
 
 export function cursorNativeId(session: RemoteSession): string {
   if (session.nativeId !== undefined && session.nativeId.length > 0) return session.nativeId
+  if (session.backend && session.backend !== 'harness' && session.sessionId.startsWith(`${session.backend}:`)) {
+    return session.sessionId.slice(session.backend.length + 1)
+  }
   if (session.sessionId.startsWith('cursor:')) return session.sessionId.slice('cursor:'.length)
   if (session.sessionId.startsWith('pi:')) return session.sessionId.slice('pi:'.length)
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
@@ -376,13 +531,15 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
   const method = frame.frame.method
   const params = isRecord(frame.frame.params) ? frame.frame.params : {}
   if (method === 'session/update') return applySessionUpdate(messages, sessionId, params)
+  if (method === 'cursor/ask_question') {
+    const questionCard = upsertAcpQuestion(messages, sessionId, params)
+    if (questionCard !== undefined) return questionCard
+  }
   if (method === 'session/request_permission' || method === 'cursor/ask_question' || method === 'cursor/create_plan') {
     return upsertApproval(messages, sessionId, params, method)
   }
   if (method === 'cursor/update_todos') {
-    const text = summarizeTodos(params)
-    if (text === undefined) return messages
-    return appendAssistantDelta(messages, sessionId, `\n\n${text}`, `cursor-todo:${stringValue(params.toolCallId) ?? Date.now()}`)
+    return messages
   }
   return messages
 }
@@ -487,10 +644,23 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
         ? 'stopped' : 'completed'
     const turn = activeAcpTurn(next)
     const time = Date.now()
-    return finalizeAssistantLive(next).map(item => turn !== undefined && item.turn === turn
-      ? { ...item, turnEnd: { reason, time },
-          ...(item.kind === 'tool' && item.state === 'running' ? { state: reason === 'completed' ? 'finished' as const : 'failed' as const } : {}) }
-      : item)
+    const usage = normalizeAcpChatUsage(update.usage)
+    const finalized = finalizeAssistantLive(next)
+    const lastAssistantIdx = usage === undefined
+      ? -1
+      : finalized.reduce((acc, item, idx) => (item.kind === 'message' && item.role === 'assistant' && (turn === undefined || item.turn === turn) ? idx : acc), -1)
+    return finalized.map((item, idx) => {
+      const turnMatched = turn !== undefined && item.turn === turn
+      const withUsage = idx === lastAssistantIdx && item.kind === 'message' && usage !== undefined
+        ? { ...item, usage }
+        : item
+      if (!turnMatched) return withUsage
+      return {
+        ...withUsage,
+        turnEnd: { reason, time },
+        ...(withUsage.kind === 'tool' && withUsage.state === 'running' ? { state: reason === 'completed' ? 'finished' as const : 'failed' as const } : {}),
+      }
+    })
   }
   if (kind === 'user_message_chunk') {
     const text = extractText(update)
@@ -510,17 +680,17 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
     const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
     const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? previous?.toolName ?? 'tool'
-    // Pi streams bash output as deltas in ACP metadata, not rawOutput.
-    // Keep this backend-specific until other adapters declare the same semantics.
-    const meta = sessionId.startsWith('pi:') && isRecord(update._meta) ? update._meta : {}
+    const pi = sessionId.startsWith('pi:')
+    const meta = pi && isRecord(update._meta) ? update._meta : {}
     const terminalOutput = isRecord(meta.terminal_output) ? meta.terminal_output : {}
     const terminalExit = isRecord(meta.terminal_exit) ? meta.terminal_exit : {}
     const exitCode = typeof terminalExit.exit_code === 'number' && Number.isInteger(terminalExit.exit_code)
       ? terminalExit.exit_code : undefined
-    const state = stringValue(update.status) === 'failed' || (exitCode !== undefined && exitCode !== 0)
-      || (sessionId.startsWith('pi:') && previous?.state === 'failed') ? 'failed'
-      : exitCode !== undefined || stringValue(update.status) === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished'
-        : sessionId.startsWith('pi:') ? previous?.state ?? 'running' : 'running'
+    const statusStr = stringValue(update.status)
+    const state = statusStr === 'failed' || (exitCode !== undefined && exitCode !== 0)
+      || previous?.state === 'failed' ? 'failed'
+      : exitCode !== undefined || statusStr === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished'
+        : previous?.state ?? 'running'
     const argumentsText = boundedDetail(update.rawInput ?? update.parameters)
     const delta = typeof terminalOutput.data === 'string' ? terminalOutput.data : undefined
     const output = delta === undefined ? boundedDetail(update.rawOutput ?? update.output ?? update.content)
@@ -543,6 +713,99 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
   return messages
 }
 
+function upsertAcpQuestion(
+  messages: ChatItem[],
+  sessionId: string,
+  params: Record<string, unknown>,
+): ChatItem[] | undefined {
+  const requestHandle = stringValue(params.requestHandle)
+  if (requestHandle === undefined || !Array.isArray(params.questions) || params.questions.length === 0) return undefined
+  const title = stringValue(params.title)
+  const questions: AskUserQuestionItem[] = []
+  for (const [idx, raw] of params.questions.entries()) {
+    if (!isRecord(raw)) continue
+    const prompt = stringValue(raw.prompt) ?? stringValue(raw.question)
+    if (prompt === undefined) continue
+    const id = stringValue(raw.id) ?? `q-${idx + 1}`
+    const header = stringValue(raw.header) ?? title
+    const options = Array.isArray(raw.options)
+      ? raw.options.flatMap(opt => {
+          if (!isRecord(opt)) return []
+          const label = stringValue(opt.label) ?? stringValue(opt.id)
+          if (label === undefined) return []
+          const description = stringValue(opt.description)
+          return [{ label, ...(description === undefined ? {} : { description }) }]
+        })
+      : undefined
+    const multiSelect = raw.multiSelect === true || raw.allowMultiple === true
+    questions.push({
+      id,
+      question: prompt,
+      ...(header === undefined ? {} : { header }),
+      ...(options && options.length > 0 ? { options } : {}),
+      ...(multiSelect ? { multiSelect: true } : {}),
+    })
+  }
+  if (questions.length === 0) return undefined
+  const id = `cursor-question:${requestHandle}`
+  const item: QuestionActivity = {
+    kind: 'question',
+    id,
+    sessionId,
+    turn: acpTurn(messages),
+    frameRpcId: requestHandle,
+    questionState: 'open',
+    questions,
+    createdAt: Date.now(),
+  }
+  const existing = messages.findIndex(entry => entry.id === id)
+  if (existing >= 0) {
+    const copy = messages.slice()
+    copy[existing] = item
+    return copy
+  }
+  return [...messages, item]
+}
+
+function normalizeAcpChatUsage(raw: unknown): ChatMessage['usage'] | undefined {
+  if (!isRecord(raw)) return undefined
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+  const inputTokens = num(raw.inputTokens)
+  const outputTokens = num(raw.outputTokens)
+  const totalTokens = num(raw.totalTokens)
+  const cacheReadTokens = num(raw.cacheReadTokens ?? raw.cachedReadTokens)
+  const cacheWriteTokens = num(raw.cacheWriteTokens ?? raw.cachedWriteTokens)
+  const reasoningTokens = num(raw.reasoningTokens ?? raw.thoughtTokens)
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return undefined
+  return {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+  }
+}
+
+export function normalizeAcpTodos(raw: unknown): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed'; priority?: string }> | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const items: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed'; priority?: string }> = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const content = stringValue(entry.content) ?? stringValue(entry.title) ?? stringValue(entry.label)
+    if (content === undefined) continue
+    const rawStatus = stringValue(entry.status)
+    const status = rawStatus === 'completed' || rawStatus === 'done'
+      ? 'completed'
+      : rawStatus === 'in_progress' || rawStatus === 'inProgress' || rawStatus === 'running'
+        ? 'in_progress'
+        : 'pending'
+    const priority = stringValue(entry.priority)
+    items.push({ content, status, ...(priority !== undefined ? { priority } : {}) })
+  }
+  return items
+}
+
 function upsertApproval(
   messages: ChatItem[],
   sessionId: string,
@@ -560,7 +823,7 @@ function upsertApproval(
       ? (stringValue(params.title) ?? 'question')
       : (stringValue(params.toolName) ?? stringValue(toolCall.title) ?? 'permission')
   const reason = method === 'cursor/create_plan'
-    ? stringValue(params.overview) ?? stringValue(params.plan)
+    ? [stringValue(params.overview), stringValue(params.plan)].filter(Boolean).join('\n\n') || undefined
     : method === 'cursor/ask_question'
       ? summarizeQuestions(params)
       : boundedDetail(stringValue(params.reason) ?? stringValue(rawInput.message) ?? toolCall.rawInput)

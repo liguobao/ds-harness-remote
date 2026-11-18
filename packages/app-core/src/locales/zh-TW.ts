@@ -767,6 +767,7 @@ const zhTW = {
     agentsTab: "智慧體", agentPlatform: "智慧體平台", switchHarness: "切換 Harness",
     backendUnavailable: (name: string) => `目前連線的主機未啟用 ${name} 服務，請在電腦端設定或啟動該智慧體。`,
     backendDescriptions: { harness: "官方 DeepSeek 智慧體框架", codex: "OpenAI Codex 程式設計智慧體", claude: "Anthropic Claude 智慧體", hermes: "Nous Research Hermes Agent 智慧體", cursor: "Cursor IDE 互動智慧體", antigravity: "Antigravity 研發框架", opencode: "OpenCode 開源智慧體", pi: "Personal Intelligence 智慧體" },
+    customAcpDescription: '自訂 ACP 智慧體',
   },
   plugins: {
     title: '外掛',

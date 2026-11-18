@@ -1,11 +1,11 @@
 import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
-import { workspaceStableKey, type AcpCatalogFilterOptions } from '../lib/workspace-key'
+import { isAcpManagedBackend, workspaceStableKey, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
 import * as browseMemory from '../services/browse-memory'
 import { codexModelSelectionFromSession, loadCodexModels } from '../services/codex'
-import { cursorNativeId } from '../services/cursor'
+import { cursorNativeId, loadCursorCatalog, loadCustomAcpCatalog, mergeCursorCatalog, mergeCustomAcpCatalog } from '../services/cursor'
 import { loadOpencodeCatalog, loadOpencodeModels, mergeOpencodeCatalog } from '../services/opencode'
 import { loadClaudeCatalog, loadClaudeModels, mergeClaudeCatalog } from '../services/claude'
 import { loadHermesCatalog, loadHermesModels, mergeHermesCatalog } from '../services/hermes'
@@ -178,7 +178,7 @@ export class SessionRuntime {
   }
 
   private async refreshAcpCatalog(spec: {
-    backend: 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
+    backend: AcpManagedBackend
     has: () => boolean
     require: () => Parameters<typeof loadPiCatalog>[0]
     load: typeof loadPiCatalog
@@ -254,6 +254,26 @@ export class SessionRuntime {
     })
   }
 
+  async refreshCursorCatalog(): Promise<void> {
+    return this.refreshAcpCatalog({
+      backend: 'cursor',
+      has: () => this.connection.hasCursor(),
+      require: () => this.connection.requireCursor(),
+      load: loadCursorCatalog,
+      merge: mergeCursorCatalog,
+    })
+  }
+
+  async refreshCustomAcpCatalog(backend: AcpManagedBackend): Promise<void> {
+    return this.refreshAcpCatalog({
+      backend,
+      has: () => this.connection.hasAcpBackend(backend),
+      require: () => this.connection.requireAcpBackend(backend),
+      load: (client, remembered, warmPath, options) => loadCustomAcpCatalog(backend, client, remembered, warmPath, options),
+      merge: (catalog, workspaces, sessions, options) => mergeCustomAcpCatalog(backend, catalog, workspaces, sessions, options),
+    })
+  }
+
   async closeActiveCodexStream(notifyRemote = true): Promise<void> {
     this.clearPendingCodexFrames()
     const stream = this.activeCodexStream
@@ -278,7 +298,9 @@ export class SessionRuntime {
       ? this.connection.requireOpencode()
       : session.backend === 'pi'
         ? this.connection.requirePi()
-        : session.backend === 'antigravity' ? this.connection.requireAntigravity() : this.connection.requireCursor()
+        : session.backend === 'antigravity' ? this.connection.requireAntigravity()
+        : session.backend === 'cursor' ? this.connection.requireCursor()
+        : this.connection.requireAcpBackend(session.backend ?? 'cursor')
     const nativeId = cursorNativeId(session)
     const stream = await client.openStream(
       nativeId,
@@ -301,12 +323,23 @@ export class SessionRuntime {
         const phase = this.store.get().connection.phase
         if (phase !== 'connected') return
         const selected = this.store.get().selectedSession
-        if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi' && selected.backend !== 'opencode' && selected.backend !== 'claude' && selected.backend !== 'hermes')) return
+        if (selected?.sessionId !== session.sessionId || !isAcpManagedBackend(selected.backend)) return
         void this.ensureCursorStream(selected, current).catch(() => undefined)
       },
     )
     if (!current()) { await stream.close().catch(() => undefined); return }
     this.activeCursorStream = stream
+  }
+
+  async refreshCustomAcpModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    if (!isAcpManagedBackend(session.backend)) return
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadAcpModels(this.connection.requireAcpBackend(session.backend), cursorNativeId(session), session.backend)
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
   }
 
   async rememberRecentWorkspace(session: RemoteSession): Promise<void> {

@@ -780,6 +780,7 @@ const ukUA = {
     agentsTab: "Агенти", agentPlatform: "Платформа агентів", switchHarness: "Змінити Harness",
     backendUnavailable: (name: string) => `${name} не ввімкнено на підключеному хості. Налаштуйте або запустіть його на компʼютері.`,
     backendDescriptions: { harness: "Офіційний фреймворк агентів DeepSeek", codex: "Агент для програмування OpenAI Codex", claude: "Агент Anthropic Claude", hermes: "Nous Research Hermes Agent", cursor: "Інтерактивний агент Cursor IDE", antigravity: "Фреймворк розробки Antigravity", opencode: "Агент із відкритим кодом OpenCode", pi: "Агент Personal Intelligence" },
+    customAcpDescription: 'Користувацький ACP-агент',
   },
   plugins: {
     connectHostFirst: 'Спочатку підключіться до хоста',

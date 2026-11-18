@@ -43,6 +43,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { AcpRemoteGateway } from './acp/gateway.js'
+import { AcpWorkspaceStore } from './acp/workspace-store.js'
 import type { AcpPeerBridge, PublishAcpFrame } from './acp/peer-bridge.js'
 import { RpcError } from './safe-error.js'
 import { CodexWorkspaceBridge, CodexWorkspaceState, type RemoteTerminalSpawner } from './codex-workspace-bridge.js'
@@ -112,7 +113,15 @@ export class HostPluginRuntime {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
-    this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
+    this.acp = new AcpRemoteGateway(
+      config.acp ?? { enabled: false, backends: [] },
+      logger,
+      undefined,
+      undefined,
+      () => this.terminalEnabled,
+      this.terminalSpawner,
+      AcpWorkspaceStore.inDirectory(identities?.directory),
+    )
     // Each operation runs on its own owner Peer minted from the Host gateway,
     // so its lifetime is independent of the client connection that submitted it.
     this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
@@ -504,6 +513,10 @@ export class HostPluginRuntime {
     return this.acp.status()
   }
 
+  acpDiagnostics(): ReturnType<AcpRemoteGateway['diagnostics']> {
+    return this.acp.diagnostics()
+  }
+
   acpCall(input: unknown): Promise<unknown> {
     return this.requireLocalAcpPeer().call(input)
   }
@@ -559,6 +572,7 @@ export class HostPluginRuntime {
       workspaceTypes: this.hostWorkspaceTypes(),
       codex: this.codex.status(),
       acp: this.acp.status(),
+      acpDiagnostics: this.acp.diagnostics(),
     }
   }
 

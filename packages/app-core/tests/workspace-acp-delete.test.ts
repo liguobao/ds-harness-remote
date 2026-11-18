@@ -306,7 +306,7 @@ describe('Issue #447 ACP workspace management and persistence', () => {
           expect(harness.get().workspaces.some(item => item.backend === backend && item.path === targetPath)).toBe(false)
           expect(harness.get().sessions.some(item => item.backend === backend)).toBe(false)
 
-          if (backend !== 'cursor') {
+          if (backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes') {
             const methodMap = {
               antigravity: 'refreshAntigravityCatalog',
               pi: 'refreshPiCatalog',
@@ -314,7 +314,8 @@ describe('Issue #447 ACP workspace management and persistence', () => {
               claude: 'refreshClaudeCatalog',
               hermes: 'refreshHermesCatalog',
             } as const
-            await harness.runtime[methodMap[backend]]()
+            const method = methodMap[backend as keyof typeof methodMap]
+            await harness.runtime[method]()
             expect(harness.get().workspaces.some(item => item.backend === backend && item.path === targetPath)).toBe(false)
           }
 
