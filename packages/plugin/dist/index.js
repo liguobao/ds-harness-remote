@@ -72,20 +72,20 @@ var require_buffer_util = __commonJS({
       if (list2.length === 0) return EMPTY_BUFFER;
       if (list2.length === 1) return list2[0];
       const target3 = Buffer.allocUnsafe(totalLength);
-      let offset = 0;
+      let offset2 = 0;
       for (let i = 0; i < list2.length; i++) {
         const buf = list2[i];
-        target3.set(buf, offset);
-        offset += buf.length;
+        target3.set(buf, offset2);
+        offset2 += buf.length;
       }
-      if (offset < totalLength) {
-        return new FastBuffer(target3.buffer, target3.byteOffset, offset);
+      if (offset2 < totalLength) {
+        return new FastBuffer(target3.buffer, target3.byteOffset, offset2);
       }
       return target3;
     }
-    function _mask(source, mask, output2, offset, length) {
+    function _mask(source, mask, output2, offset2, length) {
       for (let i = 0; i < length; i++) {
-        output2[offset + i] = source[i] ^ mask[i & 3];
+        output2[offset2 + i] = source[i] ^ mask[i & 3];
       }
     }
     function _unmask(buffer3, mask) {
@@ -123,9 +123,9 @@ var require_buffer_util = __commonJS({
     if (!process.env.WS_NO_BUFFER_UTIL) {
       try {
         const bufferUtil = __require("bufferutil");
-        module.exports.mask = function(source, mask, output2, offset, length) {
-          if (length < 48) _mask(source, mask, output2, offset, length);
-          else bufferUtil.mask(source, mask, output2, offset, length);
+        module.exports.mask = function(source, mask, output2, offset2, length) {
+          if (length < 48) _mask(source, mask, output2, offset2, length);
+          else bufferUtil.mask(source, mask, output2, offset2, length);
         };
         module.exports.unmask = function(buffer3, mask) {
           if (buffer3.length < 32) _unmask(buffer3, mask);
@@ -890,11 +890,11 @@ var require_receiver = __commonJS({
         const dst = Buffer.allocUnsafe(n);
         do {
           const buf = this._buffers[0];
-          const offset = dst.length - n;
+          const offset2 = dst.length - n;
           if (n >= buf.length) {
-            dst.set(this._buffers.shift(), offset);
+            dst.set(this._buffers.shift(), offset2);
           } else {
-            dst.set(new Uint8Array(buf.buffer, buf.byteOffset, n), offset);
+            dst.set(new Uint8Array(buf.buffer, buf.byteOffset, n), offset2);
             this._buffers[0] = new FastBuffer(
               buf.buffer,
               buf.byteOffset + n,
@@ -1463,7 +1463,7 @@ var require_sender = __commonJS({
       static frame(data2, options) {
         let mask;
         let merge3 = false;
-        let offset = 2;
+        let offset2 = 2;
         let skipMasking = false;
         if (options.mask) {
           mask = options.maskBuffer || maskBuffer;
@@ -1483,7 +1483,7 @@ var require_sender = __commonJS({
             mask[3] = randomPool[randomPoolPointer++];
           }
           skipMasking = (mask[0] | mask[1] | mask[2] | mask[3]) === 0;
-          offset = 6;
+          offset2 = 6;
         }
         let dataLength;
         if (typeof data2 === "string") {
@@ -1499,13 +1499,13 @@ var require_sender = __commonJS({
         }
         let payloadLength = dataLength;
         if (dataLength >= 65536) {
-          offset += 8;
+          offset2 += 8;
           payloadLength = 127;
         } else if (dataLength > 125) {
-          offset += 2;
+          offset2 += 2;
           payloadLength = 126;
         }
-        const target3 = Buffer.allocUnsafe(merge3 ? dataLength + offset : offset);
+        const target3 = Buffer.allocUnsafe(merge3 ? dataLength + offset2 : offset2);
         target3[0] = options.fin ? options.opcode | 128 : options.opcode;
         if (options.rsv1) target3[0] |= 64;
         target3[1] = payloadLength;
@@ -1517,13 +1517,13 @@ var require_sender = __commonJS({
         }
         if (!options.mask) return [target3, data2];
         target3[1] |= 128;
-        target3[offset - 4] = mask[0];
-        target3[offset - 3] = mask[1];
-        target3[offset - 2] = mask[2];
-        target3[offset - 1] = mask[3];
+        target3[offset2 - 4] = mask[0];
+        target3[offset2 - 3] = mask[1];
+        target3[offset2 - 2] = mask[2];
+        target3[offset2 - 1] = mask[3];
         if (skipMasking) return [target3, data2];
         if (merge3) {
-          applyMask(data2, mask, target3, offset, dataLength);
+          applyMask(data2, mask, target3, offset2, dataLength);
           return [target3];
         }
         applyMask(data2, mask, data2, 0, dataLength);
@@ -2041,36 +2041,36 @@ var require_event_target = __commonJS({
         let wrapper;
         if (type === "message") {
           wrapper = function onMessage(data2, isBinary2) {
-            const event = new MessageEvent("message", {
+            const event2 = new MessageEvent("message", {
               data: isBinary2 ? data2 : data2.toString()
             });
-            event[kTarget] = this;
-            callListener(handler, this, event);
+            event2[kTarget] = this;
+            callListener(handler, this, event2);
           };
         } else if (type === "close") {
           wrapper = function onClose(code, message) {
-            const event = new CloseEvent("close", {
+            const event2 = new CloseEvent("close", {
               code,
               reason: message.toString(),
               wasClean: this._closeFrameReceived && this._closeFrameSent
             });
-            event[kTarget] = this;
-            callListener(handler, this, event);
+            event2[kTarget] = this;
+            callListener(handler, this, event2);
           };
         } else if (type === "error") {
           wrapper = function onError(error62) {
-            const event = new ErrorEvent("error", {
+            const event2 = new ErrorEvent("error", {
               error: error62,
               message: error62.message
             });
-            event[kTarget] = this;
-            callListener(handler, this, event);
+            event2[kTarget] = this;
+            callListener(handler, this, event2);
           };
         } else if (type === "open") {
           wrapper = function onOpen() {
-            const event = new Event3("open");
-            event[kTarget] = this;
-            callListener(handler, this, event);
+            const event2 = new Event3("open");
+            event2[kTarget] = this;
+            callListener(handler, this, event2);
           };
         } else {
           return;
@@ -2106,11 +2106,11 @@ var require_event_target = __commonJS({
       EventTarget: EventTarget2,
       MessageEvent
     };
-    function callListener(listener, thisArg, event) {
+    function callListener(listener, thisArg, event2) {
       if (typeof listener === "object" && listener.handleEvent) {
-        listener.handleEvent.call(listener, event);
+        listener.handleEvent.call(listener, event2);
       } else {
-        listener.call(thisArg, event);
+        listener.call(thisArg, event2);
       }
     }
   }
@@ -2278,7 +2278,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
-    var { randomBytes: randomBytes15, createHash: createHash8 } = __require("crypto");
+    var { randomBytes: randomBytes15, createHash: createHash9 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2946,7 +2946,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash8("sha1").update(key + GUID).digest("base64");
+        const digest = createHash9("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3315,7 +3315,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter3 = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash: createHash8 } = __require("crypto");
+    var { createHash: createHash9 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3622,7 +3622,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash8("sha1").update(key + GUID).digest("base64");
+        const digest = createHash9("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -3669,10 +3669,10 @@ var require_websocket_server = __commonJS({
     };
     module.exports = WebSocketServer2;
     function addListeners(server, map2) {
-      for (const event of Object.keys(map2)) server.on(event, map2[event]);
+      for (const event2 of Object.keys(map2)) server.on(event2, map2[event2]);
       return function removeListeners() {
-        for (const event of Object.keys(map2)) {
-          server.removeListener(event, map2[event]);
+        for (const event2 of Object.keys(map2)) {
+          server.removeListener(event2, map2[event2]);
         }
       };
     }
@@ -4220,26 +4220,26 @@ var require_ip_codec = __commonJS({
         name: "v4",
         size: v4Size,
         isFormat: (ip) => v4Regex.test(ip),
-        encode(ip, buff, offset) {
-          offset = ~~offset;
-          buff = buff || new Uint8Array(offset + v4Size);
+        encode(ip, buff, offset2) {
+          offset2 = ~~offset2;
+          buff = buff || new Uint8Array(offset2 + v4Size);
           const max = ip.length;
           let n = 0;
           for (let i = 0; i < max; ) {
             const c = ip.charCodeAt(i++);
             if (c === 46) {
-              buff[offset++] = n;
+              buff[offset2++] = n;
               n = 0;
             } else {
               n = n * 10 + (c - 48);
             }
           }
-          buff[offset] = n;
+          buff[offset2] = n;
           return buff;
         },
-        decode(buff, offset) {
-          offset = ~~offset;
-          return `${buff[offset++]}.${buff[offset++]}.${buff[offset++]}.${buff[offset]}`;
+        decode(buff, offset2) {
+          offset2 = ~~offset2;
+          return `${buff[offset2++]}.${buff[offset2++]}.${buff[offset2++]}.${buff[offset2]}`;
         }
       };
       exports2.v4 = v4;
@@ -4247,34 +4247,34 @@ var require_ip_codec = __commonJS({
         name: "v6",
         size: v6Size,
         isFormat: (ip) => ip.length > 0 && v6Regex.test(ip),
-        encode(ip, buff, offset) {
-          offset = ~~offset;
-          let end = offset + v6Size;
+        encode(ip, buff, offset2) {
+          offset2 = ~~offset2;
+          let end = offset2 + v6Size;
           let fill = -1;
           let hexN = 0;
           let decN = 0;
           let prevColon = true;
           let useDec = false;
-          buff = buff || new Uint8Array(offset + v6Size);
+          buff = buff || new Uint8Array(offset2 + v6Size);
           for (let i = 0; i < ip.length; i++) {
             let c = ip.charCodeAt(i);
             if (c === 58) {
               if (prevColon) {
                 if (fill !== -1) {
-                  if (offset < end) buff[offset] = 0;
-                  if (offset < end - 1) buff[offset + 1] = 0;
-                  offset += 2;
-                } else if (offset < end) {
-                  fill = offset;
+                  if (offset2 < end) buff[offset2] = 0;
+                  if (offset2 < end - 1) buff[offset2 + 1] = 0;
+                  offset2 += 2;
+                } else if (offset2 < end) {
+                  fill = offset2;
                 }
               } else {
                 if (useDec === true) {
-                  if (offset < end) buff[offset] = decN;
-                  offset++;
+                  if (offset2 < end) buff[offset2] = decN;
+                  offset2++;
                 } else {
-                  if (offset < end) buff[offset] = hexN >> 8;
-                  if (offset < end - 1) buff[offset + 1] = hexN & 255;
-                  offset += 2;
+                  if (offset2 < end) buff[offset2] = hexN >> 8;
+                  if (offset2 < end - 1) buff[offset2 + 1] = hexN & 255;
+                  offset2 += 2;
                 }
                 hexN = 0;
                 decN = 0;
@@ -4282,8 +4282,8 @@ var require_ip_codec = __commonJS({
               prevColon = true;
               useDec = false;
             } else if (c === 46) {
-              if (offset < end) buff[offset] = decN;
-              offset++;
+              if (offset2 < end) buff[offset2] = decN;
+              offset2++;
               decN = 0;
               hexN = 0;
               prevColon = false;
@@ -4303,48 +4303,48 @@ var require_ip_codec = __commonJS({
           }
           if (prevColon === false) {
             if (useDec === true) {
-              if (offset < end) buff[offset] = decN;
-              offset++;
+              if (offset2 < end) buff[offset2] = decN;
+              offset2++;
             } else {
-              if (offset < end) buff[offset] = hexN >> 8;
-              if (offset < end - 1) buff[offset + 1] = hexN & 255;
-              offset += 2;
+              if (offset2 < end) buff[offset2] = hexN >> 8;
+              if (offset2 < end - 1) buff[offset2 + 1] = hexN & 255;
+              offset2 += 2;
             }
           } else if (fill === 0) {
-            if (offset < end) buff[offset] = 0;
-            if (offset < end - 1) buff[offset + 1] = 0;
-            offset += 2;
+            if (offset2 < end) buff[offset2] = 0;
+            if (offset2 < end - 1) buff[offset2 + 1] = 0;
+            offset2 += 2;
           } else if (fill !== -1) {
-            offset += 2;
-            for (let i = Math.min(offset - 1, end - 1); i >= fill + 2; i--) {
+            offset2 += 2;
+            for (let i = Math.min(offset2 - 1, end - 1); i >= fill + 2; i--) {
               buff[i] = buff[i - 2];
             }
             buff[fill] = 0;
             buff[fill + 1] = 0;
-            fill = offset;
+            fill = offset2;
           }
-          if (fill !== offset && fill !== -1) {
-            if (offset > end - 2) {
-              offset = end - 2;
+          if (fill !== offset2 && fill !== -1) {
+            if (offset2 > end - 2) {
+              offset2 = end - 2;
             }
             while (end > fill) {
-              buff[--end] = offset < end && offset > fill ? buff[--offset] : 0;
+              buff[--end] = offset2 < end && offset2 > fill ? buff[--offset2] : 0;
             }
           } else {
-            while (offset < end) {
-              buff[offset++] = 0;
+            while (offset2 < end) {
+              buff[offset2++] = 0;
             }
           }
           return buff;
         },
-        decode(buff, offset) {
-          offset = ~~offset;
+        decode(buff, offset2) {
+          offset2 = ~~offset2;
           let result = "";
           for (let i = 0; i < v6Size; i += 2) {
             if (i !== 0) {
               result += ":";
             }
-            result += (buff[offset + i] << 8 | buff[offset + i + 1]).toString(16);
+            result += (buff[offset2 + i] << 8 | buff[offset2 + i + 1]).toString(16);
           }
           return result.replace(/(^|:)0(:0)*:0(:|$)/, "$1::$3").replace(/:{3,4}/, "::");
         }
@@ -4360,25 +4360,25 @@ var require_ip_codec = __commonJS({
       function familyOf(string9) {
         return sizeOf(string9) === v4.size ? 1 : 2;
       }
-      function encode21(ip, buff, offset) {
-        offset = ~~offset;
+      function encode21(ip, buff, offset2) {
+        offset2 = ~~offset2;
         const size2 = sizeOf(ip);
         if (typeof buff === "function") {
-          buff = buff(offset + size2);
+          buff = buff(offset2 + size2);
         }
         if (size2 === v4.size) {
-          return v4.encode(ip, buff, offset);
+          return v4.encode(ip, buff, offset2);
         }
-        return v6.encode(ip, buff, offset);
+        return v6.encode(ip, buff, offset2);
       }
-      function decode21(buff, offset, length) {
-        offset = ~~offset;
-        length = length || buff.length - offset;
+      function decode21(buff, offset2, length) {
+        offset2 = ~~offset2;
+        length = length || buff.length - offset2;
         if (length === v4.size) {
-          return v4.decode(buff, offset, length);
+          return v4.decode(buff, offset2, length);
         }
         if (length === v6.size) {
-          return v6.decode(buff, offset, length);
+          return v6.decode(buff, offset2, length);
         }
         throw Error(`Invalid buffer size needs to be ${v4.size} for v4 or ${v6.size} for v6.`);
       }
@@ -4409,10 +4409,10 @@ var require_dns_packet = __commonJS({
     var QU_MASK = 1 << 15;
     var NOT_QU_MASK = ~QU_MASK;
     var name2 = exports.name = {};
-    name2.encode = function(str, buf, offset, { mail = false } = {}) {
+    name2.encode = function(str, buf, offset2, { mail = false } = {}) {
       if (!buf) buf = Buffer9.alloc(name2.encodingLength(str));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const n = str.replace(/^\.|\.$/gm, "");
       if (n.length) {
         let list2 = [];
@@ -4433,55 +4433,55 @@ var require_dns_packet = __commonJS({
           list2 = n.split(".");
         }
         for (let i = 0; i < list2.length; i++) {
-          const len = buf.write(list2[i], offset + 1);
-          buf[offset] = len;
-          offset += len + 1;
+          const len = buf.write(list2[i], offset2 + 1);
+          buf[offset2] = len;
+          offset2 += len + 1;
         }
       }
-      buf[offset++] = 0;
-      name2.encode.bytes = offset - oldOffset;
+      buf[offset2++] = 0;
+      name2.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     name2.encode.bytes = 0;
-    name2.decode = function(buf, offset, { mail = false } = {}) {
-      if (!offset) offset = 0;
+    name2.decode = function(buf, offset2, { mail = false } = {}) {
+      if (!offset2) offset2 = 0;
       const list2 = [];
-      let oldOffset = offset;
+      let oldOffset = offset2;
       let totalLength = 0;
       let consumedBytes = 0;
       let jumped = false;
       while (true) {
-        if (offset >= buf.length) {
+        if (offset2 >= buf.length) {
           throw new Error("Cannot decode name (buffer overflow)");
         }
-        const len = buf[offset++];
+        const len = buf[offset2++];
         consumedBytes += jumped ? 0 : 1;
         if (len === 0) {
           break;
         } else if ((len & 192) === 0) {
-          if (offset + len > buf.length) {
+          if (offset2 + len > buf.length) {
             throw new Error("Cannot decode name (buffer overflow)");
           }
           totalLength += len + 1;
           if (totalLength > 254) {
             throw new Error("Cannot decode name (name too long)");
           }
-          let label = buf.toString("utf-8", offset, offset + len);
+          let label = buf.toString("utf-8", offset2, offset2 + len);
           if (mail) {
             label = label.replace(/\./g, "\\.");
           }
           list2.push(label);
-          offset += len;
+          offset2 += len;
           consumedBytes += jumped ? 0 : len;
         } else if ((len & 192) === 192) {
-          if (offset + 1 > buf.length) {
+          if (offset2 + 1 > buf.length) {
             throw new Error("Cannot decode name (buffer overflow)");
           }
-          const jumpOffset = buf.readUInt16BE(offset - 1) - 49152;
+          const jumpOffset = buf.readUInt16BE(offset2 - 1) - 49152;
           if (jumpOffset >= oldOffset) {
             throw new Error("Cannot decode name (bad pointer)");
           }
-          offset = jumpOffset;
+          offset2 = jumpOffset;
           oldOffset = jumpOffset;
           consumedBytes += jumped ? 0 : 1;
           jumped = true;
@@ -4498,19 +4498,19 @@ var require_dns_packet = __commonJS({
       return Buffer9.byteLength(n.replace(/^\.|\.$/gm, "")) + 2;
     };
     var string9 = {};
-    string9.encode = function(s, buf, offset) {
+    string9.encode = function(s, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(string9.encodingLength(s));
-      if (!offset) offset = 0;
-      const len = buf.write(s, offset + 1);
-      buf[offset] = len;
+      if (!offset2) offset2 = 0;
+      const len = buf.write(s, offset2 + 1);
+      buf[offset2] = len;
       string9.encode.bytes = len + 1;
       return buf;
     };
     string9.encode.bytes = 0;
-    string9.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const len = buf[offset];
-      const s = buf.toString("utf-8", offset + 1, offset + 1 + len);
+    string9.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const len = buf[offset2];
+      const s = buf.toString("utf-8", offset2 + 1, offset2 + 1 + len);
       string9.decode.bytes = len + 1;
       return s;
     };
@@ -4519,26 +4519,26 @@ var require_dns_packet = __commonJS({
       return Buffer9.byteLength(s) + 1;
     };
     var header = {};
-    header.encode = function(h, buf, offset) {
+    header.encode = function(h, buf, offset2) {
       if (!buf) buf = header.encodingLength(h);
-      if (!offset) offset = 0;
+      if (!offset2) offset2 = 0;
       const flags = (h.flags || 0) & 32767;
       const type = h.type === "response" ? RESPONSE_FLAG : QUERY_FLAG;
-      buf.writeUInt16BE(h.id || 0, offset);
-      buf.writeUInt16BE(flags | type, offset + 2);
-      buf.writeUInt16BE(h.questions.length, offset + 4);
-      buf.writeUInt16BE(h.answers.length, offset + 6);
-      buf.writeUInt16BE(h.authorities.length, offset + 8);
-      buf.writeUInt16BE(h.additionals.length, offset + 10);
+      buf.writeUInt16BE(h.id || 0, offset2);
+      buf.writeUInt16BE(flags | type, offset2 + 2);
+      buf.writeUInt16BE(h.questions.length, offset2 + 4);
+      buf.writeUInt16BE(h.answers.length, offset2 + 6);
+      buf.writeUInt16BE(h.authorities.length, offset2 + 8);
+      buf.writeUInt16BE(h.additionals.length, offset2 + 10);
       return buf;
     };
     header.encode.bytes = 12;
-    header.decode = function(buf, offset) {
-      if (!offset) offset = 0;
+    header.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
       if (buf.length < 12) throw new Error("Header must be 12 bytes");
-      const flags = buf.readUInt16BE(offset + 2);
+      const flags = buf.readUInt16BE(offset2 + 2);
       return {
-        id: buf.readUInt16BE(offset),
+        id: buf.readUInt16BE(offset2),
         type: flags & RESPONSE_FLAG ? "response" : "query",
         flags: flags & 32767,
         flag_qr: (flags >> 15 & 1) === 1,
@@ -4551,10 +4551,10 @@ var require_dns_packet = __commonJS({
         flag_ad: (flags >> 5 & 1) === 1,
         flag_cd: (flags >> 4 & 1) === 1,
         rcode: rcodes.toString(flags & 15),
-        questions: new Array(buf.readUInt16BE(offset + 4)),
-        answers: new Array(buf.readUInt16BE(offset + 6)),
-        authorities: new Array(buf.readUInt16BE(offset + 8)),
-        additionals: new Array(buf.readUInt16BE(offset + 10))
+        questions: new Array(buf.readUInt16BE(offset2 + 4)),
+        answers: new Array(buf.readUInt16BE(offset2 + 6)),
+        authorities: new Array(buf.readUInt16BE(offset2 + 8)),
+        additionals: new Array(buf.readUInt16BE(offset2 + 10))
       };
     };
     header.decode.bytes = 12;
@@ -4562,19 +4562,19 @@ var require_dns_packet = __commonJS({
       return 12;
     };
     var runknown = exports.unknown = {};
-    runknown.encode = function(data2, buf, offset) {
+    runknown.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(runknown.encodingLength(data2));
-      if (!offset) offset = 0;
-      buf.writeUInt16BE(data2.length, offset);
-      data2.copy(buf, offset + 2);
+      if (!offset2) offset2 = 0;
+      buf.writeUInt16BE(data2.length, offset2);
+      data2.copy(buf, offset2 + 2);
       runknown.encode.bytes = data2.length + 2;
       return buf;
     };
     runknown.encode.bytes = 0;
-    runknown.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const len = buf.readUInt16BE(offset);
-      const data2 = buf.slice(offset + 2, offset + 2 + len);
+    runknown.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const len = buf.readUInt16BE(offset2);
+      const data2 = buf.slice(offset2 + 2, offset2 + 2 + len);
       runknown.decode.bytes = len + 2;
       return data2;
     };
@@ -4583,19 +4583,19 @@ var require_dns_packet = __commonJS({
       return data2.length + 2;
     };
     var rns = exports.ns = {};
-    rns.encode = function(data2, buf, offset) {
+    rns.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rns.encodingLength(data2));
-      if (!offset) offset = 0;
-      name2.encode(data2, buf, offset + 2);
-      buf.writeUInt16BE(name2.encode.bytes, offset);
+      if (!offset2) offset2 = 0;
+      name2.encode(data2, buf, offset2 + 2);
+      buf.writeUInt16BE(name2.encode.bytes, offset2);
       rns.encode.bytes = name2.encode.bytes + 2;
       return buf;
     };
     rns.encode.bytes = 0;
-    rns.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const len = buf.readUInt16BE(offset);
-      const dd = name2.decode(buf, offset + 2);
+    rns.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const len = buf.readUInt16BE(offset2);
+      const dd = name2.decode(buf, offset2 + 2);
       rns.decode.bytes = len + 2;
       return dd;
     };
@@ -4604,50 +4604,50 @@ var require_dns_packet = __commonJS({
       return name2.encodingLength(data2) + 2;
     };
     var rsoa = exports.soa = {};
-    rsoa.encode = function(data2, buf, offset) {
+    rsoa.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rsoa.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      name2.encode(data2.mname, buf, offset);
-      offset += name2.encode.bytes;
-      name2.encode(data2.rname, buf, offset, { mail: true });
-      offset += name2.encode.bytes;
-      buf.writeUInt32BE(data2.serial || 0, offset);
-      offset += 4;
-      buf.writeUInt32BE(data2.refresh || 0, offset);
-      offset += 4;
-      buf.writeUInt32BE(data2.retry || 0, offset);
-      offset += 4;
-      buf.writeUInt32BE(data2.expire || 0, offset);
-      offset += 4;
-      buf.writeUInt32BE(data2.minimum || 0, offset);
-      offset += 4;
-      buf.writeUInt16BE(offset - oldOffset - 2, oldOffset);
-      rsoa.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      name2.encode(data2.mname, buf, offset2);
+      offset2 += name2.encode.bytes;
+      name2.encode(data2.rname, buf, offset2, { mail: true });
+      offset2 += name2.encode.bytes;
+      buf.writeUInt32BE(data2.serial || 0, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(data2.refresh || 0, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(data2.retry || 0, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(data2.expire || 0, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(data2.minimum || 0, offset2);
+      offset2 += 4;
+      buf.writeUInt16BE(offset2 - oldOffset - 2, oldOffset);
+      rsoa.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     rsoa.encode.bytes = 0;
-    rsoa.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rsoa.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const data2 = {};
-      offset += 2;
-      data2.mname = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      data2.rname = name2.decode(buf, offset, { mail: true });
-      offset += name2.decode.bytes;
-      data2.serial = buf.readUInt32BE(offset);
-      offset += 4;
-      data2.refresh = buf.readUInt32BE(offset);
-      offset += 4;
-      data2.retry = buf.readUInt32BE(offset);
-      offset += 4;
-      data2.expire = buf.readUInt32BE(offset);
-      offset += 4;
-      data2.minimum = buf.readUInt32BE(offset);
-      offset += 4;
-      rsoa.decode.bytes = offset - oldOffset;
+      offset2 += 2;
+      data2.mname = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      data2.rname = name2.decode(buf, offset2, { mail: true });
+      offset2 += name2.decode.bytes;
+      data2.serial = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      data2.refresh = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      data2.retry = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      data2.expire = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      data2.minimum = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      rsoa.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rsoa.decode.bytes = 0;
@@ -4655,7 +4655,7 @@ var require_dns_packet = __commonJS({
       return 22 + name2.encodingLength(data2.mname) + name2.encodingLength(data2.rname);
     };
     var rtxt = exports.txt = {};
-    rtxt.encode = function(data2, buf, offset) {
+    rtxt.encode = function(data2, buf, offset2) {
       if (!Array.isArray(data2)) data2 = [data2];
       for (let i = 0; i < data2.length; i++) {
         if (typeof data2[i] === "string") {
@@ -4666,36 +4666,36 @@ var require_dns_packet = __commonJS({
         }
       }
       if (!buf) buf = Buffer9.alloc(rtxt.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
       data2.forEach(function(d) {
-        buf[offset++] = d.length;
-        d.copy(buf, offset, 0, d.length);
-        offset += d.length;
+        buf[offset2++] = d.length;
+        d.copy(buf, offset2, 0, d.length);
+        offset2 += d.length;
       });
-      buf.writeUInt16BE(offset - oldOffset - 2, oldOffset);
-      rtxt.encode.bytes = offset - oldOffset;
+      buf.writeUInt16BE(offset2 - oldOffset - 2, oldOffset);
+      rtxt.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     rtxt.encode.bytes = 0;
-    rtxt.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      let remaining = buf.readUInt16BE(offset);
-      offset += 2;
+    rtxt.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      let remaining = buf.readUInt16BE(offset2);
+      offset2 += 2;
       let data2 = [];
       while (remaining > 0) {
-        const len = buf[offset++];
+        const len = buf[offset2++];
         --remaining;
         if (remaining < len) {
           throw new Error("Buffer overflow");
         }
-        data2.push(buf.slice(offset, offset + len));
-        offset += len;
+        data2.push(buf.slice(offset2, offset2 + len));
+        offset2 += len;
         remaining -= len;
       }
-      rtxt.decode.bytes = offset - oldOffset;
+      rtxt.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rtxt.decode.bytes = 0;
@@ -4712,29 +4712,29 @@ var require_dns_packet = __commonJS({
       return length;
     };
     var rnull = exports.null = {};
-    rnull.encode = function(data2, buf, offset) {
+    rnull.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rnull.encodingLength(data2));
-      if (!offset) offset = 0;
+      if (!offset2) offset2 = 0;
       if (typeof data2 === "string") data2 = Buffer9.from(data2);
       if (!data2) data2 = Buffer9.alloc(0);
-      const oldOffset = offset;
-      offset += 2;
+      const oldOffset = offset2;
+      offset2 += 2;
       const len = data2.length;
-      data2.copy(buf, offset, 0, len);
-      offset += len;
-      buf.writeUInt16BE(offset - oldOffset - 2, oldOffset);
-      rnull.encode.bytes = offset - oldOffset;
+      data2.copy(buf, offset2, 0, len);
+      offset2 += len;
+      buf.writeUInt16BE(offset2 - oldOffset - 2, oldOffset);
+      rnull.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     rnull.encode.bytes = 0;
-    rnull.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      const len = buf.readUInt16BE(offset);
-      offset += 2;
-      const data2 = buf.slice(offset, offset + len);
-      offset += len;
-      rnull.decode.bytes = offset - oldOffset;
+    rnull.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      const len = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      const data2 = buf.slice(offset2, offset2 + len);
+      offset2 += len;
+      rnull.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rnull.decode.bytes = 0;
@@ -4743,30 +4743,30 @@ var require_dns_packet = __commonJS({
       return (Buffer9.isBuffer(data2) ? data2.length : Buffer9.byteLength(data2)) + 2;
     };
     var rhinfo = exports.hinfo = {};
-    rhinfo.encode = function(data2, buf, offset) {
+    rhinfo.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rhinfo.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      string9.encode(data2.cpu, buf, offset);
-      offset += string9.encode.bytes;
-      string9.encode(data2.os, buf, offset);
-      offset += string9.encode.bytes;
-      buf.writeUInt16BE(offset - oldOffset - 2, oldOffset);
-      rhinfo.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      string9.encode(data2.cpu, buf, offset2);
+      offset2 += string9.encode.bytes;
+      string9.encode(data2.os, buf, offset2);
+      offset2 += string9.encode.bytes;
+      buf.writeUInt16BE(offset2 - oldOffset - 2, oldOffset);
+      rhinfo.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     rhinfo.encode.bytes = 0;
-    rhinfo.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rhinfo.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const data2 = {};
-      offset += 2;
-      data2.cpu = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      data2.os = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      rhinfo.decode.bytes = offset - oldOffset;
+      offset2 += 2;
+      data2.cpu = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      data2.os = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      rhinfo.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rhinfo.decode.bytes = 0;
@@ -4776,18 +4776,18 @@ var require_dns_packet = __commonJS({
     var rptr = exports.ptr = {};
     var rcname = exports.cname = rptr;
     var rdname = exports.dname = rptr;
-    rptr.encode = function(data2, buf, offset) {
+    rptr.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rptr.encodingLength(data2));
-      if (!offset) offset = 0;
-      name2.encode(data2, buf, offset + 2);
-      buf.writeUInt16BE(name2.encode.bytes, offset);
+      if (!offset2) offset2 = 0;
+      name2.encode(data2, buf, offset2 + 2);
+      buf.writeUInt16BE(name2.encode.bytes, offset2);
       rptr.encode.bytes = name2.encode.bytes + 2;
       return buf;
     };
     rptr.encode.bytes = 0;
-    rptr.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const data2 = name2.decode(buf, offset + 2);
+    rptr.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const data2 = name2.decode(buf, offset2 + 2);
       rptr.decode.bytes = name2.decode.bytes + 2;
       return data2;
     };
@@ -4796,27 +4796,27 @@ var require_dns_packet = __commonJS({
       return name2.encodingLength(data2) + 2;
     };
     var rsrv = exports.srv = {};
-    rsrv.encode = function(data2, buf, offset) {
+    rsrv.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rsrv.encodingLength(data2));
-      if (!offset) offset = 0;
-      buf.writeUInt16BE(data2.priority || 0, offset + 2);
-      buf.writeUInt16BE(data2.weight || 0, offset + 4);
-      buf.writeUInt16BE(data2.port || 0, offset + 6);
-      name2.encode(data2.target, buf, offset + 8);
+      if (!offset2) offset2 = 0;
+      buf.writeUInt16BE(data2.priority || 0, offset2 + 2);
+      buf.writeUInt16BE(data2.weight || 0, offset2 + 4);
+      buf.writeUInt16BE(data2.port || 0, offset2 + 6);
+      name2.encode(data2.target, buf, offset2 + 8);
       const len = name2.encode.bytes + 6;
-      buf.writeUInt16BE(len, offset);
+      buf.writeUInt16BE(len, offset2);
       rsrv.encode.bytes = len + 2;
       return buf;
     };
     rsrv.encode.bytes = 0;
-    rsrv.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const len = buf.readUInt16BE(offset);
+    rsrv.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const len = buf.readUInt16BE(offset2);
       const data2 = {};
-      data2.priority = buf.readUInt16BE(offset + 2);
-      data2.weight = buf.readUInt16BE(offset + 4);
-      data2.port = buf.readUInt16BE(offset + 6);
-      data2.target = name2.decode(buf, offset + 8);
+      data2.priority = buf.readUInt16BE(offset2 + 2);
+      data2.weight = buf.readUInt16BE(offset2 + 4);
+      data2.port = buf.readUInt16BE(offset2 + 6);
+      data2.target = name2.decode(buf, offset2 + 8);
       rsrv.decode.bytes = len + 2;
       return data2;
     };
@@ -4826,36 +4826,36 @@ var require_dns_packet = __commonJS({
     };
     var rcaa = exports.caa = {};
     rcaa.ISSUER_CRITICAL = 1 << 7;
-    rcaa.encode = function(data2, buf, offset) {
+    rcaa.encode = function(data2, buf, offset2) {
       const len = rcaa.encodingLength(data2);
       if (!buf) buf = Buffer9.alloc(rcaa.encodingLength(data2));
-      if (!offset) offset = 0;
+      if (!offset2) offset2 = 0;
       if (data2.issuerCritical) {
         data2.flags = rcaa.ISSUER_CRITICAL;
       }
-      buf.writeUInt16BE(len - 2, offset);
-      offset += 2;
-      buf.writeUInt8(data2.flags || 0, offset);
-      offset += 1;
-      string9.encode(data2.tag, buf, offset);
-      offset += string9.encode.bytes;
-      buf.write(data2.value, offset);
-      offset += Buffer9.byteLength(data2.value);
+      buf.writeUInt16BE(len - 2, offset2);
+      offset2 += 2;
+      buf.writeUInt8(data2.flags || 0, offset2);
+      offset2 += 1;
+      string9.encode(data2.tag, buf, offset2);
+      offset2 += string9.encode.bytes;
+      buf.write(data2.value, offset2);
+      offset2 += Buffer9.byteLength(data2.value);
       rcaa.encode.bytes = len;
       return buf;
     };
     rcaa.encode.bytes = 0;
-    rcaa.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const len = buf.readUInt16BE(offset);
-      offset += 2;
-      const oldOffset = offset;
+    rcaa.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const len = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      const oldOffset = offset2;
       const data2 = {};
-      data2.flags = buf.readUInt8(offset);
-      offset += 1;
-      data2.tag = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      data2.value = buf.toString("utf-8", offset, oldOffset + len);
+      data2.flags = buf.readUInt8(offset2);
+      offset2 += 1;
+      data2.tag = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      data2.value = buf.toString("utf-8", offset2, oldOffset + len);
       data2.issuerCritical = !!(data2.flags & rcaa.ISSUER_CRITICAL);
       rcaa.decode.bytes = len + 2;
       return data2;
@@ -4865,50 +4865,50 @@ var require_dns_packet = __commonJS({
       return string9.encodingLength(data2.tag) + string9.encodingLength(data2.value) + 2;
     };
     var rmx = exports.mx = {};
-    rmx.encode = function(data2, buf, offset) {
+    rmx.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rmx.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      buf.writeUInt16BE(data2.preference || 0, offset);
-      offset += 2;
-      name2.encode(data2.exchange, buf, offset);
-      offset += name2.encode.bytes;
-      buf.writeUInt16BE(offset - oldOffset - 2, oldOffset);
-      rmx.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      buf.writeUInt16BE(data2.preference || 0, offset2);
+      offset2 += 2;
+      name2.encode(data2.exchange, buf, offset2);
+      offset2 += name2.encode.bytes;
+      buf.writeUInt16BE(offset2 - oldOffset - 2, oldOffset);
+      rmx.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     rmx.encode.bytes = 0;
-    rmx.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rmx.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const data2 = {};
-      offset += 2;
-      data2.preference = buf.readUInt16BE(offset);
-      offset += 2;
-      data2.exchange = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      rmx.decode.bytes = offset - oldOffset;
+      offset2 += 2;
+      data2.preference = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      data2.exchange = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      rmx.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rmx.encodingLength = function(data2) {
       return 4 + name2.encodingLength(data2.exchange);
     };
     var ra = exports.a = {};
-    ra.encode = function(host, buf, offset) {
+    ra.encode = function(host, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(ra.encodingLength(host));
-      if (!offset) offset = 0;
-      buf.writeUInt16BE(4, offset);
-      offset += 2;
-      ip.v4.encode(host, buf, offset);
+      if (!offset2) offset2 = 0;
+      buf.writeUInt16BE(4, offset2);
+      offset2 += 2;
+      ip.v4.encode(host, buf, offset2);
       ra.encode.bytes = 6;
       return buf;
     };
     ra.encode.bytes = 0;
-    ra.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      offset += 2;
-      const host = ip.v4.decode(buf, offset);
+    ra.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      offset2 += 2;
+      const host = ip.v4.decode(buf, offset2);
       ra.decode.bytes = 6;
       return host;
     };
@@ -4917,20 +4917,20 @@ var require_dns_packet = __commonJS({
       return 6;
     };
     var raaaa = exports.aaaa = {};
-    raaaa.encode = function(host, buf, offset) {
+    raaaa.encode = function(host, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(raaaa.encodingLength(host));
-      if (!offset) offset = 0;
-      buf.writeUInt16BE(16, offset);
-      offset += 2;
-      ip.v6.encode(host, buf, offset);
+      if (!offset2) offset2 = 0;
+      buf.writeUInt16BE(16, offset2);
+      offset2 += 2;
+      ip.v6.encode(host, buf, offset2);
       raaaa.encode.bytes = 18;
       return buf;
     };
     raaaa.encode.bytes = 0;
-    raaaa.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      offset += 2;
-      const host = ip.v6.decode(buf, offset);
+    raaaa.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      offset2 += 2;
+      const host = ip.v6.decode(buf, offset2);
       raaaa.decode.bytes = 18;
       return host;
     };
@@ -4939,18 +4939,18 @@ var require_dns_packet = __commonJS({
       return 18;
     };
     var roption = exports.option = {};
-    roption.encode = function(option, buf, offset) {
+    roption.encode = function(option, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(roption.encodingLength(option));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const code = optioncodes.toCode(option.code);
-      buf.writeUInt16BE(code, offset);
-      offset += 2;
+      buf.writeUInt16BE(code, offset2);
+      offset2 += 2;
       if (option.data) {
-        buf.writeUInt16BE(option.data.length, offset);
-        offset += 2;
-        option.data.copy(buf, offset);
-        offset += option.data.length;
+        buf.writeUInt16BE(option.data.length, offset2);
+        offset2 += 2;
+        option.data.copy(buf, offset2);
+        offset2 += option.data.length;
       } else {
         switch (code) {
           // case 3: NSID.  No encode makes sense.
@@ -4960,85 +4960,85 @@ var require_dns_packet = __commonJS({
             const fam = option.family || ip.familyOf(option.ip);
             const ipBuf = ip.encode(option.ip, Buffer9.alloc);
             const ipLen = Math.ceil(spl / 8);
-            buf.writeUInt16BE(ipLen + 4, offset);
-            offset += 2;
-            buf.writeUInt16BE(fam, offset);
-            offset += 2;
-            buf.writeUInt8(spl, offset++);
-            buf.writeUInt8(option.scopePrefixLength || 0, offset++);
-            ipBuf.copy(buf, offset, 0, ipLen);
-            offset += ipLen;
+            buf.writeUInt16BE(ipLen + 4, offset2);
+            offset2 += 2;
+            buf.writeUInt16BE(fam, offset2);
+            offset2 += 2;
+            buf.writeUInt8(spl, offset2++);
+            buf.writeUInt8(option.scopePrefixLength || 0, offset2++);
+            ipBuf.copy(buf, offset2, 0, ipLen);
+            offset2 += ipLen;
             break;
           // case 9: EXPIRE (experimental)
           // case 10: COOKIE.  No encode makes sense.
           case 11:
             if (option.timeout) {
-              buf.writeUInt16BE(2, offset);
-              offset += 2;
-              buf.writeUInt16BE(option.timeout, offset);
-              offset += 2;
+              buf.writeUInt16BE(2, offset2);
+              offset2 += 2;
+              buf.writeUInt16BE(option.timeout, offset2);
+              offset2 += 2;
             } else {
-              buf.writeUInt16BE(0, offset);
-              offset += 2;
+              buf.writeUInt16BE(0, offset2);
+              offset2 += 2;
             }
             break;
           case 12:
             const len = option.length || 0;
-            buf.writeUInt16BE(len, offset);
-            offset += 2;
-            buf.fill(0, offset, offset + len);
-            offset += len;
+            buf.writeUInt16BE(len, offset2);
+            offset2 += 2;
+            buf.fill(0, offset2, offset2 + len);
+            offset2 += len;
             break;
           // case 13:  CHAIN.  Experimental.
           case 14:
             const tagsLen = option.tags.length * 2;
-            buf.writeUInt16BE(tagsLen, offset);
-            offset += 2;
+            buf.writeUInt16BE(tagsLen, offset2);
+            offset2 += 2;
             for (const tag of option.tags) {
-              buf.writeUInt16BE(tag, offset);
-              offset += 2;
+              buf.writeUInt16BE(tag, offset2);
+              offset2 += 2;
             }
             break;
           default:
             throw new Error(`Unknown roption code: ${option.code}`);
         }
       }
-      roption.encode.bytes = offset - oldOffset;
+      roption.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     roption.encode.bytes = 0;
-    roption.decode = function(buf, offset) {
-      if (!offset) offset = 0;
+    roption.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
       const option = {};
-      option.code = buf.readUInt16BE(offset);
+      option.code = buf.readUInt16BE(offset2);
       option.type = optioncodes.toString(option.code);
-      offset += 2;
-      const len = buf.readUInt16BE(offset);
-      offset += 2;
-      option.data = buf.slice(offset, offset + len);
+      offset2 += 2;
+      const len = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      option.data = buf.slice(offset2, offset2 + len);
       switch (option.code) {
         // case 3: NSID.  No decode makes sense.
         case 8:
-          option.family = buf.readUInt16BE(offset);
-          offset += 2;
-          option.sourcePrefixLength = buf.readUInt8(offset++);
-          option.scopePrefixLength = buf.readUInt8(offset++);
+          option.family = buf.readUInt16BE(offset2);
+          offset2 += 2;
+          option.sourcePrefixLength = buf.readUInt8(offset2++);
+          option.scopePrefixLength = buf.readUInt8(offset2++);
           const padded = Buffer9.alloc(option.family === 1 ? 4 : 16);
-          buf.copy(padded, 0, offset, offset + len - 4);
+          buf.copy(padded, 0, offset2, offset2 + len - 4);
           option.ip = ip.decode(padded);
           break;
         // case 12: Padding.  No decode makes sense.
         case 11:
           if (len > 0) {
-            option.timeout = buf.readUInt16BE(offset);
-            offset += 2;
+            option.timeout = buf.readUInt16BE(offset2);
+            offset2 += 2;
           }
           break;
         case 14:
           option.tags = [];
           for (let i = 0; i < len; i += 2) {
-            option.tags.push(buf.readUInt16BE(offset));
-            offset += 2;
+            option.tags.push(buf.readUInt16BE(offset2));
+            offset2 += 2;
           }
       }
       roption.decode.bytes = len + 4;
@@ -5064,30 +5064,30 @@ var require_dns_packet = __commonJS({
       throw new Error(`Unknown roption code: ${option.code}`);
     };
     var ropt = exports.opt = {};
-    ropt.encode = function(options, buf, offset) {
+    ropt.encode = function(options, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(ropt.encodingLength(options));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const rdlen = encodingLengthList(options, roption);
-      buf.writeUInt16BE(rdlen, offset);
-      offset = encodeList(options, roption, buf, offset + 2);
-      ropt.encode.bytes = offset - oldOffset;
+      buf.writeUInt16BE(rdlen, offset2);
+      offset2 = encodeList(options, roption, buf, offset2 + 2);
+      ropt.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     ropt.encode.bytes = 0;
-    ropt.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    ropt.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const options = [];
-      let rdlen = buf.readUInt16BE(offset);
-      offset += 2;
+      let rdlen = buf.readUInt16BE(offset2);
+      offset2 += 2;
       let o = 0;
       while (rdlen > 0) {
-        options[o++] = roption.decode(buf, offset);
-        offset += roption.decode.bytes;
+        options[o++] = roption.decode(buf, offset2);
+        offset2 += roption.decode.bytes;
         rdlen -= roption.decode.bytes;
       }
-      ropt.decode.bytes = offset - oldOffset;
+      ropt.decode.bytes = offset2 - oldOffset;
       return options;
     };
     ropt.decode.bytes = 0;
@@ -5098,45 +5098,45 @@ var require_dns_packet = __commonJS({
     rdnskey.PROTOCOL_DNSSEC = 3;
     rdnskey.ZONE_KEY = 128;
     rdnskey.SECURE_ENTRYPOINT = 32768;
-    rdnskey.encode = function(key, buf, offset) {
+    rdnskey.encode = function(key, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rdnskey.encodingLength(key));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const keydata = key.key;
       if (!Buffer9.isBuffer(keydata)) {
         throw new Error("Key must be a Buffer");
       }
-      offset += 2;
-      buf.writeUInt16BE(key.flags, offset);
-      offset += 2;
-      buf.writeUInt8(rdnskey.PROTOCOL_DNSSEC, offset);
-      offset += 1;
-      buf.writeUInt8(key.algorithm, offset);
-      offset += 1;
-      keydata.copy(buf, offset, 0, keydata.length);
-      offset += keydata.length;
-      rdnskey.encode.bytes = offset - oldOffset;
+      offset2 += 2;
+      buf.writeUInt16BE(key.flags, offset2);
+      offset2 += 2;
+      buf.writeUInt8(rdnskey.PROTOCOL_DNSSEC, offset2);
+      offset2 += 1;
+      buf.writeUInt8(key.algorithm, offset2);
+      offset2 += 1;
+      keydata.copy(buf, offset2, 0, keydata.length);
+      offset2 += keydata.length;
+      rdnskey.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rdnskey.encode.bytes - 2, oldOffset);
       return buf;
     };
     rdnskey.encode.bytes = 0;
-    rdnskey.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rdnskey.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var key = {};
-      var length = buf.readUInt16BE(offset);
-      offset += 2;
-      key.flags = buf.readUInt16BE(offset);
-      offset += 2;
-      if (buf.readUInt8(offset) !== rdnskey.PROTOCOL_DNSSEC) {
+      var length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      key.flags = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      if (buf.readUInt8(offset2) !== rdnskey.PROTOCOL_DNSSEC) {
         throw new Error("Protocol must be 3");
       }
-      offset += 1;
-      key.algorithm = buf.readUInt8(offset);
-      offset += 1;
-      key.key = buf.slice(offset, oldOffset + length + 2);
-      offset += key.key.length;
-      rdnskey.decode.bytes = offset - oldOffset;
+      offset2 += 1;
+      key.algorithm = buf.readUInt8(offset2);
+      offset2 += 1;
+      key.key = buf.slice(offset2, oldOffset + length + 2);
+      offset2 += key.key.length;
+      rdnskey.decode.bytes = offset2 - oldOffset;
       return key;
     };
     rdnskey.decode.bytes = 0;
@@ -5144,63 +5144,63 @@ var require_dns_packet = __commonJS({
       return 6 + Buffer9.byteLength(key.key);
     };
     var rrrsig = exports.rrsig = {};
-    rrrsig.encode = function(sig, buf, offset) {
+    rrrsig.encode = function(sig, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rrrsig.encodingLength(sig));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const signature = sig.signature;
       if (!Buffer9.isBuffer(signature)) {
         throw new Error("Signature must be a Buffer");
       }
-      offset += 2;
-      buf.writeUInt16BE(types22.toType(sig.typeCovered), offset);
-      offset += 2;
-      buf.writeUInt8(sig.algorithm, offset);
-      offset += 1;
-      buf.writeUInt8(sig.labels, offset);
-      offset += 1;
-      buf.writeUInt32BE(sig.originalTTL, offset);
-      offset += 4;
-      buf.writeUInt32BE(sig.expiration, offset);
-      offset += 4;
-      buf.writeUInt32BE(sig.inception, offset);
-      offset += 4;
-      buf.writeUInt16BE(sig.keyTag, offset);
-      offset += 2;
-      name2.encode(sig.signersName, buf, offset);
-      offset += name2.encode.bytes;
-      signature.copy(buf, offset, 0, signature.length);
-      offset += signature.length;
-      rrrsig.encode.bytes = offset - oldOffset;
+      offset2 += 2;
+      buf.writeUInt16BE(types22.toType(sig.typeCovered), offset2);
+      offset2 += 2;
+      buf.writeUInt8(sig.algorithm, offset2);
+      offset2 += 1;
+      buf.writeUInt8(sig.labels, offset2);
+      offset2 += 1;
+      buf.writeUInt32BE(sig.originalTTL, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(sig.expiration, offset2);
+      offset2 += 4;
+      buf.writeUInt32BE(sig.inception, offset2);
+      offset2 += 4;
+      buf.writeUInt16BE(sig.keyTag, offset2);
+      offset2 += 2;
+      name2.encode(sig.signersName, buf, offset2);
+      offset2 += name2.encode.bytes;
+      signature.copy(buf, offset2, 0, signature.length);
+      offset2 += signature.length;
+      rrrsig.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rrrsig.encode.bytes - 2, oldOffset);
       return buf;
     };
     rrrsig.encode.bytes = 0;
-    rrrsig.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rrrsig.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var sig = {};
-      var length = buf.readUInt16BE(offset);
-      offset += 2;
-      sig.typeCovered = types22.toString(buf.readUInt16BE(offset));
-      offset += 2;
-      sig.algorithm = buf.readUInt8(offset);
-      offset += 1;
-      sig.labels = buf.readUInt8(offset);
-      offset += 1;
-      sig.originalTTL = buf.readUInt32BE(offset);
-      offset += 4;
-      sig.expiration = buf.readUInt32BE(offset);
-      offset += 4;
-      sig.inception = buf.readUInt32BE(offset);
-      offset += 4;
-      sig.keyTag = buf.readUInt16BE(offset);
-      offset += 2;
-      sig.signersName = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      sig.signature = buf.slice(offset, oldOffset + length + 2);
-      offset += sig.signature.length;
-      rrrsig.decode.bytes = offset - oldOffset;
+      var length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      sig.typeCovered = types22.toString(buf.readUInt16BE(offset2));
+      offset2 += 2;
+      sig.algorithm = buf.readUInt8(offset2);
+      offset2 += 1;
+      sig.labels = buf.readUInt8(offset2);
+      offset2 += 1;
+      sig.originalTTL = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      sig.expiration = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      sig.inception = buf.readUInt32BE(offset2);
+      offset2 += 4;
+      sig.keyTag = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      sig.signersName = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      sig.signature = buf.slice(offset2, oldOffset + length + 2);
+      offset2 += sig.signature.length;
+      rrrsig.decode.bytes = offset2 - oldOffset;
       return sig;
     };
     rrrsig.decode.bytes = 0;
@@ -5208,30 +5208,30 @@ var require_dns_packet = __commonJS({
       return 20 + name2.encodingLength(sig.signersName) + Buffer9.byteLength(sig.signature);
     };
     var rrp = exports.rp = {};
-    rrp.encode = function(data2, buf, offset) {
+    rrp.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rrp.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      name2.encode(data2.mbox || ".", buf, offset, { mail: true });
-      offset += name2.encode.bytes;
-      name2.encode(data2.txt || ".", buf, offset);
-      offset += name2.encode.bytes;
-      rrp.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      name2.encode(data2.mbox || ".", buf, offset2, { mail: true });
+      offset2 += name2.encode.bytes;
+      name2.encode(data2.txt || ".", buf, offset2);
+      offset2 += name2.encode.bytes;
+      rrp.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rrp.encode.bytes - 2, oldOffset);
       return buf;
     };
     rrp.encode.bytes = 0;
-    rrp.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rrp.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const data2 = {};
-      offset += 2;
-      data2.mbox = name2.decode(buf, offset, { mail: true }) || ".";
-      offset += name2.decode.bytes;
-      data2.txt = name2.decode(buf, offset) || ".";
-      offset += name2.decode.bytes;
-      rrp.decode.bytes = offset - oldOffset;
+      offset2 += 2;
+      data2.mbox = name2.decode(buf, offset2, { mail: true }) || ".";
+      offset2 += name2.decode.bytes;
+      data2.txt = name2.decode(buf, offset2) || ".";
+      offset2 += name2.decode.bytes;
+      rrp.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rrp.decode.bytes = 0;
@@ -5239,10 +5239,10 @@ var require_dns_packet = __commonJS({
       return 2 + name2.encodingLength(data2.mbox || ".") + name2.encodingLength(data2.txt || ".");
     };
     var typebitmap = {};
-    typebitmap.encode = function(typelist, buf, offset) {
+    typebitmap.encode = function(typelist, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(typebitmap.encodingLength(typelist));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var typesByWindow = [];
       for (var i = 0; i < typelist.length; i++) {
         var typeid = types22.toType(typelist[i]);
@@ -5254,29 +5254,29 @@ var require_dns_packet = __commonJS({
       for (i = 0; i < typesByWindow.length; i++) {
         if (typesByWindow[i] !== void 0) {
           var windowBuf = Buffer9.from(typesByWindow[i]);
-          buf.writeUInt8(i, offset);
-          offset += 1;
-          buf.writeUInt8(windowBuf.length, offset);
-          offset += 1;
-          windowBuf.copy(buf, offset);
-          offset += windowBuf.length;
+          buf.writeUInt8(i, offset2);
+          offset2 += 1;
+          buf.writeUInt8(windowBuf.length, offset2);
+          offset2 += 1;
+          windowBuf.copy(buf, offset2);
+          offset2 += windowBuf.length;
         }
       }
-      typebitmap.encode.bytes = offset - oldOffset;
+      typebitmap.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     typebitmap.encode.bytes = 0;
-    typebitmap.decode = function(buf, offset, length) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    typebitmap.decode = function(buf, offset2, length) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var typelist = [];
-      while (offset - oldOffset < length) {
-        var window2 = buf.readUInt8(offset);
-        offset += 1;
-        var windowLength = buf.readUInt8(offset);
-        offset += 1;
+      while (offset2 - oldOffset < length) {
+        var window2 = buf.readUInt8(offset2);
+        offset2 += 1;
+        var windowLength = buf.readUInt8(offset2);
+        offset2 += 1;
         for (var i = 0; i < windowLength; i++) {
-          var b = buf.readUInt8(offset + i);
+          var b = buf.readUInt8(offset2 + i);
           for (var j = 0; j < 8; j++) {
             if (b & 1 << 7 - j) {
               var typeid = types22.toString(window2 << 8 | i << 3 | j);
@@ -5284,9 +5284,9 @@ var require_dns_packet = __commonJS({
             }
           }
         }
-        offset += windowLength;
+        offset2 += windowLength;
       }
-      typebitmap.decode.bytes = offset - oldOffset;
+      typebitmap.decode.bytes = offset2 - oldOffset;
       return typelist;
     };
     typebitmap.decode.bytes = 0;
@@ -5305,31 +5305,31 @@ var require_dns_packet = __commonJS({
       return len;
     };
     var rnsec = exports.nsec = {};
-    rnsec.encode = function(record11, buf, offset) {
+    rnsec.encode = function(record11, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rnsec.encodingLength(record11));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      name2.encode(record11.nextDomain, buf, offset);
-      offset += name2.encode.bytes;
-      typebitmap.encode(record11.rrtypes, buf, offset);
-      offset += typebitmap.encode.bytes;
-      rnsec.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      name2.encode(record11.nextDomain, buf, offset2);
+      offset2 += name2.encode.bytes;
+      typebitmap.encode(record11.rrtypes, buf, offset2);
+      offset2 += typebitmap.encode.bytes;
+      rnsec.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rnsec.encode.bytes - 2, oldOffset);
       return buf;
     };
     rnsec.encode.bytes = 0;
-    rnsec.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rnsec.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var record11 = {};
-      var length = buf.readUInt16BE(offset);
-      offset += 2;
-      record11.nextDomain = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      record11.rrtypes = typebitmap.decode(buf, offset, length - (offset - oldOffset));
-      offset += typebitmap.decode.bytes;
-      rnsec.decode.bytes = offset - oldOffset;
+      var length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      record11.nextDomain = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      record11.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
+      offset2 += typebitmap.decode.bytes;
+      rnsec.decode.bytes = offset2 - oldOffset;
       return record11;
     };
     rnsec.decode.bytes = 0;
@@ -5337,10 +5337,10 @@ var require_dns_packet = __commonJS({
       return 2 + name2.encodingLength(record11.nextDomain) + typebitmap.encodingLength(record11.rrtypes);
     };
     var rnsec3 = exports.nsec3 = {};
-    rnsec3.encode = function(record11, buf, offset) {
+    rnsec3.encode = function(record11, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rnsec3.encodingLength(record11));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const salt = record11.salt;
       if (!Buffer9.isBuffer(salt)) {
         throw new Error("salt must be a Buffer");
@@ -5349,51 +5349,51 @@ var require_dns_packet = __commonJS({
       if (!Buffer9.isBuffer(nextDomain)) {
         throw new Error("nextDomain must be a Buffer");
       }
-      offset += 2;
-      buf.writeUInt8(record11.algorithm, offset);
-      offset += 1;
-      buf.writeUInt8(record11.flags, offset);
-      offset += 1;
-      buf.writeUInt16BE(record11.iterations, offset);
-      offset += 2;
-      buf.writeUInt8(salt.length, offset);
-      offset += 1;
-      salt.copy(buf, offset, 0, salt.length);
-      offset += salt.length;
-      buf.writeUInt8(nextDomain.length, offset);
-      offset += 1;
-      nextDomain.copy(buf, offset, 0, nextDomain.length);
-      offset += nextDomain.length;
-      typebitmap.encode(record11.rrtypes, buf, offset);
-      offset += typebitmap.encode.bytes;
-      rnsec3.encode.bytes = offset - oldOffset;
+      offset2 += 2;
+      buf.writeUInt8(record11.algorithm, offset2);
+      offset2 += 1;
+      buf.writeUInt8(record11.flags, offset2);
+      offset2 += 1;
+      buf.writeUInt16BE(record11.iterations, offset2);
+      offset2 += 2;
+      buf.writeUInt8(salt.length, offset2);
+      offset2 += 1;
+      salt.copy(buf, offset2, 0, salt.length);
+      offset2 += salt.length;
+      buf.writeUInt8(nextDomain.length, offset2);
+      offset2 += 1;
+      nextDomain.copy(buf, offset2, 0, nextDomain.length);
+      offset2 += nextDomain.length;
+      typebitmap.encode(record11.rrtypes, buf, offset2);
+      offset2 += typebitmap.encode.bytes;
+      rnsec3.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rnsec3.encode.bytes - 2, oldOffset);
       return buf;
     };
     rnsec3.encode.bytes = 0;
-    rnsec3.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rnsec3.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var record11 = {};
-      var length = buf.readUInt16BE(offset);
-      offset += 2;
-      record11.algorithm = buf.readUInt8(offset);
-      offset += 1;
-      record11.flags = buf.readUInt8(offset);
-      offset += 1;
-      record11.iterations = buf.readUInt16BE(offset);
-      offset += 2;
-      const saltLength2 = buf.readUInt8(offset);
-      offset += 1;
-      record11.salt = buf.slice(offset, offset + saltLength2);
-      offset += saltLength2;
-      const hashLength = buf.readUInt8(offset);
-      offset += 1;
-      record11.nextDomain = buf.slice(offset, offset + hashLength);
-      offset += hashLength;
-      record11.rrtypes = typebitmap.decode(buf, offset, length - (offset - oldOffset));
-      offset += typebitmap.decode.bytes;
-      rnsec3.decode.bytes = offset - oldOffset;
+      var length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      record11.algorithm = buf.readUInt8(offset2);
+      offset2 += 1;
+      record11.flags = buf.readUInt8(offset2);
+      offset2 += 1;
+      record11.iterations = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      const saltLength2 = buf.readUInt8(offset2);
+      offset2 += 1;
+      record11.salt = buf.slice(offset2, offset2 + saltLength2);
+      offset2 += saltLength2;
+      const hashLength = buf.readUInt8(offset2);
+      offset2 += 1;
+      record11.nextDomain = buf.slice(offset2, offset2 + hashLength);
+      offset2 += hashLength;
+      record11.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
+      offset2 += typebitmap.decode.bytes;
+      rnsec3.decode.bytes = offset2 - oldOffset;
       return record11;
     };
     rnsec3.decode.bytes = 0;
@@ -5401,43 +5401,43 @@ var require_dns_packet = __commonJS({
       return 8 + record11.salt.length + record11.nextDomain.length + typebitmap.encodingLength(record11.rrtypes);
     };
     var rds = exports.ds = {};
-    rds.encode = function(digest, buf, offset) {
+    rds.encode = function(digest, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rds.encodingLength(digest));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const digestdata = digest.digest;
       if (!Buffer9.isBuffer(digestdata)) {
         throw new Error("Digest must be a Buffer");
       }
-      offset += 2;
-      buf.writeUInt16BE(digest.keyTag, offset);
-      offset += 2;
-      buf.writeUInt8(digest.algorithm, offset);
-      offset += 1;
-      buf.writeUInt8(digest.digestType, offset);
-      offset += 1;
-      digestdata.copy(buf, offset, 0, digestdata.length);
-      offset += digestdata.length;
-      rds.encode.bytes = offset - oldOffset;
+      offset2 += 2;
+      buf.writeUInt16BE(digest.keyTag, offset2);
+      offset2 += 2;
+      buf.writeUInt8(digest.algorithm, offset2);
+      offset2 += 1;
+      buf.writeUInt8(digest.digestType, offset2);
+      offset2 += 1;
+      digestdata.copy(buf, offset2, 0, digestdata.length);
+      offset2 += digestdata.length;
+      rds.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rds.encode.bytes - 2, oldOffset);
       return buf;
     };
     rds.encode.bytes = 0;
-    rds.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rds.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       var digest = {};
-      var length = buf.readUInt16BE(offset);
-      offset += 2;
-      digest.keyTag = buf.readUInt16BE(offset);
-      offset += 2;
-      digest.algorithm = buf.readUInt8(offset);
-      offset += 1;
-      digest.digestType = buf.readUInt8(offset);
-      offset += 1;
-      digest.digest = buf.slice(offset, oldOffset + length + 2);
-      offset += digest.digest.length;
-      rds.decode.bytes = offset - oldOffset;
+      var length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      digest.keyTag = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      digest.algorithm = buf.readUInt8(offset2);
+      offset2 += 1;
+      digest.digestType = buf.readUInt8(offset2);
+      offset2 += 1;
+      digest.digest = buf.slice(offset2, oldOffset + length + 2);
+      offset2 += digest.digest.length;
+      rds.decode.bytes = offset2 - oldOffset;
       return digest;
     };
     rds.decode.bytes = 0;
@@ -5453,39 +5453,39 @@ var require_dns_packet = __commonJS({
           return 32;
       }
     };
-    rsshfp.encode = function encode21(record11, buf, offset) {
+    rsshfp.encode = function encode21(record11, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rsshfp.encodingLength(record11));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      buf[offset] = record11.algorithm;
-      offset += 1;
-      buf[offset] = record11.hash;
-      offset += 1;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      buf[offset2] = record11.algorithm;
+      offset2 += 1;
+      buf[offset2] = record11.hash;
+      offset2 += 1;
       const fingerprintBuf = Buffer9.from(record11.fingerprint.toUpperCase(), "hex");
       if (fingerprintBuf.length !== rsshfp.getFingerprintLengthForHashType(record11.hash)) {
         throw new Error("Invalid fingerprint length");
       }
-      fingerprintBuf.copy(buf, offset);
-      offset += fingerprintBuf.byteLength;
-      rsshfp.encode.bytes = offset - oldOffset;
+      fingerprintBuf.copy(buf, offset2);
+      offset2 += fingerprintBuf.byteLength;
+      rsshfp.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rsshfp.encode.bytes - 2, oldOffset);
       return buf;
     };
     rsshfp.encode.bytes = 0;
-    rsshfp.decode = function decode21(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rsshfp.decode = function decode21(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const record11 = {};
-      offset += 2;
-      record11.algorithm = buf[offset];
-      offset += 1;
-      record11.hash = buf[offset];
-      offset += 1;
+      offset2 += 2;
+      record11.algorithm = buf[offset2];
+      offset2 += 1;
+      record11.hash = buf[offset2];
+      offset2 += 1;
       const fingerprintLength = rsshfp.getFingerprintLengthForHashType(record11.hash);
-      record11.fingerprint = buf.slice(offset, offset + fingerprintLength).toString("hex").toUpperCase();
-      offset += fingerprintLength;
-      rsshfp.decode.bytes = offset - oldOffset;
+      record11.fingerprint = buf.slice(offset2, offset2 + fingerprintLength).toString("hex").toUpperCase();
+      offset2 += fingerprintLength;
+      rsshfp.decode.bytes = offset2 - oldOffset;
       return record11;
     };
     rsshfp.decode.bytes = 0;
@@ -5493,46 +5493,46 @@ var require_dns_packet = __commonJS({
       return 4 + Buffer9.from(record11.fingerprint, "hex").byteLength;
     };
     var rnaptr = exports.naptr = {};
-    rnaptr.encode = function(data2, buf, offset) {
+    rnaptr.encode = function(data2, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rnaptr.encodingLength(data2));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      offset += 2;
-      buf.writeUInt16BE(data2.order || 0, offset);
-      offset += 2;
-      buf.writeUInt16BE(data2.preference || 0, offset);
-      offset += 2;
-      string9.encode(data2.flags, buf, offset);
-      offset += string9.encode.bytes;
-      string9.encode(data2.services, buf, offset);
-      offset += string9.encode.bytes;
-      string9.encode(data2.regexp, buf, offset);
-      offset += string9.encode.bytes;
-      name2.encode(data2.replacement, buf, offset);
-      offset += name2.encode.bytes;
-      rnaptr.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      offset2 += 2;
+      buf.writeUInt16BE(data2.order || 0, offset2);
+      offset2 += 2;
+      buf.writeUInt16BE(data2.preference || 0, offset2);
+      offset2 += 2;
+      string9.encode(data2.flags, buf, offset2);
+      offset2 += string9.encode.bytes;
+      string9.encode(data2.services, buf, offset2);
+      offset2 += string9.encode.bytes;
+      string9.encode(data2.regexp, buf, offset2);
+      offset2 += string9.encode.bytes;
+      name2.encode(data2.replacement, buf, offset2);
+      offset2 += name2.encode.bytes;
+      rnaptr.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rnaptr.encode.bytes - 2, oldOffset);
       return buf;
     };
     rnaptr.encode.bytes = 0;
-    rnaptr.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rnaptr.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const data2 = {};
-      offset += 2;
-      data2.order = buf.readUInt16BE(offset);
-      offset += 2;
-      data2.preference = buf.readUInt16BE(offset);
-      offset += 2;
-      data2.flags = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      data2.services = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      data2.regexp = string9.decode(buf, offset);
-      offset += string9.decode.bytes;
-      data2.replacement = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      rnaptr.decode.bytes = offset - oldOffset;
+      offset2 += 2;
+      data2.order = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      data2.preference = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      data2.flags = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      data2.services = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      data2.regexp = string9.decode(buf, offset2);
+      offset2 += string9.decode.bytes;
+      data2.replacement = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      rnaptr.decode.bytes = offset2 - oldOffset;
       return data2;
     };
     rnaptr.decode.bytes = 0;
@@ -5540,43 +5540,43 @@ var require_dns_packet = __commonJS({
       return string9.encodingLength(data2.flags) + string9.encodingLength(data2.services) + string9.encodingLength(data2.regexp) + name2.encodingLength(data2.replacement) + 6;
     };
     var rtlsa = exports.tlsa = {};
-    rtlsa.encode = function(cert, buf, offset) {
+    rtlsa.encode = function(cert, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(rtlsa.encodingLength(cert));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const certdata = cert.certificate;
       if (!Buffer9.isBuffer(certdata)) {
         throw new Error("Certificate must be a Buffer");
       }
-      offset += 2;
-      buf.writeUInt8(cert.usage, offset);
-      offset += 1;
-      buf.writeUInt8(cert.selector, offset);
-      offset += 1;
-      buf.writeUInt8(cert.matchingType, offset);
-      offset += 1;
-      certdata.copy(buf, offset, 0, certdata.length);
-      offset += certdata.length;
-      rtlsa.encode.bytes = offset - oldOffset;
+      offset2 += 2;
+      buf.writeUInt8(cert.usage, offset2);
+      offset2 += 1;
+      buf.writeUInt8(cert.selector, offset2);
+      offset2 += 1;
+      buf.writeUInt8(cert.matchingType, offset2);
+      offset2 += 1;
+      certdata.copy(buf, offset2, 0, certdata.length);
+      offset2 += certdata.length;
+      rtlsa.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rtlsa.encode.bytes - 2, oldOffset);
       return buf;
     };
     rtlsa.encode.bytes = 0;
-    rtlsa.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    rtlsa.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const cert = {};
-      const length = buf.readUInt16BE(offset);
-      offset += 2;
-      cert.usage = buf.readUInt8(offset);
-      offset += 1;
-      cert.selector = buf.readUInt8(offset);
-      offset += 1;
-      cert.matchingType = buf.readUInt8(offset);
-      offset += 1;
-      cert.certificate = buf.slice(offset, oldOffset + length + 2);
-      offset += cert.certificate.length;
-      rtlsa.decode.bytes = offset - oldOffset;
+      const length = buf.readUInt16BE(offset2);
+      offset2 += 2;
+      cert.usage = buf.readUInt8(offset2);
+      offset2 += 1;
+      cert.selector = buf.readUInt8(offset2);
+      offset2 += 1;
+      cert.matchingType = buf.readUInt8(offset2);
+      offset2 += 1;
+      cert.certificate = buf.slice(offset2, oldOffset + length + 2);
+      offset2 += cert.certificate.length;
+      rtlsa.decode.bytes = offset2 - oldOffset;
       return cert;
     };
     rtlsa.decode.bytes = 0;
@@ -5635,63 +5635,63 @@ var require_dns_packet = __commonJS({
       return runknown;
     };
     var answer = exports.answer = {};
-    answer.encode = function(a, buf, offset) {
+    answer.encode = function(a, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(answer.encodingLength(a));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      name2.encode(a.name, buf, offset);
-      offset += name2.encode.bytes;
-      buf.writeUInt16BE(types22.toType(a.type), offset);
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      name2.encode(a.name, buf, offset2);
+      offset2 += name2.encode.bytes;
+      buf.writeUInt16BE(types22.toType(a.type), offset2);
       if (a.type.toUpperCase() === "OPT") {
         if (a.name !== ".") {
           throw new Error("OPT name must be root.");
         }
-        buf.writeUInt16BE(a.udpPayloadSize || 4096, offset + 2);
-        buf.writeUInt8(a.extendedRcode || 0, offset + 4);
-        buf.writeUInt8(a.ednsVersion || 0, offset + 5);
-        buf.writeUInt16BE(a.flags || 0, offset + 6);
-        offset += 8;
-        ropt.encode(a.options || [], buf, offset);
-        offset += ropt.encode.bytes;
+        buf.writeUInt16BE(a.udpPayloadSize || 4096, offset2 + 2);
+        buf.writeUInt8(a.extendedRcode || 0, offset2 + 4);
+        buf.writeUInt8(a.ednsVersion || 0, offset2 + 5);
+        buf.writeUInt16BE(a.flags || 0, offset2 + 6);
+        offset2 += 8;
+        ropt.encode(a.options || [], buf, offset2);
+        offset2 += ropt.encode.bytes;
       } else {
         let klass = classes2.toClass(a.class === void 0 ? "IN" : a.class);
         if (a.flush) klass |= FLUSH_MASK;
-        buf.writeUInt16BE(klass, offset + 2);
-        buf.writeUInt32BE(a.ttl || 0, offset + 4);
-        offset += 8;
+        buf.writeUInt16BE(klass, offset2 + 2);
+        buf.writeUInt32BE(a.ttl || 0, offset2 + 4);
+        offset2 += 8;
         const enc = renc(a.type);
-        enc.encode(a.data, buf, offset);
-        offset += enc.encode.bytes;
+        enc.encode(a.data, buf, offset2);
+        offset2 += enc.encode.bytes;
       }
-      answer.encode.bytes = offset - oldOffset;
+      answer.encode.bytes = offset2 - oldOffset;
       return buf;
     };
     answer.encode.bytes = 0;
-    answer.decode = function(buf, offset) {
-      if (!offset) offset = 0;
+    answer.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
       const a = {};
-      const oldOffset = offset;
-      a.name = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      a.type = types22.toString(buf.readUInt16BE(offset));
+      const oldOffset = offset2;
+      a.name = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      a.type = types22.toString(buf.readUInt16BE(offset2));
       if (a.type === "OPT") {
-        a.udpPayloadSize = buf.readUInt16BE(offset + 2);
-        a.extendedRcode = buf.readUInt8(offset + 4);
-        a.ednsVersion = buf.readUInt8(offset + 5);
-        a.flags = buf.readUInt16BE(offset + 6);
+        a.udpPayloadSize = buf.readUInt16BE(offset2 + 2);
+        a.extendedRcode = buf.readUInt8(offset2 + 4);
+        a.ednsVersion = buf.readUInt8(offset2 + 5);
+        a.flags = buf.readUInt16BE(offset2 + 6);
         a.flag_do = (a.flags >> 15 & 1) === 1;
-        a.options = ropt.decode(buf, offset + 8);
-        offset += 8 + ropt.decode.bytes;
+        a.options = ropt.decode(buf, offset2 + 8);
+        offset2 += 8 + ropt.decode.bytes;
       } else {
-        const klass = buf.readUInt16BE(offset + 2);
-        a.ttl = buf.readUInt32BE(offset + 4);
+        const klass = buf.readUInt16BE(offset2 + 2);
+        a.ttl = buf.readUInt32BE(offset2 + 4);
         a.class = classes2.toString(klass & NOT_FLUSH_MASK);
         a.flush = !!(klass & FLUSH_MASK);
         const enc = renc(a.type);
-        a.data = enc.decode(buf, offset + 8);
-        offset += 8 + enc.decode.bytes;
+        a.data = enc.decode(buf, offset2 + 8);
+        offset2 += 8 + enc.decode.bytes;
       }
-      answer.decode.bytes = offset - oldOffset;
+      answer.decode.bytes = offset2 - oldOffset;
       return a;
     };
     answer.decode.bytes = 0;
@@ -5700,33 +5700,33 @@ var require_dns_packet = __commonJS({
       return name2.encodingLength(a.name) + 8 + renc(a.type).encodingLength(data2);
     };
     var question = exports.question = {};
-    question.encode = function(q, buf, offset) {
+    question.encode = function(q, buf, offset2) {
       if (!buf) buf = Buffer9.alloc(question.encodingLength(q));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      name2.encode(q.name, buf, offset);
-      offset += name2.encode.bytes;
-      buf.writeUInt16BE(types22.toType(q.type), offset);
-      offset += 2;
-      buf.writeUInt16BE(classes2.toClass(q.class === void 0 ? "IN" : q.class), offset);
-      offset += 2;
-      question.encode.bytes = offset - oldOffset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      name2.encode(q.name, buf, offset2);
+      offset2 += name2.encode.bytes;
+      buf.writeUInt16BE(types22.toType(q.type), offset2);
+      offset2 += 2;
+      buf.writeUInt16BE(classes2.toClass(q.class === void 0 ? "IN" : q.class), offset2);
+      offset2 += 2;
+      question.encode.bytes = offset2 - oldOffset;
       return q;
     };
     question.encode.bytes = 0;
-    question.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+    question.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       const q = {};
-      q.name = name2.decode(buf, offset);
-      offset += name2.decode.bytes;
-      q.type = types22.toString(buf.readUInt16BE(offset));
-      offset += 2;
-      q.class = classes2.toString(buf.readUInt16BE(offset));
-      offset += 2;
+      q.name = name2.decode(buf, offset2);
+      offset2 += name2.decode.bytes;
+      q.type = types22.toString(buf.readUInt16BE(offset2));
+      offset2 += 2;
+      q.class = classes2.toString(buf.readUInt16BE(offset2));
+      offset2 += 2;
       const qu = !!(q.class & QU_MASK);
       if (qu) q.class &= NOT_QU_MASK;
-      question.decode.bytes = offset - oldOffset;
+      question.decode.bytes = offset2 - oldOffset;
       return q;
     };
     question.decode.bytes = 0;
@@ -5740,38 +5740,38 @@ var require_dns_packet = __commonJS({
     exports.AUTHENTIC_DATA = 1 << 5;
     exports.CHECKING_DISABLED = 1 << 4;
     exports.DNSSEC_OK = 1 << 15;
-    exports.encode = function(result, buf, offset) {
+    exports.encode = function(result, buf, offset2) {
       const allocing = !buf;
       if (allocing) buf = Buffer9.alloc(exports.encodingLength(result));
-      if (!offset) offset = 0;
-      const oldOffset = offset;
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
       if (!result.questions) result.questions = [];
       if (!result.answers) result.answers = [];
       if (!result.authorities) result.authorities = [];
       if (!result.additionals) result.additionals = [];
-      header.encode(result, buf, offset);
-      offset += header.encode.bytes;
-      offset = encodeList(result.questions, question, buf, offset);
-      offset = encodeList(result.answers, answer, buf, offset);
-      offset = encodeList(result.authorities, answer, buf, offset);
-      offset = encodeList(result.additionals, answer, buf, offset);
-      exports.encode.bytes = offset - oldOffset;
+      header.encode(result, buf, offset2);
+      offset2 += header.encode.bytes;
+      offset2 = encodeList(result.questions, question, buf, offset2);
+      offset2 = encodeList(result.answers, answer, buf, offset2);
+      offset2 = encodeList(result.authorities, answer, buf, offset2);
+      offset2 = encodeList(result.additionals, answer, buf, offset2);
+      exports.encode.bytes = offset2 - oldOffset;
       if (allocing && exports.encode.bytes !== buf.length) {
         return buf.slice(0, exports.encode.bytes);
       }
       return buf;
     };
     exports.encode.bytes = 0;
-    exports.decode = function(buf, offset) {
-      if (!offset) offset = 0;
-      const oldOffset = offset;
-      const result = header.decode(buf, offset);
-      offset += header.decode.bytes;
-      offset = decodeList(result.questions, question, buf, offset);
-      offset = decodeList(result.answers, answer, buf, offset);
-      offset = decodeList(result.authorities, answer, buf, offset);
-      offset = decodeList(result.additionals, answer, buf, offset);
-      exports.decode.bytes = offset - oldOffset;
+    exports.decode = function(buf, offset2) {
+      if (!offset2) offset2 = 0;
+      const oldOffset = offset2;
+      const result = header.decode(buf, offset2);
+      offset2 += header.decode.bytes;
+      offset2 = decodeList(result.questions, question, buf, offset2);
+      offset2 = decodeList(result.answers, answer, buf, offset2);
+      offset2 = decodeList(result.authorities, answer, buf, offset2);
+      offset2 = decodeList(result.additionals, answer, buf, offset2);
+      exports.decode.bytes = offset2 - oldOffset;
       return result;
     };
     exports.decode.bytes = 0;
@@ -5802,19 +5802,19 @@ var require_dns_packet = __commonJS({
       for (let i = 0; i < list2.length; i++) len += enc.encodingLength(list2[i]);
       return len;
     }
-    function encodeList(list2, enc, buf, offset) {
+    function encodeList(list2, enc, buf, offset2) {
       for (let i = 0; i < list2.length; i++) {
-        enc.encode(list2[i], buf, offset);
-        offset += enc.encode.bytes;
+        enc.encode(list2[i], buf, offset2);
+        offset2 += enc.encode.bytes;
       }
-      return offset;
+      return offset2;
     }
-    function decodeList(list2, enc, buf, offset) {
+    function decodeList(list2, enc, buf, offset2) {
       for (let i = 0; i < list2.length; i++) {
-        list2[i] = enc.decode(buf, offset);
-        offset += enc.decode.bytes;
+        list2[i] = enc.decode(buf, offset2);
+        offset2 += enc.decode.bytes;
       }
-      return offset;
+      return offset2;
     }
   }
 });
@@ -6545,12 +6545,12 @@ function createBufferWriter(bytes, singleBuffer) {
   const reuseBuffer = singleBuffer ? Buffer.alloc(length) : void 0;
   return (values) => {
     const buf = reuseBuffer || Buffer.alloc(length);
-    let offset = 0;
+    let offset2 = 0;
     values.forEach((v, i) => {
       const size2 = bytes[i];
-      if (size2 === 8) buf.writeBigUInt64BE(v, offset);
-      else buf.writeUIntBE(v, offset, size2);
-      offset += size2;
+      if (size2 === 8) buf.writeBigUInt64BE(v, offset2);
+      else buf.writeUIntBE(v, offset2, size2);
+      offset2 += size2;
     });
     return buf;
   };
@@ -6558,25 +6558,25 @@ function createBufferWriter(bytes, singleBuffer) {
 function bufferWriterLE(bytes, values) {
   const length = bytes.reduce((acc, cur) => acc + cur, 0);
   const buf = Buffer.alloc(length);
-  let offset = 0;
+  let offset2 = 0;
   values.forEach((v, i) => {
     const size2 = bytes[i];
-    if (size2 === 8) buf.writeBigUInt64LE(v, offset);
-    else buf.writeUIntLE(v, offset, size2);
-    offset += size2;
+    if (size2 === 8) buf.writeBigUInt64LE(v, offset2);
+    else buf.writeUIntLE(v, offset2, size2);
+    offset2 += size2;
   });
   return buf;
 }
 function bufferReader(buf, bytes) {
-  let offset = 0;
+  let offset2 = 0;
   return bytes.map((v) => {
     let read;
     if (v === 8) {
-      read = buf.readBigUInt64BE(offset);
+      read = buf.readBigUInt64BE(offset2);
     } else {
-      read = buf.readUIntBE(offset, v);
+      read = buf.readUIntBE(offset2, v);
     }
-    offset += v;
+    offset2 += v;
     return read;
   });
 }
@@ -7014,11 +7014,11 @@ function encodeDerInteger(value) {
   } else {
     bytes = value;
   }
-  let offset = 0;
-  while (offset < bytes.length - 1 && bytes[offset] === 0) {
-    offset++;
+  let offset2 = 0;
+  while (offset2 < bytes.length - 1 && bytes[offset2] === 0) {
+    offset2++;
   }
-  bytes = bytes.subarray(offset);
+  bytes = bytes.subarray(offset2);
   if (bytes.length === 0) {
     bytes = Buffer.from([0]);
   }
@@ -7337,9 +7337,9 @@ function createCipher2(cipher) {
   }
   return null;
 }
-function createAEADCipher(id6, name2, block, kx, constants7, hash22 = "sha256") {
+function createAEADCipher(id7, name2, block, kx, constants7, hash22 = "sha256") {
   const cipher = new AEADCipher();
-  cipher.id = id6;
+  cipher.id = id7;
   cipher.name = name2;
   cipher.blockAlgorithm = block;
   cipher.kx = kx;
@@ -7432,34 +7432,34 @@ function createAv1AggregationHeader({
 }
 function splitAv1Obus(sample) {
   const obus = [];
-  let offset = 0;
-  while (offset < sample.length) {
-    const start = offset;
-    const header = sample[offset];
-    offset += 1;
+  let offset2 = 0;
+  while (offset2 < sample.length) {
+    const start = offset2;
+    const header = sample[offset2];
+    offset2 += 1;
     if (header == void 0) {
       break;
     }
     const extensionFlag = getBit(header, 5);
     const hasSizeField = getBit(header, 6);
     if (extensionFlag) {
-      if (offset >= sample.length) {
+      if (offset2 >= sample.length) {
         throw new Error("invalid AV1 OBU: extension flag set but buffer ends");
       }
-      offset += 1;
+      offset2 += 1;
     }
     if (!hasSizeField) {
       obus.push(sample.subarray(start));
       break;
     }
-    const [obuSize, leb128Length] = leb128decode(sample.subarray(offset));
-    offset += leb128Length;
-    const end = offset + obuSize;
+    const [obuSize, leb128Length] = leb128decode(sample.subarray(offset2));
+    offset2 += leb128Length;
+    const end = offset2 + obuSize;
     if (end > sample.length) {
       throw new Error("invalid AV1 OBU size");
     }
     obus.push(sample.subarray(start, end));
-    offset = end;
+    offset2 = end;
   }
   return obus;
 }
@@ -7513,13 +7513,13 @@ function looksLikeAnnexB(sample) {
   }
   return sample[0] === 0 && sample[1] === 0 && sample[2] === 0 && sample[3] === 1 || sample[0] === 0 && sample[1] === 0 && sample[2] === 1;
 }
-function readUintLength(buf, offset, size2) {
-  if (size2 === 1) return buf[offset];
-  if (size2 === 2) return buf.readUInt16BE(offset);
+function readUintLength(buf, offset2, size2) {
+  if (size2 === 1) return buf[offset2];
+  if (size2 === 2) return buf.readUInt16BE(offset2);
   if (size2 === 3) {
-    return buf[offset] << 16 | buf[offset + 1] << 8 | buf[offset + 2];
+    return buf[offset2] << 16 | buf[offset2 + 1] << 8 | buf[offset2 + 2];
   }
-  return buf.readUInt32BE(offset);
+  return buf.readUInt32BE(offset2);
 }
 function splitH265NalUnits(sample, naluLengthSize = 4, inputFormat = "auto") {
   if (naluLengthSize < 1 || naluLengthSize > 4 || !Number.isInteger(naluLengthSize)) {
@@ -7547,23 +7547,23 @@ function splitH265NalUnits(sample, naluLengthSize = 4, inputFormat = "auto") {
 }
 function parseLengthPrefixed(sample, naluLengthSize) {
   const nalus = [];
-  let offset = 0;
-  while (offset < sample.length) {
-    if (offset + naluLengthSize > sample.length) {
+  let offset2 = 0;
+  while (offset2 < sample.length) {
+    if (offset2 + naluLengthSize > sample.length) {
       return { error: "H.265 length-prefixed sample truncated (length field)" };
     }
-    const length = readUintLength(sample, offset, naluLengthSize);
-    offset += naluLengthSize;
+    const length = readUintLength(sample, offset2, naluLengthSize);
+    offset2 += naluLengthSize;
     if (length === 0) {
       return { error: "H.265 length-prefixed sample: NAL length 0 is invalid" };
     }
-    if (offset + length > sample.length) {
+    if (offset2 + length > sample.length) {
       return {
         error: `H.265 length-prefixed sample: NAL length ${length} exceeds buffer`
       };
     }
-    nalus.push(sample.subarray(offset, offset + length));
-    offset += length;
+    nalus.push(sample.subarray(offset2, offset2 + length));
+    offset2 += length;
   }
   return { nalus, error: "" };
 }
@@ -7621,13 +7621,13 @@ function looksLikeAnnexB2(sample) {
   }
   return sample[0] === 0 && sample[1] === 0 && sample[2] === 0 && sample[3] === 1 || sample[0] === 0 && sample[1] === 0 && sample[2] === 1;
 }
-function readUintLength2(buf, offset, size2) {
-  if (size2 === 1) return buf[offset];
-  if (size2 === 2) return buf.readUInt16BE(offset);
+function readUintLength2(buf, offset2, size2) {
+  if (size2 === 1) return buf[offset2];
+  if (size2 === 2) return buf.readUInt16BE(offset2);
   if (size2 === 3) {
-    return buf[offset] << 16 | buf[offset + 1] << 8 | buf[offset + 2];
+    return buf[offset2] << 16 | buf[offset2 + 1] << 8 | buf[offset2 + 2];
   }
-  return buf.readUInt32BE(offset);
+  return buf.readUInt32BE(offset2);
 }
 function splitH264NalUnits(sample, naluLengthSize = 4, inputFormat = "auto") {
   if (naluLengthSize < 1 || naluLengthSize > 4 || !Number.isInteger(naluLengthSize)) {
@@ -7655,23 +7655,23 @@ function splitH264NalUnits(sample, naluLengthSize = 4, inputFormat = "auto") {
 }
 function parseLengthPrefixed2(sample, naluLengthSize) {
   const nalus = [];
-  let offset = 0;
-  while (offset < sample.length) {
-    if (offset + naluLengthSize > sample.length) {
+  let offset2 = 0;
+  while (offset2 < sample.length) {
+    if (offset2 + naluLengthSize > sample.length) {
       return { error: "H.264 length-prefixed sample truncated (length field)" };
     }
-    const length = readUintLength2(sample, offset, naluLengthSize);
-    offset += naluLengthSize;
+    const length = readUintLength2(sample, offset2, naluLengthSize);
+    offset2 += naluLengthSize;
     if (length === 0) {
       return { error: "H.264 length-prefixed sample: NAL length 0 is invalid" };
     }
-    if (offset + length > sample.length) {
+    if (offset2 + length > sample.length) {
       return {
         error: `H.264 length-prefixed sample: NAL length ${length} exceeds buffer`
       };
     }
-    nalus.push(sample.subarray(offset, offset + length));
-    offset += length;
+    nalus.push(sample.subarray(offset2, offset2 + length));
+    offset2 += length;
   }
   return { nalus, error: "" };
 }
@@ -7736,25 +7736,25 @@ function parseAvcDecoderConfigurationRecord(description) {
     );
   }
   const naluLengthSize = (record11[4] & 3) + 1;
-  let offset = 5;
+  let offset2 = 5;
   const readSets = (count) => {
     const sets = [];
     for (let i = 0; i < count; i++) {
-      if (offset + 2 > record11.length) {
+      if (offset2 + 2 > record11.length) {
         throw new Error("invalid H.264 avcC: truncated parameter set length");
       }
-      const length = record11.readUInt16BE(offset);
-      offset += 2;
-      if (offset + length > record11.length) {
+      const length = record11.readUInt16BE(offset2);
+      offset2 += 2;
+      if (offset2 + length > record11.length) {
         throw new Error("invalid H.264 avcC: truncated parameter set");
       }
-      sets.push(record11.subarray(offset, offset + length));
-      offset += length;
+      sets.push(record11.subarray(offset2, offset2 + length));
+      offset2 += length;
     }
     return sets;
   };
-  const sps = readSets(record11[offset++] & 31);
-  const pps = offset < record11.length ? readSets(record11[offset++]) : [];
+  const sps = readSets(record11[offset2++] & 31);
+  const pps = offset2 < record11.length ? readSets(record11[offset2++]) : [];
   return { naluLengthSize, sps, pps, parameterSets: [...sps, ...pps] };
 }
 function packFragment(expectedSize, data2) {
@@ -8025,14 +8025,14 @@ function rtpHeaderExtensionsParser(extensions, extIdUriMap) {
     return acc;
   }, {});
 }
-function serializeSdesMid(id6) {
-  return Buffer.from(id6);
+function serializeSdesMid(id7) {
+  return Buffer.from(id7);
 }
-function serializeSdesRTPStreamID(id6) {
-  return Buffer.from(id6);
+function serializeSdesRTPStreamID(id7) {
+  return Buffer.from(id7);
 }
-function serializeRepairedRtpStreamId(id6) {
-  return Buffer.from(id6);
+function serializeRepairedRtpStreamId(id7) {
+  return Buffer.from(id7);
 }
 function serializeTransportWideCC(transportSequenceNumber) {
   return bufferWriter([2], [transportSequenceNumber]);
@@ -8370,11 +8370,11 @@ function ipAddressToBuffer(address2) {
     sections.splice(emptyIndex, 1, ...zeros);
   }
   const result = Buffer.allocUnsafe(16);
-  let offset = 0;
+  let offset2 = 0;
   for (const section of sections) {
     const word = Number.parseInt(section, 16) || 0;
-    result[offset++] = word >> 8 & 255;
-    result[offset++] = word & 255;
+    result[offset2++] = word >> 8 & 255;
+    result[offset2++] = word & 255;
   }
   return result;
 }
@@ -8471,8 +8471,8 @@ function unpackUnknownAttributes(data2) {
     throw new Error("UNKNOWN-ATTRIBUTES must have an even length");
   }
   const attributes = [];
-  for (let offset = 0; offset < data2.length; offset += 2) {
-    attributes.push(data2.readUInt16BE(offset));
+  for (let offset2 = 0; offset2 < data2.length; offset2 += 2) {
+    attributes.push(data2.readUInt16BE(offset2));
   }
   return attributes;
 }
@@ -8745,18 +8745,18 @@ function encodeTcpFrame(data2) {
 }
 function splitTcpFrames(buffer3) {
   const frames = [];
-  let offset = 0;
-  while (buffer3.length - offset >= 2) {
-    const length = buffer3.readUInt16BE(offset);
-    if (buffer3.length - offset < length + 2) {
+  let offset2 = 0;
+  while (buffer3.length - offset2 >= 2) {
+    const length = buffer3.readUInt16BE(offset2);
+    if (buffer3.length - offset2 < length + 2) {
       break;
     }
-    frames.push(buffer3.subarray(offset + 2, offset + 2 + length));
-    offset += 2 + length;
+    frames.push(buffer3.subarray(offset2 + 2, offset2 + 2 + length));
+    offset2 += 2 + length;
   }
   return {
     frames,
-    rest: buffer3.subarray(offset)
+    rest: buffer3.subarray(offset2)
   };
 }
 function socketKey(addr) {
@@ -8822,33 +8822,33 @@ function padTurnFrame(data2) {
 }
 function splitTurnTcpFrames(buffer3) {
   const frames = [];
-  let offset = 0;
+  let offset2 = 0;
   let malformed = false;
-  while (buffer3.length - offset >= 4) {
+  while (buffer3.length - offset2 >= 4) {
     let frameLength;
-    if (isChannelData(buffer3.subarray(offset))) {
-      const payloadLength = buffer3.readUInt16BE(offset + 2);
+    if (isChannelData(buffer3.subarray(offset2))) {
+      const payloadLength = buffer3.readUInt16BE(offset2 + 2);
       frameLength = 4 + payloadLength + paddingLength(payloadLength);
-    } else if ((buffer3[offset] & 192) === 0) {
-      if (buffer3.length - offset < 20) {
+    } else if ((buffer3[offset2] & 192) === 0) {
+      if (buffer3.length - offset2 < 20) {
         break;
       }
-      const stunBodyLength = buffer3.readUInt16BE(offset + 2);
+      const stunBodyLength = buffer3.readUInt16BE(offset2 + 2);
       frameLength = 20 + stunBodyLength + paddingLength(stunBodyLength);
     } else {
       malformed = true;
       break;
     }
-    if (buffer3.length - offset < frameLength) {
+    if (buffer3.length - offset2 < frameLength) {
       break;
     }
-    frames.push(buffer3.subarray(offset, offset + frameLength));
-    offset += frameLength;
+    frames.push(buffer3.subarray(offset2, offset2 + frameLength));
+    offset2 += frameLength;
   }
   return {
     frames,
     malformed,
-    rest: buffer3.subarray(offset)
+    rest: buffer3.subarray(offset2)
   };
 }
 function isStreamTransport(transport) {
@@ -8875,7 +8875,7 @@ function selectTurnUdpSocketType(address2, udpFamily) {
   return (udpFamily ?? 4) === 6 ? "udp6" : "udp4";
 }
 async function createTurnClient({ address: address2, username, password }, {
-  lifetime,
+  lifetime: lifetime2,
   portRange,
   interfaceAddresses,
   ssl,
@@ -8885,7 +8885,7 @@ async function createTurnClient({ address: address2, username, password }, {
   udpFamily,
   signal
 } = {}) {
-  lifetime ??= DEFAULT_ALLOCATION_LIFETIME;
+  lifetime2 ??= DEFAULT_ALLOCATION_LIFETIME;
   transportType ??= ssl ? "tls" : "udp";
   const transport = transportType === "udp" ? await UdpTransport.init(selectTurnUdpSocketType(address2, udpFamily), {
     portRange,
@@ -8895,7 +8895,7 @@ async function createTurnClient({ address: address2, username, password }, {
     address2,
     username,
     password,
-    lifetime,
+    lifetime2,
     transport,
     {
       reconnect: transportType === "udp" ? void 0 : (alternate, alternateDomain) => transportType === "tcp" ? TcpTransport.init(alternate, { connectTimeoutMs }) : TlsTransport.init(
@@ -9169,10 +9169,10 @@ function generateCodecStatsId(transportId, payloadType, scopeId) {
 function getStatsTimestamp() {
   return performance.timeOrigin + performance.now();
 }
-function getReferencedStatsIds(stat11) {
+function getReferencedStatsIds(stat12) {
   const references = [];
   for (const [key, value] of Object.entries(
-    stat11
+    stat12
   )) {
     if (key === "id") {
       continue;
@@ -9195,8 +9195,8 @@ function getReferencedStatsIds(stat11) {
 }
 function buildStatsReport(stats, rootIds) {
   const index = /* @__PURE__ */ new Map();
-  for (const stat11 of stats) {
-    index.set(stat11.id, stat11);
+  for (const stat12 of stats) {
+    index.set(stat12.id, stat12);
   }
   if (!rootIds) {
     return new RTCStatsReport([...index.values()]);
@@ -9204,19 +9204,19 @@ function buildStatsReport(stats, rootIds) {
   const includedIds = /* @__PURE__ */ new Set();
   const queue = [...new Set(Array.from(rootIds))];
   while (queue.length > 0) {
-    const id6 = queue.shift();
-    if (!id6 || includedIds.has(id6)) {
+    const id7 = queue.shift();
+    if (!id7 || includedIds.has(id7)) {
       continue;
     }
-    const stat11 = index.get(id6);
-    if (!stat11) {
+    const stat12 = index.get(id7);
+    if (!stat12) {
       continue;
     }
-    includedIds.add(id6);
-    queue.push(...getReferencedStatsIds(stat11));
+    includedIds.add(id7);
+    queue.push(...getReferencedStatsIds(stat12));
   }
   return new RTCStatsReport(
-    [...includedIds].map((id6) => index.get(id6)).filter((stat11) => !!stat11)
+    [...includedIds].map((id7) => index.get(id7)).filter((stat12) => !!stat12)
   );
 }
 function getApplicationStopRevision(transceiver) {
@@ -10108,13 +10108,13 @@ function normalizeCandidateUfrag(message) {
   const init = "toJSON" in message ? message.toJSON() : { ...message };
   return { ...init, usernameFragment: fromString };
 }
-function settledState(event, current, done) {
+function settledState(event2, current, done) {
   return new Promise((resolve10) => {
-    if (done(current()) || event.ended) {
+    if (done(current()) || event2.ended) {
       resolve10(current());
       return;
     }
-    const { unSubscribe } = event.subscribe(
+    const { unSubscribe } = event2.subscribe(
       (state2) => {
         if (!done(state2)) return;
         unSubscribe();
@@ -10184,19 +10184,19 @@ var init_lib = __esm({
         if (args.length === 0) {
           return super.emit(type, new Event(type));
         }
-        const [event, ...rest] = args;
-        if (event && typeof event === "object" && !("type" in event)) {
+        const [event2, ...rest] = args;
+        if (event2 && typeof event2 === "object" && !("type" in event2)) {
           try {
-            Object.defineProperty(event, "type", {
+            Object.defineProperty(event2, "type", {
               configurable: true,
               enumerable: true,
               value: type
             });
           } catch {
-            return super.emit(type, { type, ...event }, ...rest);
+            return super.emit(type, { type, ...event2 }, ...rest);
           }
         }
-        return super.emit(type, event, ...rest);
+        return super.emit(type, event2, ...rest);
       }
       addEventListener = (type, listener, options) => {
         if (typeof options === "object" && options?.once) {
@@ -10208,7 +10208,7 @@ var init_lib = __esm({
       removeEventListener = (type, listener) => {
         this.removeListener(type, listener);
       };
-      dispatchEvent = (event) => this.emit(event.type, event);
+      dispatchEvent = (event2) => this.emit(event2.type, event2);
     };
     BitWriter = class {
       constructor(bitLength) {
@@ -10264,12 +10264,12 @@ var init_lib = __esm({
       constructor(size2) {
         this.buffer = Buffer.alloc(size2);
       }
-      writeInt16BE(value, offset) {
-        this.buffer.writeInt16BE(value, offset);
+      writeInt16BE(value, offset2) {
+        this.buffer.writeInt16BE(value, offset2);
         return this;
       }
-      writeUInt8(value, offset) {
-        this.buffer.writeUInt8(value, offset);
+      writeUInt8(value, offset2) {
+        this.buffer.writeUInt8(value, offset2);
         return this;
       }
     };
@@ -10592,12 +10592,12 @@ var init_lib = __esm({
         };
       };
       subscribe = (execute, complete, error62) => {
-        const id6 = this.event.eventId;
-        this.event.stack.push({ execute, id: id6, complete, error: error62 });
+        const id7 = this.event.eventId;
+        this.event.stack.push({ execute, id: id7, complete, error: error62 });
         this.event.eventId++;
         const unSubscribe = () => {
           this.event.stack = this.event.stack.filter(
-            (item) => item.id !== id6 && item
+            (item) => item.id !== id7 && item
           );
         };
         const disposer = (disposer2) => {
@@ -10612,12 +10612,12 @@ var init_lib = __esm({
       }
       queuingSubscribe = (execute, complete, error62) => {
         if (this.ended) throw new Error("event completed");
-        const id6 = this.event.eventId;
-        this.event.promiseStack.push({ execute, id: id6, complete, error: error62 });
+        const id7 = this.event.eventId;
+        this.event.promiseStack.push({ execute, id: id7, complete, error: error62 });
         this.event.eventId++;
         const unSubscribe = () => {
           this.event.stack = this.event.stack.filter(
-            (item) => item.id !== id6 && item
+            (item) => item.id !== id7 && item
           );
         };
         const disposer = (disposer2) => {
@@ -11316,8 +11316,8 @@ var init_lib = __esm({
         }
         this._bufferedAmountLowThreshold = value;
       }
-      setId(id6) {
-        this.id = id6;
+      setId(id7) {
+        this.id = id7;
       }
       setReadyState(state2) {
         if (state2 !== this.readyState) {
@@ -12692,8 +12692,8 @@ var init_lib = __esm({
         h.timestamp = rawPacket.readUInt32BE(timestampOffset);
         h.ssrc = rawPacket.readUInt32BE(ssrcOffset);
         for (let i = 0; i < h.csrc.length; i++) {
-          const offset = csrcOffset + i * csrcSize;
-          h.csrc[i] = rawPacket.subarray(offset).readUInt32BE();
+          const offset2 = csrcOffset + i * csrcSize;
+          h.csrc[i] = rawPacket.subarray(offset2).readUInt32BE();
         }
         if (h.extension) {
           h.extensionProfile = rawPacket.subarray(currOffset).readUInt16BE();
@@ -12794,50 +12794,50 @@ var init_lib = __esm({
       }
       serialize(size2) {
         const buf = Buffer.alloc(size2);
-        let offset = 0;
+        let offset2 = 0;
         const v_p_x_cc = new BitWriter(8);
         v_p_x_cc.set(2, 0, this.version);
         if (this.padding) v_p_x_cc.set(1, 2, 1);
         if (this.extensions.length > 0) this.extension = true;
         if (this.extension) v_p_x_cc.set(1, 3, 1);
         v_p_x_cc.set(4, 4, this.csrc.length);
-        buf.writeUInt8(v_p_x_cc.value, offset++);
+        buf.writeUInt8(v_p_x_cc.value, offset2++);
         const m_pt = new BitWriter(8);
         if (this.marker) m_pt.set(1, 0, 1);
         m_pt.set(7, 1, this.payloadType);
-        buf.writeUInt8(m_pt.value, offset++);
+        buf.writeUInt8(m_pt.value, offset2++);
         buf.writeUInt16BE(this.sequenceNumber, seqNumOffset);
-        offset += 2;
+        offset2 += 2;
         buf.writeUInt32BE(this.timestamp, timestampOffset);
-        offset += 4;
+        offset2 += 4;
         buf.writeUInt32BE(this.ssrc, ssrcOffset);
-        offset += 4;
+        offset2 += 4;
         for (const csrc of this.csrc) {
-          buf.writeUInt32BE(csrc, offset);
-          offset += 4;
+          buf.writeUInt32BE(csrc, offset2);
+          offset2 += 4;
         }
         if (this.extension) {
-          const extHeaderPos = offset;
-          buf.writeUInt16BE(this.extensionProfile, offset);
-          offset += 4;
-          const startExtensionsPos = offset;
+          const extHeaderPos = offset2;
+          buf.writeUInt16BE(this.extensionProfile, offset2);
+          offset2 += 4;
+          const startExtensionsPos = offset2;
           switch (this.extensionProfile) {
             case ExtensionProfiles.OneByte:
               for (const extension2 of this.extensions) {
                 buf.writeUInt8(
                   extension2.id << 4 | extension2.payload.length - 1,
-                  offset++
+                  offset2++
                 );
-                extension2.payload.copy(buf, offset);
-                offset += extension2.payload.length;
+                extension2.payload.copy(buf, offset2);
+                offset2 += extension2.payload.length;
               }
               break;
             case ExtensionProfiles.TwoByte:
               for (const extension2 of this.extensions) {
-                buf.writeUInt8(extension2.id, offset++);
-                buf.writeUInt8(extension2.payload.length, offset++);
-                extension2.payload.copy(buf, offset);
-                offset += extension2.payload.length;
+                buf.writeUInt8(extension2.id, offset2++);
+                buf.writeUInt8(extension2.payload.length, offset2++);
+                extension2.payload.copy(buf, offset2);
+                offset2 += extension2.payload.length;
               }
               break;
             default: {
@@ -12845,19 +12845,19 @@ var init_lib = __esm({
               if (extLen % 4 != 0) {
                 throw new Error();
               }
-              this.extensions[0].payload.copy(buf, offset);
-              offset += extLen;
+              this.extensions[0].payload.copy(buf, offset2);
+              offset2 += extLen;
             }
           }
-          const extSize = offset - startExtensionsPos;
+          const extSize = offset2 - startExtensionsPos;
           const roundedExtSize = Math.trunc((extSize + 3) / 4) * 4;
           buf.writeUInt16BE(Math.trunc(roundedExtSize / 4), extHeaderPos + 2);
           for (let i = 0; i < roundedExtSize - extSize; i++) {
-            buf.writeUInt8(0, offset);
-            offset++;
+            buf.writeUInt8(0, offset2);
+            offset2++;
           }
         }
-        this.payloadOffset = offset;
+        this.payloadOffset = offset2;
         return buf;
       }
     };
@@ -12984,20 +12984,20 @@ var init_lib = __esm({
       obu_or_fragment = [];
       static deSerialize = (buf) => {
         const p = new _AV1RtpPayload();
-        let offset = 0;
-        p.zBit_RtpStartsWithFragment = getBit(buf[offset], 0);
-        p.yBit_RtpEndsWithFragment = getBit(buf[offset], 1);
-        p.w_RtpNumObus = getBit(buf[offset], 2, 2);
-        p.nBit_RtpStartsNewCodedVideoSequence = getBit(buf[offset], 4);
-        offset++;
+        let offset2 = 0;
+        p.zBit_RtpStartsWithFragment = getBit(buf[offset2], 0);
+        p.yBit_RtpEndsWithFragment = getBit(buf[offset2], 1);
+        p.w_RtpNumObus = getBit(buf[offset2], 2, 2);
+        p.nBit_RtpStartsNewCodedVideoSequence = getBit(buf[offset2], 4);
+        offset2++;
         if (p.nBit_RtpStartsNewCodedVideoSequence && p.zBit_RtpStartsWithFragment) {
           throw new Error();
         }
         if (p.w_RtpNumObus === 0) {
           let i = 0;
-          while (offset < buf.length) {
-            const [elementSize, bytes] = leb128decode(buf.subarray(offset));
-            const start = offset + bytes;
+          while (offset2 < buf.length) {
+            const [elementSize, bytes] = leb128decode(buf.subarray(offset2));
+            const start = offset2 + bytes;
             const end = start + elementSize;
             if (end > buf.length) {
               throw new Error("AV1 OBU element length exceeds payload");
@@ -13011,14 +13011,14 @@ var init_lib = __esm({
               continues: isLast && !!p.yBit_RtpEndsWithFragment,
               isContinuation: isFirst && !!p.zBit_RtpStartsWithFragment
             });
-            offset = end;
+            offset2 = end;
             i++;
           }
           return p;
         }
         [...Array(p.w_RtpNumObus - 1).keys()].forEach((i) => {
-          const [elementSize, bytes] = leb128decode(buf.subarray(offset));
-          const start = offset + bytes;
+          const [elementSize, bytes] = leb128decode(buf.subarray(offset2));
+          const start = offset2 + bytes;
           const end = start + elementSize;
           let isFragment2 = false;
           if (p.zBit_RtpStartsWithFragment && i === 0) {
@@ -13030,14 +13030,14 @@ var init_lib = __esm({
             continues: false,
             isContinuation: isFragment2
           });
-          offset += bytes + elementSize;
+          offset2 += bytes + elementSize;
         });
         let isFragment = false;
         if (p.yBit_RtpEndsWithFragment || p.w_RtpNumObus === 1 && p.zBit_RtpStartsWithFragment) {
           isFragment = true;
         }
         p.obu_or_fragment.push({
-          data: buf.subarray(offset),
+          data: buf.subarray(offset2),
           isFragment,
           continues: !!p.yBit_RtpEndsWithFragment,
           isContinuation: !!p.zBit_RtpStartsWithFragment && p.w_RtpNumObus === 1
@@ -13123,34 +13123,34 @@ var init_lib = __esm({
           throw new Error("AV1 OBU too short: expected at least 1 header byte");
         }
         const obu = new _AV1Obu();
-        let offset = 0;
-        obu.obu_forbidden_bit = getBit(buf[offset], 0);
-        obu.obu_type = OBU_TYPES[getBit(buf[offset], 1, 4)];
-        obu.obu_extension_flag = getBit(buf[offset], 5);
-        obu.obu_has_size_field = getBit(buf[offset], 6);
-        obu.obu_reserved_1bit = getBit(buf[offset], 7);
-        offset++;
+        let offset2 = 0;
+        obu.obu_forbidden_bit = getBit(buf[offset2], 0);
+        obu.obu_type = OBU_TYPES[getBit(buf[offset2], 1, 4)];
+        obu.obu_extension_flag = getBit(buf[offset2], 5);
+        obu.obu_has_size_field = getBit(buf[offset2], 6);
+        obu.obu_reserved_1bit = getBit(buf[offset2], 7);
+        offset2++;
         if (obu.obu_extension_flag) {
-          if (offset >= buf.length) {
+          if (offset2 >= buf.length) {
             throw new Error(
               "AV1 OBU: extension flag set but extension byte missing"
             );
           }
-          obu.extension_header = buf[offset];
-          offset++;
+          obu.extension_header = buf[offset2];
+          offset2++;
         }
         if (obu.obu_has_size_field) {
-          const [obuSize, leb128Length] = leb128decode(buf.subarray(offset));
-          offset += leb128Length;
-          const end = offset + obuSize;
+          const [obuSize, leb128Length] = leb128decode(buf.subarray(offset2));
+          offset2 += leb128Length;
+          const end = offset2 + obuSize;
           if (end > buf.length) {
             throw new Error(
-              `AV1 OBU size field ${obuSize} exceeds remaining buffer ${buf.length - offset}`
+              `AV1 OBU size field ${obuSize} exceeds remaining buffer ${buf.length - offset2}`
             );
           }
-          obu.payload = buf.subarray(offset, end);
+          obu.payload = buf.subarray(offset2, end);
         } else {
-          obu.payload = buf.subarray(offset);
+          obu.payload = buf.subarray(offset2);
         }
         return obu;
       }
@@ -13322,9 +13322,9 @@ var init_lib = __esm({
         const chunkSize = Math.min(this.maxPayloadSize, this.frameBytes);
         const packets = [];
         let ts = rtpTimestamp >>> 0;
-        for (let offset = 0; offset < data2.length; offset += chunkSize) {
-          const end = Math.min(data2.length, offset + chunkSize);
-          const chunk = data2.subarray(offset, end);
+        for (let offset2 = 0; offset2 < data2.length; offset2 += chunkSize) {
+          const end = Math.min(data2.length, offset2 + chunkSize);
+          const chunk = data2.subarray(offset2, end);
           packets.push(this.buildPacket(chunk, ts, this.takeTalkspurtMarker()));
           ts = ts + chunk.length >>> 0;
         }
@@ -13386,9 +13386,9 @@ var init_lib = __esm({
         const chunkSize = Math.min(this.maxPayloadSize, this.frameBytes);
         const packets = [];
         let ts = rtpTimestamp >>> 0;
-        for (let offset = 0; offset < data2.length; offset += chunkSize) {
-          const end = Math.min(data2.length, offset + chunkSize);
-          const chunk = data2.subarray(offset, end);
+        for (let offset2 = 0; offset2 < data2.length; offset2 += chunkSize) {
+          const end = Math.min(data2.length, offset2 + chunkSize);
+          const chunk = data2.subarray(offset2, end);
           packets.push(this.buildPacket(chunk, ts, this.takeTalkspurtMarker()));
           ts = ts + chunk.length >>> 0;
         }
@@ -13444,43 +13444,43 @@ var init_lib = __esm({
         h265.layerId = hdr.layerId;
         h265.tid = hdr.tid;
         if (hdr.type === H265_PAYLOAD_TYPE_AP) {
-          let offset = 2;
+          let offset2 = 2;
           if (options.hasDonl) {
-            if (offset + 2 > buf.length) {
+            if (offset2 + 2 > buf.length) {
               throw new Error("H.265 AP: DONL exceeds buffer");
             }
-            offset += 2;
+            offset2 += 2;
           }
           const parts = [];
           let first2 = true;
-          while (offset < buf.length) {
+          while (offset2 < buf.length) {
             if (!first2 && options.hasDonl) {
-              if (offset + 1 > buf.length) {
+              if (offset2 + 1 > buf.length) {
                 throw new Error("H.265 AP: DOND exceeds buffer");
               }
-              offset += 1;
+              offset2 += 1;
             }
-            if (offset + 2 > buf.length) {
+            if (offset2 + 2 > buf.length) {
               throw new Error("H.265 AP: NALU size field exceeds buffer");
             }
-            const naluSize = buf.readUInt16BE(offset);
-            offset += 2;
+            const naluSize = buf.readUInt16BE(offset2);
+            offset2 += 2;
             if (naluSize < 2) {
               throw new Error(
                 `H.265 AP: NALU size ${naluSize} too small for header`
               );
             }
-            if (offset + naluSize > buf.length) {
+            if (offset2 + naluSize > buf.length) {
               throw new Error(
-                `H.265 AP: NALU size ${naluSize} at offset ${offset} exceeds buffer ${buf.length}`
+                `H.265 AP: NALU size ${naluSize} at offset ${offset2} exceeds buffer ${buf.length}`
               );
             }
-            const nalu = buf.subarray(offset, offset + naluSize);
+            const nalu = buf.subarray(offset2, offset2 + naluSize);
             if (isIrapType(nalTypeOf(nalu))) {
               h265.apContainsIrap = true;
             }
             parts.push(packageAnnexB(nalu));
-            offset += naluSize;
+            offset2 += naluSize;
             first2 = false;
           }
           if (parts.length === 0) {
@@ -13502,14 +13502,14 @@ var init_lib = __esm({
               "H.265 FU: S and E must not both be set (RFC 7798 \xA74.4.3)"
             );
           }
-          let offset = 3;
+          let offset2 = 3;
           if (options.hasDonl && h265.s) {
-            if (offset + 2 > buf.length) {
+            if (offset2 + 2 > buf.length) {
               throw new Error("H.265 FU: DONL exceeds buffer");
             }
-            offset += 2;
+            offset2 += 2;
           }
-          const fuPayload = buf.subarray(offset);
+          const fuPayload = buf.subarray(offset2);
           if (fuPayload.length === 0) {
             throw new Error("H.265 FU: empty FU payload (RFC 7798 forbids empty)");
           }
@@ -13601,15 +13601,15 @@ var init_lib = __esm({
           return null;
         }
         const startcodeOffset = this.currentStartcodeOffset;
-        let offset = startcodeOffset;
-        const u323 = this.data[offset] << 24 | this.data[offset + 1] << 16 | this.data[offset + 2] << 8 | this.data[offset + 3];
-        offset += u323 === 1 ? 4 : 3;
-        const next = this.findNextStartCodeOffset(offset);
+        let offset2 = startcodeOffset;
+        const u323 = this.data[offset2] << 24 | this.data[offset2 + 1] << 16 | this.data[offset2 + 2] << 8 | this.data[offset2 + 3];
+        offset2 += u323 === 1 ? 4 : 3;
+        const next = this.findNextStartCodeOffset(offset2);
         this.currentStartcodeOffset = next;
-        if (offset >= next) {
+        if (offset2 >= next) {
           return this.eof ? null : this.readNextNalu();
         }
-        return this.data.subarray(offset, next);
+        return this.data.subarray(offset2, next);
       }
       readAll() {
         const nalus = [];
@@ -13709,13 +13709,13 @@ var init_lib = __esm({
           if (fragmentSize <= 0) {
             throw new Error("invalid H.265 RTP maxPayloadSize for FU");
           }
-          for (let offset = 0; offset < body.length; offset += fragmentSize) {
+          for (let offset2 = 0; offset2 < body.length; offset2 += fragmentSize) {
             const chunk = body.subarray(
-              offset,
-              Math.min(body.length, offset + fragmentSize)
+              offset2,
+              Math.min(body.length, offset2 + fragmentSize)
             );
-            const isStart = offset === 0;
-            const isEnd = offset + chunk.length >= body.length;
+            const isStart = offset2 === 0;
+            const isEnd = offset2 + chunk.length >= body.length;
             const fuHeader = Buffer.from([
               (isStart ? 128 : 0) | (isEnd ? 64 : 0) | nalHdr.type & 63
             ]);
@@ -13757,12 +13757,12 @@ var init_lib = __esm({
             "H.264 RTP payload too short: expected at least 1 byte (NAL/FU indicator)"
           );
         }
-        let offset = 0;
-        const naluHeader = buf[offset];
+        let offset2 = 0;
+        const naluHeader = buf[offset2];
         h264.f = getBit(naluHeader, 0);
         h264.nri = getBit(naluHeader, 1, 2);
         h264.nalUnitType = getBit(naluHeader, 3, 5);
-        offset++;
+        offset2++;
         if (0 < h264.nalUnitType && h264.nalUnitType < NalUnitType.stap_a) {
           h264.payload = this.packaging(buf);
           return h264;
@@ -13773,11 +13773,11 @@ var init_lib = __esm({
           );
         }
         if (h264.nalUnitType === NalUnitType.fu_a || h264.nalUnitType === NalUnitType.fu_b) {
-          h264.s = getBit(buf[offset], 0);
-          h264.e = getBit(buf[offset], 1);
-          h264.r = getBit(buf[offset], 2);
-          h264.nalUnitPayloadType = getBit(buf[offset], 3, 5);
-          offset++;
+          h264.s = getBit(buf[offset2], 0);
+          h264.e = getBit(buf[offset2], 1);
+          h264.r = getBit(buf[offset2], 2);
+          h264.nalUnitPayloadType = getBit(buf[offset2], 3, 5);
+          offset2++;
         }
         if (h264.nalUnitType === NalUnitType.stap_a) {
           let stapOffset = stap_aHeaderSize;
@@ -13805,7 +13805,7 @@ var init_lib = __esm({
           if (!fragment) {
             fragment = Buffer.alloc(0);
           }
-          const fu = buf.subarray(offset);
+          const fu = buf.subarray(offset2);
           h264.fragment = Buffer.concat([fragment, fu]);
           if (h264.e && h264.nalUnitPayloadType !== void 0) {
             const bitStream = new BitStream(Buffer.alloc(1)).writeBits(1, 0).writeBits(2, h264.nri).writeBits(5, h264.nalUnitPayloadType);
@@ -13948,13 +13948,13 @@ var init_lib = __esm({
           }
           const fuIndicator = nalHeader & 224 | NalUnitType.fu_a;
           const nalType = nalHeader & 31;
-          for (let offset = 0; offset < fragmentPayload.length; offset += fragmentSize) {
+          for (let offset2 = 0; offset2 < fragmentPayload.length; offset2 += fragmentSize) {
             const chunk = fragmentPayload.subarray(
-              offset,
-              Math.min(fragmentPayload.length, offset + fragmentSize)
+              offset2,
+              Math.min(fragmentPayload.length, offset2 + fragmentSize)
             );
-            const isStart = offset === 0;
-            const isEnd = offset + chunk.length >= fragmentPayload.length;
+            const isStart = offset2 === 0;
+            const isEnd = offset2 + chunk.length >= fragmentPayload.length;
             const fuHeader = Buffer.from([
               (isStart ? 128 : 0) | (isEnd ? 64 : 0) | nalType
             ]);
@@ -14065,10 +14065,10 @@ var init_lib = __esm({
           result.payload = Buffer.from(dataSection.subarray(0, headers[0].size));
         } else {
           const parts = [];
-          let offset = 0;
+          let offset2 = 0;
           for (const h of headers) {
-            parts.push(dataSection.subarray(offset, offset + h.size));
-            offset += h.size;
+            parts.push(dataSection.subarray(offset2, offset2 + h.size));
+            offset2 += h.size;
           }
           result.payload = Buffer.concat(parts);
         }
@@ -14147,13 +14147,13 @@ var init_lib = __esm({
           throw new Error("invalid AAC RTP maxPayloadSize for fragmentation");
         }
         const packets = [];
-        for (let offset = 0; offset < au.length; offset += maxData) {
-          const chunk = au.subarray(offset, Math.min(au.length, offset + maxData));
+        for (let offset2 = 0; offset2 < au.length; offset2 += maxData) {
+          const chunk = au.subarray(offset2, Math.min(au.length, offset2 + maxData));
           packets.push(
             this.buildPacket(
               buildAuPayload([au], chunk),
               timestamp,
-              offset + chunk.length >= au.length
+              offset2 + chunk.length >= au.length
             )
           );
         }
@@ -14218,51 +14218,51 @@ var init_lib = __esm({
       size2 = 0;
       static deSerialize(buf) {
         const p = new _Vp8RtpPayload();
-        let offset = 0;
-        p.xBit = getBit(buf[offset], 0);
-        p.nBit = getBit(buf[offset], 2);
-        p.sBit = getBit(buf[offset], 3);
-        p.pid = getBit(buf[offset], 5, 3);
-        offset++;
+        let offset2 = 0;
+        p.xBit = getBit(buf[offset2], 0);
+        p.nBit = getBit(buf[offset2], 2);
+        p.sBit = getBit(buf[offset2], 3);
+        p.pid = getBit(buf[offset2], 5, 3);
+        offset2++;
         if (p.xBit) {
-          p.iBit = getBit(buf[offset], 0);
-          p.lBit = getBit(buf[offset], 1);
-          p.tBit = getBit(buf[offset], 2);
-          p.kBit = getBit(buf[offset], 3);
-          offset++;
+          p.iBit = getBit(buf[offset2], 0);
+          p.lBit = getBit(buf[offset2], 1);
+          p.tBit = getBit(buf[offset2], 2);
+          p.kBit = getBit(buf[offset2], 3);
+          offset2++;
         }
         if (p.iBit) {
-          p.mBit = getBit(buf[offset], 0);
+          p.mBit = getBit(buf[offset2], 0);
           if (p.mBit) {
-            const _7 = paddingByte(getBit(buf[offset], 1, 7));
-            const _8 = paddingByte(buf[offset + 1]);
+            const _7 = paddingByte(getBit(buf[offset2], 1, 7));
+            const _8 = paddingByte(buf[offset2 + 1]);
             p.pictureId = Number.parseInt(_7 + _8, 2);
-            offset += 2;
+            offset2 += 2;
           } else {
-            p.pictureId = getBit(buf[offset], 1, 7);
-            offset++;
+            p.pictureId = getBit(buf[offset2], 1, 7);
+            offset2++;
           }
         }
         if (p.lBit) {
-          offset++;
+          offset2++;
         }
         if (p.lBit || p.kBit) {
           if (p.tBit) {
           }
           if (p.kBit) {
           }
-          offset++;
+          offset2++;
         }
-        p.payload = buf.subarray(offset);
+        p.payload = buf.subarray(offset2);
         if (p.payloadHeaderExist) {
-          p.size0 = getBit(buf[offset], 0, 3);
-          p.hBit = getBit(buf[offset], 3);
-          p.ver = getBit(buf[offset], 4, 3);
-          p.pBit = getBit(buf[offset], 7);
-          offset++;
-          p.size1 = buf[offset];
-          offset++;
-          p.size2 = buf[offset];
+          p.size0 = getBit(buf[offset2], 0, 3);
+          p.hBit = getBit(buf[offset2], 3);
+          p.ver = getBit(buf[offset2], 4, 3);
+          p.pBit = getBit(buf[offset2], 7);
+          offset2++;
+          p.size1 = buf[offset2];
+          offset2++;
+          p.size2 = buf[offset2];
         }
         return p;
       }
@@ -14307,16 +14307,16 @@ var init_lib = __esm({
         const pictureId = this.pictureId;
         this.pictureId = this.pictureId + 1 & VP8_PICTURE_ID_MASK;
         const packets = [];
-        for (let offset = 0; offset < data2.length; offset += chunkSize) {
+        for (let offset2 = 0; offset2 < data2.length; offset2 += chunkSize) {
           const chunk = data2.subarray(
-            offset,
-            Math.min(data2.length, offset + chunkSize)
+            offset2,
+            Math.min(data2.length, offset2 + chunkSize)
           );
           const descriptor = createVp8PayloadDescriptor({
-            start: offset === 0,
+            start: offset2 === 0,
             pictureId
           });
-          const isLast = offset + chunk.length >= data2.length;
+          const isLast = offset2 + chunk.length >= data2.length;
           packets.push(
             this.buildPacket(
               Buffer.concat([descriptor, chunk]),
@@ -14364,87 +14364,87 @@ var init_lib = __esm({
       pgP_Diff = [];
       payload;
       static deSerialize(buf) {
-        const { p, offset } = this.parseRtpPayload(buf);
-        p.payload = buf.subarray(offset);
+        const { p, offset: offset2 } = this.parseRtpPayload(buf);
+        p.payload = buf.subarray(offset2);
         return p;
       }
       static parseRtpPayload(buf) {
         const p = new _Vp9RtpPayload();
-        let offset = 0;
-        p.iBit = getBit(buf[offset], 0);
-        p.pBit = getBit(buf[offset], 1);
-        p.lBit = getBit(buf[offset], 2);
-        p.fBit = getBit(buf[offset], 3);
-        p.bBit = getBit(buf[offset], 4);
-        p.eBit = getBit(buf[offset], 5);
-        p.vBit = getBit(buf[offset], 6);
-        p.zBit = getBit(buf[offset], 7);
-        offset++;
+        let offset2 = 0;
+        p.iBit = getBit(buf[offset2], 0);
+        p.pBit = getBit(buf[offset2], 1);
+        p.lBit = getBit(buf[offset2], 2);
+        p.fBit = getBit(buf[offset2], 3);
+        p.bBit = getBit(buf[offset2], 4);
+        p.eBit = getBit(buf[offset2], 5);
+        p.vBit = getBit(buf[offset2], 6);
+        p.zBit = getBit(buf[offset2], 7);
+        offset2++;
         if (p.iBit) {
-          p.m = getBit(buf[offset], 0);
+          p.m = getBit(buf[offset2], 0);
           if (p.m) {
-            const _7 = paddingByte(getBit(buf[offset], 1, 7));
-            const _8 = paddingByte(buf[offset + 1]);
+            const _7 = paddingByte(getBit(buf[offset2], 1, 7));
+            const _8 = paddingByte(buf[offset2 + 1]);
             p.pictureId = Number.parseInt(_7 + _8, 2);
-            offset += 2;
+            offset2 += 2;
           } else {
-            p.pictureId = getBit(buf[offset], 1, 7);
-            offset++;
+            p.pictureId = getBit(buf[offset2], 1, 7);
+            offset2++;
           }
         }
         if (p.lBit) {
-          p.tid = getBit(buf[offset], 0, 3);
-          p.u = getBit(buf[offset], 3);
-          p.sid = getBit(buf[offset], 4, 3);
-          p.d = getBit(buf[offset], 7);
-          offset++;
+          p.tid = getBit(buf[offset2], 0, 3);
+          p.u = getBit(buf[offset2], 3);
+          p.sid = getBit(buf[offset2], 4, 3);
+          p.d = getBit(buf[offset2], 7);
+          offset2++;
           if (p.fBit === 0) {
-            p.tl0PicIdx = buf[offset];
-            offset++;
+            p.tl0PicIdx = buf[offset2];
+            offset2++;
           }
         }
         if (p.fBit && p.pBit) {
           for (; ; ) {
-            p.pDiff = [...p.pDiff, getBit(buf[offset], 0, 7)];
-            const n = getBit(buf[offset], 7);
-            offset++;
+            p.pDiff = [...p.pDiff, getBit(buf[offset2], 0, 7)];
+            const n = getBit(buf[offset2], 7);
+            offset2++;
             if (n === 0) break;
           }
         }
         if (p.vBit) {
-          p.n_s = getBit(buf[offset], 0, 3);
-          p.y = getBit(buf[offset], 3);
-          p.g = getBit(buf[offset], 4);
-          offset++;
+          p.n_s = getBit(buf[offset2], 0, 3);
+          p.y = getBit(buf[offset2], 3);
+          p.g = getBit(buf[offset2], 4);
+          offset2++;
           if (p.y) {
             [...Array(p.n_s + 1)].forEach(() => {
-              p.width.push(buf.readUInt16BE(offset));
-              offset += 2;
-              p.height.push(buf.readUInt16BE(offset));
-              offset += 2;
+              p.width.push(buf.readUInt16BE(offset2));
+              offset2 += 2;
+              p.height.push(buf.readUInt16BE(offset2));
+              offset2 += 2;
             });
           }
           if (p.g) {
-            p.n_g = buf[offset];
-            offset++;
+            p.n_g = buf[offset2];
+            offset2++;
           }
           if (p.n_g > 0) {
             [...Array(p.n_g).keys()].forEach((i) => {
-              p.pgT.push(getBit(buf[offset], 0, 3));
-              p.pgU.push(getBit(buf[offset], 3));
-              const r = getBit(buf[offset], 4, 2);
-              offset++;
+              p.pgT.push(getBit(buf[offset2], 0, 3));
+              p.pgU.push(getBit(buf[offset2], 3));
+              const r = getBit(buf[offset2], 4, 2);
+              offset2++;
               p.pgP_Diff[i] = [];
               if (r > 0) {
                 [...Array(r)].forEach(() => {
-                  p.pgP_Diff[i].push(buf[offset]);
-                  offset++;
+                  p.pgP_Diff[i].push(buf[offset2]);
+                  offset2++;
                 });
               }
             });
           }
         }
-        return { offset, p };
+        return { offset: offset2, p };
       }
       static isDetectedFinalPacketInSequence(header) {
         return header.marker;
@@ -14478,13 +14478,13 @@ var init_lib = __esm({
         else if (options.isKeyframe !== void 0) isKeyframe = options.isKeyframe;
         const pBit = isKeyframe ? 0 : 1;
         const packets = [];
-        for (let offset = 0; offset < data2.length; offset += chunkSize) {
+        for (let offset2 = 0; offset2 < data2.length; offset2 += chunkSize) {
           const chunk = data2.subarray(
-            offset,
-            Math.min(data2.length, offset + chunkSize)
+            offset2,
+            Math.min(data2.length, offset2 + chunkSize)
           );
-          const isStart = offset === 0;
-          const isEnd = offset + chunk.length >= data2.length;
+          const isStart = offset2 === 0;
+          const isEnd = offset2 + chunk.length >= data2.length;
           const descriptor = new BitWriter(8).set(1, 0, 0).set(1, 1, pBit).set(1, 2, 0).set(1, 3, 0).set(1, 4, isStart ? 1 : 0).set(1, 5, isEnd ? 1 : 0).set(1, 6, 0).set(1, 7, 0).buffer;
           packets.push(
             this.buildPacket(
@@ -14603,23 +14603,23 @@ var init_lib = __esm({
         return this.buildPacket(payload, rtpTimestamp, !!input4.start);
       }
       /** First packet of an event: marker=1, E=0 (RFC 4733 §2.5.1.1). */
-      packetizeStart(event, volume, duration3, rtpTimestamp) {
+      packetizeStart(event2, volume, duration3, rtpTimestamp) {
         return this.packetizeEvent(
-          { event, volume, duration: duration3, start: true, end: false },
+          { event: event2, volume, duration: duration3, start: true, end: false },
           rtpTimestamp
         );
       }
       /** Intermediate update: marker=0, E=0; duration is cumulative. */
-      packetizeContinue(event, volume, duration3, rtpTimestamp) {
+      packetizeContinue(event2, volume, duration3, rtpTimestamp) {
         return this.packetizeEvent(
-          { event, volume, duration: duration3, start: false, end: false },
+          { event: event2, volume, duration: duration3, start: false, end: false },
           rtpTimestamp
         );
       }
       /** Final packet(s): marker=0, E=1; duration is cumulative. */
-      packetizeEnd(event, volume, duration3, rtpTimestamp) {
+      packetizeEnd(event2, volume, duration3, rtpTimestamp) {
         return this.packetizeEvent(
-          { event, volume, duration: duration3, start: false, end: true },
+          { event: event2, volume, duration: duration3, start: false, end: true },
           rtpTimestamp
         );
       }
@@ -14638,12 +14638,12 @@ var init_lib = __esm({
     ];
     timer = {
       setTimeout: (...args) => {
-        const id6 = setTimeout(...args);
-        return () => clearTimeout(id6);
+        const id7 = setTimeout(...args);
+        return () => clearTimeout(id7);
       },
       setInterval: (callback, delay2) => {
-        const id6 = setInterval(callback, delay2);
-        return () => clearInterval(id6);
+        const id7 = setInterval(callback, delay2);
+        return () => clearInterval(id7);
       }
     };
     RTCP_HEADER_SIZE = 4;
@@ -15985,15 +15985,15 @@ var init_lib = __esm({
       static deSerialize(bufferOrArrayBuffer) {
         const buf = bufferOrArrayBuffer instanceof ArrayBuffer ? Buffer.from(bufferOrArrayBuffer) : bufferOrArrayBuffer;
         const red = new _Red();
-        let offset = 0;
-        [red.header, offset] = RedHeader.deSerialize(buf);
+        let offset2 = 0;
+        [red.header, offset2] = RedHeader.deSerialize(buf);
         red.header.fields.forEach(({ blockLength, timestampOffset: timestampOffset2, blockPT }) => {
           if (blockLength && timestampOffset2) {
-            const block = buf.subarray(offset, offset + blockLength);
+            const block = buf.subarray(offset2, offset2 + blockLength);
             red.blocks.push({ block, blockPT, timestampOffset: timestampOffset2 });
-            offset += blockLength;
+            offset2 += blockLength;
           } else {
-            const block = buf.subarray(offset);
+            const block = buf.subarray(offset2);
             red.blocks.push({ block, blockPT });
           }
         });
@@ -16023,23 +16023,23 @@ var init_lib = __esm({
     RedHeader = class _RedHeader {
       fields = [];
       static deSerialize(buf) {
-        let offset = 0;
+        let offset2 = 0;
         const header = new _RedHeader();
         for (; ; ) {
           const field = {};
           header.fields.push(field);
-          const bitStream = new BitStream(buf.subarray(offset));
+          const bitStream = new BitStream(buf.subarray(offset2));
           field.fBit = bitStream.readBits(1);
           field.blockPT = bitStream.readBits(7);
-          offset++;
+          offset2++;
           if (field.fBit === 0) {
             break;
           }
           field.timestampOffset = bitStream.readBits(14);
           field.blockLength = bitStream.readBits(10);
-          offset += 3;
+          offset2 += 3;
         }
-        return [header, offset];
+        return [header, offset2];
       }
       serialize() {
         let buf = Buffer.alloc(0);
@@ -19521,11 +19521,11 @@ var init_lib = __esm({
       }
     };
     TurnProtocol = class _TurnProtocol {
-      constructor(server, username, password, lifetime, transport, options = {}) {
+      constructor(server, username, password, lifetime2, transport, options = {}) {
         this.server = server;
         this.username = username;
         this.password = password;
-        this.lifetime = lifetime;
+        this.lifetime = lifetime2;
         this.transport = transport;
         this.options = options;
         this.configuredServer = server;
@@ -19629,7 +19629,7 @@ var init_lib = __esm({
               tried.push(this.pinnedServerEndpoint);
             }
             const failed = error62;
-            const fail6 = (reason) => new TurnRedirectError(reason, this.server, alternate.server, failed);
+            const fail7 = (reason) => new TurnRedirectError(reason, this.server, alternate.server, failed);
             if (!alternate.server) {
               throw new TurnRedirectError(
                 "missing-alternate",
@@ -19639,13 +19639,13 @@ var init_lib = __esm({
               );
             }
             if (tried.some((addr) => addressEquals(addr, alternate.server))) {
-              throw fail6("loop");
+              throw fail7("loop");
             }
             if (redirects >= maxRedirects) {
-              throw fail6("too-many-redirects");
+              throw fail7("too-many-redirects");
             }
             if (isStreamTransport(this.transport) && !this.options.reconnect) {
-              throw fail6("unsupported-transport");
+              throw fail7("unsupported-transport");
             }
             log23("allocate redirected", this.server, "->", alternate);
             await this.switchServer(alternate);
@@ -22264,9 +22264,9 @@ var init_lib = __esm({
         body.writeUInt32BE(this.cumulativeTsn, 0);
         return Buffer.concat([
           body,
-          ...this.streams.map(([id6, seq]) => {
+          ...this.streams.map(([id7, seq]) => {
             const streamBuffer = Buffer.alloc(4);
-            streamBuffer.writeUInt16BE(id6, 0);
+            streamBuffer.writeUInt16BE(id7, 0);
             streamBuffer.writeUInt16BE(seq, 2);
             return streamBuffer;
           })
@@ -24138,8 +24138,8 @@ var init_lib = __esm({
       constructor(stats) {
         super();
         if (stats) {
-          for (const stat11 of stats) {
-            this.set(stat11.id, stat11);
+          for (const stat12 of stats) {
+            this.set(stat12.id, stat12);
           }
         }
       }
@@ -24615,8 +24615,8 @@ var init_lib = __esm({
       getVideoTracks() {
         return this.tracks.filter((track) => track.kind === "video");
       }
-      getTrackById(id6) {
-        return this.tracks.find((track) => track.id === id6);
+      getTrackById(id7) {
+        return this.tracks.find((track) => track.id === id7);
       }
       get active() {
         return this.tracks.some((track) => !track.stopped);
@@ -24769,7 +24769,7 @@ var init_lib = __esm({
       removeEventListener = (type, listener) => {
         this.events.removeEventListener(type, listener);
       };
-      dispatchEvent = (event) => this.events.dispatchEvent(event);
+      dispatchEvent = (event2) => this.events.dispatchEvent(event2);
       get localParameters() {
         return new RTCDtlsParameters(
           this.localCertificate ? this.localCertificate.getFingerprints() : [],
@@ -25340,7 +25340,7 @@ var init_lib = __esm({
       removeEventListener = (type, listener) => {
         this.events.removeEventListener(type, listener);
       };
-      dispatchEvent = (event) => this.events.dispatchEvent(event);
+      dispatchEvent = (event2) => this.events.dispatchEvent(event2);
       get role() {
         if (!this.connection.remoteUsername || !this.connection.remotePassword) {
           return "unknown";
@@ -26103,12 +26103,12 @@ var init_lib = __esm({
           ...[
             this.sctp.onReceive.subscribe(this.datachannelReceive),
             this.sctp.onReconfigStreams.subscribe((ids) => {
-              ids.forEach((id6) => {
-                const dc = this.dataChannels[id6];
+              ids.forEach((id7) => {
+                const dc = this.dataChannels[id7];
                 if (!dc) return;
                 dc.setReadyState("closing");
                 dc.setReadyState("closed");
-                delete this.dataChannels[id6];
+                delete this.dataChannels[id7];
               });
             }),
             this.sctp.stateChanged.connected.subscribe(() => {
@@ -28873,7 +28873,7 @@ var init_lib = __esm({
               track,
               transceiver,
               streams: remoteStreamIds.map(
-                (id6) => new MediaStream({ id: id6, tracks: [track] })
+                (id7) => new MediaStream({ id: id7, tracks: [track] })
               )
             });
           }
@@ -32954,7 +32954,7 @@ var init_lib = __esm({
           const candidateTarget = unfinished.map((index) => this.getTransportByMLineIndex(sdp, index)).filter(
             (iceTransport2) => !!iceTransport2
           ).reduce((acc, transport) => {
-            if (!acc.find(({ id: id6 }) => id6 === transport.id)) {
+            if (!acc.find(({ id: id7 }) => id7 === transport.id)) {
               acc.push(transport);
             }
             return acc;
@@ -33448,16 +33448,16 @@ var init_lib = __esm({
         );
         this.transceiverManager.onTrack.subscribe(
           ({ track, streams, transceiver }) => {
-            const event = new RTCTrackEvent({
+            const event2 = new RTCTrackEvent({
               track,
               streams,
               transceiver,
               receiver: transceiver.receiver
             });
             this.onTrack.execute(track);
-            this.emit("track", event);
+            this.emit("track", event2);
             if (this.ontrack) {
-              this.ontrack(event);
+              this.ontrack(event2);
             }
           }
         );
@@ -33502,9 +33502,9 @@ var init_lib = __esm({
         );
         this.sctpManager.onDataChannel.subscribe((channel) => {
           this.onDataChannel.execute(channel);
-          const event = { type: "datachannel", channel };
-          this.ondatachannel?.(event);
-          this.emit("datachannel", event);
+          const event2 = { type: "datachannel", channel };
+          this.ondatachannel?.(event2);
+          this.emit("datachannel", event2);
         });
         this.secureManager = new SecureTransportManager({
           config: this.config,
@@ -33556,12 +33556,12 @@ var init_lib = __esm({
         this.secureManager.onIceCandidate.subscribe((candidate) => {
           const iceCandidate = candidate ? candidate.toJSON() : void 0;
           this.onIceCandidate.execute(iceCandidate);
-          const event = {
+          const event2 = {
             type: "icecandidate",
             candidate: iceCandidate
           };
-          this.onicecandidate?.(event);
-          this.emit("icecandidate", event);
+          this.onicecandidate?.(event2);
+          this.emit("icecandidate", event2);
         });
       }
       get connectionState() {
@@ -34728,9 +34728,9 @@ var init_lib = __esm({
           this.onIceCandidate,
           this.onNegotiationneeded
         ];
-        for (const event of events) {
-          if (!event.ended) {
-            event.complete();
+        for (const event2 of events) {
+          if (!event2.ended) {
+            event2.complete();
           }
         }
       }
@@ -40972,9 +40972,9 @@ var require_polynomial = __commonJS({
         for (let i = 0; i < divisor.length; i++) {
           result[i] ^= GF.mul(divisor[i], coeff);
         }
-        let offset = 0;
-        while (offset < result.length && result[offset] === 0) offset++;
-        result = result.slice(offset);
+        let offset2 = 0;
+        while (offset2 < result.length && result[offset2] === 0) offset2++;
+        result = result.slice(offset2);
       }
       return result;
     };
@@ -41881,16 +41881,16 @@ var require_qrcode = __commonJS({
       const dataCodewordsInGroup2 = dataCodewordsInGroup1 + 1;
       const ecCount = totalCodewordsInGroup1 - dataCodewordsInGroup1;
       const rs = new ReedSolomonEncoder(ecCount);
-      let offset = 0;
+      let offset2 = 0;
       const dcData = new Array(ecTotalBlocks);
       const ecData = new Array(ecTotalBlocks);
       let maxDataSize = 0;
       const buffer3 = new Uint8Array(bitBuffer.buffer);
       for (let b = 0; b < ecTotalBlocks; b++) {
         const dataSize = b < blocksInGroup1 ? dataCodewordsInGroup1 : dataCodewordsInGroup2;
-        dcData[b] = buffer3.slice(offset, offset + dataSize);
+        dcData[b] = buffer3.slice(offset2, offset2 + dataSize);
         ecData[b] = rs.encode(dcData[b]);
-        offset += dataSize;
+        offset2 += dataSize;
         maxDataSize = Math.max(maxDataSize, dataSize);
       }
       const data2 = new Uint8Array(totalCodewords);
@@ -43915,12 +43915,12 @@ var require_png_sync = __commonJS({
   "node_modules/pngjs/lib/png-sync.js"(exports) {
     "use strict";
     var parse5 = require_parser_sync();
-    var pack = require_packer_sync();
+    var pack2 = require_packer_sync();
     exports.read = function(buffer3, options) {
       return parse5(buffer3, options || {});
     };
     exports.write = function(png, options) {
-      return pack(png, options);
+      return pack2(png, options);
     };
   }
 });
@@ -48388,15 +48388,15 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     const syms = normalized.symbolKeys;
     const doc = new Doc(["payload", "ctx"], { shape, inst, memo: memo2, syms });
     const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
-    const prefixStr = (id6, k) => `
-          let ${id6}_ab = false;
-          for (let i = 0; i < ${id6}.issues.length; i++) {
-            const iss = ${id6}.issues[i];
+    const prefixStr = (id7, k) => `
+          let ${id7}_ab = false;
+          for (let i = 0; i < ${id7}.issues.length; i++) {
+            const iss = ${id7}.issues[i];
             iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
             payload.issues.push(iss);
-            if (iss.continue !== true) ${id6}_ab = true;
+            if (iss.continue !== true) ${id7}_ab = true;
           }
-          if (${id6}_ab && ctx && ctx.abortEarly) {
+          if (${id7}_ab && ctx && ctx.abortEarly) {
             payload.value = newResult;
             return payload;
           }`;
@@ -48410,34 +48410,34 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     for (const key of normalized.allKeys) {
       if (key === "__proto__")
         continue;
-      const id6 = ids[key];
+      const id7 = ids[key];
       const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
       const isPresent = `${k} in input`;
       const schema = shape[key];
       const optin = schema?._zod?.optin;
       const isOptionalIn = optin !== void 0;
       const isOptionalOut = schema?._zod?.optout === "optional";
-      doc.write(`const ${id6} = ${parseStr(k)};`);
+      doc.write(`const ${id7} = ${parseStr(k)};`);
       if (isOptionalIn && isOptionalOut) {
-        const assign = optin === "optional" ? `${id6}_present` : `${id6}.value !== undefined || ${id6}_present`;
+        const assign = optin === "optional" ? `${id7}_present` : `${id7}.value !== undefined || ${id7}_present`;
         doc.write(`
-        const ${id6}_present = ${isPresent};
-        if (!${id6}.issues.length || ${id6}_present) {
-          if (${id6}.issues.length) {${prefixStr(id6, k)}
+        const ${id7}_present = ${isPresent};
+        if (!${id7}.issues.length || ${id7}_present) {
+          if (${id7}.issues.length) {${prefixStr(id7, k)}
           }
 
           if (${assign}) {
-            newResult[${k}] = ${id6}.value;
+            newResult[${k}] = ${id7}.value;
           }
         }
 
       `);
       } else if (!isOptionalIn) {
         doc.write(`
-        const ${id6}_present = ${isPresent};
-        if (${id6}.issues.length) {${prefixStr(id6, k)}
+        const ${id7}_present = ${isPresent};
+        if (${id7}.issues.length) {${prefixStr(id7, k)}
         }
-        if (!${id6}_present && !${id6}.issues.length) {
+        if (!${id7}_present && !${id7}.issues.length) {
           payload.issues.push({
             code: "invalid_type",
             expected: "nonoptional",
@@ -48450,22 +48450,22 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
           }
         }
 
-        if (${id6}_present) {
-          newResult[${k}] = ${id6}.value;
+        if (${id7}_present) {
+          newResult[${k}] = ${id7}.value;
         }
 
       `);
       } else {
         doc.write(`
-        if (${id6}.issues.length) {${prefixStr(id6, k)}
+        if (${id7}.issues.length) {${prefixStr(id7, k)}
         }
       `);
         if (optin === "defaulted") {
-          doc.write(`newResult[${k}] = ${id6}.value;`);
+          doc.write(`newResult[${k}] = ${id7}.value;`);
         } else {
           doc.write(`
-        if (${id6}.value !== undefined || ${isPresent}) {
-          newResult[${k}] = ${id6}.value;
+        if (${id7}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id7}.value;
         }
       `);
         }
@@ -60493,26 +60493,26 @@ function extractDefs(ctx, schema) {
     return;
   const idToSchema = /* @__PURE__ */ new Map();
   for (const entry of ctx.seen.entries()) {
-    const id6 = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id6) {
-      const existing = idToSchema.get(id6);
+    const id7 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id7) {
+      const existing = idToSchema.get(id7);
       if (existing && existing !== entry[0]) {
-        throw new Error(`Duplicate schema id "${id6}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
+        throw new Error(`Duplicate schema id "${id7}" detected during JSON Schema conversion. Two different schemas cannot share the same id when converted together.`);
       }
-      idToSchema.set(id6, entry[0]);
+      idToSchema.set(id7, entry[0]);
     }
   }
   const makeURI = (entry) => {
     const defsSegment = ctx.target === "draft-2020-12" ? "$defs" : "definitions";
     if (ctx.external) {
       const externalId = ctx.external.registry.get(entry[0])?.id;
-      const uriGenerator = ctx.external.uri ?? ((id7) => id7);
+      const uriGenerator = ctx.external.uri ?? ((id8) => id8);
       if (externalId) {
         return { ref: uriGenerator(externalId) };
       }
-      const id6 = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
-      entry[1].defId = id6;
-      return { defId: id6, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id6)}` };
+      const id7 = entry[1].defId ?? entry[1].schema.id ?? `schema${ctx.counter++}`;
+      entry[1].defId = id7;
+      return { defId: id7, ref: `${uriGenerator("__shared")}#/${defsSegment}/${encodeJSONPointerSegment(id7)}` };
     }
     const uriPrefix = `#`;
     const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
@@ -60560,8 +60560,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         continue;
       }
     }
-    const id6 = ctx.metadataRegistry.get(entry[0])?.id;
-    if (id6) {
+    const id7 = ctx.metadataRegistry.get(entry[0])?.id;
+    if (id7) {
       extractToDef(entry);
       continue;
     }
@@ -60794,10 +60794,10 @@ function finalize(ctx, schema) {
   } else {
   }
   if (ctx.external?.uri) {
-    const id6 = ctx.external.registry.get(schema)?.id;
-    if (!id6)
+    const id7 = ctx.external.registry.get(schema)?.id;
+    if (!id7)
       throw new Error("Schema is missing an `id` property");
-    result.$id = ctx.external.uri(id6);
+    result.$id = ctx.external.uri(id7);
   }
   assignProps(result, root2.defId ? root2.schema : root2.def ?? root2.schema);
   const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
@@ -61403,7 +61403,7 @@ function stringifyKeyNames(bySchema, json2, visited) {
   const values = json2.enum ?? (json2.const !== void 0 ? [json2.const] : void 0);
   if (!numericType && !values?.some((v) => typeof v === "number"))
     return json2;
-  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id: id6, ...rest } = json2;
+  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf, format, id: id7, ...rest } = json2;
   if (rest.enum)
     rest.enum = rest.enum.map((v) => typeof v === "number" ? String(v) : v);
   else if (typeof rest.const === "number")
@@ -64610,8 +64610,8 @@ var SequencedCiphertextReorderBuffer = class {
       throw new Error("Duplicate buffered ciphertext counter.");
     }
     const maxFrames = this.options.maxFrames ?? MAX_REORDER_BUFFERED_FRAMES;
-    const maxBytes = this.options.maxBytes ?? MAX_REORDER_BUFFERED_BYTES;
-    if (this.pending.size >= maxFrames || this.bufferedBytes + ciphertext.byteLength > maxBytes) {
+    const maxBytes2 = this.options.maxBytes ?? MAX_REORDER_BUFFERED_BYTES;
+    if (this.pending.size >= maxFrames || this.bufferedBytes + ciphertext.byteLength > maxBytes2) {
       throw new Error("Cross-transport reorder buffer exceeded its limit.");
     }
     const copy = new Uint8Array(ciphertext);
@@ -64703,8 +64703,8 @@ function decodeBinaryUpload(data2) {
   if (data2.byteLength < BINARY_UPLOAD_PREFIX_BYTES || !BINARY_UPLOAD_MAGIC.every((byte, index) => data2[index] === byte))
     throw new Error("Invalid binary upload prefix");
   const headerBytes = new DataView(data2.buffer, data2.byteOffset, data2.byteLength).getUint32(8, false);
-  const chunkBytes = data2.byteLength - BINARY_UPLOAD_PREFIX_BYTES - headerBytes;
-  if (!headerBytes || headerBytes > BINARY_UPLOAD_MAX_HEADER_BYTES || chunkBytes < 1 || chunkBytes > BINARY_UPLOAD_CHUNK_BYTES)
+  const chunkBytes2 = data2.byteLength - BINARY_UPLOAD_PREFIX_BYTES - headerBytes;
+  if (!headerBytes || headerBytes > BINARY_UPLOAD_MAX_HEADER_BYTES || chunkBytes2 < 1 || chunkBytes2 > BINARY_UPLOAD_CHUNK_BYTES)
     throw new Error("Invalid binary upload bounds");
   const message = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(data2.subarray(BINARY_UPLOAD_PREFIX_BYTES, BINARY_UPLOAD_PREFIX_BYTES + headerBytes)));
   if (!isBinaryUploadRecord(message) || message.type !== "rpc.request" || !isBinaryUploadRecord(message.payload) || message.payload.method !== BINARY_UPLOAD_METHOD || !isBinaryUploadRecord(message.payload.params) || "data" in message.payload.params)
@@ -64882,7 +64882,18 @@ var controlFrameTypes = [
   "pong",
   "error"
 ];
+var sessionTransferMethods = [
+  "session.transfer.export.open",
+  "session.transfer.export.read",
+  "session.transfer.export.close",
+  "session.transfer.import.open",
+  "session.transfer.import.chunk",
+  "session.transfer.import.commit",
+  "session.transfer.import.status",
+  "session.transfer.import.abort"
+];
 var rpcMethods = [
+  ...sessionTransferMethods,
   "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
@@ -65288,44 +65299,44 @@ var rpcErrorPayloadSchema = external_exports.object({
   retryable: external_exports.boolean().optional(),
   details: external_exports.unknown().optional()
 });
-function createMessage(type, payload, id6 = cryptoRandomId()) {
+function createMessage(type, payload, id7 = cryptoRandomId()) {
   return {
     v: PROTOCOL_VERSION,
-    id: id6,
+    id: id7,
     type,
     timestamp: Date.now(),
     payload
   };
 }
-function createControlFrame(type, payload, id6 = cryptoRandomId()) {
+function createControlFrame(type, payload, id7 = cryptoRandomId()) {
   return {
     v: PROTOCOL_VERSION,
-    id: id6,
+    id: id7,
     type,
     timestamp: Date.now(),
     payload
   };
 }
-function createRelayDataFrame(type, payload, id6 = cryptoRandomId()) {
+function createRelayDataFrame(type, payload, id7 = cryptoRandomId()) {
   return {
     v: PROTOCOL_VERSION,
-    id: id6,
+    id: id7,
     type,
     timestamp: Date.now(),
     payload
   };
 }
-function createRpcRequest(method, params, id6) {
-  return createMessage("rpc.request", { method, params }, id6);
+function createRpcRequest(method, params, id7) {
+  return createMessage("rpc.request", { method, params }, id7);
 }
-function createRpcResponse(requestId, result) {
-  return createMessage("rpc.response", { requestId, result });
+function createRpcResponse(requestId2, result) {
+  return createMessage("rpc.response", { requestId: requestId2, result });
 }
-function createRpcError(requestId, code, message, details2, retryable) {
-  return createMessage("rpc.error", { requestId, code, message, details: details2, retryable });
+function createRpcError(requestId2, code, message, details2, retryable) {
+  return createMessage("rpc.error", { requestId: requestId2, code, message, details: details2, retryable });
 }
-function createEvent(event, data2, options = {}) {
-  return createMessage("event", { event, data: data2, ...options });
+function createEvent(event2, data2, options = {}) {
+  return createMessage("event", { event: event2, data: data2, ...options });
 }
 function parseRemoteMessage(input4) {
   return remoteMessageSchema.parse(input4);
@@ -65448,10 +65459,10 @@ var SecureMessageCodec = class {
     if (assembly.receivedBytes !== totalBytes)
       throw new Error("Secure message length is invalid.");
     const message = new Uint8Array(totalBytes);
-    let offset = 0;
+    let offset2 = 0;
     for (const part of assembly.chunks) {
-      message.set(part, offset);
-      offset += part.byteLength;
+      message.set(part, offset2);
+      offset2 += part.byteLength;
     }
     return message;
   }
@@ -65487,12 +65498,12 @@ function cryptoRandomId() {
 
 // packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
-function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id6, capability) {
+function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id7, capability) {
   if (!capabilities.includes(capability))
     return false;
   if (workspaceTypes === void 0)
     return true;
-  const entries = workspaceTypes.filter((item) => item.id === id6);
+  const entries = workspaceTypes.filter((item) => item.id === id7);
   return entries.length === 1 && entries[0]?.capability === capability && entries[0].available;
 }
 var RemoteGatewayError = class extends Error {
@@ -65607,18 +65618,18 @@ var CodexRemoteClient = class {
       unsubscribe();
       return true;
     };
-    unsubscribe = this.core.onEvent((event) => {
-      if (!isRecord(event.data) || event.data.streamId !== streamId)
+    unsubscribe = this.core.onEvent((event2) => {
+      if (!isRecord(event2.data) || event2.data.streamId !== streamId)
         return;
-      if (event.event === "codex.app.stream.closed") {
+      if (event2.event === "codex.app.stream.closed") {
         if (!markClosed())
           return;
-        onClose?.(codexStreamCloseReason(event.data.reason));
+        onClose?.(codexStreamCloseReason(event2.data.reason));
         return;
       }
-      if (event.event !== "codex.app.frame" || !isRecord(event.data.frame) || typeof event.data.frame.method !== "string")
+      if (event2.event !== "codex.app.frame" || !isRecord(event2.data.frame) || typeof event2.data.frame.method !== "string")
         return;
-      onFrame(event.data.frame);
+      onFrame(event2.data.frame);
     });
     try {
       await this.core.rpc("codex.app.stream.open", { streamId, threadId }, signal);
@@ -65663,17 +65674,17 @@ var CodexRemoteClient = class {
         throw invalidResponse("transfer descriptor");
       }
       const response = new Uint8Array(committed.totalBytes);
-      let offset = 0;
+      let offset2 = 0;
       for (let index = 0; index < committed.totalChunks; index += 1) {
         const result = await this.core.rpc("codex.app.transfer.read", { transferId, index }, signal);
         if (result.transferId !== transferId || result.index !== index)
           throw invalidResponse("transfer ordering");
         const chunk = base64ToBytes(result.data);
-        const expected = Math.min(CODEX_APP_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
+        const expected = Math.min(CODEX_APP_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset2);
         if (chunk.byteLength !== expected)
           throw invalidResponse("transfer chunk");
-        response.set(chunk, offset);
-        offset += chunk.byteLength;
+        response.set(chunk, offset2);
+        offset2 += chunk.byteLength;
       }
       return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(response));
     } finally {
@@ -65747,12 +65758,12 @@ function deriveCodexCwdWorkspaces(values) {
       continue;
     }
     const baseId = `cwd-${hashWorkspacePath(key)}`;
-    let id6 = baseId;
-    for (let suffix = 2; usedIds.has(id6); suffix += 1)
-      id6 = `${baseId}-${suffix}`;
-    usedIds.add(id6);
+    let id7 = baseId;
+    for (let suffix = 2; usedIds.has(id7); suffix += 1)
+      id7 = `${baseId}-${suffix}`;
+    usedIds.add(id7);
     byPath.set(key, {
-      id: id6,
+      id: id7,
       name: workspaceBasename(path),
       path,
       position: byPath.size,
@@ -65956,15 +65967,15 @@ function sniffImageMediaType(data2) {
     return "image/webp";
   return void 0;
 }
-function base64PrefixBytes(value, maxBytes) {
-  const chars = value.slice(0, Math.ceil(maxBytes / 3) * 4);
+function base64PrefixBytes(value, maxBytes2) {
+  const chars = value.slice(0, Math.ceil(maxBytes2 / 3) * 4);
   let binary;
   try {
     binary = atob(chars);
   } catch {
     return new Uint8Array();
   }
-  const bytes = new Uint8Array(Math.min(binary.length, maxBytes));
+  const bytes = new Uint8Array(Math.min(binary.length, maxBytes2));
   for (let index = 0; index < bytes.length; index += 1)
     bytes[index] = binary.charCodeAt(index);
   return bytes;
@@ -66138,9 +66149,9 @@ var AgentAcpClient = class {
     return backend === "opencode" && this.capabilities.includes("agent.acp.opencode.archive.v1");
   }
   onSessionArchived(handler) {
-    return this.core.onEvent((event) => {
-      if (event.event === "agent.acp.catalog.changed" && isRecord2(event.data) && event.data.backend === "opencode" && event.data.archived === true && typeof event.data.sessionId === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(event.data.sessionId))
-        handler(event.data);
+    return this.core.onEvent((event2) => {
+      if (event2.event === "agent.acp.catalog.changed" && isRecord2(event2.data) && event2.data.backend === "opencode" && event2.data.archived === true && typeof event2.data.sessionId === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(event2.data.sessionId))
+        handler(event2.data);
     });
   }
   async archiveSession(sessionId, backend, signal) {
@@ -66279,17 +66290,17 @@ var AgentAcpClient = class {
       signal?.removeEventListener("abort", onAbort);
       return true;
     };
-    unsubscribe = this.core.onEvent((event) => {
-      if (event.event === "agent.acp.frame" && isRecord2(event.data)) {
-        const data2 = event.data;
+    unsubscribe = this.core.onEvent((event2) => {
+      if (event2.event === "agent.acp.frame" && isRecord2(event2.data)) {
+        const data2 = event2.data;
         if (tool ? data2.streamId !== streamId : !frameMatchesSubscription(data2, streamId, sessionId))
           return;
         onFrame(data2);
       }
-      if (event.event === "agent.acp.stream.closed" && isRecord2(event.data) && event.data.streamId === streamId) {
+      if (event2.event === "agent.acp.stream.closed" && isRecord2(event2.data) && event2.data.streamId === streamId) {
         if (!markClosed())
           return;
-        onClosed?.(event.data);
+        onClosed?.(event2.data);
       }
     });
     unsubscribeCoreClose = this.core.onClose(() => {
@@ -66393,10 +66404,10 @@ function sessionScopedStreamId(sessionId) {
 }
 function concat(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
-  let offset = 0;
+  let offset2 = 0;
   for (const chunk of chunks) {
-    output2.set(chunk, offset);
-    offset += chunk.byteLength;
+    output2.set(chunk, offset2);
+    offset2 += chunk.byteLength;
   }
   return output2;
 }
@@ -66892,10 +66903,10 @@ var RtcChunkCodec = class {
       return void 0;
     this.assemblies.delete(messageId);
     const message = new Uint8Array(assembly.receivedBytes);
-    let offset = 0;
+    let offset2 = 0;
     for (const part of assembly.chunks) {
-      message.set(part, offset);
-      offset += part.byteLength;
+      message.set(part, offset2);
+      offset2 += part.byteLength;
     }
     return message;
   }
@@ -66973,15 +66984,15 @@ var RtcDataChannelTransport = class {
     this.pc = options.factory.create({
       iceServers: options.iceServers,
       iceTransportPolicy: options.iceTransportPolicy,
-      onDiagnostic: (event) => this.handlePeerDiagnostic(event)
+      onDiagnostic: (event2) => this.handlePeerDiagnostic(event2)
     });
-    this.pc.ondatachannel = (event) => this.adoptChannel(event.channel);
-    this.pc.onicecandidate = (event) => {
-      if (event.candidate !== null && !this.closed) {
-        const candidate = summarizeIceCandidate(event.candidate);
+    this.pc.ondatachannel = (event2) => this.adoptChannel(event2.channel);
+    this.pc.onicecandidate = (event2) => {
+      if (event2.candidate !== null && !this.closed) {
+        const candidate = summarizeIceCandidate(event2.candidate);
         recordCandidate(this.localCandidateTelemetry, candidate);
         this.emitDiagnostic({ type: "local-candidate", candidate, diagnostics: this.diagnostics() });
-        this.onSignal({ type: "ice", candidate: event.candidate });
+        this.onSignal({ type: "ice", candidate: event2.candidate });
       }
     };
     this.pc.onconnectionstatechange = () => {
@@ -67241,10 +67252,10 @@ var RtcDataChannelTransport = class {
         resolve10?.();
       });
     };
-    channel.onmessage = (event) => {
+    channel.onmessage = (event2) => {
       if (this.closed || !this.opened)
         return;
-      const data2 = event.data;
+      const data2 = event2.data;
       const frame = typeof data2 === "string" ? new TextEncoder().encode(data2) : new Uint8Array(data2);
       this.bytesReceived += frame.byteLength;
       try {
@@ -67375,23 +67386,23 @@ var RtcDataChannelTransport = class {
     this.candidatePairTelemetry = inspectCandidatePairs(stats);
     return inspectSelectedPath(stats);
   }
-  handlePeerDiagnostic(event) {
-    if (event.type === "local-candidate-filtered") {
-      recordCandidate(this.filteredLocalCandidateTelemetry, event.candidate);
+  handlePeerDiagnostic(event2) {
+    if (event2.type === "local-candidate-filtered") {
+      recordCandidate(this.filteredLocalCandidateTelemetry, event2.candidate);
       this.emitDiagnostic({
-        type: event.type,
-        candidate: event.candidate,
-        reason: event.reason,
+        type: event2.type,
+        candidate: event2.candidate,
+        reason: event2.reason,
         diagnostics: this.diagnostics()
       });
       return;
     }
-    if (event.localCandidate !== void 0)
-      recordCandidate(this.filteredCandidatePairTelemetry, event.localCandidate);
+    if (event2.localCandidate !== void 0)
+      recordCandidate(this.filteredCandidatePairTelemetry, event2.localCandidate);
     this.emitDiagnostic({
-      type: event.type,
-      localCandidate: event.localCandidate,
-      reason: event.reason,
+      type: event2.type,
+      localCandidate: event2.localCandidate,
+      reason: event2.reason,
       diagnostics: this.diagnostics()
     });
   }
@@ -67404,9 +67415,9 @@ var RtcDataChannelTransport = class {
       diagnostics: this.diagnostics()
     });
   }
-  emitDiagnostic(event) {
+  emitDiagnostic(event2) {
     try {
-      this.onDiagnostic?.(event);
+      this.onDiagnostic?.(event2);
     } catch {
     }
   }
@@ -67437,7 +67448,7 @@ function inspectSelectedPath(stats) {
     }
   }
   const pairs = [
-    ...[...selectedPairIds].map((id6) => candidatePairs.get(id6)).filter((pair) => pair !== void 0),
+    ...[...selectedPairIds].map((id7) => candidatePairs.get(id7)).filter((pair) => pair !== void 0),
     ...selectedPairs
   ];
   for (const pair of pairs) {
@@ -67598,11 +67609,11 @@ function isLanCandidatePair(localType, remoteType, localScope, remoteScope) {
     return true;
   return localType === "host" && isLocalNetworkScope(localScope) && remoteType === "prflx" && remoteScope === "unknown" || remoteType === "host" && isLocalNetworkScope(remoteScope) && localType === "prflx" && localScope === "unknown";
 }
-function isLocalNetworkScope(scope2) {
-  return scope2 === "private" || scope2 === "link-local" || scope2 === "loopback";
+function isLocalNetworkScope(scope3) {
+  return scope3 === "private" || scope3 === "link-local" || scope3 === "loopback";
 }
-function isExplicitlyNonLanScope(scope2) {
-  return scope2 === "public" || scope2 === "cgnat" || scope2 === "reserved";
+function isExplicitlyNonLanScope(scope3) {
+  return scope3 === "public" || scope3 === "cgnat" || scope3 === "reserved";
 }
 function increment(map2, key) {
   map2[key] = (map2[key] ?? 0) + 1;
@@ -67771,8 +67782,8 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.socket !== void 0 || this.connectedAt !== void 0)
       return;
     throwIfAborted(this.options.signal);
-    const lifetime = new AbortController();
-    this.lifetime = lifetime;
+    const lifetime2 = new AbortController();
+    this.lifetime = lifetime2;
     this.webrtcEnabled = true;
     this.serverNegotiateTimeoutMs = void 0;
     this.dataMode = "relay";
@@ -67790,12 +67801,12 @@ var AdaptiveTransport = class extends BaseTransport {
       this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
       this.handshakeTimer = setTimeout(() => this.failConnection(Object.assign(new Error("Adaptive control handshake timed out"), { code: "TRANSPORT_SETUP_FAILED" })), this.options.handshakeTimeoutMs ?? 15e3);
       const socket = this.socket;
-      socket.onmessage = (event) => {
+      socket.onmessage = (event2) => {
         if (this.socket === socket)
-          void this.handleSocketMessage(event.data, lifetime);
+          void this.handleSocketMessage(event2.data, lifetime2);
       };
       socket.onopen = () => {
-        if (this.lifetime !== lifetime)
+        if (this.lifetime !== lifetime2)
           return;
         this.sendControl("hello", {
           role: this.options.role,
@@ -67806,12 +67817,12 @@ var AdaptiveTransport = class extends BaseTransport {
         });
       };
       socket.onerror = () => {
-        if (this.lifetime === lifetime && this.socket === socket)
+        if (this.lifetime === lifetime2 && this.socket === socket)
           this.controlLost(Object.assign(new Error("Control socket failed"), { code: "TRANSPORT_SETUP_FAILED" }), { reason: "control-error" });
       };
-      socket.onclose = (event) => {
-        if (this.lifetime === lifetime && this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
+      socket.onclose = (event2) => {
+        if (this.lifetime === lifetime2 && this.socket === socket)
+          this.controlLost(adaptiveControlCloseError(event2), { reason: "control-closed", closeCode: event2.code, closeReason: event2.reason });
       };
     });
   }
@@ -67905,8 +67916,8 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     return { mode: mode2, connected, bytesSent: this.bytesSent, bytesReceived: this.bytesReceived };
   }
-  async handleSocketMessage(raw, lifetime) {
-    if (this.lifetime !== lifetime)
+  async handleSocketMessage(raw, lifetime2) {
+    if (this.lifetime !== lifetime2)
       return;
     try {
       if (typeof raw !== "string")
@@ -67970,8 +67981,8 @@ var AdaptiveTransport = class extends BaseTransport {
           this.relayAssignment = assignment;
         }
         this.clearHandshake();
-        void this.negotiate(lifetime.signal).catch((error62) => {
-          if (this.lifetime === lifetime)
+        void this.negotiate(lifetime2.signal).catch((error62) => {
+          if (this.lifetime === lifetime2)
             this.failConnection(error62 instanceof Error ? error62 : new Error("Adaptive transport negotiation failed"));
         });
         return;
@@ -68147,10 +68158,10 @@ var AdaptiveTransport = class extends BaseTransport {
       onSignal: (signal2) => this.sendRtcSignal(signal2),
       negotiateTimeoutMs: effectiveNegotiateTimeoutMs,
       label: `client->${this.options.targetDeviceId}`,
-      onDiagnostic: (event) => {
-        this.lastRtcDiagnostics = event.diagnostics;
+      onDiagnostic: (event2) => {
+        this.lastRtcDiagnostics = event2.diagnostics;
         try {
-          this.options.onWebRtcDiagnostic?.(event);
+          this.options.onWebRtcDiagnostic?.(event2);
         } catch {
         }
       }
@@ -68221,12 +68232,12 @@ var AdaptiveTransport = class extends BaseTransport {
     }, delay2);
   }
   async reopenControl() {
-    const lifetime = this.lifetime;
-    if (!lifetime || !this.lease?.canDetach())
+    const lifetime2 = this.lifetime;
+    if (!lifetime2 || !this.lease?.canDetach())
       return;
     try {
       const token = this.options.refreshAccessToken ? await this.options.refreshAccessToken() : this.options.accessToken;
-      if (this.lifetime !== lifetime || !this.lease?.canDetach())
+      if (this.lifetime !== lifetime2 || !this.lease?.canDetach())
         return;
       const socket = new WebSocket(this.url);
       this.socket = socket;
@@ -68236,7 +68247,7 @@ var AdaptiveTransport = class extends BaseTransport {
           this.controlLost(new Error("Control recovery handshake timed out"), { reason: "control-error" });
       }, 15e3);
       socket.onopen = () => {
-        if (this.socket !== socket || this.lifetime !== lifetime)
+        if (this.socket !== socket || this.lifetime !== lifetime2)
           return;
         this.sendControl("hello", {
           role: this.options.role,
@@ -68246,20 +68257,20 @@ var AdaptiveTransport = class extends BaseTransport {
           capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
         });
       };
-      socket.onmessage = (event) => {
-        if (this.socket === socket && this.lifetime === lifetime)
-          void this.handleSocketMessage(event.data, lifetime);
+      socket.onmessage = (event2) => {
+        if (this.socket === socket && this.lifetime === lifetime2)
+          void this.handleSocketMessage(event2.data, lifetime2);
       };
       socket.onerror = () => {
         if (this.socket === socket)
           this.controlLost(new Error("Control recovery failed"), { reason: "control-error" });
       };
-      socket.onclose = (event) => {
+      socket.onclose = (event2) => {
         if (this.socket === socket)
-          this.controlLost(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code, closeReason: event.reason });
+          this.controlLost(adaptiveControlCloseError(event2), { reason: "control-closed", closeCode: event2.code, closeReason: event2.reason });
       };
     } catch (error62) {
-      if (this.lifetime !== lifetime)
+      if (this.lifetime !== lifetime2)
         return;
       if (typeof error62 === "object" && error62 && ("retryable" in error62 && error62.retryable === false || "code" in error62 && ["AUTH_INVALID", "DEVICE_REVOKED", "MEMBERSHIP_REQUIRED", "PEER_IDENTITY_MISMATCH", "DEVICE_NOT_FOUND", "TOKEN_REUSED"].includes(String(error62.code)))) {
         this.failConnection(error62 instanceof Error ? error62 : new Error("Control recovery authorization failed"));
@@ -68343,11 +68354,11 @@ var AdaptiveTransport = class extends BaseTransport {
         peerDeviceId: this.options.targetDeviceId,
         ticket: assignment.relayTicket
       }), this.controlFrameLimits));
-      socket.onmessage = (event) => {
+      socket.onmessage = (event2) => {
         try {
-          if (typeof event.data !== "string")
+          if (typeof event2.data !== "string")
             throw new Error("Relay data frames must be text JSON");
-          const data2 = decodeRelayDataFrame(event.data, this.controlFrameLimits);
+          const data2 = decodeRelayDataFrame(event2.data, this.controlFrameLimits);
           if (data2.type === "relay.ready") {
             if (data2.payload.connectionId !== this.connectionId || assignment.relayEpoch !== void 0 && data2.payload.epoch !== assignment.relayEpoch) {
               throw new Error("Relay data attach assignment mismatch");
@@ -68448,7 +68459,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.readyReject = void 0;
     this.removeAbort?.();
     this.removeAbort = void 0;
-    const lifetime = this.lifetime;
+    const lifetime2 = this.lifetime;
     this.lifetime = void 0;
     const rtc = this.rtc;
     const socket = this.socket;
@@ -68460,7 +68471,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.relayAssignment = void 0;
     this.connectionId = void 0;
     this.connectedAt = void 0;
-    lifetime?.abort();
+    lifetime2?.abort();
     reject?.(error62);
     void rtc?.close();
     dataSocket?.close();
@@ -68480,17 +68491,17 @@ var AdaptiveTransport = class extends BaseTransport {
     this.handshakeTimer = void 0;
   }
 };
-function adaptiveControlCloseError(event) {
-  const serverShutdown = isServerShutdownClose(event.code, event.reason);
-  const heartbeatTimeout = isHeartbeatTimeoutClose(event.code, event.reason);
-  const reason = event.reason.trim().slice(0, 300);
-  const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
+function adaptiveControlCloseError(event2) {
+  const serverShutdown = isServerShutdownClose(event2.code, event2.reason);
+  const heartbeatTimeout = isHeartbeatTimeoutClose(event2.code, event2.reason);
+  const reason = event2.reason.trim().slice(0, 300);
+  const detail = reason.length > 0 ? `${reason} (WebSocket ${event2.code})` : `WebSocket closed with code ${event2.code}`;
   return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
     // Preserve the specific self-hosted authorization reasons so the Client
     // runtime can surface a terminal reauthorization state instead of a generic
     // transport loss (PR #285). Every other close keeps the shared semantics.
-    code: event.code === 4003 ? "CONNECTION_REPLACED" : event.code === 4001 && ["AUTH_INVALID", "TOKEN_EXPIRED", "DEVICE_REVOKED"].includes(reason) ? reason : "TRANSPORT_CLOSED",
-    retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event.code)
+    code: event2.code === 4003 ? "CONNECTION_REPLACED" : event2.code === 4001 && ["AUTH_INVALID", "TOKEN_EXPIRED", "DEVICE_REVOKED"].includes(reason) ? reason : "TRANSPORT_CLOSED",
+    retryable: serverShutdown || heartbeatTimeout || [1e3, 1001, 1006, 1011, 1012, 1013].includes(event2.code)
   });
 }
 var CONTROL_RECOVERY_MAX_DELAY_MS = 15e3;
@@ -68659,9 +68670,9 @@ var RemoteClientCore = class {
     if (message.type === "rpc.error")
       this.handleError(message);
     if (message.type === "event") {
-      const event = message.payload;
+      const event2 = message.payload;
       for (const handler of this.eventHandlers)
-        handler(event);
+        handler(event2);
     }
   }
   handleResponse(message) {
@@ -68676,25 +68687,25 @@ var RemoteClientCore = class {
       return;
     pending.reject(Object.assign(new Error(message.payload.message), { code: message.payload.code }));
   }
-  takePending(requestId) {
-    const pending = this.pending.get(requestId);
+  takePending(requestId2) {
+    const pending = this.pending.get(requestId2);
     if (pending === void 0)
       return void 0;
-    this.pending.delete(requestId);
+    this.pending.delete(requestId2);
     clearTimeout(pending.timer);
     pending.removeAbort?.();
     return pending;
   }
-  rejectPending(requestId, error62) {
-    const pending = this.takePending(requestId);
+  rejectPending(requestId2, error62) {
+    const pending = this.takePending(requestId2);
     if (pending === void 0)
       return false;
     pending.reject(error62);
     return true;
   }
   rejectAllPending(createError) {
-    for (const requestId of [...this.pending.keys()]) {
-      const pending = this.takePending(requestId);
+    for (const requestId2 of [...this.pending.keys()]) {
+      const pending = this.takePending(requestId2);
       if (pending !== void 0)
         pending.reject(createError(pending));
     }
@@ -68836,18 +68847,18 @@ var RemoteSessionHistoryCache = class {
   }
   recordFollowSnapshot(client, sessionId, frame) {
     if (!isRecord3(frame) || frame.type !== "snapshot") return;
-    const id6 = sessionId.length > 0 ? sessionId : isRecord3(frame.header) && typeof frame.header.id === "string" ? frame.header.id : "";
-    if (id6.length === 0) return;
-    const existing = this.sessions.get(id6) ?? { unary: /* @__PURE__ */ new Map() };
+    const id7 = sessionId.length > 0 ? sessionId : isRecord3(frame.header) && typeof frame.header.id === "string" ? frame.header.id : "";
+    if (id7.length === 0) return;
+    const existing = this.sessions.get(id7) ?? { unary: /* @__PURE__ */ new Map() };
     const cloned = cloneStructured(frame);
     if (Array.isArray(cloned.records) && cloned.records.length > MAX_CACHED_RECORDS_PER_SESSION) {
       cloned.records = cloned.records.slice(cloned.records.length - MAX_CACHED_RECORDS_PER_SESSION);
       cloned.hasMore = true;
     }
-    this.invalidateUnary(id6, existing);
+    this.invalidateUnary(id7, existing);
     existing.client = client;
     existing.snapshot = cloned;
-    touchLru(this.sessions, id6, existing, MAX_CACHED_SESSIONS);
+    touchLru(this.sessions, id7, existing, MAX_CACHED_SESSIONS);
   }
   prependBackfilledRecords(client, sessionId, backfilled) {
     const entry = this.sessions.get(sessionId);
@@ -69647,19 +69658,19 @@ var AcpEventCarrier = class {
     return queue.iterate(() => queue.close());
   }
   async remoteEvents(signal) {
-    const id6 = `cursor-events:${Date.now()}:${Math.random()}`;
+    const id7 = `cursor-events:${Date.now()}:${Math.random()}`;
     const queue = new AsyncValueQueue(signal);
-    this.context.eventStreams.set(id6, queue);
+    this.context.eventStreams.set(id7, queue);
     const workspace2 = this.context.selectedWorkspaceId === void 0 ? void 0 : this.context.workspaceById.get(this.context.selectedWorkspaceId);
     queue.push({
       type: "ready",
-      clientId: id6,
+      clientId: id7,
       host: { home: workspace2?.path ?? "/" }
     });
-    return queue.iterate(() => this.context.eventStreams.delete(id6));
+    return queue.iterate(() => this.context.eventStreams.delete(id7));
   }
-  emitRemoteEvent(event, args) {
-    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
+  emitRemoteEvent(event2, args) {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event: event2, args });
   }
   emitApproval(input4) {
     for (const queue of this.context.eventStreams.values()) queue.push({
@@ -69744,7 +69755,7 @@ var AcpLiveProjection = class {
       piToolCalls: /* @__PURE__ */ new Map()
     };
   }
-  snapshotFrame(session2, history, follow) {
+  snapshotFrame(session2, history2, follow) {
     const step = this.context.backend === "pi" ? follow.piStep ?? 1 : 1;
     const assistantStream = follow.assistantAttempt === void 0 ? { revision: follow.assistantStreamRevision } : {
       revision: follow.assistantStreamRevision,
@@ -69759,10 +69770,10 @@ var AcpLiveProjection = class {
     };
     return {
       type: "snapshot",
-      header: history.header,
-      cursor: history.cursor,
-      records: history.records,
-      hasMore: history.hasMore,
+      header: history2.header,
+      cursor: history2.cursor,
+      records: history2.records,
+      hasMore: history2.hasMore,
       projections: {
         asOfSeq: session2.projectionSeq ?? -1,
         values: {
@@ -69789,7 +69800,7 @@ var AcpLiveProjection = class {
     const sessionId = session2.sessionId;
     await this.context.hydrateSession(session2);
     this.context.rememberOpenedSession?.(sessionId);
-    const history = this.context.historyPage(session2, {
+    const history2 = this.context.historyPage(session2, {
       limit: optionalPositiveInteger(request.maxMessages) ?? 50
     });
     const queue = new AsyncValueQueue(signal);
@@ -69799,7 +69810,7 @@ var AcpLiveProjection = class {
       existing.queue = queue;
       existing.hasConsumer = true;
       priorQueue.close();
-      queue.push(this.snapshotFrame(session2, history, existing));
+      queue.push(this.snapshotFrame(session2, history2, existing));
       return queue.iterate(() => {
         if (existing.queue === queue) {
           existing.closed = true;
@@ -69810,7 +69821,7 @@ var AcpLiveProjection = class {
     }
     const follow = this.createFollowState(session2, queue, true, session2.running);
     this.context.follows.add(follow);
-    queue.push(this.snapshotFrame(session2, history, follow));
+    queue.push(this.snapshotFrame(session2, history2, follow));
     try {
       const stream = await this.context.client.openStream(
         session2.acpSessionId,
@@ -70227,7 +70238,7 @@ var AcpLiveProjection = class {
   pushEvent(follow, type, data2) {
     const session2 = this.context.sessions.get(follow.sessionId);
     const seq = session2 !== void 0 ? session2.events.length : follow.nextSeq++;
-    const event = {
+    const event2 = {
       type,
       seq,
       time: Date.now(),
@@ -70235,12 +70246,12 @@ var AcpLiveProjection = class {
       ...isSurfaceEvent(type) ? { surfaceOp: "append" } : {}
     };
     if (session2 !== void 0) {
-      session2.events.push({ type: "event", event });
+      session2.events.push({ type: "event", event: event2 });
       this.context.syncSessionCache?.(session2);
     }
     for (const f of this.context.follows) {
       if (f.sessionId === follow.sessionId) {
-        f.queue.push({ type: "event", event });
+        f.queue.push({ type: "event", event: event2 });
         f.nextSeq = seq + 1;
       }
     }
@@ -70738,7 +70749,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.historyCache.delete(sessionId);
     for (const [workspaceId, workspace2] of this.workspaceById) {
       if (!workspace2.sessionIds.includes(sessionId)) continue;
-      const sessionIds = workspace2.sessionIds.filter((id6) => id6 !== sessionId);
+      const sessionIds = workspace2.sessionIds.filter((id7) => id7 !== sessionId);
       this.workspaceById.set(workspaceId, {
         ...workspace2,
         sessionIds,
@@ -70807,12 +70818,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const prevTitleOverridden = session2.titleOverridden;
     const prevAttachmentIds = new Set(this.imageAttachments.keys());
     this.cacheImageAttachments(sessionId, imageBlocks);
-    const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
+    const requestId2 = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
     try {
       await this.live.ensureFollow(session2);
     } catch (error62) {
-      for (const id6 of [...this.imageAttachments.keys()]) {
-        if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
+      for (const id7 of [...this.imageAttachments.keys()]) {
+        if (!prevAttachmentIds.has(id7)) this.imageAttachments.delete(id7);
       }
       throw error62;
     }
@@ -70829,7 +70840,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         id: `user:${Date.now()}`,
         role: "user",
         content: [...text ? [{ type: "text", text }] : [], ...imageBlocks],
-        source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
+        source: requestId2 ? { kind: "user", rpcId: requestId2 } : { kind: "user" }
       });
     }
     this.titles.applyPrompt(session2, text);
@@ -70856,8 +70867,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         if (titleChanged) {
           this.publishProjection(sessionId, "title", prevTitle ?? this.backendLabel());
         }
-        for (const id6 of [...this.imageAttachments.keys()]) {
-          if (!prevAttachmentIds.has(id6)) this.imageAttachments.delete(id6);
+        for (const id7 of [...this.imageAttachments.keys()]) {
+          if (!prevAttachmentIds.has(id7)) this.imageAttachments.delete(id7);
         }
         if (follow !== void 0) {
           follow.turn = prevTurn;
@@ -70971,7 +70982,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       const firstUser = session2.events.find((entry) => entry.event.type === "user/message");
       this.titles.applyPrompt(session2, extractPromptText(array2(record2(firstUser?.event.data).content)));
       session2.blank = false;
-      for (const event of session2.events) this.cacheImageAttachments(session2.sessionId, array2(record2(event.event.data).content ?? record2(record2(event.event.data).message).content));
+      for (const event2 of session2.events) this.cacheImageAttachments(session2.sessionId, array2(record2(event2.event.data).content ?? record2(record2(event2.event.data).message).content));
       this.syncSessionCache(session2);
     }
   }
@@ -70991,8 +71002,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (cached2.permissionPreset !== void 0 && !this.selectedPermissions.has(session2.sessionId)) {
       this.selectedPermissions.set(session2.sessionId, cached2.permissionPreset);
     }
-    for (const event of session2.events) {
-      this.cacheImageAttachments(session2.sessionId, array2(record2(event.event.data).content ?? record2(record2(event.event.data).message).content));
+    for (const event2 of session2.events) {
+      this.cacheImageAttachments(session2.sessionId, array2(record2(event2.event.data).content ?? record2(record2(event2.event.data).message).content));
     }
   }
   syncSessionCache(session2) {
@@ -71124,7 +71135,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async discoverAndAttachSessions(workspace2) {
     if (this.backend === "cursor") return;
-    const previousTitles = new Map([...this.sessions].map(([id6, session2]) => [id6, session2.title]));
+    const previousTitles = new Map([...this.sessions].map(([id7, session2]) => [id7, session2.title]));
     try {
       let discovered = [];
       if (this.client.listSessions !== void 0) {
@@ -71159,7 +71170,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   attachSessionToWorkspace(cwd2, sessionId) {
     const workspace2 = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2, this.backend);
-    const sessionIds = [sessionId, ...workspace2.sessionIds.filter((id6) => id6 !== sessionId)];
+    const sessionIds = [sessionId, ...workspace2.sessionIds.filter((id7) => id7 !== sessionId)];
     const next = {
       ...workspace2,
       sessionIds,
@@ -71540,7 +71551,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const remoteV3 = capabilities.has("harness.remote.v3");
   const terminal = capabilities.has("harness.terminal.v1");
   const workspaceTypes = "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
-  const available = (id6, capability) => remoteWorkspaceTypeAvailable(value.capabilities, workspaceTypes, id6, capability);
+  const available = (id7, capability) => remoteWorkspaceTypeAvailable(value.capabilities, workspaceTypes, id7, capability);
   const codex = available("codex", "codex.appserver.v1");
   const cursor3 = available("cursor", "agent.acp.cursor.v1");
   const antigravity = available("antigravity", "agent.acp.antigravity.v1");
@@ -71622,12 +71633,12 @@ var ClientCodexStreams = class {
         throw error62;
       }
     }
-    stream.unsubscribe = remote.client.onEvent((event) => {
-      if (event.event === "codex.app.frame" && isRecord5(event.data) && event.data.streamId === value.streamId) {
-        this.appendCodexFrame(stream, event.data);
+    stream.unsubscribe = remote.client.onEvent((event2) => {
+      if (event2.event === "codex.app.frame" && isRecord5(event2.data) && event2.data.streamId === value.streamId) {
+        this.appendCodexFrame(stream, event2.data);
       }
-      if (event.event === "codex.app.stream.closed" && isRecord5(event.data) && event.data.streamId === value.streamId) {
-        stream.closed = typeof event.data.reason === "string" ? event.data.reason : "closed";
+      if (event2.event === "codex.app.stream.closed" && isRecord5(event2.data) && event2.data.streamId === value.streamId) {
+        stream.closed = typeof event2.data.reason === "string" ? event2.data.reason : "closed";
         stream.wake();
       }
     });
@@ -71640,11 +71651,11 @@ var ClientCodexStreams = class {
     this.context.codexStreams.set(value.streamId, stream);
     return { opened: true, streamId: value.streamId, threadId: value.threadId };
   }
-  publishLocalCodexFrame = async (event, data2) => {
+  publishLocalCodexFrame = async (event2, data2) => {
     const streamId = data2.streamId;
     const stream = this.context.codexStreams.get(streamId);
     if (stream === void 0 || stream.target.kind !== "local") return;
-    if (event === "codex.app.frame") {
+    if (event2 === "codex.app.frame") {
       this.appendCodexFrame(stream, data2);
       return;
     }
@@ -71714,11 +71725,11 @@ var ClientCodexStreams = class {
 
 // packages/plugin/src/preferred-connection.ts
 async function connectPreferredTransport(create, signal) {
-  const lifetime = new AbortController();
-  const cancel = () => lifetime.abort();
+  const lifetime2 = new AbortController();
+  const cancel = () => lifetime2.abort();
   signal?.addEventListener("abort", cancel, { once: true });
   if (signal?.aborted) cancel();
-  const race = new DirectPreferredRace(lifetime.signal, 3e3, 25e3, true);
+  const race = new DirectPreferredRace(lifetime2.signal, 3e3, 25e3, true);
   const candidates = /* @__PURE__ */ new Map();
   const unsubscribes = [];
   let fatal;
@@ -71726,10 +71737,10 @@ async function connectPreferredTransport(create, signal) {
   let finished = false;
   let succeeded = false;
   const begin = (attempt) => {
-    if (finished || lifetime.signal.aborted || candidates.has(attempt)) return;
+    if (finished || lifetime2.signal.aborted || candidates.has(attempt)) return;
     try {
       const transport = create(attempt, {
-        signal: lifetime.signal,
+        signal: lifetime2.signal,
         failOnWebRtcFallback: true,
         useServerNegotiateTimeout: true,
         onParallelConnections: attempt === "direct" ? () => begin("turn") : void 0,
@@ -71741,7 +71752,7 @@ async function connectPreferredTransport(create, signal) {
         if (ready) race.failed(attempt);
       }));
       void transport.connect().then(() => {
-        if (finished || lifetime.signal.aborted) return;
+        if (finished || lifetime2.signal.aborted) return;
         const mode2 = transport.getStats().mode;
         if (attempt === "direct" ? mode2 !== "LAN" && mode2 !== "P2P" : mode2 !== "TURN") {
           race.failed(attempt);
@@ -71752,11 +71763,11 @@ async function connectPreferredTransport(create, signal) {
         ready = true;
         race.ready(attempt, transport);
       }).catch((error62) => {
-        if (finished || lifetime.signal.aborted) return;
+        if (finished || lifetime2.signal.aborted) return;
         const candidateFailed = ["RTC_NEGOTIATION_FAILED", "TRANSPORT_SETUP_FAILED"].includes(error62?.code) || error62?.code === "TRANSPORT_CLOSED" && error62?.retryable === true;
         if (!candidateFailed) {
           fatal = error62;
-          lifetime.abort();
+          lifetime2.abort();
           return;
         }
         race.failed(attempt);
@@ -71766,7 +71777,7 @@ async function connectPreferredTransport(create, signal) {
       });
     } catch (error62) {
       fatal = error62;
-      lifetime.abort();
+      lifetime2.abort();
     }
   };
   begin("direct");
@@ -72231,10 +72242,10 @@ var SHA512 = class extends HashMD {
     this.Hh = Hh | 0;
     this.Hl = Hl | 0;
   }
-  process(view, offset) {
-    for (let i = 0; i < 16; i++, offset += 4) {
-      SHA512_W_H[i] = view.getUint32(offset);
-      SHA512_W_L[i] = view.getUint32(offset += 4);
+  process(view, offset2) {
+    for (let i = 0; i < 16; i++, offset2 += 4) {
+      SHA512_W_H[i] = view.getUint32(offset2);
+      SHA512_W_L[i] = view.getUint32(offset2 += 4);
     }
     for (let i = 16; i < 80; i++) {
       const W15h = SHA512_W_H[i - 15] | 0;
@@ -72772,12 +72783,12 @@ function calcOffsets(n, window2, wOpts) {
     nextN += _1n3;
   }
   const offsetStart = window2 * windowSize;
-  const offset = offsetStart + Math.abs(wbits) - 1;
+  const offset2 = offsetStart + Math.abs(wbits) - 1;
   const isZero = wbits === 0;
   const isNeg = wbits < 0;
   const isNegF = window2 % 2 !== 0;
   const offsetF = offsetStart;
-  return { nextN, offset, isZero, isNeg, isNegF, offsetF };
+  return { nextN, offset: offset2, isZero, isNeg, isNegF, offsetF };
 }
 function validateMSMPoints(points, c) {
   if (!Array.isArray(points))
@@ -72864,12 +72875,12 @@ var wNAF = class {
     let f = this.BASE;
     const wo = calcWOpts(W, this.bits);
     for (let window2 = 0; window2 < wo.windows; window2++) {
-      const { nextN, offset, isZero, isNeg, isNegF, offsetF } = calcOffsets(n, window2, wo);
+      const { nextN, offset: offset2, isZero, isNeg, isNegF, offsetF } = calcOffsets(n, window2, wo);
       n = nextN;
       if (isZero) {
         f = f.add(negateCt(isNegF, precomputes[offsetF]));
       } else {
-        p = p.add(negateCt(isNeg, precomputes[offset]));
+        p = p.add(negateCt(isNeg, precomputes[offset2]));
       }
     }
     assert0(n);
@@ -72885,12 +72896,12 @@ var wNAF = class {
     for (let window2 = 0; window2 < wo.windows; window2++) {
       if (n === _0n3)
         break;
-      const { nextN, offset, isZero, isNeg } = calcOffsets(n, window2, wo);
+      const { nextN, offset: offset2, isZero, isNeg } = calcOffsets(n, window2, wo);
       n = nextN;
       if (isZero) {
         continue;
       } else {
-        const item = precomputes[offset];
+        const item = precomputes[offset2];
         acc = acc.add(isNeg ? item.negate() : item);
       }
     }
@@ -74906,9 +74917,9 @@ var SHA2_32B = class extends HashMD2 {
     (to ||= new this.constructor()).set(...this.get());
     return this._cloneIntoMeta(to);
   }
-  process(view, offset) {
-    for (let i = 0; i < 16; i++, offset += 4)
-      SHA256_W[i] = view.getUint32(offset, false);
+  process(view, offset2) {
+    for (let i = 0; i < 16; i++, offset2 += 4)
+      SHA256_W[i] = view.getUint32(offset2, false);
     for (let i = 16; i < 64; i++) {
       const W15 = SHA256_W[i - 15];
       const W2 = SHA256_W[i - 2];
@@ -75110,10 +75121,10 @@ var SHA2_64B = class extends HashMD2 {
     (to ||= new this.constructor()).set(...this.get());
     return this._cloneIntoMeta(to);
   }
-  process(view, offset) {
-    for (let i = 0; i < 16; i++, offset += 4) {
-      SHA512_W_H2[i] = view.getUint32(offset);
-      SHA512_W_L2[i] = view.getUint32(offset += 4);
+  process(view, offset2) {
+    for (let i = 0; i < 16; i++, offset2 += 4) {
+      SHA512_W_H2[i] = view.getUint32(offset2);
+      SHA512_W_L2[i] = view.getUint32(offset2 += 4);
     }
     for (let i = 16; i < 80; i++) {
       const W15h = SHA512_W_H2[i - 15] | 0;
@@ -76429,10 +76440,10 @@ function cmask(P, swap) {
   return P + swap - (swap >> _1n11 << _1n11);
 }
 function cswap(P) {
-  const offset = BigInt(6) * P;
+  const offset2 = BigInt(6) * P;
   return (mask, x_2, x_3) => {
     const sum = x_2 + x_3;
-    const d = offset + x_3 - x_2;
+    const d = offset2 + x_3 - x_2;
     const a = (d * mask + x_2) % P;
     return { x_2: a, x_3: sum - a };
   };
@@ -77428,7 +77439,7 @@ var _BLAKE2 = class {
     abytes2(data2);
     const { blockLen, buffer: buffer3, buffer32 } = this;
     const len = data2.length;
-    const offset = data2.byteOffset;
+    const offset2 = data2.byteOffset;
     const buf = data2.buffer;
     for (let pos = 0; pos < len; ) {
       if (this.pos === blockLen) {
@@ -77438,7 +77449,7 @@ var _BLAKE2 = class {
         this.pos = 0;
       }
       const take = Math.min(blockLen - this.pos, len - pos);
-      const dataOffset = offset + pos;
+      const dataOffset = offset2 + pos;
       if (take === blockLen && !(dataOffset % 4) && pos + take < len) {
         const data32 = new Uint32Array(buf, dataOffset, Math.floor((len - pos) / 4));
         swap32IfBE(data32);
@@ -77580,7 +77591,7 @@ var _BLAKE2b = class extends _BLAKE2 {
     this.v7l = v7l | 0;
     this.v7h = v7h | 0;
   }
-  compress(msg, offset, isLast) {
+  compress(msg, offset2, isLast) {
     const { v0l, v0h, v1l, v1h, v2l, v2h, v3l, v3h, v4l, v4h, v5l, v5h, v6l, v6h, v7l, v7h } = this;
     {
       BBUF[0] = v0l;
@@ -77612,22 +77623,22 @@ var _BLAKE2b = class extends _BLAKE2 {
     let j = 0;
     const s = BSIGMA;
     for (let i = 0; i < 12; i++) {
-      G1b(0, 4, 8, 12, msg, offset + 2 * s[j++]);
-      G2b(0, 4, 8, 12, msg, offset + 2 * s[j++]);
-      G1b(1, 5, 9, 13, msg, offset + 2 * s[j++]);
-      G2b(1, 5, 9, 13, msg, offset + 2 * s[j++]);
-      G1b(2, 6, 10, 14, msg, offset + 2 * s[j++]);
-      G2b(2, 6, 10, 14, msg, offset + 2 * s[j++]);
-      G1b(3, 7, 11, 15, msg, offset + 2 * s[j++]);
-      G2b(3, 7, 11, 15, msg, offset + 2 * s[j++]);
-      G1b(0, 5, 10, 15, msg, offset + 2 * s[j++]);
-      G2b(0, 5, 10, 15, msg, offset + 2 * s[j++]);
-      G1b(1, 6, 11, 12, msg, offset + 2 * s[j++]);
-      G2b(1, 6, 11, 12, msg, offset + 2 * s[j++]);
-      G1b(2, 7, 8, 13, msg, offset + 2 * s[j++]);
-      G2b(2, 7, 8, 13, msg, offset + 2 * s[j++]);
-      G1b(3, 4, 9, 14, msg, offset + 2 * s[j++]);
-      G2b(3, 4, 9, 14, msg, offset + 2 * s[j++]);
+      G1b(0, 4, 8, 12, msg, offset2 + 2 * s[j++]);
+      G2b(0, 4, 8, 12, msg, offset2 + 2 * s[j++]);
+      G1b(1, 5, 9, 13, msg, offset2 + 2 * s[j++]);
+      G2b(1, 5, 9, 13, msg, offset2 + 2 * s[j++]);
+      G1b(2, 6, 10, 14, msg, offset2 + 2 * s[j++]);
+      G2b(2, 6, 10, 14, msg, offset2 + 2 * s[j++]);
+      G1b(3, 7, 11, 15, msg, offset2 + 2 * s[j++]);
+      G2b(3, 7, 11, 15, msg, offset2 + 2 * s[j++]);
+      G1b(0, 5, 10, 15, msg, offset2 + 2 * s[j++]);
+      G2b(0, 5, 10, 15, msg, offset2 + 2 * s[j++]);
+      G1b(1, 6, 11, 12, msg, offset2 + 2 * s[j++]);
+      G2b(1, 6, 11, 12, msg, offset2 + 2 * s[j++]);
+      G1b(2, 7, 8, 13, msg, offset2 + 2 * s[j++]);
+      G2b(2, 7, 8, 13, msg, offset2 + 2 * s[j++]);
+      G1b(3, 4, 9, 14, msg, offset2 + 2 * s[j++]);
+      G2b(3, 4, 9, 14, msg, offset2 + 2 * s[j++]);
     }
     this.v0l ^= BBUF[0] ^ BBUF[16];
     this.v0h ^= BBUF[1] ^ BBUF[17];
@@ -77654,25 +77665,25 @@ var _BLAKE2b = class extends _BLAKE2 {
   }
 };
 var blake2b = /* @__PURE__ */ createHasher2((opts) => new _BLAKE2b(opts));
-function _compress(s, offset, msg, rounds, v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) {
+function _compress(s, offset2, msg, rounds, v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15) {
   let j = 0;
   for (let i = 0; i < rounds; i++) {
-    ({ a: v0, b: v4, c: v8, d: v12 } = G1s(v0, v4, v8, v12, msg[offset + s[j++]]));
-    ({ a: v0, b: v4, c: v8, d: v12 } = G2s(v0, v4, v8, v12, msg[offset + s[j++]]));
-    ({ a: v1, b: v5, c: v9, d: v13 } = G1s(v1, v5, v9, v13, msg[offset + s[j++]]));
-    ({ a: v1, b: v5, c: v9, d: v13 } = G2s(v1, v5, v9, v13, msg[offset + s[j++]]));
-    ({ a: v2, b: v6, c: v10, d: v14 } = G1s(v2, v6, v10, v14, msg[offset + s[j++]]));
-    ({ a: v2, b: v6, c: v10, d: v14 } = G2s(v2, v6, v10, v14, msg[offset + s[j++]]));
-    ({ a: v3, b: v7, c: v11, d: v15 } = G1s(v3, v7, v11, v15, msg[offset + s[j++]]));
-    ({ a: v3, b: v7, c: v11, d: v15 } = G2s(v3, v7, v11, v15, msg[offset + s[j++]]));
-    ({ a: v0, b: v5, c: v10, d: v15 } = G1s(v0, v5, v10, v15, msg[offset + s[j++]]));
-    ({ a: v0, b: v5, c: v10, d: v15 } = G2s(v0, v5, v10, v15, msg[offset + s[j++]]));
-    ({ a: v1, b: v6, c: v11, d: v12 } = G1s(v1, v6, v11, v12, msg[offset + s[j++]]));
-    ({ a: v1, b: v6, c: v11, d: v12 } = G2s(v1, v6, v11, v12, msg[offset + s[j++]]));
-    ({ a: v2, b: v7, c: v8, d: v13 } = G1s(v2, v7, v8, v13, msg[offset + s[j++]]));
-    ({ a: v2, b: v7, c: v8, d: v13 } = G2s(v2, v7, v8, v13, msg[offset + s[j++]]));
-    ({ a: v3, b: v4, c: v9, d: v14 } = G1s(v3, v4, v9, v14, msg[offset + s[j++]]));
-    ({ a: v3, b: v4, c: v9, d: v14 } = G2s(v3, v4, v9, v14, msg[offset + s[j++]]));
+    ({ a: v0, b: v4, c: v8, d: v12 } = G1s(v0, v4, v8, v12, msg[offset2 + s[j++]]));
+    ({ a: v0, b: v4, c: v8, d: v12 } = G2s(v0, v4, v8, v12, msg[offset2 + s[j++]]));
+    ({ a: v1, b: v5, c: v9, d: v13 } = G1s(v1, v5, v9, v13, msg[offset2 + s[j++]]));
+    ({ a: v1, b: v5, c: v9, d: v13 } = G2s(v1, v5, v9, v13, msg[offset2 + s[j++]]));
+    ({ a: v2, b: v6, c: v10, d: v14 } = G1s(v2, v6, v10, v14, msg[offset2 + s[j++]]));
+    ({ a: v2, b: v6, c: v10, d: v14 } = G2s(v2, v6, v10, v14, msg[offset2 + s[j++]]));
+    ({ a: v3, b: v7, c: v11, d: v15 } = G1s(v3, v7, v11, v15, msg[offset2 + s[j++]]));
+    ({ a: v3, b: v7, c: v11, d: v15 } = G2s(v3, v7, v11, v15, msg[offset2 + s[j++]]));
+    ({ a: v0, b: v5, c: v10, d: v15 } = G1s(v0, v5, v10, v15, msg[offset2 + s[j++]]));
+    ({ a: v0, b: v5, c: v10, d: v15 } = G2s(v0, v5, v10, v15, msg[offset2 + s[j++]]));
+    ({ a: v1, b: v6, c: v11, d: v12 } = G1s(v1, v6, v11, v12, msg[offset2 + s[j++]]));
+    ({ a: v1, b: v6, c: v11, d: v12 } = G2s(v1, v6, v11, v12, msg[offset2 + s[j++]]));
+    ({ a: v2, b: v7, c: v8, d: v13 } = G1s(v2, v7, v8, v13, msg[offset2 + s[j++]]));
+    ({ a: v2, b: v7, c: v8, d: v13 } = G2s(v2, v7, v8, v13, msg[offset2 + s[j++]]));
+    ({ a: v3, b: v4, c: v9, d: v14 } = G1s(v3, v4, v9, v14, msg[offset2 + s[j++]]));
+    ({ a: v3, b: v4, c: v9, d: v14 } = G2s(v3, v4, v9, v14, msg[offset2 + s[j++]]));
   }
   return { v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15 };
 }
@@ -77733,10 +77744,10 @@ var _BLAKE2s = class extends _BLAKE2 {
     this.v6 = v6 | 0;
     this.v7 = v7 | 0;
   }
-  compress(msg, offset, isLast) {
+  compress(msg, offset2, isLast) {
     const l = fromNumL(this.length);
     const h = fromNumH(this.length);
-    const { v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15 } = _compress(BSIGMA, offset, msg, 10, this.v0, this.v1, this.v2, this.v3, this.v4, this.v5, this.v6, this.v7, B2S_IV[0], B2S_IV[1], B2S_IV[2], B2S_IV[3], l ^ B2S_IV[4], h ^ B2S_IV[5], isLast ? ~B2S_IV[6] : B2S_IV[6], B2S_IV[7]);
+    const { v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15 } = _compress(BSIGMA, offset2, msg, 10, this.v0, this.v1, this.v2, this.v3, this.v4, this.v5, this.v6, this.v7, B2S_IV[0], B2S_IV[1], B2S_IV[2], B2S_IV[3], l ^ B2S_IV[4], h ^ B2S_IV[5], isLast ? ~B2S_IV[6] : B2S_IV[6], B2S_IV[7]);
     this.v0 ^= v0 ^ v8;
     this.v1 ^= v1 ^ v9;
     this.v2 ^= v2 ^ v10;
@@ -78199,7 +78210,7 @@ var Poly1305 = class {
     for (let i = 0; i < 8; i++)
       this.pad[i] = u8to16(key, 16 + 2 * i);
   }
-  process(data2, offset, isLast = false) {
+  process(data2, offset2, isLast = false) {
     const hibit = isLast ? 0 : 1 << 11;
     const { h, r } = this;
     const r0 = r[0];
@@ -78212,14 +78223,14 @@ var Poly1305 = class {
     const r7 = r[7];
     const r8 = r[8];
     const r9 = r[9];
-    const t0 = u8to16(data2, offset + 0);
-    const t1 = u8to16(data2, offset + 2);
-    const t2 = u8to16(data2, offset + 4);
-    const t3 = u8to16(data2, offset + 6);
-    const t4 = u8to16(data2, offset + 8);
-    const t5 = u8to16(data2, offset + 10);
-    const t6 = u8to16(data2, offset + 12);
-    const t7 = u8to16(data2, offset + 14);
+    const t0 = u8to16(data2, offset2 + 0);
+    const t1 = u8to16(data2, offset2 + 2);
+    const t2 = u8to16(data2, offset2 + 4);
+    const t3 = u8to16(data2, offset2 + 6);
+    const t4 = u8to16(data2, offset2 + 8);
+    const t5 = u8to16(data2, offset2 + 10);
+    const t6 = u8to16(data2, offset2 + 12);
+    const t7 = u8to16(data2, offset2 + 14);
     let h0 = h[0] + (t0 & 8191);
     let h1 = h[1] + ((t0 >>> 13 | t1 << 3) & 8191);
     let h2 = h[2] + ((t1 >>> 10 | t2 << 6) & 8191);
@@ -78831,14 +78842,14 @@ var ClientSecureTransport = class {
   sends = new SerialSend();
   closeError;
   async connect() {
-    const lifetime = new AbortController();
-    this.lifetime = lifetime;
+    const lifetime2 = new AbortController();
+    this.lifetime = lifetime2;
     this.closed = false;
     this.closeError = void 0;
     this.incoming.reset();
     this.outgoing.reset();
     await this.inner.connect();
-    lifetime.signal.throwIfAborted();
+    lifetime2.signal.throwIfAborted();
     const info = this.inner.connectionInfo();
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
       await this.inner.close();
@@ -78853,11 +78864,11 @@ var ClientSecureTransport = class {
     });
     this.noise = noise;
     try {
-      await waitForResponder(this.inner, noise, lifetime.signal);
+      await waitForResponder(this.inner, noise, lifetime2.signal);
       this.inner.markSecureReady?.();
     } catch (error62) {
       noise.destroy();
-      if (this.lifetime === lifetime) {
+      if (this.lifetime === lifetime2) {
         this.noise = void 0;
         await this.inner.close();
       }
@@ -79345,7 +79356,7 @@ var LoopbackHost = class {
     this.onClose = onClose;
     this.ports = [...getPorts()];
     this.timer = setInterval(() => {
-      for (const [id6, handle] of this.handles) if (Date.now() - handle.touched > 6e4) this.close(id6);
+      for (const [id7, handle] of this.handles) if (Date.now() - handle.touched > 6e4) this.close(id7);
     }, 1e4);
     this.timer.unref();
   }
@@ -79356,7 +79367,7 @@ var LoopbackHost = class {
   setPorts(ports) {
     this.ports = [...ports];
     const allowed = new Set(ports);
-    for (const [id6, handle] of this.handles) if (!allowed.has(handle.port)) this.close(id6);
+    for (const [id7, handle] of this.handles) if (!allowed.has(handle.port)) this.close(id7);
   }
   async call(input4) {
     if (this.closed) throw new RpcError("TRANSPORT_CLOSED", "Preview connection closed.");
@@ -79396,19 +79407,19 @@ var LoopbackHost = class {
           await new Promise((resolve10, reject) => {
             const timer2 = setTimeout(() => finish(new Error("timeout")), 2e4);
             const ready = () => finish();
-            const fail6 = () => finish(new Error("closed"));
+            const fail7 = () => finish(new Error("closed"));
             const finish = (error62) => {
               clearTimeout(timer2);
               response.off("readable", ready);
               response.off("end", ready);
               response.off("close", ready);
-              response.off("error", fail6);
+              response.off("error", fail7);
               error62 === void 0 ? resolve10() : reject(error62);
             };
             response.once("readable", ready);
             response.once("end", ready);
             response.once("close", ready);
-            response.once("error", fail6);
+            response.once("error", fail7);
           });
           if (this.handles.get(value.id) !== handle) throw new Error("closed");
           chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
@@ -79474,13 +79485,13 @@ var LoopbackHost = class {
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.timer);
-    for (const id6 of this.handles.keys()) this.close(id6);
+    for (const id7 of this.handles.keys()) this.close(id7);
     this.onClose?.();
   }
-  close(id6, expected) {
-    const handle = this.handles.get(id6);
+  close(id7, expected) {
+    const handle = this.handles.get(id7);
     if (expected !== void 0 && handle !== expected) return;
-    this.handles.delete(id6);
+    this.handles.delete(id7);
     if (handle?.kind === "http") {
       handle.response?.destroy();
       handle.request.destroy();
@@ -79639,20 +79650,20 @@ var LoopbackPreview = class {
         socket.destroy();
         return;
       }
-      const id6 = randomUUID();
+      const id7 = randomUUID();
       const headers = this.headers(req, port);
       const protocols = (req.headers["sec-websocket-protocol"] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
-      void this.client.rpc("loopback.call", { op: "ws.open", id: id6, port, path: req.url ?? "/", headers, protocols }, this.lifetime.signal).then((result) => {
+      void this.client.rpc("loopback.call", { op: "ws.open", id: id7, port, path: req.url ?? "/", headers, protocols }, this.lifetime.signal).then((result) => {
         if (socket.destroyed || this.lifetime.signal.aborted) {
           socket.destroy();
-          void this.release(id6);
+          void this.release(id7);
           return;
         }
         selectedProtocols.set(req, result.protocol);
-        ws.handleUpgrade(req, socket, head, (local) => this.websocket(id6, local));
+        ws.handleUpgrade(req, socket, head, (local) => this.websocket(id7, local));
       }).catch(() => {
         socket.destroy();
-        void this.release(id6);
+        void this.release(id7);
       });
     });
     await new Promise((resolve10, reject) => {
@@ -79679,11 +79690,11 @@ var LoopbackPreview = class {
     return cleanHeaders(headerPairs(req.headers)).filter(([name2]) => !["origin", "referer"].includes(name2.toLowerCase())).concat(req.headers.origin === void 0 ? [] : [["origin", `http://127.0.0.1:${port}`]]);
   }
   async http(port, authority, req, res) {
-    const id6 = randomUUID();
+    const id7 = randomUUID();
     const controller = new AbortController();
     const abort = () => {
       controller.abort();
-      void this.release(id6);
+      void this.release(id7);
     };
     res.once("close", abort);
     const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
@@ -79697,7 +79708,7 @@ var LoopbackPreview = class {
       }
       const head = await this.client.rpc("loopback.call", {
         op: "http.open",
-        id: id6,
+        id: id7,
         port,
         path: req.url ?? "/",
         method: req.method ?? "GET",
@@ -79723,7 +79734,7 @@ var LoopbackPreview = class {
       headers["referrer-policy"] = "no-referrer";
       res.writeHead(head.status, headers);
       while (!signal.aborted) {
-        const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id6 }, signal);
+        const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id7 }, signal);
         if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
           await new Promise((resolve10, reject) => {
             const ready = () => {
@@ -79752,10 +79763,10 @@ var LoopbackPreview = class {
       } else res.destroy();
     } finally {
       res.off("close", abort);
-      await this.release(id6);
+      await this.release(id7);
     }
   }
-  websocket(id6, socket) {
+  websocket(id7, socket) {
     let input4 = Promise.resolve();
     let queued = 0;
     let count = 0;
@@ -79764,7 +79775,7 @@ var LoopbackPreview = class {
     const close = () => {
       controller.abort();
       socket.terminate();
-      void this.release(id6);
+      void this.release(id7);
     };
     socket.on("error", close);
     socket.on("close", close);
@@ -79777,7 +79788,7 @@ var LoopbackPreview = class {
         return;
       }
       input4 = input4.then(async () => {
-        await this.client.rpc("loopback.call", { op: "ws.send", id: id6, data: bytes.toString("base64"), binary }, signal);
+        await this.client.rpc("loopback.call", { op: "ws.send", id: id7, data: bytes.toString("base64"), binary }, signal);
         queued -= bytes.length;
         count -= 1;
       }).catch(close);
@@ -79785,7 +79796,7 @@ var LoopbackPreview = class {
     void (async () => {
       try {
         while (!signal.aborted) {
-          const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id6 }, signal);
+          const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id7 }, signal);
           for (const message of result.messages) {
             if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
             await new Promise((resolve10, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error62) => error62 ? reject(error62) : resolve10()));
@@ -79798,8 +79809,8 @@ var LoopbackPreview = class {
       }
     })();
   }
-  async release(id6) {
-    if (!this.lifetime.signal.aborted) await this.client.rpc("loopback.call", { op: "close", id: id6 }).catch(() => void 0);
+  async release(id7) {
+    if (!this.lifetime.signal.aborted) await this.client.rpc("loopback.call", { op: "close", id: id7 }).catch(() => void 0);
   }
 };
 
@@ -80349,8 +80360,8 @@ var ClientControl = class {
 
 // packages/plugin/src/client-workspace-queries.ts
 async function readRemoteWorkspaceBaseline(gateway, signal) {
-  const lifetime = new AbortController();
-  const activeSignal = signal === void 0 ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]);
+  const lifetime2 = new AbortController();
+  const activeSignal = signal === void 0 ? lifetime2.signal : AbortSignal.any([signal, lifetime2.signal]);
   const source = await gateway.open("workspace/follow", { args: {} }, activeSignal);
   const iterator = source[Symbol.asyncIterator]();
   try {
@@ -80365,7 +80376,7 @@ async function readRemoteWorkspaceBaseline(gateway, signal) {
       return { workspaceId: item.workspaceId, path: item.path, title: item.title };
     });
   } finally {
-    lifetime.abort("workspace-baseline-read");
+    lifetime2.abort("workspace-baseline-read");
     await iterator.return?.();
   }
 }
@@ -80492,7 +80503,7 @@ async function loadCatalog(client, signal, pendingThreads) {
   ]);
   let projects = projectsResult;
   if (pendingThreads !== void 0) {
-    const listedIds = new Set(threads.map((thread) => string5(thread.id)).filter((id6) => id6 !== void 0));
+    const listedIds = new Set(threads.map((thread) => string5(thread.id)).filter((id7) => id7 !== void 0));
     for (const [threadId, thread] of pendingThreads) {
       if (listedIds.has(threadId)) pendingThreads.delete(threadId);
       else threads.unshift(thread);
@@ -80587,8 +80598,8 @@ async function loadModelDirectory(client, signal) {
     for (const value of array3(result.data)) {
       const source = record5(value);
       if (source.hidden === true) continue;
-      const id6 = string5(source.model) ?? string5(source.id);
-      if (id6 === void 0 || models.has(id6)) continue;
+      const id7 = string5(source.model) ?? string5(source.id);
+      if (id7 === void 0 || models.has(id7)) continue;
       const efforts = array3(source.supportedReasoningEfforts).map((value2) => {
         const effort = record5(value2);
         const effortId = string5(effort.reasoningEffort);
@@ -80603,8 +80614,8 @@ async function loadModelDirectory(client, signal) {
       const defaultEffort2 = string5(source.defaultReasoningEffort);
       const description = string5(source.description);
       const model = {
-        id: id6,
-        name: string5(source.displayName) ?? id6,
+        id: id7,
+        name: string5(source.displayName) ?? id7,
         ...description === void 0 ? {} : { description },
         ...efforts.length === 0 ? {} : {
           reasoning: {
@@ -80613,8 +80624,8 @@ async function loadModelDirectory(client, signal) {
           }
         }
       };
-      models.set(id6, model);
-      if (source.isDefault === true) defaultModelId = id6;
+      models.set(id7, model);
+      if (source.isDefault === true) defaultModelId = id7;
     }
     cursor3 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
     if (cursor3 === void 0) break;
@@ -80653,12 +80664,12 @@ function projectWorkspace(project2) {
 }
 function projectCodexProject(value, fallbackPosition) {
   const source = record5(value);
-  const id6 = string5(source.id);
-  if (id6 === void 0) return void 0;
+  const id7 = string5(source.id);
+  if (id7 === void 0) return void 0;
   const roots = array3(source.roots).map((root2) => string5(record5(root2).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
   if (roots.length === 0) return void 0;
   return {
-    id: id6,
+    id: id7,
     name: string5(source.name) ?? basename(roots[0].path),
     roots,
     position: finiteNumber(source.position) ?? fallbackPosition,
@@ -80876,22 +80887,22 @@ function pngDimensions(bytes) {
 }
 function jpegDimensions(bytes) {
   if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216) return void 0;
-  let offset = 2;
-  while (offset + 9 < bytes.length) {
-    if (bytes[offset] !== 255) {
-      offset += 1;
+  let offset2 = 2;
+  while (offset2 + 9 < bytes.length) {
+    if (bytes[offset2] !== 255) {
+      offset2 += 1;
       continue;
     }
-    const marker = bytes[offset + 1];
-    offset += 2;
+    const marker = bytes[offset2 + 1];
+    offset2 += 2;
     if (marker === 216 || marker === 217) continue;
-    if (offset + 2 > bytes.length) return void 0;
-    const length = readUint16BE(bytes, offset);
-    if (length < 2 || offset + length > bytes.length) return void 0;
+    if (offset2 + 2 > bytes.length) return void 0;
+    const length = readUint16BE(bytes, offset2);
+    if (length < 2 || offset2 + length > bytes.length) return void 0;
     if (isJpegSof(marker) && length >= 7) {
-      return positiveDimensions(readUint16BE(bytes, offset + 5), readUint16BE(bytes, offset + 3));
+      return positiveDimensions(readUint16BE(bytes, offset2 + 5), readUint16BE(bytes, offset2 + 3));
     }
-    offset += length;
+    offset2 += length;
   }
   return void 0;
 }
@@ -80927,29 +80938,29 @@ function sniffImageMediaType2(data2) {
   if (bytes.length >= 12 && stringFromBytes(bytes, 0, 4) === "RIFF" && stringFromBytes(bytes, 8, 12) === "WEBP") return "image/webp";
   return void 0;
 }
-function base64PrefixBytes2(value, maxBytes) {
-  const chars = value.slice(0, Math.ceil(maxBytes / 3) * 4);
+function base64PrefixBytes2(value, maxBytes2) {
+  const chars = value.slice(0, Math.ceil(maxBytes2 / 3) * 4);
   let binary;
   try {
     binary = atob(chars);
   } catch {
     return new Uint8Array();
   }
-  const bytes = new Uint8Array(Math.min(binary.length, maxBytes));
+  const bytes = new Uint8Array(Math.min(binary.length, maxBytes2));
   for (let index = 0; index < bytes.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
-function readUint16BE(bytes, offset) {
-  return (bytes[offset] << 8) + bytes[offset + 1];
+function readUint16BE(bytes, offset2) {
+  return (bytes[offset2] << 8) + bytes[offset2 + 1];
 }
-function readUint16LE(bytes, offset) {
-  return bytes[offset] + (bytes[offset + 1] << 8);
+function readUint16LE(bytes, offset2) {
+  return bytes[offset2] + (bytes[offset2 + 1] << 8);
 }
-function readUint24LE(bytes, offset) {
-  return bytes[offset] + (bytes[offset + 1] << 8) + (bytes[offset + 2] << 16);
+function readUint24LE(bytes, offset2) {
+  return bytes[offset2] + (bytes[offset2 + 1] << 8) + (bytes[offset2 + 2] << 16);
 }
-function readUint32BE(bytes, offset) {
-  return bytes[offset] * 16777216 + bytes[offset + 1] * 65536 + bytes[offset + 2] * 256 + bytes[offset + 3];
+function readUint32BE(bytes, offset2) {
+  return bytes[offset2] * 16777216 + bytes[offset2 + 1] * 65536 + bytes[offset2 + 2] * 256 + bytes[offset2 + 3];
 }
 function positiveDimensions(width, height) {
   return width > 0 && height > 0 ? { width, height } : void 0;
@@ -81195,8 +81206,8 @@ var CodexEventCarrier = class {
     queue.push({ type: "ready", clientId, host: { home } });
     return queue.iterate(() => this.context.eventStreams.delete(clientId));
   }
-  emitRemoteEvent(event, args) {
-    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
+  emitRemoteEvent(event2, args) {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event: event2, args });
   }
   emitApproval(input4) {
     for (const queue of this.context.eventStreams.values()) queue.push({
@@ -81306,7 +81317,7 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
         model: turnModel.model,
         ...turnModel.reasoningEffort === void 0 ? {} : { reasoningEffort: turnModel.reasoningEffort }
       };
-      for (const event of itemEvents(
+      for (const event2 of itemEvents(
         item,
         turnNumber,
         1,
@@ -81316,13 +81327,13 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
         itemIndex === imageOwner ? toolImages : []
       )) {
         const eventSeq = append(
-          event.type,
-          event.data,
+          event2.type,
+          event2.data,
           normalizeTime(item.createdAt) || time3,
-          event.view,
-          event.type === "tool/result" && toolCallSeq !== void 0 ? [toolCallSeq] : void 0
+          event2.view,
+          event2.type === "tool/result" && toolCallSeq !== void 0 ? [toolCallSeq] : void 0
         );
-        if (event.type === "tool/call") toolCallSeq = eventSeq;
+        if (event2.type === "tool/call") toolCallSeq = eventSeq;
       }
     }
     if (turnActive) continue;
@@ -81349,29 +81360,29 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
     ...active2 === void 0 ? {} : { activeTurnId: active2 }
   };
 }
-function paginateCodexNativeHistory(history, request) {
-  const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq);
+function paginateCodexNativeHistory(history2, request) {
+  const throughSeq = Math.min(request.throughSeq ?? history2.lastSeq, history2.lastSeq);
   const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
-  const window2 = endSeq < 0 ? [] : history.entries.filter((entry) => entry.event.seq <= endSeq);
+  const window2 = endSeq < 0 ? [] : history2.entries.filter((entry) => entry.event.seq <= endSeq);
   const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES;
   let messages = 0;
   let cut = 0;
   for (let index = window2.length - 1; index >= 0; index -= 1) {
-    const event = window2[index].event;
-    if (!isSurfaceEvent2(event.type) || event.surfaceOp !== "append") continue;
+    const event2 = window2[index].event;
+    if (!isSurfaceEvent2(event2.type) || event2.surfaceOp !== "append") continue;
     messages += 1;
     if (messages >= maxMessages) {
-      cut = Math.min(event.seq, ...event.sourceEventSeqs ?? []);
+      cut = Math.min(event2.seq, ...event2.sourceEventSeqs ?? []);
       break;
     }
   }
   return {
-    header: history.header,
-    cursor: history.lastSeq,
-    nextTurn: history.nextTurn,
+    header: history2.header,
+    cursor: history2.lastSeq,
+    nextTurn: history2.nextTurn,
     records: window2.filter((entry) => entry.event.seq >= cut),
     hasMore: window2.some((entry) => entry.event.seq < cut),
-    ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+    ...history2.activeTurnId === void 0 ? {} : { activeTurnId: history2.activeTurnId }
   };
 }
 function adaptEventData(type, data2, sessionGeneration) {
@@ -81408,9 +81419,9 @@ function adaptCodexHistoryPage(value, sessionGeneration) {
     records
   };
 }
-function itemEvents(item, turn, step, requestId, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
+function itemEvents(item, turn, step, requestId2, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
   const type = string5(item.type);
-  const id6 = string5(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`;
+  const id7 = string5(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`;
   const text = itemText2(item);
   const itemModel = projectCodexModel(item);
   const effectiveSelection = itemModel.model === void 0 ? selection : {
@@ -81421,10 +81432,10 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
   if (type === "userMessage") return [{
     type: "user/message",
     data: {
-      id: id6,
+      id: id7,
       role: "user",
-      content: messageContent(item, `${sessionId}:${id6}`, text),
-      source: requestId === void 0 || requestId === "" ? { kind: "user" } : { kind: "user", rpcId: requestId }
+      content: messageContent(item, `${sessionId}:${id7}`, text),
+      source: requestId2 === void 0 || requestId2 === "" ? { kind: "user" } : { kind: "user", rpcId: requestId2 }
     }
   }];
   if (type === "agentMessage" || type === "reasoning" || type === "plan") return [{
@@ -81433,9 +81444,9 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
       turn,
       step,
       message: {
-        id: id6,
+        id: id7,
         role: "assistant",
-        content: type === "reasoning" ? [{ type: "reasoning", text: itemText2({ content: item.summary }) || text || "" }] : messageContent(item, `${sessionId}:${id6}`, text, type === "agentMessage" ? supplementalImages : []),
+        content: type === "reasoning" ? [{ type: "reasoning", text: itemText2({ content: item.summary }) || text || "" }] : messageContent(item, `${sessionId}:${id7}`, text, type === "agentMessage" ? supplementalImages : []),
         source: { kind: "model", provider: effectiveSelection.provider, model: effectiveSelection.model }
       }
     }
@@ -81446,10 +81457,10 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
     return [
       {
         type: "tool/call",
-        data: { turn, step, callId: id6, name: name2, arguments: JSON.stringify(args) },
+        data: { turn, step, callId: id7, name: name2, arguments: JSON.stringify(args) },
         view: { for: "call", view: toolCallView(item, type, args) }
       },
-      toolResultEvent(item, turn, step, id6, toolResultText(item, type, text))
+      toolResultEvent(item, turn, step, id7, toolResultText(item, type, text))
     ];
   }
   if (type === "error") return [{
@@ -81458,7 +81469,7 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
       turn,
       step,
       message: {
-        id: id6,
+        id: id7,
         role: "assistant",
         content: [{ type: "text", text: text ?? "CodeX reported an error." }],
         source: { kind: "model", provider: effectiveSelection.provider, model: effectiveSelection.model }
@@ -81476,7 +81487,7 @@ function messageContent(item, attachmentSeed, fallbackText, supplementalImages =
   }
   return [{ type: "text", text: fallbackText ?? "" }];
 }
-function toolResultEvent(item, turn, step, id6, resultText) {
+function toolResultEvent(item, turn, step, id7, resultText) {
   const type = string5(item.type) ?? "unknown";
   return {
     type: "tool/result",
@@ -81484,29 +81495,29 @@ function toolResultEvent(item, turn, step, id6, resultText) {
       turn,
       step,
       message: {
-        id: `${id6}:result`,
+        id: `${id7}:result`,
         role: "user",
         content: [{
           type: "tool-result",
-          toolCallId: id6,
+          toolCallId: id7,
           content: [{ type: "text", text: resultText }],
           ...item.status === "failed" || item.success === false ? { isError: true } : {}
         }],
-        source: { kind: "tool", callId: id6 }
+        source: { kind: "tool", callId: id7 }
       }
     },
     view: { for: "result", view: toolResultView(item, type, resultText) }
   };
 }
-function toolResultContentReplacement(event) {
-  const data2 = record5(event.data);
+function toolResultContentReplacement(event2) {
+  const data2 = record5(event2.data);
   const message = record5(data2.message);
   const content = array3(message.content);
   const result = record5(content[0]);
-  if (result.isError === void 0) return event;
+  if (result.isError === void 0) return event2;
   const { isError: _isError, ...stableResult } = result;
   return {
-    ...event,
+    ...event2,
     data: {
       ...data2,
       message: { ...message, content: [stableResult] }
@@ -81749,15 +81760,15 @@ var CodexLiveProjection = class {
       maxMessages: optionalPositiveInteger2(request.maxMessages)
     }, signal);
     const directoryPromise = this.context.models(signal).catch(() => void 0);
-    const [history, directory] = await Promise.all([historyPromise, directoryPromise]);
+    const [history2, directory] = await Promise.all([historyPromise, directoryPromise]);
     const queue = new AsyncValueQueue2(signal);
     const follow = {
       sessionId,
       threadId,
       queue,
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== void 0,
+      nextSeq: history2.cursor + 1,
+      turn: history2.nextTurn,
+      stepOpen: history2.activeTurnId !== void 0,
       startedItems: /* @__PURE__ */ new Set(),
       completedItems: /* @__PURE__ */ new Set(),
       streamedBlocks: /* @__PURE__ */ new Map(),
@@ -81769,20 +81780,20 @@ var CodexLiveProjection = class {
       liveToolResultSeq: /* @__PURE__ */ new Map(),
       pendingToolImages: [],
       requestId: this.context.pendingRequestIds.get(sessionId),
-      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+      ...history2.activeTurnId === void 0 ? {} : { activeTurnId: history2.activeTurnId }
     };
     this.context.follows.add(follow);
     queue.push({
       type: "snapshot",
-      header: history.header,
-      cursor: history.cursor,
-      records: history.records,
-      hasMore: history.hasMore,
+      header: history2.header,
+      cursor: history2.cursor,
+      records: history2.records,
+      hasMore: history2.hasMore,
       projections: {
-        asOfSeq: history.cursor,
+        asOfSeq: history2.cursor,
         values: {
           title: this.context.sessionTitle(sessionId),
-          sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
+          sessionListMetadata: { blank: history2.cursor < 0, lastPromptAt: null },
           modelSelection: modelSelectionProjection(this.context.modelSelection(sessionId, directory)),
           permissions: codexPermissionsProjection(this.context.permissionSelection(sessionId)),
           imageLimits: codexImageLimitsProjection()
@@ -81998,7 +82009,7 @@ var CodexLiveProjection = class {
     if (type === "agentMessage" && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow);
     const supplementalImages = type === "agentMessage" ? follow.pendingToolImages : [];
     let assistantMessageSeq;
-    for (const event of itemEvents(
+    for (const event2 of itemEvents(
       item,
       follow.turn,
       1,
@@ -82007,11 +82018,11 @@ var CodexLiveProjection = class {
       follow.sessionId,
       supplementalImages
     )) {
-      if (event.type === "tool/call" && follow.startedItems.has(itemId)) continue;
-      if (event.type === "tool/result") this.pushToolResult(follow, itemId, event);
+      if (event2.type === "tool/call" && follow.startedItems.has(itemId)) continue;
+      if (event2.type === "tool/result") this.pushToolResult(follow, itemId, event2);
       else {
-        const seq = this.pushEvent(follow, event.type, event.data, event.view);
-        if (event.type === "assistant/message") assistantMessageSeq = seq;
+        const seq = this.pushEvent(follow, event2.type, event2.data, event2.view);
+        if (event2.type === "assistant/message") assistantMessageSeq = seq;
       }
     }
     if (type === "agentMessage" && assistantMessageSeq !== void 0) {
@@ -82032,7 +82043,7 @@ var CodexLiveProjection = class {
   }
   pushEvent(follow, type, data2, view, placement) {
     const seq = follow.nextSeq++;
-    const event = {
+    const event2 = {
       type,
       seq,
       time: Date.now(),
@@ -82046,10 +82057,10 @@ var CodexLiveProjection = class {
         sourceEventSeqs: [placement.replaceSeq]
       } : {}
     };
-    this.cacheImageBlocks(follow.sessionId, event.data);
+    this.cacheImageBlocks(follow.sessionId, event2.data);
     follow.queue.push({
       type: "event",
-      event,
+      event: event2,
       ...view === void 0 ? {} : { view }
     });
     return seq;
@@ -82180,7 +82191,7 @@ var CodexLiveProjection = class {
       follow.requestId,
       this.context.modelSelection(follow.sessionId),
       follow.sessionId
-    ).find((event) => event.type === "tool/call");
+    ).find((event2) => event2.type === "tool/call");
     if (call !== void 0 && !follow.liveToolResultSeq.has(`${itemId}:call`)) {
       this.pushEvent(follow, call.type, call.data, call.view);
       follow.liveToolResultSeq.set(`${itemId}:call`, -1);
@@ -82192,9 +82203,9 @@ var CodexLiveProjection = class {
     const result = toolResultEvent(item, follow.turn, 1, itemId, resultText);
     this.pushToolResult(follow, itemId, result);
   }
-  pushToolResult(follow, itemId, event) {
+  pushToolResult(follow, itemId, event2) {
     const previous = follow.liveToolResultSeq.get(itemId);
-    const projected = previous === void 0 ? event : toolResultContentReplacement(event);
+    const projected = previous === void 0 ? event2 : toolResultContentReplacement(event2);
     const seq = this.pushEvent(
       follow,
       projected.type,
@@ -83041,15 +83052,15 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     }
     this.cacheHistoryImages(value);
   }
-  cacheHistoryImages(history) {
-    const sessionId = history.header.id;
-    const entries = "entries" in history ? history.entries : history.records;
+  cacheHistoryImages(history2) {
+    const sessionId = history2.header.id;
+    const entries = "entries" in history2 ? history2.entries : history2.records;
     for (const entry of entries) this.live.cacheImageBlocks(sessionId, entry.event.data);
   }
   async sessionHistory(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
     const beforeSeq = optionalNonNegativeInteger(request.beforeSeq);
-    const history = await this.readHistoryPage(nativeThreadId(sessionId), {
+    const history2 = await this.readHistoryPage(nativeThreadId(sessionId), {
       beforeSeq,
       maxMessages: optionalPositiveInteger2(request.maxMessages)
     }, signal);
@@ -83060,17 +83071,17 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       this.rememberOpenedSession(sessionId);
     }
     return success3({
-      events: history.records.map((entry) => ({
+      events: history2.records.map((entry) => ({
         event: entry.event,
         ...entry.view === void 0 ? {} : { view: entry.view }
       })),
-      hasMore: history.hasMore,
+      hasMore: history2.hasMore,
       ...beforeSeq !== void 0 ? {} : {
         projections: {
-          asOfSeq: history.cursor,
+          asOfSeq: history2.cursor,
           values: {
             title: this.sessionTitle(sessionId),
-            sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
+            sessionListMetadata: { blank: history2.cursor < 0, lastPromptAt: null },
             modelSelection: modelSelectionProjection(this.modelSelection(sessionId, directory)),
             permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
             imageLimits: codexImageLimitsProjection()
@@ -83674,17 +83685,17 @@ var RemoteTypertGateway2 = class {
     signal.throwIfAborted();
     const streamId = uuidV7();
     const queue = new AsyncValueQueue4();
-    const lifetime = new AbortController();
-    const transferSignal = AbortSignal.any([signal, lifetime.signal]);
+    const lifetime2 = new AbortController();
+    const transferSignal = AbortSignal.any([signal, lifetime2.signal]);
     let disconnected = false;
-    const unsubscribe = this.client.onEvent((event) => routeStreamEvent(event, streamId, queue));
+    const unsubscribe = this.client.onEvent((event2) => routeStreamEvent(event2, streamId, queue));
     const unsubscribeClose = this.client.onClose(() => {
       disconnected = true;
-      lifetime.abort();
+      lifetime2.abort();
       queue.fail(new RemoteClientError("TRANSPORT_CLOSED", "The remote Harness stream transport closed."));
     });
     const onAbort = () => {
-      lifetime.abort();
+      lifetime2.abort();
       queue.close();
       unsubscribe();
       unsubscribeClose();
@@ -83707,7 +83718,7 @@ var RemoteTypertGateway2 = class {
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
       unsubscribeClose();
-      lifetime.abort();
+      lifetime2.abort();
       void this.client.rpc("harness.remote.stream.close", { streamId }).catch(() => void 0);
       await this.deferDisconnect(error62, disconnected, signal);
       throw error62;
@@ -83720,7 +83731,7 @@ var RemoteTypertGateway2 = class {
       unsubscribeClose,
       signal,
       onAbort,
-      lifetime,
+      lifetime2,
       transferSignal,
       () => disconnected,
       sessionId,
@@ -83895,7 +83906,7 @@ var RemoteTypertGateway2 = class {
       await new Promise((resolve10) => signal.addEventListener("abort", () => resolve10(), { once: true }));
     }
   }
-  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal, disconnected, sessionId, fallbackSnapshot) {
+  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime2, transferSignal, disconnected, sessionId, fallbackSnapshot) {
     let resolvedSessionId = sessionId ?? "";
     try {
       for await (const item of queue) {
@@ -83935,7 +83946,7 @@ var RemoteTypertGateway2 = class {
       await this.deferDisconnect(error62, disconnected(), signal);
       throw error62;
     } finally {
-      lifetime.abort();
+      lifetime2.abort();
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
       unsubscribeClose();
@@ -83992,7 +84003,7 @@ var RemoteTypertGateway2 = class {
     signal.throwIfAborted();
     const { transferId } = committed;
     const responseBytes = new Uint8Array(committed.totalBytes);
-    let offset = 0;
+    let offset2 = 0;
     for (let index = 0; index < committed.totalChunks; index += 1) {
       const result = await this.client.rpc(
         "harness.remote.transfer.read",
@@ -84003,12 +84014,12 @@ var RemoteTypertGateway2 = class {
         throw new Error("The remote Host returned an out-of-order Harness Remote transfer chunk.");
       }
       const chunk = base64ToBytes2(result.data);
-      const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
+      const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset2);
       if (chunk.byteLength !== expectedBytes) {
         throw new Error("The remote Host returned an invalid Harness Remote transfer chunk.");
       }
-      responseBytes.set(chunk, offset);
-      offset += chunk.byteLength;
+      responseBytes.set(chunk, offset2);
+      offset2 += chunk.byteLength;
     }
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
   }
@@ -84067,14 +84078,14 @@ var AsyncValueQueue4 = class {
     }
   }
 };
-function routeStreamEvent(event, streamId, queue) {
-  if (event.event === "harness.remote.frame") {
-    const data3 = event.data;
+function routeStreamEvent(event2, streamId, queue) {
+  if (event2.event === "harness.remote.frame") {
+    const data3 = event2.data;
     if (data3.streamId === streamId && data3.hasValue === true) queue.push(data3);
     return;
   }
-  if (event.event !== "harness.remote.stream.closed") return;
-  const data2 = event.data;
+  if (event2.event !== "harness.remote.stream.closed") return;
+  const data2 = event2.data;
   if (data2.streamId !== streamId) return;
   if (data2.reason === "failed") {
     const failure5 = data2.failure;
@@ -84107,8 +84118,8 @@ function remoteFailure(failure5) {
 }
 function bytesToBase642(bytes) {
   let binary = "";
-  for (let offset = 0; offset < bytes.byteLength; offset += 32768) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 32768, bytes.byteLength)));
+  for (let offset2 = 0; offset2 < bytes.byteLength; offset2 += 32768) {
+    binary += String.fromCharCode(...bytes.subarray(offset2, Math.min(offset2 + 32768, bytes.byteLength)));
   }
   return btoa(binary);
 }
@@ -84200,7 +84211,7 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 var CHUNK = 64 * 1024;
 async function uploadRemoteFile(client, sessionId, localPath, name2, signal, assertCurrent) {
   const uploadId = randomUUID2();
-  const scope2 = { sessionId, uploadId };
+  const scope3 = { sessionId, uploadId };
   let file2;
   let remoteOpened = false;
   let committing = false;
@@ -84223,27 +84234,27 @@ async function uploadRemoteFile(client, sessionId, localPath, name2, signal, ass
     totalBytes = before.size;
     if (!before.isFile() || before.size > workspaceUploadMaxBytes(client.getStats?.().mode)) throw new Error("INVALID_LOCAL_UPLOAD_FILE");
     remoteOpened = true;
-    const opened = external_exports.object({ uploadId: external_exports.literal(uploadId), chunkBytes: external_exports.number().int().min(1).max(CHUNK) }).parse(await call("workspace.upload.open", { ...scope2, name: name2, totalBytes: before.size }));
-    let offset = 0;
-    while (offset < before.size) {
+    const opened = external_exports.object({ uploadId: external_exports.literal(uploadId), chunkBytes: external_exports.number().int().min(1).max(CHUNK) }).parse(await call("workspace.upload.open", { ...scope3, name: name2, totalBytes: before.size }));
+    let offset2 = 0;
+    while (offset2 < before.size) {
       check2();
-      const buffer3 = Buffer.alloc(Math.min(opened.chunkBytes, before.size - offset));
-      const read = await file2.read(buffer3, 0, buffer3.length, offset);
+      const buffer3 = Buffer.alloc(Math.min(opened.chunkBytes, before.size - offset2));
+      const read = await file2.read(buffer3, 0, buffer3.length, offset2);
       if (!read.bytesRead) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
-      const next = offset + read.bytesRead;
+      const next = offset2 + read.bytesRead;
       external_exports.object({ uploadId: external_exports.literal(uploadId), receivedBytes: external_exports.literal(next) }).parse(
-        await call("workspace.upload.chunk", { ...scope2, offset, data: buffer3.subarray(0, read.bytesRead).toString("base64") })
+        await call("workspace.upload.chunk", { ...scope3, offset: offset2, data: buffer3.subarray(0, read.bytesRead).toString("base64") })
       );
-      offset = next;
+      offset2 = next;
     }
     const after = await file2.stat();
     if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
     check2();
     committing = true;
-    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(before.size) }).parse(await call("workspace.upload.commit", scope2));
+    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(before.size) }).parse(await call("workspace.upload.commit", scope3));
     return { status: "accepted", ...result };
   } catch {
-    if (remoteOpened) await client.rpc("workspace.upload.abort", scope2, AbortSignal.timeout(5e3)).catch(() => void 0);
+    if (remoteOpened) await client.rpc("workspace.upload.abort", scope3, AbortSignal.timeout(5e3)).catch(() => void 0);
     return { status: committing ? "unknown" : "rejected" };
   } finally {
     await file2?.close();
@@ -84282,15 +84293,15 @@ async function downloadRemoteFile(gateway, sessionId, path, signal, assertCurren
   try {
     const file2 = await open3(localPath, "wx", 384);
     try {
-      let offset = 0;
+      let offset2 = 0;
       for (; ; ) {
-        const length = Math.min(CHUNK_BYTES, Math.max(1, before.bytes - offset));
-        const chunk = chunkSchema.parse(await call("readBytes", { range: { offset, length } }));
-        if (chunk.absolutePath !== before.absolutePath || chunk.version !== before.version || chunk.bytes !== before.bytes || chunk.offset !== offset || chunk.data.length > length || offset + chunk.data.length > before.bytes || (chunk.eof ? offset + chunk.data.length !== before.bytes : chunk.data.length === 0)) {
+        const length = Math.min(CHUNK_BYTES, Math.max(1, before.bytes - offset2));
+        const chunk = chunkSchema.parse(await call("readBytes", { range: { offset: offset2, length } }));
+        if (chunk.absolutePath !== before.absolutePath || chunk.version !== before.version || chunk.bytes !== before.bytes || chunk.offset !== offset2 || chunk.data.length > length || offset2 + chunk.data.length > before.bytes || (chunk.eof ? offset2 + chunk.data.length !== before.bytes : chunk.data.length === 0)) {
           throw new Error("REMOTE_FILE_CHANGED_OR_INVALID_CHUNK");
         }
         await file2.writeFile(chunk.data);
-        offset += chunk.data.length;
+        offset2 += chunk.data.length;
         if (chunk.eof) break;
       }
       const after = identity.parse(await call("stat"));
@@ -84640,8 +84651,8 @@ async function first(gateway, endpoint, args, signal) {
 function historyRecords(page) {
   if (!Array.isArray(page.records) || typeof page.hasMore !== "boolean") fail4("INVALID_HISTORY_PAGE");
   return page.records.map((value) => {
-    const row = record7(value), event = record7(row.event);
-    if (!["event", "chunks"].includes(String(row.type)) || !Number.isSafeInteger(event.seq) || Number(event.seq) < 0 || typeof event.type !== "string") fail4("INVALID_HISTORY_RECORD");
+    const row = record7(value), event2 = record7(row.event);
+    if (!["event", "chunks"].includes(String(row.type)) || !Number.isSafeInteger(event2.seq) || Number(event2.seq) < 0 || typeof event2.type !== "string") fail4("INVALID_HISTORY_RECORD");
     return row;
   });
 }
@@ -84651,10 +84662,10 @@ function boundedHistory(records, hasMore, throughSeq) {
   const selected = [];
   let budget = 48e3;
   for (const row of [...records].reverse()) {
-    const event = record7(row.event), json2 = JSON.stringify(row);
+    const event2 = record7(row.event), json2 = JSON.stringify(row);
     if (selected.length > 0 && json2.length > budget) break;
     const text = json2.slice(0, Math.min(budget, 16e3));
-    selected.unshift({ seq: Number(event.seq), type: String(event.type), json: text, truncated: text.length < json2.length });
+    selected.unshift({ seq: Number(event2.seq), type: String(event2.type), json: text, truncated: text.length < json2.length });
     budget -= text.length;
     if (budget <= 0) break;
   }
@@ -84691,9 +84702,9 @@ var ObservedState = class {
     else if (value.type === "projection" && typeof value.key === "string") this.projection(value.key, value.value);
     this.update();
   }
-  event(event, live) {
-    const data2 = record7(event.data), id6 = typeof data2.id === "string" ? data2.id : void 0;
-    if (event.type === "turn/start") {
+  event(event2, live) {
+    const data2 = record7(event2.data), id7 = typeof data2.id === "string" ? data2.id : void 0;
+    if (event2.type === "turn/start") {
       this.failed = false;
       this.approvals.clear();
       this.questions.clear();
@@ -84702,17 +84713,17 @@ var ObservedState = class {
         this.queued = false;
       }
     }
-    if (event.type === "turn/end") {
+    if (event2.type === "turn/end") {
       this.failed = [data2.reason, record7(data2.reason).kind].some((reason) => reason === "error" || reason === "failed");
       this.approvals.clear();
       this.questions.clear();
       if (live) this.running = false;
     }
-    if (event.type === "approval/asked" && id6) this.approvals.add(id6);
-    if (event.type === "approval/decided" && id6) this.approvals.delete(id6);
+    if (event2.type === "approval/asked" && id7) this.approvals.add(id7);
+    if (event2.type === "approval/decided" && id7) this.approvals.delete(id7);
     const callId = record7(record7(data2.message).source).callId ?? data2.callId ?? data2.id;
-    if (event.type === "tool/call" && (data2.name ?? data2.toolName) === "ask_user_question" && typeof callId === "string") this.questions.add(callId);
-    if (event.type === "tool/result" && typeof callId === "string") this.questions.delete(callId);
+    if (event2.type === "tool/call" && (data2.name ?? data2.toolName) === "ask_user_question" && typeof callId === "string") this.questions.add(callId);
+    if (event2.type === "tool/result" && typeof callId === "string") this.questions.delete(callId);
   }
   projection(key, value) {
     if (key === "inbox") this.queued = Array.isArray(record7(value)["next-turn"]) && record7(value)["next-turn"].length > 0;
@@ -84817,18 +84828,18 @@ async function withQueueLock(lock, operation) {
   await mkdir2(dirname2(lock), { recursive: true, mode: 448 });
   const deadline = Date.now() + 15e3;
   await ensureQueueMarker(lock, deadline);
-  const id6 = `${process.pid}-${uuidV7()}`;
-  const holder = `${lock}.holder-${id6}`;
-  await publishExclusive(holder, `${id6} choosing
+  const id7 = `${process.pid}-${uuidV7()}`;
+  const holder = `${lock}.holder-${id7}`;
+  await publishExclusive(holder, `${id7} choosing
 `);
   try {
     const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0);
     if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
-    await atomicWritePrivate(holder, `${id6} ${ticket}
+    await atomicWritePrivate(holder, `${id7} ${ticket}
 `);
     for (; ; ) {
       const entries = await participants(lock);
-      const preceding = entries.some((entry) => entry.id !== id6 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id6));
+      const preceding = entries.some((entry) => entry.id !== id7 && (entry.ticket === void 0 || entry.ticket < ticket || entry.ticket === ticket && entry.id < id7));
       if (!preceding) break;
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError();
       await new Promise((resolve10) => setTimeout(resolve10, 50));
@@ -84884,21 +84895,21 @@ async function participants(lock) {
   for (const name2 of entries) {
     if (!name2.startsWith(prefix)) continue;
     if (name2.endsWith(".tmp")) continue;
-    const id6 = name2.slice(prefix.length);
-    if (!/^\d+-[0-9a-f-]{36}$/.test(id6)) throw new ServerCredentialsBusyError();
+    const id7 = name2.slice(prefix.length);
+    if (!/^\d+-[0-9a-f-]{36}$/.test(id7)) throw new ServerCredentialsBusyError();
     const path = join3(dirname2(lock), name2);
     const record11 = await readLockRecord(path);
     if (record11 === void 0) continue;
-    const match = new RegExp(`^${id6} (choosing|[1-9]\\d*)\\n$`).exec(record11);
+    const match = new RegExp(`^${id7} (choosing|[1-9]\\d*)\\n$`).exec(record11);
     if (match === null) throw new ServerCredentialsBusyError();
-    const pid = Number(id6.slice(0, id6.indexOf("-")));
+    const pid = Number(id7.slice(0, id7.indexOf("-")));
     if (await ownerExited(pid)) {
       await rm2(path, { force: true });
       continue;
     }
     const ticket = match[1] === "choosing" ? void 0 : Number(match[1]);
     if (ticket !== void 0 && !Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError();
-    result.push({ id: id6, ...ticket === void 0 ? {} : { ticket } });
+    result.push({ id: id7, ...ticket === void 0 ? {} : { ticket } });
   }
   return result;
 }
@@ -85155,24 +85166,24 @@ var Time;
   Time2.day = Time2.hour * 24;
   Time2.week = Time2.day * 7;
   let timezoneOffset = (/* @__PURE__ */ new Date()).getTimezoneOffset();
-  function setTimezoneOffset(offset) {
-    timezoneOffset = offset;
+  function setTimezoneOffset(offset2) {
+    timezoneOffset = offset2;
   }
   Time2.setTimezoneOffset = setTimezoneOffset;
   function getTimezoneOffset() {
     return timezoneOffset;
   }
   Time2.getTimezoneOffset = getTimezoneOffset;
-  function getDateNumber(date6 = /* @__PURE__ */ new Date(), offset) {
+  function getDateNumber(date6 = /* @__PURE__ */ new Date(), offset2) {
     if (typeof date6 === "number") date6 = new Date(date6);
-    if (offset === void 0) offset = timezoneOffset;
-    return Math.floor((date6.valueOf() / Time2.minute - offset) / 1440);
+    if (offset2 === void 0) offset2 = timezoneOffset;
+    return Math.floor((date6.valueOf() / Time2.minute - offset2) / 1440);
   }
   Time2.getDateNumber = getDateNumber;
-  function fromDateNumber(value, offset) {
+  function fromDateNumber(value, offset2) {
     const date6 = new Date(value * Time2.day);
-    if (offset === void 0) offset = timezoneOffset;
-    return new Date(+date6 + offset * Time2.minute);
+    if (offset2 === void 0) offset2 = timezoneOffset;
+    return new Date(+date6 + offset2 * Time2.minute);
   }
   Time2.fromDateNumber = fromDateNumber;
   const numeric = /\d+(?:\.\d+)?/.source;
@@ -85978,17 +85989,17 @@ function resolveConfig(input4 = {}, env = process.env) {
     },
     acp: {
       enabled: acpEnabled,
-      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id6) => {
-        const configured = parsed.acp?.backends?.find((item) => item.id === id6);
-        const legacy = parsed.acp?.backend === id6 ? parsed.acp : void 0;
+      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id7) => {
+        const configured = parsed.acp?.backends?.find((item) => item.id === id7);
+        const legacy = parsed.acp?.backend === id7 ? parsed.acp : void 0;
         const defaults = { codex: "codex", cursor: "agent", antigravity: "agy", pi: "pi-acp", claude: "claude-agent-acp", opencode: "opencode", hermes: "hermes" };
-        const cursorCommand = id6 === "codex" ? parsed.codex?.binary : id6 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
+        const cursorCommand = id7 === "codex" ? parsed.codex?.binary : id7 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
         const cwd2 = configured?.cwd ?? legacy?.cwd;
         return {
-          id: id6,
-          enabled: configured?.enabled ?? legacy?.enabled ?? (id6 === "codex" ? codexEnabled : id6 === "cursor" ? cursorEnabled : id6 === "pi" ? true : id6 === "claude" ? true : id6 === "opencode" ? true : id6 === "hermes" ? false : parsed.acp !== void 0),
-          command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id6] ?? id6,
-          args: id6 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id6 === "pi" || id6 === "claude" ? [] : id6 === "hermes" ? ["acp"] : id6 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
+          id: id7,
+          enabled: configured?.enabled ?? legacy?.enabled ?? (id7 === "codex" ? codexEnabled : id7 === "cursor" ? cursorEnabled : id7 === "pi" ? true : id7 === "claude" ? true : id7 === "opencode" ? true : id7 === "hermes" ? false : parsed.acp !== void 0),
+          command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id7] ?? id7,
+          args: id7 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id7 === "pi" || id7 === "claude" ? [] : id7 === "hermes" ? ["acp"] : id7 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
           ...cwd2 === void 0 ? {} : { cwd: cwd2 }
         };
       })
@@ -86762,8 +86773,8 @@ function usesDuplexTerminal(version2) {
   return match[3] === void 0 || !match[3].startsWith("alpha.") || Number(match[3].slice(6)) >= 3;
 }
 var Queue = class {
-  constructor(maxBytes = 256 * 1024, maxItems = 64) {
-    this.maxBytes = maxBytes;
+  constructor(maxBytes2 = 256 * 1024, maxItems = 64) {
+    this.maxBytes = maxBytes2;
     this.maxItems = maxItems;
   }
   values = [];
@@ -86816,19 +86827,19 @@ var TerminalCarrierCompat = class {
     const control = new AbortController();
     const queue = new Queue();
     const entry = { args, control, queue, sequence: 0, writable: false, pending: /* @__PURE__ */ new Map() };
-    const lifetime = AbortSignal.any([signal, control.signal]);
+    const lifetime2 = AbortSignal.any([signal, control.signal]);
     const close = () => {
       queue.close(void 0, true);
       for (const pending of entry.pending.values()) pending.reject(new RpcError("TRANSPORT_CLOSED", "The terminal attachment closed. Input will not be replayed."));
       entry.pending.clear();
       if (this.attachments.get(key) === entry) this.attachments.delete(key);
     };
-    lifetime.addEventListener("abort", close, { once: true });
-    lifetime.throwIfAborted();
+    lifetime2.addEventListener("abort", close, { once: true });
+    lifetime2.throwIfAborted();
     this.attachments.set(key, entry);
     let source;
     try {
-      source = await this.gateway.open("terminal/attach", { args: { agentId: args.agentId, id: args.id } }, lifetime, queue);
+      source = await this.gateway.open("terminal/attach", { args: { agentId: args.agentId, id: args.id } }, lifetime2, queue);
     } catch (error62) {
       control.abort();
       throw error62;
@@ -86836,7 +86847,7 @@ var TerminalCarrierCompat = class {
     return (async function* () {
       try {
         for await (const value of source) {
-          if (lifetime.aborted) break;
+          if (lifetime2.aborted) break;
           if (isRecord10(value) && value.type === "ack") {
             const pending = entry.pending.get(Number(value.sequence));
             if (!pending) throw new RpcError("INVALID_MESSAGE", "Unexpected terminal input acknowledgement.");
@@ -86850,7 +86861,7 @@ var TerminalCarrierCompat = class {
         }
       } finally {
         control.abort();
-        lifetime.removeEventListener("abort", close);
+        lifetime2.removeEventListener("abort", close);
       }
     })();
   }
@@ -86890,7 +86901,7 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
   const args = external_exports.object({ agentId: identity2, id: identity2 }).strict().parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
   const attachmentId = uuidV7();
   const control = new AbortController();
-  const lifetime = AbortSignal.any([signal, control.signal]);
+  const lifetime2 = AbortSignal.any([signal, control.signal]);
   const output2 = new Queue(4 * 1024 * 1024, 256);
   let writable = false;
   const iterator = uplink[Symbol.asyncIterator]();
@@ -86898,11 +86909,11 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
     output2.close();
     void iterator.return?.().catch(() => void 0);
   };
-  lifetime.addEventListener("abort", abort, { once: true });
-  lifetime.throwIfAborted();
+  lifetime2.addEventListener("abort", abort, { once: true });
+  lifetime2.throwIfAborted();
   let source;
   try {
-    source = await target3.open("terminal/follow", { args: { ...args, attachmentId } }, lifetime);
+    source = await target3.open("terminal/follow", { args: { ...args, attachmentId } }, lifetime2);
   } catch (error62) {
     control.abort();
     throw error62;
@@ -86911,12 +86922,12 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
   const ready = new Promise((resolve10) => {
     startInput = resolve10;
   });
-  lifetime.addEventListener("abort", startInput, { once: true });
-  if (lifetime.aborted) startInput();
+  lifetime2.addEventListener("abort", startInput, { once: true });
+  if (lifetime2.aborted) startInput();
   void (async () => {
     try {
       for await (const value of source) {
-        if (lifetime.aborted) break;
+        if (lifetime2.aborted) break;
         if (isRecord10(value) && (value.type === "snapshot" || value.type === "state") && isRecord10(value.info)) {
           writable = value.info.controllerId === attachmentId;
           output2.push({ ...value, writable });
@@ -86933,9 +86944,9 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
     let sequence2 = 0;
     try {
       await ready;
-      while (!lifetime.aborted) {
+      while (!lifetime2.aborted) {
         const next = await iterator.next();
-        if (next.done || lifetime.aborted) break;
+        if (next.done || lifetime2.aborted) break;
         const value = input2.parse(next.value);
         if (value.sequence !== ++sequence2) throw new RpcError("INVALID_MESSAGE", "Terminal input sequence is invalid.");
         if (!writable) {
@@ -86946,9 +86957,9 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
           ...args,
           attachmentId,
           ...value.type === "write" ? { data: value.data } : { cols: value.cols, rows: value.rows }
-        } }, lifetime);
+        } }, lifetime2);
         if (!result.ok) throw Object.assign(new Error(result.error.message), result.error);
-        if (!lifetime.aborted) output2.push({ type: "ack", sequence: sequence2 });
+        if (!lifetime2.aborted) output2.push({ type: "ack", sequence: sequence2 });
       }
     } catch (error62) {
       output2.close(error62);
@@ -86960,8 +86971,8 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
       yield* output2;
     } finally {
       control.abort();
-      lifetime.removeEventListener("abort", abort);
-      lifetime.removeEventListener("abort", startInput);
+      lifetime2.removeEventListener("abort", abort);
+      lifetime2.removeEventListener("abort", startInput);
     }
   })();
 }
@@ -87322,10 +87333,10 @@ function isUsableExternalNode(candidate, requireFrom) {
 }
 function isExecutableFile(candidate) {
   try {
-    const stat11 = statSync(candidate);
-    if (!stat11.isFile()) return false;
+    const stat12 = statSync(candidate);
+    if (!stat12.isFile()) return false;
     if (process.platform === "win32") return true;
-    return (stat11.mode & 73) !== 0;
+    return (stat12.mode & 73) !== 0;
   } catch {
     return false;
   }
@@ -87414,11 +87425,11 @@ var ExternalNativePeerConnection = class {
   }
   request(method, payload) {
     if (this.closed) return Promise.reject(new Error("native rtc helper is closed"));
-    const id6 = this.nextRequestId++;
+    const id7 = this.nextRequestId++;
     const promise2 = new Promise((resolve10, reject) => {
-      this.pending.set(id6, { resolve: resolve10, reject });
+      this.pending.set(id7, { resolve: resolve10, reject });
     });
-    this.write({ id: id6, method, payload });
+    this.write({ id: id7, method, payload });
     return promise2;
   }
   notify(method, payload) {
@@ -87814,15 +87825,15 @@ function buildNativeRtcFactory(RTCPeerConnection3) {
           return raw.onicegatheringstatechange;
         },
         set onicecandidate(value) {
-          raw.onicecandidate = value === null ? null : (event) => value({
-            candidate: event.candidate === null ? null : normalizeNativeCandidate(event.candidate)
+          raw.onicecandidate = value === null ? null : (event2) => value({
+            candidate: event2.candidate === null ? null : normalizeNativeCandidate(event2.candidate)
           });
         },
         get onicecandidate() {
           return raw.onicecandidate;
         },
         set ondatachannel(value) {
-          raw.ondatachannel = value === null ? null : (event) => value({ channel: adaptNativeDataChannel(event.channel) });
+          raw.ondatachannel = value === null ? null : (event2) => value({ channel: adaptNativeDataChannel(event2.channel) });
         },
         get ondatachannel() {
           return raw.ondatachannel;
@@ -87885,9 +87896,9 @@ function buildWeriftFactory(werift, options = {}) {
       });
       let onIceCandidate = null;
       let onDataChannel = null;
-      raw.onicecandidate = (event) => {
+      raw.onicecandidate = (event2) => {
         if (onIceCandidate === null) return;
-        const candidate = event.candidate === void 0 ? null : event.candidate.toJSON();
+        const candidate = event2.candidate === void 0 ? null : event2.candidate.toJSON();
         if (candidate !== null && !shouldAdvertiseCandidate(candidate, allowedHostAddresses)) {
           configuration.onDiagnostic?.({
             type: "local-candidate-filtered",
@@ -87898,9 +87909,9 @@ function buildWeriftFactory(werift, options = {}) {
         }
         onIceCandidate({ candidate });
       };
-      raw.ondatachannel = (event) => {
+      raw.ondatachannel = (event2) => {
         if (onDataChannel === null) return;
-        onDataChannel({ channel: adaptDataChannel2(event.channel) });
+        onDataChannel({ channel: adaptDataChannel2(event2.channel) });
       };
       const pc = {
         get connectionState() {
@@ -87996,7 +88007,7 @@ function adaptDataChannel2(raw) {
       return raw.onopen;
     },
     set onmessage(value) {
-      raw.onmessage = value === null ? null : (event) => value({ data: toArrayBuffer2(event.data) });
+      raw.onmessage = value === null ? null : (event2) => value({ data: toArrayBuffer2(event2.data) });
     },
     get onmessage() {
       return null;
@@ -88057,7 +88068,7 @@ function adaptNativeDataChannel(raw) {
     },
     set onmessage(value) {
       onmessage = value;
-      raw.onmessage = value === null ? null : (event) => value({ data: normalizeNativeMessageData(event.data) });
+      raw.onmessage = value === null ? null : (event2) => value({ data: normalizeNativeMessageData(event2.data) });
     },
     get onmessage() {
       return onmessage;
@@ -88391,8 +88402,8 @@ var ClientModeRuntime = class {
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
   }
   async connect(targetDeviceId, signal) {
-    const lifetime = this.remoteLifetime.signal;
-    const connectionSignal = signal === void 0 ? lifetime : AbortSignal.any([lifetime, signal]);
+    const lifetime2 = this.remoteLifetime.signal;
+    const connectionSignal = signal === void 0 ? lifetime2 : AbortSignal.any([lifetime2, signal]);
     connectionSignal.throwIfAborted();
     const remote = await this.connection.connect(targetDeviceId, connectionSignal).catch((error62) => {
       if (!connectionSignal.aborted && !this.connected && this.gatewaySwitch.status().target?.deviceId === targetDeviceId) {
@@ -88689,7 +88700,7 @@ var ClientModeRuntime = class {
       throw new ClientModeError("INVALID_MESSAGE", "A targetDeviceId is required for remote mode.");
     }
     signal = this.beginSelection(signal);
-    const lifetime = this.remoteLifetime.signal;
+    const lifetime2 = this.remoteLifetime.signal;
     const next = await this.connect(targetDeviceId, signal);
     try {
       this.assertRemoteCompatible(next);
@@ -88700,7 +88711,7 @@ var ClientModeRuntime = class {
     }
     const previous = this.connected;
     await this.closePreview();
-    if (signal.aborted || lifetime.aborted || this.closed) {
+    if (signal.aborted || lifetime2.aborted || this.closed) {
       await next.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
@@ -89246,13 +89257,13 @@ var ClientModeRuntime = class {
     return features;
   }
   async ensureConnected(targetDeviceId, signal, isCurrent) {
-    const lifetime = this.remoteLifetime.signal;
+    const lifetime2 = this.remoteLifetime.signal;
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
     signal = this.beginSelection(signal);
     const next = await this.connect(targetDeviceId, signal);
     const assertCurrent = () => {
       signal?.throwIfAborted();
-      if (this.closed || lifetime.aborted || isCurrent?.() === false) {
+      if (this.closed || lifetime2.aborted || isCurrent?.() === false) {
         throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
       }
     };
@@ -89741,7 +89752,7 @@ async function assertOwnedRemoteStorage(root2) {
   ]);
   let identities = 0;
   let verifiedScopedIdentities = 0;
-  const checkIdentity = async (directory, scope2, role2) => {
+  const checkIdentity = async (directory, scope3, role2) => {
     const canAutoHeal = role2 === "client" || directory === root2 && verifiedScopedIdentities > 0;
     const entries = (await readStorageEntries(directory)).filter((entry) => !(directory === root2 && entry.name === "servers" && entry.isDirectory()));
     for (const entry of entries) {
@@ -89826,7 +89837,7 @@ async function assertOwnedRemoteStorage(root2) {
       if (credentials === void 0) throw rejected("IDENTITY_INVALID");
       const origin = new URL(credentials.serverUrl);
       if (!["http:", "https:"].includes(origin.protocol)) throw rejected("IDENTITY_INVALID");
-      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+      if (scope3 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope3) {
         throw rejected("STORAGE_CONFLICT");
       }
     }
@@ -89840,23 +89851,23 @@ async function assertOwnedRemoteStorage(root2) {
       if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
       const origin = new URL(pairing.serverUrl);
       if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected("IDENTITY_INVALID");
-      if (scope2 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope2) {
+      if (scope3 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope3) {
         throw rejected("STORAGE_CONFLICT");
       }
     }
     identities++;
-    if (scope2 !== void 0) verifiedScopedIdentities++;
+    if (scope3 !== void 0) verifiedScopedIdentities++;
   };
   try {
     const entries = await readStorageEntries(root2);
     const servers = entries.find((entry) => entry.name === "servers");
     if (servers !== void 0) {
       if (!servers.isDirectory()) throw rejected("STORAGE_CONFLICT", servers.name);
-      for (const scope2 of await readStorageEntries(join5(root2, "servers"))) {
-        if (!scope2.isDirectory() || !/^[a-f0-9]{24}$/.test(scope2.name)) throw rejected("STORAGE_CONFLICT", scope2.name);
-        for (const role2 of await readStorageEntries(join5(root2, "servers", scope2.name))) {
+      for (const scope3 of await readStorageEntries(join5(root2, "servers"))) {
+        if (!scope3.isDirectory() || !/^[a-f0-9]{24}$/.test(scope3.name)) throw rejected("STORAGE_CONFLICT", scope3.name);
+        for (const role2 of await readStorageEntries(join5(root2, "servers", scope3.name))) {
           if (!role2.isDirectory() || role2.name !== "host" && role2.name !== "client") throw rejected("STORAGE_CONFLICT", role2.name);
-          await checkIdentity(join5(root2, "servers", scope2.name, role2.name), scope2.name, role2.name);
+          await checkIdentity(join5(root2, "servers", scope3.name, role2.name), scope3.name, role2.name);
         }
       }
     }
@@ -90012,8 +90023,8 @@ function isRefreshQueueArtifact(name2) {
 }
 function serverStorageDirectory(root2, serverUrl, role2) {
   const origin = new URL(serverUrl).origin;
-  const scope2 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
-  return join5(root2, "servers", scope2, role2);
+  const scope3 = createHash5("sha256").update(origin).digest("hex").slice(0, 24);
+  return join5(root2, "servers", scope3, role2);
 }
 function fingerprint2(publicKey) {
   const compact = createHash5("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -90154,11 +90165,11 @@ async function hasVerifiedScopedIdentity(directory) {
     const serversPath = join5(directory, "servers");
     const metadata = await lstat3(serversPath);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) return false;
-    for (const scope2 of await readdir2(serversPath, { withFileTypes: true })) {
-      if (!scope2.isDirectory() || scope2.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope2.name)) continue;
-      for (const role2 of await readdir2(join5(serversPath, scope2.name), { withFileTypes: true })) {
+    for (const scope3 of await readdir2(serversPath, { withFileTypes: true })) {
+      if (!scope3.isDirectory() || scope3.isSymbolicLink() || !/^[a-f0-9]{24}$/.test(scope3.name)) continue;
+      for (const role2 of await readdir2(join5(serversPath, scope3.name), { withFileTypes: true })) {
         if (!role2.isDirectory() || role2.isSymbolicLink() || role2.name !== "host" && role2.name !== "client") continue;
-        const roleDir = join5(serversPath, scope2.name, role2.name);
+        const roleDir = join5(serversPath, scope3.name, role2.name);
         try {
           for (const fileName of ["device.json", "device.key"]) {
             const fileStat = await lstat3(join5(roleDir, fileName));
@@ -90489,11 +90500,11 @@ var CodexAppServerClient = class {
     if (!this.ready) throw new CodexAppServerError("CODEX_UNAVAILABLE", "Codex App Server is not ready.");
     return this.request(method, params, timeoutMs);
   }
-  async respond(id6, result) {
-    this.write({ id: id6, result });
+  async respond(id7, result) {
+    this.write({ id: id7, result });
   }
-  async respondError(id6, code, message) {
-    this.write({ id: id6, error: { code, message } });
+  async respondError(id7, code, message) {
+    this.write({ id: id7, error: { code, message } });
   }
   onInbound(handler) {
     this.inboundHandlers.add(handler);
@@ -90574,19 +90585,19 @@ var CodexAppServerClient = class {
     }
   }
   request(method, params, timeoutMs) {
-    const id6 = this.nextId++;
+    const id7 = this.nextId++;
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
-        this.pending.delete(id6);
+        this.pending.delete(id7);
         reject(new CodexAppServerError("CODEX_REQUEST_TIMEOUT", "Codex App Server request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { method, resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { method, resolve: resolve10, reject, timer: timer2 });
     });
     try {
-      this.write({ id: id6, method, params });
+      this.write({ id: id7, method, params });
     } catch (error62) {
-      const pending = this.takePending(id6);
+      const pending = this.takePending(id7);
       pending?.reject(error62 instanceof Error ? error62 : new Error("Codex App Server write failed."));
     }
     return result;
@@ -90657,15 +90668,15 @@ var CodexAppServerClient = class {
     this.failureNotified = true;
     for (const handler of this.unavailableHandlers) handler(code);
   }
-  takePending(id6) {
-    const pending = this.pending.get(id6);
+  takePending(id7) {
+    const pending = this.pending.get(id7);
     if (pending === void 0) return void 0;
-    this.pending.delete(id6);
+    this.pending.delete(id7);
     clearTimeout(pending.timer);
     return pending;
   }
   failPending(error62) {
-    for (const id6 of [...this.pending.keys()]) this.takePending(id6)?.reject(error62);
+    for (const id7 of [...this.pending.keys()]) this.takePending(id7)?.reject(error62);
   }
 };
 var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
@@ -90970,16 +90981,16 @@ function messageValue(value, budget, isInjectedUser = false) {
   }
   return out;
 }
-function isInjectedUserEvent(event) {
-  const data2 = object3(event.data) ? event.data : void 0;
+function isInjectedUserEvent(event2) {
+  const data2 = object3(event2.data) ? event2.data : void 0;
   const msg = data2 && object3(data2.message) ? data2.message : data2;
   const src = msg && object3(msg.source) ? msg.source : void 0;
   return Boolean(src && typeof src.kind === "string" && src.kind !== "user");
 }
-function requestHeaderEvent(event) {
-  if (!object3(event.data) || !object3(event.data.header)) return event;
-  const { tools: _tools, system: _system, ...restHeader } = event.data.header;
-  return { ...event, data: { ...event.data, header: restHeader } };
+function requestHeaderEvent(event2) {
+  if (!object3(event2.data) || !object3(event2.data.header)) return event2;
+  const { tools: _tools, system: _system, ...restHeader } = event2.data.header;
+  return { ...event2, data: { ...event2.data, header: restHeader } };
 }
 function project(value, budget) {
   if (Array.isArray(value)) return value.map((item) => project(item, budget));
@@ -90988,10 +90999,10 @@ function project(value, budget) {
     const eventType = String(value.event.type);
     if (TOOL_EVENT_TYPES.has(eventType)) {
       const { view, ...rest } = value;
-      const event = toolValue(value.event, budget);
-      const data2 = object3(event.data) ? event.data : {};
+      const event2 = toolValue(value.event, budget);
+      const data2 = object3(event2.data) ? event2.data : {};
       const title = object3(view) && object3(view.view) ? view.view.title : void 0;
-      return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+      return { ...rest, event: { ...event2, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
     }
     if (eventType === "request/header") return { ...value, event: requestHeaderEvent(value.event) };
     if (eventType === "assistant/message") return { ...value, event: messageValue(value.event, budget, false) };
@@ -91031,22 +91042,22 @@ async function previewCall(peer, input4, invoke) {
   if (!Array.isArray(result.records) || typeof params.threadId !== "string") return result;
   let cache = details.get(peer);
   if (!cache) details.set(peer, cache = /* @__PURE__ */ new Map());
-  for (const [id6, value] of cache) if (value.until < Date.now()) cache.delete(id6);
+  for (const [id7, value] of cache) if (value.until < Date.now()) cache.delete(id7);
   const pending = /* @__PURE__ */ new Map();
   let pendingBytes = 0;
   const records = result.records.map((raw) => {
-    const record11 = object4(raw), event = object4(record11.event), data2 = object4(event.data);
-    if (event.type !== "tool/result" || size(record11) < 4096) return raw;
+    const record11 = object4(raw), event2 = object4(record11.event), data2 = object4(event2.data);
+    if (event2.type !== "tool/result" || size(record11) < 4096) return raw;
     const bytes = size(record11);
     if (bytes > MAX_CACHE) return raw;
     if (pending.size >= 64 || pendingBytes + bytes > MAX_CACHE) {
       throw new RpcError("RESPONSE_TOO_LARGE", "History requires chunked transfer.");
     }
-    const id6 = randomUUID12();
-    pending.set(id6, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
+    const id7 = randomUUID12();
+    pending.set(id7, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
     pendingBytes += bytes;
     const message = object4(data2.message);
-    return { ...record11, view: void 0, event: { ...event, data: {
+    return { ...record11, view: void 0, event: { ...event2, data: {
       id: data2.id,
       callId: data2.callId,
       name: data2.name,
@@ -91057,7 +91068,7 @@ async function previewCall(peer, input4, invoke) {
       isError: data2.isError === true,
       failed: data2.failed,
       error: data2.error ? { message: "Tool execution failed" } : void 0,
-      remoteDetail: { threadId: params.threadId, detailId: id6 }
+      remoteDetail: { threadId: params.threadId, detailId: id7 }
     } } };
   });
   const preview = { ...result, records };
@@ -91068,7 +91079,7 @@ async function previewCall(peer, input4, invoke) {
     cachedBytes -= cache.get(oldest).bytes;
     cache.delete(oldest);
   }
-  for (const [id6, detail] of pending) cache.set(id6, detail);
+  for (const [id7, detail] of pending) cache.set(id7, detail);
   return preview;
 }
 
@@ -91316,11 +91327,11 @@ var CodexPeerBridge = class {
   }
   pruneTransfers() {
     const staleBefore = Date.now() - TRANSFER_IDLE_MS;
-    for (const [id6, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id6);
+    for (const [id7, transfer] of this.incomingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id7);
     }
-    for (const [id6, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id6);
+    for (const [id7, transfer] of this.outgoingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id7);
     }
   }
   requireOpen() {
@@ -91349,10 +91360,10 @@ function safeMethod(input4) {
 }
 function concatChunks(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
-  let offset = 0;
+  let offset2 = 0;
   for (const chunk of chunks) {
-    output2.set(chunk, offset);
-    offset += chunk.byteLength;
+    output2.set(chunk, offset2);
+    offset2 += chunk.byteLength;
   }
   return output2;
 }
@@ -91707,8 +91718,8 @@ var CodexRemoteDomain = class {
     if (call.method === "dsh/sessionAttachment") {
       const attachmentId = call.params.attachmentId;
       const thread = await this.readThreadForHistory(connectionId, threadId);
-      const history = projectCodexNativeHistory(thread, `codex:${threadId}`);
-      const found = findProjectedImageAttachment(history.entries, attachmentId);
+      const history2 = projectCodexNativeHistory(thread, `codex:${threadId}`);
+      const found = findProjectedImageAttachment(history2.entries, attachmentId);
       if (found === void 0) {
         throw new RpcError("CODEX_ATTACHMENT_NOT_FOUND", "The CodeX image is not available in this Session.");
       }
@@ -93092,17 +93103,17 @@ var CursorAcpClient = class {
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not ready.`);
     const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
-    const id6 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    const id7 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
     if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
-      const state2 = id6 ? this.modelStates.get(id6) : void 0;
-      if (!state2 || !id6) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before selecting a model.");
+      const state2 = id7 ? this.modelStates.get(id7) : void 0;
+      if (!state2 || !id7) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before selecting a model.");
       if (method === "dsh/sessionModels") return state2.catalog();
-      if (this.modelBusy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
+      if (this.modelBusy.has(id7)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
       const selection = params;
-      this.modelBusy.add(id6);
+      this.modelBusy.add(id7);
       try {
         const result2 = await state2.select(
-          id6,
+          id7,
           selection.model,
           selection.reasoningEffort,
           (method2, params2) => this.request(method2, params2, timeoutMs ?? ACP_REQUEST_TIMEOUT_MS)
@@ -93110,20 +93121,20 @@ var CursorAcpClient = class {
         for (const handler of this.inboundHandlers) handler({
           kind: "notification",
           method: "session/update",
-          params: { sessionId: id6, update: { sessionUpdate: "model_selection", selected: result2.selected } }
+          params: { sessionId: id7, update: { sessionUpdate: "model_selection", selected: result2.selected } }
         });
         return result2;
       } finally {
-        this.modelBusy.delete(id6);
+        this.modelBusy.delete(id7);
       }
     }
-    if (backend && method === "session/prompt" && id6) {
-      if (this.modelBusy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The ACP session is busy.");
-      this.modelBusy.add(id6);
+    if (backend && method === "session/prompt" && id7) {
+      if (this.modelBusy.has(id7)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The ACP session is busy.");
+      this.modelBusy.add(id7);
       try {
         return await this.request(method, params, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS);
       } finally {
-        this.modelBusy.delete(id6);
+        this.modelBusy.delete(id7);
       }
     }
     if (method === "session/cancel" && this.options.authenticationMethod === null) {
@@ -93134,7 +93145,7 @@ var CursorAcpClient = class {
     const result = await this.request(method, params, budget);
     if (backend && (method === "session/new" || method === "session/load")) {
       const returnedId = isRecord15(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
-      const sessionId = method === "session/load" ? id6 : returnedId;
+      const sessionId = method === "session/load" ? id7 : returnedId;
       if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "ACP returned an invalid session.");
       const state2 = new AcpSessionModelState(backend);
       state2.update(result);
@@ -93142,11 +93153,11 @@ var CursorAcpClient = class {
     }
     return result;
   }
-  async respond(id6, result) {
-    this.write({ jsonrpc: "2.0", id: id6, result });
+  async respond(id7, result) {
+    this.write({ jsonrpc: "2.0", id: id7, result });
   }
-  async respondError(id6, code, message) {
-    this.write({ jsonrpc: "2.0", id: id6, error: { code, message } });
+  async respondError(id7, code, message) {
+    this.write({ jsonrpc: "2.0", id: id7, error: { code, message } });
   }
   onInbound(handler) {
     this.inboundHandlers.add(handler);
@@ -93247,19 +93258,19 @@ var CursorAcpClient = class {
     }
   }
   request(method, params, timeoutMs) {
-    const id6 = this.nextId++;
+    const id7 = this.nextId++;
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
-        this.pending.delete(id6);
+        this.pending.delete(id7);
         reject(new CursorAcpError(this.code("REQUEST_TIMEOUT"), `${this.adapterLabel} ACP request timed out.`));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
-      this.write({ jsonrpc: "2.0", id: id6, method, params });
+      this.write({ jsonrpc: "2.0", id: id7, method, params });
     } catch (error62) {
-      const pending = this.takePending(id6);
+      const pending = this.takePending(id7);
       pending?.reject(error62 instanceof Error ? error62 : new Error("Cursor ACP write failed."));
     }
     return result;
@@ -93334,15 +93345,15 @@ var CursorAcpClient = class {
     this.failureNotified = true;
     for (const handler of this.unavailableHandlers) handler(code);
   }
-  takePending(id6) {
-    const pending = this.pending.get(id6);
+  takePending(id7) {
+    const pending = this.pending.get(id7);
     if (pending === void 0) return void 0;
-    this.pending.delete(id6);
+    this.pending.delete(id7);
     clearTimeout(pending.timer);
     return pending;
   }
   failPending(error62) {
-    for (const id6 of [...this.pending.keys()]) this.takePending(id6)?.reject(error62);
+    for (const id7 of [...this.pending.keys()]) this.takePending(id7)?.reject(error62);
   }
 };
 function safeUpstreamError2(value, label = "Cursor") {
@@ -93373,10 +93384,10 @@ function acpHistoryEvents(messages, sessionId, provider) {
     data: data2,
     ...surface ? { surfaceOp: "append" } : {}
   } });
-  const id6 = () => `${provider}-history:${sessionId}:${events.length}`;
+  const id7 = () => `${provider}-history:${sessionId}:${events.length}`;
   const flushMessage = () => {
     if (!pending) return;
-    const message = { id: id6(), role: pending.role, content: pending.content };
+    const message = { id: id7(), role: pending.role, content: pending.content };
     if (pending.role === "user") push2("user/message", { ...message, source: { kind: "user" } }, true);
     else push2("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
     pending = void 0;
@@ -93384,7 +93395,7 @@ function acpHistoryEvents(messages, sessionId, provider) {
   const result = (tool) => {
     if (tool.emitted || !tool.terminal) return;
     tool.emitted = true;
-    push2("tool/result", { turn, step, message: { id: id6(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
+    push2("tool/result", { turn, step, message: { id: id7(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
       type: "tool-result",
       toolCallId: tool.id,
       content: tool.output,
@@ -93517,9 +93528,9 @@ var IsolatedAcpClient = class {
   isReady() {
     return !this.closed && this.catalog?.isReady() === true;
   }
-  async create(history = false) {
+  async create(history2 = false) {
     if (this.closed) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
-    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", `Too many ${this.label} ACP sessions are active.`);
+    if (this.all.size >= (history2 ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", `Too many ${this.label} ACP sessions are active.`);
     const client = this.factory();
     this.starting.add(client);
     this.all.add(client);
@@ -93577,9 +93588,9 @@ var IsolatedAcpClient = class {
         if (incomingId !== boundId) return;
         this.updateConfiguration(boundId, message);
         if (message.kind === "request") {
-          const id7 = `${this.backend}-callback:${++this.nextCallback}`;
-          this.callbacks.set(id7, { client: client2, id: message.id });
-          message = { ...message, id: id7 };
+          const id8 = `${this.backend}-callback:${++this.nextCallback}`;
+          this.callbacks.set(id8, { client: client2, id: message.id });
+          message = { ...message, id: id8 };
         }
         for (const handler of this.inbound) handler(message);
       };
@@ -93593,21 +93604,21 @@ var IsolatedAcpClient = class {
       });
       try {
         const result = await client2.call(method, params, timeoutMs);
-        const id7 = method === "session/load" ? p.sessionId : result.sessionId;
-        if (typeof id7 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id7) || this.clients.has(id7) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id7) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
-        this.clients.set(id7, client2);
+        const id8 = method === "session/load" ? p.sessionId : result.sessionId;
+        if (typeof id8 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id8) || this.clients.has(id8) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id8) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
+        this.clients.set(id8, client2);
         const config2 = { ...result };
-        this.updateConfiguration(id7, { kind: "notification", method: "session/update", params: {
+        this.updateConfiguration(id8, { kind: "notification", method: "session/update", params: {
           update: { sessionUpdate: "config_option_update", configOptions: config2.configOptions }
         } }, config2);
         for (const key of ["models", "modes"]) {
           if (replayConfiguration[key]) config2[key] = { ...config2[key], ...replayConfiguration[key] };
         }
-        this.configurations.set(id7, config2);
-        boundId = id7;
+        this.configurations.set(id8, config2);
+        boundId = id8;
         replaying = false;
         for (const message of queued) receive(message);
-        return { ...result, sessionId: id7 };
+        return { ...result, sessionId: id8 };
       } catch (error62) {
         await this.dispose(client2);
         throw error62;
@@ -93615,46 +93626,46 @@ var IsolatedAcpClient = class {
     }
     const client = this.clients.get(String(p.sessionId));
     if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", `Load the ${this.label} session before using it.`);
-    const id6 = String(p.sessionId);
+    const id7 = String(p.sessionId);
     if (this.backend === "cursor" && (method === "dsh/sessionModels" || method === "dsh/selectModel")) return client.call(method, params, timeoutMs);
-    if (method === "dsh/sessionModels") return this.models(id6);
+    if (method === "dsh/sessionModels") return this.models(id7);
     if (method === "dsh/selectModel") {
-      if (this.busy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `Stop the ${this.label} reply before changing its model.`);
-      const config2 = this.configurations.get(id6);
+      if (this.busy.has(id7)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `Stop the ${this.label} reply before changing its model.`);
+      const config2 = this.configurations.get(id7);
       if (!config2?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config2?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
         throw new CursorAcpError("INVALID_MESSAGE", `The ${this.label} model or thinking level is not available.`);
       }
-      this.busy.add(id6);
+      this.busy.add(id7);
       try {
-        const modelResult = await client.call("session/set_config_option", { sessionId: id6, configId: "model", value: p.model });
-        this.updateConfiguration(id6, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
-        if (this.configurations.get(id6)?.models?.currentModelId !== p.model) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the model change.`);
+        const modelResult = await client.call("session/set_config_option", { sessionId: id7, configId: "model", value: p.model });
+        this.updateConfiguration(id7, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
+        if (this.configurations.get(id7)?.models?.currentModelId !== p.model) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the model change.`);
         if (p.reasoningEffort !== void 0) {
-          if (!this.configurations.get(id6)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
-          const thinkingResult = await client.call("session/set_config_option", { sessionId: id6, configId: "thought_level", value: p.reasoningEffort });
-          this.updateConfiguration(id6, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
-          if (this.configurations.get(id6)?.modes?.currentModeId !== p.reasoningEffort) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the thinking change.`);
+          if (!this.configurations.get(id7)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
+          const thinkingResult = await client.call("session/set_config_option", { sessionId: id7, configId: "thought_level", value: p.reasoningEffort });
+          this.updateConfiguration(id7, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
+          if (this.configurations.get(id7)?.modes?.currentModeId !== p.reasoningEffort) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the thinking change.`);
         }
-        return { selected: this.models(id6).current };
+        return { selected: this.models(id7).current };
       } finally {
-        this.busy.delete(id6);
+        this.busy.delete(id7);
       }
     }
     if (method === "session/prompt") {
-      if (this.busy.has(id6)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `The ${this.label} session is busy.`);
-      this.busy.add(id6);
+      if (this.busy.has(id7)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `The ${this.label} session is busy.`);
+      this.busy.add(id7);
       try {
         return await client.call(method, params, timeoutMs);
       } finally {
-        this.busy.delete(id6);
+        this.busy.delete(id7);
       }
     }
     return client.call(method, params, timeoutMs);
   }
-  updateConfiguration(id6, message, initial) {
+  updateConfiguration(id7, message, initial) {
     if (message.method !== "session/update") return;
     const update = message.params.update;
-    const config2 = initial ?? this.configurations.get(id6);
+    const config2 = initial ?? this.configurations.get(id7);
     if (!update || !config2) return;
     if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config2.modes = { ...config2.modes, currentModeId: update.currentModeId };
     if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
@@ -93672,8 +93683,8 @@ var IsolatedAcpClient = class {
       }
     }
   }
-  models(id6) {
-    const config2 = this.configurations.get(id6);
+  models(id7) {
+    const config2 = this.configurations.get(id7);
     const modes = config2?.modes;
     return {
       current: { provider: "pi", model: config2?.models?.currentModelId ?? "", reasoningEffort: modes?.currentModeId },
@@ -93720,16 +93731,16 @@ var IsolatedAcpClient = class {
       }
     }
   }
-  async respond(id6, result) {
-    const pending = this.callbacks.get(String(id6));
+  async respond(id7, result) {
+    const pending = this.callbacks.get(String(id7));
     if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", `The ${this.label} callback is unavailable.`);
-    this.callbacks.delete(String(id6));
+    this.callbacks.delete(String(id7));
     await pending.client.respond(pending.id, result);
   }
-  async respondError(id6, code, message) {
-    const pending = this.callbacks.get(String(id6));
+  async respondError(id7, code, message) {
+    const pending = this.callbacks.get(String(id7));
     if (!pending) return;
-    this.callbacks.delete(String(id6));
+    this.callbacks.delete(String(id7));
     await pending.client.respondError(pending.id, code, message);
   }
   onInbound(handler) {
@@ -93972,9 +93983,9 @@ var TerminalFollower = class {
   }
 };
 var OwnedTerminal = class {
-  constructor(sessionId, id6, cwd2, cols, rows, removed, rosterChanged) {
+  constructor(sessionId, id7, cwd2, cols, rows, removed, rosterChanged) {
     this.sessionId = sessionId;
-    this.id = id6;
+    this.id = id7;
     this.cwd = cwd2;
     this.cols = cols;
     this.rows = rows;
@@ -94183,12 +94194,12 @@ var RemoteTerminalController = class {
     if (endpoint === "terminal/shells") return { ok: true, value: await this.shells(signal) };
     if (endpoint === "terminal/list") return { ok: true, value: this.roster(sessionId) };
     if (endpoint === "terminal/create") return { ok: true, value: await this.create(sessionId, cwd2, args, signal) };
-    const id6 = identifier(args.id);
+    const id7 = identifier(args.id);
     if (endpoint === "terminal/close") {
-      await this.shared.terminals.get(`${sessionId}/${id6}`)?.close();
+      await this.shared.terminals.get(`${sessionId}/${id7}`)?.close();
       return { ok: true };
     }
-    const terminal = this.requireTerminal(sessionId, id6);
+    const terminal = this.requireTerminal(sessionId, id7);
     await terminal.enqueue(async () => {
       this.check(signal);
       if (terminal.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is closing.");
@@ -94317,7 +94328,7 @@ var RemoteTerminalController = class {
   }
   async create(sessionId, cwd2, args, signal) {
     const request = typeof args.request === "object" && args.request !== null ? args.request : {};
-    const id6 = identifier(request.id), key = `${sessionId}/${id6}`;
+    const id7 = identifier(request.id), key = `${sessionId}/${id7}`;
     const existing = this.shared.terminals.get(key);
     if (existing) {
       if (existing.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is closing.");
@@ -94329,7 +94340,7 @@ var RemoteTerminalController = class {
     if (this.shared.terminals.size >= MAX_TERMINALS || [...this.shared.terminals.values()].filter((item) => item.sessionId === sessionId).length >= MAX_SESSION_TERMINALS) throw new RpcError("RATE_LIMITED", "Too many remote terminals are active.");
     const terminal = new OwnedTerminal(
       sessionId,
-      id6,
+      id7,
       cwd2,
       dimension(request.cols ?? 80, MAX_COLS),
       dimension(request.rows ?? 24, MAX_ROWS),
@@ -94378,8 +94389,8 @@ var RemoteTerminalController = class {
     signal.throwIfAborted();
     if (!this.enabled()) throw new RpcError("TERMINAL_DISABLED", "Remote terminal is disabled on this Host.");
   }
-  requireTerminal(sessionId, id6) {
-    const terminal = this.shared.terminals.get(`${sessionId}/${id6}`);
+  requireTerminal(sessionId, id7) {
+    const terminal = this.shared.terminals.get(`${sessionId}/${id7}`);
     if (!terminal?.process || terminal.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is no longer available.");
     return terminal;
   }
@@ -94422,11 +94433,11 @@ var AsyncQueue = class {
   }
 };
 var WorkspaceBridge = class {
-  constructor(resolveCwd, terminalEnabled, state2 = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner(), scope2) {
+  constructor(resolveCwd, terminalEnabled, state2 = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner(), scope3) {
     this.resolveCwd = resolveCwd;
     this.terminalEnabled = terminalEnabled;
     this.state = state2;
-    this.scope = scope2;
+    this.scope = scope3;
     this.terminal = new RemoteTerminalController(state2, spawnTerminal, terminalEnabled, (code, message) => this.scopeError(code, message));
   }
   terminal;
@@ -94499,7 +94510,7 @@ var WorkspaceBridge = class {
       }
       if (!info.isFile()) throw this.scopeError("WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
       if (info.size > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
-      const offset = readOffset(args);
+      const offset2 = readOffset(args);
       const limit = readLimit(args);
       const file2 = await open4(target3, "r");
       let bytes;
@@ -94519,22 +94530,22 @@ var WorkspaceBridge = class {
         await file2.close();
       }
       if (endpoint === "workspaceFiles/readBytes") {
-        const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
+        const slice2 = bytes.subarray(offset2, Math.min(offset2 + limit, bytes.length));
         return {
           ok: true,
           value: {
             absolutePath,
             version: version2,
             bytes: bytes.length,
-            offset,
+            offset: offset2,
             data: slice2.toString("base64"),
-            eof: offset + slice2.length >= bytes.length
+            eof: offset2 + slice2.length >= bytes.length
           }
         };
       }
       const text = bytes.toString("utf8");
-      const slice = text.slice(offset, offset + limit);
-      return { ok: true, value: { absolutePath: target3, version: `${info.mtimeMs}:${info.size}`, text: slice, offset, lines: slice.split("\n").length, eof: offset + slice.length >= text.length } };
+      const slice = text.slice(offset2, offset2 + limit);
+      return { ok: true, value: { absolutePath: target3, version: `${info.mtimeMs}:${info.size}`, text: slice, offset: offset2, lines: slice.split("\n").length, eof: offset2 + slice.length >= text.length } };
     } catch (error62) {
       if (error62 instanceof RpcError) throw error62;
       throw this.scopeError("WORKSPACE_UNAVAILABLE", "The CodeX workspace file is unavailable.");
@@ -94553,7 +94564,7 @@ var WorkspaceBridge = class {
     signal.addEventListener("abort", abort, { once: true });
     void (async () => {
       try {
-        for await (const event of watcher) queue.push({ kind: "change", type: event.eventType, path: event.filename ?? "" });
+        for await (const event2 of watcher) queue.push({ kind: "change", type: event2.eventType, path: event2.filename ?? "" });
       } catch {
       } finally {
         signal.removeEventListener("abort", abort);
@@ -94741,8 +94752,8 @@ var AcpWorkspaceTools = class {
   }
   payload(sessionId, backend, args) {
     const scopedId = `${backend === "antigravity" ? "acp" : backend}:${sessionId}`;
-    const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter((id6) => id6 !== void 0);
-    if (!ids.length || ids.some((id6) => id6 !== scopedId)) throw new RpcError("PERMISSION_DENIED", "The tool scope does not match the ACP session.");
+    const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter((id7) => id7 !== void 0);
+    if (!ids.length || ids.some((id7) => id7 !== scopedId)) throw new RpcError("PERMISSION_DENIED", "The tool scope does not match the ACP session.");
     return { args };
   }
   async call(sessionId, backend, endpoint, args) {
@@ -94795,10 +94806,10 @@ function claudeHistoryEvents(messages, sessionId, provider = "claude") {
     data: data2,
     ...surface ? { surfaceOp: "append" } : {}
   } });
-  const id6 = () => `${provider}-history:${sessionId}:${events.length}`;
+  const id7 = () => `${provider}-history:${sessionId}:${events.length}`;
   const flushMessage = () => {
     if (!pending) return;
-    const message = { id: id6(), role: pending.role, content: pending.content };
+    const message = { id: id7(), role: pending.role, content: pending.content };
     if (pending.role === "user") push2("user/message", { ...message, source: { kind: "user" } }, true);
     else push2("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
     pending = void 0;
@@ -94806,7 +94817,7 @@ function claudeHistoryEvents(messages, sessionId, provider = "claude") {
   const result = (tool) => {
     if (tool.emitted || !tool.terminal) return;
     tool.emitted = true;
-    push2("tool/result", { turn, step, message: { id: id6(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
+    push2("tool/result", { turn, step, message: { id: id7(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
       type: "tool-result",
       toolCallId: tool.id,
       content: tool.output,
@@ -94928,29 +94939,29 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   }
   onInbound(handler) {
     return super.onInbound((message) => {
-      const id6 = message.params?.sessionId;
-      if (message.kind === "notification" && message.method === "session/update" && id6 && this.loads.has(id6)) return;
+      const id7 = message.params?.sessionId;
+      if (message.kind === "notification" && message.method === "session/update" && id7 && this.loads.has(id7)) return;
       handler(message);
     });
   }
   async call(method, params, timeoutMs) {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
-    const id6 = params?.sessionId;
-    if (method === "session/load" && typeof id6 === "string") {
-      if (this.live.has(id6)) return this.live.get(id6);
-      const pending = this.loads.get(id6);
+    const id7 = params?.sessionId;
+    if (method === "session/load" && typeof id7 === "string") {
+      if (this.live.has(id7)) return this.live.get(id7);
+      const pending = this.loads.get(id7);
       if (pending) return pending;
       this.checkSessionLimit();
       const load = Promise.resolve().then(() => super.call(method, params, timeoutMs)).then((result) => {
-        this.assertLoaded(result, id6);
-        this.live.set(id6, result);
+        this.assertLoaded(result, id7);
+        this.live.set(id7, result);
         return result;
       });
-      this.loads.set(id6, load);
+      this.loads.set(id7, load);
       try {
         return await load;
       } finally {
-        this.loads.delete(id6);
+        this.loads.delete(id7);
       }
     }
     if (method === "session/new") {
@@ -94972,9 +94983,9 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if (this.live.size + this.loads.size + this.pendingNew >= 30) throw new CursorAcpError("ACP_PROCESS_LIMIT", `Too many ${this.label} sessions are active.`);
   }
   assertLoaded(result, sessionId) {
-    const id6 = result?.sessionId;
+    const id7 = result?.sessionId;
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
-    if (id6 !== void 0 && id6 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
+    if (id7 !== void 0 && id7 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
   }
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId, cwd2) {
@@ -95068,14 +95079,14 @@ function parseAgyModels(output2) {
     const wireId = match[1];
     const suffix = wireId.match(/-(low|medium|high|xhigh|max|thinking)$/)?.[1];
     const effort = suffix ?? (/\(Thinking\)$/i.test(match[2]) ? "thinking" : void 0);
-    const id6 = suffix ? wireId.slice(0, -(suffix.length + 1)) : wireId;
-    const model = models.get(id6) ?? { id: id6, name: match[2].replace(/\s+\((Low|Medium|High|Xhigh|Max|Thinking)\)$/i, "") };
+    const id7 = suffix ? wireId.slice(0, -(suffix.length + 1)) : wireId;
+    const model = models.get(id7) ?? { id: id7, name: match[2].replace(/\s+\((Low|Medium|High|Xhigh|Max|Thinking)\)$/i, "") };
     if (effort) {
       model.reasoning ??= { efforts: [], defaultEffort: effort };
       if (!model.reasoning.efforts.some((item) => item.id === effort)) model.reasoning.efforts.push({ id: effort, name: effort[0].toUpperCase() + effort.slice(1) });
     }
-    models.set(id6, model);
-    variants.set(`${id6}/${effort ?? ""}`, wireId);
+    models.set(id7, model);
+    variants.set(`${id7}/${effort ?? ""}`, wireId);
   }
   if (!models.size) throw new Error("The installed AGY CLI did not return a model catalog.");
   return { groups: [{ id: "antigravity", name: "Antigravity", models: [...models.values()] }], variants };
@@ -95228,11 +95239,11 @@ var TranscriptWatcher = class extends EventEmitter2 {
   closed = false;
   transcriptPath;
   transcriptFullPath;
-  on(event, listener) {
-    return super.on(event, listener);
+  on(event2, listener) {
+    return super.on(event2, listener);
   }
-  emit(event, ...args) {
-    return super.emit(event, ...args);
+  emit(event2, ...args) {
+    return super.emit(event2, ...args);
   }
   /**
    * 启动增量文件监听
@@ -95273,16 +95284,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
     return this.readTail;
   }
   async readNewLines() {
-    let stat11;
+    let stat12;
     try {
-      stat11 = await fs2.stat(this.transcriptPath);
+      stat12 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
-    if (stat11.size <= this.offset) return;
+    if (stat12.size <= this.offset) return;
     const handle = await fs2.open(this.transcriptPath, "r");
     try {
-      const bytesToRead = stat11.size - this.offset;
+      const bytesToRead = stat12.size - this.offset;
       const buffer3 = Buffer.alloc(bytesToRead);
       const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, this.offset);
       this.offset += bytesRead;
@@ -95709,11 +95720,11 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       }, ACP_START_TIMEOUT_MS2);
       timer2.unref?.();
       const checkInit = (chunk) => {
-        this.consumeStdout(chunk, (event) => {
-          if (event.event === "init") {
+        this.consumeStdout(chunk, (event2) => {
+          if (event2.event === "init") {
             initResolved = true;
             clearTimeout(timer2);
-            const conversationId = event.conversation_id;
+            const conversationId = event2.conversation_id;
             if (typeof conversationId === "string") {
               this.activeConversationId = conversationId;
               this.attachWatcher(conversationId);
@@ -95871,12 +95882,12 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       }
     }
   }
-  handleAgyEvent(event) {
-    const eventName = event.event;
+  handleAgyEvent(event2) {
+    const eventName = event2.event;
     const current = this.currentPromptPending;
     const sessionId = current?.sessionId ?? this.activeConversationId ?? "default";
-    if (eventName === "step_update" && typeof event.step_update === "object" && event.step_update !== null) {
-      const step = event.step_update;
+    if (eventName === "step_update" && typeof event2.step_update === "object" && event2.step_update !== null) {
+      const step = event2.step_update;
       const stepType = step.step_type;
       if (stepType === "agent_response" && typeof step.text_delta === "string") {
         this.emitNotification("session/update", {
@@ -95927,8 +95938,8 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           });
         }
       }
-    } else if (eventName === "result" && typeof event.result === "object" && event.result !== null) {
-      const result = event.result;
+    } else if (eventName === "result" && typeof event2.result === "object" && event2.result !== null) {
+      const result = event2.result;
       if (current) {
         clearTimeout(current.timer);
         this.currentPromptPending = void 0;
@@ -96222,47 +96233,47 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
     const p = isRecord17(params) ? params : {};
-    const id6 = typeof p.sessionId === "string" ? p.sessionId : void 0;
-    if (id6 && this.archivingSessions.has(id6)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
-    if (id6 && this.archivedSessions.has(id6) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
+    const id7 = typeof p.sessionId === "string" ? p.sessionId : void 0;
+    if (id7 && this.archivingSessions.has(id7)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
+    if (id7 && this.archivedSessions.has(id7) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
-    if (method === "session/load" && id6) {
-      if (this.models.has(id6)) return { sessionId: id6 };
-      const pending = this.loads.get(id6);
+    if (method === "session/load" && id7) {
+      if (this.models.has(id7)) return { sessionId: id7 };
+      const pending = this.loads.get(id7);
       if (pending) return pending;
-      const load = Promise.resolve().then(() => this.loadSession(method, params, budget, id6));
-      this.loads.set(id6, load);
+      const load = Promise.resolve().then(() => this.loadSession(method, params, budget, id7));
+      this.loads.set(id7, load);
       try {
         return await load;
       } finally {
-        this.loads.delete(id6);
+        this.loads.delete(id7);
       }
     }
     if (method === "session/new") return this.loadSession(method, params, budget);
     if (method === "dsh/sessionModels" || method === "dsh/selectModel") {
-      const models = id6 ? this.models.get(id6) : void 0;
+      const models = id7 ? this.models.get(id7) : void 0;
       if (!models) throw new OpencodeAcpError("ACP_SESSION_NOT_LOADED", "Load the OpenCode session before selecting its model.");
       if (method === "dsh/sessionModels") return models.catalog();
-      if (this.busy.has(id6)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before changing its model.");
-      this.busy.add(id6);
+      if (this.busy.has(id7)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before changing its model.");
+      this.busy.add(id7);
       try {
-        const result2 = await models.select(id6, p.model, p.reasoningEffort, (method2, params2) => this.request(method2, params2, budget));
+        const result2 = await models.select(id7, p.model, p.reasoningEffort, (method2, params2) => this.request(method2, params2, budget));
         this.publish({ kind: "notification", method: "session/update", params: {
-          sessionId: id6,
+          sessionId: id7,
           update: { sessionUpdate: "model_selection", selected: result2.selected }
         } });
         return result2;
       } finally {
-        this.busy.delete(id6);
+        this.busy.delete(id7);
       }
     }
-    if (method === "session/prompt" && id6) {
-      if (this.busy.has(id6)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "The OpenCode session is busy.");
-      this.busy.add(id6);
+    if (method === "session/prompt" && id7) {
+      if (this.busy.has(id7)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "The OpenCode session is busy.");
+      this.busy.add(id7);
       try {
         return await this.request(method, params, budget);
       } finally {
-        this.busy.delete(id6);
+        this.busy.delete(id7);
       }
     }
     if (method === "session/cancel") {
@@ -96298,23 +96309,23 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
     const returnedId = isRecord17(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
-    const id6 = sessionId ?? returnedId;
-    if (!this.ready || !id6 || sessionId && returnedId && returnedId !== sessionId) {
+    const id7 = sessionId ?? returnedId;
+    if (!this.ready || !id7 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
     }
     const models = new AcpSessionModelState("opencode");
     models.update(result);
-    this.models.set(id6, models);
+    this.models.set(id7, models);
     return result;
   }
   publish(message) {
     for (const handler of this.inboundHandlers) handler(message);
   }
-  async respond(id6, result) {
-    this.write({ jsonrpc: "2.0", id: id6, result });
+  async respond(id7, result) {
+    this.write({ jsonrpc: "2.0", id: id7, result });
   }
-  async respondError(id6, code, message) {
-    this.write({ jsonrpc: "2.0", id: id6, error: { code, message } });
+  async respondError(id7, code, message) {
+    this.write({ jsonrpc: "2.0", id: id7, error: { code, message } });
   }
   onInbound(handler) {
     this.inboundHandlers.add(handler);
@@ -96332,14 +96343,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.models.clear();
     this.nativeApi?.close();
     this.failPending(new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed."));
-    const history = this.historyStop?.();
+    const history2 = this.historyStop?.();
     const child = this.process;
     this.process = void 0;
     if (child === void 0 || child.exitCode !== null || child.killed) {
-      await history;
+      await history2;
       return;
     }
-    await Promise.all([history, new Promise((resolve10) => {
+    await Promise.all([history2, new Promise((resolve10) => {
       const timer2 = setTimeout(() => {
         child.kill("SIGKILL");
         resolve10();
@@ -96425,19 +96436,19 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     }
   }
   request(method, params, timeoutMs) {
-    const id6 = this.nextId++;
+    const id7 = this.nextId++;
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
-        this.pending.delete(id6);
+        this.pending.delete(id7);
         reject(new OpencodeAcpError("OPENCODE_REQUEST_TIMEOUT", "OpenCode ACP request timed out."));
       }, timeoutMs);
       timer2.unref?.();
-      this.pending.set(id6, { resolve: resolve10, reject, timer: timer2 });
+      this.pending.set(id7, { resolve: resolve10, reject, timer: timer2 });
     });
     try {
-      this.write({ jsonrpc: "2.0", id: id6, method, params });
+      this.write({ jsonrpc: "2.0", id: id7, method, params });
     } catch (error62) {
-      const pending = this.takePending(id6);
+      const pending = this.takePending(id7);
       pending?.reject(error62 instanceof Error ? error62 : new Error("OpenCode ACP write failed."));
     }
     return result;
@@ -96520,15 +96531,15 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.failureNotified = true;
     for (const handler of this.unavailableHandlers) handler(code);
   }
-  takePending(id6) {
-    const pending = this.pending.get(id6);
+  takePending(id7) {
+    const pending = this.pending.get(id7);
     if (pending === void 0) return void 0;
-    this.pending.delete(id6);
+    this.pending.delete(id7);
     clearTimeout(pending.timer);
     return pending;
   }
   failPending(error62) {
-    for (const id6 of [...this.pending.keys()]) this.takePending(id6)?.reject(error62);
+    for (const id7 of [...this.pending.keys()]) this.takePending(id7)?.reject(error62);
   }
 };
 function safeUpstreamError3(value) {
@@ -96786,8 +96797,8 @@ async function querySqliteJson(dbPath, sql, params = []) {
   }
   try {
     const { execFile: execFile4 } = await import("node:child_process");
-    const { promisify: promisify5 } = await import("node:util");
-    const execFileAsync3 = promisify5(execFile4);
+    const { promisify: promisify6 } = await import("node:util");
+    const execFileAsync3 = promisify6(execFile4);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
@@ -96843,7 +96854,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   try {
     const path = await transcriptPath(baseDir, conversationId);
     if (path === void 0) return void 0;
-    const stat11 = await fs3.stat(path);
+    const stat12 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     try {
       const buffer3 = Buffer.alloc(4096);
@@ -96854,7 +96865,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (record11.type !== "USER_INPUT") return void 0;
       const title = cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
+      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat12.mtimeMs, updatedAt: stat12.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -97210,7 +97221,7 @@ var AcpPeerBridge = class {
   }
   async publishInbound(sessionId, frame) {
     if (this.closed) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
-    const streamIds = [...this.streams.entries()].filter(([id6, targetSessionId]) => !this.toolControllers.has(id6) && targetSessionId === sessionId).map(([streamId]) => streamId);
+    const streamIds = [...this.streams.entries()].filter(([id7, targetSessionId]) => !this.toolControllers.has(id7) && targetSessionId === sessionId).map(([streamId]) => streamId);
     if (streamIds.length === 0) {
       this.logger?.warn("Publishing ACP frame without an open stream; using session-scoped delivery", {
         method: frame.method
@@ -97237,11 +97248,11 @@ var AcpPeerBridge = class {
   }
   async failStreams(reason = "failed", sessions) {
     if (this.closed) return;
-    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id6]) => id6);
-    for (const id6 of streamIds) {
-      this.streams.delete(id6);
-      this.toolControllers.get(id6)?.abort();
-      this.toolControllers.delete(id6);
+    const streamIds = [...this.streams].filter(([, sessionId]) => sessions === void 0 || sessions.has(sessionId)).map(([id7]) => id7);
+    for (const id7 of streamIds) {
+      this.streams.delete(id7);
+      this.toolControllers.get(id7)?.abort();
+      this.toolControllers.delete(id7);
     }
     if (sessions === void 0) {
       this.incomingTransfers.clear();
@@ -97269,11 +97280,11 @@ var AcpPeerBridge = class {
   }
   pruneTransfers() {
     const staleBefore = Date.now() - TRANSFER_IDLE_MS2;
-    for (const [id6, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id6);
+    for (const [id7, transfer] of this.incomingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.incomingTransfers.delete(id7);
     }
-    for (const [id6, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id6);
+    for (const [id7, transfer] of this.outgoingTransfers) {
+      if (transfer.touchedAt < staleBefore) this.outgoingTransfers.delete(id7);
     }
   }
   requireOpen() {
@@ -97302,10 +97313,10 @@ function safeMethod2(input4) {
 }
 function concatChunks2(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
-  let offset = 0;
+  let offset2 = 0;
   for (const chunk of chunks) {
-    output2.set(chunk, offset);
-    offset += chunk.byteLength;
+    output2.set(chunk, offset2);
+    offset2 += chunk.byteLength;
   }
   return output2;
 }
@@ -97395,7 +97406,7 @@ var AcpRemoteGateway = class {
   }
   start() {
     if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
-    if (!this.config.enabled || !this.enabledBackends().some((id6) => !this.pendingReconfiguration.has(id6))) return Promise.resolve();
+    if (!this.config.enabled || !this.enabledBackends().some((id7) => !this.pendingReconfiguration.has(id7))) return Promise.resolve();
     this.startPromise ??= this.startOnce().finally(() => {
       this.startPromise = void 0;
     });
@@ -97419,14 +97430,14 @@ var AcpRemoteGateway = class {
   }
   availableBackends() {
     const list2 = [];
-    for (const [id6, inst] of this.backendInstances) {
-      if (!this.pendingReconfiguration.has(id6) && this.enabledBackends().includes(id6) && inst.client.isReady()) list2.push(id6);
+    for (const [id7, inst] of this.backendInstances) {
+      if (!this.pendingReconfiguration.has(id7) && this.enabledBackends().includes(id7) && inst.client.isReady()) list2.push(id7);
     }
     return list2;
   }
   defaultBackend() {
     const ready = this.availableBackends();
-    return this.enabledBackends().find((id6) => ready.includes(id6)) ?? this.enabledBackends()[0] ?? "antigravity";
+    return this.enabledBackends().find((id7) => ready.includes(id7)) ?? this.enabledBackends()[0] ?? "antigravity";
   }
   status() {
     return {
@@ -98062,29 +98073,29 @@ var AcpRemoteGateway = class {
       const next = config2.backends.find((candidate) => candidate.id === item.id);
       return previous.enabled !== config2.enabled || JSON.stringify(item) !== JSON.stringify(next);
     }).map((item) => item.id)]);
-    for (const id6 of changed) this.pendingReconfiguration.add(id6);
+    for (const id7 of changed) this.pendingReconfiguration.add(id7);
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
     await this.startPromise?.catch(() => void 0);
-    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id6]) => id6));
+    const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id7]) => id7));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
-    for (const [id6, session2] of this.sessionCwds) if (changed.has(session2.backend)) this.sessionCwds.delete(id6);
+    for (const [id7, session2] of this.sessionCwds) if (changed.has(session2.backend)) this.sessionCwds.delete(id7);
     const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : sessionId.startsWith("pi:") ? "pi" : sessionId.startsWith("opencode:") ? "opencode" : sessionId.startsWith("claude:") ? "claude" : sessionId.startsWith("hermes:") ? "hermes" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
-    for (const id6 of sessions) {
-      this.sessionOwners.delete(id6);
-      this.promptsInProgress.delete(id6);
-      const preparation = this.preparingPrompts.get(id6);
+    for (const id7 of sessions) {
+      this.sessionOwners.delete(id7);
+      this.promptsInProgress.delete(id7);
+      const preparation = this.preparingPrompts.get(id7);
       if (preparation) preparation.cancelled = true;
-      this.preparingPrompts.delete(id6);
-      this.sessionBackends.delete(id6);
-      this.recentFrames.delete(id6);
-      this.turnCatchUp.delete(id6);
+      this.preparingPrompts.delete(id7);
+      this.sessionBackends.delete(id7);
+      this.recentFrames.delete(id7);
+      this.turnCatchUp.delete(id7);
     }
-    for (const [id6, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id6);
-    const processes = await Promise.allSettled([...changed].map(async (id6) => {
-      const instance = this.backendInstances.get(id6);
+    for (const [id7, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id7);
+    const processes = await Promise.allSettled([...changed].map(async (id7) => {
+      const instance = this.backendInstances.get(id7);
       if (instance === void 0) return;
       await this.disposeInstance(instance);
-      if (this.backendInstances.get(id6) === instance) this.backendInstances.delete(id6);
+      if (this.backendInstances.get(id7) === instance) this.backendInstances.delete(id7);
     }));
     this.available = this.availableBackends().length > 0;
     const cleanupFailed = terminalError !== void 0 || [...stopping, ...processes].some((result) => result.status === "rejected");
@@ -98092,11 +98103,11 @@ var AcpRemoteGateway = class {
     this.unavailableCode = terminalError?.code ?? (cleanupFailed ? "ACP_RECONFIGURE_FAILED" : void 0);
     if (terminalError) throw terminalError;
     if (cleanupFailed) throw new RpcError("ACP_RECONFIGURE_FAILED", "Some ACP backend processes could not be stopped. Save the backend settings again to retry.");
-    for (const id6 of changed) this.pendingReconfiguration.delete(id6);
+    for (const id7 of changed) this.pendingReconfiguration.delete(id7);
     await this.start();
     if (this.closed) return;
-    for (const id6 of this.enabledBackends()) {
-      if (!this.availableBackends().includes(id6)) this.scheduleBackendRestart(id6);
+    for (const id7 of this.enabledBackends()) {
+      if (!this.availableBackends().includes(id7)) this.scheduleBackendRestart(id7);
     }
   }
   async close() {
@@ -98147,17 +98158,17 @@ var AcpRemoteGateway = class {
    * reconfigure or a later failure) can target the same missing backend; without
    * this both would capture the same previous instance and leak a replacement.
    */
-  launchSerialized(id6) {
-    const candidate = this.config.backends.find((item) => item.id === id6);
-    if (candidate === void 0 || !this.enabledBackends().includes(id6) || this.pendingReconfiguration.has(id6)) return Promise.resolve();
-    if (this.backendInstances.get(id6)?.client.isReady()) return Promise.resolve();
-    const inFlight = this.launching.get(id6);
+  launchSerialized(id7) {
+    const candidate = this.config.backends.find((item) => item.id === id7);
+    if (candidate === void 0 || !this.enabledBackends().includes(id7) || this.pendingReconfiguration.has(id7)) return Promise.resolve();
+    if (this.backendInstances.get(id7)?.client.isReady()) return Promise.resolve();
+    const inFlight = this.launching.get(id7);
     if (inFlight !== void 0) return inFlight;
     let task;
     task = this.launchCandidateBinaries(candidate).finally(() => {
-      if (this.launching.get(id6) === task) this.launching.delete(id6);
+      if (this.launching.get(id7) === task) this.launching.delete(id7);
     });
-    this.launching.set(id6, task);
+    this.launching.set(id7, task);
     return task;
   }
   async launchCandidateBinaries(candidate) {
@@ -98178,7 +98189,7 @@ var AcpRemoteGateway = class {
     return this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
   }
   async launchBackendCandidate(backend, binary) {
-    const id6 = backend.id;
+    const id7 = backend.id;
     const acp = this.createAcp(binary, this.logger, backend);
     this.startingClients.set(acp, backend);
     try {
@@ -98194,14 +98205,14 @@ var AcpRemoteGateway = class {
       this.startingClients.delete(acp);
     }
     const unsubscribeInbound = acp.onInbound((message) => {
-      this.inboundChain = this.inboundChain.then(() => this.backendInstances.get(id6)?.client === acp ? this.handleInbound(id6, message) : void 0).catch((error62) => {
-        this.logger.warn("ACP inbound fanout failed", { id: id6, code: errorCode3(error62) });
+      this.inboundChain = this.inboundChain.then(() => this.backendInstances.get(id7)?.client === acp ? this.handleInbound(id7, message) : void 0).catch((error62) => {
+        this.logger.warn("ACP inbound fanout failed", { id: id7, code: errorCode3(error62) });
       });
     });
     const unsubscribeUnavailable = acp.onUnavailable((code) => {
-      void this.handleUnavailable(id6, code);
+      void this.handleUnavailable(id7, code);
     });
-    const prev = this.backendInstances.get(id6);
+    const prev = this.backendInstances.get(id7);
     if (prev !== void 0) {
       await this.disposeInstance(prev);
     }
@@ -98212,8 +98223,8 @@ var AcpRemoteGateway = class {
       return;
     }
     this.available = true;
-    this.backendInstances.set(id6, {
-      id: id6,
+    this.backendInstances.set(id7, {
+      id: id7,
       client: acp,
       unsubscribeInbound,
       unsubscribeUnavailable,
@@ -98755,14 +98766,14 @@ var BUILTIN_ACP_SPECS = Object.freeze({
     downloadUrl: "https://hermes-agent.nousresearch.com"
   })
 });
-function isBuiltinAcpBackend(id6) {
-  return Object.prototype.hasOwnProperty.call(BUILTIN_ACP_SPECS, id6);
+function isBuiltinAcpBackend(id7) {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_ACP_SPECS, id7);
 }
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat11 = statSync3(candidate);
-    if (!stat11.isFile()) return false;
+    const stat12 = statSync3(candidate);
+    if (!stat12.isFile()) return false;
     if (platform3 === "win32") return true;
     accessSync2(candidate, constants5.X_OK);
     return true;
@@ -98794,7 +98805,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
   }
   return void 0;
 }
-function candidateBinaryPaths(id6, options = {}) {
+function candidateBinaryPaths(id7, options = {}) {
   const platform3 = options.platform ?? process.platform;
   const pJoin = platform3 === "win32" ? win322.join : posix2.join;
   const env = options.env ?? process.env;
@@ -98806,7 +98817,7 @@ function candidateBinaryPaths(id6, options = {}) {
   const candidates = [];
   const npmBackends = /* @__PURE__ */ new Set(["codex", "claude", "pi", "opencode"]);
   const npmBinDirs = [];
-  if (npmBackends.has(id6)) {
+  if (npmBackends.has(id7)) {
     const resolvedPrefix = options.npmPrefix ?? discoverSystemNpmPrefix(platform3);
     if (resolvedPrefix) {
       npmBinDirs.push(platform3 === "win32" ? resolvedPrefix : pJoin(resolvedPrefix, "bin"));
@@ -98819,7 +98830,7 @@ function candidateBinaryPaths(id6, options = {}) {
     }
   }
   if (platform3 === "win32") {
-    switch (id6) {
+    switch (id7) {
       case "hermes":
         candidates.push(
           "D:\\Hermes\\bin\\hermes.exe",
@@ -98875,7 +98886,7 @@ function candidateBinaryPaths(id6, options = {}) {
         break;
     }
   } else {
-    switch (id6) {
+    switch (id7) {
       case "codex":
         candidates.push(
           "/Applications/ChatGPT.app/Contents/Resources/codex-cli/codex",
@@ -98952,10 +98963,10 @@ function lookupSystemPath(command, platform3 = process.platform) {
     return void 0;
   }
 }
-function findExistingBinary(id6, options = {}) {
+function findExistingBinary(id7, options = {}) {
   const platform3 = options.platform ?? process.platform;
   const check2 = options.checkExecutable ?? ((path) => defaultCheckExecutable(path, platform3));
-  const candidates = candidateBinaryPaths(id6, options);
+  const candidates = candidateBinaryPaths(id7, options);
   for (const candidate of candidates) {
     if (check2(candidate)) {
       return platform3 === "win32" ? win322.resolve(candidate) : posix2.resolve(candidate);
@@ -98970,7 +98981,7 @@ function findExistingBinary(id6, options = {}) {
     opencode: "opencode",
     hermes: "hermes"
   };
-  const defaultCmd = defaultCommands[id6] ?? id6;
+  const defaultCmd = defaultCommands[id7] ?? id7;
   const fromPath = lookupSystemPath(defaultCmd, platform3);
   if (fromPath && check2(fromPath)) {
     return fromPath;
@@ -99495,10 +99506,10 @@ var PluginControlRuntime = class {
   }
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    const id6 = record9(payload).id;
-    if (typeof id6 !== "string" || ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(id6)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
+    const id7 = record9(payload).id;
+    if (typeof id7 !== "string" || ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(id7)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
     const current = resolveConfig(this.settings.get());
-    const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id6);
+    const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id7);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));
     await this.host?.setAgentBackends?.(resolveConfig(this.settings.get()));
     return { ...await this.settingsView(), applies: "live" };
@@ -100010,15 +100021,15 @@ function parsePersistedLine(line, seq) {
     line
   };
 }
-async function readTailUtf8(filePath, totalSize, maxBytes) {
-  if (totalSize <= maxBytes) {
+async function readTailUtf8(filePath, totalSize, maxBytes2) {
+  if (totalSize <= maxBytes2) {
     return readFile5(filePath, "utf8");
   }
   const handle = await open5(filePath, "r");
   try {
-    const start = totalSize - maxBytes;
-    const buffer3 = Buffer.allocUnsafe(maxBytes);
-    const { bytesRead } = await handle.read(buffer3, 0, maxBytes, start);
+    const start = totalSize - maxBytes2;
+    const buffer3 = Buffer.allocUnsafe(maxBytes2);
+    const { bytesRead } = await handle.read(buffer3, 0, maxBytes2, start);
     const raw = buffer3.subarray(0, bytesRead).toString("utf8");
     const firstNewline = raw.indexOf("\n");
     return firstNewline === -1 ? raw : raw.slice(firstNewline + 1);
@@ -100071,6 +100082,301 @@ function redact(value, key = "") {
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
+
+// packages/plugin/src/session-transfer.ts
+import { createHash as createHash7, randomUUID as randomUUID16 } from "node:crypto";
+import { stat as stat7 } from "node:fs/promises";
+import { promisify as promisify5 } from "node:util";
+import { gunzip, gzip } from "node:zlib";
+var pack = promisify5(gzip);
+var unpack = promisify5(gunzip);
+var transferVersion = 1;
+var maxBytes = 8 * 1024 * 1024;
+var chunkBytes = 256 * 1024;
+var lifetime = 5 * 6e4;
+var id6 = external_exports.string().min(1).max(128);
+var requestId = id6.regex(/^[A-Za-z0-9._:-]+$/);
+var offset = external_exports.number().int().min(0).max(maxBytes);
+var scope = external_exports.discriminatedUnion("kind", [
+  external_exports.strictObject({ kind: external_exports.literal("session"), sessionId: id6 }),
+  external_exports.strictObject({ kind: external_exports.literal("workspace"), workspaceId: id6 })
+]);
+var locator = { batchId: requestId, requestId };
+var event = external_exports.looseObject({ seq: external_exports.number().int().nonnegative(), type: external_exports.string(), time: external_exports.number(), data: external_exports.unknown() });
+var history = external_exports.strictObject({
+  formatVersion: external_exports.literal(transferVersion),
+  version: external_exports.number().int().positive(),
+  createdAt: external_exports.number().int().nonnegative(),
+  inheritedEventCount: external_exports.number().int().nonnegative(),
+  events: external_exports.array(event).min(1).max(5e4)
+});
+function fail6(code, message) {
+  throw new RpcError(code, message);
+}
+var SessionTransferHost = class {
+  constructor(services) {
+    this.services = services;
+  }
+  commits = /* @__PURE__ */ new Map();
+  peer(deviceId) {
+    return new SessionTransferPeer(this.services, this.commits, deviceId);
+  }
+};
+var SessionTransferPeer = class {
+  constructor(services, commits, deviceId) {
+    this.services = services;
+    this.commits = commits;
+    this.deviceId = deviceId;
+  }
+  outgoing;
+  incoming;
+  expiry;
+  closed = false;
+  busy = false;
+  capabilities() {
+    const { query, persistence, workspaces, sessions } = this.services();
+    return [
+      ...query && workspaces ? ["session.transfer.export.v1"] : [],
+      ...persistence && workspaces && sessions ? ["session.transfer.import.v1"] : []
+    ];
+  }
+  close() {
+    this.closed = true;
+    this.reset();
+  }
+  reset() {
+    clearTimeout(this.expiry);
+    this.outgoing = void 0;
+    this.incoming = void 0;
+  }
+  async call(method, params) {
+    if (this.closed) fail6("FEATURE_NOT_SUPPORTED", "Session transfer is unavailable.");
+    if (this.busy) fail6("RATE_LIMITED", "A session transfer request is already in progress.");
+    this.busy = true;
+    clearTimeout(this.expiry);
+    try {
+      return await this.invoke(method, params);
+    } finally {
+      this.busy = false;
+      if (this.closed) this.reset();
+      else if (this.outgoing || this.incoming) this.expiry = setTimeout(() => this.reset(), lifetime).unref();
+    }
+  }
+  workspace(workspaceId) {
+    return this.services().workspaces?.get(workspaceId) ?? fail6("SESSION_TRANSFER_WORKSPACE_UNAVAILABLE", "The workspace is unavailable.");
+  }
+  async snapshot(sessionId) {
+    const query = this.services().query ?? fail6("FEATURE_NOT_SUPPORTED", "Session export is unavailable.");
+    try {
+      return await query.readSession(sessionId);
+    } catch {
+      return fail6("SESSION_TRANSFER_READ_FAILED", "The session history could not be read.");
+    }
+  }
+  async invoke(method, params) {
+    const handleParams = { handle: external_exports.uuid() };
+    switch (method) {
+      case "session.transfer.export.open": {
+        if (this.outgoing) fail6("RATE_LIMITED", "An export is already open.");
+        const { scope: selection } = external_exports.strictObject({ scope }).parse(params);
+        const ids = selection.kind === "session" ? [selection.sessionId] : [...this.workspace(selection.workspaceId).sessionIds];
+        if (ids.length > 2048) fail6("SESSION_TRANSFER_LIMIT", "Too many sessions in this export.");
+        const sessions = /* @__PURE__ */ new Map();
+        for (const sessionId of ids) {
+          if (this.closed) fail6("SESSION_TRANSFER_CLOSED", "The connection closed.");
+          const snapshot2 = await this.snapshot(sessionId);
+          if (snapshot2.session.origin === "subagent") {
+            if (selection.kind === "session") fail6("FEATURE_NOT_SUPPORTED", "Subagent export is unavailable.");
+            continue;
+          }
+          let throughSeq = snapshot2.events.length - 1;
+          while (throughSeq >= 0 && snapshot2.events[throughSeq]?.type !== "turn/end") throughSeq -= 1;
+          if (throughSeq >= 0 && snapshot2.events[throughSeq + 1]?.type === "session/end-seed") throughSeq += 1;
+          while (throughSeq >= 0 && snapshot2.events[throughSeq + 1]?.type === "session/title") throughSeq += 1;
+          if (throughSeq < 0 || snapshot2.inheritedEventCount > throughSeq + 1) {
+            if (selection.kind === "session") fail6("SESSION_TRANSFER_EMPTY", "The session has no completed history to transfer.");
+            continue;
+          }
+          sessions.set(sessionId, { throughSeq, inheritedEventCount: snapshot2.inheritedEventCount });
+        }
+        const handle = randomUUID16();
+        this.outgoing = { handle, sessions };
+        return { handle, sessions: [...sessions].map(([sessionId, { throughSeq }]) => ({ sessionId, throughSeq })), chunkBytes };
+      }
+      case "session.transfer.export.read": {
+        const input4 = external_exports.strictObject({ ...handleParams, sessionId: id6, offset }).parse(params);
+        const state2 = this.exportState(input4.handle);
+        const boundary = state2.sessions.get(input4.sessionId) ?? fail6("INVALID_PARAMS", "The session is outside this export.");
+        if (state2.packed?.sessionId !== input4.sessionId) {
+          if (input4.offset !== 0) fail6("INVALID_PARAMS", "Start reading each session at offset zero.");
+          const snapshot2 = await this.snapshot(input4.sessionId);
+          const events = snapshot2.events.slice(0, boundary.throughSeq + 1);
+          if (events.length !== boundary.throughSeq + 1 || events.length > 5e4) {
+            fail6("SESSION_TRANSFER_LIMIT", "The selected history is unavailable or too large.");
+          }
+          const json2 = Buffer.from(JSON.stringify({
+            formatVersion: transferVersion,
+            version: snapshot2.session.version,
+            createdAt: snapshot2.session.createdAt,
+            inheritedEventCount: boundary.inheritedEventCount,
+            events
+          }));
+          if (json2.length > maxBytes) fail6("SESSION_TRANSFER_LIMIT", "The session history is too large.");
+          const data3 = await pack(json2);
+          if (data3.length > maxBytes) fail6("SESSION_TRANSFER_LIMIT", "The compressed history is too large.");
+          state2.packed = { sessionId: input4.sessionId, data: data3, sha256: createHash7("sha256").update(data3).digest("hex") };
+        }
+        const { data: data2, sha256: sha2562 } = state2.packed;
+        if (input4.offset >= data2.length) fail6("INVALID_PARAMS", "The offset is outside the session history.");
+        const chunk = data2.subarray(input4.offset, input4.offset + chunkBytes);
+        return {
+          offset: input4.offset,
+          data: chunk.toString("base64"),
+          ...input4.offset + chunk.length === data2.length ? { totalBytes: data2.length, sha256: sha2562 } : {}
+        };
+      }
+      case "session.transfer.export.close": {
+        this.exportState(external_exports.strictObject(handleParams).parse(params).handle);
+        this.outgoing = void 0;
+        return {};
+      }
+      case "session.transfer.import.open": {
+        const input4 = external_exports.strictObject({
+          workspaceId: id6,
+          batchId: requestId,
+          sourceSessionId: id6,
+          formatVersion: external_exports.literal(transferVersion)
+        }).parse(params);
+        if (!this.capabilities().includes("session.transfer.import.v1")) fail6("FEATURE_NOT_SUPPORTED", "Session import is unavailable.");
+        if (this.incoming) fail6("RATE_LIMITED", "An import is already open.");
+        this.workspace(input4.workspaceId);
+        const handle = randomUUID16();
+        this.incoming = { ...input4, handle, received: 0, chunks: [] };
+        return { handle, chunkBytes, maxBytes };
+      }
+      case "session.transfer.import.chunk": {
+        const input4 = external_exports.strictObject({
+          ...handleParams,
+          offset,
+          data: external_exports.string().min(4).max(Math.ceil(chunkBytes / 3) * 4)
+        }).parse(params);
+        const state2 = this.importState(input4.handle);
+        const chunk = Buffer.from(input4.data, "base64");
+        if (input4.offset !== state2.received || chunk.length > chunkBytes || chunk.toString("base64") !== input4.data) {
+          fail6("INVALID_PARAMS", "Invalid or out-of-order import chunk.");
+        }
+        if (state2.received + chunk.length > maxBytes || state2.chunks.length >= 128) {
+          fail6("SESSION_TRANSFER_LIMIT", "The session upload exceeds its limit.");
+        }
+        state2.chunks.push(chunk);
+        state2.received += chunk.length;
+        return { receivedBytes: state2.received };
+      }
+      case "session.transfer.import.commit": {
+        const input4 = external_exports.strictObject({
+          ...handleParams,
+          requestId,
+          totalBytes: offset.min(1),
+          sha256: external_exports.string().regex(/^[0-9a-f]{64}$/)
+        }).parse(params);
+        const state2 = this.importState(input4.handle);
+        const data2 = Buffer.concat(state2.chunks, state2.received);
+        if (state2.received !== input4.totalBytes || createHash7("sha256").update(data2).digest("hex") !== input4.sha256) {
+          fail6("INVALID_PARAMS", "The imported data does not match its size or digest.");
+        }
+        this.incoming = void 0;
+        const key = this.commitKey(state2.batchId, input4.requestId);
+        const fingerprint3 = JSON.stringify([state2.workspaceId, state2.sourceSessionId, input4.sha256]);
+        for (const [entry, commit2] of this.commits) if (commit2.expires <= Date.now()) this.commits.delete(entry);
+        const previous = this.commits.get(key);
+        if (previous) {
+          if (previous.fingerprint !== fingerprint3) fail6("INVALID_PARAMS", "The request ID was used for another import.");
+          return previous.result;
+        }
+        if (this.commits.size >= 1024) fail6("RATE_LIMITED", "Too many recent session imports.");
+        const result = this.write(state2.workspaceId, data2);
+        const commit = { fingerprint: fingerprint3, result, expires: Infinity };
+        this.commits.set(key, commit);
+        try {
+          return await result;
+        } finally {
+          commit.expires = Date.now() + lifetime;
+        }
+      }
+      case "session.transfer.import.status": {
+        const input4 = external_exports.strictObject(locator).parse(params);
+        const commit = this.commits.get(this.commitKey(input4.batchId, input4.requestId));
+        return !commit || commit.expires <= Date.now() ? { status: "unknown" } : { status: "completed", ...await commit.result };
+      }
+      case "session.transfer.import.abort": {
+        this.importState(external_exports.strictObject(handleParams).parse(params).handle);
+        this.incoming = void 0;
+        return {};
+      }
+      default:
+        return fail6("METHOD_NOT_FOUND", "The requested method does not exist.");
+    }
+  }
+  exportState(handle) {
+    if (this.outgoing?.handle !== handle) fail6("INVALID_PARAMS", "The export handle is unavailable.");
+    return this.outgoing;
+  }
+  importState(handle) {
+    if (this.incoming?.handle !== handle) fail6("INVALID_PARAMS", "The import handle is unavailable.");
+    return this.incoming;
+  }
+  commitKey(batchId, request) {
+    return JSON.stringify([this.deviceId, batchId, request]);
+  }
+  async write(workspaceId, data2) {
+    const { persistence, sessions } = this.services();
+    if (!persistence || !sessions) fail6("FEATURE_NOT_SUPPORTED", "Session import is unavailable.");
+    let source;
+    try {
+      const raw = await unpack(data2, { maxOutputLength: maxBytes });
+      source = history.parse(JSON.parse(raw.toString("utf8")));
+      if (source.inheritedEventCount > source.events.length || !source.events.some((item) => item.type === "turn/end") || !["turn/end", "session/end-seed", "session/title"].includes(source.events.at(-1)?.type ?? "") || source.events.some((item, index) => item.seq !== index)) throw new Error();
+    } catch {
+      return fail6("SESSION_TRANSFER_INVALID_HISTORY", "The session history is invalid or unsupported.");
+    }
+    const cwd2 = this.workspace(workspaceId).path;
+    if (!(await stat7(cwd2).catch(() => void 0))?.isDirectory() || this.workspace(workspaceId).path !== cwd2) {
+      fail6("SESSION_TRANSFER_WORKSPACE_UNAVAILABLE", "The target workspace directory is unavailable.");
+    }
+    const sessionId = `session-${randomUUID16()}`;
+    const { inheritedEventCount, events } = source;
+    let header;
+    try {
+      header = sessions.prepare(sessionId, {
+        seed: events,
+        inheritedEventCount,
+        meta: { createdAt: source.createdAt, cwd: cwd2, isSeeded: inheritedEventCount > 0 }
+      }).header;
+      if (header.version !== source.version) throw new Error();
+    } catch {
+      return fail6("SESSION_TRANSFER_INVALID_HISTORY", "Harness rejected the imported history.");
+    }
+    try {
+      const handle = await persistence.create(header, { inheritedEventCount });
+      try {
+        await handle.append(source.events);
+        await handle.flush();
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return fail6("SESSION_TRANSFER_WRITE_FAILED", "The target could not persist the session.");
+    }
+    try {
+      const workspace2 = this.workspace(workspaceId);
+      if (workspace2.path !== cwd2) return { sessionId, workspaceAttached: false };
+      await workspace2.attachSession(sessionId);
+      return { sessionId, workspaceAttached: true };
+    } catch {
+      return { sessionId, workspaceAttached: false };
+    }
+  }
+};
 
 // packages/plugin/src/lan-upload.ts
 import { randomBytes as randomBytes13 } from "node:crypto";
@@ -100264,7 +100570,7 @@ function unavailable2() {
 }
 
 // packages/plugin/src/host-pairing.ts
-import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { createHash as createHash8, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
 import { join as join15 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
@@ -100275,21 +100581,21 @@ function rawKey(text) {
     throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Invalid pairing key.", false);
   return bytes;
 }
-function pairingProof(privateKey, serverKey, id6, path, raw, side = "host") {
+function pairingProof(privateKey, serverKey, id7, path, raw, side = "host") {
   const local = createPrivateKey4({ key: Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), rawKey(privateKey)]), format: "der", type: "pkcs8" });
   const peer = createPublicKey2({ key: Buffer.concat([Buffer.from("302a300506032b656e032100", "hex"), rawKey(serverKey)]), format: "der", type: "spki" });
   const shared = diffieHellman2({ privateKey: local, publicKey: peer });
-  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(id6), Buffer.from("dsh-pairing-v1/" + side), 32));
+  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(id7), Buffer.from("dsh-pairing-v1/" + side), 32));
   try {
     return createHmac6("sha256", key).update(`POST
 ${path}
-${createHash7("sha256").update(raw).digest("hex")}`).digest("base64url");
+${createHash8("sha256").update(raw).digest("hex")}`).digest("base64url");
   } finally {
     shared.fill(0);
     key.fill(0);
   }
 }
-var fullFingerprint = (key) => createHash7("sha256").update(rawKey(key)).digest("hex");
+var fullFingerprint = (key) => createHash8("sha256").update(rawKey(key)).digest("hex");
 var HostPairing = class {
   constructor(serverUrl, directory, identity3, descriptor, adopt, fetcher = fetch, httpServerAllowlist = []) {
     this.identity = identity3;
@@ -100341,27 +100647,27 @@ var HostPairing = class {
       return saved ? this.poll(saved) : void 0;
     });
   }
-  confirm(id6, code) {
+  confirm(id7, code) {
     return this.serial(async () => {
-      const saved = await this.requireSession(id6);
+      const saved = await this.requireSession(id7);
       let raw;
       if (saved.submission !== void 0) {
         if (code !== void 0)
           throw new ServerApiError("PAIRING_ATTEMPT_USED", "Recover the original submission without changing the code.", false);
-        raw = this.crypt(saved.submission, id6, false);
+        raw = this.crypt(saved.submission, id7, false);
       } else {
         if (saved.state !== "claimed" || typeof code !== "string" || !/^[0-9]{8}$/.test(code))
           throw new ServerApiError("INVALID_MESSAGE", "Confirm on the phone and enter 8 digits.", false);
         raw = JSON.stringify({ submissionId: uuidV7(), verificationCode: code });
-        saved.submission = this.crypt(raw, id6, true);
+        saved.submission = this.crypt(raw, id7, true);
         await this.save(saved);
       }
       return this.accept(saved, await this.send(saved, "host/confirm", raw));
     });
   }
-  cancel(id6) {
+  cancel(id7) {
     return this.serial(async () => {
-      const s = await this.requireSession(id6);
+      const s = await this.requireSession(id7);
       return this.accept(s, await this.send(s, "host/cancel", "{}"));
     });
   }
@@ -100378,9 +100684,9 @@ var HostPairing = class {
     }
     return s;
   }
-  async requireSession(id6) {
+  async requireSession(id7) {
     const s = await this.load();
-    if (!s || s.session.sessionId !== id6)
+    if (!s || s.session.sessionId !== id7)
       throw new ServerApiError("PAIRING_CLOSED", "This pairing was replaced or expired.", false);
     return s;
   }
@@ -100470,19 +100776,19 @@ var HostPairing = class {
       throw new ServerApiError("PAIRING_CONNECTION_FAILED", "Pairing result is unknown. Recover the original submission.", true);
     }
   }
-  crypt(value, id6, encrypt) {
-    const key = createHash7("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
+  crypt(value, id7, encrypt) {
+    const key = createHash8("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
     try {
       if (encrypt) {
         const iv = randomBytes14(12);
         const c2 = createCipheriv5("aes-256-gcm", key, iv);
-        c2.setAAD(Buffer.from(id6));
+        c2.setAAD(Buffer.from(id7));
         const data2 = Buffer.concat([c2.update(value, "utf8"), c2.final()]);
         return Buffer.concat([iv, c2.getAuthTag(), data2]).toString("base64url");
       }
       const b = Buffer.from(value, "base64url");
       const c = createDecipheriv4("aes-256-gcm", key, b.subarray(0, 12));
-      c.setAAD(Buffer.from(id6));
+      c.setAAD(Buffer.from(id7));
       c.setAuthTag(b.subarray(12, 28));
       return Buffer.concat([c.update(b.subarray(28)), c.final()]).toString("utf8");
     } finally {
@@ -100492,9 +100798,9 @@ var HostPairing = class {
 };
 
 // packages/plugin/src/workspace-upload.ts
-import { randomUUID as randomUUID16 } from "node:crypto";
+import { randomUUID as randomUUID17 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
-import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
+import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat8, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
@@ -100561,10 +100867,10 @@ var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
 var WORKSPACE_UPLOAD_AUTHORITY_TTL_MS = 5e3;
 var WORKSPACE_UPLOAD_AUTHORITY_BYTES = 4 * 1024 * 1024;
-var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
-var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(workspaceUploadMaxBytes("LAN")), encoding: external_exports.literal("binary-v1").optional() }).strict();
-var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
-var binaryChunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
+var scope2 = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
+var openParams = scope2.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(workspaceUploadMaxBytes("LAN")), encoding: external_exports.literal("binary-v1").optional() }).strict();
+var chunkParams = scope2.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
+var binaryChunkParams = scope2.extend({ offset: external_exports.number().int().min(0), data: external_exports.instanceof(Uint8Array).refine((data2) => data2.byteLength > 0 && data2.byteLength <= BINARY_UPLOAD_CHUNK_BYTES) }).strict();
 var WorkspaceUploadHost = class {
   constructor(resolveRoot, ttlMs = 12e4, transportMode = () => void 0, now = Date.now, budget = new WorkspaceUploadBudget()) {
     this.resolveRoot = resolveRoot;
@@ -100598,7 +100904,7 @@ var WorkspaceUploadHost = class {
           case "workspace.upload.commit":
             return await this.commit(input4);
           case "workspace.upload.abort": {
-            const p = scope.parse(input4);
+            const p = scope2.parse(input4);
             const upload = this.uploads.get(p.uploadId);
             if (upload && upload.sessionId !== p.sessionId) throw failure4("UPLOAD_NOT_FOUND");
             if (upload) await this.discard(p.uploadId, upload);
@@ -100608,7 +100914,7 @@ var WorkspaceUploadHost = class {
             throw failure4("METHOD_NOT_FOUND");
         }
       } catch (error62) {
-        const p = scope.safeParse(input4 && typeof input4 === "object" ? { sessionId: input4.sessionId, uploadId: input4.uploadId } : input4);
+        const p = scope2.safeParse(input4 && typeof input4 === "object" ? { sessionId: input4.sessionId, uploadId: input4.uploadId } : input4);
         const upload = p.success ? this.uploads.get(p.data.uploadId) : void 0;
         if (p.success && upload?.sessionId === p.data.sessionId) await this.discard(p.data.uploadId, upload);
         if (error62 instanceof external_exports.ZodError || error62 instanceof RpcError) throw error62;
@@ -100621,7 +100927,7 @@ var WorkspaceUploadHost = class {
     this.lifetime.abort();
     clearInterval(this.timer);
     return this.serialize(async () => {
-      await Promise.all([...this.uploads].map(([id6, upload]) => this.discard(id6, upload)));
+      await Promise.all([...this.uploads].map(([id7, upload]) => this.discard(id7, upload)));
       this.completed.clear();
     });
   }
@@ -100640,10 +100946,10 @@ var WorkspaceUploadHost = class {
     this.assertLive();
     if (!sourceRoot || !isAbsolute8(sourceRoot)) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const root2 = await realpath6(sourceRoot);
-    const directory = await stat7(root2);
+    const directory = await stat8(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join16(root2, `.dsh-upload-${randomUUID17()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -100694,7 +101000,7 @@ var WorkspaceUploadHost = class {
     return { uploadId: p.uploadId, receivedBytes: upload.received };
   }
   async commit(input4) {
-    const p = scope.parse(input4);
+    const p = scope2.parse(input4);
     const prior = this.completed.get(p.uploadId);
     if (prior) {
       if (prior.sessionId !== p.sessionId) throw failure4("UPLOAD_NOT_FOUND");
@@ -100770,11 +101076,11 @@ var WorkspaceUploadHost = class {
       upload.authorityBytes = upload.received;
     }
     if (await realpath6(upload.root) !== upload.root) throw failure4("UPLOAD_WORKSPACE_CHANGED");
-    const directory = await stat7(upload.root);
+    const directory = await stat8(upload.root);
     if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure4("UPLOAD_WORKSPACE_CHANGED");
   }
-  async discard(id6, upload) {
-    this.uploads.delete(id6);
+  async discard(id7, upload) {
+    this.uploads.delete(id7);
     upload.reservation.release();
     const original = await upload.handle.stat().catch(() => void 0);
     await upload.handle.close().catch(() => void 0);
@@ -100787,8 +101093,8 @@ var WorkspaceUploadHost = class {
   }
   async expire() {
     const cutoff = this.now() - this.ttlMs;
-    await Promise.all([...this.uploads].filter(([, u]) => u.touched <= cutoff).map(([id6, u]) => this.discard(id6, u)));
-    for (const [id6, entry] of this.completed) if (entry.touched <= cutoff) this.completed.delete(id6);
+    await Promise.all([...this.uploads].filter(([, u]) => u.touched <= cutoff).map(([id7, u]) => this.discard(id7, u)));
+    for (const [id7, entry] of this.completed) if (entry.touched <= cutoff) this.completed.delete(id7);
   }
 };
 function failure4(code) {
@@ -101272,6 +101578,7 @@ var compactionOperationSchema = external_exports.object({
   operationId: external_exports.string().uuid()
 }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
+  ...sessionTransferMethods,
   "harness.transport.describe",
   "remote.history.configure",
   "harness.remote.call",
@@ -101329,7 +101636,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -101344,10 +101651,12 @@ var RpcRouter = class {
     this.compaction = compaction;
     this.lanUpload = lanUpload;
     this.transportUpgrade = transportUpgrade;
+    this.sessionTransfer = sessionTransfer;
   }
   active = 0;
   async closePeerStreams() {
     this.loopback?.closeAll();
+    this.sessionTransfer?.close();
     await Promise.all([
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
@@ -101374,7 +101683,7 @@ var RpcRouter = class {
     const startedAt = performance.now();
     try {
       const result = await this.invoke(request.payload.method, request.payload.params);
-      const subMethod = typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
+      const subMethod = !request.payload.method.startsWith("session.transfer.") && typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
       this.logger?.info("host rpc ok", {
         method: request.payload.method,
         ...subMethod ? { subMethod } : {},
@@ -101383,7 +101692,7 @@ var RpcRouter = class {
       return createRpcResponse(request.id, result);
     } catch (error62) {
       const response = errorResponse2(request.id, error62);
-      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
+      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && !request.payload.method.startsWith("session.transfer.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
       const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
@@ -101410,6 +101719,7 @@ var RpcRouter = class {
           ...this.harnessRemote === void 0 || !remoteAvailable ? [] : ["harness.remote.stream.transfer.v1"],
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
+          ...this.sessionTransfer?.capabilities() ?? [],
           ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
         ])];
         let workspaceTypes;
@@ -101531,6 +101841,10 @@ var RpcRouter = class {
       case "remote.transport.upgrade.abort":
         return this.requireTransportUpgrade().abort(params);
       default:
+        if (method.startsWith("session.transfer.")) {
+          if (!this.sessionTransfer) throw new RpcError("FEATURE_NOT_SUPPORTED", "Session transfer is unavailable on this Host.");
+          return this.sessionTransfer.call(method, params);
+        }
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
   }
@@ -101571,11 +101885,11 @@ var RpcRouter = class {
     return this.transportUpgrade;
   }
 };
-function errorResponse2(requestId, error62) {
+function errorResponse2(requestId2, error62) {
   const code = safeErrorCode(error62);
-  if (error62 instanceof RpcError) return createRpcError(requestId, code, error62.message, error62.details, error62.retryable);
+  if (error62 instanceof RpcError) return createRpcError(requestId2, code, error62.message, error62.details, error62.retryable);
   return createRpcError(
-    requestId,
+    requestId2,
     code,
     code === "INVALID_MESSAGE" ? "The RPC parameters are invalid." : "The Host could not complete the request."
   );
@@ -101915,7 +102229,7 @@ var HostServerConnection = class {
         void cleanup.catch(() => void 0).finally(() => error62 === void 0 ? resolve10() : reject(error62));
       };
       let forceDrainWake;
-      const handleClose = (event, forced = false) => {
+      const handleClose = (event2, forced = false) => {
         if (settled || this.socket !== socket) return;
         if (closing) {
           if (forced) {
@@ -101926,8 +102240,8 @@ var HostServerConnection = class {
         }
         closing = true;
         clearLiveness();
-        const closeSemantics = classifyControlClose(event.code, event.reason);
-        retainOnClose = [1e3, 1001, 4007].includes(event.code) || closeSemantics.retryable && !closeSemantics.replaced;
+        const closeSemantics = classifyControlClose(event2.code, event2.reason);
+        retainOnClose = [1e3, 1001, 4007].includes(event2.code) || closeSemantics.retryable && !closeSemantics.replaced;
         const close = async () => {
           if (!forced) {
             let drainTimer;
@@ -101946,25 +102260,25 @@ var HostServerConnection = class {
             finish();
             return;
           }
-          if (event.code === 4003 || event.reason === "CONNECTION_REPLACED" || socketError === "CONNECTION_REPLACED") {
+          if (event2.code === 4003 || event2.reason === "CONNECTION_REPLACED" || socketError === "CONNECTION_REPLACED") {
             finish(new ControlConnectionError("CONNECTION_REPLACED", "Another instance connected with this Host identity."));
             return;
           }
-          if (event.code === 4004 || event.reason === "DEVICE_REVOKED" || socketError === "DEVICE_REVOKED" || this.terminalError === "DEVICE_REVOKED") {
+          if (event2.code === 4004 || event2.reason === "DEVICE_REVOKED" || socketError === "DEVICE_REVOKED" || this.terminalError === "DEVICE_REVOKED") {
             finish(new ControlConnectionError("DEVICE_REVOKED", "The Server revoked this Host device."));
             return;
           }
-          if (event.code === 4011 || event.reason === "UNSUPPORTED_VERSION" || socketError === "UNSUPPORTED_VERSION" || this.terminalError === "UNSUPPORTED_VERSION") {
+          if (event2.code === 4011 || event2.reason === "UNSUPPORTED_VERSION" || socketError === "UNSUPPORTED_VERSION" || this.terminalError === "UNSUPPORTED_VERSION") {
             finish(new ControlConnectionError("UNSUPPORTED_VERSION", "The Server does not support the Remote protocol version."));
             return;
           }
-          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event.code) || event.code === 4002 && event.reason === "recovery authorization rejected")) {
+          if (!acknowledged && recoveryTickets.length && ([4008, 4012].includes(event2.code) || event2.code === 4002 && event2.reason === "recovery authorization rejected")) {
             await this.dropTunnels();
             if (settled) return;
             finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry control without recovery state."));
             return;
           }
-          const isAuthRejection = event.code === 4002 || socketError === "AUTH_INVALID" || socketError === "TOKEN_EXPIRED" || event.code === 4001 && (event.reason === "AUTH_INVALID" || event.reason === "TOKEN_EXPIRED");
+          const isAuthRejection = event2.code === 4002 || socketError === "AUTH_INVALID" || socketError === "TOKEN_EXPIRED" || event2.code === 4001 && (event2.reason === "AUTH_INVALID" || event2.reason === "TOKEN_EXPIRED");
           if (isAuthRejection) {
             if (this.authRecoveryAttempted) {
               finish(new ControlConnectionError("AUTH_INVALID", "Server rejected refreshed credentials."));
@@ -102000,9 +102314,9 @@ var HostServerConnection = class {
             finish(new ControlConnectionError("CREDENTIALS_REFRESHED", "Retry hello with refreshed credentials."));
             return;
           }
-          const finalCode = socketError ?? closeCode(event.code);
+          const finalCode = socketError ?? closeCode(event2.code);
           if (acknowledged && this.terminalError === void 0) this.terminalError = finalCode;
-          finish(acknowledged ? void 0 : new ControlConnectionError(finalCode, event.reason || "Server control connection closed."));
+          finish(acknowledged ? void 0 : new ControlConnectionError(finalCode, event2.reason || "Server control connection closed."));
         };
         void close();
       };
@@ -102055,10 +102369,10 @@ var HostServerConnection = class {
           ...recoveryTickets.length ? { recoveryTickets } : {}
         });
       };
-      socket.onmessage = (event) => {
+      socket.onmessage = (event2) => {
         if (settled || closing || this.socket !== socket) return;
         try {
-          const preview = decodeControl(event.data, this.controlFrameLimits);
+          const preview = decodeControl(event2.data, this.controlFrameLimits);
           if (preview.type === "error") {
             const payload = requireControlError(preview.payload);
             if (payload.code === "DEVICE_REVOKED" || payload.connectionId === void 0) {
@@ -102072,7 +102386,7 @@ var HostServerConnection = class {
         }
         messageQueue = messageQueue.then(async () => {
           if (settled || this.socket !== socket) return;
-          const frame = decodeControl(event.data, this.controlFrameLimits);
+          const frame = decodeControl(event2.data, this.controlFrameLimits);
           this.lastActiveAt = Date.now();
           if (acknowledged) armLiveness();
           if (frame.type === "hello.ack") {
@@ -102132,8 +102446,8 @@ var HostServerConnection = class {
       socket.onerror = () => {
         if (!acknowledged) finish(new ControlConnectionError("CONNECTION_FAILED", "Unable to open the Server WebSocket."));
       };
-      socket.onclose = (event) => {
-        handleClose(event);
+      socket.onclose = (event2) => {
+        handleClose(event2);
       };
     });
   }
@@ -102350,8 +102664,8 @@ var HostServerConnection = class {
         }
         return this.rtcFactory;
       },
-      fetchIceServers: async (id6) => {
-        const servers = await this.api.turnCredentials(id6).catch(() => []);
+      fetchIceServers: async (id7) => {
+        const servers = await this.api.turnCredentials(id7).catch(() => []);
         return tunnel.preferredTransports.includes("turn") ? servers : stunOnlyIceServers(servers);
       },
       onReceiveSequencedCiphertext: (counter, ciphertext, source) => {
@@ -102494,14 +102808,14 @@ var HostServerConnection = class {
       onSignal: (signal) => this.sendRtcSignal(tunnel, signal),
       negotiateTimeoutMs: this.webRtcNegotiateTimeoutMs,
       label: `host<-${tunnel.peer.deviceId}`,
-      onDiagnostic: (event) => {
-        if (event.type !== "local-candidate-filtered" && event.type !== "candidate-pair-filtered") return;
+      onDiagnostic: (event2) => {
+        if (event2.type !== "local-candidate-filtered" && event2.type !== "candidate-pair-filtered") return;
         this.logger.debug("webrtc candidate filtered", {
           connectionId: shortId3(tunnel.connectionId),
           peerDeviceId: shortId3(tunnel.peer.deviceId),
-          type: event.type,
-          reason: event.reason,
-          candidate: event.type === "local-candidate-filtered" ? event.candidate : event.localCandidate
+          type: event2.type,
+          reason: event2.reason,
+          candidate: event2.type === "local-candidate-filtered" ? event2.candidate : event2.localCandidate
         });
       }
     });
@@ -102758,10 +103072,10 @@ var HostServerConnection = class {
           finish(asError2(error62));
         }
       };
-      socket.onmessage = (event) => {
+      socket.onmessage = (event2) => {
         try {
-          if (typeof event.data !== "string") throw new ControlConnectionError("INVALID_MESSAGE", "Relay data frames must be text JSON.");
-          const frame = decodeRelayDataFrame(event.data, this.controlFrameLimits);
+          if (typeof event2.data !== "string") throw new ControlConnectionError("INVALID_MESSAGE", "Relay data frames must be text JSON.");
+          const frame = decodeRelayDataFrame(event2.data, this.controlFrameLimits);
           if (frame.type === "relay.ready") {
             if (frame.payload.connectionId !== tunnel.connectionId || assignment.relayEpoch !== void 0 && frame.payload.epoch !== assignment.relayEpoch) {
               throw new ControlConnectionError("INVALID_MESSAGE", "Relay data attach does not match the assigned connection.");
@@ -103180,13 +103494,13 @@ function closeCode(code) {
 }
 
 // packages/plugin/src/harness-remote-bridge.ts
-import { randomUUID as randomUUID17 } from "node:crypto";
+import { randomUUID as randomUUID18 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
-import { lstat as lstat6, realpath as realpath7, stat as stat9 } from "node:fs/promises";
+import { lstat as lstat6, realpath as realpath7, stat as stat10 } from "node:fs/promises";
 import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
-import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
+import { mkdir as mkdir5, readdir as readdir6, stat as stat9 } from "node:fs/promises";
 import { homedir as homedir9, platform as platform2 } from "node:os";
 import { basename as basename8, dirname as dirname7, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
@@ -103207,7 +103521,7 @@ async function listRemoteDirectory(path, signal) {
     signal?.throwIfAborted();
     const child = resolve8(target3, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat8(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat9(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -103739,7 +104053,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID18(), host: { home: homedir10() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -103878,7 +104192,7 @@ var HarnessRemoteBridge = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
-    const transferId = randomUUID17();
+    const transferId = randomUUID18();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
     const completed = new Promise((resolve10, reject) => {
@@ -103908,9 +104222,9 @@ var HarnessRemoteBridge = class {
   }
   pruneTransfers() {
     const cutoff = Date.now() - TRANSFER_IDLE_MS;
-    for (const [id6, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id6);
-    for (const [id6, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) {
-      this.outgoingTransfers.delete(id6);
+    for (const [id7, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id7);
+    for (const [id7, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) {
+      this.outgoingTransfers.delete(id7);
       transfer.finish?.(new Error("Harness Remote stream transfer timed out"));
     }
   }
@@ -103967,10 +104281,10 @@ var HarnessRemoteBridge = class {
     delete finalArgs.baseFile;
     if (endpoint === "workspaceFiles/readBytes") {
       const range = byteOrLineRange2(finalArgs);
-      const offset = typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
+      const offset2 = typeof range.offset === "number" && Number.isInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
       const rawLength = typeof range.length === "number" && Number.isInteger(range.length) && range.length > 0 ? range.length : MAX_READ_BYTES2;
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
-      const normalizedRange = { offset, length: boundedLength };
+      const normalizedRange = { offset: offset2, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
         finalArgs.options = { ...isRecord22(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
@@ -103981,7 +104295,7 @@ var HarnessRemoteBridge = class {
         }
       }
       if ("offset" in finalArgs || "length" in finalArgs) {
-        finalArgs.offset = offset;
+        finalArgs.offset = offset2;
         finalArgs.length = boundedLength;
       }
     }
@@ -103998,7 +104312,7 @@ var HarnessRemoteBridge = class {
     }
     try {
       const root2 = await realpath7(cwd2);
-      const info = await stat9(root2);
+      const info = await stat10(root2);
       if (!info.isDirectory()) {
         throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "root-invalid");
       }
@@ -104065,7 +104379,7 @@ var HarnessRemoteBridge = class {
       if (isPathOutside(canonicalRel)) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
       }
-      const info = await stat9(canonical);
+      const info = await stat10(canonical);
       if (endpoint !== "workspaceFiles/stat" && !info.isFile()) {
         throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is not a regular file.", "not-regular-file");
       }
@@ -104302,10 +104616,10 @@ function isJsonRecord(value) {
 }
 function concatChunks3(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
-  let offset = 0;
+  let offset2 = 0;
   for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
+    result.set(chunk, offset2);
+    offset2 += chunk.byteLength;
   }
   return result;
 }
@@ -104464,15 +104778,15 @@ function remoteOwnedBundleRow(row, plugin) {
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
-import { randomUUID as randomUUID18 } from "node:crypto";
+import { randomUUID as randomUUID19 } from "node:crypto";
 var MIN_BUDGET_MS = 6e4;
 var MAX_BUDGET_MS = 72e5;
 var DEFAULT_BUDGET_MS = 18e5;
 var RETENTION_MS = 6e5;
 var CANCEL_SETTLE_MS = 15e3;
 var MAX_OPERATIONS = 32;
-function requestIndexKey(ownerDeviceId, sessionId, requestId) {
-  return `${ownerDeviceId}\0${sessionId}\0${requestId}`;
+function requestIndexKey(ownerDeviceId, sessionId, requestId2) {
+  return `${ownerDeviceId}\0${sessionId}\0${requestId2}`;
 }
 function isRecord23(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -104564,7 +104878,7 @@ var RemoteCompactionOperations = class {
       resolveCommandSettled = resolve10;
     });
     return {
-      operationId: randomUUID18(),
+      operationId: randomUUID19(),
       requestId: params.requestId,
       sessionId: params.sessionId,
       ownerDeviceId: owner.deviceId,
@@ -104762,15 +105076,15 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record11 of [...records, ...legacy]) {
-    const event = isRecord23(record11) && isRecord23(record11.event) ? record11.event : record11;
-    if (isRecord23(event) && typeof event.type === "string") events.push(event);
+    const event2 = isRecord23(record11) && isRecord23(record11.event) ? record11.event : record11;
+    if (isRecord23(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
   const resolvedCommandId = commandId ?? latestCompactCommandId(events, acceptedAt);
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
-  const end = [...events].reverse().find((event) => {
-    if (event.type !== "compaction/end") return false;
-    const data3 = isRecord23(event.data) ? event.data : void 0;
+  const end = [...events].reverse().find((event2) => {
+    if (event2.type !== "compaction/end") return false;
+    const data3 = isRecord23(event2.data) ? event2.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) return { kind: "not-yet" };
@@ -104779,11 +105093,11 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function latestCompactCommandId(events, acceptedAt) {
-  for (const event of [...events].reverse()) {
-    if (event.type !== "command/run") continue;
-    const data2 = isRecord23(event.data) ? event.data : void 0;
+  for (const event2 of [...events].reverse()) {
+    if (event2.type !== "command/run") continue;
+    const data2 = isRecord23(event2.data) ? event2.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
-    const time3 = typeof event.time === "number" ? event.time : 0;
+    const time3 = typeof event2.time === "number" ? event2.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
     return data2.commandId;
   }
@@ -104826,7 +105140,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // packages/plugin/src/service.ts
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -104871,13 +105185,14 @@ var HostPluginRuntime = class {
         }
       }
     });
+    const sessionTransfer = transferServices && new SessionTransferHost(transferServices);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
       const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer);
       const uploadBridge = uploadDispatcher === void 0 ? void 0 : new PluginRouteBridge(uploadDispatcher, this.logger);
       const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
         peerGateway,
-        (event, data2) => send(createEvent(event, data2)),
+        (event2, data2) => send(createEvent(event2, data2)),
         this.logger,
         this.harnessVersion,
         new TerminalPolicy(() => this.terminalEnabled, context.peerDeviceId, this.terminalOwners),
@@ -104902,11 +105217,11 @@ var HostPluginRuntime = class {
       );
       const codex = this.codex.createPeer(
         context,
-        (event, data2) => send(createEvent(event, data2))
+        (event2, data2) => send(createEvent(event2, data2))
       );
       const cursor3 = this.acp.createPeer(
         context,
-        (event, data2) => send(createEvent(event, data2))
+        (event2, data2) => send(createEvent(event2, data2))
       );
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer);
       const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
@@ -104940,7 +105255,8 @@ var HostPluginRuntime = class {
           owner: { deviceId: context.peerDeviceId, connectionId: context.connectionId }
         },
         lanUpload,
-        context.createTransportUpgradeHost?.(send)
+        context.createTransportUpgradeHost?.(send),
+        sessionTransfer?.peer(context.peerDeviceId)
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -105411,7 +105727,7 @@ var HostPluginRuntime = class {
     const peer = this.codex.createPeer({
       connectionId: `loopback:${identity3.deviceId}`,
       peerDeviceId: identity3.deviceId
-    }, (event, data2) => this.localCodexPublish(event, data2));
+    }, (event2, data2) => this.localCodexPublish(event2, data2));
     if (peer === void 0) {
       throw new RpcError("CODEX_UNAVAILABLE", "Local CodeX is disabled or unavailable on this Host.");
     }
@@ -105427,7 +105743,7 @@ var HostPluginRuntime = class {
     const peer = this.acp.createPeer({
       connectionId: `loopback:${identity3.deviceId}`,
       peerDeviceId: identity3.deviceId
-    }, (event, data2) => this.localAcpPublish(event, data2));
+    }, (event2, data2) => this.localAcpPublish(event2, data2));
     if (peer === void 0) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
     }
@@ -105527,17 +105843,17 @@ function remoteDiscoveryTools(resolve10) {
     render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }]
   });
   const run = async (signal, query) => {
-    const lifetime = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
-    lifetime.throwIfAborted();
+    const lifetime2 = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
+    lifetime2.throwIfAborted();
     const client = resolve10();
     if (client === void 0) throw new Error("REMOTE_UNAVAILABLE: Configure Remote and sign in through the local Remote panel first.");
     try {
-      const result = await query(client, lifetime);
-      lifetime.throwIfAborted();
+      const result = await query(client, lifetime2);
+      lifetime2.throwIfAborted();
       if (resolve10() !== client) throw new Error("Remote runtime changed.");
       return result;
     } catch {
-      lifetime.throwIfAborted();
+      lifetime2.throwIfAborted();
       throw new Error("REMOTE_DISCOVERY_FAILED: Check Remote login, Host availability and identity trust in the local Remote panel, then retry.");
     }
   };
@@ -105803,7 +106119,7 @@ var PluginUpdateChecker = class {
 };
 
 // packages/plugin/src/plugin-self-update.ts
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { randomUUID as randomUUID20 } from "node:crypto";
 
 // packages/plugin/src/version-compare.ts
 var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -105849,11 +106165,11 @@ function compareVersions(left, right) {
 // packages/plugin/src/plugin-self-update.ts
 var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
 var LocalPluginUpgrade = class {
-  constructor(checker, manager, subscribe, requestId = randomUUID19) {
+  constructor(checker, manager, subscribe, requestId2 = randomUUID20) {
     this.checker = checker;
     this.manager = manager;
     this.subscribe = subscribe;
-    this.requestId = requestId;
+    this.requestId = requestId2;
   }
   decidedVersion;
   ready = false;
@@ -105914,17 +106230,17 @@ var LocalPluginUpgrade = class {
       return { status: "manual" };
     }
     if (!updatable) return { status: "manual" };
-    const requestId = this.requestId();
+    const requestId2 = this.requestId();
     let dispose = () => {
     };
     const started = new Promise((resolve10) => {
-      dispose = this.subscribe((event) => {
-        if (event.requestId !== requestId) return;
-        if (event.step === "removing" || event.step === "installing") resolve10({ status: "started" });
+      dispose = this.subscribe((event2) => {
+        if (event2.requestId !== requestId2) return;
+        if (event2.step === "removing" || event2.step === "installing") resolve10({ status: "started" });
       });
     });
     try {
-      const settled = manager.updateBundle(REMOTE_PLUGIN_PACKAGE, version2, { requestId }).then((result) => classifyUpdateResult(result)).catch(() => ({ status: "failed", message: "update-failed" }));
+      const settled = manager.updateBundle(REMOTE_PLUGIN_PACKAGE, version2, { requestId: requestId2 }).then((result) => classifyUpdateResult(result)).catch(() => ({ status: "failed", message: "update-failed" }));
       return await Promise.race([started, settled]);
     } finally {
       dispose();
@@ -106011,8 +106327,8 @@ function createRemoteFileContentProvider(call, options = {}) {
       allowed: currentSaveAsAllowed(options.saveAsAllowed),
       maxBytes: currentSaveAsMaxBytes(options.saveAsMaxBytes)
     }),
-    async stat(locator, signal) {
-      const value = await call("fileviewer.stat", { path: locator }, signal);
+    async stat(locator2, signal) {
+      const value = await call("fileviewer.stat", { path: locator2 }, signal);
       if (!value.exists) return void 0;
       return {
         name: value.name,
@@ -106022,7 +106338,7 @@ function createRemoteFileContentProvider(call, options = {}) {
         isDirectory: value.isDirectory
       };
     },
-    async read(locator, request) {
+    async read(locator2, request) {
       if (!Number.isInteger(request.offset) || request.offset < 0) throw new Error("A non-negative integer offset is required.");
       if (!Number.isInteger(request.length) || request.length <= 0) throw new Error("A positive integer length is required.");
       const chunks = [];
@@ -106030,9 +106346,9 @@ function createRemoteFileContentProvider(call, options = {}) {
       while (received < request.length) {
         request.signal.throwIfAborted();
         const length = Math.min(REMOTE_FILE_CHUNK_BYTES, request.length - received);
-        const offset = request.offset + received;
-        const range = await call("fileviewer.readRange", { path: locator, offset, length }, request.signal);
-        if (range.offset !== offset) throw new Error("The Remote Host returned a mismatched file range.");
+        const offset2 = request.offset + received;
+        const range = await call("fileviewer.readRange", { path: locator2, offset: offset2, length }, request.signal);
+        if (range.offset !== offset2) throw new Error("The Remote Host returned a mismatched file range.");
         const bytes = decodeBase64(range.data);
         if (bytes.byteLength > length) throw new Error("The Remote Host returned more file bytes than requested.");
         chunks.push(bytes);
@@ -106047,8 +106363,8 @@ function createRemoteFileContentProvider(call, options = {}) {
       }
       return merged;
     },
-    async list(locator, signal) {
-      const value = await call("fileviewer.list", { path: locator }, signal);
+    async list(locator2, signal) {
+      const value = await call("fileviewer.list", { path: locator2 }, signal);
       return value.entries.map((entry) => ({
         locator: entry.path,
         name: entry.name,
@@ -106073,7 +106389,7 @@ function decodeBase64(value) {
 }
 
 // packages/plugin/src/cli.ts
-import { stat as stat10 } from "node:fs/promises";
+import { stat as stat11 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
 import { join as join18 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
@@ -106358,7 +106674,7 @@ function terminalLink(url2, target3) {
 }
 async function exists3(path) {
   try {
-    await stat10(path);
+    await stat11(path);
     return true;
   } catch (error62) {
     if (error62 instanceof Error && "code" in error62 && error62.code === "ENOENT") return false;
@@ -106614,7 +106930,13 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         () => ctx.get("webServer")?.port,
         peer
       ),
-      schedule
+      schedule,
+      () => ({
+        query: ctx.get("sessionQuery", false),
+        sessions: ctx.get("sessions", false),
+        persistence: ctx.get("sessionPersistence", false),
+        workspaces: ctx.get("workspaceRegistry", false)
+      })
     );
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {
@@ -106811,7 +107133,7 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
   }
   const base = readConfig();
   const resolveRegistration = (input4) => entryConfigSchema(input4 === void 0 ? base : input4);
-  const scope2 = settings.register(pluginSettingsNamespace, resolveRegistration, {
+  const scope3 = settings.register(pluginSettingsNamespace, resolveRegistration, {
     base,
     applies: "restart",
     validate: (value) => {
@@ -106819,9 +107141,9 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
     }
   });
   return {
-    get: () => scope2.get(),
+    get: () => scope3.get(),
     replace: (section) => runHmrSafe(async () => {
-      await scope2.replace(section);
+      await scope3.replace(section);
     }, hmr)
   };
 }

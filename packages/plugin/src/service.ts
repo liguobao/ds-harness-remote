@@ -1,3 +1,4 @@
+import { SessionTransferHost, type TransferServices } from './session-transfer.js'
 import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
 import type { HostPairingView } from './pairing-contract.js'
@@ -106,6 +107,7 @@ export class HostPluginRuntime {
     private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
     /** Host `schedule` service; absent on Hosts whose composition omits reminders. */
     private readonly schedule?: ScheduleCreateService,
+    transferServices?: () => TransferServices,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -145,6 +147,7 @@ export class HostPluginRuntime {
         }
       },
     })
+    const sessionTransfer = transferServices && new SessionTransferHost(transferServices)
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
       const uploadDispatcher = this.pluginRoutes?.(peerGateway?.peer)
@@ -218,6 +221,7 @@ export class HostPluginRuntime {
         },
         lanUpload,
         context.createTransportUpgradeHost?.(send),
+        sessionTransfer?.peer(context.peerDeviceId),
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

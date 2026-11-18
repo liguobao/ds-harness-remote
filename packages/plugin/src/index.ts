@@ -1,3 +1,4 @@
+import type { TransferServices } from './session-transfer.js'
 import * as DshConnection from '@deepseek-ai/dsh-client-connection'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
@@ -347,6 +348,12 @@ async function activate(
         peer,
       ),
       schedule,
+      () => ({
+        query: ctx.get('sessionQuery', false) as TransferServices['query'],
+        sessions: ctx.get('sessions', false) as TransferServices['sessions'],
+        persistence: ctx.get('sessionPersistence', false) as TransferServices['persistence'],
+        workspaces: ctx.get('workspaceRegistry', false) as TransferServices['workspaces'],
+      }),
     )
 
     let clientRuntime: ClientModeRuntime | undefined
