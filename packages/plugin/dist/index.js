@@ -95129,6 +95129,8 @@ var TranscriptWatcher = class extends EventEmitter2 {
   }
   offset = 0;
   lineRemainder = "";
+  readTail = Promise.resolve();
+  readQueued = false;
   pollTimer;
   closed = false;
   transcriptPath;
@@ -95146,7 +95148,7 @@ var TranscriptWatcher = class extends EventEmitter2 {
     if (this.closed) return;
     const poll = async () => {
       try {
-        await this.readNewLines();
+        await this.flush();
       } catch {
       }
       if (!this.closed) {
@@ -95166,8 +95168,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
   /**
    * 立即触发一次读取（同步/主动检查）
    */
-  async flush() {
-    await this.readNewLines();
+  flush() {
+    if (this.closed) return Promise.resolve();
+    if (!this.readQueued) {
+      this.readQueued = true;
+      this.readTail = this.readTail.catch(() => void 0).then(async () => {
+        this.readQueued = false;
+        if (!this.closed) await this.readNewLines();
+      });
+    }
+    return this.readTail;
   }
   async readNewLines() {
     let stat11;
@@ -95762,7 +95772,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           onRawEvent(parsed);
         }
         this.handleAgyEvent(parsed);
-        void this.watcher?.flush();
+        void this.watcher?.flush().catch(() => void 0);
       } catch (err5) {
         this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
       }
