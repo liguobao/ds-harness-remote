@@ -44145,7 +44145,7 @@ var require_utils2 = __commonJS({
 // node_modules/qrcode/lib/renderer/png.js
 var require_png2 = __commonJS({
   "node_modules/qrcode/lib/renderer/png.js"(exports) {
-    var fs4 = __require("fs");
+    var fs6 = __require("fs");
     var PNG = require_png().PNG;
     var Utils = require_utils2();
     exports.render = function render(qrData, options) {
@@ -44197,7 +44197,7 @@ var require_png2 = __commonJS({
         called = true;
         cb.apply(null, args);
       };
-      const stream = fs4.createWriteStream(path);
+      const stream = fs6.createWriteStream(path);
       stream.on("error", done);
       stream.on("close", done);
       exports.renderToFileStream(stream, qrData, options);
@@ -44264,9 +44264,9 @@ var require_utf8 = __commonJS({
         cb = options;
         options = void 0;
       }
-      const fs4 = __require("fs");
+      const fs6 = __require("fs");
       const utf8 = exports.render(qrData, options);
-      fs4.writeFile(path, utf8, cb);
+      fs6.writeFile(path, utf8, cb);
     };
   }
 });
@@ -44440,10 +44440,10 @@ var require_svg = __commonJS({
         cb = options;
         options = void 0;
       }
-      const fs4 = __require("fs");
+      const fs6 = __require("fs");
       const svgTag = exports.render(qrData, options);
       const xmlStr = '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">' + svgTag;
-      fs4.writeFile(path, xmlStr, cb);
+      fs6.writeFile(path, xmlStr, cb);
     };
   }
 });
@@ -94659,10 +94659,10 @@ var AcpWorkspaceTools = class {
 };
 
 // packages/plugin/src/acp/gateway.ts
-import { randomUUID as randomUUID15 } from "node:crypto";
+import { randomUUID as randomUUID16 } from "node:crypto";
 import { readdir as readdir5, realpath as realpath5, stat as stat5 } from "node:fs/promises";
-import { homedir as homedir6 } from "node:os";
-import { basename as basename7, isAbsolute as isAbsolute7, join as join12, relative as relative4, resolve as resolve6 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+import { basename as basename8, isAbsolute as isAbsolute7, join as join13, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
@@ -95091,28 +95091,125 @@ async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
 // packages/plugin/src/acp/adapters/antigravity-process.ts
 import { spawn as spawn5 } from "node:child_process";
 import { Buffer as Buffer6 } from "node:buffer";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync4 } from "node:fs";
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
-import { promises as fs2 } from "node:fs";
-import { join as join10 } from "node:path";
+import { promises as fs3 } from "node:fs";
+import { join as join11 } from "node:path";
 import { EventEmitter as EventEmitter2 } from "node:events";
+
+// packages/plugin/src/acp/adapters/antigravity/antigravity-paths.ts
+import { promises as fs2 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
+import { join as join10 } from "node:path";
+var DSH_AGY_DUAL_END_PATCH_V1 = "DSH_AGY_DUAL_END_PATCH_V1";
+var ANTIGRAVITY_ROOTS_ENV = "DSH_ANTIGRAVITY_ROOTS";
+var ANTIGRAVITY_DESKTOP_ROOT_ENV = "DSH_ANTIGRAVITY_DESKTOP_ROOT";
+var ANTIGRAVITY_CLI_ROOT_ENV = "DSH_ANTIGRAVITY_CLI_ROOT";
+function makeEnd(source, root2, dbPath, brainDir, conversationsDir) {
+  return {
+    source,
+    ...root2 === void 0 ? {} : { root: root2 },
+    dbPath: dbPath ?? join10(root2 ?? "", "conversation_summaries.db"),
+    brainDir: brainDir ?? join10(root2 ?? "", "brain"),
+    conversationsDir: conversationsDir ?? join10(root2 ?? "", "conversations")
+  };
+}
+function defaultDesktopRoot() {
+  return join10(homedir4(), ".gemini/antigravity");
+}
+function defaultCliRoot() {
+  return join10(homedir4(), ".gemini/antigravity-cli");
+}
+function parseRootsEnv(raw) {
+  if (!raw?.trim()) return {};
+  const result = {};
+  const parts = raw.split(/[,;]/).map((part) => part.trim()).filter(Boolean);
+  let positional = 0;
+  for (const part of parts) {
+    const labelled = part.match(/^(desktop|cli)\s*[:=]\s*(.+)$/i);
+    if (labelled) {
+      const key2 = labelled[1].toLowerCase();
+      result[key2] = labelled[2].trim();
+      continue;
+    }
+    const key = positional++ === 0 ? "desktop" : "cli";
+    result[key] ??= part;
+  }
+  return result;
+}
+function envValue(env, key) {
+  const value = env[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : void 0;
+}
+function antigravityEnds(overrides = {}) {
+  const env = overrides.env ?? process.env;
+  const roots = parseRootsEnv(envValue(env, ANTIGRAVITY_ROOTS_ENV));
+  const desktopRoot = overrides.desktopRoot ?? envValue(env, ANTIGRAVITY_DESKTOP_ROOT_ENV) ?? roots.desktop ?? defaultDesktopRoot();
+  const cliRoot = overrides.cliRoot ?? envValue(env, ANTIGRAVITY_CLI_ROOT_ENV) ?? roots.cli ?? defaultCliRoot();
+  return [makeEnd("desktop", desktopRoot), makeEnd("cli", cliRoot)];
+}
+function resolveAntigravityEnds(options = {}) {
+  if (options.dbPath === void 0 && options.brainDir === void 0) return antigravityEnds({ env: options.env });
+  const env = options.env ?? process.env;
+  const roots = parseRootsEnv(envValue(env, ANTIGRAVITY_ROOTS_ENV));
+  const cliRoot = envValue(env, ANTIGRAVITY_CLI_ROOT_ENV) ?? roots.cli ?? defaultCliRoot();
+  const fallback = makeEnd("custom", cliRoot);
+  return [makeEnd(
+    "custom",
+    void 0,
+    options.dbPath ?? fallback.dbPath,
+    options.brainDir ?? fallback.brainDir,
+    fallback.conversationsDir
+  )];
+}
+function resolveBrainDirs(baseDir, env) {
+  if (baseDir === void 0) return antigravityEnds({ env }).map((end) => end.brainDir);
+  if (typeof baseDir === "string") return [baseDir];
+  return [...baseDir];
+}
+function publicSource(end) {
+  return end.source === "custom" ? void 0 : end.source;
+}
+async function resolveTranscriptPath(brainDir, conversationId) {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
+  try {
+    const root2 = await fs2.realpath(brainDir);
+    const expected = join10(root2, conversationId, ".system_generated", "logs", "transcript.jsonl");
+    return await fs2.realpath(expected) === expected ? expected : void 0;
+  } catch {
+    return void 0;
+  }
+}
+
+// packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
 var TranscriptWatcher = class extends EventEmitter2 {
-  constructor(conversationId, baseDir = join10(homedir4(), ".gemini/antigravity-cli/brain")) {
+  constructor(conversationId, baseDir, options = {}) {
     super();
     this.conversationId = conversationId;
-    this.baseDir = baseDir;
-    const brainDir = join10(this.baseDir, conversationId, ".system_generated/logs");
-    this.transcriptPath = join10(brainDir, "transcript.jsonl");
-    this.transcriptFullPath = join10(brainDir, "transcript_full.jsonl");
+    const roots = options.brainDirs !== void 0 ? [...options.brainDirs] : resolveBrainDirs(baseDir);
+    this.brainDirs = roots;
+    this.baseDir = roots[0] ?? "";
+    this.dedupe = options.dedupe !== false;
+    this.states = roots.map((brainDir) => {
+      const logs = join11(brainDir, conversationId, ".system_generated", "logs");
+      return {
+        brainDir,
+        transcriptPath: join11(logs, "transcript.jsonl"),
+        transcriptFullPath: join11(logs, "transcript_full.jsonl"),
+        offset: 0,
+        lineRemainder: ""
+      };
+    });
   }
-  offset = 0;
-  lineRemainder = "";
+  states;
+  dedupe;
+  dispatched = /* @__PURE__ */ new Set();
   pollTimer;
   closed = false;
-  transcriptPath;
-  transcriptFullPath;
+  /** First brain root, retained for compatibility with single-root callers. */
+  baseDir;
+  brainDirs;
   on(event, listener) {
     return super.on(event, listener);
   }
@@ -95150,32 +95247,43 @@ var TranscriptWatcher = class extends EventEmitter2 {
     await this.readNewLines();
   }
   async readNewLines() {
+    const ranked = await Promise.all(this.states.map(async (state2) => {
+      try {
+        return { state: state2, mtimeMs: (await fs3.stat(state2.transcriptPath)).mtimeMs };
+      } catch {
+        return { state: state2, mtimeMs: -1 };
+      }
+    }));
+    ranked.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const { state: state2 } of ranked) await this.readState(state2);
+  }
+  async readState(state2) {
     let stat11;
     try {
-      stat11 = await fs2.stat(this.transcriptPath);
+      stat11 = await fs3.stat(state2.transcriptPath);
     } catch {
       return;
     }
-    if (stat11.size <= this.offset) return;
-    const handle = await fs2.open(this.transcriptPath, "r");
+    if (stat11.size <= state2.offset) return;
+    const handle = await fs3.open(state2.transcriptPath, "r");
     try {
-      const bytesToRead = stat11.size - this.offset;
+      const bytesToRead = stat11.size - state2.offset;
       const buffer3 = Buffer.alloc(bytesToRead);
-      const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, this.offset);
-      this.offset += bytesRead;
-      const text = this.lineRemainder + buffer3.subarray(0, bytesRead).toString("utf-8");
+      const { bytesRead } = await handle.read(buffer3, 0, bytesToRead, state2.offset);
+      state2.offset += bytesRead;
+      const text = state2.lineRemainder + buffer3.subarray(0, bytesRead).toString("utf-8");
       const lines = text.split("\n");
-      this.lineRemainder = lines.pop() ?? "";
+      state2.lineRemainder = lines.pop() ?? "";
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        await this.parseAndDispatch(trimmed);
+        await this.parseAndDispatch(trimmed, state2);
       }
     } finally {
       await handle.close();
     }
   }
-  async parseAndDispatch(rawLine) {
+  async parseAndDispatch(rawLine, state2) {
     let record11;
     try {
       record11 = JSON.parse(rawLine);
@@ -95183,7 +95291,12 @@ var TranscriptWatcher = class extends EventEmitter2 {
       return;
     }
     if (Array.isArray(record11.truncated_fields) && record11.truncated_fields.length > 0) {
-      record11 = await this.enrichFromFullTranscript(record11);
+      record11 = await this.enrichFromFullTranscript(record11, state2);
+    }
+    if (this.dedupe) {
+      const key = `${record11.type ?? ""}:${record11.step_index ?? ""}`;
+      if (this.dispatched.has(key)) return;
+      this.dispatched.add(key);
     }
     this.emit("step", record11);
     if (record11.type === "PLANNER_RESPONSE") {
@@ -95219,9 +95332,9 @@ var TranscriptWatcher = class extends EventEmitter2 {
       this.emit("complete", this.conversationId);
     }
   }
-  async enrichFromFullTranscript(record11) {
+  async enrichFromFullTranscript(record11, state2) {
     try {
-      const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
+      const content = await fs3.readFile(state2.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
       for (const line of lines) {
         const trimmed = line.trim();
@@ -95236,6 +95349,305 @@ var TranscriptWatcher = class extends EventEmitter2 {
     return record11;
   }
 };
+
+// packages/plugin/src/acp/adapters/antigravity/session-sync.ts
+import { createRequire as createRequire2 } from "node:module";
+import { existsSync as existsSync3 } from "node:fs";
+import { promises as fs4 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { basename as basename7, dirname as dirname5, join as join12 } from "node:path";
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+import { randomUUID as randomUUID15 } from "node:crypto";
+var nodeRequire = createRequire2(import.meta.url);
+var execFileAsync = promisify3(execFile2);
+var SUMMARY_TABLE = "conversation_summaries";
+var AntigravitySessionSyncError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "AntigravitySessionSyncError";
+  }
+};
+function sqlite() {
+  try {
+    return nodeRequire("node:sqlite");
+  } catch (error62) {
+    throw new AntigravitySessionSyncError("SQLITE_UNAVAILABLE", "node:sqlite is unavailable for Antigravity session sync.", { cause: error62 });
+  }
+}
+function endsForSync(options) {
+  const [desktopDefault, cliDefault] = antigravityEnds(options);
+  return {
+    desktop: {
+      ...desktopDefault,
+      dbPath: options.desktopDbPath ?? desktopDefault.dbPath,
+      brainDir: options.desktopBrainDir ?? desktopDefault.brainDir,
+      conversationsDir: options.desktopConversationsDir ?? desktopDefault.conversationsDir
+    },
+    cli: {
+      ...cliDefault,
+      dbPath: options.cliDbPath ?? cliDefault.dbPath,
+      brainDir: options.cliBrainDir ?? cliDefault.brainDir,
+      conversationsDir: options.cliConversationsDir ?? cliDefault.conversationsDir
+    }
+  };
+}
+function toSqlValue(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  return String(value);
+}
+function quoteIdentifier(name2) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name2)) {
+    throw new AntigravitySessionSyncError("SCHEMA_MISMATCH", `Unsafe column name in Antigravity summaries: ${name2}`);
+  }
+  return `"${name2}"`;
+}
+async function readSqlite(dbPath, sql, params = []) {
+  try {
+    const db = new (sqlite()).DatabaseSync(dbPath, { readOnly: true, timeout: 2e3 });
+    try {
+      return db.prepare(sql).all(...params);
+    } finally {
+      db.close();
+    }
+  } catch {
+  }
+  try {
+    let literalSql = sql;
+    for (const param of params) {
+      const literal2 = param === null ? "NULL" : typeof param === "number" || typeof param === "bigint" ? String(param) : `'${Buffer.from(param).toString("utf8").replace(/'/g, "''")}'`;
+      literalSql = literalSql.replace("?", literal2);
+    }
+    const uri = `file:${dbPath}?mode=ro`;
+    const { stdout } = await execFileAsync("sqlite3", ["-uri", uri, "-json", literalSql], { timeout: 1e4 });
+    return JSON.parse(stdout || "[]");
+  } catch {
+  }
+  const tempDir = await fs4.mkdtemp(join12(tmpdir2(), "agy-sync-read-"));
+  try {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await fs4.copyFile(`${dbPath}${suffix}`, join12(tempDir, `db${suffix}`)).catch(() => void 0);
+    }
+    const db = new (sqlite()).DatabaseSync(join12(tempDir, "db"), { timeout: 2e3 });
+    try {
+      return db.prepare(sql).all(...params);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await fs4.rm(tempDir, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+async function readSummaryRow(dbPath, conversationId) {
+  const rows = await readSqlite(
+    dbPath,
+    `SELECT * FROM ${SUMMARY_TABLE} WHERE conversation_id = ? LIMIT 1`,
+    [conversationId]
+  );
+  return rows[0];
+}
+async function readColumns(dbPath) {
+  const rows = await readSqlite(dbPath, `PRAGMA table_info(${SUMMARY_TABLE})`);
+  return rows.map((row) => String(row.name)).filter(Boolean);
+}
+async function readTableSql(dbPath) {
+  const rows = await readSqlite(
+    dbPath,
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    [SUMMARY_TABLE]
+  );
+  return typeof rows[0]?.sql === "string" ? rows[0].sql : void 0;
+}
+async function backupSqlite(dbPath) {
+  const tempDir = await fs4.mkdtemp(join12(tmpdir2(), "agy-sync-backup-"));
+  const present = [];
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await fs4.copyFile(`${dbPath}${suffix}`, join12(tempDir, suffix === "" ? "db" : `db${suffix}`));
+      present.push(suffix);
+    } catch {
+    }
+  }
+  return { tempDir, present };
+}
+async function restoreSqlite(dbPath, backup) {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const target3 = `${dbPath}${suffix}`;
+    if (backup.present.includes(suffix)) {
+      await fs4.copyFile(join12(backup.tempDir, suffix === "" ? "db" : `db${suffix}`), target3).catch(() => void 0);
+    } else {
+      await fs4.rm(target3, { force: true }).catch(() => void 0);
+    }
+  }
+  await fs4.rm(backup.tempDir, { recursive: true, force: true }).catch(() => void 0);
+}
+async function writeSummaryRow(desktopDb, cliDb, conversationId) {
+  const row = await readSummaryRow(desktopDb, conversationId);
+  if (row === void 0) {
+    throw new AntigravitySessionSyncError("ROW_MISSING", `Desktop summaries have no row for conversation ${conversationId}.`);
+  }
+  const desktopColumns = await readColumns(desktopDb);
+  if (desktopColumns.length === 0) {
+    throw new AntigravitySessionSyncError("SCHEMA_MISMATCH", "Desktop conversation_summaries table has no readable columns.");
+  }
+  if (!existsSync3(cliDb)) {
+    const createSql = await readTableSql(desktopDb);
+    if (createSql === void 0) {
+      throw new AntigravitySessionSyncError("SCHEMA_MISMATCH", "Desktop conversation_summaries schema is unavailable.");
+    }
+    await fs4.mkdir(dirname5(cliDb), { recursive: true });
+    const fresh = new (sqlite()).DatabaseSync(cliDb);
+    try {
+      fresh.exec(createSql);
+    } finally {
+      fresh.close();
+    }
+  }
+  const cliColumns = await readColumns(cliDb);
+  const missing = desktopColumns.filter((column) => !cliColumns.includes(column));
+  if (missing.length > 0) {
+    throw new AntigravitySessionSyncError(
+      "SCHEMA_MISMATCH",
+      `CLI conversation_summaries is missing columns required by desktop: ${missing.join(", ")}`
+    );
+  }
+  const columns = desktopColumns.filter((column) => column in row);
+  const backup = await backupSqlite(cliDb);
+  let transactionStarted = false;
+  let rollbackVerified = true;
+  try {
+    const db = new (sqlite()).DatabaseSync(cliDb, { timeout: 2e3 });
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      transactionStarted = true;
+      try {
+        db.prepare(`DELETE FROM ${SUMMARY_TABLE} WHERE conversation_id = ?`).run(conversationId);
+        db.prepare(`INSERT INTO ${SUMMARY_TABLE} (${columns.map(quoteIdentifier).join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((column) => toSqlValue(row[column])));
+        db.exec("COMMIT");
+        transactionStarted = false;
+      } catch (error62) {
+        try {
+          db.exec("ROLLBACK");
+          transactionStarted = false;
+        } catch {
+          rollbackVerified = false;
+        }
+        throw error62;
+      }
+    } finally {
+      db.close();
+    }
+  } catch (error62) {
+    if (transactionStarted || !rollbackVerified) await restoreSqlite(cliDb, backup);
+    throw new AntigravitySessionSyncError("DB_WRITE_FAILED", "Failed to copy the desktop summary row into the CLI database.", { cause: error62 });
+  } finally {
+    await fs4.rm(backup.tempDir, { recursive: true, force: true }).catch(() => void 0);
+  }
+}
+async function sessionStamp(end, conversationId) {
+  const transcript = await resolveTranscriptPath(end.brainDir, conversationId);
+  const pb = join12(end.conversationsDir, `${conversationId}.pb`);
+  const stats = await Promise.all([
+    transcript === void 0 ? Promise.resolve(void 0) : fs4.stat(transcript).catch(() => void 0),
+    fs4.stat(pb).catch(() => void 0)
+  ]);
+  let mtimeMs = Math.max(stats[0]?.mtimeMs ?? 0, stats[1]?.mtimeMs ?? 0);
+  let hasDbRow = false;
+  try {
+    const row = await readSummaryRow(end.dbPath, conversationId);
+    if (row !== void 0) {
+      hasDbRow = true;
+      const modified = typeof row.last_modified_time === "string" ? Date.parse(row.last_modified_time) : Number.NaN;
+      if (Number.isFinite(modified)) mtimeMs = Math.max(mtimeMs, modified);
+    }
+  } catch {
+  }
+  return {
+    present: transcript !== void 0 || stats[1] !== void 0 || hasDbRow,
+    mtimeMs,
+    ...transcript === void 0 ? {} : { transcript },
+    ...stats[1] === void 0 ? {} : { pb }
+  };
+}
+async function copyIfNewer(src, dst, copiedFiles, label) {
+  let srcStat;
+  try {
+    srcStat = await fs4.stat(src);
+  } catch {
+    return;
+  }
+  let dstStat;
+  try {
+    dstStat = await fs4.stat(dst);
+  } catch {
+  }
+  if (dstStat !== void 0 && dstStat.mtimeMs >= srcStat.mtimeMs) return;
+  await fs4.mkdir(dirname5(dst), { recursive: true });
+  const temp = join12(dirname5(dst), `.${basename7(dst)}.agy-sync-${randomUUID15()}.tmp`);
+  try {
+    await fs4.copyFile(src, temp);
+    await fs4.rename(temp, dst);
+    copiedFiles.push(label);
+  } finally {
+    await fs4.rm(temp, { force: true }).catch(() => void 0);
+  }
+}
+async function copyBrainTree(srcDir, dstDir, copiedFiles) {
+  let entries;
+  try {
+    entries = await fs4.readdir(srcDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const src = join12(srcDir, entry.name);
+    const dst = join12(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyBrainTree(src, dst, copiedFiles);
+    } else if (entry.isFile()) {
+      await copyIfNewer(src, dst, copiedFiles, `brain/${entry.name}`);
+    }
+  }
+}
+async function syncDesktopSessionForResume(conversationId, options = {}) {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) {
+    return { status: "noop", reason: "invalid conversation id", copiedFiles: [] };
+  }
+  const { desktop, cli } = endsForSync(options);
+  const [desktopStamp, cliStamp] = await Promise.all([
+    sessionStamp(desktop, conversationId),
+    sessionStamp(cli, conversationId)
+  ]);
+  if (!desktopStamp.present) {
+    return { status: "noop", reason: "session is not present on desktop", copiedFiles: [] };
+  }
+  if (cliStamp.present && cliStamp.mtimeMs >= desktopStamp.mtimeMs) {
+    return { status: "skipped", reason: "CLI session is already current", copiedFiles: [] };
+  }
+  const copiedFiles = [];
+  await copyIfNewer(
+    join12(desktop.conversationsDir, `${conversationId}.pb`),
+    join12(cli.conversationsDir, `${conversationId}.pb`),
+    copiedFiles,
+    `conversations/${conversationId}.pb`
+  );
+  await copyBrainTree(
+    join12(desktop.brainDir, conversationId),
+    join12(cli.brainDir, conversationId),
+    copiedFiles
+  );
+  await writeSummaryRow(desktop.dbPath, cli.dbPath, conversationId);
+  return { status: "synced", reason: "desktop session copied into CLI", copiedFiles };
+}
+async function hasCliSession(conversationId, options = {}) {
+  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return false;
+  const { cli } = endsForSync(options);
+  return (await sessionStamp(cli, conversationId)).present;
+}
 
 // packages/plugin/src/acp/adapters/antigravity-process.ts
 var ACP_PROMPT_TIMEOUT_MS2 = 10 * 6e4;
@@ -95254,7 +95666,7 @@ function resolveAntigravityBinary(preferred) {
     return preferred.trim();
   }
   const defaultLocal = "/var/lib/dsh/.local/bin/agy";
-  if (existsSync3(defaultLocal)) {
+  if (existsSync4(defaultLocal)) {
     return defaultLocal;
   }
   return "agy";
@@ -95565,7 +95977,34 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.closed) throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
     const args = [...this.args, "--add-dir", imageDirectory];
     if (this.activeConversationId) {
-      args.push("--conversation", this.activeConversationId);
+      const conversationId = this.activeConversationId;
+      const syncOptions = this.brainDir === void 0 ? {} : { cliBrainDir: this.brainDir };
+      try {
+        const result = await syncDesktopSessionForResume(conversationId, syncOptions);
+        if (result.status !== "noop") {
+          this.logger?.info("Antigravity resume source check", {
+            conversationId,
+            status: result.status,
+            copiedFiles: result.copiedFiles.length,
+            patch: DSH_AGY_DUAL_END_PATCH_V1
+          });
+        }
+      } catch (error62) {
+        const usable = await hasCliSession(conversationId, syncOptions).catch(() => false);
+        if (!usable) {
+          throw new AntigravityAcpError(
+            "SESSION_SYNC_FAILED",
+            "The requested Antigravity session exists only on desktop and could not be synchronized.",
+            { cause: error62 }
+          );
+        }
+        this.logger?.warn("Desktop session sync failed; continuing with the existing CLI session", {
+          conversationId,
+          error: String(error62)
+        });
+      }
+      if (this.closed) throw new AntigravityAcpError("ANTIGRAVITY_CLOSED", "The Antigravity domain is closed.");
+      args.push("--conversation", conversationId);
     }
     if (this.skipPermissions) {
       args.push("--dangerously-skip-permissions");
@@ -95866,13 +96305,13 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify3, stripVTControlCharacters } from "node:util";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify4, stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
-var execFileAsync = promisify3(execFile2);
+var execFileAsync2 = promisify4(execFile3);
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
-    const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), "--help"], {
+    const { stdout, stderr } = await execFileAsync2(binary, [...opencodePrivateArgs(args), "--help"], {
       cwd: cwd2,
       signal,
       timeout: 2e4,
@@ -96528,12 +96967,11 @@ function isSessionMutation(method) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-loader.ts
-import { promises as fs3 } from "node:fs";
-import { isAbsolute as isAbsolute6, join as join11, relative as relative3, resolve as resolve5, sep as sep2 } from "node:path";
+import { promises as fs5 } from "node:fs";
+import { isAbsolute as isAbsolute6, relative as relative3, resolve as resolve5, sep as sep2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { homedir as homedir5 } from "node:os";
-import { createRequire as createRequire2 } from "node:module";
-var nodeRequire = createRequire2(import.meta.url);
+import { createRequire as createRequire3 } from "node:module";
+var nodeRequire2 = createRequire3(import.meta.url);
 function cleanUserPrompt(raw) {
   if (!raw) return "";
   raw = stripAgyImageReferences(raw);
@@ -96543,12 +96981,21 @@ function cleanUserPrompt(raw) {
   }
   return raw.trim();
 }
-async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
+async function loadTranscriptEvents(conversationId, sessionId, baseDir) {
   let content = "";
   try {
-    const filePath = await transcriptPath(baseDir, conversationId);
-    if (filePath === void 0 || (await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
-    content = await fs3.readFile(filePath, "utf-8");
+    const candidates = [];
+    for (const brainDir of resolveBrainDirs(baseDir)) {
+      const path = await resolveTranscriptPath(brainDir, conversationId);
+      if (path === void 0) continue;
+      const stat11 = await fs5.stat(path);
+      if (stat11.size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
+      candidates.push({ path, mtimeMs: stat11.mtimeMs });
+    }
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const newest = candidates[0];
+    if (newest === void 0) return [];
+    content = await fs5.readFile(newest.path, "utf-8");
   } catch {
     return [];
   }
@@ -96650,7 +97097,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
 }
 async function querySqliteJson(dbPath, sql, params = []) {
   try {
-    const { DatabaseSync } = nodeRequire("node:sqlite");
+    const { DatabaseSync } = nodeRequire2("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       const stmt = db.prepare(sql);
@@ -96662,32 +97109,47 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile4 } = await import("node:child_process");
-    const { promisify: promisify5 } = await import("node:util");
-    const execFileAsync3 = promisify5(execFile4);
+    const { execFile: execFile5 } = await import("node:child_process");
+    const { promisify: promisify6 } = await import("node:util");
+    const execFileAsync4 = promisify6(execFile5);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync3("sqlite3", [dbPath, "-json", formattedSql]);
+    const { stdout } = await execFileAsync4("sqlite3", [dbPath, "-json", formattedSql]);
     return JSON.parse(stdout || "[]");
   } catch {
     return [];
   }
 }
-async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db"), baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
+async function discoverAntigravityWorkspaces(dbPath, baseDir) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const end of resolveAntigravityEnds({ dbPath, brainDir: baseDir })) {
+    for (const path of await workspacesFromEnd(end)) paths.add(path);
+  }
+  const verified = [];
+  for (const p of paths) {
+    try {
+      const s = await fs5.stat(p);
+      if (s.isDirectory()) verified.push(p);
+    } catch {
+    }
+  }
+  return verified;
+}
+async function workspacesFromEnd(end) {
   try {
-    await fs3.stat(dbPath);
+    await fs5.stat(end.dbPath);
   } catch {
     return [];
   }
   const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;";
-  const rows = await querySqliteJson(dbPath, sql);
+  const rows = await querySqliteJson(end.dbPath, sql);
   const paths = /* @__PURE__ */ new Set();
   for (const row of rows) {
     if (!row?.workspace_uris) continue;
-    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue;
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(end.brainDir, row.conversation_id)) continue;
     try {
       const uris = JSON.parse(row.workspace_uris);
       if (Array.isArray(uris)) {
@@ -96706,22 +97168,14 @@ async function discoverAntigravityWorkspaces(dbPath = join11(homedir5(), ".gemin
     } catch {
     }
   }
-  const verified = [];
-  for (const p of paths) {
-    try {
-      const s = await fs3.stat(p);
-      if (s.isDirectory()) verified.push(p);
-    } catch {
-    }
-  }
-  return verified;
+  return [...paths];
 }
-async function readTranscriptSummary(baseDir, conversationId) {
+async function readTranscriptSummary(baseDir, conversationId, source) {
   try {
-    const path = await transcriptPath(baseDir, conversationId);
+    const path = await resolveTranscriptPath(baseDir, conversationId);
     if (path === void 0) return void 0;
-    const stat11 = await fs3.stat(path);
-    const handle = await fs3.open(path, "r");
+    const stat11 = await fs5.stat(path);
+    const handle = await fs5.open(path, "r");
     try {
       const buffer3 = Buffer.alloc(4096);
       const { bytesRead } = await handle.read(buffer3, 0, buffer3.length, 0);
@@ -96731,7 +97185,13 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (record11.type !== "USER_INPUT") return void 0;
       const title = cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs, updatedAt: stat11.mtimeMs };
+      return {
+        conversationId,
+        title,
+        createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat11.mtimeMs,
+        updatedAt: stat11.mtimeMs,
+        ...source === void 0 ? {} : { source }
+      };
     } finally {
       await handle.close();
     }
@@ -96739,18 +97199,29 @@ async function readTranscriptSummary(baseDir, conversationId) {
     return void 0;
   }
 }
-async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain"), dbPath = join11(homedir5(), ".gemini/antigravity-cli/conversation_summaries.db")) {
+async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir, dbPath) {
   const requestedWorkspace = workspacePath.trim() === "" ? void 0 : resolve5(workspacePath);
+  const ends = resolveAntigravityEnds({ dbPath, brainDir: baseDir });
+  const found = (await Promise.all(ends.map((end) => sessionsFromEnd(end, requestedWorkspace)))).flat();
+  const merged = /* @__PURE__ */ new Map();
+  for (const session2 of found) {
+    const previous = merged.get(session2.conversationId);
+    if (previous === void 0 || session2.updatedAt > previous.updatedAt) merged.set(session2.conversationId, session2);
+  }
+  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+}
+async function sessionsFromEnd(end, requestedWorkspace) {
+  const source = publicSource(end);
   try {
-    await fs3.stat(dbPath);
+    await fs5.stat(end.dbPath);
     const rows = await querySqliteJson(
-      dbPath,
+      end.dbPath,
       "SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC;"
     );
     const summaries = [];
     for (const row of rows) {
       if (requestedWorkspace !== void 0 && !workspaceMatches(row.workspace_uris, requestedWorkspace)) continue;
-      const transcript = row.title?.trim() ? void 0 : await readTranscriptSummary(baseDir, row.conversation_id);
+      const transcript = row.title?.trim() ? void 0 : await readTranscriptSummary(end.brainDir, row.conversation_id, source);
       if (!row.step_count && !row.title?.trim()) {
         if (transcript !== void 0) summaries.push(transcript);
         continue;
@@ -96760,16 +97231,17 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
         conversationId: row.conversation_id,
         title: row.title?.trim() || transcript?.title || "Untitled Session",
         createdAt: time3,
-        updatedAt: time3
+        updatedAt: time3,
+        ...source === void 0 ? {} : { source }
       });
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+    return summaries;
   } catch {
   }
   if (requestedWorkspace !== void 0) return [];
   let dirEntries;
   try {
-    dirEntries = await fs3.readdir(baseDir);
+    dirEntries = await fs5.readdir(end.brainDir);
   } catch {
     return [];
   }
@@ -96777,10 +97249,10 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
   for (const entry of dirEntries) {
     if (entry === "tempmediaStorage" || !entry.includes("-")) continue;
     try {
-      const path = await transcriptPath(baseDir, entry);
+      const path = await resolveTranscriptPath(end.brainDir, entry);
       if (path === void 0) continue;
-      const s = await fs3.stat(path);
-      const handle = await fs3.open(path, "r");
+      const s = await fs5.stat(path);
+      const handle = await fs5.open(path, "r");
       try {
         const buf = Buffer.alloc(4096);
         const { bytesRead } = await handle.read(buf, 0, 4096, 0);
@@ -96795,7 +97267,8 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
               conversationId: entry,
               title,
               createdAt,
-              updatedAt: s.mtimeMs
+              updatedAt: s.mtimeMs,
+              ...source === void 0 ? {} : { source }
             });
           }
         }
@@ -96805,8 +97278,7 @@ async function discoverAntigravitySessions(workspacePath, limit = 30, baseDir = 
     } catch {
     }
   }
-  results.sort((a, b) => b.updatedAt - a.updatedAt);
-  return results.slice(0, limit);
+  return results;
 }
 function workspaceMatches(rawUris, requestedWorkspace) {
   if (rawUris === void 0) return false;
@@ -96822,16 +97294,6 @@ function workspaceMatches(rawUris, requestedWorkspace) {
     });
   } catch {
     return false;
-  }
-}
-async function transcriptPath(baseDir, conversationId) {
-  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return void 0;
-  try {
-    const root2 = await fs3.realpath(baseDir);
-    const expected = join11(root2, conversationId, ".system_generated", "logs", "transcript.jsonl");
-    return await fs3.realpath(expected) === expected ? expected : void 0;
-  } catch {
-    return void 0;
   }
 }
 
@@ -97443,7 +97905,7 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (isCatalogBackend(requestedBackend)) {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename7(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename8(path) || "workspace" }));
         if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
         const defaultCandidates = /* @__PURE__ */ new Set();
         const cwd3 = process.cwd();
@@ -97455,7 +97917,7 @@ var AcpRemoteGateway = class {
           } catch {
           }
         }
-        return [...defaultCandidates].map((path) => ({ path, title: basename7(path) || "workspace" }));
+        return [...defaultCandidates].map((path) => ({ path, title: basename8(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -97488,7 +97950,7 @@ var AcpRemoteGateway = class {
         }
         return {
           path: p,
-          title: basename7(p) || "workspace",
+          title: basename8(p) || "workspace",
           ...sessionCount > 0 ? { sessionCount } : {}
         };
       }));
@@ -98135,7 +98597,7 @@ var AcpRemoteGateway = class {
       await client.respondError(message.id, -32602, "The ACP permission options are invalid.");
       return;
     }
-    const requestHandle = randomUUID15();
+    const requestHandle = randomUUID16();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
       connectionId: owner,
@@ -98421,8 +98883,8 @@ var AcpRemoteGateway = class {
     }
   }
   async listDirectory(path) {
-    const home = homedir6();
-    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join12(home, path.slice(2)) : path;
+    const home = homedir5();
+    const target3 = path.trim() === "~" || path.trim() === "" ? home : path.startsWith("~/") ? join13(home, path.slice(2)) : path;
     const canonical = await this.requireExistingDirectory(isAbsolute7(target3) ? target3 : resolve6(target3));
     const names = await readdir5(canonical);
     const entries = [];
@@ -98432,7 +98894,7 @@ var AcpRemoteGateway = class {
         truncated = true;
         break;
       }
-      const child = join12(canonical, name2);
+      const child = join13(canonical, name2);
       try {
         const info = await stat5(child);
         if (!info.isDirectory()) continue;
@@ -98525,7 +98987,7 @@ function buildCrumbs(path, home) {
   let current = path;
   while (true) {
     crumbs2.unshift({
-      name: current === home ? "~" : basename7(current) || current,
+      name: current === home ? "~" : basename8(current) || current,
       path: current,
       hidden: false
     });
@@ -98538,24 +99000,24 @@ function buildCrumbs(path, home) {
   return crumbs2;
 }
 function cursorBinaryCandidates(configured) {
-  const userHome = homedir6();
+  const userHome = homedir5();
   if (configured === "agy" || configured === "antigravity") {
     return [
-      join12(userHome, ".local", "bin", "agy"),
+      join13(userHome, ".local", "bin", "agy"),
       "agy"
     ];
   }
   if (configured === "agent" || configured === "cursor") {
     return [
-      join12(userHome, ".local", "bin", "agent"),
+      join13(userHome, ".local", "bin", "agent"),
       "agent"
     ];
   }
   if (configured === "opencode") {
     return [
       // Official installer location (curl -fsSL https://opencode.ai/install | bash).
-      join12(userHome, ".opencode", "bin", "opencode"),
-      join12(userHome, ".local", "bin", "opencode"),
+      join13(userHome, ".opencode", "bin", "opencode"),
+      join13(userHome, ".local", "bin", "opencode"),
       "opencode"
     ];
   }
@@ -98578,12 +99040,12 @@ function isRecord19(value) {
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile3, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
-import { homedir as homedir7 } from "node:os";
-import { dirname as dirname5, join as join13, posix as posix2, win32 as win322 } from "node:path";
-import { promisify as promisify4 } from "node:util";
-var execFileAsync2 = promisify4(execFile3);
+import { execFile as execFile4, execFileSync } from "node:child_process";
+import { existsSync as existsSync5, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
+import { dirname as dirname6, join as join14, posix as posix2, win32 as win322 } from "node:path";
+import { promisify as promisify5 } from "node:util";
+var execFileAsync3 = promisify5(execFile4);
 var BUILTIN_ACP_SPECS = Object.freeze({
   codex: Object.freeze({
     id: "codex",
@@ -98637,7 +99099,7 @@ function isBuiltinAcpBackend(id6) {
 }
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
-    if (!existsSync4(candidate)) return false;
+    if (!existsSync5(candidate)) return false;
     const stat11 = statSync3(candidate);
     if (!stat11.isFile()) return false;
     if (platform3 === "win32") return true;
@@ -98662,7 +99124,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
     });
     const trimmed = out.trim();
-    if (trimmed.length > 0 && existsSync4(trimmed)) {
+    if (trimmed.length > 0 && existsSync5(trimmed)) {
       cachedNpmPrefix = trimmed;
       return trimmed;
     }
@@ -98674,7 +99136,7 @@ function candidateBinaryPaths(id6, options = {}) {
   const platform3 = options.platform ?? process.platform;
   const pJoin = platform3 === "win32" ? win322.join : posix2.join;
   const env = options.env ?? process.env;
-  const home = options.homedir ?? homedir7();
+  const home = options.homedir ?? homedir6();
   const localAppData = env.LOCALAPPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Local") : "");
   const appData = env.APPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Roaming") : "");
   const programFiles = env.ProgramFiles ?? (platform3 === "win32" ? "C:\\Program Files" : "");
@@ -98853,15 +99315,15 @@ function findExistingBinary(id6, options = {}) {
   return void 0;
 }
 function findNodeNpmCli(nodeExecPath = process.execPath) {
-  const nodeDir = dirname5(nodeExecPath);
+  const nodeDir = dirname6(nodeExecPath);
   const candidates = [
-    join13(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
-    join13(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"),
+    join14(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     "D:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
     "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
   ];
   for (const candidate of candidates) {
-    if (existsSync4(candidate)) return candidate;
+    if (existsSync5(candidate)) return candidate;
   }
   return void 0;
 }
@@ -98893,7 +99355,7 @@ async function installOrConfigureBackend(backendId, options = {}) {
   const fileToExec = npmCli ? process.execPath : "npm";
   const argsToExec = npmCli ? [npmCli, "install", "-g", spec.npmPackage, "--no-fund", "--no-audit"] : ["install", "-g", spec.npmPackage, "--no-fund", "--no-audit"];
   const runner = options.execFileImpl ?? (async (file2, cmdArgs, opts) => {
-    return execFileAsync2(file2, cmdArgs, opts);
+    return execFileAsync3(file2, cmdArgs, opts);
   });
   try {
     await runner(fileToExec, argsToExec, {
@@ -99633,12 +100095,12 @@ function fail5(error62) {
 }
 
 // packages/plugin/src/index.ts
-import { basename as basename9, dirname as dirname9 } from "node:path";
+import { basename as basename10, dirname as dirname10 } from "node:path";
 
 // packages/plugin/src/host-log-store.ts
 import { mkdir as mkdir4, open as open5, readFile as readFile5, rename as rename3, rm as rm4, stat as stat6, writeFile as writeFile3 } from "node:fs/promises";
-import { homedir as homedir8 } from "node:os";
-import { dirname as dirname6, join as join14 } from "node:path";
+import { homedir as homedir7 } from "node:os";
+import { dirname as dirname7, join as join15 } from "node:path";
 var DEFAULT_MAX_ENTRIES = 1e3;
 var DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 var DEFAULT_MAX_BACKUPS = 2;
@@ -99646,10 +100108,10 @@ var MAX_LINE_CHARS = 8192;
 var TAIL_READ_BYTES = 512 * 1024;
 function resolveHostLogPath(options = {}) {
   const env = options.env ?? process.env;
-  const home = env.DSH_HOME || join14(options.homeDirectory ?? homedir8(), ".dsh");
+  const home = env.DSH_HOME || join15(options.homeDirectory ?? homedir7(), ".dsh");
   const rawProfile = options.profile ?? env.DSH_PROFILE ?? "";
   const profileSlug = rawProfile.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "host";
-  return join14(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
+  return join15(home, "logs", "ds-harness-remote", `${profileSlug}.log`);
 }
 var HostLogStore = class {
   filePath;
@@ -99799,7 +100261,7 @@ var HostLogStore = class {
   async appendToDisk(payload) {
     const target3 = this.filePath;
     if (!this.dirEnsured) {
-      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      await mkdir4(dirname7(target3), { recursive: true, mode: 448 });
       this.dirEnsured = true;
     }
     if (!this.sizeVerified) {
@@ -99837,7 +100299,7 @@ var HostLogStore = class {
   async clearDisk() {
     const target3 = this.filePath;
     if (!this.dirEnsured) {
-      await mkdir4(dirname6(target3), { recursive: true, mode: 448 });
+      await mkdir4(dirname7(target3), { recursive: true, mode: 448 });
       this.dirEnsured = true;
     }
     await writeFile3(target3, "", { encoding: "utf8", mode: 384 });
@@ -99905,7 +100367,7 @@ function isEnoent(error62) {
 }
 function safeFsErrorMessage(error62) {
   if (error62 instanceof Error && error62.message.trim().length > 0) {
-    const home = homedir8();
+    const home = homedir7();
     const normalized = home.length > 0 ? error62.message.split(home).join("~") : error62.message;
     return normalized.replace(/[\r\n]+/g, " ").trim();
   }
@@ -100139,7 +100601,7 @@ function unavailable2() {
 
 // packages/plugin/src/host-pairing.ts
 import { createHash as createHash7, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
 var active = /* @__PURE__ */ new Set(["created", "claimed", "approved"]);
@@ -100171,7 +100633,7 @@ var HostPairing = class {
     this.adopt = adopt;
     this.fetcher = fetcher;
     this.serverUrl = normalizeServerUrl(serverUrl, httpServerAllowlist);
-    this.path = join15(directory, "host-pairing.json");
+    this.path = join16(directory, "host-pairing.json");
   }
   path;
   serverUrl;
@@ -100366,10 +100828,10 @@ var HostPairing = class {
 };
 
 // packages/plugin/src/workspace-upload.ts
-import { randomUUID as randomUUID16 } from "node:crypto";
+import { randomUUID as randomUUID17 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link as link2, lstat as lstat4, open as open6, realpath as realpath6, stat as stat7, unlink as unlink2 } from "node:fs/promises";
-import { extname, isAbsolute as isAbsolute8, join as join16 } from "node:path";
+import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
 
 // packages/plugin/src/workspace-upload-budget.ts
 import { statfs } from "node:fs/promises";
@@ -100517,7 +100979,7 @@ var WorkspaceUploadHost = class {
     const directory = await stat7(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join16(root2, `.dsh-upload-${randomUUID16()}.part`);
+    const temp = join17(root2, `.dsh-upload-${randomUUID17()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -100587,7 +101049,7 @@ var WorkspaceUploadHost = class {
       await this.validateRoot(upload);
       const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension2}`;
       try {
-        await link2(upload.temp, join16(upload.root, name2));
+        await link2(upload.temp, join17(upload.root, name2));
       } catch (error62) {
         if (error62.code === "EEXIST") continue;
         throw error62;
@@ -103054,15 +103516,15 @@ function closeCode(code) {
 }
 
 // packages/plugin/src/harness-remote-bridge.ts
-import { randomUUID as randomUUID17 } from "node:crypto";
-import { homedir as homedir10 } from "node:os";
+import { randomUUID as randomUUID18 } from "node:crypto";
+import { homedir as homedir9 } from "node:os";
 import { lstat as lstat5, realpath as realpath7, stat as stat9 } from "node:fs/promises";
-import { dirname as dirname8, isAbsolute as isAbsolute10, join as join17, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
+import { dirname as dirname9, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
 
 // packages/plugin/src/remote-directory-browser.ts
 import { mkdir as mkdir5, readdir as readdir6, stat as stat8 } from "node:fs/promises";
-import { homedir as homedir9, platform as platform2 } from "node:os";
-import { basename as basename8, dirname as dirname7, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
+import { homedir as homedir8, platform as platform2 } from "node:os";
+import { basename as basename9, dirname as dirname8, isAbsolute as isAbsolute9, parse as parse3, resolve as resolve8 } from "node:path";
 var MAX_ENTRIES = 500;
 async function ensureHostWorkspaceDirectory(path) {
   if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute9(path) || resolve8(path) === parse3(path).root) {
@@ -103072,7 +103534,7 @@ async function ensureHostWorkspaceDirectory(path) {
 }
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
-  const home = resolve8(homedir9());
+  const home = resolve8(homedir8());
   const target3 = path === void 0 || path.trim() === "" ? home : resolve8(path);
   if (!isAbsolute9(target3)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir6(target3, { withFileTypes: true });
@@ -103100,8 +103562,8 @@ function crumbs(path) {
   const segments = [];
   let current = path;
   while (current !== root2) {
-    segments.unshift(basename8(current));
-    current = dirname7(current);
+    segments.unshift(basename9(current));
+    current = dirname8(current);
   }
   for (const segment of segments) {
     current = resolve8(current, segment);
@@ -103595,7 +104057,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID17(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID18(), host: { home: homedir9() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -103734,7 +104196,7 @@ var HarnessRemoteBridge = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
-    const transferId = randomUUID17();
+    const transferId = randomUUID18();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
     const completed = new Promise((resolve10, reject) => {
@@ -103804,7 +104266,7 @@ var HarnessRemoteBridge = class {
       }
       const safeBaseRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, rawBaseFile, endpoint, sessionWorkspace.cwd);
       const baseCandidate = resolve9(sessionWorkspace.root, safeBaseRel);
-      const baseDir = dirname8(baseCandidate);
+      const baseDir = dirname9(baseCandidate);
       const targetCandidate = resolve9(baseDir, path);
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, targetCandidate, endpoint, sessionWorkspace.cwd);
     } else {
@@ -103893,7 +104355,7 @@ var HarnessRemoteBridge = class {
       const parts = rel.split(sep3).filter((p) => p.length > 0 && p !== ".");
       let currentPath = root2;
       for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = join17(currentPath, parts[i]);
+        currentPath = join18(currentPath, parts[i]);
         if (isPathOutside(relative5(root2, currentPath))) {
           throw workspaceFileFailure("WORKSPACE_PATH_DENIED", "The requested workspace path is outside the workspace.", "outside-root");
         }
@@ -104320,7 +104782,7 @@ function remoteOwnedBundleRow(row, plugin) {
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
-import { randomUUID as randomUUID18 } from "node:crypto";
+import { randomUUID as randomUUID19 } from "node:crypto";
 var MIN_BUDGET_MS = 6e4;
 var MAX_BUDGET_MS = 72e5;
 var DEFAULT_BUDGET_MS = 18e5;
@@ -104420,7 +104882,7 @@ var RemoteCompactionOperations = class {
       resolveCommandSettled = resolve10;
     });
     return {
-      operationId: randomUUID18(),
+      operationId: randomUUID19(),
       requestId: params.requestId,
       sessionId: params.sessionId,
       ownerDeviceId: owner.deviceId,
@@ -104661,7 +105123,7 @@ function errorText(error62) {
 
 // packages/plugin/src/service.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
-import { existsSync as existsSync5 } from "node:fs";
+import { existsSync as existsSync6 } from "node:fs";
 
 // packages/plugin/src/codex-workspace-bridge.ts
 var CodexWorkspaceBridge = class extends WorkspaceBridge {
@@ -105244,7 +105706,7 @@ var HostPluginRuntime = class {
   acpAvailable(command) {
     if (command === "opencode") {
       try {
-        if (existsSync5("/usr/local/bin/opencode") || existsSync5("/var/lib/dsh/.opencode/bin/opencode")) return true;
+        if (existsSync6("/usr/local/bin/opencode") || existsSync6("/var/lib/dsh/.opencode/bin/opencode")) return true;
       } catch {
       }
     }
@@ -105656,7 +106118,7 @@ var PluginUpdateChecker = class {
 };
 
 // packages/plugin/src/plugin-self-update.ts
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { randomUUID as randomUUID20 } from "node:crypto";
 
 // packages/plugin/src/version-compare.ts
 var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -105702,7 +106164,7 @@ function compareVersions(left, right) {
 // packages/plugin/src/plugin-self-update.ts
 var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
 var LocalPluginUpgrade = class {
-  constructor(checker, manager, subscribe, requestId = randomUUID19) {
+  constructor(checker, manager, subscribe, requestId = randomUUID20) {
     this.checker = checker;
     this.manager = manager;
     this.subscribe = subscribe;
@@ -105928,7 +106390,7 @@ function decodeBase64(value) {
 // packages/plugin/src/cli.ts
 import { stat as stat10 } from "node:fs/promises";
 import { hostname as hostname5 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -106020,7 +106482,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled"
   ];
-  if (!await exists3(join18(directory, "device.json"))) {
+  if (!await exists3(join19(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write2(runtime.stdout, `${lines.join("\n")}
 
@@ -106080,9 +106542,9 @@ async function logout(args, runtime) {
   }
   const directory = serverStorageDirectory(root2, serverUrl, "host");
   const [hasDevice, hasKey, hasCredentials] = await Promise.all([
-    exists3(join18(directory, "device.json")),
-    exists3(join18(directory, "device.key")),
-    exists3(join18(directory, "server-credentials.json"))
+    exists3(join19(directory, "device.json")),
+    exists3(join19(directory, "device.key")),
+    exists3(join19(directory, "server-credentials.json"))
   ]);
   if (!hasDevice && !hasKey && !hasCredentials) {
     await new ServerCredentialStore(directory).clear();
@@ -106621,8 +107083,8 @@ function resolveLogProfileName(ctx) {
   const baseDir = ctx.root?.baseDir;
   if (typeof baseDir === "string" && baseDir.trim().length > 0) {
     const trimmed = baseDir.trim();
-    if (basename9(dirname9(trimmed)) === "profiles") {
-      const segment = basename9(trimmed);
+    if (basename10(dirname10(trimmed)) === "profiles") {
+      const segment = basename10(trimmed);
       if (segment.length > 0) return segment;
     }
   }

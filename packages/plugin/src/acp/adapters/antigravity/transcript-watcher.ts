@@ -1,25 +1,54 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
-import { homedir } from 'node:os'
+import { resolveBrainDirs } from './antigravity-paths.js'
 import type { AntigravityEvents, StepLogRecord } from './types.js'
 
+interface TranscriptState {
+  readonly brainDir: string
+  readonly transcriptPath: string
+  readonly transcriptFullPath: string
+  offset: number
+  lineRemainder: string
+}
+
+export interface TranscriptWatcherOptions {
+  /** Explicit brain roots; takes precedence over the baseDir argument. */
+  brainDirs?: readonly string[]
+  /** Dispatch a given (type, step_index) once across all roots. Defaults to true. */
+  dedupe?: boolean
+}
+
 export class TranscriptWatcher extends EventEmitter {
-  private offset = 0
-  private lineRemainder = ''
+  private readonly states: TranscriptState[]
+  private readonly dedupe: boolean
+  private readonly dispatched = new Set<string>()
   private pollTimer?: NodeJS.Timeout
   private closed = false
-  private readonly transcriptPath: string
-  private readonly transcriptFullPath: string
+  /** First brain root, retained for compatibility with single-root callers. */
+  readonly baseDir: string
+  readonly brainDirs: readonly string[]
 
   constructor(
     readonly conversationId: string,
-    readonly baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+    baseDir?: string | readonly string[],
+    options: TranscriptWatcherOptions = {},
   ) {
     super()
-    const brainDir = join(this.baseDir, conversationId, '.system_generated/logs')
-    this.transcriptPath = join(brainDir, 'transcript.jsonl')
-    this.transcriptFullPath = join(brainDir, 'transcript_full.jsonl')
+    const roots = options.brainDirs !== undefined ? [...options.brainDirs] : resolveBrainDirs(baseDir)
+    this.brainDirs = roots
+    this.baseDir = roots[0] ?? ''
+    this.dedupe = options.dedupe !== false
+    this.states = roots.map(brainDir => {
+      const logs = join(brainDir, conversationId, '.system_generated', 'logs')
+      return {
+        brainDir,
+        transcriptPath: join(logs, 'transcript.jsonl'),
+        transcriptFullPath: join(logs, 'transcript_full.jsonl'),
+        offset: 0,
+        lineRemainder: '',
+      }
+    })
   }
 
   override on<U extends keyof AntigravityEvents>(event: U, listener: AntigravityEvents[U]): this {
@@ -65,37 +94,52 @@ export class TranscriptWatcher extends EventEmitter {
   }
 
   private async readNewLines(): Promise<void> {
+    // Consume the most recently updated transcript first. After a desktop ->
+    // CLI resume sync both roots contain the same steps; duplicate steps from
+    // the older root are then suppressed instead of being emitted twice.
+    const ranked = await Promise.all(this.states.map(async state => {
+      try {
+        return { state, mtimeMs: (await fs.stat(state.transcriptPath)).mtimeMs }
+      } catch {
+        return { state, mtimeMs: -1 }
+      }
+    }))
+    ranked.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    for (const { state } of ranked) await this.readState(state)
+  }
+
+  private async readState(state: TranscriptState): Promise<void> {
     let stat
     try {
-      stat = await fs.stat(this.transcriptPath)
+      stat = await fs.stat(state.transcriptPath)
     } catch {
       return
     }
 
-    if (stat.size <= this.offset) return
+    if (stat.size <= state.offset) return
 
-    const handle = await fs.open(this.transcriptPath, 'r')
+    const handle = await fs.open(state.transcriptPath, 'r')
     try {
-      const bytesToRead = stat.size - this.offset
+      const bytesToRead = stat.size - state.offset
       const buffer = Buffer.alloc(bytesToRead)
-      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset)
-      this.offset += bytesRead
+      const { bytesRead } = await handle.read(buffer, 0, bytesToRead, state.offset)
+      state.offset += bytesRead
 
-      const text = this.lineRemainder + buffer.subarray(0, bytesRead).toString('utf-8')
+      const text = state.lineRemainder + buffer.subarray(0, bytesRead).toString('utf-8')
       const lines = text.split('\n')
-      this.lineRemainder = lines.pop() ?? ''
+      state.lineRemainder = lines.pop() ?? ''
 
       for (const line of lines) {
         const trimmed = line.trim()
         if (!trimmed) continue
-        await this.parseAndDispatch(trimmed)
+        await this.parseAndDispatch(trimmed, state)
       }
     } finally {
       await handle.close()
     }
   }
 
-  private async parseAndDispatch(rawLine: string): Promise<void> {
+  private async parseAndDispatch(rawLine: string, state: TranscriptState): Promise<void> {
     let record: StepLogRecord
     try {
       record = JSON.parse(rawLine) as StepLogRecord
@@ -104,7 +148,13 @@ export class TranscriptWatcher extends EventEmitter {
     }
 
     if (Array.isArray(record.truncated_fields) && record.truncated_fields.length > 0) {
-      record = await this.enrichFromFullTranscript(record)
+      record = await this.enrichFromFullTranscript(record, state)
+    }
+
+    if (this.dedupe) {
+      const key = `${record.type ?? ''}:${record.step_index ?? ''}`
+      if (this.dispatched.has(key)) return
+      this.dispatched.add(key)
     }
 
     this.emit('step', record)
@@ -144,9 +194,9 @@ export class TranscriptWatcher extends EventEmitter {
     }
   }
 
-  private async enrichFromFullTranscript(record: StepLogRecord): Promise<StepLogRecord> {
+  private async enrichFromFullTranscript(record: StepLogRecord, state: TranscriptState): Promise<StepLogRecord> {
     try {
-      const content = await fs.readFile(this.transcriptFullPath, 'utf-8')
+      const content = await fs.readFile(state.transcriptFullPath, 'utf-8')
       const lines = content.split('\n')
       for (const line of lines) {
         const trimmed = line.trim()

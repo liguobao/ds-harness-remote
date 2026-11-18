@@ -13,6 +13,8 @@ import type {
 } from './cursor-process.js'
 
 import { TranscriptWatcher } from './antigravity/transcript-watcher.js'
+import { hasCliSession, syncDesktopSessionForResume } from './antigravity/session-sync.js'
+import { DSH_AGY_DUAL_END_PATCH_V1 } from './antigravity/antigravity-paths.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
@@ -379,7 +381,33 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
     const args = [...this.args, '--add-dir', imageDirectory]
     if (this.activeConversationId) {
-      args.push('--conversation', this.activeConversationId)
+      const conversationId = this.activeConversationId
+      const syncOptions = this.brainDir === undefined ? {} : { cliBrainDir: this.brainDir }
+      try {
+        // agy reads only the CLI data root. Migrate a desktop-only session
+        // before handing --conversation to the process so resume finds it.
+        const result = await syncDesktopSessionForResume(conversationId, syncOptions)
+        if (result.status !== 'noop') {
+          this.logger?.info('Antigravity resume source check', {
+            conversationId,
+            status: result.status,
+            copiedFiles: result.copiedFiles.length,
+            patch: DSH_AGY_DUAL_END_PATCH_V1,
+          })
+        }
+      } catch (error) {
+        const usable = await hasCliSession(conversationId, syncOptions).catch(() => false)
+        if (!usable) {
+          throw new AntigravityAcpError('SESSION_SYNC_FAILED',
+            'The requested Antigravity session exists only on desktop and could not be synchronized.', { cause: error })
+        }
+        this.logger?.warn('Desktop session sync failed; continuing with the existing CLI session', {
+          conversationId,
+          error: String(error),
+        })
+      }
+      if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
+      args.push('--conversation', conversationId)
     }
     if (this.skipPermissions) {
       args.push('--dangerously-skip-permissions')

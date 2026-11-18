@@ -1,10 +1,17 @@
 import { AGY_IMAGE_ROOT, stripAgyImageReferences, agyImageReferences, readAgyImage } from './image-store.js'
 import { promises as fs } from 'node:fs'
 import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
+import {
+  resolveAntigravityEnds,
+  resolveBrainDirs,
+  resolveTranscriptPath,
+  publicSource,
+  type AntigravityEnd,
+  type AntigravitySource,
+} from './antigravity-paths.js'
 import type { StepLogRecord } from './types.js'
 
 // Load prefix-only Node builtins natively, including under older Vite runners.
@@ -34,13 +41,25 @@ export function cleanUserPrompt(raw?: string): string {
 export async function loadTranscriptEvents(
   conversationId: string,
   sessionId: string,
-  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+  baseDir?: string | readonly string[],
 ): Promise<HydratedSessionEvent[]> {
   let content = ''
   try {
-    const filePath = await transcriptPath(baseDir, conversationId)
-    if (filePath === undefined || (await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return []
-    content = await fs.readFile(filePath, 'utf-8')
+    // An explicit baseDir keeps the original single-root behavior; the default
+    // checks every configured brain root and reads the most recently updated
+    // transcript for this conversation.
+    const candidates: Array<{ path: string; mtimeMs: number }> = []
+    for (const brainDir of resolveBrainDirs(baseDir)) {
+      const path = await resolveTranscriptPath(brainDir, conversationId)
+      if (path === undefined) continue
+      const stat = await fs.stat(path)
+      if (stat.size > MAX_AGENT_ACP_TRANSFER_BYTES) return []
+      candidates.push({ path, mtimeMs: stat.mtimeMs })
+    }
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const newest = candidates[0]
+    if (newest === undefined) return []
+    content = await fs.readFile(newest.path, 'utf-8')
   } catch {
     return []
   }
@@ -159,6 +178,8 @@ export interface DiscoveredSession {
   title: string
   createdAt: number
   updatedAt: number
+  /** Which Antigravity data root won this session; absent for explicit single-path callers. */
+  source?: AntigravitySource
 }
 
 async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params: Array<string | number> = []): Promise<T[]> {
@@ -193,22 +214,40 @@ async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params:
 }
 
 export async function discoverAntigravityWorkspaces(
-  dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
-  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
+  dbPath?: string,
+  baseDir?: string,
 ): Promise<string[]> {
+  const paths = new Set<string>()
+  for (const end of resolveAntigravityEnds({ dbPath, brainDir: baseDir })) {
+    for (const path of await workspacesFromEnd(end)) paths.add(path)
+  }
+
+  const verified: string[] = []
+  for (const p of paths) {
+    try {
+      const s = await fs.stat(p)
+      if (s.isDirectory()) verified.push(p)
+    } catch {
+      // ignore
+    }
+  }
+  return verified
+}
+
+async function workspacesFromEnd(end: AntigravityEnd): Promise<string[]> {
   try {
-    await fs.stat(dbPath)
+    await fs.stat(end.dbPath)
   } catch {
     return []
   }
 
   const sql = "SELECT conversation_id, workspace_uris, step_count, title FROM conversation_summaries ORDER BY step_count DESC;"
-  const rows = await querySqliteJson<{ conversation_id: string; workspace_uris?: string; step_count?: number; title?: string }>(dbPath, sql)
+  const rows = await querySqliteJson<{ conversation_id: string; workspace_uris?: string; step_count?: number; title?: string }>(end.dbPath, sql)
   const paths = new Set<string>()
 
   for (const row of rows) {
     if (!row?.workspace_uris) continue
-    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(baseDir, row.conversation_id)) continue
+    if (!(row.step_count && row.step_count > 0) && !row.title?.trim() && !await readTranscriptSummary(end.brainDir, row.conversation_id)) continue
     try {
       const uris = JSON.parse(row.workspace_uris)
       if (Array.isArray(uris)) {
@@ -230,22 +269,16 @@ export async function discoverAntigravityWorkspaces(
       // ignore
     }
   }
-
-  const verified: string[] = []
-  for (const p of paths) {
-    try {
-      const s = await fs.stat(p)
-      if (s.isDirectory()) verified.push(p)
-    } catch {
-      // ignore
-    }
-  }
-  return verified
+  return [...paths]
 }
 
-async function readTranscriptSummary(baseDir: string, conversationId: string): Promise<DiscoveredSession | undefined> {
+async function readTranscriptSummary(
+  baseDir: string,
+  conversationId: string,
+  source?: AntigravitySource,
+): Promise<DiscoveredSession | undefined> {
   try {
-    const path = await transcriptPath(baseDir, conversationId)
+    const path = await resolveTranscriptPath(baseDir, conversationId)
     if (path === undefined) return undefined
     const stat = await fs.stat(path)
     const handle = await fs.open(path, 'r')
@@ -258,7 +291,13 @@ async function readTranscriptSummary(baseDir: string, conversationId: string): P
       if (record.type !== 'USER_INPUT') return undefined
       const title = cleanUserPrompt(record.content).split('\n')[0]?.trim().slice(0, 40) || (agyImageReferences(record.content ?? '').length > 0 ? 'Image' : undefined)
       if (!title) return undefined
-      return { conversationId, title, createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs, updatedAt: stat.mtimeMs }
+      return {
+        conversationId,
+        title,
+        createdAt: record.created_at ? new Date(record.created_at).getTime() : stat.mtimeMs,
+        updatedAt: stat.mtimeMs,
+        ...(source === undefined ? {} : { source }),
+      }
     } finally {
       await handle.close()
     }
@@ -270,14 +309,28 @@ async function readTranscriptSummary(baseDir: string, conversationId: string): P
 export async function discoverAntigravitySessions(
   workspacePath: string,
   limit: number = 30,
-  baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
-  dbPath: string = join(homedir(), '.gemini/antigravity-cli/conversation_summaries.db'),
+  baseDir?: string,
+  dbPath?: string,
 ): Promise<DiscoveredSession[]> {
   const requestedWorkspace = workspacePath.trim() === '' ? undefined : resolve(workspacePath)
+  const ends = resolveAntigravityEnds({ dbPath, brainDir: baseDir })
+  // Discover every root before applying the limit; otherwise one root with
+  // many recent sessions could hide a newer session from the other root.
+  const found = (await Promise.all(ends.map(end => sessionsFromEnd(end, requestedWorkspace)))).flat()
+  const merged = new Map<string, DiscoveredSession>()
+  for (const session of found) {
+    const previous = merged.get(session.conversationId)
+    if (previous === undefined || session.updatedAt > previous.updatedAt) merged.set(session.conversationId, session)
+  }
+  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+}
+
+async function sessionsFromEnd(end: AntigravityEnd, requestedWorkspace?: string): Promise<DiscoveredSession[]> {
+  const source = publicSource(end)
   // Database URIs provide workspace authority. Decode them before comparing so
   // percent-encoded names, path separators, and similarly named projects stay distinct.
   try {
-    await fs.stat(dbPath)
+    await fs.stat(end.dbPath)
     interface DbSessionRow {
       conversation_id: string
       title?: string
@@ -285,12 +338,12 @@ export async function discoverAntigravitySessions(
       step_count?: number
       last_modified_time?: string
     }
-    const rows = await querySqliteJson<DbSessionRow>(dbPath,
+    const rows = await querySqliteJson<DbSessionRow>(end.dbPath,
       'SELECT conversation_id, title, workspace_uris, step_count, last_modified_time FROM conversation_summaries ORDER BY last_modified_time DESC;')
     const summaries: DiscoveredSession[] = []
     for (const row of rows) {
       if (requestedWorkspace !== undefined && !workspaceMatches(row.workspace_uris, requestedWorkspace)) continue
-      const transcript = row.title?.trim() ? undefined : await readTranscriptSummary(baseDir, row.conversation_id)
+      const transcript = row.title?.trim() ? undefined : await readTranscriptSummary(end.brainDir, row.conversation_id, source)
       if (!row.step_count && !row.title?.trim()) {
         if (transcript !== undefined) summaries.push(transcript)
         continue
@@ -301,19 +354,20 @@ export async function discoverAntigravitySessions(
         title: row.title?.trim() || transcript?.title || 'Untitled Session',
         createdAt: time,
         updatedAt: time,
+        ...(source === undefined ? {} : { source }),
       })
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+    return summaries
   } catch {
     // Unscoped discovery may fall back to transcript scanning without a database.
   }
   // A transcript alone does not establish which project it belongs to.
   if (requestedWorkspace !== undefined) return []
 
-  // 2. Fallback to filesystem scanning
+  // Fallback to filesystem scanning
   let dirEntries: string[]
   try {
-    dirEntries = await fs.readdir(baseDir)
+    dirEntries = await fs.readdir(end.brainDir)
   } catch {
     return []
   }
@@ -322,7 +376,7 @@ export async function discoverAntigravitySessions(
   for (const entry of dirEntries) {
     if (entry === 'tempmediaStorage' || !entry.includes('-')) continue
     try {
-      const path = await transcriptPath(baseDir, entry)
+      const path = await resolveTranscriptPath(end.brainDir, entry)
       if (path === undefined) continue
       const s = await fs.stat(path)
       const handle = await fs.open(path, 'r')
@@ -341,6 +395,7 @@ export async function discoverAntigravitySessions(
               title,
               createdAt,
               updatedAt: s.mtimeMs,
+              ...(source === undefined ? {} : { source }),
             })
           }
         }
@@ -351,9 +406,7 @@ export async function discoverAntigravitySessions(
       // ignore
     }
   }
-
-  results.sort((a, b) => b.updatedAt - a.updatedAt)
-  return results.slice(0, limit)
+  return results
 }
 
 function workspaceMatches(rawUris: string | undefined, requestedWorkspace: string): boolean {
@@ -367,12 +420,3 @@ function workspaceMatches(rawUris: string | undefined, requestedWorkspace: strin
   } catch { return false }
 }
 
-/** Remote conversation ids can select only a real transcript inside the AGY brain. */
-async function transcriptPath(baseDir: string, conversationId: string): Promise<string | undefined> {
-  if (!/^[a-zA-Z0-9_-]{1,256}$/.test(conversationId)) return undefined
-  try {
-    const root = await fs.realpath(baseDir)
-    const expected = join(root, conversationId, '.system_generated', 'logs', 'transcript.jsonl')
-    return await fs.realpath(expected) === expected ? expected : undefined
-  } catch { return undefined }
-}
