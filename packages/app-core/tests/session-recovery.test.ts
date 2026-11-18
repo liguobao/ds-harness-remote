@@ -18,7 +18,7 @@ const { proxy, transport, storage, authenticate, acp, codex, botDispatch, networ
   botDispatch: vi.fn(),
   network: { preferred: ['relay'] as Array<'lan' | 'p2p' | 'turn' | 'relay'> },
 }))
-vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
+vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light', Medium: 'medium' } }))
 vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => network.preferred }))
 vi.mock('../src/services/connection', async () => {
   const { BotRemoteClient } = await import('../src/services/bot-catalog')
@@ -84,6 +84,8 @@ const prepareScenario1 = () => {
     selectedSession: session,
     selectedDevice: { deviceId: 'host' } as never,
     sessions: [session],
+    busyAction: undefined,
+    busySendMode: 'queue',
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
   })
   proxy.sessionHistory.mockResolvedValue(page([]))
@@ -310,6 +312,60 @@ describe('ordered history recovery', () => {
         } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : 'unconfirmed' })
       },
     }))), prepareScenario1)
+  })
+
+  it('handles busySendMode steer/queue delivery, busyAction release, and unconfirmed retry', async () => {
+    const scenarios = [
+      'steer-while-running',
+      'idle-fallback-to-queue',
+      'in-flight-first-send-uses-steer',
+      'steer-timeout-unconfirmed-and-retry',
+    ] as const
+    await runScenarios(scenarios.map(name => ({ name, run: async () => {
+      if (name === 'steer-while-running') {
+        const running = { ...session, running: true }
+        useAppStore.setState({ selectedSession: running, sessions: [running], busySendMode: 'steer' })
+        proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+        const rpcId = 'steer-direct-1'
+        expect(await useAppStore.getState().sendMessage('interrupt now', [], rpcId)).toBe('sent')
+        expect(proxy.sessionPrompt).toHaveBeenCalledWith('s1', 'interrupt now', rpcId, [], [], 'steer')
+        expect(useAppStore.getState().busyAction).toBeUndefined()
+        const row = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+        expect(row).toMatchObject({ id: `local:${rpcId}`, role: 'user', text: 'interrupt now' })
+        expect(row?.kind === 'message' ? row.sendState : undefined).toBeUndefined()
+        const message = { id: 'host-steer-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'interrupt now' }] }
+        useAppStore.getState().handleMuxFrame(frame(entry('user/message', 25, { message })))
+        const echoed = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+        expect(echoed).toMatchObject({ id: 'host-steer-1', nativeSeq: 25 })
+        expect(echoed).not.toHaveProperty('sendState')
+      } else if (name === 'idle-fallback-to-queue') {
+        const idle = { ...session, running: false }
+        useAppStore.setState({ selectedSession: idle, sessions: [idle], busySendMode: 'steer' })
+        proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+        const rpcId = 'idle-normal-1'
+        expect(await useAppStore.getState().sendMessage('new turn', [], rpcId)).toBe('sent')
+        expect(proxy.sessionPrompt).toHaveBeenCalledWith('s1', 'new turn', rpcId, [], [], 'queue')
+      } else if (name === 'in-flight-first-send-uses-steer') {
+        const idle = { ...session, running: false }
+        useAppStore.setState({ selectedSession: idle, sessions: [idle], busySendMode: 'steer', busyAction: 'send-message' })
+        proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+        const rpcId = 'inflight-steer-1'
+        expect(await useAppStore.getState().sendMessage('second send', [], rpcId)).toBe('sent')
+        expect(proxy.sessionPrompt).toHaveBeenCalledWith('s1', 'second send', rpcId, [], [], 'steer')
+      } else {
+        const running = { ...session, running: true }
+        useAppStore.setState({ selectedSession: running, sessions: [running], busySendMode: 'steer' })
+        proxy.sessionPrompt.mockRejectedValueOnce(Object.assign(new Error('synthetic timeout'), { code: 'TIMEOUT' }))
+        const rpcId = 'steer-timeout-1'
+        expect(await useAppStore.getState().sendMessage('retryable steer', [], rpcId)).toBe('kept')
+        expect(useAppStore.getState().busyAction).toBeUndefined()
+        const timedOut = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+        expect(timedOut).toMatchObject({ id: `local:${rpcId}`, sendState: 'unconfirmed' })
+        proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+        expect(await useAppStore.getState().retrySendMessage(`local:${rpcId}`)).toBe(true)
+        expect(proxy.sessionPrompt).toHaveBeenLastCalledWith('s1', 'retryable steer', rpcId, [], [], 'steer')
+      }
+    } })), prepareScenario1)
   })
 
   it('settles an acknowledged prompt that history and inbox never recorded, and releases the composer', async () => {
