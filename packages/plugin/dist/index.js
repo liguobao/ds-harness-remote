@@ -81420,7 +81420,7 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
     data: {
       id: id6,
       role: "user",
-      content: messageContent(item, `${sessionId}:${id6}`, "text", text),
+      content: messageContent(item, `${sessionId}:${id6}`, text),
       source: requestId === void 0 || requestId === "" ? { kind: "user" } : { kind: "user", rpcId: requestId }
     }
   }];
@@ -81432,13 +81432,7 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
       message: {
         id: id6,
         role: "assistant",
-        content: messageContent(
-          item,
-          `${sessionId}:${id6}`,
-          type === "reasoning" ? "reasoning" : "text",
-          text,
-          type === "agentMessage" ? supplementalImages : []
-        ),
+        content: type === "reasoning" ? [{ type: "reasoning", text: itemText2({ content: item.summary }) || text || "" }] : messageContent(item, `${sessionId}:${id6}`, text, type === "agentMessage" ? supplementalImages : []),
         source: { kind: "model", provider: effectiveSelection.provider, model: effectiveSelection.model }
       }
     }
@@ -81470,14 +81464,14 @@ function itemEvents(item, turn, step, requestId, selection = modelSelection(), s
   }];
   return [];
 }
-function messageContent(item, attachmentSeed, fallbackType, fallbackText, supplementalImages = []) {
+function messageContent(item, attachmentSeed, fallbackText, supplementalImages = []) {
   const source = item.content ?? item.input;
   const blocks = contentBlocks(source, attachmentSeed);
   const images = contentBlocks(supplementalImages, `${attachmentSeed}:tool-output`);
   if (blocks.length > 0 || images.length > 0) {
-    return [...blocks.length > 0 ? blocks : [{ type: fallbackType, text: fallbackText ?? "" }], ...images];
+    return [...blocks.length > 0 ? blocks : [{ type: "text", text: fallbackText ?? "" }], ...images];
   }
-  return [{ type: fallbackType, text: fallbackText ?? "" }];
+  return [{ type: "text", text: fallbackText ?? "" }];
 }
 function toolResultEvent(item, turn, step, id6, resultText) {
   const type = string5(item.type) ?? "unknown";
@@ -87300,7 +87294,8 @@ function isUsableExternalNode(candidate, requireFrom) {
     cwd: dirname3(requireFrom),
     env,
     encoding: "utf8",
-    timeout: 3e3
+    timeout: 3e3,
+    windowsHide: true
   });
   return probe.status === 0 && probe.stdout.startsWith("node:");
 }
@@ -87321,7 +87316,8 @@ var ExternalNativePeerConnection = class {
     this.child = spawn(this.nodeBinary, ["--input-type=module", "--eval", HELPER_SOURCE], {
       cwd: dirname3(this.requireFrom),
       env: { ...process.env, DSH_REMOTE_RTC_HELPER_REQUIRE_FROM: this.requireFrom },
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk) => this.handleStdout(String(chunk)));
@@ -89522,7 +89518,7 @@ var IdentityStore = class {
    * file lives outside `removeIdentityRecords`, so resetting cannot delete a
    * lock another process holds — and cannot leave itself unprotected either.
    */
-  async reset(deviceName) {
+  async reset(deviceName, options = {}) {
     if (this.defaultOptions !== void 0) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions);
     await ensureDirectory(this.directory);
     return withIdentityLock(this.directory, async () => {
@@ -89530,7 +89526,9 @@ var IdentityStore = class {
       this.identity = void 0;
       this.peers.clear();
       await removeIdentityRecords(this.directory);
-      return this.loadOrCreateLocked(deviceName);
+      const identity3 = await this.loadOrCreateLocked(deviceName);
+      if (options.clearPairingPolicy) await rm3(join5(this.directory, "pairing-host-only.json"), { force: true });
+      return identity3;
     });
   }
   listTrustedPeers() {
@@ -94991,7 +94989,7 @@ function parseAgyModels(output2) {
 }
 async function readAgyModels(binary) {
   try {
-    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8" });
+    const result = await exec(binary, ["models"], { timeout: 3e4, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true });
     return parseAgyModels(result.stdout);
   } catch {
     throw new Error("The installed AGY model catalog is unavailable. Retry after checking the Host CLI.");
@@ -95131,6 +95129,8 @@ var TranscriptWatcher = class extends EventEmitter2 {
   }
   offset = 0;
   lineRemainder = "";
+  readTail = Promise.resolve();
+  readQueued = false;
   pollTimer;
   closed = false;
   transcriptPath;
@@ -95148,7 +95148,7 @@ var TranscriptWatcher = class extends EventEmitter2 {
     if (this.closed) return;
     const poll = async () => {
       try {
-        await this.readNewLines();
+        await this.flush();
       } catch {
       }
       if (!this.closed) {
@@ -95168,8 +95168,16 @@ var TranscriptWatcher = class extends EventEmitter2 {
   /**
    * 立即触发一次读取（同步/主动检查）
    */
-  async flush() {
-    await this.readNewLines();
+  flush() {
+    if (this.closed) return Promise.resolve();
+    if (!this.readQueued) {
+      this.readQueued = true;
+      this.readTail = this.readTail.catch(() => void 0).then(async () => {
+        this.readQueued = false;
+        if (!this.closed) await this.readNewLines();
+      });
+    }
+    return this.readTail;
   }
   async readNewLines() {
     let stat11;
@@ -95764,7 +95772,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           onRawEvent(parsed);
         }
         this.handleAgyEvent(parsed);
-        void this.watcher?.flush();
+        void this.watcher?.flush().catch(() => void 0);
       } catch (err5) {
         this.logger?.debug("Failed to parse agy stdout line", { code: "INVALID_AGY_STREAM_EVENT" });
       }
@@ -97883,7 +97891,7 @@ var AcpRemoteGateway = class {
   }
   /** Trusted, connection-scoped authority for the dedicated workspace uploader. */
   resolveUploadWorkspace(connectionId, publicId) {
-    const match = /^(acp|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId);
+    const match = /^(acp|antigravity|cursor|pi|opencode|claude|hermes):(.+)$/.exec(publicId);
     const backend = match?.[1] === "acp" ? "antigravity" : match?.[1];
     const session2 = match ? this.sessionCwds.get(match[2]) : void 0;
     if (!this.peers.has(connectionId) || !session2 || session2.backend !== backend || this.closed) {
@@ -98637,8 +98645,8 @@ var BUILTIN_ACP_SPECS = Object.freeze({
     id: "claude",
     name: "Claude",
     kind: "npm_package",
-    npmPackage: "@anthropic-ai/claude-agent-acp",
-    downloadUrl: "https://www.npmjs.com/package/@anthropic-ai/claude-agent-acp"
+    npmPackage: "@agentclientprotocol/claude-agent-acp",
+    downloadUrl: "https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp"
   }),
   opencode: Object.freeze({
     id: "opencode",
@@ -98681,6 +98689,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
       timeout: 3e3,
+      windowsHide: true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
     });
     const trimmed = out.trim();
@@ -98838,7 +98847,8 @@ function lookupSystemPath(command, platform3 = process.platform) {
     const output2 = execFileSync(probe, [command], {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
-      timeout: 5e3
+      timeout: 5e3,
+      windowsHide: true
     });
     const firstLine = output2.split(/\r?\n/).find((line) => line.trim().length > 0);
     if (firstLine && defaultCheckExecutable(firstLine.trim(), platform3)) {
@@ -99591,7 +99601,8 @@ function commandAvailable(command) {
   try {
     execFileSync2(process.platform === "win32" ? "where" : "which", [command], {
       stdio: "ignore",
-      timeout: 5e3
+      timeout: 5e3,
+      windowsHide: true
     });
     return true;
   } catch {
@@ -100710,7 +100721,7 @@ function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, ac
       if (!parsed) throw unavailable3();
       return codex(parsed.threadId);
     }
-    if (/^(acp|cursor|pi|opencode|claude|hermes):/.test(sessionId)) return acp(sessionId);
+    if (/^(acp|antigravity|cursor|pi|opencode|claude|hermes):/.test(sessionId)) return acp(sessionId);
     if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable3();
     const result = await gateway.dispatch("session/list", { args: { _request: {} } }, signal);
     signal.throwIfAborted();
@@ -105014,9 +105025,12 @@ var HostPluginRuntime = class {
     } catch (error62) {
       revokeFailure = error62;
     }
-    this.identity = await this.identities.reset(this.config.deviceName);
+    this.identity = await this.identities.reset(this.config.deviceName, { clearPairingPolicy: true });
     this.serverApi?.bindIdentity(this.identity);
-    if (this.serverApi !== void 0) this.serverConnection = this.createServerConnection(this.identity);
+    if (this.serverApi !== void 0) {
+      await this.serverApi.loadStoredPolicy();
+      this.serverConnection = this.createServerConnection(this.identity);
+    }
     this.initializePairing();
     this.logger.info("Host authorization cleared");
     if (revokeFailure !== void 0) throw revokeFailure;
@@ -105271,7 +105285,7 @@ var HostPluginRuntime = class {
       }
     }
     try {
-      execFileSync3(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
+      execFileSync3(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore", windowsHide: true });
       return true;
     } catch {
       return false;

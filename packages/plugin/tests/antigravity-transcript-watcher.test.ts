@@ -71,6 +71,23 @@ describe('TranscriptWatcher', () => {
     watcher.stop()
   })
 
+  it('dispatches each record once when multiple flushes overlap', async () => {
+    const watcher = new TranscriptWatcher(conversationId, testDir)
+    const steps: number[] = []
+    watcher.on('step', step => steps.push(step.step_index))
+    const transcriptFile = join(brainDir, 'transcript.jsonl')
+
+    try {
+      for (const stepIndex of [1, 2]) {
+        await fs.appendFile(transcriptFile, `${JSON.stringify({ step_index: stepIndex, type: 'USER_INPUT' })}\n`)
+        await Promise.all(Array.from({ length: 8 }, () => watcher.flush()))
+      }
+      expect(steps).toEqual([1, 2])
+    } finally {
+      watcher.stop()
+    }
+  })
+
   it('enriches truncated fields from transcript_full.jsonl', async () => {
     const watcher = new TranscriptWatcher(conversationId, testDir)
     const messages: string[] = []

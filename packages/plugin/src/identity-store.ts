@@ -223,7 +223,7 @@ export class IdentityStore {
    * file lives outside `removeIdentityRecords`, so resetting cannot delete a
    * lock another process holds — and cannot leave itself unprotected either.
    */
-  async reset(deviceName: string): Promise<HostIdentity> {
+  async reset(deviceName: string, options: { clearPairingPolicy?: boolean } = {}): Promise<HostIdentity> {
     if (this.defaultOptions !== undefined) this.storageDirectory = await prepareDefaultIdentityDirectory(this.defaultOptions)
     await ensureDirectory(this.directory)
     return withIdentityLock(this.directory, async () => {
@@ -231,7 +231,9 @@ export class IdentityStore {
       this.identity = undefined
       this.peers.clear()
       await removeIdentityRecords(this.directory)
-      return this.loadOrCreateLocked(deviceName)
+      const identity = await this.loadOrCreateLocked(deviceName)
+      if (options.clearPairingPolicy) await rm(join(this.directory, 'pairing-host-only.json'), { force: true })
+      return identity
     })
   }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   imageMediaType,
+  promptImageFromAsset,
   sanitizeBase64,
   sessionImageLimits,
   sniffImageMediaType,
@@ -34,6 +35,18 @@ describe('chat images and attachment preview (Issue #159)', () => {
     expect(imageMediaType('image/x-png', 'blob')).toBe('image/png')
     expect(imageMediaType(undefined, '1000000161', 'iVBORw0KGgoAAAANSUhEUgAA')).toBe('image/png')
     expect(imageMediaType('application/octet-stream', 'unknown', '/9j/4AAQSkZJRg==')).toBe('image/jpeg')
+  })
+
+  it('declares the encoded JPEG type for a PNG screenshot from the image picker', () => {
+    const image = promptImageFromAsset({
+      uri: 'file:///cache/screenshot.png',
+      fileName: 'screenshot.png',
+      mimeType: 'image/png',
+      width: 100,
+      height: 200,
+      base64: '/9j/2w==',
+    })
+    expect(image).toMatchObject({ mediaType: 'image/jpeg', data: '/9j/2w==' })
   })
 
   it('ensures sessionImageLimits falls back to safe default count when missing', () => {

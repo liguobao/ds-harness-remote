@@ -116,6 +116,9 @@ export function imageMediaType(
   name: string,
   base64?: string,
 ): ImageMediaType | undefined {
+  // Expo may return re-encoded bytes with the original asset's MIME type and name.
+  const detected = base64 === undefined ? undefined : sniffImageMediaType(base64)
+  if (detected !== undefined) return detected
   const normalized = mimeType?.toLowerCase()
   if (normalized === 'image/x-png') return 'image/png'
   if (IMAGE_MEDIA_TYPES.includes(normalized as ImageMediaType)) return normalized as ImageMediaType
@@ -124,7 +127,6 @@ export function imageMediaType(
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
   if (extension === 'webp') return 'image/webp'
   if (extension === 'gif') return 'image/gif'
-  if (base64 !== undefined) return sniffImageMediaType(base64)
   return undefined
 }
 

@@ -7,6 +7,8 @@ import type { AntigravityEvents, StepLogRecord } from './types.js'
 export class TranscriptWatcher extends EventEmitter {
   private offset = 0
   private lineRemainder = ''
+  private readTail = Promise.resolve()
+  private readQueued = false
   private pollTimer?: NodeJS.Timeout
   private closed = false
   private readonly transcriptPath: string
@@ -37,7 +39,7 @@ export class TranscriptWatcher extends EventEmitter {
     if (this.closed) return
     const poll = async () => {
       try {
-        await this.readNewLines()
+        await this.flush()
       } catch {
         // 文件可能尚未创建或临时锁占用，静默重试
       }
@@ -60,8 +62,18 @@ export class TranscriptWatcher extends EventEmitter {
   /**
    * 立即触发一次读取（同步/主动检查）
    */
-  async flush(): Promise<void> {
-    await this.readNewLines()
+  flush(): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    // Polling and stdout can both request a read. Keep one reader and
+    // coalesce arrivals during that read into a single follow-up.
+    if (!this.readQueued) {
+      this.readQueued = true
+      this.readTail = this.readTail.catch(() => undefined).then(async () => {
+        this.readQueued = false
+        if (!this.closed) await this.readNewLines()
+      })
+    }
+    return this.readTail
   }
 
   private async readNewLines(): Promise<void> {

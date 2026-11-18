@@ -268,7 +268,7 @@ export function itemEvents(
     data: {
       id,
       role: 'user',
-      content: messageContent(item, `${sessionId}:${id}`, 'text', text),
+      content: messageContent(item, `${sessionId}:${id}`, text),
       source: requestId === undefined || requestId === '' ? { kind: 'user' } : { kind: 'user', rpcId: requestId },
     },
   }]
@@ -280,13 +280,9 @@ export function itemEvents(
       message: {
         id,
         role: 'assistant',
-        content: messageContent(
-          item,
-          `${sessionId}:${id}`,
-          type === 'reasoning' ? 'reasoning' : 'text',
-          text,
-          type === 'agentMessage' ? supplementalImages : [],
-        ),
+        content: type === 'reasoning'
+          ? [{ type: 'reasoning', text: itemText({ content: item.summary }) || text || '' }]
+          : messageContent(item, `${sessionId}:${id}`, text, type === 'agentMessage' ? supplementalImages : []),
         source: { kind: 'model', provider: effectiveSelection.provider, model: effectiveSelection.model },
       },
     },
@@ -322,7 +318,6 @@ export function itemEvents(
 function messageContent(
   item: JsonRecord,
   attachmentSeed: string,
-  fallbackType: 'text' | 'reasoning',
   fallbackText?: string,
   supplementalImages: JsonRecord[] = [],
 ): JsonRecord[] {
@@ -330,9 +325,9 @@ function messageContent(
   const blocks = contentBlocks(source, attachmentSeed)
   const images = contentBlocks(supplementalImages, `${attachmentSeed}:tool-output`)
   if (blocks.length > 0 || images.length > 0) {
-    return [...(blocks.length > 0 ? blocks : [{ type: fallbackType, text: fallbackText ?? '' }]), ...images]
+    return [...(blocks.length > 0 ? blocks : [{ type: 'text', text: fallbackText ?? '' }]), ...images]
   }
-  return [{ type: fallbackType, text: fallbackText ?? '' }]
+  return [{ type: 'text', text: fallbackText ?? '' }]
 }
 
 export function toolResultEvent(
