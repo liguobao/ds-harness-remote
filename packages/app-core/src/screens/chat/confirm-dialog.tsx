@@ -45,54 +45,85 @@ export function ConfirmDialog({
     pendingRef.current = undefined
     pending?.()
   }
-  // Android's native Modal fade animates the whole window in a few coarse
-  // steps, which reads as a hard white→gray jump on light themes. Drive the
-  // fade from JS instead: the (transparent) Modal window appears instantly and
-  // the scrim+card ease in/out over a controlled curve.
-  const [mounted, setMounted] = useState(visible)
+  // iOS keeps the original native Modal fade (its `onDismiss` ordering and
+  // Modal fade are already correct there). Android's native fade animates the
+  // whole window in a few coarse steps, which reads as a hard white→gray jump
+  // on light themes, so it is driven from JS instead: the (transparent) Modal
+  // window appears instantly and the scrim+card ease in/out over a controlled
+  // curve.
+  const isAndroid = Platform.OS === 'android'
+  const [androidMounted, setAndroidMounted] = useState(visible)
   // Android elevation shadows render at full strength regardless of the view's
   // animated opacity, so the card's square shadow would pop in before the card
   // fades in and linger after it fades out. Only draw it while fully shown.
   const [shadowShown, setShadowShown] = useState(visible)
   const fade = useRef(new Animated.Value(visible ? 1 : 0)).current
   useEffect(() => {
+    if (!isAndroid) return
+    let anim: Animated.CompositeAnimation | undefined
     if (visible) {
-      setMounted(true)
+      setAndroidMounted(true)
       setShadowShown(false)
-      Animated.timing(fade, {
+      anim = Animated.timing(fade, {
         toValue: 1,
         duration: 220,
         easing: Easing.inOut(Easing.quad),
         useNativeDriver: true,
-      }).start(({ finished }) => {
+      })
+      anim.start(({ finished }) => {
         if (finished) setShadowShown(true)
       })
     } else {
       setShadowShown(false)
-      Animated.timing(fade, {
+      // Initial mount with visible=false: nothing to animate out.
+      if (!androidMounted) return
+      anim = Animated.timing(fade, {
         toValue: 0,
         duration: 180,
         easing: Easing.in(Easing.quad),
         useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) setMounted(false)
+      })
+      anim.start(({ finished }) => {
+        if (finished) setAndroidMounted(false)
       })
     }
-  }, [visible, fade])
+    return () => anim?.stop()
+  }, [visible, isAndroid])
+  // The exit fade must not re-trigger destructive actions: ignore presses and
+  // the Android back button while the dialog is animating out.
+  const modalVisible = isAndroid ? androidMounted : visible
+  const guardVisible = () => {
+    if (!visible) {
+      pendingRef.current = undefined
+      return true
+    }
+    return false
+  }
   return (
     <Modal
       transparent
-      visible={mounted}
-      animationType="none"
+      visible={modalVisible}
+      animationType={isAndroid ? 'none' : 'fade'}
       onRequestClose={() => {
+        if (guardVisible()) return
         pendingRef.current = undefined
         onClose('dismiss')
       }}
       onDismiss={runPending}
       statusBarTranslucent
     >
-      <Animated.View style={[styles.backdrop, { opacity: fade }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => onClose('dismiss')} accessibilityLabel={title} />
+      <Animated.View
+        style={isAndroid ? [styles.backdrop, { opacity: fade }] : styles.backdrop}
+        pointerEvents={visible ? 'auto' : 'none'}
+      >
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => {
+            if (guardVisible()) return
+            onClose('dismiss')
+          }}
+          accessibilityLabel={title}
+        />
         {/* Elevation shadow only while fully visible; see shadowShown above. */}
         <View style={[styles.card, shadowShown ? null : styles.cardShadowless]} accessibilityViewIsModal>
           <Text style={styles.title}>{title}</Text>
@@ -104,6 +135,7 @@ export function ConfirmDialog({
                 accessibilityRole="button"
                 accessibilityLabel={button.label}
                 onPress={() => {
+                  if (guardVisible()) return
                   pendingRef.current = button.onPress
                   onClose('action')
                   if (Platform.OS !== 'ios') runPending()
