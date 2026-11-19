@@ -4,13 +4,18 @@
 
 ## 0.6.6 — 待发布 / Unreleased
 
-Android versionCode / iOS buildNumber: 74.
+Android versionCode 74 · iOS buildNumber floor 74
 
 ### 中文
 
+- Android 和 iOS 可从主机详情页打开主机上的 DSH Web。普通账号、仅设备账号和会员均可使用，需要配对的 Remote Host 同步升级，且服务器已启用 DSH Web。
+- Android、iOS 和鸿蒙可在设置中查看账号会员状态，并改善主机列表、新建对话和 PDF 阅读体验。Android 和 iOS 将排版密度统一到会话外观设置，并移除更多操作菜单中重复的快捷提示词入口。
+- Android 和 iOS 的连接详情显示当前 Relay 节点。修复 Relay 与 WebRTC 切换时可能出现的连接中断，并缩短无 TURN 的自建服务回落到 Relay 的等待时间。
+- 修复 Android 和 iOS 冷启动打开会话列表时可能崩溃、断线切换权限后输入框锁住、正常接管会话时误报未确认，以及 ACP 图片预览、流式回复重复和草稿恢复问题。
+- 修复 Codex 流式回复重连后缺失更新、ACP 长会话历史回放和 Windows 上 ACP 启动失败的问题。取消或超时的远程压缩可恢复，避免后续压缩一直被阻塞。
 - 适配 DSH Desktop 0.2.2-rc.5，远程会话支持终端列表实时更新，原生 Harness 工作区可按文件名或路径搜索。
 - 使用官方托管服务时，可从远程工作台底栏打开会员方案页。
-- Android 在会话忙碌时可选择「排队发送」或「插话发送」，已排队的消息也可手动插入当前对话。
+- Android 和 iOS 在会话忙碌时可选择「排队发送」或「插话发送」，已排队的消息也可手动插入当前对话。
 - Antigravity 优先使用原生 `agy acp`，保留旧版适配器作为回退。扩展 ACP 会话的模式、权限和状态显示，并支持注册使用标准 stdio ACP 的自定义后端。
 - 新增跨机器复制 Harness 会话历史的 Host API。可复制单个会话或整个工作区的普通会话，导入后使用目标工作区，源 worktree 归属不随历史迁移。此能力需要客户端接入。
 - Host 使用 werift 时，可利用合格的公网 IPv6 和识别到的 Tailscale IPv4 地址尝试 P2P 直连。
@@ -32,9 +37,14 @@ Android versionCode / iOS buildNumber: 74.
 
 ### English
 
+- Open the Host’s DSH Web from Host details on Android and iOS. Standard, device-only, and member accounts can use it with an updated paired Remote Host and a Server with DSH Web enabled.
+- View account membership status in Settings on Android, iOS, and HarmonyOS. These clients also improve the Host list, new conversation flow, and PDF viewer. On Android and iOS, layout density lives in conversation appearance settings, and quick prompts are available from the composer.
+- Android and iOS connection details show the active Relay node. Fix interruptions when switching between Relay and WebRTC, and fall back to Relay sooner on self-hosted Servers without TURN.
+- Fix a possible session-list crash on cold start, a locked composer when changing permissions during a disconnect, false session-control confirmation errors, and issues with ACP image previews, duplicate streamed replies, and draft recovery on Android and iOS.
+- Recover missing Codex stream updates after reconnecting, improve long ACP history replay, and fix ACP startup failures on Windows. Later compaction requests can proceed after a cancelled or timed-out remote compaction.
 - Support DSH Desktop 0.2.2-rc.5 with live remote terminal lists and file search by name or path in native Harness workspaces.
 - Open membership plans from the Remote workspace footer when connected to the official hosted service.
-- Android lets you queue a message or steer the active turn while a session is busy. You can also steer with a message that is already queued.
+- Android and iOS let you queue a message or steer the active turn while a session is busy. You can also steer with a message that is already queued.
 - Prefer native `agy acp` for Antigravity with the legacy adapter as a fallback. Expand ACP mode and permission controls and session status, and support registering custom backends that use standard stdio ACP.
 - Add Host APIs for copying one Harness session or the ordinary sessions in a workspace across machines. Imported sessions use the destination workspace and leave source worktree ownership behind. These APIs require client integration.
 - Hosts using werift can attempt direct P2P connections over eligible public IPv6 and recognized Tailscale IPv4 addresses.
