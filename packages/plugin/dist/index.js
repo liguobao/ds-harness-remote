@@ -98361,7 +98361,7 @@ var AcpPeerBridge = class {
       });
     }
     const data2 = { streamId: `session:${sessionId}`, frame };
-    if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+    if (encodeMessage(createEvent("agent.acp.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
       for (const streamId of streamIds) {
         this.streams.delete(streamId);
         await this.publish("agent.acp.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
@@ -98859,7 +98859,7 @@ var AcpRemoteGateway = class {
     const envelope = parseCallEnvelope2(input4);
     const call = parseAcpCall(envelope.method, envelope.params);
     const sessionId = sessionIdFromParams(call.method, call.params);
-    const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0);
+    const backend = typeof call.params.backend === "string" ? call.params.backend : call.method === "dsh/sessionHistory" ? this.resolveHistoryTarget(call.params).backend : sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0;
     const assertCurrent = this.captureCallScope(connectionId, typeof backend === "string" ? backend : this.defaultBackend());
     const reserve = backend === "opencode" && sessionId !== void 0 && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method);
     if (reserve) {
@@ -98877,6 +98877,14 @@ var AcpRemoteGateway = class {
         else this.opencodeOperations.delete(sessionId);
       }
     }
+  }
+  resolveHistoryTarget(params) {
+    const rawSessionId = String(params.sessionId);
+    const parsedPrefix = parsePublicSessionId(rawSessionId);
+    const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId;
+    const boundBackend = this.sessionBackends.get(conversationId);
+    const backend = typeof params.backend === "string" ? params.backend : parsedPrefix?.backend ?? boundBackend ?? this.defaultBackend();
+    return { rawSessionId, parsedPrefix, conversationId, boundBackend, backend };
   }
   captureCallScope(connectionId, backend) {
     const peer = this.peers.get(connectionId);
@@ -99120,11 +99128,7 @@ var AcpRemoteGateway = class {
       return { items: [] };
     }
     if (call.method === "dsh/sessionHistory") {
-      const rawSessionId = String(call.params.sessionId);
-      const parsedPrefix = parsePublicSessionId(rawSessionId);
-      const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId;
-      const boundBackend = this.sessionBackends.get(conversationId);
-      const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
+      const { rawSessionId, parsedPrefix, conversationId, boundBackend, backend } = this.resolveHistoryTarget(call.params);
       if (boundBackend !== void 0 && boundBackend !== backend || parsedPrefix && parsedPrefix.backend !== backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
@@ -99209,23 +99213,39 @@ var AcpRemoteGateway = class {
         await this.listCatalogSessions(targetBackend).catch(() => void 0);
       }
       assertCurrent();
-      this.requireSessionOwner(connectionId, sessionId);
+      const existingOwner = this.sessionOwners.get(sessionId);
+      if (existingOwner !== void 0 && existingOwner !== connectionId) {
+        throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this session.");
+      }
       const acp = this.requireAcp(targetBackend);
-      this.sessionBackends.set(sessionId, targetBackend);
       const result = await acp.call(call.method, { ...call.params, ...sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId).cwd, mcpServers: [] } : {} });
       assertCurrent();
       const loadedId = readSessionId(result) ?? sessionId;
       if (loadedId !== void 0) {
-        if (loadedId !== sessionId || this.sessionBackends.has(loadedId) && targetBackend !== void 0 && this.sessionBackends.get(loadedId) !== targetBackend) {
+        const currentOwner = this.sessionOwners.get(loadedId);
+        if (currentOwner !== void 0 && currentOwner !== connectionId) {
+          throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this session.");
+        }
+        const currentBackend = this.sessionBackends.get(loadedId);
+        if (loadedId !== sessionId || currentBackend !== void 0 && currentBackend !== targetBackend) {
           throw new RpcError("ACP_SESSION_COLLISION", "The ACP backend returned a different session identifier.");
         }
-        this.sessionOwners.set(loadedId, connectionId);
-        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
+        let persistedPreset;
         if (!this.sessionPermissions.has(loadedId)) {
-          const persistedPreset = await this.workspaceStore.getSessionPermission(loadedId);
+          persistedPreset = await this.workspaceStore.getSessionPermission(loadedId);
           assertCurrent();
-          if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset);
+          const postOwner = this.sessionOwners.get(loadedId);
+          if (postOwner !== void 0 && postOwner !== connectionId) {
+            throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this session.");
+          }
+          const postBackend = this.sessionBackends.get(loadedId);
+          if (postBackend !== void 0 && postBackend !== targetBackend) {
+            throw new RpcError("ACP_SESSION_COLLISION", "The ACP backend returned a different session identifier.");
+          }
         }
+        this.sessionOwners.set(loadedId, connectionId);
+        this.sessionBackends.set(loadedId, targetBackend);
+        if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset);
       }
       return sanitizeSessionResult(result);
     }
@@ -99393,35 +99413,21 @@ var AcpRemoteGateway = class {
         stopReason,
         catchUp: catchUp.length
       });
-      await this.publishToSession(sessionId, {
-        method: "session/update",
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: "prompt_completed",
-            stopReason,
-            ...usage ? { usage } : {},
-            ...catchUp.length > 0 ? { catchUp } : {}
-          }
-        }
-      });
+      await this.publishToSession(sessionId, this.buildTerminalPromptFrame(sessionId, {
+        sessionUpdate: "prompt_completed",
+        stopReason,
+        ...usage ? { usage } : {}
+      }, catchUp));
     } catch (error62) {
       if (!accepted()) return;
       this.logger?.warn("ACP session/prompt failed", { code: errorCode3(error62) });
       await this.inboundChain.catch(() => void 0);
       if (!accepted()) return;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
-      await this.publishToSession(sessionId, {
-        method: "session/update",
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: "prompt_failed",
-            code: errorCode3(error62),
-            ...catchUp.length > 0 ? { catchUp } : {}
-          }
-        }
-      }).catch(() => void 0);
+      await this.publishToSession(sessionId, this.buildTerminalPromptFrame(sessionId, {
+        sessionUpdate: "prompt_failed",
+        code: errorCode3(error62)
+      }, catchUp)).catch(() => void 0);
     } finally {
       if (this.promptsInProgress.get(sessionId) === task) {
         this.promptsInProgress.delete(sessionId);
@@ -99600,7 +99606,18 @@ var AcpRemoteGateway = class {
       count: buffered.length
     });
     for (const frame of buffered) {
-      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
+      try {
+        await peer.publishInbound(sessionId, { method: frame.method, params: frame.params });
+      } catch (error62) {
+        if (isResponseTooLarge(error62)) {
+          this.logger.warn("Skipped oversized buffered ACP frame during replay", {
+            sessionId: shortSessionId(sessionId),
+            method: frame.method
+          });
+          continue;
+        }
+        throw error62;
+      }
     }
   }
   async reconfigure(config2) {
@@ -99628,6 +99645,8 @@ var AcpRemoteGateway = class {
     }
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
     await this.startPromise?.catch(() => void 0);
+    const inFlightLaunching = [...changed].map((id7) => this.launching.get(id7)?.promise).filter((task) => task !== void 0);
+    if (inFlightLaunching.length > 0) await Promise.allSettled(inFlightLaunching);
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id7]) => id7));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
     for (const [id7, session2] of this.sessionCwds) if (changed.has(session2.backend)) this.sessionCwds.delete(id7);
@@ -99717,14 +99736,19 @@ var AcpRemoteGateway = class {
     const candidate = this.config.backends.find((item) => item.id === id7);
     if (candidate === void 0 || !this.enabledBackends().includes(id7) || this.pendingReconfiguration.has(id7)) return Promise.resolve();
     if (this.backendInstances.get(id7)?.client.isReady()) return Promise.resolve();
+    const configKey = JSON.stringify(candidate);
     const inFlight = this.launching.get(id7);
-    if (inFlight !== void 0) return inFlight;
-    let task;
-    task = this.launchCandidateBinaries(candidate).finally(() => {
-      if (this.launching.get(id7) === task) this.launching.delete(id7);
+    if (inFlight !== void 0) {
+      if (inFlight.configKey === configKey) return inFlight.promise;
+      return inFlight.promise.catch(() => void 0).then(() => this.launchSerialized(id7));
+    }
+    let entry;
+    const promise2 = this.launchCandidateBinaries(candidate).finally(() => {
+      if (this.launching.get(id7) === entry) this.launching.delete(id7);
     });
-    this.launching.set(id7, task);
-    return task;
+    entry = { configKey, promise: promise2 };
+    this.launching.set(id7, entry);
+    return promise2;
   }
   async launchCandidateBinaries(candidate) {
     let lastError;
@@ -99772,9 +99796,11 @@ var AcpRemoteGateway = class {
       else this.backendDiagnostics.delete(id7);
       this.backendErrors.delete(id7);
     } catch (error62) {
-      const diag = (error62 instanceof CursorAcpError ? error62.authDiagnostic : void 0) ?? acp.diagnostics?.();
-      if (diag) this.backendDiagnostics.set(id7, diag);
-      this.backendErrors.set(id7, errorCode3(error62));
+      if (this.backendCurrent(backend)) {
+        const diag = (error62 instanceof CursorAcpError ? error62.authDiagnostic : void 0) ?? acp.diagnostics?.();
+        if (diag) this.backendDiagnostics.set(id7, diag);
+        this.backendErrors.set(id7, errorCode3(error62));
+      }
       await acp.close();
       throw error62;
     } finally {
@@ -99873,18 +99899,68 @@ var AcpRemoteGateway = class {
     }
   }
   async publishToSession(sessionId, frame) {
-    this.recordTurnCatchUp(sessionId, frame);
+    const oversized = isOversizedAcpFrame(sessionId, frame);
+    if (!oversized) this.recordTurnCatchUp(sessionId, frame);
     const ownerId = this.sessionOwners.get(sessionId);
     const owner = ownerId === void 0 ? void 0 : this.peers.get(ownerId);
     if (owner === void 0) {
+      if (oversized) {
+        this.logger.warn("Dropped oversized ACP frame without buffering", {
+          sessionId: shortSessionId(sessionId),
+          method: frame.method
+        });
+        return;
+      }
       this.bufferFrame(sessionId, frame);
       return;
     }
     try {
       await owner.publishInbound(sessionId, frame);
-    } catch {
+    } catch (error62) {
+      if (oversized || isResponseTooLarge(error62)) {
+        const list2 = this.turnCatchUp.get(sessionId);
+        if (list2 !== void 0 && list2.at(-1)?.params === frame.params) list2.pop();
+        this.logger.warn("Dropped oversized ACP frame without buffering", {
+          sessionId: shortSessionId(sessionId),
+          method: frame.method
+        });
+        return;
+      }
       this.bufferFrame(sessionId, frame);
     }
+  }
+  buildTerminalPromptFrame(sessionId, baseUpdate, catchUp) {
+    const build = (items) => ({
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          ...baseUpdate,
+          ...items.length > 0 ? { catchUp: items } : {}
+        }
+      }
+    });
+    if (catchUp.length === 0) return build([]);
+    const full = build(catchUp);
+    if (!isOversizedAcpFrame(sessionId, full)) return full;
+    let low = 1;
+    let high = catchUp.length - 1;
+    let best = build([]);
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = build(catchUp.slice(catchUp.length - mid));
+      if (!isOversizedAcpFrame(sessionId, candidate)) {
+        best = candidate;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    this.logger.warn("Trimmed ACP turn catchUp to fit secure channel limit", {
+      sessionId: shortSessionId(sessionId),
+      originalCount: catchUp.length
+    });
+    return best;
   }
   recordTurnCatchUp(sessionId, frame) {
     const list2 = this.turnCatchUp.get(sessionId);
@@ -99897,6 +99973,13 @@ var AcpRemoteGateway = class {
     while (list2.length > MAX_TURN_CATCH_UP_FRAMES) list2.shift();
   }
   bufferFrame(sessionId, frame) {
+    if (isOversizedAcpFrame(sessionId, frame)) {
+      this.logger.warn("Dropped oversized ACP frame without buffering", {
+        sessionId: shortSessionId(sessionId),
+        method: frame.method
+      });
+      return;
+    }
     this.pruneFrameBuffer(sessionId);
     const list2 = this.recentFrames.get(sessionId) ?? [];
     list2.push({ method: frame.method, params: frame.params, at: Date.now() });
@@ -99943,11 +100026,17 @@ var AcpRemoteGateway = class {
   // Retries are tracked per backend so one failing adapter cannot consume, or be
   // reset by, another adapter's attempts.
   scheduleBackendRestart(backend) {
-    if (this.closed || !this.config.enabled) return;
+    if (this.closed) return;
+    if (!this.config.enabled || !this.enabledBackends().includes(backend)) {
+      this.syncIdleUnavailableState();
+      return;
+    }
+    if (this.pendingReconfiguration.has(backend)) return;
     if (this.restartTimers.has(backend)) return;
     const attempt = this.restartAttempts.get(backend) ?? 0;
     if (attempt >= this.restartDelaysMs.length) {
       this.logger.warn("ACP backend restart attempts exhausted", { id: backend });
+      this.syncIdleUnavailableState();
       return;
     }
     this.restartAttempts.set(backend, attempt + 1);
@@ -99958,6 +100047,11 @@ var AcpRemoteGateway = class {
     timer2.unref?.();
     this.restartTimers.set(backend, timer2);
   }
+  syncIdleUnavailableState() {
+    if (this.closed || this.pendingReconfiguration.size > 0 || this.isAvailable()) return;
+    if (this.restartTimers.size > 0 || this.launching.size > 0) return;
+    this.state = this.config.enabled && this.enabledBackends().length > 0 ? "unavailable" : "disabled";
+  }
   async restartBackend(backend) {
     if (this.closed) return;
     try {
@@ -99965,6 +100059,7 @@ var AcpRemoteGateway = class {
       if (!this.closed && this.pendingReconfiguration.size === 0 && this.isAvailable()) this.state = "ready";
     } catch (error62) {
       this.logger.warn("ACP backend restart failed", { id: backend, code: errorCode3(error62) });
+      if (!this.isAvailable()) this.unavailableCode ??= errorCode3(error62);
     }
     if (this.closed) return;
     if (this.availableBackends().includes(backend)) return;
@@ -100372,6 +100467,29 @@ function cursorBinaryCandidates(configured) {
 function errorCode3(error62) {
   if (error62 instanceof CursorAcpError || error62 instanceof OpencodeAcpError || error62 instanceof RpcError) return error62.code;
   return "CURSOR_UNAVAILABLE";
+}
+var OVERSIZED_FRAME_ERROR_CODES = /* @__PURE__ */ new Set(["RESPONSE_TOO_LARGE", "FRAME_TOO_LARGE", "PAYLOAD_TOO_LARGE"]);
+function isOversizedAcpFrame(sessionId, frame) {
+  return encodeMessage(createEvent("agent.acp.frame", {
+    streamId: `session:${sessionId}`,
+    frame
+  })).byteLength > MAX_SECURE_MESSAGE_BYTES;
+}
+function isResponseTooLarge(error62) {
+  const seen = /* @__PURE__ */ new Set();
+  let current = error62;
+  while (current !== void 0 && current !== null && !seen.has(current) && seen.size < 8) {
+    seen.add(current);
+    if (isRecord21(current) && typeof current.code === "string" && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
+      return true;
+    }
+    const message = current instanceof Error ? current.message : isRecord21(current) && typeof current.message === "string" ? current.message : void 0;
+    if (message !== void 0 && /secure message exceeds the reassembly limit|exceeds the secure channel limit/i.test(message)) {
+      return true;
+    }
+    current = current instanceof Error ? current.cause : isRecord21(current) ? current.cause : void 0;
+  }
+  return false;
 }
 function shortSessionId(sessionId) {
   return sessionId.length <= 16 ? sessionId : `${sessionId.slice(0, 8)}\u2026${sessionId.slice(-4)}`;
