@@ -304,7 +304,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
   return (
     <View style={styles.flex}>
-      {webRpc && isConnected && <DshWebScreen rpc={webRpc} onClose={() => setWebRpc(undefined)} />}
+      {webRpc && isConnected && <DshWebScreen rpc={webRpc} hostName={device.name} onClose={() => setWebRpc(undefined)} />}
       <BlurHeaderFrame header={<TopBar title={zhCN.devices.title} onBack={onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>

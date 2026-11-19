@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Modal, Platform, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Modal, Platform, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import WebView from 'react-native-webview'
 import { dshWebGrantSchema, type DshWebGrant } from '@dsh-remote/protocol'
@@ -32,10 +32,15 @@ export function isFatalDshWebHttpError(
   }
 }
 
-export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }) {
+export function DshWebScreen({ rpc, hostName, onClose }: {
+  rpc: Rpc
+  hostName: string
+  onClose: () => void
+}) {
   const chinese = useAppStore(state => state.language)?.startsWith('zh')
   const { colors } = useTheme()
   const [grant, setGrant] = useState<DshWebGrant>()
+  const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const pendingCloseRef = useRef<Promise<unknown> | undefined>(undefined)
@@ -44,6 +49,7 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
     const abort = new AbortController()
     let shouldClose = false
     setFailed(false)
+    setLoaded(false)
     setGrant(undefined)
 
     const startOpen = () => {
@@ -102,17 +108,19 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
 
   const retry = () => {
     setFailed(false)
+    setLoaded(false)
     setGrant(undefined)
     setAttempt(current => current + 1)
   }
 
-  const sessionUri = grant && new URL('/__remote/session', grant.url).href
+  const grantUrl = grant && new URL(grant.url).href
+  const sessionUri = grantUrl && new URL('/__remote/session', grantUrl).href
   const source = useMemo(() => {
     if (!grant || !sessionUri) return undefined
     if (Platform.OS === 'android') {
       // postUrl can send an opaque Origin. Post a form from the tunnel origin instead.
       return {
-        baseUrl: grant.url,
+        baseUrl: new URL('/__remote/session-bootstrap', grant.url).href,
         html: `<!doctype html><meta name="referrer" content="same-origin">
           <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; form-action 'self'">
           <form method="post" action="/__remote/session">
@@ -127,25 +135,31 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
       body: 'browserGrant=' + encodeURIComponent(grant.browserGrant),
     }
   }, [grant, sessionUri])
-  const title = chinese ? '打开 DSH Web' : 'Open DSH Web'
+  const openTitle = chinese ? '打开 DSH Web' : 'Open DSH Web'
+  const loadingMessage = grant
+    ? (chinese ? '正在验证访问并加载页面…' : 'Verifying access and loading the page…')
+    : (chinese ? '正在建立 DSH Web 连接…' : 'Establishing the DSH Web connection…')
   return (
     <Modal visible onRequestClose={onClose} animationType="slide">
       <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>
-        <TopBar title={title} onBack={onClose} />
+        <TopBar title={loaded && !failed ? hostName : openTitle} onBack={onClose} />
         {failed ? <ErrorBanner
           message={chinese ? '无法打开 DSH Web，请重试。' : 'Could not open DSH Web. Please try again.'}
           onRetry={retry}
         />
-          : !source || !grant || !sessionUri ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
-            : <WebView
+          : <View style={styles.fill}>
+              {source && grantUrl && sessionUri && <WebView
                 source={source}
                 originWhitelist={['*']}
                 onShouldStartLoadWithRequest={({ url }) => {
-                  try { return new URL(url).origin === new URL(grant.url).origin } catch { return false }
+                  try { return new URL(url).origin === new URL(grantUrl).origin } catch { return false }
+                }}
+                onLoad={({ nativeEvent }) => {
+                  if (nativeEvent.url === grantUrl) setLoaded(true)
                 }}
                 onError={() => setFailed(true)}
                 onHttpError={({ nativeEvent }) => {
-                  if (isFatalDshWebHttpError(nativeEvent, grant.url, sessionUri)) setFailed(true)
+                  if (isFatalDshWebHttpError(nativeEvent, grantUrl, sessionUri)) setFailed(true)
                 }}
                 onContentProcessDidTerminate={() => setFailed(true)}
                 incognito={Platform.OS === 'ios'}
@@ -155,6 +169,11 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
                 allowFileAccess={false}
                 mixedContentMode="never"
               />}
+              {!loaded && <View style={[StyleSheet.absoluteFill, styles.loading, { backgroundColor: colors.background }]}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={{ color: colors.muted }} accessibilityLiveRegion="polite">{loadingMessage}</Text>
+              </View>}
+            </View>}
       </SafeAreaView>
     </Modal>
   )
@@ -162,5 +181,10 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 24,
+  },
 })

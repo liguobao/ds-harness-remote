@@ -79,6 +79,7 @@ vi.mock('react-native', () => ({
   Modal: 'Modal',
   Platform: { OS: 'android' },
   StyleSheet: { create: <T,>(styles: T) => styles },
+  Text: 'Text',
   View: 'View',
 }))
 
@@ -128,7 +129,7 @@ function findElement(node: unknown, predicate: (el: ElementNode) => boolean): El
 
 function renderScreen(rpc: (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>) {
   reactHarness.beginRender()
-  return DshWebScreen({ rpc, onClose: () => undefined })
+  return DshWebScreen({ rpc, hostName: 'Test Host', onClose: () => undefined })
 }
 
 async function flushMicrotasks() {
@@ -234,7 +235,7 @@ describe('DshWebScreen helpers and lifecycle', () => {
           const readyTree = renderScreen(rpc)
           const webView = findElement(readyTree, el => el.type === 'WebView')
           expect(webView?.props?.source).toEqual({
-            baseUrl: validGrant().url,
+            baseUrl: new URL('/__remote/session-bootstrap', validGrant().url).href,
             html: expect.stringContaining('<form method="post" action="/__remote/session">'),
           })
           const source = webView?.props?.source as { html: string }
