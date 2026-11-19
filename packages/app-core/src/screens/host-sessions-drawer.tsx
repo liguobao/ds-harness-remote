@@ -1155,7 +1155,7 @@ export function HostSessionsDrawer({
               accessibilityLabel={strings.settings.more}
               onPress={() => { Keyboard.dismiss(); setAppMenuOpen(true) }}
               hitSlop={8}
-              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressedFade]}
             >
               <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>

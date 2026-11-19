@@ -852,7 +852,9 @@ export function WelcomeMessage({ policyHint }: { policyHint?: string } = {}) {
         </View>
       </View>
       {policyHint !== undefined && policyHint.length > 0 && (
-        <Text style={styles.welcomePolicyHint}>{policyHint}</Text>
+        <Text style={styles.welcomePolicyHint} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+          {policyHint}
+        </Text>
       )}
     </View>
   )

@@ -300,7 +300,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
       </View>
     </>}
     {binary && !error && <>
-      <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.readOnly}</Text>
+      {binary.mimeType !== 'application/pdf' && <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.readOnly}</Text>}
       {binary.missingFonts.length > 0 && <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.missingFonts(binary.missingFonts.join(', '))}</Text>}
       {binary.mimeType === 'application/pdf'
         ? <PdfPreview key={`${file}:${revision}`} data={binary.data} label={file ?? t.tools.files} />

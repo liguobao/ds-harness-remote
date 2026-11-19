@@ -44,6 +44,8 @@
   let resizeTimer = 0
   let lastWidth = 0
   let disposed = false
+  let swipe = null
+  let pinch = null
 
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
   const send = value => {
@@ -145,7 +147,7 @@
     } catch { /* The canvas already shows the page; a missing text overlay is not a render failure. */ }
   }
 
-  const render = async () => {
+  const render = async (anchor = null) => {
     const mine = ++renderToken
     let task = null
     try {
@@ -176,6 +178,12 @@
       canvasEl.height = clamp(Math.floor(viewport.height), 1, MAX_CANVAS_DIMENSION)
       pageEl.style.width = `${width}px`
       pageEl.style.height = `${height}px`
+      rootEl.style.touchAction = width + 2 * PAGE_MARGIN > rootEl.clientWidth + 1 ? 'pan-x pan-y' : 'pan-y'
+      if (anchor !== null) {
+        const rect = pageEl.getBoundingClientRect()
+        rootEl.scrollLeft += rect.left + anchor.x * width - anchor.clientX
+        rootEl.scrollTop += rect.top + anchor.y * height - anchor.clientY
+      }
       textEl.replaceChildren()
       state.scale = cssScale
       task = current.render({
@@ -194,7 +202,15 @@
       state.pages = pageCount
       state.zoom = zoom
       state.error = null
-      send({ type: 'rendered', id: session, page: current.pageNumber, pages: pageCount, zoom })
+      send({
+        type: 'rendered',
+        id: session,
+        page: current.pageNumber,
+        pages: pageCount,
+        zoom,
+        canZoomIn: zoom < MAX_ZOOM,
+        canZoomOut: zoom > MIN_ZOOM,
+      })
     } catch (error) {
       if (disposed || mine !== renderToken || error?.name === 'RenderingCancelledException') return
       fail(errorCode(error))
@@ -224,6 +240,7 @@
       return
     }
     current = next
+    rootEl.scrollTo(0, 0)
     await render()
   }
 
@@ -369,6 +386,64 @@
     zoom = clamp(Math.round(zoom * (1 + delta) * 1000) / 1000, MIN_ZOOM, MAX_ZOOM)
     void render()
   }
+
+  const touchDistance = (first, second) => Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY)
+  const clearGesture = () => {
+    swipe = null
+    pinch = null
+    pageEl.style.transform = ''
+    pageEl.style.transformOrigin = ''
+  }
+
+  rootEl.addEventListener('touchstart', event => {
+    if (current === null || state.status !== 'rendered') return
+    const [first, second] = event.touches
+    if (event.touches.length === 1) {
+      swipe = rootEl.scrollWidth <= rootEl.clientWidth + 1 ? { x: first.clientX, y: first.clientY } : null
+      return
+    }
+    swipe = null
+    if (event.touches.length !== 2) { clearGesture(); return }
+    event.preventDefault()
+    const rect = pageEl.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    const clientX = (first.clientX + second.clientX) / 2
+    const clientY = (first.clientY + second.clientY) / 2
+    const x = clamp((clientX - rect.left) / rect.width, 0, 1)
+    const y = clamp((clientY - rect.top) / rect.height, 0, 1)
+    pinch = { distance: Math.max(1, touchDistance(first, second)), startZoom: zoom, target: zoom, x, y, clientX, clientY }
+    pageEl.style.transformOrigin = `${x * 100}% ${y * 100}%`
+  }, { passive: false })
+
+  rootEl.addEventListener('touchmove', event => {
+    if (pinch === null || event.touches.length !== 2) return
+    event.preventDefault()
+    const [first, second] = event.touches
+    pinch.target = clamp(pinch.startZoom * touchDistance(first, second) / pinch.distance, MIN_ZOOM, MAX_ZOOM)
+    pageEl.style.transform = `scale(${pinch.target / pinch.startZoom})`
+  }, { passive: false })
+
+  rootEl.addEventListener('touchend', event => {
+    if (pinch !== null && event.touches.length < 2) {
+      const completed = pinch
+      clearGesture()
+      if (completed.target !== zoom) {
+        zoom = completed.target
+        void render(completed)
+      }
+      return
+    }
+    const start = swipe
+    clearGesture()
+    if (start === null || event.touches.length !== 0) return
+    const [end] = event.changedTouches
+    const dx = end.clientX - start.x
+    const dy = end.clientY - start.y
+    if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+    const next = pageNumber + (dx < 0 ? 1 : -1)
+    if (next >= 1 && next <= pageCount) void goToPage(next)
+  })
+  rootEl.addEventListener('touchcancel', clearGesture)
 
   const observer = new ResizeObserver(onResize)
   observer.observe(rootEl)

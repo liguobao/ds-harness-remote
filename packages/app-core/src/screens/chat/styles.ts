@@ -275,7 +275,7 @@ export function createStyles(
       color: colors.subtle,
       textAlign: 'center',
       marginTop: spacing.sm,
-      paddingHorizontal: spacing.lg,
+      alignSelf: 'stretch',
     },
     mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
     composerWrap: { backgroundColor: 'transparent', paddingHorizontal: spacing.md, paddingTop: 4, paddingBottom: 6 },

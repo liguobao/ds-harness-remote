@@ -7,7 +7,7 @@ import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
 import { ConnectionScreen } from './device-screens'
-import { platformIcon, switcherDeviceSubtitle } from '../lib/device-display'
+import { platformIcon, platformName } from '../lib/device-display'
 import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
@@ -101,57 +101,58 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                 }}
               />
             </View>
-          ) : <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <GroupCard>
-              {devices.length === 0
-                ? <View style={styles.emptyState}>
-                    <Text style={styles.emptyTitle}>{strings.devices.emptyTitle}</Text>
-                    <Text style={styles.emptyBody}>{strings.devices.emptyBody}</Text>
-                  </View>
-                : devices.map((device, index) => {
-                    const isCurrent = selectedDevice?.deviceId === device.deviceId
-                    const isConnected = isCurrent && connection.phase === 'connected'
-                    const Icon = platformIcon(device.platform)
-                    const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
-                    return (
-                      <GroupRow
-                        key={device.deviceId}
-                        first={index === 0}
-                        icon={Icon}
-                        label={device.name}
-                        detail={switcherDeviceSubtitle(device, strings.remoteHosts.remoteTag)}
-                        selected={isConnected}
-                        chevron={false}
-                        accessibilityLabel={device.name}
-                        disabled={busy}
-                        onPress={() => {
-                          if (isConnected) onClose()
-                          else if (device.trusted && device.online) setChosenDevice(device)
-                          else onSelectDevice(device)
-                        }}
-                        accessory={
-                          // The 20dp check slot is reserved on every row, so the
-                          // online/offline text cannot drift between rows.
-                          <View style={styles.trailingGroup}>
-                            <View style={styles.statusRow}>
-                              <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
-                              <Text style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
+          ) : <View style={styles.listViewport}>
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <GroupCard>
+                {devices.length === 0
+                  ? <View style={styles.emptyState}>
+                      <Text style={styles.emptyTitle}>{strings.devices.emptyTitle}</Text>
+                      <Text style={styles.emptyBody}>{strings.devices.emptyBody}</Text>
+                    </View>
+                  : devices.map((device, index) => {
+                      const isCurrent = selectedDevice?.deviceId === device.deviceId
+                      const isConnected = isCurrent && connection.phase === 'connected'
+                      const Icon = platformIcon(device.platform)
+                      const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
+                      return (
+                        <GroupRow
+                          key={device.deviceId}
+                          first={index === 0}
+                          icon={Icon}
+                          label={device.name}
+                          detail={`${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`}
+                          selected={isConnected}
+                          chevron={false}
+                          accessibilityLabel={[device.name, status.label, device.harnessVersion].filter(Boolean).join(', ')}
+                          disabled={busy}
+                          onPress={() => {
+                            if (isConnected) onClose()
+                            else if (device.trusted && device.online) setChosenDevice(device)
+                            else onSelectDevice(device)
+                          }}
+                          accessory={
+                            <View style={styles.trailingGroup}>
+                              <View style={styles.statusLine}>
+                                <View style={[styles.statusDot, { backgroundColor: status.dot }]} />
+                                <Text numberOfLines={1} style={[styles.statusText, isConnected && { color: colors.primary }]}>{status.label}</Text>
+                                <View style={styles.checkSlot}>
+                                  {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
+                                </View>
+                              </View>
+                              {device.harnessVersion ? <Text numberOfLines={1} style={styles.version}>{device.harnessVersion}</Text> : null}
                             </View>
-                            <View style={styles.checkSlot}>
-                              {isConnected ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : null}
-                            </View>
-                          </View>
-                        }
-                      />
-                    )
-                  })}
-            </GroupCard>
-            <Text style={styles.hint}>{strings.remoteHosts.singleHostHint}</Text>
-          </ScrollView>}
+                          }
+                        />
+                      )
+                    })}
+              </GroupCard>
+              <Text style={styles.hint}>{strings.remoteHosts.singleHostHint}</Text>
+            </ScrollView>
+          </View>}
           {connectingDevice === undefined && <View style={styles.bottomCard}>
             <GroupCard>
               <GroupRow
@@ -200,13 +201,16 @@ function createStyles(colors: ThemeColors) {
     sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs, paddingHorizontal: spacing.lg },
     headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     title: { ...type.heading, fontSize: 18, fontWeight: '700', color: colors.ink, flex: 1 },
+    // Match GroupCard at the viewport edge when the list is taller than the sheet.
+    listViewport: { flexShrink: 1, marginHorizontal: spacing.lg, borderRadius: radius.xl, overflow: 'hidden' },
     scroll: { flexGrow: 0, flexShrink: 1 },
-    scrollContent: { gap: spacing.md, paddingHorizontal: spacing.lg },
+    scrollContent: { gap: spacing.md },
     hint: { ...type.caption, color: colors.muted, paddingHorizontal: spacing.md },
-    trailingGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    trailingGroup: { alignItems: 'flex-end', maxWidth: '48%' },
+    statusLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     statusDot: { width: 6, height: 6, borderRadius: 3 },
-    statusText: { ...type.caption, color: colors.muted },
+    statusText: { ...type.caption, color: colors.muted, flexShrink: 1 },
+    version: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, textAlign: 'right', fontVariant: ['tabular-nums'] },
     checkSlot: { width: 20, alignItems: 'center', justifyContent: 'center' },
     bottomCard: { paddingHorizontal: spacing.lg },
     emptyState: { paddingVertical: spacing.xl, paddingHorizontal: spacing.md, alignItems: 'center', gap: spacing.xs },
