@@ -4,6 +4,12 @@ import type { CodexPermissionPreset } from '@dsh-remote/protocol'
 import type { HarnessSessionGeneration } from '../harness-version.js'
 import { CodexSessionHistoryCache } from '../session-history-cache.js'
 import type { RemoteTypertGatewayTarget, TypertGatewayRequest, TypertRpcResult } from '../typert-gateway-contract.js'
+import {
+  normalizeVirtualHistoryTurnWindow,
+  VIRTUAL_HISTORY_MAX_MESSAGES,
+  VirtualHistoryResponseTooLargeError,
+  type VirtualHistoryTurnWindow,
+} from '../virtual-history-pagination.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import type {
   CatalogState,
@@ -54,6 +60,7 @@ import { CodexEventCarrier } from './virtual-event-carrier.js'
 import type { CodexNativeHistory, CodexNativeHistoryPage } from './virtual-history.js'
 import {
   adaptCodexHistoryPage,
+  enforceCodexHistoryPageBudget,
   isCodexNativeHistoryPage,
   paginateCodexNativeHistory,
   projectCodexNativeHistory,
@@ -837,12 +844,20 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async sessionPage(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = sessionIdFromAddress(record(request.address))
-    const page = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
-      throughSeq: optionalInteger(request.throughSeq),
-      maxMessages: optionalPositiveInteger(request.maxMessages),
-    }, signal)
-    return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
+    try {
+      const page = await this.readHistoryPage(nativeThreadId(sessionId), {
+        beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
+        throughSeq: optionalInteger(request.throughSeq),
+        maxMessages: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+      }, signal)
+      return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        return failure('response-too-large', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+      }
+      throw error
+    }
   }
 
   private activeTurnId(threadId: string): string | undefined {
@@ -852,12 +867,15 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async readHistoryPage(
     threadId: string,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
     signal?: AbortSignal,
   ): Promise<CodexNativeHistoryPage> {
+    const turnWindow = normalizeVirtualHistoryTurnWindow(page.turnWindow)
     const boundedPage = {
-      ...page,
+      beforeSeq: page.beforeSeq,
+      throughSeq: page.throughSeq,
       maxMessages: boundedCodexHistoryPageSize(page.maxMessages),
+      ...(turnWindow === undefined ? {} : { turnWindow }),
     }
     const knownUpdatedAt = this.catalog?.sessions.find(item => item.id === `codex:${threadId}`)?.updatedAt
     if (!this.blankThreads.has(threadId)) {
@@ -876,15 +894,34 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         const readEpoch = this.historyCache.beginReadEpoch()
         let value: unknown
         try {
-          value = record(await this.client.request('dsh/sessionHistory', {
+          const requestParams = {
             threadId,
             ...(boundedPage.beforeSeq === undefined ? {} : { beforeSeq: boundedPage.beforeSeq }),
             ...(boundedPage.throughSeq === undefined ? {} : { throughSeq: boundedPage.throughSeq }),
             ...(boundedPage.maxMessages === undefined ? {} : { maxMessages: boundedPage.maxMessages }),
-          }, sharedSignal))
+          }
+          try {
+            value = record(await this.client.request('dsh/sessionHistory', {
+              ...requestParams,
+              ...(boundedPage.turnWindow === undefined ? {} : { turnWindow: boundedPage.turnWindow }),
+            }, sharedSignal))
+          } catch (turnWindowError) {
+            if (
+              boundedPage.turnWindow !== undefined
+              && turnWindowError instanceof Error
+              && errorCode(turnWindowError) === 'INVALID_MESSAGE'
+            ) {
+              value = record(await this.client.request('dsh/sessionHistory', {
+                ...requestParams,
+                maxMessages: boundedPage.maxMessages ?? VIRTUAL_HISTORY_MAX_MESSAGES,
+              }, sharedSignal))
+            } else {
+              throw turnWindowError
+            }
+          }
         } catch (error) {
           if (!isLegacySessionHistoryUnsupported(error)) {
-            if (!sharedSignal.aborted) {
+            if (!sharedSignal.aborted && !(error instanceof Error && errorCode(error) === 'RESPONSE_TOO_LARGE')) {
               const stale = this.historyCache.getStalePage(threadId, this.sessionGeneration, boundedPage)
               if (stale !== undefined) return stale
             }
@@ -916,6 +953,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
               beforeSeq: page.beforeSeq,
               throughSeq: page.throughSeq,
               maxMessages: boundedPage.maxMessages,
+              turnWindow: boundedPage.turnWindow,
             },
           )
         }
@@ -923,10 +961,14 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
           throw new Error('CodeX Remote returned an invalid paginated History.')
         }
+        const bounded = enforceCodexHistoryPageBudget(value, {
+          maxMessages: boundedPage.maxMessages,
+          turnWindow: boundedPage.turnWindow,
+        })
         if (!this.blankThreads.has(threadId)) {
-          this.historyCache.setPage(threadId, this.sessionGeneration, boundedPage, value, knownUpdatedAt, readEpoch)
+          this.historyCache.setPage(threadId, this.sessionGeneration, boundedPage, bounded, knownUpdatedAt, readEpoch)
         }
-        return value
+        return bounded
       },
     )
     this.applyHistoryMetadata(threadId, resolved)
@@ -958,10 +1000,20 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private async sessionHistory(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = requiredString(request.sessionId, 'sessionId')
     const beforeSeq = optionalNonNegativeInteger(request.beforeSeq)
-    const history = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq,
-      maxMessages: optionalPositiveInteger(request.maxMessages),
-    }, signal)
+    let history: CodexNativeHistoryPage
+    try {
+      history = await this.readHistoryPage(nativeThreadId(sessionId), {
+        beforeSeq,
+        throughSeq: optionalInteger(request.throughSeq),
+        maxMessages: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+      }, signal)
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        return failure('response-too-large', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+      }
+      throw error
+    }
     const directory = await this.models(signal).catch(() => undefined)
     if (beforeSeq === undefined) {
       signal.throwIfAborted()

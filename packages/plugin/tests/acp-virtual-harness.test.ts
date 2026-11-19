@@ -7,7 +7,15 @@ import {
   type AcpClientLike,
 } from '../src/acp/virtual-harness.js'
 import { AcpSessionHistoryCache } from '../src/session-history-cache.js'
-import type { AcpSessionArchivedData, AgentAcpFrameData } from '@dsh-remote/protocol'
+import { utf8JsonByteLength, VIRTUAL_HISTORY_MAX_BYTES, VIRTUAL_HISTORY_MAX_MESSAGES } from '../src/virtual-history-pagination.js'
+import {
+  createRpcResponse,
+  encodeMessage,
+  MAX_SECURE_MESSAGE_BYTES,
+  SecureMessageCodec,
+  type AcpSessionArchivedData,
+  type AgentAcpFrameData,
+} from '@dsh-remote/protocol'
 
 type AgentAcpClientLike = AcpClientLike
 
@@ -1537,6 +1545,303 @@ describe('AcpVirtualHarness', () => {
       await s2.close()
       await iter.return?.()
     } finally { await target.close() }
+  })
+
+  it('bounds large ACP history pages by message cap, turnWindow, and byte budget without gaps or loops', async () => {
+    const buildTurns = (turnCount: number, replySize: number) => {
+      const events: Array<{ type: 'event'; event: { type: string; seq: number; time: number; data: unknown; surfaceOp?: 'append' } }> = []
+      let seq = 0
+      for (let turn = 1; turn <= turnCount; turn += 1) {
+        const payload = `turn-${turn}:` + 'x'.repeat(replySize)
+        events.push(
+          { type: 'event', event: { type: 'turn/start', seq: seq++, time: turn, data: { turn } } },
+          { type: 'event', event: { type: 'step/start', seq: seq++, time: turn, data: { turn, step: 1 } } },
+          { type: 'event', event: { type: 'user/message', seq: seq++, time: turn, data: { id: `u-${turn}`, role: 'user', content: [{ type: 'text', text: `Prompt ${turn}` }] }, surfaceOp: 'append' } },
+          { type: 'event', event: { type: 'assistant/message', seq: seq++, time: turn, data: { turn, step: 1, message: { id: `a-${turn}`, role: 'assistant', content: [{ type: 'text', text: payload }] } }, surfaceOp: 'append' } },
+          { type: 'event', event: { type: 'step/end', seq: seq++, time: turn, data: { turn, step: 1 } } },
+          { type: 'event', event: { type: 'turn/end', seq: seq++, time: turn, data: { turn, reason: { kind: 'completed' } } } },
+        )
+      }
+      return events
+    }
+
+    await runScenarios([
+      {
+        name: 'clamps maxMessages=500 and enforces 256 KiB budget across follow, history, and page with lossless cursor walk',
+        run: async () => {
+          const events = buildTurns(80, 4 * 1024)
+          const client = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => events) }
+          const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          const controller = new AbortController()
+          let iterator: AsyncIterator<unknown> | undefined
+          try {
+            const workspace = await target.selectOrCreateWorkspace('/test')
+            const sessionId = workspace.sessionIds[0]!
+            const followStream = await target.open(
+              'session/follow',
+              { args: { request: { address: { kind: 'session', sessionId }, maxMessages: 500 } } },
+              controller.signal,
+            )
+            iterator = followStream[Symbol.asyncIterator]()
+            const snapshot = (await iterator.next()).value as {
+              type: string
+              cursor: number
+              hasMore: boolean
+              records: Array<{ event: { seq: number } }>
+            }
+            expect(snapshot.type).toBe('snapshot')
+            expect(snapshot.hasMore).toBe(true)
+            expect(snapshot.records.length).toBeGreaterThan(0)
+            expect(snapshot.records.length).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_MESSAGES)
+            expect(snapshot.cursor).toBe(snapshot.records.at(-1)!.event.seq)
+            expect(utf8JsonByteLength(snapshot)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+
+            const history = await target.dispatch(
+              'session/history',
+              { args: { request: { sessionId, maxMessages: 500 } } },
+              controller.signal,
+            )
+            expect(history.ok).toBe(true)
+            if (!history.ok) throw new Error('history failed')
+            expect(utf8JsonByteLength(history.value)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+            expect((history.value as { hasMore: boolean }).hasMore).toBe(true)
+
+            const collected: number[] = []
+            let beforeSeq: number | undefined
+            let guard = 0
+            while (guard++ < 100) {
+              const page = await target.dispatch(
+                'session/page',
+                { args: { request: { address: { kind: 'session', sessionId }, maxMessages: 500, ...(beforeSeq === undefined ? {} : { beforeSeq }) } } },
+                controller.signal,
+              )
+              expect(page.ok).toBe(true)
+              if (!page.ok) throw new Error('page failed')
+              const value = page.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+              expect(value.records.length).toBeGreaterThan(0)
+              expect(value.records.length).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_MESSAGES)
+              expect(utf8JsonByteLength(value)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+              collected.unshift(...value.records.map(entry => entry.event.seq))
+              if (!value.hasMore) break
+              beforeSeq = value.records[0]!.event.seq
+            }
+            expect(collected).toEqual(events.map(entry => entry.event.seq))
+          } finally {
+            controller.abort()
+            await iterator?.return?.()
+            await target.close()
+          }
+        },
+      },
+      {
+        name: 'aligns integer and object turnWindow to turn boundaries and snaps cleanly under byte budget',
+        run: async () => {
+          const smallEvents = buildTurns(5, 32)
+          const smallClient = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => smallEvents) }
+          const smallTarget = new AcpVirtualHarness(smallClient, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          const signal = new AbortController().signal
+          try {
+            const workspace = await smallTarget.selectOrCreateWorkspace('/test')
+            const sessionId = workspace.sessionIds[0]!
+
+            const p1 = await smallTarget.dispatch('session/page', { args: { request: { sessionId, turnWindow: 2 } } }, signal)
+            expect(p1.ok).toBe(true)
+            if (!p1.ok) throw new Error('p1 failed')
+            const v1 = p1.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v1.records[0]!.event.type).toBe('turn/start')
+            expect(v1.records.map(entry => entry.event.seq)).toEqual(smallEvents.slice(18, 30).map(e => e.event.seq))
+            expect(v1.hasMore).toBe(true)
+
+            const p2 = await smallTarget.dispatch('session/page', { args: { request: { sessionId, beforeSeq: 18, turnWindow: 2 } } }, signal)
+            expect(p2.ok).toBe(true)
+            if (!p2.ok) throw new Error('p2 failed')
+            const v2 = p2.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v2.records[0]!.event.type).toBe('turn/start')
+            expect(v2.records.map(entry => entry.event.seq)).toEqual(smallEvents.slice(6, 18).map(e => e.event.seq))
+            expect(v2.hasMore).toBe(true)
+
+            const p3 = await smallTarget.dispatch('session/page', { args: { request: { sessionId, beforeSeq: 6, turnWindow: 2 } } }, signal)
+            expect(p3.ok).toBe(true)
+            if (!p3.ok) throw new Error('p3 failed')
+            const v3 = p3.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v3.records[0]!.event.type).toBe('turn/start')
+            expect(v3.records.map(entry => entry.event.seq)).toEqual(smallEvents.slice(0, 6).map(e => e.event.seq))
+            expect(v3.hasMore).toBe(false)
+
+            const objPage = await smallTarget.dispatch(
+              'session/page',
+              { args: { request: { sessionId, maxMessages: 500, turnWindow: { minMessages: 15, minTurns: 2 } } } },
+              signal,
+            )
+            expect(objPage.ok).toBe(true)
+            if (!objPage.ok) throw new Error('objPage failed')
+            const objValue = objPage.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(objValue.records[0]!.event.type).toBe('turn/start')
+            expect(objValue.records.map(entry => entry.event.seq)).toEqual(smallEvents.slice(12, 30).map(e => e.event.seq))
+            expect(objValue.hasMore).toBe(true)
+          } finally {
+            await smallTarget.close()
+          }
+
+          const heavyEvents = buildTurns(3, 150 * 1024)
+          const heavyClient = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => heavyEvents) }
+          const heavyTarget = new AcpVirtualHarness(heavyClient, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          try {
+            const workspace = await heavyTarget.selectOrCreateWorkspace('/heavy')
+            const sessionId = workspace.sessionIds[0]!
+            const first = await heavyTarget.dispatch('session/page', { args: { request: { sessionId, turnWindow: 2 } } }, signal)
+            expect(first.ok).toBe(true)
+            if (!first.ok) throw new Error('heavy first failed')
+            const firstVal = first.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(firstVal.records[0]!.event.type).toBe('turn/start')
+            expect(firstVal.records.map(entry => entry.event.seq)).toEqual(heavyEvents.slice(12, 18).map(e => e.event.seq))
+            expect(firstVal.hasMore).toBe(true)
+            expect(utf8JsonByteLength(firstVal)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+          } finally {
+            await heavyTarget.close()
+          }
+        },
+      },
+      {
+        name: 'returns a single oversized newest event without empty-page infinite loops',
+        run: async () => {
+          const events = [
+            ...buildTurns(1, 32),
+            {
+              type: 'event' as const,
+              event: {
+                type: 'assistant/message',
+                seq: 6,
+                time: 2,
+                data: { turn: 2, step: 1, message: { id: 'giant', role: 'assistant', content: [{ type: 'text', text: 'z'.repeat(320 * 1024) }] } },
+                surfaceOp: 'append' as const,
+              },
+            },
+          ]
+          const client = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => events) }
+          const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          const signal = new AbortController().signal
+          try {
+            const workspace = await target.selectOrCreateWorkspace('/oversized')
+            const sessionId = workspace.sessionIds[0]!
+            const first = await target.dispatch('session/page', { args: { request: { sessionId, maxMessages: 200 } } }, signal)
+            expect(first.ok).toBe(true)
+            if (!first.ok) throw new Error('oversized first failed')
+            const firstVal = first.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+            expect(firstVal.records.map(entry => entry.event.seq)).toEqual([6])
+            expect(firstVal.hasMore).toBe(true)
+
+            const second = await target.dispatch('session/page', { args: { request: { sessionId, beforeSeq: 6, maxMessages: 200 } } }, signal)
+            expect(second.ok).toBe(true)
+            if (!second.ok) throw new Error('oversized second failed')
+            const secondVal = second.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+            expect(secondVal.records.map(entry => entry.event.seq)).toEqual([0, 1, 2, 3, 4, 5])
+            expect(secondVal.hasMore).toBe(false)
+          } finally {
+            await target.close()
+          }
+        },
+      },
+      {
+        name: 'compacts a >4 MiB newest ACP record on session/history below MAX_SECURE_MESSAGE_BYTES without mutating session.events and advances cursor',
+        run: async () => {
+          const hugePayload = 'q'.repeat(4 * 1024 * 1024 + 64 * 1024)
+          const events = [
+            ...buildTurns(1, 32),
+            {
+              type: 'event' as const,
+              event: {
+                type: 'assistant/message',
+                seq: 6,
+                time: 2,
+                data: {
+                  turn: 2,
+                  step: 1,
+                  message: {
+                    id: 'acp-giant-4m',
+                    role: 'assistant',
+                    content: [{ type: 'text', text: hugePayload }],
+                  },
+                },
+                surfaceOp: 'append' as const,
+              },
+            },
+          ]
+          const client = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => events) }
+          const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          const signal = new AbortController().signal
+          try {
+            const workspace = await target.selectOrCreateWorkspace('/oversized-4m')
+            const sessionId = workspace.sessionIds[0]!
+            const history = await target.dispatch('session/history', { args: { request: { sessionId, maxMessages: 200 } } }, signal)
+            expect(history.ok).toBe(true)
+            if (!history.ok) throw new Error('oversized 4m history failed')
+            const historyVal = history.value as {
+              records: Array<{ event: { seq: number; data: Record<string, unknown> } }>
+              events: Array<{ event: { seq: number; data: Record<string, unknown> } }>
+              hasMore: boolean
+            }
+            expect(historyVal.records).toHaveLength(1)
+            expect(historyVal.events).toHaveLength(1)
+            expect(historyVal.records[0]!.event.seq).toBe(6)
+            expect(historyVal.records[0]!.event.data.truncated).toBe(true)
+            expect(historyVal.hasMore).toBe(true)
+
+            const rpcBytes = encodeMessage(createRpcResponse('req-acp-4m', history.value))
+            expect(rpcBytes.byteLength).toBeLessThanOrEqual(MAX_SECURE_MESSAGE_BYTES)
+            expect(() => new SecureMessageCodec().encode(rpcBytes)).not.toThrow()
+
+            // Source session.events must remain untouched.
+            const storedSession = (target as unknown as {
+              sessions: Map<string, { events: Array<{ event: { data: { message?: { content?: Array<{ text?: string }> } } } }> }>
+            }).sessions.get(sessionId)!
+            expect(storedSession.events[6]!.event.data.message!.content![0]!.text).toBe(hugePayload)
+
+            // Next page via beforeSeq advances cleanly to older records.
+            const older = await target.dispatch('session/page', { args: { request: { sessionId, beforeSeq: 6, maxMessages: 200 } } }, signal)
+            expect(older.ok).toBe(true)
+            if (!older.ok) throw new Error('oversized 4m older page failed')
+            const olderVal = older.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+            expect(olderVal.records.map(entry => entry.event.seq)).toEqual([0, 1, 2, 3, 4, 5])
+            expect(olderVal.hasMore).toBe(false)
+          } finally {
+            await target.close()
+          }
+        },
+      },
+      {
+        name: 'returns explicit response-too-large when ACP projections envelope exceeds transport hard cap',
+        run: async () => {
+          const events = buildTurns(1, 32)
+          const client = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => events) }
+          const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'opencode')
+          const signal = new AbortController().signal
+          try {
+            const workspace = await target.selectOrCreateWorkspace('/oversized-envelope')
+            const sessionId = workspace.sessionIds[0]!
+            const session = (target as unknown as {
+              sessions: Map<string, { title?: string }>
+            }).sessions.get(sessionId)!
+            session.title = 'T'.repeat(MAX_SECURE_MESSAGE_BYTES)
+
+            const history = await target.dispatch('session/history', { args: { request: { sessionId } } }, signal)
+            expect(history).toMatchObject({
+              ok: false,
+              error: { code: 'response-too-large' },
+            })
+
+            await expect(
+              target.open('session/follow', { args: { request: { sessionId } } }, signal),
+            ).rejects.toMatchObject({
+              code: 'response-too-large',
+              retryable: false,
+            })
+          } finally {
+            await target.close()
+          }
+        },
+      },
+    ])
   })
 })
 

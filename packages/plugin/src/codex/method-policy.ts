@@ -25,6 +25,16 @@ const permissionPreset = z.enum(['workspace-write', 'danger-full-access'])
 const projectRoot = z.object({
   path: z.string().min(1).max(4096),
 }).strict()
+const turnWindow = z.union([
+  z.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES),
+  z.object({
+    minMessages: z.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
+    minTurns: z.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
+  }).strict().refine(
+    value => value.minMessages !== undefined || value.minTurns !== undefined,
+    { message: 'turnWindow requires minMessages or minTurns.' },
+  ),
+])
 
 const schemas = {
   'account/read': z.object({ refreshToken: z.literal(false).optional() }).strict(),
@@ -61,6 +71,7 @@ const schemas = {
     beforeSeq: z.number().int().nonnegative().optional(),
     throughSeq: z.number().int().min(-1).optional(),
     maxMessages: z.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
+    turnWindow: turnWindow.optional(),
   }).strict(),
   'dsh/sessionAttachment': z.object({
     threadId: id,
