@@ -77,7 +77,7 @@ vi.mock('react', async importOriginal => {
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
   Modal: 'Modal',
-  Platform: { OS: 'android' },
+  Platform: { OS: 'ios' },
   StyleSheet: { create: <T,>(styles: T) => styles },
   Text: 'Text',
   View: 'View',
@@ -210,7 +210,7 @@ describe('DshWebScreen helpers and lifecycle', () => {
         },
       },
       {
-        name: 'transient open failure offers retry without spurious close and submits a same-origin Android form once recovered',
+        name: 'transient open failure offers retry without spurious close and submits a same-origin form on iOS once recovered',
         run: async () => {
           let calls = 0
           const rpc = vi.fn(async (method: string) => {

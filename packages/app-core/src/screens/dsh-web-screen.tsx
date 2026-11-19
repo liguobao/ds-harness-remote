@@ -116,25 +116,17 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
   const grantUrl = grant && new URL(grant.url).href
   const sessionUri = grantUrl && new URL('/__remote/session', grantUrl).href
   const source = useMemo(() => {
-    if (!grant || !sessionUri) return undefined
-    if (Platform.OS === 'android') {
-      // postUrl can send an opaque Origin. Post a form from the tunnel origin instead.
-      return {
-        baseUrl: new URL('/__remote/session-bootstrap', grant.url).href,
-        html: `<!doctype html><meta name="referrer" content="same-origin">
-          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; form-action 'self'">
-          <form method="post" action="/__remote/session">
-            <input type="hidden" name="browserGrant" value="${encodeURIComponent(grant.browserGrant)}">
-          </form><script>document.forms[0].submit()</script>`,
-      }
-    }
+    if (!grant || !grantUrl) return undefined
+    // Native POST can send an opaque Origin. Submit from the tunnel origin.
     return {
-      uri: sessionUri,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'browserGrant=' + encodeURIComponent(grant.browserGrant),
+      baseUrl: new URL('/__remote/session-bootstrap', grantUrl).href,
+      html: `<!doctype html><meta name="referrer" content="same-origin">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; form-action 'self'">
+        <form method="post" action="/__remote/session">
+          <input type="hidden" name="browserGrant" value="${encodeURIComponent(grant.browserGrant)}">
+        </form><script>document.forms[0].submit()</script>`,
     }
-  }, [grant, sessionUri])
+  }, [grant, grantUrl])
   const openTitle = chinese ? '打开 DSH Web' : 'Open DSH Web'
   const loadingMessage = grant
     ? (chinese ? '正在验证访问并加载页面…' : 'Verifying access and loading the page…')
