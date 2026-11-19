@@ -23,6 +23,7 @@ const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
 const MAX_ACP_LINE_BYTES = 288 * 1024 * 1024
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
+const MAX_OPENCODE_SESSION_LIST = 1000
 
 interface PendingRequest {
   resolve: (value: unknown) => void
@@ -249,8 +250,25 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (method === 'session/list' && nativeApi && isRecord(result) && Array.isArray(result.sessions)) {
       // ACP list may return archived native records, including after a restart.
       // Recheck every item against OpenCode; process-local caches are insufficient.
-      if (result.sessions.length > 1000) throw new OpencodeAcpError('INVALID_MESSAGE', 'The OpenCode catalog page is too large.')
-      const items = result.sessions
+      const rawItems = result.sessions
+      const items = rawItems.length > MAX_OPENCODE_SESSION_LIST
+        ? [...rawItems]
+            .sort((a, b) => {
+              const ta = isRecord(a) && typeof a.updatedAt === 'string' ? Date.parse(a.updatedAt) || 0 : 0
+              const tb = isRecord(b) && typeof b.updatedAt === 'string' ? Date.parse(b.updatedAt) || 0 : 0
+              return tb - ta
+            })
+            .slice(0, MAX_OPENCODE_SESSION_LIST)
+        : rawItems
+      const realpathCache = new Map<string, Promise<string | undefined>>()
+      const resolveCwd = (rawCwd: string): Promise<string | undefined> => {
+        let cached = realpathCache.get(rawCwd)
+        if (!cached) {
+          cached = realpath(rawCwd).catch(() => undefined)
+          realpathCache.set(rawCwd, cached)
+        }
+        return cached
+      }
       const archivedItems = new Map<number, boolean>()
       let next = 0
       await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
@@ -259,9 +277,19 @@ export class OpencodeAcpClient implements CursorAcpLike {
           if (index >= items.length) return
           const item = items[index]
           if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
-          const cwd = await realpath(item.cwd).catch(() => undefined)
+          let cwd: string | undefined
+          try {
+            cwd = await resolveCwd(item.cwd)
+          } catch {
+            continue
+          }
           if (!cwd) continue
-          const archived = await nativeApi.isArchived(item.sessionId, cwd)
+          let archived: boolean
+          try {
+            archived = await nativeApi.isArchived(item.sessionId, cwd)
+          } catch {
+            continue
+          }
           if (archived) this.archivedSessions.add(item.sessionId)
           else this.archivedSessions.delete(item.sessionId)
           archivedItems.set(index, archived)
