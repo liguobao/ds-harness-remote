@@ -1,4 +1,3 @@
-import type { IncomingMessage } from "node:http";
 import {
 	CLOSE_PROTOCOL_ERROR,
 	type CreateTunnelResponse,
@@ -31,7 +30,6 @@ export type ConnectionOptions = {
 	onRequest: (entry: RequestLog) => void;
 	/** Heartbeat timing; tests shorten it. */
 	heartbeat?: { intervalMs: number; timeoutMs: number };
-	signal?: AbortSignal;
 };
 
 export type CloseInfo = { code: number; reason: string };
@@ -46,66 +44,31 @@ export class Connection {
 	private readonly heartbeat: NodeJS.Timeout;
 	private pongTimeout: NodeJS.Timeout | undefined;
 
-	static open(options: ConnectionOptions): Promise<Connection> {
-		const { signal } = options;
-		if (signal?.aborted) {
-			return Promise.reject(new TunnelError("network_error", "Connection aborted", { cause: signal.reason }));
-		}
+	static open(options: ConnectionOptions, signal?: AbortSignal): Promise<Connection> {
 		return new Promise((resolve, reject) => {
-			let settled = false;
+			signal?.throwIfAborted();
 			const socket = new WebSocket(options.tunnel.connectUrl, {
 				headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
 				perMessageDeflate: false,
 				handshakeTimeout: 6_000,
 			});
-			const cleanup = () => {
-				signal?.removeEventListener("abort", onAbort);
-				socket.off("unexpected-response", onUnexpectedResponse);
-				socket.off("error", onError);
-				socket.off("open", onOpen);
-			};
-			const onAbort = () => {
-				if (settled) {
-					return;
-				}
-				settled = true;
-				cleanup();
-				socket.on("error", () => {});
-				socket.terminate();
-				reject(new TunnelError("network_error", "Connection aborted", { cause: signal?.reason }));
-			};
-			const onUnexpectedResponse = (_request: unknown, response: IncomingMessage) => {
-				if (settled) {
-					return;
-				}
-				settled = true;
-				cleanup();
-				socket.on("error", () => {});
+			const abort = () => socket.terminate();
+			const removeAbort = () => signal?.removeEventListener("abort", abort);
+			signal?.addEventListener("abort", abort, { once: true });
+			socket.once("close", removeAbort);
+			socket.once("unexpected-response", (_request, response) => {
+				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
 				response.destroy();
 				socket.terminate();
-				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
-			};
-			const onError = (error: Error) => {
-				if (settled) {
-					return;
-				}
-				settled = true;
-				cleanup();
-				socket.on("error", () => {});
+			});
+			socket.once("error", (error) => {
 				reject(new TunnelError("network_error", `Could not connect: ${error.message}`, { cause: error }));
-			};
-			const onOpen = () => {
-				if (settled) {
-					return;
-				}
-				settled = true;
-				cleanup();
+			});
+			socket.once("open", () => {
+				removeAbort();
+				socket.removeAllListeners("error");
 				resolve(new Connection(socket, options));
-			};
-			signal?.addEventListener("abort", onAbort, { once: true });
-			socket.once("unexpected-response", onUnexpectedResponse);
-			socket.once("error", onError);
-			socket.once("open", onOpen);
+			});
 		});
 	}
 
