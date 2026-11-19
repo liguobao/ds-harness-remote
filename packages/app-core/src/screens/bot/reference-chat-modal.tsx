@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import * as Haptics from 'expo-haptics'
-import { CalendarDays, MessageSquare, Search, X, Zap } from 'lucide-react-native'
+import { CalendarDays, MessageSquare, Search, X } from 'lucide-react-native'
 import { strings } from '../../locales/i18n'
 import type { BotState } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
@@ -21,13 +21,11 @@ export function BotPlusMenuModal({
   visible,
   onClose,
   onReferenceChat,
-  onOpenPrompts,
   onOpenSchedules,
 }: {
   visible: boolean
   onClose: () => void
   onReferenceChat: () => void
-  onOpenPrompts?: () => void
   onOpenSchedules?: () => void
 }) {
   const styles = useThemedStyles(createStyles)
@@ -50,16 +48,6 @@ export function BotPlusMenuModal({
                 onReferenceChat()
               }}
             />
-            {onOpenPrompts !== undefined && (
-              <GroupRow
-                icon={Zap}
-                label={strings.chat.quickPrompts}
-                onPress={() => {
-                  onClose()
-                  onOpenPrompts()
-                }}
-              />
-            )}
             {onOpenSchedules !== undefined && (
               <GroupRow
                 icon={CalendarDays}
