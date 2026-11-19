@@ -4,7 +4,13 @@ import type { AndroidConnectionOptions } from '../src/services/connection'
 import type { DeviceIdentity, RemoteDevice } from '../src/types'
 
 const { client, service } = vi.hoisted(() => ({
-  client: { connect: vi.fn(), close: vi.fn(), rpc: vi.fn(), supportsBinaryUpload: vi.fn() },
+  client: {
+    connect: vi.fn(),
+    close: vi.fn(),
+    rpc: vi.fn(),
+    supportsBinaryUpload: vi.fn(),
+    supportsDshWeb: vi.fn(),
+  },
   service: { start: vi.fn(), stop: vi.fn(), setStatus: vi.fn() },
 }))
 vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
@@ -12,6 +18,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   close = client.close
   rpc = client.rpc
   supportsBinaryUpload = client.supportsBinaryUpload
+  supportsDshWeb = client.supportsDshWeb
 } }))
 vi.mock('../src/services/foreground-service', () => ({ foregroundService: service }))
 import { AndroidRemoteRuntime } from '../src/services/remote-runtime'
@@ -31,6 +38,7 @@ const prepare = () => {
   service.stop.mockResolvedValue(undefined)
   client.connect.mockResolvedValue(undefined)
   client.close.mockResolvedValue(undefined)
+  client.supportsDshWeb.mockReturnValue(false)
 }
 beforeEach(prepare)
 
@@ -196,16 +204,19 @@ describe('Android carrier foreground service ownership', () => {
 it('binds upload RPC callers to one connection generation, including reconnect to the same Host', async () => {
   const runtime = new AndroidRemoteRuntime()
   client.supportsBinaryUpload.mockReturnValue(true)
+  client.supportsDshWeb.mockReturnValueOnce(true)
   client.rpc.mockResolvedValue({ok:true})
   await connect(runtime)
   const first = runtime.createRpcCaller()
   expect(first.supportsBinaryUpload).toBe(true)
+  expect(first.supportsDshWeb).toBe(true)
   await first('workspace.upload.open',{})
   await runtime.close()
   await connect(runtime)
   await expect(first('workspace.upload.chunk.binary',{})).rejects.toThrow('replaced')
   expect(client.rpc).toHaveBeenCalledTimes(1)
   const second = runtime.createRpcCaller()
+  expect(second.supportsDshWeb).toBe(false)
   await second('workspace.upload.open',{})
   const options = client.connect.mock.calls.at(-1)![5] as AndroidConnectionOptions
   options.onClose?.({retryable:true})
