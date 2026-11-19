@@ -38,6 +38,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         sessionProjectionSeqs: {},
         permissionSelecting: false,
         modelSelecting: false,
+        agentPresetSelecting: false,
+        agentPresetLoading: false,
         busyAction: undefined,
         codexReadySessionId: undefined,
         selectedDevice: device,
@@ -150,6 +152,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   opencodeAvailable: false,
                   claudeAvailable: false,
                   hermesAvailable: false,
+                  permissionSelecting: false,
+                  modelSelecting: false,
+                  agentPresetSelecting: false,
+                  agentPresetLoading: false,
                   busyAction: undefined,
                 })
               }
@@ -340,6 +346,11 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
         sessionModels: undefined,
+        permissionSelecting: false,
+        modelSelecting: false,
+        agentPresetOptions: undefined,
+        agentPresetLoading: false,
+        agentPresetSelecting: false,
         historyHasMore: false,
         historyLoadingOlder: false,
         oldestLoadedSeq: undefined,
@@ -349,6 +360,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
     setOffline() {
       if (get().connection.phase !== 'disconnected') {
         runtime.flushPendingMuxFrames()
+        ++runtime.connectionGeneration
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
@@ -358,6 +370,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           hostSessionEvents: false,
           codexAvailable: false,
           busyAction: undefined,
+          permissionSelecting: false,
+          modelSelecting: false,
+          agentPresetSelecting: false,
+          agentPresetLoading: false,
           cursorAvailable: false,
           antigravityAvailable: false,
           piAvailable: false,

@@ -75,3 +75,22 @@ export function isRecoverableTransportError(error: unknown): boolean {
   const code = (error as Error & { code?: unknown }).code
   return code === 'TRANSPORT_CLOSED' || code === 'CLIENT_CLOSED'
 }
+
+const QUEUE_ITEM_NOT_FOUND_CODES = new Set([
+  'queue-item-not-found',
+  'session/queue-item-not-found',
+  'queue_item_not_found',
+])
+
+/** True when the Host reports that a pending queue item has already been removed or consumed. */
+export function isQueueItemNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const errorWithMeta = error as Error & { code?: unknown; details?: unknown }
+  const code = errorWithMeta.code
+  if (typeof code === 'string' && QUEUE_ITEM_NOT_FOUND_CODES.has(code.toLowerCase())) return true
+  if (typeof errorWithMeta.details === 'object' && errorWithMeta.details !== null) {
+    const remoteCode = (errorWithMeta.details as Record<string, unknown>).remoteCode
+    if (typeof remoteCode === 'string' && QUEUE_ITEM_NOT_FOUND_CODES.has(remoteCode.toLowerCase())) return true
+  }
+  return /queue[\s_-]*item.*not[\s_-]*found/i.test(error.message)
+}

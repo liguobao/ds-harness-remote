@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { friendlyError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
+import { friendlyError, isQueueItemNotFoundError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
 import { createNativeRpcId } from '../services/rpc-id'
 import {
@@ -10,9 +10,9 @@ import {
 import { cursorNativeId } from '../services/cursor'
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { resolveHarnessSendMode } from '../screens/chat/composer-gate'
-import type { ChatItem } from '../types'
+import type { ChatItem, RemoteSession } from '../types'
 import { withCodexPermissionState } from './codex-session-state'
-import { findApproval, findQuestion, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
+import { findApproval, findQuestion, inboxQueuedItems, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered, removeInboxQueueItem } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isRecord, record, stringValue, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
@@ -226,6 +226,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
               latest?.running === true
               || inInbox
               || echoed
+              || (expectQueued && latest?.running === false)
               || state.selectedSession?.sessionId !== session.sessionId
             )
             return {
@@ -239,7 +240,8 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
                       // A projection may already have queued or released this
                       // row while the acknowledgement was still in flight.
                       sendState: item.queuedAdopted === true ? item.sendState
-                        : inInbox ? 'queued' : item.sendState ?? (expectQueued ? 'queued' : undefined),
+                        : inInbox ? 'queued'
+                          : item.sendState ?? (expectQueued ? (latest?.running === false ? 'unconfirmed' : 'queued') : undefined),
                       ...(inInbox ? { queuedAdopted: true as const } : {}),
                     }
                     : item),
@@ -293,29 +295,66 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       // nothing with no error.
       if (session === undefined || (session.backend !== undefined && session.backend !== 'harness')
         || get().connection.phase !== 'connected') return false
+      const generation = runtime.connectionGeneration
       try {
         await runtime.connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
       } catch (error) {
-        set({ error: friendlyError(error) })
-        return false
+        if (generation !== runtime.connectionGeneration) return false
+        if (!isQueueItemNotFoundError(error)) {
+          set({ error: friendlyError(error) })
+          return false
+        }
       }
+      if (generation !== runtime.connectionGeneration) return false
       // Settle the matching local optimistic row together with the Host queue:
       // the dock lists local `queued` rows the inbox has not adopted, so without
       // this the steered/removed item is immediately re-listed from local state
       // and the buttons look like no-ops. Steer hands the row back to the
-      // timeline (its echo replaces it); remove retires it quietly.
-      if (rpcId !== undefined) {
-        set(state => ({
-          messages: {
-            ...state.messages,
-            [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
-              item.kind === 'message' && item.requestRpcId === rpcId && item.id.startsWith('local:')
-                && item.nativeSeq === undefined && (item.sendState === 'queued' || item.sendState === 'unconfirmed')
-                ? { ...item, queuedAdopted: true, sendState: action === 'steer' ? 'unconfirmed' as const : 'canceled' as const, sendError: undefined }
-                : item),
+      // timeline (its echo replaces it); remove retires it quietly and prunes
+      // the stale inbox entry.
+      set(state => {
+        const currentSession = state.selectedSession?.sessionId === session.sessionId
+          ? state.selectedSession
+          : state.sessions.find(item => item.sessionId === session.sessionId)
+        const currentInbox = currentSession?.projections?.values?.inbox
+        const effectiveRpcId = rpcId ?? inboxQueuedItems(currentInbox).find(item => item.id === itemId)?.rpcId
+        const prunedInbox = removeInboxQueueItem(currentInbox, itemId, effectiveRpcId)
+        const inboxChanged = prunedInbox !== currentInbox
+        const updateSession = (item: RemoteSession): RemoteSession => item.sessionId !== session.sessionId ? item : {
+          ...item,
+          projections: {
+            ...item.projections,
+            values: {
+              ...item.projections?.values,
+              inbox: prunedInbox,
+            },
           },
-        }))
-      }
+        }
+        const nextSendState = action === 'remove' ? 'canceled' as const : 'unconfirmed' as const
+        const existingMessages = state.messages[session.sessionId] ?? []
+        let messagesChanged = false
+        const nextMessages = effectiveRpcId === undefined ? existingMessages : existingMessages.map(item => {
+          if (item.kind === 'message' && item.requestRpcId === effectiveRpcId && item.id.startsWith('local:')
+            && item.nativeSeq === undefined && item.sendState !== 'failed' && item.sendState !== 'canceled') {
+            messagesChanged = true
+            return { ...item, queuedAdopted: true, sendState: nextSendState, sendError: undefined }
+          }
+          return item
+        })
+        if (!inboxChanged && !messagesChanged) return {}
+        return {
+          ...(inboxChanged ? {
+            sessions: state.sessions.map(updateSession),
+            selectedSession: state.selectedSession === undefined ? undefined : updateSession(state.selectedSession),
+          } : {}),
+          ...(messagesChanged ? {
+            messages: {
+              ...state.messages,
+              [session.sessionId]: nextMessages,
+            },
+          } : {}),
+        }
+      })
       return true
     },
 

@@ -69,6 +69,11 @@ function acpClientForBackend(connection: SessionAccess['runtime']['connection'],
 /** Session actions use the store's single connection/session runtime. */
 export function createSessionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
   'refreshSessionStatus' | 'syncHarnessCatalog' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
+  let modelSelectToken = 0
+  let permissionSelectToken = 0
+  let agentPresetLoadToken = 0
+  let agentPresetSelectToken = 0
+
   const isHarnessBackend = (backend?: RemoteSession['backend']) =>
     (backend ?? 'harness') === 'harness'
 
@@ -230,6 +235,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           historyLoadingOlder: false,
           sessionModels: undefined,
           modelSelecting: false,
+          permissionSelecting: false,
+          agentPresetOptions: undefined,
+          agentPresetLoading: false,
+          agentPresetSelecting: false,
           historyHasMore: false,
           oldestLoadedSeq: undefined,
         }))
@@ -293,8 +302,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         historyLoadingOlder: false,
         sessionModels: undefined,
         modelSelecting: false,
+        permissionSelecting: false,
         agentPresetOptions: undefined,
         agentPresetLoading: false,
+        agentPresetSelecting: false,
         sessionLifecycles: state.sessionLifecycles[session.sessionId] === undefined
           ? state.sessionLifecycles
           : {
@@ -502,11 +513,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // replaces the row by requestRpcId, so a misjudgment self-heals.
           const inboxSnapshot = latest.projections?.values?.inbox
           const userQuestionsSnapshot = latest.projections?.values?.userQuestions
-          const merged = applyFeedback(mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []), history.throughSeq), ratings)
-          const reconciled = inboxSnapshot === undefined ? merged : reconcileDeliveryStates(
-            merged,
-            inboxRpcIds(inboxSnapshot),
-            new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
+          const liveItems = browseLive(items, state.messages[session.sessionId] ?? [])
+          const historyRpcIds = new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
+          const queuedRpcIds = inboxSnapshot === undefined ? undefined : inboxRpcIds(inboxSnapshot)
+          const reconciledLive = queuedRpcIds === undefined ? liveItems : reconcileDeliveryStates(
+            liveItems,
+            queuedRpcIds,
+            historyRpcIds,
             runtime.connectionStartedAt,
           )
           // A prompt acknowledged on this connection can still be missing from
@@ -514,19 +527,18 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // proves the session is idle and neither source knows the requestId,
           // settle the optimistic row as unconfirmed instead of leaving the
           // composer stuck on "sending" forever. Late echoes still replace it.
-          const historyRpcIds = new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : []))
           const runningNow = nextSession.running === true || authoritativeLifecycle?.running === true
-          const unsettled = inboxSnapshot === undefined || runningNow ? reconciled : (() => {
-            const queuedRpcIds = inboxRpcIds(inboxSnapshot)
-            return reconciled.map(item => item.kind === 'message' && item.id.startsWith('local:')
-              && item.sendState === undefined && item.requestRpcId !== undefined
-              && !queuedRpcIds.has(item.requestRpcId) && !historyRpcIds.has(item.requestRpcId)
+          const settledLive = queuedRpcIds === undefined || runningNow ? reconciledLive : reconciledLive.map(item =>
+            item.kind === 'message' && item.id.startsWith('local:')
+            && (item.sendState === undefined || item.sendState === 'queued') && item.requestRpcId !== undefined
+            && !queuedRpcIds.has(item.requestRpcId) && !historyRpcIds.has(item.requestRpcId)
               ? { ...item, sendState: 'unconfirmed' as const }
-              : item)
-          })()
+              : item,
+          )
+          const merged = applyFeedback(mergeHistoryAndLive(items, settledLive, history.throughSeq), ratings)
           const withQuestions = userQuestionsSnapshot === undefined
-            ? unsettled
-            : reconcileUserQuestionsProjection(unsettled, session.sessionId, userQuestionsSnapshot, inboxSnapshot)
+            ? merged
+            : reconcileUserQuestionsProjection(merged, session.sessionId, userQuestionsSnapshot, inboxSnapshot)
           const hasRunningAskUserTool = items.some(item => item.kind === 'tool' && item.state === 'running' && (item.toolKey ?? item.toolName) === 'ask_user_question')
           const effectivelyRunning = nextSession.running || (authoritativeLifecycle === undefined && hasRunningAskUserTool)
           const activeTurn = authoritativeLifecycle?.turn
@@ -939,8 +951,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
             })),
             busyAction: undefined,
-            selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
-            sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
+            ...(state.selectedSession?.sessionId === sessionId ? {
+              selectedSession: undefined,
+              sessionModels: undefined,
+              permissionSelecting: false,
+              modelSelecting: false,
+              agentPresetOptions: undefined,
+              agentPresetLoading: false,
+              agentPresetSelecting: false,
+            } : {}),
           }))
           return true
         }
@@ -957,8 +976,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
             })),
             busyAction: undefined,
-            selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
-            sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
+            ...(state.selectedSession?.sessionId === sessionId ? {
+              selectedSession: undefined,
+              sessionModels: undefined,
+              permissionSelecting: false,
+              modelSelecting: false,
+              agentPresetOptions: undefined,
+              agentPresetLoading: false,
+              agentPresetSelecting: false,
+            } : {}),
           }))
           return true
         }
@@ -971,8 +997,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           archivedSessionIds,
           pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
           busyAction: undefined,
-          selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
-          sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
+          ...(state.selectedSession?.sessionId === sessionId ? {
+            selectedSession: undefined,
+            sessionModels: undefined,
+            permissionSelecting: false,
+            modelSelecting: false,
+            agentPresetOptions: undefined,
+            agentPresetLoading: false,
+            agentPresetSelecting: false,
+          } : {}),
         }))
         return true
       } catch (error) {
@@ -1105,8 +1138,18 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async selectModel(selection) {
       const generation = runtime.connectionGeneration
+      const loadGeneration = runtime.sessionLoadGeneration
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
+      const token = ++modelSelectToken
+      const isCurrent = () => token === modelSelectToken
+        && generation === runtime.connectionGeneration
+        && loadGeneration === runtime.sessionLoadGeneration
+        && get().connection.phase === 'connected'
+        && get().selectedSession?.sessionId === session.sessionId
+      const releaseIfLatest = () => {
+        if (token === modelSelectToken && get().modelSelecting) set({ modelSelecting: false })
+      }
       set({ modelSelecting: true, error: undefined })
       try {
         if (session.backend === 'codex') {
@@ -1120,13 +1163,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }
         if (session.backend === 'pi') {
           const models = await selectPiModel(runtime.connection.requirePi(), cursorNativeId(session), selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
         if (session.backend === 'opencode') {
           const models = await selectOpencodeModel(runtime.connection.requireOpencode(), cursorNativeId(session), selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
@@ -1134,36 +1177,37 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           const models = session.backend === 'hermes'
             ? await selectHermesModel(runtime.connection.requireHermes(), cursorNativeId(session), selection)
             : await selectClaudeModel(runtime.connection.requireClaude(), cursorNativeId(session), selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
         if (session.backend === 'antigravity') {
           const models = await selectAcpModel(runtime.connection.requireAntigravity(), cursorNativeId(session), 'antigravity', selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
         if (session.backend === 'cursor') {
           const models = await selectAcpModel(runtime.connection.requireCursor(), cursorNativeId(session), 'cursor', selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
         if (isAcpManagedBackend(session.backend)) {
           const models = await selectAcpModel(runtime.connection.requireAcpBackend(session.backend), cursorNativeId(session), session.backend, selection)
-          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
         const selected = await runtime.connection.requireProxy().sessionSelectModel(session.sessionId, selection)
+        if (!isCurrent()) { releaseIfLatest(); return false }
         set(state => ({
           sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
           modelSelecting: false,
         }))
         return true
       } catch (error) {
-        if (isAcpManagedBackend(session.backend) && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
+        if (!isCurrent()) { releaseIfLatest(); return false }
         set({ modelSelecting: false, error: friendlyError(error) })
         return false
       }
@@ -1173,12 +1217,22 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
       const generation = runtime.connectionGeneration
+      const loadGeneration = runtime.sessionLoadGeneration
+      const token = ++permissionSelectToken
+      const isCurrent = () => token === permissionSelectToken
+        && generation === runtime.connectionGeneration
+        && loadGeneration === runtime.sessionLoadGeneration
+        && get().connection.phase === 'connected'
+        && get().selectedSession?.sessionId === session.sessionId
+      const releaseIfLatest = () => {
+        if (token === permissionSelectToken && get().permissionSelecting) set({ permissionSelecting: false })
+      }
       set({ permissionSelecting: true, error: undefined })
       try {
         if (isAcpManagedBackend(session.backend)) {
           const client = acpClientForBackend(runtime.connection, session.backend)
           const confirmed = await client.selectPermission(cursorNativeId(session), session.backend, preset)
-          if (generation !== runtime.connectionGeneration) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           const confirmedRecord = typeof confirmed === 'object' && confirmed !== null ? confirmed as Record<string, unknown> : undefined
           const effective = typeof confirmedRecord?.preset === 'string' ? confirmedRecord.preset : preset
           const permissions = acpPermissionsValue(effective)
@@ -1206,9 +1260,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (hostDeviceId === undefined) throw new Error(zhCN.runtime.connectHostFirst)
           const threadId = codexThreadId(session)
           const result = await runtime.connection.requireCodex().request('thread/resume', { threadId, permissionPreset: preset })
-          if (generation !== runtime.connectionGeneration) return false
+          if (!isCurrent()) { releaseIfLatest(); return false }
           const effectivePreset = codexPermissionPresetFromResponse(result) ?? preset
           await saveCodexPermissionPreset(hostDeviceId, threadId, effectivePreset)
+          if (!isCurrent()) { releaseIfLatest(); return false }
           set(state => ({
             ...withCodexPermissionState(state, session.sessionId, effectivePreset),
             permissionSelecting: false,
@@ -1217,9 +1272,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }
         const proxy = runtime.connection.requireProxy()
         await proxy.sessionSelectPermission(session.sessionId, preset)
+        if (!isCurrent()) { releaseIfLatest(); return false }
         // Read back the official projection; never fabricate an accepted grant.
         const confirmed = (await proxy.sessionList()).find(item => item.sessionId === session.sessionId)
-        if (generation !== runtime.connectionGeneration) return false
+        if (!isCurrent()) { releaseIfLatest(); return false }
         const permissions = confirmed?.projections?.values?.permissions
         if (typeof permissions !== 'object' || permissions === null || !('currentValue' in permissions) || permissions.currentValue !== preset) {
           throw new Error('The Host did not confirm the selected permission preset.')
@@ -1240,6 +1296,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         })
         return true
       } catch (error) {
+        if (!isCurrent()) { releaseIfLatest(); return false }
         set({ permissionSelecting: false, error: friendlyError(error) })
         return false
       }
@@ -1252,13 +1309,22 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       if (get().agentPresetLoading) return false
       const sessionId = session.sessionId
       const generation = runtime.connectionGeneration
-      const isCurrent = () => generation === runtime.connectionGeneration && get().selectedSession?.sessionId === sessionId
+      const loadGeneration = runtime.sessionLoadGeneration
+      const token = ++agentPresetLoadToken
+      const isCurrent = () => token === agentPresetLoadToken
+        && generation === runtime.connectionGeneration
+        && loadGeneration === runtime.sessionLoadGeneration
+        && get().connection.phase === 'connected'
+        && get().selectedSession?.sessionId === sessionId
+      const releaseIfLatest = () => {
+        if (token === agentPresetLoadToken && get().agentPresetLoading) set({ agentPresetLoading: false })
+      }
       set({ agentPresetLoading: true })
       try {
         if (isAcpManagedBackend(backend)) {
           const modes = await acpClientForBackend(runtime.connection, backend).sessionModes(cursorNativeId(session), backend)
           if (!isCurrent()) {
-            set({ agentPresetLoading: false })
+            releaseIfLatest()
             return false
           }
           const presets = modes.availableModes.map(mode => ({
@@ -1272,14 +1338,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }
         const roster = await runtime.connection.requireProxy().agentPresetList()
         if (!isCurrent()) {
-          set({ agentPresetLoading: false })
+          releaseIfLatest()
           return false
         }
         set({ agentPresetOptions: [...roster.presets], agentPresetLoading: false })
         return true
       } catch (error) {
         if (!isCurrent()) {
-          set({ agentPresetLoading: false })
+          releaseIfLatest()
           return false
         }
         if (isAcpManagedBackend(backend)) {
@@ -1296,11 +1362,23 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
       if (session.backend === 'codex') return false
+      const generation = runtime.connectionGeneration
+      const loadGeneration = runtime.sessionLoadGeneration
+      const token = ++agentPresetSelectToken
+      const isCurrent = () => token === agentPresetSelectToken
+        && generation === runtime.connectionGeneration
+        && loadGeneration === runtime.sessionLoadGeneration
+        && get().connection.phase === 'connected'
+        && get().selectedSession?.sessionId === session.sessionId
+      const releaseIfLatest = () => {
+        if (token === agentPresetSelectToken && get().agentPresetSelecting) set({ agentPresetSelecting: false })
+      }
       set({ agentPresetSelecting: true, error: undefined })
       try {
         const committed = isAcpManagedBackend(session.backend)
           ? await acpClientForBackend(runtime.connection, session.backend).setMode(cursorNativeId(session), session.backend, preset).then(res => res.currentModeId ?? preset)
           : await runtime.connection.requireProxy().agentPresetSelect(session.sessionId, preset)
+        if (!isCurrent()) { releaseIfLatest(); return false }
         set(state => {
           const update = (item: RemoteSession): RemoteSession =>
             item.sessionId === session.sessionId ? { ...item, agentPreset: committed } : item
@@ -1312,6 +1390,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         })
         return true
       } catch (error) {
+        if (!isCurrent()) { releaseIfLatest(); return false }
         set({ agentPresetSelecting: false, error: friendlyError(error) })
         return false
       }
