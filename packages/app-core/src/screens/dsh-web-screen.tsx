@@ -106,12 +106,27 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
     setAttempt(current => current + 1)
   }
 
-  const source = useMemo(() => grant && ({
-    uri: new URL('/__remote/session', grant.url).href,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'browserGrant=' + encodeURIComponent(grant.browserGrant),
-  }), [grant])
+  const sessionUri = grant && new URL('/__remote/session', grant.url).href
+  const source = useMemo(() => {
+    if (!grant || !sessionUri) return undefined
+    if (Platform.OS === 'android') {
+      // postUrl can send an opaque Origin. Post a form from the tunnel origin instead.
+      return {
+        baseUrl: grant.url,
+        html: `<!doctype html><meta name="referrer" content="same-origin">
+          <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; form-action 'self'">
+          <form method="post" action="/__remote/session">
+            <input type="hidden" name="browserGrant" value="${encodeURIComponent(grant.browserGrant)}">
+          </form><script>document.forms[0].submit()</script>`,
+      }
+    }
+    return {
+      uri: sessionUri,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'browserGrant=' + encodeURIComponent(grant.browserGrant),
+    }
+  }, [grant, sessionUri])
   const title = chinese ? '打开 DSH Web' : 'Open DSH Web'
   return (
     <Modal visible onRequestClose={onClose} animationType="slide">
@@ -121,7 +136,7 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
           message={chinese ? '无法打开 DSH Web，请重试。' : 'Could not open DSH Web. Please try again.'}
           onRetry={retry}
         />
-          : !source || !grant ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
+          : !source || !grant || !sessionUri ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
             : <WebView
                 source={source}
                 originWhitelist={['*']}
@@ -130,7 +145,7 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
                 }}
                 onError={() => setFailed(true)}
                 onHttpError={({ nativeEvent }) => {
-                  if (isFatalDshWebHttpError(nativeEvent, grant.url, source.uri)) setFailed(true)
+                  if (isFatalDshWebHttpError(nativeEvent, grant.url, sessionUri)) setFailed(true)
                 }}
                 onContentProcessDidTerminate={() => setFailed(true)}
                 incognito={Platform.OS === 'ios'}

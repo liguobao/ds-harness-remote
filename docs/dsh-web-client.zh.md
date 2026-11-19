@@ -18,10 +18,10 @@
 1. **探测能力。** 连接完成后从 `harness.transport.describe({})` 读取 `capabilities`。当前 Host 有 `dsh.web.v1` 且连接在线时显示按钮。切换 Host 或重连后按新连接重新探测。
 2. **发起一次打开。** 在当前 Noise 连接上调用 `dsh.web.open({})`。按钮进入等待状态，合并连点。Host 和 Client 身份取自当前连接，RPC 请求体使用空对象。用户切换 Host、关闭打开页或断线时，丢弃晚到的结果。
 3. **校验响应。** 用 `dshWebGrantSchema` 校验 `{ url, browserGrant, expiresAt }`。其中 `url` 是干净的 HTTPS 根地址，`browserGrant` 是短期一次性票据，`expiresAt` 是兑换截止时间，以 Unix 毫秒表示。票据在 WSS 就绪后签发，当前 Server 的兑换窗口最长 30 秒。确认票据仍有效后马上打开 WebView。
-4. **在 WebView 内换票。** 首次导航直接对 `url` 同源的 `/__remote/session` 发起顶层 POST，发送 URL 编码的 `browserGrant` 字段。Worker 消费票据、返回 `Set-Cookie` 和 `303 Location: /`。同一 WebView 完成跳转，并在后续 HTTP、SSE、WebSocket 握手时自动携带隧道会话 Cookie。
+4. **在 WebView 内换票。** WebView 对 `url` 同源的 `/__remote/session` 发起顶层 POST，发送 URL 编码的 `browserGrant` 字段。Worker 消费票据、返回 `Set-Cookie` 和 `303 Location: /`。同一 WebView 完成跳转，并在后续 HTTP、SSE、WebSocket 握手时自动携带隧道会话 Cookie。
 5. **关闭与重试。** WebView 关闭时，对打开它的同一条 Noise 连接尽力发出 `dsh.web.close({})` 并销毁视图。已过期、已消费或兑换结果不明确时，关闭当前视图后重新发起打开请求，取得新票据。刷新已进入的页面时加载干净地址，避免重发换票 POST。
 
-首次导航示例，校验过的 `grant` 是打开 RPC 的结果。
+iOS 首次导航示例使用打开 RPC 返回并校验过的 `grant`。
 
 ```ts
 const source = {
@@ -32,9 +32,9 @@ const source = {
 }
 ```
 
-只允许 WebView 顶层导航停留在当前隧道的 HTTPS origin。POST 由同一个 WebView 的原生网络栈发送并跟随重定向，应用的登录 Cookie、客户端 Bearer 和 Host 拨号 token 均无需传入。票据仅保存在当前打开流程的内存中，避开 URL、持久存储、埋点、错误上报和日志。隧道 Cookie 带 `__Host-` 前缀，含 `Secure`、`HttpOnly`、`Path=/` 和 `SameSite=Lax`，省略 `Domain`，有效期受租约约束。
+只允许 WebView 顶层导航停留在当前隧道的 HTTPS origin。POST 和重定向都在同一个 WebView 内完成，应用的登录 Cookie、客户端 Bearer 和 Host 拨号 token 均无需传入。票据仅保存在当前打开流程的内存中，避开 URL、持久存储、埋点、错误上报和日志。隧道 Cookie 带 `__Host-` 前缀，含 `Secure`、`HttpOnly`、`Path=/` 和 `SameSite=Lax`，省略 `Domain`，有效期受租约约束。
 
-Android 的 WebView POST 使用原生 `postUrl`，表单 body 是跨平台必需项，自定义 headers 在 Android POST 路径上不会传递。iOS 使用 WKWebView 的原生请求。两端都要实机确认 303 后的首次 GET 已携带 Cookie。现有代码入口是 [设备详情页](../packages/app-core/src/screens/device-screens.tsx) 和 [DSH Web WebView](../packages/app-core/src/screens/dsh-web-screen.tsx)。Host 入口见 [运行时发现](../packages/plugin/src/index.ts) 和 [隧道生命周期](../packages/plugin/src/dsh-web-host.ts)。
+Android 以已校验的隧道 HTTPS 根地址作为本地表单页的 `baseUrl`，并用 `same-origin` referrer policy 自动提交表单，使请求带有同源 `Origin`。Android 原生 `postUrl` 可能产生不透明的 Origin，使 Worker 拒绝换票。iOS 使用 WKWebView 的原生请求。两端都要实机确认 303 后的首次 GET 已携带 Cookie。现有代码入口是 [设备详情页](../packages/app-core/src/screens/device-screens.tsx) 和 [DSH Web WebView](../packages/app-core/src/screens/dsh-web-screen.tsx)。Host 入口见 [运行时发现](../packages/plugin/src/index.ts) 和 [隧道生命周期](../packages/plugin/src/dsh-web-host.ts)。
 
 ## 错误与验收
 

@@ -209,7 +209,7 @@ describe('DshWebScreen helpers and lifecycle', () => {
         },
       },
       {
-        name: 'transient open failure offers retry without spurious close and shows the WebView once recovered',
+        name: 'transient open failure offers retry without spurious close and submits a same-origin Android form once recovered',
         run: async () => {
           let calls = 0
           const rpc = vi.fn(async (method: string) => {
@@ -233,7 +233,13 @@ describe('DshWebScreen helpers and lifecycle', () => {
           await flushMicrotasks()
           const readyTree = renderScreen(rpc)
           const webView = findElement(readyTree, el => el.type === 'WebView')
-          expect(webView).toBeDefined()
+          expect(webView?.props?.source).toEqual({
+            baseUrl: validGrant().url,
+            html: expect.stringContaining('<form method="post" action="/__remote/session">'),
+          })
+          const source = webView?.props?.source as { html: string }
+          expect(source.html).toContain('name="referrer" content="same-origin"')
+          expect(source.html).toContain(`name="browserGrant" value="${validGrant().browserGrant}"`)
 
           reactHarness.unmount()
           expect(rpc.mock.calls.map(([method]) => method)).toEqual(['dsh.web.open', 'dsh.web.open', 'dsh.web.close'])
