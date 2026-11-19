@@ -88497,7 +88497,8 @@ var cachedWerift;
 var cachedNativeFactory;
 async function loadNodeRtcFactory(options = {}) {
   const nativeFactory = isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
-  return nativeFactory ?? await loadWeriftFactory(options);
+  const factory = nativeFactory ?? await loadWeriftFactory(options);
+  return factory === void 0 ? void 0 : wrapLocalCandidateFilterFactory(factory, options);
 }
 async function loadWeriftFactory(options = {}) {
   const cacheable = isCacheableFactoryOptions(options);
@@ -88545,6 +88546,9 @@ function buildNativeRtcFactory(RTCPeerConnection3) {
         },
         get signalingState() {
           return raw.signalingState;
+        },
+        get localDescription() {
+          return raw.localDescription;
         },
         set onconnectionstatechange(value) {
           raw.onconnectionstatechange = value;
@@ -88928,6 +88932,159 @@ function shouldUseLocalCandidate(candidate, allowedHostAddresses) {
   }
   return true;
 }
+function wrapLocalCandidateFilterFactory(factory, options = {}) {
+  return {
+    create(configuration) {
+      const blockedHostAddresses = detectBlockedHostAddresses(options.interfaces ?? networkInterfaces2());
+      const raw = factory.create(configuration);
+      let onIceCandidate = null;
+      const shouldAllow = (candidate) => {
+        if (shouldAdvertiseFilteredLocalCandidate(candidate, blockedHostAddresses)) return true;
+        configuration.onDiagnostic?.({
+          type: "local-candidate-filtered",
+          candidate: summarizeIceCandidate(candidate),
+          reason: "local-host-not-allowed"
+        });
+        return false;
+      };
+      const filterDescription = (description, emitDiagnostic) => {
+        if (description.sdp === void 0 || description.sdp.length === 0) return description;
+        const lineEnding = description.sdp.includes("\r\n") ? "\r\n" : "\n";
+        const lines = description.sdp.split(/\r?\n/);
+        let changed = false;
+        const keptLines = [];
+        for (const line of lines) {
+          if (/^a=candidate:/i.test(line)) {
+            const candidate = { candidate: line.slice(2) };
+            const allowed = emitDiagnostic ? shouldAllow(candidate) : shouldAdvertiseFilteredLocalCandidate(candidate, blockedHostAddresses);
+            if (!allowed) {
+              changed = true;
+              continue;
+            }
+          }
+          keptLines.push(line);
+        }
+        return changed ? { type: description.type, sdp: keptLines.join(lineEnding) } : description;
+      };
+      raw.onicecandidate = (event2) => {
+        if (onIceCandidate === null) return;
+        if (event2.candidate !== null && !shouldAllow(event2.candidate)) return;
+        onIceCandidate(event2);
+      };
+      const rawWithLocalDescription = raw;
+      return {
+        get connectionState() {
+          return raw.connectionState;
+        },
+        get iceConnectionState() {
+          return raw.iceConnectionState;
+        },
+        get iceGatheringState() {
+          return raw.iceGatheringState;
+        },
+        get signalingState() {
+          return raw.signalingState;
+        },
+        get localDescription() {
+          const current = rawWithLocalDescription.localDescription;
+          return current === void 0 || current === null ? current : filterDescription(current, false);
+        },
+        set onconnectionstatechange(value) {
+          raw.onconnectionstatechange = value;
+        },
+        get onconnectionstatechange() {
+          return raw.onconnectionstatechange;
+        },
+        set oniceconnectionstatechange(value) {
+          raw.oniceconnectionstatechange = value;
+        },
+        get oniceconnectionstatechange() {
+          return raw.oniceconnectionstatechange;
+        },
+        set onicegatheringstatechange(value) {
+          raw.onicegatheringstatechange = value;
+        },
+        get onicegatheringstatechange() {
+          return raw.onicegatheringstatechange;
+        },
+        set onicecandidate(value) {
+          onIceCandidate = value;
+        },
+        get onicecandidate() {
+          return onIceCandidate;
+        },
+        set ondatachannel(value) {
+          raw.ondatachannel = value;
+        },
+        get ondatachannel() {
+          return raw.ondatachannel;
+        },
+        createDataChannel(label, init) {
+          return raw.createDataChannel(label, init);
+        },
+        async createOffer() {
+          return filterDescription(await raw.createOffer(), true);
+        },
+        async createAnswer() {
+          return filterDescription(await raw.createAnswer(), true);
+        },
+        setLocalDescription(description) {
+          return raw.setLocalDescription(description === void 0 ? void 0 : filterDescription(description, false));
+        },
+        setRemoteDescription(description) {
+          return raw.setRemoteDescription(description);
+        },
+        addIceCandidate(candidate) {
+          return raw.addIceCandidate(candidate);
+        },
+        getStats() {
+          return raw.getStats();
+        },
+        close() {
+          raw.close();
+        }
+      };
+    }
+  };
+}
+function detectBlockedHostAddresses(interfaces) {
+  const allowed = /* @__PURE__ */ new Set();
+  const blocked = /* @__PURE__ */ new Set();
+  for (const [name2, addresses = []] of Object.entries(interfaces)) {
+    const tailscale = isTailscaleInterface(name2, addresses);
+    const physical = physicalInterfaceScore(name2) !== void 0;
+    for (const { address: address2, internal } of addresses) {
+      if (internal) continue;
+      const normalized = normalizeHostAddress(address2);
+      if (normalized.length === 0) continue;
+      if (tailscale) {
+        if ((isCgnat(normalized) || isTailscaleIpv6Address(normalized)) && !isBenchmarkHostAddress(normalized)) {
+          allowed.add(normalized);
+        } else {
+          blocked.add(normalized);
+        }
+        continue;
+      }
+      if (physical) {
+        if (!isBenchmarkHostAddress(normalized)) allowed.add(normalized);
+        continue;
+      }
+      blocked.add(normalized);
+    }
+  }
+  for (const address2 of allowed) blocked.delete(address2);
+  return blocked;
+}
+function shouldAdvertiseFilteredLocalCandidate(candidate, blockedHostAddresses) {
+  const parsed = parseIceCandidate(candidate);
+  if (parsed === void 0 || parsed.type !== "host" || parsed.host === void 0) return true;
+  const rawHost = parsed.host.trim().toLowerCase();
+  if (isBenchmarkHostAddress(rawHost)) return false;
+  if (rawHost.startsWith("::ffff:") && blockedHostAddresses.has(rawHost.slice("::ffff:".length))) {
+    return false;
+  }
+  return !blockedHostAddresses.has(normalizeHostAddress(rawHost));
+}
 function localCandidate(pair) {
   try {
     return pair.localCandidate;
@@ -89029,12 +89186,47 @@ function physicalInterfaceScore(name2) {
 function isIpv4Family(family) {
   return family === "IPv4" || family === 4;
 }
-function isUsableIpv4(ip) {
+function parseIpv4Parts(ip) {
   const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return void 0;
+  return parts;
+}
+function isBenchmarkIpv4Parts(parts) {
+  return parts[0] === 198 && (parts[1] === 18 || parts[1] === 19);
+}
+function isBenchmarkHostAddress(host) {
+  const normalized = host.trim().toLowerCase();
+  const ipv4Parts = parseIpv4Parts(normalized);
+  if (ipv4Parts !== void 0) return isBenchmarkIpv4Parts(ipv4Parts);
+  if (normalized.startsWith("::ffff:")) {
+    const mappedParts = parseIpv4Parts(normalized.slice("::ffff:".length));
+    if (mappedParts !== void 0) return isBenchmarkIpv4Parts(mappedParts);
+    const canonical = normalizeHostAddress(normalized);
+    if (canonical.startsWith("::ffff:c612:") || canonical.startsWith("::ffff:c613:")) return true;
+  }
+  return false;
+}
+function normalizeHostAddress(address2) {
+  const trimmed = address2.trim().toLowerCase();
+  const zoneIndex = trimmed.indexOf("%");
+  const withoutZone = zoneIndex < 0 ? trimmed : trimmed.slice(0, zoneIndex);
+  if (!withoutZone.includes(":")) return withoutZone;
+  try {
+    const hostname6 = new URL(`http://[${withoutZone}]/`).hostname;
+    return hostname6.startsWith("[") && hostname6.endsWith("]") ? hostname6.slice(1, -1) : hostname6;
+  } catch {
+    return withoutZone;
+  }
+}
+function isTailscaleIpv6Address(address2) {
+  return address2.startsWith("fd7a:115c:a1e0:");
+}
+function isUsableIpv4(ip) {
+  const parts = parseIpv4Parts(ip);
+  if (parts === void 0) return false;
   if (parts[0] === 0 || parts[0] === 127 || parts[0] >= 224) return false;
   if (parts[0] === 169 && parts[1] === 254) return false;
-  if (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) return false;
+  if (isBenchmarkIpv4Parts(parts)) return false;
   return true;
 }
 function isCgnat(ip) {
