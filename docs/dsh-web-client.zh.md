@@ -7,7 +7,7 @@
 | 组件 | 需要具备的能力 |
 | --- | --- |
 | Host 插件 | 支持 `dsh.web.v1`。当前 Harness 实例已挂载 `webApp`，Web 监听器已就绪，官方浏览器鉴权可用。插件从运行时读取实际监听地址，支持动态端口。使用本机 HTTPS 时，证书须通过 Host 进程的正常验证。 |
-| Remote Server | 已启用 DSH Web 会话接口，支持分配、签票、租约授权复查和关闭。准备一组有效的已配对 Host 与 Client。两台设备属于同一账号，账号持有有效会员权益。 |
+| Remote Server | 已启用 DSH Web 会话接口，支持分配、签票、租约授权复查和关闭。准备一组有效的已配对 Host 与 Client。两台设备属于同一账号。普通账号、仅设备账号和会员均可使用。 |
 | hostc Worker | 具备内部控制、Host 出站 WSS、一次性换票和浏览器会话校验。返回的浏览器域名具备有效 HTTPS 证书。 |
 | Client | 使用现有配对流程建立已认证的 Noise 连接。WebView 支持顶层表单 POST，并在同一实例中接收 Cookie 和跟随 303。 |
 
@@ -41,16 +41,16 @@ Android 的 WebView POST 使用原生 `postUrl`，表单 body 是跨平台必需
 | 结果 | Client 处理 |
 | --- | --- |
 | 缺少 `dsh.web.v1` | 隐藏入口。联调时检查 Host 插件及本机 DSH Web 是否兼容、已就绪。 |
-| `WEB_ENTITLEMENT_REQUIRED` | 提示需要有效会员。 |
+| `RATE_LIMITED`（Server HTTP 接口） | 普通账号和仅设备账号共享新建隧道额度。额度用完后稍后重试。 |
 | `MEMBERSHIP_REQUIRED` 或 `CONNECTION_NOT_FOUND` | 检查当前设备配对关系和已认证连接。 |
 | `DSH_WEB_NOT_READY`、`TUNNEL_UNAVAILABLE` 或打开超时 | 显示可重试错误，用户再次操作时发起新的打开。 |
 | 换票返回 `410` 或兑换后页面访问失败 | 清理当前打开流程。重新打开时申请新票据。 |
-| WebView 打开后 Host 离线、会员撤销或租约到期 | 当前页面流可能断开。关闭页面后按当前连接状态重新打开。 |
+| WebView 打开后 Host 离线、配对撤销或租约到期 | 当前页面流可能断开。关闭页面后按当前连接状态重新打开。 |
 
 使用已配对的真实设备验证以下场景。
 
 - Android 与 iOS 分别点一次打开。确认顶层 POST 后收到 303，首个 GET 带会话 Cookie，页面可使用 HTTP、SSE 和 WebSocket。
-- 将干净 URL 复制到另一浏览器。未兑换该隧道票据的浏览器应被拒绝，另一位会员登录 Remote 也一样。
+- 将干净 URL 复制到另一浏览器。未兑换该隧道票据的浏览器应被拒绝。
 - 并发兑换同一张票据，预期仅一次返回 303。过期后提交原票据应被拒绝。
-- 分别验证连点、打开过程中切换 Host、关闭 WebView、断线和撤销会员。关闭或授权失效后，已打开的连接应终止。Host 每 15 秒检查一次授权，断线重拨前也复查。
+- 分别验证连点、打开过程中切换 Host、关闭 WebView、断线和撤销配对。关闭或授权失效后，已打开的连接应终止。Host 每 15 秒检查一次授权，断线重拨前也复查。
 - 检查 Client、Host、Server 和 Worker 日志，确认地址栏、历史记录和日志里都没有票据、拨号 token、会话 Cookie 或 DSH 启动凭据。
