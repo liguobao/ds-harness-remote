@@ -431,6 +431,9 @@ describe('AdaptiveTransport capability negotiation', () => {
   it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
     await runScenarios([
       { code: 4001, reason: 'CONNECTION_FAILED', retryable: true },
+      { code: 4001, reason: 'SLOW_CONSUMER', retryable: false },
+      { code: 4001, reason: 'SLOW_CONSUMER: extra', retryable: false },
+      { code: 4003, reason: 'SLOW_CONSUMER', retryable: false },
       { code: 4001, reason: 'AUTH_INVALID', failure: 'AUTH_INVALID', retryable: false },
       { code: 4001, reason: 'TOKEN_EXPIRED', failure: 'TOKEN_EXPIRED', retryable: false },
       { code: 4001, reason: 'DEVICE_REVOKED', failure: 'DEVICE_REVOKED', retryable: false },
@@ -462,6 +465,56 @@ describe('AdaptiveTransport capability negotiation', () => {
         code: row.failure ?? (row.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED'), retryable: row.retryable,
       }))
       await transport.close()
+    } })), cleanupScenario1)
+  })
+
+  it('fails closed on 4001/SLOW_CONSUMER even with an active ControlLease while keeping documented 4001 recovery', async () => {
+    await runScenarios([
+      { name: '4001/SLOW_CONSUMER fails closed', reason: 'SLOW_CONSUMER', retain: false },
+      { name: '4001/CONNECTION_FAILED retains lease', reason: 'CONNECTION_FAILED', retain: true },
+      { name: '4001/server shutdown retains lease', reason: 'server shutdown', retain: true },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      vi.spyOn(Math, 'random').mockReturnValue(0.5)
+      const rtc = stalledRtc()
+      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory })
+      const closed = vi.fn()
+      transport.onClose(closed)
+      try {
+        const connecting = transport.connect()
+        const socket = FakeWebSocket.latest!
+        socket.open()
+        socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+        socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', recoveryTicket: 'initial' }))
+        await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+        rtc.channel.readyState = 'open'
+        rtc.channel.onopen?.()
+        await connecting
+        transport.markSecureReady()
+        const request = lastSentPayload(socket, 'connection.lease.request')
+        socket.receive(createControlFrame('connection.lease.ack', { ...request, ticket: 'renewed', leaseMs: 300_000 }))
+        const instancesBefore = FakeWebSocket.instances.length
+
+        vi.useFakeTimers()
+        socket.readyState = 3
+        socket.onclose?.({ code: 4001, reason: row.reason })
+        if (row.retain) {
+          expect(closed).not.toHaveBeenCalled()
+          expect(rtc.pc.close).not.toHaveBeenCalled()
+          await vi.advanceTimersByTimeAsync(8_000)
+          expect(FakeWebSocket.instances).toHaveLength(instancesBefore + 1)
+          expect(closed).not.toHaveBeenCalled()
+        } else {
+          expect(closed).toHaveBeenCalledOnce()
+          expect(closed).toHaveBeenCalledWith(expect.objectContaining({ code: 'TRANSPORT_CLOSED', retryable: false }))
+          expect(rtc.pc.close).toHaveBeenCalled()
+          await vi.advanceTimersByTimeAsync(20_000)
+          expect(FakeWebSocket.instances).toHaveLength(instancesBefore)
+        }
+      } finally {
+        vi.useRealTimers()
+        await transport.close()
+      }
     } })), cleanupScenario1)
   })
 
@@ -874,6 +927,139 @@ describe('AdaptiveTransport capability negotiation', () => {
 
     await expect(connecting).rejects.toThrow('Control frame exceeds')
   })
+
+  it('retires the Relay data socket cleanly so a subsequent idle close or detach cannot tear down the connection', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport({ forceRelay: true })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const control = FakeWebSocket.latest!
+      control.open()
+      control.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      await Promise.resolve()
+      control.receive(createControlFrame('connect.accepted', {
+        connectionId: 'connection-1',
+        relayEndpoint: 'wss://relay.example/ws',
+        relayTicket: 'dshrt.payload.signature',
+        relayNodeId: 'relay-1',
+        relayEpoch: 4,
+        relayRecoveryTicket: 'relay-recovery',
+      }))
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+      const data = FakeWebSocket.instances[1]!
+      data.open()
+      data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
+      await connecting
+      transport.markSecureReady()
+      const lease = lastSentPayload(control, 'connection.lease.request')
+      control.receive(createControlFrame('connection.lease.ack', { ...lease, ticket: 'renewed', leaseMs: 300_000 }))
+
+      let upgradedAlive = true
+      transport.retireRelayDataSocket(() => upgradedAlive)
+      expect(data.readyState).toBe(3)
+      expect(data.onopen).toBeNull()
+      expect(data.onmessage).toBeNull()
+      expect(data.onerror).toBeNull()
+      expect(data.onclose).toBeNull()
+      expect(closed).not.toHaveBeenCalled()
+
+      // Even after the old Relay dataSocket is retired, an active upgraded WebRTC leg
+      // still allows ControlLease recovery across transient control drops.
+      vi.spyOn(Math, 'random').mockReturnValue(0)
+      control.readyState = 3
+      control.onclose?.({ code: 1012, reason: 'restart' })
+      expect(closed).not.toHaveBeenCalled()
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(FakeWebSocket.instances).toHaveLength(3)
+      const recovered = FakeWebSocket.latest!
+      recovered.open()
+      recovered.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      expect(lastSentPayload(recovered, 'connection.lease.request')).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+
+      // Once the upgraded leg is no longer active, a control loss fails closed.
+      upgradedAlive = false
+      recovered.readyState = 3
+      recovered.onclose?.({ code: 1012, reason: 'restart' })
+      expect(closed).toHaveBeenCalledOnce()
+    } finally {
+      await transport.close()
+    }
+  })
+
+  it('gates ControlLease requests on hello.ack and scales the heartbeat watchdog by hello.ack heartbeatIntervalMs', async () => {
+    await runScenarios([
+      { name: 'blocks lease renewal after recovery socket opens before hello.ack', kind: 'pre-hello-ack' as const },
+      { name: 'triggers heartbeat timeout at 3x shorter negotiated interval (30s)', kind: 'short-interval' as const },
+      { name: 'does not falsely time out at 80s when negotiated interval is 40s (120s budget)', kind: 'long-interval' as const },
+    ].map(row => ({
+      name: row.name,
+      run: async () => {
+        vi.stubGlobal('WebSocket', FakeWebSocket)
+        const rtc = stalledRtc()
+        const transport = createAdaptiveTransport({ rtcFactory: rtc.factory })
+        const closed = vi.fn()
+        transport.onClose(closed)
+        try {
+          if (row.kind !== 'pre-hello-ack') vi.useFakeTimers()
+          const connecting = transport.connect()
+          const socket = FakeWebSocket.latest!
+          socket.open()
+          const intervalMs = row.kind === 'short-interval' ? 10_000 : row.kind === 'long-interval' ? 40_000 : 25_000
+          socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'], heartbeatIntervalMs: intervalMs }))
+          socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', recoveryTicket: 'initial' }))
+          if (row.kind !== 'pre-hello-ack') await vi.advanceTimersByTimeAsync(0)
+          else await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+          rtc.channel.readyState = 'open'
+          rtc.channel.onopen?.()
+          if (row.kind !== 'pre-hello-ack') await vi.advanceTimersByTimeAsync(300)
+          await connecting
+          transport.markSecureReady()
+          const req = lastSentPayload(socket, 'connection.lease.request')
+          socket.receive(createControlFrame('connection.lease.ack', { ...req, ticket: 'renewed', leaseMs: 300_000 }))
+          const internals = transport as unknown as {
+            lastControlReceivedAt: number
+            lease: { tick(force?: boolean): void }
+          }
+
+          if (row.kind === 'pre-hello-ack') {
+            vi.spyOn(Math, 'random').mockReturnValue(0)
+            socket.readyState = 3
+            socket.onclose?.({ code: 1012, reason: 'restart' })
+            await vi.waitFor(() => expect(FakeWebSocket.latest).not.toBe(socket))
+            const recovered = FakeWebSocket.latest!
+            recovered.open()
+            expect(recovered.sent.map(raw => JSON.parse(raw).type)).toEqual(['hello'])
+            // Lease tick while the new socket is open but hello.ack has not arrived yet must not send connection.lease.request.
+            internals.lease.tick(true)
+            expect(recovered.sent.map(raw => JSON.parse(raw).type)).toEqual(['hello'])
+            expect(recovered.readyState).toBe(FakeWebSocket.OPEN)
+            recovered.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+            expect(lastSentPayload(recovered, 'connection.lease.request')).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+          } else if (row.kind === 'short-interval') {
+            vi.spyOn(Math, 'random').mockReturnValue(1)
+            internals.lastControlReceivedAt = Date.now() - 29_999
+            internals.lease.tick(true)
+            expect(socket.readyState).toBe(FakeWebSocket.OPEN)
+            internals.lastControlReceivedAt = Date.now() - 30_000
+            internals.lease.tick(true)
+            expect(socket.readyState).toBe(3)
+            expect(closed).not.toHaveBeenCalled()
+          } else {
+            const beforeCount = socket.sent.length
+            internals.lastControlReceivedAt = Date.now() - 80_000
+            internals.lease.tick(true)
+            expect(socket.readyState).toBe(FakeWebSocket.OPEN)
+            expect(socket.sent.length).toBe(beforeCount + 1)
+            expect(lastSentPayload(socket, 'connection.lease.request')).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+          }
+        } finally {
+          await transport.close()
+        }
+      },
+    })), cleanupScenario1)
+  })
 })
 
 function createAdaptiveTransport(options: Partial<AdaptiveTransportOptions> = {}): AdaptiveTransport {
@@ -889,6 +1075,7 @@ function createAdaptiveTransport(options: Partial<AdaptiveTransportOptions> = {}
 
 function helloAck(overrides: {
   capabilities: string[]
+  heartbeatIntervalMs?: number
   webrtcEnabled?: boolean
   webrtcFallbackTimeoutMs?: number
   maxControlFrameBytes?: number

@@ -259,4 +259,86 @@ describe('Android SecureTransport live upgrade & cross-leg reorder', () => {
     await upgrader.close()
     await core.close()
   })
+
+  it('retires inner Relay dataSocket after upgrade drain so old dataSocket close cannot tear down LAN while preserving upgraded-leg liveness', async () => {
+    const { clientKeys, hostKeys, hostNoise, inner, deliverRelay } = createPairedHandshake()
+    let dataSocketOpen = true
+    let dataSocketOnClose: (() => void) | null = () => {
+      if (dataSocketOpen) {
+        dataSocketOpen = false
+        innerCloseCb?.(new Error('Relay data socket closed'))
+      }
+    }
+    let innerCloseCb: ((error?: Error) => void) | undefined
+    inner.onClose = cb => { innerCloseCb = cb; return () => { innerCloseCb = undefined } }
+
+    let capturedUpgradedAlive: (() => boolean) | undefined
+    const retireSpy = vi.fn((isUpgradedLegActive?: () => boolean) => {
+      capturedUpgradedAlive = isUpgradedLegActive
+      dataSocketOnClose = null
+      dataSocketOpen = false
+    })
+    inner.retireRelayDataSocket = retireSpy
+
+    const secure = new SecureTransport(
+      inner,
+      { deviceId: 'client-1', name: 'Phone', platform: 'android', publicKey: clientKeys.publicKey, privateKey: clientKeys.privateKey },
+      { deviceId: 'host-1', name: 'Mac', platform: 'darwin', identityKey: hostKeys.publicKey, membershipId: 'm1', online: true, trusted: true },
+    )
+    const closed = vi.fn()
+    const received: string[] = []
+    secure.onClose(closed)
+    secure.onMessage(msg => received.push(new TextDecoder().decode(msg)))
+    await secure.connect()
+
+    let lanConnected = true
+    let onSeq: ((counter: number, cipher: Uint8Array) => void) | undefined
+    const lanLeg: SequencedOutboundTransport = {
+      isSequencedUpgradeLeg: true,
+      mode: 'LAN',
+      selectedTransport: 'lan',
+      connect: async () => undefined,
+      send: async () => { throw new Error('unused') },
+      sendSequenced: async () => undefined,
+      onSequencedMessage: cb => { onSeq = cb; return () => { onSeq = undefined } },
+      onMessage: () => () => undefined,
+      onClose: () => () => undefined,
+      close: async () => { lanConnected = false },
+      getStats: () => ({ mode: 'LAN', connected: lanConnected, bytesSent: 0, bytesReceived: 0 }),
+      connectionDetails: async () => ({ mode: 'LAN', transport: 'lan', connectionState: 'connected', iceConnectionState: 'connected', diagnostics: {} as never }),
+    }
+
+    secure.attachIncomingLeg(lanLeg)
+    await secure.switchOutboundLeg(lanLeg, { closePrevious: true })
+    // Not retired until drain completes (trailing frame 0 still in flight on Relay).
+    expect(retireSpy).not.toHaveBeenCalled()
+
+    const hostCodec = new SecureMessageCodec()
+    const c0 = hostNoise.encrypt(hostCodec.encode(new TextEncoder().encode('trailing-relay-0'))[0]!)
+    const c1 = hostNoise.encrypt(hostCodec.encode(new TextEncoder().encode('upgraded-lan-1'))[0]!)
+
+    secure.markPreviousLegEndCounter(1)
+    onSeq?.(1, c1)
+    expect(retireSpy).not.toHaveBeenCalled()
+
+    // Trailing Relay frame arrives -> watermark satisfied -> inner.retireRelayDataSocket fires immediately.
+    deliverRelay(c0)
+    expect(received).toEqual(['trailing-relay-0', 'upgraded-lan-1'])
+    expect(retireSpy).toHaveBeenCalledOnce()
+    expect(dataSocketOpen).toBe(false)
+    expect(dataSocketOnClose).toBeNull()
+    expect(capturedUpgradedAlive?.()).toBe(true)
+    expect(closed).not.toHaveBeenCalled()
+
+    // Old Relay dataSocket closing afterwards cannot tear down the healthy LAN tunnel.
+    ;(dataSocketOnClose as (() => void) | null)?.()
+    expect(closed).not.toHaveBeenCalled()
+    expect(secure.getStats().mode).toBe('LAN')
+
+    // Once the upgraded leg disconnects or SecureTransport closes, liveness reports false.
+    lanConnected = false
+    expect(capturedUpgradedAlive?.()).toBe(false)
+
+    await secure.close()
+  })
 })

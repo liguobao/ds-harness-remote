@@ -67035,6 +67035,7 @@ var RtcDataChannelTransport = class {
   channel;
   remoteCandidates = [];
   remoteDescriptionSet = false;
+  opening = false;
   opened = false;
   closed = false;
   messageHandlers = /* @__PURE__ */ new Set();
@@ -67205,6 +67206,7 @@ var RtcDataChannelTransport = class {
     if (this.closed)
       return;
     this.closed = true;
+    this.opening = false;
     this.clearNegotiation();
     this.openReject?.(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed during negotiation."));
     this.openResolve = void 0;
@@ -67326,21 +67328,25 @@ var RtcDataChannelTransport = class {
     this.channel = channel;
     channel.binaryType = "arraybuffer";
     channel.onopen = () => {
-      if (this.closed || this.opened)
+      if (this.closed || this.opened || this.opening)
         return;
-      this.opened = true;
-      const resolve10 = this.openResolve;
+      this.opening = true;
       this.clearNegotiation();
       void this.resolveSelectedTransport().then(() => {
-        if (this.closed)
+        this.opening = false;
+        if (this.closed || this.channel !== channel || channel.readyState !== "open") {
+          this.failOpen(new RtcConnectError("RTC_CLOSED", "WebRTC data channel closed."));
           return;
+        }
+        this.opened = true;
+        const resolve10 = this.openResolve;
         this.openResolve = void 0;
         this.openReject = void 0;
         resolve10?.();
       });
     };
     channel.onmessage = (event2) => {
-      if (this.closed || !this.opened)
+      if (this.closed || !this.opened && !this.opening)
         return;
       const data2 = event2.data;
       const frame = typeof data2 === "string" ? new TextEncoder().encode(data2) : new Uint8Array(data2);
@@ -67358,11 +67364,15 @@ var RtcDataChannelTransport = class {
     channel.onclose = () => {
       if (this.closed)
         return;
+      const wasOpening = this.opening;
+      this.opening = false;
       this.failOpen(new RtcConnectError("RTC_CLOSED", "WebRTC data channel closed."));
       if (this.opened) {
         this.opened = false;
         for (const handler of this.closeHandlers)
           handler();
+      } else if (wasOpening) {
+        void this.close();
       }
     };
     channel.onerror = () => {
@@ -67409,6 +67419,7 @@ var RtcDataChannelTransport = class {
       return;
     const reject = this.openReject;
     this.clearNegotiation();
+    this.opening = false;
     this.openResolve = void 0;
     this.openReject = void 0;
     reject(error62);
@@ -67853,6 +67864,8 @@ var AdaptiveTransport = class extends BaseTransport {
   lastRtcDiagnostics;
   relayAssignment;
   dataReady = false;
+  dataSocketTimer;
+  isUpgradedLegActive;
   recoveryTicket;
   relayRecoveryTicket;
   lease;
@@ -67874,6 +67887,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.webrtcEnabled = true;
     this.serverNegotiateTimeoutMs = void 0;
     this.dataMode = "relay";
+    this.isUpgradedLegActive = void 0;
     this.selected = void 0;
     this.connectedAt = void 0;
     this.relayCounter = 0;
@@ -68181,6 +68195,7 @@ var AdaptiveTransport = class extends BaseTransport {
           selected = "relay";
         } else {
           this.dataMode = "webrtc";
+          this.retireDataSocket(this.dataSocket);
           selected = wireSelected;
         }
       } catch (error62) {
@@ -68303,7 +68318,12 @@ var AdaptiveTransport = class extends BaseTransport {
     if (!ticket || !this.connectionId || this.lease)
       return;
     this.lease = new ControlLease(this.connectionId, ticket, (payload) => {
-      if (this.controlReady && this.lastControlReceivedAt !== void 0 && Date.now() - this.lastControlReceivedAt >= 75e3) {
+      if (!this.controlReady) {
+        throw Object.assign(new Error("Adaptive control channel is not authenticated"), { code: "TRANSPORT_CLOSED" });
+      }
+      const intervalMs = typeof this.heartbeatIntervalMs === "number" && Number.isFinite(this.heartbeatIntervalMs) && this.heartbeatIntervalMs > 0 ? this.heartbeatIntervalMs : DEFAULT_HEARTBEAT_INTERVAL_MS;
+      const heartbeatTimeoutMs = Math.max(15e3, intervalMs * 3);
+      if (this.lastControlReceivedAt !== void 0 && Date.now() - this.lastControlReceivedAt >= heartbeatTimeoutMs) {
         this.controlLost(new Error("Control heartbeat timed out"), { reason: "control-error" });
         throw new Error("Control heartbeat timed out");
       }
@@ -68311,8 +68331,18 @@ var AdaptiveTransport = class extends BaseTransport {
     }, () => this.failConnection(Object.assign(new Error("Control authorization lease expired"), { code: "TRANSPORT_CLOSED", retryable: true })));
     this.lease.start();
   }
+  /**
+   * Retire the independent Relay data socket once an in-band upgrade has moved
+   * traffic onto WebRTC, so an idle close on the old Relay leg cannot tear down
+   * the healthy upgraded connection.
+   */
+  retireRelayDataSocket(isUpgradedLegActive) {
+    this.isUpgradedLegActive = isUpgradedLegActive;
+    this.retireDataSocket(this.dataSocket);
+  }
   controlLost(error62, diagnostic) {
-    if (error62.retryable === false || !this.lease?.canDetach() || !(this.dataMode === "webrtc" ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
+    const dataPlaneAlive = this.dataMode === "webrtc" ? this.rtc?.getStats().connected === true : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN || this.isUpgradedLegActive?.() === true;
+    if (error62.retryable === false || !this.lease?.canDetach() || !dataPlaneAlive) {
       this.failConnection(error62, diagnostic);
       return;
     }
@@ -68443,17 +68473,32 @@ var AdaptiveTransport = class extends BaseTransport {
     socket.binaryType = "arraybuffer";
     this.dataSocket = socket;
     await new Promise((resolve10, reject) => {
+      const clearTimer = () => {
+        if (this.dataSocketTimer !== void 0)
+          clearTimeout(this.dataSocketTimer);
+        this.dataSocketTimer = void 0;
+      };
       const timer2 = setTimeout(() => {
+        if (this.dataSocket !== socket)
+          return;
+        clearTimer();
+        this.retireDataSocket(socket);
         reject(new Error("Relay data attach timed out"));
-        socket.close();
       }, this.options.handshakeTimeoutMs ?? 15e3);
-      socket.onopen = () => socket.send(encodeRelayDataFrame(createRelayDataFrame("relay.attach", {
-        connectionId: this.connectionId,
-        deviceId: this.options.deviceId,
-        peerDeviceId: this.options.targetDeviceId,
-        ticket: assignment.relayTicket
-      }), this.controlFrameLimits));
+      this.dataSocketTimer = timer2;
+      socket.onopen = () => {
+        if (this.dataSocket !== socket)
+          return;
+        socket.send(encodeRelayDataFrame(createRelayDataFrame("relay.attach", {
+          connectionId: this.connectionId,
+          deviceId: this.options.deviceId,
+          peerDeviceId: this.options.targetDeviceId,
+          ticket: assignment.relayTicket
+        }), this.controlFrameLimits));
+      };
       socket.onmessage = (event2) => {
+        if (this.dataSocket !== socket)
+          return;
         try {
           if (typeof event2.data !== "string")
             throw new Error("Relay data frames must be text JSON");
@@ -68462,41 +68507,78 @@ var AdaptiveTransport = class extends BaseTransport {
             if (data2.payload.connectionId !== this.connectionId || assignment.relayEpoch !== void 0 && data2.payload.epoch !== assignment.relayEpoch) {
               throw new Error("Relay data attach assignment mismatch");
             }
-            clearTimeout(timer2);
+            clearTimer();
             this.dataReady = true;
             resolve10();
             return;
           }
-          void this.handleDataSocketFrame(data2.type, data2.payload).catch((error62) => {
-            this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+          void this.handleDataSocketFrame(socket, data2.type, data2.payload).catch((error62) => {
+            if (this.dataSocket === socket && this.dataMode === "relay") {
+              this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+            }
           });
         } catch (error62) {
-          clearTimeout(timer2);
+          clearTimer();
           reject(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
-          this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+          if (this.dataSocket === socket && this.dataMode === "relay") {
+            this.failConnection(error62 instanceof Error ? error62 : new Error("Invalid Relay data frame"));
+          }
         }
       };
       socket.onerror = () => {
-        clearTimeout(timer2);
+        if (this.dataSocket !== socket)
+          return;
+        clearTimer();
         reject(new Error("Relay data socket failed"));
       };
       socket.onclose = () => {
-        clearTimeout(timer2);
-        if (!this.dataReady)
+        if (this.dataSocket !== socket)
+          return;
+        clearTimer();
+        if (!this.dataReady) {
+          this.dataSocket = void 0;
           reject(new Error("Relay data socket closed before attach"));
-        else
+        } else if (this.dataMode === "relay") {
           this.failConnection(new Error("Relay data socket closed"));
+        } else {
+          this.retireDataSocket(socket);
+        }
       };
     });
   }
-  async handleDataSocketFrame(type, payload) {
+  retireDataSocket(socket) {
+    if (socket === void 0)
+      return;
+    if (this.dataSocket === socket) {
+      this.dataSocket = void 0;
+      this.dataReady = false;
+      if (this.dataSocketTimer !== void 0) {
+        clearTimeout(this.dataSocketTimer);
+        this.dataSocketTimer = void 0;
+      }
+    }
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = socket.readyState === 0 ? () => void 0 : null;
+    socket.onclose = null;
+    try {
+      socket.close();
+    } catch {
+    }
+  }
+  async handleDataSocketFrame(socket, type, payload) {
+    if (this.dataSocket !== socket)
+      return;
     if (type === "relay.detach") {
-      this.failConnection(new Error("Relay peer detached"));
+      if (this.dataMode === "relay")
+        this.failConnection(new Error("Relay peer detached"));
+      else
+        this.retireDataSocket(socket);
       return;
     }
     if (type === "ping") {
-      if (this.dataSocket?.readyState === WebSocket.OPEN) {
-        this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
+      if (this.dataSocket === socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
       }
       return;
     }
@@ -68567,13 +68649,18 @@ var AdaptiveTransport = class extends BaseTransport {
     this.socket = void 0;
     this.dataSocket = void 0;
     this.dataReady = false;
+    this.isUpgradedLegActive = void 0;
+    if (this.dataSocketTimer !== void 0) {
+      clearTimeout(this.dataSocketTimer);
+      this.dataSocketTimer = void 0;
+    }
     this.relayAssignment = void 0;
     this.connectionId = void 0;
     this.connectedAt = void 0;
     lifetime2?.abort();
     reject?.(error62);
     void rtc?.close();
-    dataSocket?.close();
+    this.retireDataSocket(dataSocket);
     socket?.close();
     if (established && diagnostic !== void 0) {
       try {
@@ -105461,7 +105548,8 @@ var HostServerConnection = class {
     if (tunnel === void 0 || payload.targetDeviceId !== this.identity.deviceId || payload.step !== 1) {
       throw new ControlConnectionError("SECURE_CHANNEL_FAILED", "Noise IK handshake is not valid for this connection.");
     }
-    if (tunnel.transport === "negotiating" && (tunnel.rtc !== void 0 || tunnel.relayAssignment !== void 0)) {
+    const awaitingRelayData = tunnel.transport === "relay" && tunnel.relayAssignment !== void 0 && !tunnel.dataReady;
+    if (tunnel.transport === "negotiating" && (tunnel.rtc !== void 0 || tunnel.relayAssignment !== void 0) || awaitingRelayData) {
       if (tunnel.pendingHandshake === void 0) tunnel.pendingHandshake = payload;
       else this.logger.warn("duplicate pending secure handshake ignored", {
         connectionId: shortId3(tunnel.connectionId),
@@ -105494,9 +105582,11 @@ var HostServerConnection = class {
           reason: diagnosticReason3(error62)
         });
       }
-      tunnel.dataSocket?.close();
+      tunnel.abortDataSocketOpen?.();
+      const dataSocket = tunnel.dataSocket;
       tunnel.dataSocket = void 0;
       tunnel.dataReady = false;
+      dataSocket?.close();
     }, mode2, this.rtcFactoryProvider === void 0 || this.config.forceRelay ? void 0 : (publishEvent) => new TransportUpgradeHost({
       connectionId: tunnel.connectionId,
       peerDeviceId: tunnel.peer.deviceId,
@@ -105522,6 +105612,8 @@ var HostServerConnection = class {
       },
       adoptRtc: async (rtc, upgradedMode, attemptId) => {
         const prevRtc = tunnel.rtc;
+        const drainingRtc = prevRtc !== void 0 && prevRtc !== rtc ? prevRtc : void 0;
+        const drainingDataSocket = drainingRtc === void 0 ? tunnel.dataSocket : void 0;
         tunnel.rtc = rtc;
         tunnel.transport = wireFromTransportTier(upgradedMode);
         tunnel.transportMode = upgradedMode;
@@ -105535,18 +105627,26 @@ var HostServerConnection = class {
             void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
           }
         });
-        if (prevRtc !== void 0 && prevRtc !== rtc) {
+        if (drainingRtc !== void 0) {
           tunnel.drainingRtcs ??= /* @__PURE__ */ new Set();
-          tunnel.drainingRtcs.add(prevRtc);
+          tunnel.drainingRtcs.add(drainingRtc);
         }
-        const endCounter = await channel.upgradeTransport(
+        const endCounter = drainingRtc !== void 0 ? await channel.upgradeTransport(
           upgradedMode,
           (counter, ciphertext) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
-          prevRtc,
+          drainingRtc,
           attemptId,
           (stale) => {
             tunnel.drainingRtcs?.delete(stale);
             void stale.close().catch(() => void 0);
+          }
+        ) : await channel.upgradeTransport(
+          upgradedMode,
+          (counter, ciphertext) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
+          drainingDataSocket,
+          attemptId,
+          drainingDataSocket === void 0 ? void 0 : (stale) => {
+            this.retireDataSocket(tunnel, stale);
           }
         );
         return endCounter;
@@ -105568,8 +105668,11 @@ var HostServerConnection = class {
     const leaseTicket = viaWebRtc ? tunnel.recoveryTicket : tunnel.transport === "relay" && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : void 0;
     if (leaseTicket) {
       tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, (payload2) => {
+        if (!this.online) {
+          throw new ControlConnectionError("CONNECTION_FAILED", "Server control socket is not authenticated.");
+        }
         const heartbeatTimeoutMs = Math.max(15e3, this.heartbeatIntervalMs * 3);
-        if (this.online && this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
+        if (this.lastActiveAt !== void 0 && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
           if (this.forceCloseSocket) this.forceCloseSocket(4009, "heartbeat timeout");
           else this.socket?.close(4009, "heartbeat timeout");
           throw new Error("Control heartbeat timed out");
@@ -105587,6 +105690,8 @@ var HostServerConnection = class {
     });
   }
   async resumePendingHandshake(tunnel) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return;
+    if (tunnel.transport === "relay" && tunnel.relayAssignment !== void 0 && !tunnel.dataReady) return;
     const payload = tunnel.pendingHandshake;
     if (payload === void 0 || tunnel.channel !== void 0 || tunnel.transport === "negotiating") return;
     tunnel.pendingHandshake = void 0;
@@ -105721,25 +105826,7 @@ var HostServerConnection = class {
       tunnel.transport = "relay";
       tunnel.transportMode = void 0;
       await rtc?.close();
-      if (tunnel.relayAssignment !== void 0) {
-        try {
-          await this.openDataSocket(tunnel);
-        } catch (error62) {
-          this.logger.warn("relay data attach failed", {
-            connectionId: shortId3(tunnel.connectionId),
-            peerDeviceId: shortId3(tunnel.peer.deviceId),
-            reason: diagnosticReason3(error62)
-          });
-          await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
-          this.sendControl("error", {
-            code: "CONNECTION_FAILED",
-            message: "Relay data connection failed.",
-            retryable: true,
-            connectionId: tunnel.connectionId
-          });
-          return;
-        }
-      }
+      if (!await this.attachRelayDataSocket(tunnel)) return;
       await this.resumePendingHandshake(tunnel);
       return;
     }
@@ -105846,7 +105933,71 @@ var HostServerConnection = class {
         ...webrtcDiagnosticsLogFields2(diagnostics)
       });
     }
-    await this.resumePendingHandshake(tunnel);
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel !== void 0 || tunnel.transport !== "relay") return;
+    if (!await this.attachRelayDataSocket(tunnel)) return;
+    try {
+      await this.resumePendingHandshake(tunnel);
+    } catch (handshakeError) {
+      this.logger.warn("pending secure handshake failed", {
+        connectionId: shortId3(tunnel.connectionId),
+        reason: diagnosticReason3(handshakeError)
+      });
+      await this.dropTunnel(tunnel.connectionId, "SECURE_CHANNEL_FAILED");
+    }
+  }
+  async attachRelayDataSocket(tunnel) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return false;
+    if (tunnel.relayAssignment === void 0 || tunnel.dataReady) return true;
+    try {
+      await this.openDataSocket(tunnel);
+    } catch (error62) {
+      if (this.tunnels.get(tunnel.connectionId) !== tunnel) return false;
+      this.logger.warn("relay data attach failed", {
+        connectionId: shortId3(tunnel.connectionId),
+        peerDeviceId: shortId3(tunnel.peer.deviceId),
+        reason: diagnosticReason3(error62)
+      });
+      await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+      if (this.socket?.readyState === 1) {
+        try {
+          this.sendControl("error", {
+            code: "CONNECTION_FAILED",
+            message: "Relay data connection failed.",
+            retryable: true,
+            connectionId: tunnel.connectionId
+          });
+        } catch {
+        }
+      }
+      return false;
+    }
+    return this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.transport === "relay";
+  }
+  retireDataSocket(tunnel, socket) {
+    if (socket === void 0) return;
+    if (tunnel.dataSocket === socket) {
+      tunnel.dataSocket = void 0;
+      tunnel.dataReady = false;
+    }
+    socket.onopen = null;
+    socket.onmessage = null;
+    if (socket.readyState === 3) {
+      socket.onerror = null;
+      socket.onclose = null;
+      return;
+    }
+    socket.onerror = () => void 0;
+    socket.onclose = () => {
+      socket.onopen = null;
+      socket.onerror = null;
+      socket.onclose = null;
+    };
+    try {
+      socket.close(1e3, "transport upgraded");
+    } catch {
+      socket.onerror = null;
+      socket.onclose = null;
+    }
   }
   sendTransportSelected(tunnel, transport) {
     this.sendControl("transport.selected", {
@@ -105888,23 +106039,35 @@ var HostServerConnection = class {
     });
   }
   async openDataSocket(tunnel) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) throw new Error("Relay tunnel closed");
+    if (tunnel.dataReady && tunnel.dataSocket !== void 0) return;
+    if (tunnel.dataSocketOpening !== void 0) return tunnel.dataSocketOpening;
     const assignment = tunnel.relayAssignment;
-    if (assignment === void 0 || tunnel.dataSocket !== void 0) return;
+    if (assignment === void 0) return;
     if (typeof assignment.relayEndpoint !== "string" || typeof assignment.relayTicket !== "string") return;
     const socket = this.createWebSocket(assignment.relayEndpoint);
     socket.binaryType = "arraybuffer";
     tunnel.dataSocket = socket;
-    await new Promise((resolve10, reject) => {
+    const opening = new Promise((resolve10, reject) => {
       let settled = false;
       const timer2 = setTimeout(() => finish(new Error("Relay data attach timed out")), 15e3);
       const finish = (error62) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer2);
-        if (error62 === void 0) resolve10();
-        else reject(error62);
+        if (tunnel.abortDataSocketOpen === abort) tunnel.abortDataSocketOpen = void 0;
+        if (tunnel.dataSocketOpening === opening) tunnel.dataSocketOpening = void 0;
+        if (error62 === void 0) {
+          resolve10();
+        } else {
+          if (!tunnel.dataReady) this.retireDataSocket(tunnel, socket);
+          reject(error62);
+        }
       };
+      const abort = () => finish(new Error("Relay tunnel closed"));
+      tunnel.abortDataSocketOpen = abort;
       socket.onopen = () => {
+        if (tunnel.dataSocket !== socket) return;
         try {
           socket.send(encodeRelayDataFrame(createRelayDataFrame("relay.attach", {
             connectionId: tunnel.connectionId,
@@ -105917,10 +106080,15 @@ var HostServerConnection = class {
         }
       };
       socket.onmessage = (event2) => {
+        if (tunnel.dataSocket !== socket) return;
         try {
           if (typeof event2.data !== "string") throw new ControlConnectionError("INVALID_MESSAGE", "Relay data frames must be text JSON.");
           const frame = decodeRelayDataFrame(event2.data, this.controlFrameLimits);
           if (frame.type === "relay.ready") {
+            if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.transport !== "relay") {
+              finish(new Error("Relay tunnel closed"));
+              return;
+            }
             if (frame.payload.connectionId !== tunnel.connectionId || assignment.relayEpoch !== void 0 && frame.payload.epoch !== assignment.relayEpoch) {
               throw new ControlConnectionError("INVALID_MESSAGE", "Relay data attach does not match the assigned connection.");
             }
@@ -105928,31 +106096,43 @@ var HostServerConnection = class {
             finish();
             return;
           }
-          void this.handleDataSocketFrame(tunnel, frame.type, frame.payload).catch((error62) => {
+          void this.handleDataSocketFrame(tunnel, socket, frame.type, frame.payload).catch((error62) => {
             finish(asError2(error62));
-            void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+            if (tunnel.dataSocket === socket && tunnel.transport === "relay") {
+              void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+            }
           });
         } catch (error62) {
           finish(asError2(error62));
-          void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+          if (tunnel.dataSocket === socket && tunnel.transport === "relay") {
+            void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+          }
         }
       };
-      socket.onerror = () => finish(new Error("Relay data socket failed"));
+      socket.onerror = () => {
+        if (tunnel.dataSocket !== socket) return;
+        finish(new Error("Relay data socket failed"));
+      };
       socket.onclose = () => {
+        if (tunnel.dataSocket !== socket) return;
         if (!tunnel.dataReady) finish(new Error("Relay data socket closed before attach"));
-        else void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+        else if (tunnel.transport === "relay") void this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+        else this.retireDataSocket(tunnel, socket);
       };
     });
+    tunnel.dataSocketOpening = opening;
+    await opening;
   }
-  async handleDataSocketFrame(tunnel, type, payload) {
-    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return;
+  async handleDataSocketFrame(tunnel, socket, type, payload) {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.dataSocket !== socket) return;
     if (type === "relay.detach") {
-      await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+      if (tunnel.transport === "relay") await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+      else this.retireDataSocket(tunnel, socket);
       return;
     }
     if (type === "ping") {
-      if (tunnel.dataSocket?.readyState === 1) {
-        tunnel.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
+      if (tunnel.dataSocket === socket && socket.readyState === 1) {
+        socket.send(encodeRelayDataFrame(createRelayDataFrame("pong", payload), this.controlFrameLimits));
       }
       return;
     }
@@ -105976,8 +106156,12 @@ var HostServerConnection = class {
     this.tunnels.clear();
     await Promise.all(tunnels.map(async (tunnel) => {
       tunnel.lease?.stop();
+      tunnel.abortDataSocketOpen?.();
       if (tunnel.rtc !== void 0) await tunnel.rtc.close();
-      tunnel.dataSocket?.close();
+      const dataSocket = tunnel.dataSocket;
+      tunnel.dataSocket = void 0;
+      tunnel.dataReady = false;
+      dataSocket?.close();
       if (tunnel.channel !== void 0) await tunnel.channel.close();
       else tunnel.noise.destroy();
     }));
@@ -105989,6 +106173,7 @@ var HostServerConnection = class {
     this.notifyTunnelClosed(tunnel);
     this.tunnels.delete(connectionId);
     tunnel.lease?.stop();
+    tunnel.abortDataSocketOpen?.();
     try {
       await tunnel.rtc?.close();
       for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => void 0);
@@ -105999,9 +106184,10 @@ var HostServerConnection = class {
         reason: diagnosticReason3(error62)
       });
     }
-    tunnel.dataSocket?.close();
+    const dataSocket = tunnel.dataSocket;
     tunnel.dataSocket = void 0;
     tunnel.dataReady = false;
+    dataSocket?.close();
     if (tunnel.channel !== void 0) {
       try {
         const closed = detail === void 0 ? await this.connections.closeConnection(connectionId, code) : await this.connections.closeConnection(connectionId, code, detail);
@@ -106078,27 +106264,26 @@ var ServerNoiseChannel = class {
   get outboundCounter() {
     return Number(this.tunnel.noise.sendingCounter());
   }
-  async upgradeTransport(nextMode, nextTransmit, previousRtc, attemptId = "", disposePreviousRtc) {
+  async upgradeTransport(nextMode, nextTransmit, previousLeg, attemptId = "", disposePreviousLeg) {
     this.mode = nextMode;
     this.transmitSequenced = nextTransmit;
     const endCounter = Number(this.tunnel.noise.sendingCounter());
-    if (previousRtc !== void 0 && disposePreviousRtc !== void 0 && previousRtc !== void 0) {
-      const existing = this.drainingLegs.get(previousRtc);
+    if (previousLeg !== void 0 && disposePreviousLeg !== void 0) {
+      const existing = this.drainingLegs.get(previousLeg);
       if (existing !== void 0) clearTimeout(existing.timer);
       const timer2 = setTimeout(() => {
-        const leg = this.drainingLegs.get(previousRtc);
+        const leg = this.drainingLegs.get(previousLeg);
         if (leg !== void 0) {
-          this.drainingLegs.delete(previousRtc);
-          leg.dispose(previousRtc);
+          this.drainingLegs.delete(previousLeg);
+          leg.dispose();
         }
       }, DEFAULT_PREVIOUS_LEG_DRAIN_MS);
       timer2.unref?.();
-      this.drainingLegs.set(previousRtc, {
-        rtc: previousRtc,
+      this.drainingLegs.set(previousLeg, {
         attemptId,
         endCounter: void 0,
         timer: timer2,
-        dispose: disposePreviousRtc
+        dispose: () => disposePreviousLeg(previousLeg)
       });
     }
     return endCounter;
@@ -106106,13 +106291,13 @@ var ServerNoiseChannel = class {
   confirmPreviousLegDrain(attemptId, clientPreviousLegEndCounter) {
     if (this.closed) return;
     const received = Number(this.tunnel.noise.receivingCounter());
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [legKey, leg] of this.drainingLegs) {
       if (leg.attemptId !== attemptId) continue;
       leg.endCounter = clientPreviousLegEndCounter;
       if (received >= clientPreviousLegEndCounter) {
         clearTimeout(leg.timer);
-        this.drainingLegs.delete(rtc);
-        leg.dispose(rtc);
+        this.drainingLegs.delete(legKey);
+        leg.dispose();
       }
     }
   }
@@ -106152,11 +106337,11 @@ var ServerNoiseChannel = class {
     const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext));
     const currentReceiving = Number(this.tunnel.noise.receivingCounter());
     this.reorderBuffer.onExpectedAdvanced(currentReceiving);
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [legKey, leg] of this.drainingLegs) {
       if (leg.endCounter !== void 0 && currentReceiving >= leg.endCounter) {
         clearTimeout(leg.timer);
-        this.drainingLegs.delete(rtc);
-        leg.dispose(rtc);
+        this.drainingLegs.delete(legKey);
+        leg.dispose();
       }
     }
     if (plaintext === void 0) return;
@@ -106192,9 +106377,9 @@ var ServerNoiseChannel = class {
     if (this.closed) return;
     this.closed = true;
     this.reorderBuffer.clear();
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [, leg] of this.drainingLegs) {
       clearTimeout(leg.timer);
-      leg.dispose(rtc);
+      leg.dispose();
     }
     this.drainingLegs.clear();
     this.handlers.clear();

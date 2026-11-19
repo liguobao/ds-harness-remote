@@ -514,6 +514,50 @@ describe('RtcDataChannelTransport initiator', () => {
       vi.useRealTimers()
     }
   })
+
+  it('rejects connect() if the data channel closes while getStats() is still pending', async () => {
+    await runScenarios([
+      { name: 'channel.onclose fires before getStats resolves', fireCloseEvent: true },
+      { name: 'channel.readyState turns closed before getStats resolves', fireCloseEvent: false },
+    ].map(row => ({
+      name: row.name,
+      run: async () => {
+        const pc = new FakePeerConnection()
+        let resolveStats: ((stats: RtcStats) => void) | undefined
+        vi.spyOn(pc, 'getStats').mockImplementation(() => new Promise<RtcStats>(resolve => { resolveStats = resolve }))
+        const transport = new RtcDataChannelTransport({
+          role: 'initiator',
+          factory: factoryFor(pc),
+          onSignal: () => undefined,
+        })
+        const closed = vi.fn()
+        const received: Uint8Array[] = []
+        transport.onClose(closed)
+        transport.onMessage(data => received.push(data))
+        const connecting = expect(transport.connect()).rejects.toMatchObject({ code: 'RTC_CLOSED' })
+        await flush()
+        transport.handleSignal({ type: 'answer', sdp: 'v=0 answer' })
+        await flush()
+        const channel = pc.channels[0]!
+        channel.open()
+        await vi.waitFor(() => expect(resolveStats).toBeTypeOf('function'))
+        // Messages arriving during the async getStats() window are still delivered.
+        channel.receive(new Uint8Array([4, 5, 6]).buffer)
+        expect(received).toHaveLength(1)
+
+        if (row.fireCloseEvent) {
+          channel.close()
+        } else {
+          channel.readyState = 'closed'
+        }
+        resolveStats!(asStats(lanStats()))
+        await connecting
+        expect(transport.getStats().connected).toBe(false)
+        expect(closed).not.toHaveBeenCalled()
+        await transport.close()
+      },
+    })))
+  })
 })
 
 describe('RtcDataChannelTransport responder', () => {
