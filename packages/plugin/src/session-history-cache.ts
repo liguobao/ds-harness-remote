@@ -4,6 +4,7 @@ import type { AcpPermissionPreset, NativeEvent as AcpNativeEvent } from './acp/v
 import type { CodexModelSelection } from './codex/virtual-catalog.js'
 import type { CodexNativeHistoryPage } from './codex/virtual-history.js'
 import type { HarnessSessionGeneration } from './harness-version.js'
+import type { VirtualHistoryTurnWindow } from './virtual-history-pagination.js'
 
 const MAX_CACHED_SESSIONS = 32
 const MAX_CACHED_RECORDS_PER_SESSION = 200
@@ -453,13 +454,14 @@ export class CodexSessionHistoryCache {
 
   static pageKey(
     generation: HarnessSessionGeneration,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
   ): string {
     return JSON.stringify([
       generation,
       page.beforeSeq ?? null,
       page.throughSeq ?? null,
       page.maxMessages ?? null,
+      page.turnWindow ?? null,
     ])
   }
 
@@ -474,7 +476,7 @@ export class CodexSessionHistoryCache {
   getFreshPage(
     threadId: string,
     generation: HarnessSessionGeneration,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
     knownUpdatedAt?: number,
   ): CodexNativeHistoryPage | undefined {
     const entry = this.threads.get(threadId)
@@ -510,7 +512,7 @@ export class CodexSessionHistoryCache {
   getStalePage(
     threadId: string,
     generation: HarnessSessionGeneration,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
   ): CodexNativeHistoryPage | undefined {
     const entry = this.threads.get(threadId)
     if (entry === undefined) return undefined
@@ -522,7 +524,7 @@ export class CodexSessionHistoryCache {
   setPage(
     threadId: string,
     generation: HarnessSessionGeneration,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
     value: CodexNativeHistoryPage,
     knownUpdatedAt?: number,
     readEpoch?: number,
@@ -550,7 +552,7 @@ export class CodexSessionHistoryCache {
   runSingleFlightPage(
     threadId: string,
     generation: HarnessSessionGeneration,
-    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
+    page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow },
     signal: AbortSignal | undefined,
     factory: (sharedSignal: AbortSignal) => Promise<CodexNativeHistoryPage>,
   ): Promise<CodexNativeHistoryPage> {

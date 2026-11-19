@@ -7,8 +7,10 @@ import { join } from 'node:path'
 import {
   CODEX_APP_TRANSFER_CHUNK_BYTES,
   createEvent,
+  createRpcResponse,
   encodeMessage,
   MAX_SECURE_MESSAGE_BYTES,
+  SecureMessageCodec,
 } from '@dsh-remote/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -2403,6 +2405,94 @@ describe('CodexRemoteDomain', () => {
       await domain.close()
     }
   }, 15000)
+
+  it('bounds >4 MiB dsh/sessionHistory responses below MAX_SECURE_MESSAGE_BYTES and fails closed with non-retryable RESPONSE_TOO_LARGE on un-compactable envelopes', async () => {
+    const { root } = await directories()
+    const hugeText = 'r'.repeat(4 * 1024 * 1024 + 64 * 1024)
+    const app = new FakeAppServer(root)
+    const originalCall = app.call.bind(app)
+    let oversizeEnvelope = false
+    vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+      if (method === 'thread/turns/list') {
+        throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'turn pagination unsupported')
+      }
+      if (method === 'thread/read' && isRecord(params) && params.includeTurns === true) {
+        return {
+          thread: {
+            id: 'allowed-thread',
+            projectId: 'allowed-project',
+            cwd: root,
+            ...(oversizeEnvelope ? { model: 'M'.repeat(MAX_SECURE_MESSAGE_BYTES) } : {}),
+            createdAt: 1,
+            updatedAt: 2,
+            turns: [
+              {
+                id: 'turn-1',
+                status: 'completed',
+                createdAt: 1,
+                items: [
+                  { id: 'u-1', type: 'userMessage', content: [{ type: 'text', text: 'First prompt' }] },
+                  { id: 'a-1', type: 'agentMessage', text: 'First reply', status: 'completed' },
+                ],
+              },
+              {
+                id: 'turn-2',
+                status: 'inProgress',
+                createdAt: 2,
+                items: [
+                  { id: 'u-2', type: 'userMessage', content: [{ type: 'text', text: 'Giant prompt' }] },
+                  { id: 'a-2', type: 'agentMessage', text: hugeText, status: 'inProgress' },
+                ],
+              },
+            ],
+          },
+        }
+      }
+      return originalCall(method, params)
+    })
+
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    try {
+      const first = await domain.call('connection-1', {
+        method: 'dsh/sessionHistory',
+        params: { threadId: 'allowed-thread', maxMessages: 50 },
+      }) as {
+        records: Array<{ event: { seq: number; data: Record<string, unknown> } }>
+        hasMore: boolean
+        cursor: number
+      }
+      expect(first.records).toHaveLength(1)
+      expect(first.hasMore).toBe(true)
+      expect(first.records[0]!.event.data.truncated).toBe(true)
+
+      const rpcBytes = encodeMessage(createRpcResponse('req-domain-4m', first))
+      expect(rpcBytes.byteLength).toBeLessThanOrEqual(MAX_SECURE_MESSAGE_BYTES)
+      expect(() => new SecureMessageCodec().encode(rpcBytes)).not.toThrow()
+
+      const older = await domain.call('connection-1', {
+        method: 'dsh/sessionHistory',
+        params: { threadId: 'allowed-thread', beforeSeq: first.records[0]!.event.seq, maxMessages: 50 },
+      }) as {
+        records: Array<{ event: { seq: number } }>
+        hasMore: boolean
+      }
+      expect(older.hasMore).toBe(false)
+      expect(older.records.length).toBeGreaterThan(0)
+      expect(older.records.every(entry => entry.event.seq < first.records[0]!.event.seq)).toBe(true)
+
+      oversizeEnvelope = true
+      await expect(domain.call('connection-1', {
+        method: 'dsh/sessionHistory',
+        params: { threadId: 'allowed-thread', maxMessages: 50 },
+      })).rejects.toMatchObject({
+        code: 'RESPONSE_TOO_LARGE',
+        retryable: false,
+      })
+    } finally {
+      await domain.close()
+    }
+  })
 })
 
 class FakeAppServer implements CodexAppServerLike {

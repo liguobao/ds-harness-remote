@@ -6,8 +6,21 @@ import {
   paginateCodexNativeHistory,
   projectCodexNativeHistory,
 } from '../src/codex/virtual-harness.js'
-import { itemEvents } from '../src/codex/virtual-history.js'
+import { enforceCodexHistoryPageBudget, itemEvents } from '../src/codex/virtual-history.js'
+import { parseCodexCall } from '../src/codex/method-policy.js'
 import { CodexSessionHistoryCache } from '../src/session-history-cache.js'
+import {
+  createRpcResponse,
+  encodeMessage,
+  MAX_SECURE_MESSAGE_BYTES,
+  SecureMessageCodec,
+} from '@dsh-remote/protocol'
+import {
+  utf8JsonByteLength,
+  VIRTUAL_HISTORY_HARD_MAX_BYTES,
+  VIRTUAL_HISTORY_MAX_BYTES,
+  VIRTUAL_HISTORY_MAX_MESSAGES,
+} from '../src/virtual-history-pagination.js'
 
 describe('CodexVirtualHarness', () => {
   it.each([
@@ -1151,6 +1164,618 @@ describe('CodexVirtualHarness', () => {
       await second.close()
     }
   })
+
+  it('bounds CodeX history pages by message cap, turnWindow, and byte budget without gaps or loops', async () => {
+    const makeLargeThread = (id: string, turnCount: number, outputBytes: number, withCommand = true) => ({
+      id,
+      name: `Thread ${id}`,
+      cwd: '/workspace/repo',
+      createdAt: 1_700_000_000,
+      updatedAt: 1_700_000_100,
+      status: { type: 'idle' },
+      turns: Array.from({ length: turnCount }, (_, idx) => {
+        const turnNum = idx + 1
+        return {
+          id: `turn_${turnNum}`,
+          status: 'completed',
+          createdAt: 1_700_000_000 + turnNum,
+          updatedAt: 1_700_000_010 + turnNum,
+          items: [
+            { id: `u_${turnNum}`, type: 'userMessage', content: [{ type: 'text', text: `Prompt ${turnNum}` }] },
+            ...(withCommand ? [{
+              id: `cmd_${turnNum}`,
+              type: 'commandExecution',
+              command: `echo ${turnNum}`,
+              aggregatedOutput: `out-${turnNum}:` + 'y'.repeat(outputBytes),
+              exitCode: 0,
+              status: 'completed',
+            }] : []),
+            { id: `a_${turnNum}`, type: 'agentMessage', text: `Reply ${turnNum}:` + (withCommand ? 'ok' : 'r'.repeat(outputBytes)), status: 'completed' },
+          ],
+        }
+      }),
+    })
+
+    await runScenarios([
+      {
+        name: 'clamps maxMessages=500 and enforces 256 KiB budget across follow and page with lossless cursor walk',
+        run: async () => {
+          const largeThread = makeLargeThread('thr_large', 60, 6 * 1024, true)
+          const fullHistory = projectCodexNativeHistory(largeThread, 'codex:thr_large')
+          const client = fakeCodex([largeThread])
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const controller = new AbortController()
+          let iterator: AsyncIterator<unknown> | undefined
+          try {
+            const followStream = await target.open(
+              'session/follow',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_large' }, maxMessages: 500 } } },
+              controller.signal,
+            )
+            iterator = followStream[Symbol.asyncIterator]()
+            const snapshot = (await iterator.next()).value as {
+              type: string
+              hasMore: boolean
+              records: Array<{ event: { seq: number } }>
+            }
+            expect(snapshot.type).toBe('snapshot')
+            expect(snapshot.hasMore).toBe(true)
+            expect(snapshot.records.length).toBeGreaterThan(0)
+            expect(utf8JsonByteLength(snapshot)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+            expect(client.request).toHaveBeenCalledWith(
+              'dsh/sessionHistory',
+              { threadId: 'thr_large', maxMessages: VIRTUAL_HISTORY_MAX_MESSAGES },
+              expect.any(AbortSignal),
+            )
+
+            const collected: number[] = []
+            let beforeSeq: number | undefined
+            let guard = 0
+            while (guard++ < 100) {
+              const page = await target.dispatch(
+                'session/page',
+                {
+                  args: {
+                    request: {
+                      address: { kind: 'session', sessionId: 'codex:thr_large' },
+                      maxMessages: 500,
+                      ...(beforeSeq === undefined ? {} : { beforeSeq }),
+                    },
+                  },
+                },
+                controller.signal,
+              )
+              expect(page.ok).toBe(true)
+              if (!page.ok) throw new Error('codex page failed')
+              const value = page.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+              expect(value.records.length).toBeGreaterThan(0)
+              expect(utf8JsonByteLength(value)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+              collected.unshift(...value.records.map(entry => entry.event.seq))
+              if (!value.hasMore) break
+              beforeSeq = value.records[0]!.event.seq
+            }
+            expect(collected).toEqual(fullHistory.entries.map(entry => entry.event.seq))
+          } finally {
+            controller.abort()
+            await iterator?.return?.()
+            await target.close()
+          }
+        },
+      },
+      {
+        name: 'aligns integer and object turnWindow to CodeX turn boundaries and falls back cleanly on older Hosts',
+        run: async () => {
+          const multiTurn = makeLargeThread('thr_turns', 5, 16, false)
+          const fullHistory = projectCodexNativeHistory(multiTurn, 'codex:thr_turns')
+          const client = fakeCodex([multiTurn])
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const signal = new AbortController().signal
+          try {
+            const p1 = await target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_turns' }, turnWindow: 2 } } },
+              signal,
+            )
+            expect(p1.ok).toBe(true)
+            if (!p1.ok) throw new Error('p1 failed')
+            const v1 = p1.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v1.records[0]!.event.type).toBe('turn/start')
+            expect(v1.records.map(entry => entry.event.seq)).toEqual(fullHistory.entries.slice(18, 30).map(e => e.event.seq))
+            expect(v1.hasMore).toBe(true)
+
+            const p2 = await target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_turns' }, beforeSeq: 18, turnWindow: 2 } } },
+              signal,
+            )
+            expect(p2.ok).toBe(true)
+            if (!p2.ok) throw new Error('p2 failed')
+            const v2 = p2.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v2.records[0]!.event.type).toBe('turn/start')
+            expect(v2.records.map(entry => entry.event.seq)).toEqual(fullHistory.entries.slice(6, 18).map(e => e.event.seq))
+            expect(v2.hasMore).toBe(true)
+
+            const p3 = await target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_turns' }, beforeSeq: 6, turnWindow: 2 } } },
+              signal,
+            )
+            expect(p3.ok).toBe(true)
+            if (!p3.ok) throw new Error('p3 failed')
+            const v3 = p3.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(v3.records[0]!.event.type).toBe('turn/start')
+            expect(v3.records.map(entry => entry.event.seq)).toEqual(fullHistory.entries.slice(0, 6).map(e => e.event.seq))
+            expect(v3.hasMore).toBe(false)
+
+            const objPage = await target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_turns' }, maxMessages: 500, turnWindow: { minMessages: 5, minTurns: 2 } } } },
+              signal,
+            )
+            expect(objPage.ok).toBe(true)
+            if (!objPage.ok) throw new Error('objPage failed')
+            const objVal = objPage.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(objVal.records[0]!.event.type).toBe('turn/start')
+            expect(objVal.records.map(entry => entry.event.seq)).toEqual(fullHistory.entries.slice(12, 30).map(e => e.event.seq))
+            expect(objVal.hasMore).toBe(true)
+          } finally {
+            await target.close()
+          }
+
+          const legacyClient = fakeCodex([multiTurn])
+          const originalRequest = legacyClient.request.getMockImplementation()!
+          legacyClient.request.mockImplementation(async (method: string, params?: Record<string, unknown>, s?: AbortSignal) => {
+            if (method === 'dsh/sessionHistory' && params?.turnWindow !== undefined) {
+              throw Object.assign(new Error('The CodeX call parameters are invalid.'), { code: 'INVALID_MESSAGE' })
+            }
+            return originalRequest(method, params, s)
+          })
+          const legacyTarget = new CodexVirtualHarness(legacyClient, { deviceId: 'host-1', name: 'Host' })
+          try {
+            const fallback = await legacyTarget.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_turns' }, turnWindow: 2 } } },
+              signal,
+            )
+            expect(fallback.ok).toBe(true)
+            if (!fallback.ok) throw new Error('fallback failed')
+            const fallbackVal = fallback.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(fallbackVal.records[0]!.event.type).toBe('turn/start')
+            expect(fallbackVal.records.map(entry => entry.event.seq)).toEqual(fullHistory.entries.slice(18, 30).map(e => e.event.seq))
+            expect(fallbackVal.hasMore).toBe(true)
+          } finally {
+            await legacyTarget.close()
+          }
+        },
+      },
+      {
+        name: 'returns a single oversized newest CodeX event without empty-page infinite loops',
+        run: async () => {
+          const oversizedThread = {
+            id: 'thr_giant',
+            name: 'Giant reply',
+            cwd: '/workspace/repo',
+            createdAt: 1_700_000_000,
+            updatedAt: 1_700_000_100,
+            status: { type: 'idle' },
+            turns: [
+              {
+                id: 'turn_1',
+                status: 'completed',
+                createdAt: 1_700_000_001,
+                items: [
+                  { id: 'u_1', type: 'userMessage', content: [{ type: 'text', text: 'First prompt' }] },
+                  { id: 'a_1', type: 'agentMessage', text: 'Small reply', status: 'completed' },
+                ],
+              },
+              {
+                id: 'turn_2',
+                status: 'inProgress',
+                createdAt: 1_700_000_002,
+                items: [
+                  { id: 'u_2', type: 'userMessage', content: [{ type: 'text', text: 'Big prompt' }] },
+                  { id: 'a_2', type: 'agentMessage', text: 'g'.repeat(320 * 1024), status: 'inProgress' },
+                ],
+              },
+            ],
+          }
+          const fullHistory = projectCodexNativeHistory(oversizedThread, 'codex:thr_giant')
+          const client = fakeCodex([oversizedThread])
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const signal = new AbortController().signal
+          try {
+            const collected: number[] = []
+            let beforeSeq: number | undefined
+            let guard = 0
+            while (guard++ < 10) {
+              const page = await target.dispatch(
+                'session/page',
+                {
+                  args: {
+                    request: {
+                      address: { kind: 'session', sessionId: 'codex:thr_giant' },
+                      maxMessages: 200,
+                      ...(beforeSeq === undefined ? {} : { beforeSeq }),
+                    },
+                  },
+                },
+                signal,
+              )
+              expect(page.ok).toBe(true)
+              if (!page.ok) throw new Error('giant page failed')
+              const value = page.value as { records: Array<{ event: { seq: number } }>; hasMore: boolean }
+              expect(value.records.length).toBeGreaterThan(0)
+              collected.unshift(...value.records.map(entry => entry.event.seq))
+              if (!value.hasMore) break
+              beforeSeq = value.records[0]!.event.seq
+            }
+            expect(collected).toEqual(fullHistory.entries.map(entry => entry.event.seq))
+            expect(guard).toBeLessThan(10)
+          } finally {
+            await target.close()
+          }
+        },
+      },
+      {
+        name: 'handles large legacy Host turnWindow fallback without half-turn tails and requests 200 messages',
+        run: async () => {
+          const largeMultiTurn = {
+            id: 'thr_legacy_large',
+            name: 'Legacy Large Thread',
+            cwd: '/workspace/repo',
+            createdAt: 1_700_000_000,
+            updatedAt: 1_700_000_100,
+            status: { type: 'idle' },
+            turns: Array.from({ length: 7 }, (_, turnIdx) => {
+              const turnNum = turnIdx + 1
+              return {
+                id: `turn_${turnNum}`,
+                status: 'completed',
+                createdAt: 1_700_000_000 + turnNum,
+                updatedAt: 1_700_000_010 + turnNum,
+                items: [
+                  { id: `u_${turnNum}`, type: 'userMessage', content: [{ type: 'text', text: `Prompt ${turnNum}` }] },
+                  ...Array.from({ length: 32 }, (_, toolIdx) => ({
+                    id: `cmd_${turnNum}_${toolIdx}`,
+                    type: 'commandExecution',
+                    command: `step ${turnNum}-${toolIdx}`,
+                    aggregatedOutput: 'ok',
+                    exitCode: 0,
+                    status: 'completed',
+                  })),
+                  { id: `a_${turnNum}`, type: 'agentMessage', text: `Reply ${turnNum}`, status: 'completed' },
+                ],
+              }
+            }),
+          }
+          const fullHistory = projectCodexNativeHistory(largeMultiTurn, 'codex:thr_legacy_large')
+          const turnStartSeqs = fullHistory.entries
+            .filter(entry => entry.event.type === 'turn/start')
+            .map(entry => entry.event.seq)
+          expect(turnStartSeqs).toHaveLength(7)
+
+          const legacyClient = fakeCodex([largeMultiTurn])
+          const originalRequest = legacyClient.request.getMockImplementation()!
+          legacyClient.request.mockImplementation(async (method: string, params?: Record<string, unknown>, s?: AbortSignal) => {
+            if (method === 'dsh/sessionHistory' && params?.turnWindow !== undefined) {
+              throw Object.assign(new Error('The CodeX call parameters are invalid.'), { code: 'INVALID_MESSAGE' })
+            }
+            return originalRequest(method, params, s)
+          })
+          const legacyTarget = new CodexVirtualHarness(legacyClient, { deviceId: 'host-1', name: 'Host' })
+          const signal = new AbortController().signal
+          try {
+            const first = await legacyTarget.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_legacy_large' }, turnWindow: 6 } } },
+              signal,
+            )
+            expect(first.ok).toBe(true)
+            if (!first.ok) throw new Error('legacy large first page failed')
+            expect(legacyClient.request).toHaveBeenCalledWith(
+              'dsh/sessionHistory',
+              { threadId: 'thr_legacy_large', maxMessages: VIRTUAL_HISTORY_MAX_MESSAGES },
+              expect.any(AbortSignal),
+            )
+            const firstVal = first.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            // Legacy Host returned 200 surface messages starting mid-Turn-2 (hasMore=true);
+            // client must drop Turn 2's truncated tail and align cleanly to Turn 3's turn/start.
+            expect(firstVal.records[0]!.event.type).toBe('turn/start')
+            expect(firstVal.records[0]!.event.seq).toBe(turnStartSeqs[2])
+            expect(firstVal.hasMore).toBe(true)
+
+            const second = await legacyTarget.dispatch(
+              'session/page',
+              {
+                args: {
+                  request: {
+                    address: { kind: 'session', sessionId: 'codex:thr_legacy_large' },
+                    beforeSeq: firstVal.records[0]!.event.seq,
+                    turnWindow: 6,
+                  },
+                },
+              },
+              signal,
+            )
+            expect(second.ok).toBe(true)
+            if (!second.ok) throw new Error('legacy large second page failed')
+            const secondVal = second.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            expect(secondVal.records[0]!.event.type).toBe('turn/start')
+            expect(secondVal.records[0]!.event.seq).toBe(turnStartSeqs[0])
+            expect(secondVal.hasMore).toBe(false)
+            expect([
+              ...secondVal.records.map(entry => entry.event.seq),
+              ...firstVal.records.map(entry => entry.event.seq),
+            ]).toEqual(fullHistory.entries.map(entry => entry.event.seq))
+
+            const midTurnOnly = enforceCodexHistoryPageBudget({
+              header: { version: 1, id: 'codex:thr_mid', createdAt: 1 },
+              cursor: 12,
+              nextTurn: 2,
+              hasMore: true,
+              records: [
+                { type: 'event', event: { type: 'user/message', seq: 10, time: 1, data: {}, surfaceOp: 'append' } },
+                { type: 'event', event: { type: 'assistant/message', seq: 11, time: 1, data: {}, surfaceOp: 'append' } },
+                { type: 'event', event: { type: 'user/message', seq: 12, time: 1, data: {}, surfaceOp: 'append' } },
+              ],
+            }, { turnWindow: 1 })
+            expect(midTurnOnly.records.map(entry => entry.event.seq)).toEqual([10, 11, 12])
+          } finally {
+            await legacyTarget.close()
+          }
+        },
+      },
+      {
+        name: 'preserves turn boundary alignment when v3 expansion pushes a near-budget Host page over 256 KiB',
+        run: async () => {
+          const makeV3BoundaryThread = (msgLen: number) => ({
+            id: 'thr_v3_boundary',
+            name: 'V3 Boundary Thread',
+            cwd: '/workspace/repo',
+            createdAt: 1_700_000_000,
+            updatedAt: 1_700_000_100,
+            status: { type: 'idle' },
+            turns: [1, 2, 3].map(turnNum => ({
+              id: `turn_${turnNum}`,
+              status: 'completed',
+              createdAt: 1_700_000_000 + turnNum,
+              updatedAt: 1_700_000_010 + turnNum,
+              items: [
+                { id: `u_${turnNum}`, type: 'userMessage', content: [{ type: 'text', text: `Prompt ${turnNum}` }] },
+                ...(turnNum === 1
+                  ? [{ id: 'a_1', type: 'agentMessage', text: 'short', status: 'completed' }]
+                  : Array.from({ length: 50 }, (_, idx) => ({
+                      id: `a_${turnNum}_${idx}`,
+                      type: 'agentMessage',
+                      text: 'm'.repeat(msgLen),
+                      status: 'completed',
+                    }))),
+              ],
+            })),
+          })
+          // Calibrate legacy Turn 2 + Turn 3 to fit inside the Host's 256 KiB budget
+          // while v3 `stream: []` injection (+1,200 B across 100 assistant messages)
+          // plus `permissionPreset` pushes the adapted page over the client budget.
+          const probe = makeV3BoundaryThread(2300)
+          const probeHostPage = paginateCodexNativeHistory(
+            projectCodexNativeHistory(probe, 'codex:thr_v3_boundary', 'legacy'),
+            { turnWindow: 2 },
+          )
+          const probeHostBytes = utf8JsonByteLength(probeHostPage)
+          const targetSlack = VIRTUAL_HISTORY_MAX_BYTES - 2048 - 400
+          const deltaPerMsg = Math.floor((targetSlack - probeHostBytes) / 100)
+          const boundaryThread = makeV3BoundaryThread(2300 + deltaPerMsg)
+
+          const legacyHistory = projectCodexNativeHistory(boundaryThread, 'codex:thr_v3_boundary', 'legacy')
+          const turnStartSeqs = legacyHistory.entries
+            .filter(entry => entry.event.type === 'turn/start')
+            .map(entry => entry.event.seq)
+          const hostPage = paginateCodexNativeHistory(legacyHistory, { turnWindow: 2 })
+          // Confirm the Host itself returned both Turn 2 and Turn 3 cleanly before v3 adaptation.
+          expect(hostPage.records[0]!.event.seq).toBe(turnStartSeqs[1])
+          expect(hostPage.hasMore).toBe(true)
+
+          const client = fakeCodex([boundaryThread])
+          const originalRequest = client.request.getMockImplementation()!
+          client.request.mockImplementation(async (method: string, params?: Record<string, unknown>, s?: AbortSignal) => {
+            const response = await originalRequest(method, params, s)
+            return method === 'dsh/sessionHistory'
+              ? { ...(response as Record<string, unknown>), permissionPreset: 'workspace-write' }
+              : response
+          })
+          const v3Target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'v3')
+          const signal = new AbortController().signal
+          try {
+            const page = await v3Target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_v3_boundary' }, turnWindow: 2 } } },
+              signal,
+            )
+            expect(page.ok).toBe(true)
+            if (!page.ok) throw new Error('v3 boundary page failed')
+            const value = page.value as { records: Array<{ event: { seq: number; type: string } }>; hasMore: boolean }
+            // Client secondary byte trim must snap to Turn 3's turn/start rather than splitting Turn 2.
+            expect(value.records[0]!.event.type).toBe('turn/start')
+            expect(value.records[0]!.event.seq).toBe(turnStartSeqs[2])
+            expect(value.hasMore).toBe(true)
+            expect(utf8JsonByteLength(value)).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+          } finally {
+            await v3Target.close()
+          }
+        },
+      },
+      {
+        name: 'validates turnWindow on dsh/sessionHistory method policy',
+        run: async () => {
+          expect(parseCodexCall('dsh/sessionHistory', { threadId: 'thr_1', turnWindow: 2 }).params).toEqual({
+            threadId: 'thr_1',
+            turnWindow: 2,
+          })
+          expect(parseCodexCall('dsh/sessionHistory', {
+            threadId: 'thr_1',
+            turnWindow: { minMessages: 50, minTurns: 2 },
+          }).params).toEqual({
+            threadId: 'thr_1',
+            turnWindow: { minMessages: 50, minTurns: 2 },
+          })
+          expect(() => parseCodexCall('dsh/sessionHistory', { threadId: 'thr_1', turnWindow: 0 })).toThrow()
+          expect(() => parseCodexCall('dsh/sessionHistory', { threadId: 'thr_1', turnWindow: {} })).toThrow()
+        },
+      },
+      {
+        name: 'compacts a >4 MiB newest CodeX record below MAX_SECURE_MESSAGE_BYTES without mutating source and advances cursor',
+        run: async () => {
+          const hugeReply = 'c'.repeat(4 * 1024 * 1024 + 64 * 1024)
+          const hugeThread = {
+            id: 'thr_4m_record',
+            name: 'Oversized 4 MiB Thread',
+            cwd: '/workspace/repo',
+            createdAt: 1_700_000_000,
+            updatedAt: 1_700_000_100,
+            status: { type: 'idle' },
+            turns: [
+              {
+                id: 'turn_1',
+                status: 'completed',
+                createdAt: 1_700_000_001,
+                items: [
+                  { id: 'u_1', type: 'userMessage', content: [{ type: 'text', text: 'First prompt' }] },
+                  { id: 'a_1', type: 'agentMessage', text: 'Small reply', status: 'completed' },
+                ],
+              },
+              {
+                id: 'turn_2',
+                status: 'inProgress',
+                createdAt: 1_700_000_002,
+                items: [
+                  { id: 'u_2', type: 'userMessage', content: [{ type: 'text', text: 'Second prompt' }] },
+                  { id: 'a_2', type: 'agentMessage', text: hugeReply, status: 'inProgress' },
+                ],
+              },
+            ],
+          }
+          const sourceHistory = projectCodexNativeHistory(hugeThread, 'codex:thr_4m_record')
+          const newestEntry = sourceHistory.entries.at(-1)!
+          expect(utf8JsonByteLength(newestEntry)).toBeGreaterThan(MAX_SECURE_MESSAGE_BYTES)
+
+          const page1 = paginateCodexNativeHistory(sourceHistory, { maxMessages: 200 })
+          expect(page1.records).toHaveLength(1)
+          expect(page1.hasMore).toBe(true)
+          expect(page1.records[0]!.event.seq).toBe(newestEntry.event.seq)
+          expect((page1.records[0]!.event.data as Record<string, unknown>).truncated).toBe(true)
+          expect(utf8JsonByteLength(page1)).toBeLessThanOrEqual(VIRTUAL_HISTORY_HARD_MAX_BYTES)
+          const rpcBytes = encodeMessage(createRpcResponse('req-codex-4m', page1))
+          expect(rpcBytes.byteLength).toBeLessThanOrEqual(MAX_SECURE_MESSAGE_BYTES)
+          expect(() => new SecureMessageCodec().encode(rpcBytes)).not.toThrow()
+
+          // Source history entry must stay untouched.
+          const originalText = ((newestEntry.event.data as { message: { content: Array<{ text: string }> } }).message.content[0]!).text
+          expect(originalText).toBe(hugeReply)
+          expect((newestEntry.event.data as Record<string, unknown>).truncated).toBeUndefined()
+
+          // Client paginates older entries cleanly via beforeSeq.
+          const page2 = paginateCodexNativeHistory(sourceHistory, {
+            beforeSeq: page1.records[0]!.event.seq,
+            maxMessages: 200,
+          })
+          expect(page2.hasMore).toBe(false)
+          expect(page2.records.map(entry => entry.event.seq)).toEqual(
+            sourceHistory.entries.slice(0, -1).map(entry => entry.event.seq),
+          )
+        },
+      },
+      {
+        name: 'surfaces explicit response-too-large / RESPONSE_TOO_LARGE on un-compactable CodeX history envelopes',
+        run: async () => {
+          const client = fakeCodex()
+          const hostTooLargeError = Object.assign(
+            new Error('Virtual history response exceeds transport limit.'),
+            { code: 'RESPONSE_TOO_LARGE', details: { actualBytes: 5_000_000, maxBytes: VIRTUAL_HISTORY_HARD_MAX_BYTES } },
+          )
+          client.request.mockImplementation(async (method: string) => {
+            if (method === 'dsh/sessionHistory') throw hostTooLargeError
+            if (method === 'model/list') return { data: [], nextCursor: null }
+            return {}
+          })
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          const signal = new AbortController().signal
+          try {
+            const hostRejected = await target.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } } },
+              signal,
+            )
+            expect(hostRejected).toMatchObject({
+              ok: false,
+              error: { code: 'RESPONSE_TOO_LARGE' },
+            })
+
+            await expect(
+              target.open(
+                'session/follow',
+                { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } } },
+                signal,
+              ),
+            ).rejects.toMatchObject({
+              isDSHRemoteError: true,
+              code: 'response-too-large',
+              retryable: false,
+            })
+          } finally {
+            await target.close()
+          }
+
+          // Local VirtualHistoryResponseTooLargeError (e.g. un-compactable envelope during client budget enforcement)
+          // maps cleanly to business failure('response-too-large').
+          const localOversizedEnvelopeClient = fakeCodex()
+          localOversizedEnvelopeClient.request.mockImplementation(async (method: string) => {
+            if (method === 'dsh/sessionHistory') {
+              return {
+                header: {
+                  version: 1,
+                  id: 'codex:thr_1',
+                  createdAt: 1_700_000_000,
+                  cwd: '/'.repeat(MAX_SECURE_MESSAGE_BYTES),
+                },
+                cursor: 0,
+                nextTurn: 1,
+                hasMore: false,
+                records: [
+                  { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { text: 'hi' }, surfaceOp: 'append' } },
+                ],
+              }
+            }
+            if (method === 'model/list') return { data: [], nextCursor: null }
+            return {}
+          })
+          const localTarget = new CodexVirtualHarness(localOversizedEnvelopeClient, { deviceId: 'host-1', name: 'Host' })
+          try {
+            const localPage = await localTarget.dispatch(
+              'session/page',
+              { args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } } },
+              signal,
+            )
+            expect(localPage).toMatchObject({
+              ok: false,
+              error: { code: 'response-too-large' },
+            })
+
+            const localHistory = await localTarget.dispatch(
+              'session/history',
+              { args: { request: { sessionId: 'codex:thr_1' } } },
+              signal,
+            )
+            expect(localHistory).toMatchObject({
+              ok: false,
+              error: { code: 'response-too-large' },
+            })
+          } finally {
+            await localTarget.close()
+          }
+        },
+      },
+    ])
+  })
 })
 
 interface FakeCodexOptions {
@@ -1246,6 +1871,7 @@ function fakeCodex(extraThreads: Array<Record<string, unknown>> = [], options: F
           beforeSeq: typeof params?.beforeSeq === 'number' ? params.beforeSeq : undefined,
           throughSeq: typeof params?.throughSeq === 'number' ? params.throughSeq : undefined,
           maxMessages: typeof params?.maxMessages === 'number' ? params.maxMessages : undefined,
+          turnWindow: params?.turnWindow as never,
         },
       )
     }

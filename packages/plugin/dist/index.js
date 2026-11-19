@@ -69267,7 +69267,8 @@ var CodexSessionHistoryCache = class _CodexSessionHistoryCache {
       generation,
       page.beforeSeq ?? null,
       page.throughSeq ?? null,
-      page.maxMessages ?? null
+      page.maxMessages ?? null,
+      page.turnWindow ?? null
     ]);
   }
   beginReadEpoch() {
@@ -69424,6 +69425,522 @@ var AcpSessionHistoryCache = class {
     this.sessions.clear();
   }
 };
+
+// packages/plugin/src/virtual-history-pagination.ts
+var VIRTUAL_HISTORY_DEFAULT_MAX_MESSAGES = 50;
+var VIRTUAL_HISTORY_MAX_MESSAGES = 200;
+var VIRTUAL_HISTORY_MAX_BYTES = 256 * 1024;
+var VIRTUAL_HISTORY_RPC_ENVELOPE_RESERVE_BYTES = 256 * 1024;
+var VIRTUAL_HISTORY_HARD_MAX_BYTES = MAX_SECURE_MESSAGE_BYTES - VIRTUAL_HISTORY_RPC_ENVELOPE_RESERVE_BYTES;
+var STAGE_B_STRING_BYTE_LIMITS = [64 * 1024, 8 * 1024, 1024, 256];
+var MAX_COMPACT_ARRAY_ITEMS = 32;
+var MAX_COMPACT_DEPTH = 32;
+var MAX_STUB_ATTACHMENTS = 16;
+var TRUNCATED_STRING_MARKER = "\n[History record truncated to fit transport limit]";
+var OMITTED_RECORD_TEXT = "[History record omitted: exceeds transport size limit]";
+var OMITTED_NESTED_VALUE_TEXT = "[History nested value omitted: exceeds depth limit]";
+var PRESERVED_DATA_KEYS = /* @__PURE__ */ new Set([
+  "id",
+  "role",
+  "source",
+  "turn",
+  "step",
+  "toolCallId",
+  "callId",
+  "name",
+  "status",
+  "isError",
+  "title",
+  "kind",
+  "phase",
+  "attachment",
+  "type"
+]);
+var SCALAR_IDENTITY_KEYS = [
+  "id",
+  "role",
+  "turn",
+  "step",
+  "toolCallId",
+  "callId",
+  "name",
+  "status",
+  "isError",
+  "title",
+  "kind",
+  "phase"
+];
+var VirtualHistoryResponseTooLargeError = class extends Error {
+  constructor(actualBytes, maxBytes2, message = `Virtual history response (${actualBytes} bytes) exceeds transport limit (${maxBytes2} bytes).`) {
+    super(message);
+    this.actualBytes = actualBytes;
+    this.maxBytes = maxBytes2;
+    this.name = "VirtualHistoryResponseTooLargeError";
+  }
+  code = "RESPONSE_TOO_LARGE";
+  retryable = false;
+};
+var utf8Encoder = new TextEncoder();
+function isPlainRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isSafeScalar(value) {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null;
+}
+function utf8ByteLength(value) {
+  return utf8Encoder.encode(value).byteLength;
+}
+function sliceUtf8BytesSafe(value, maxBytes2) {
+  if (maxBytes2 <= 0 || value.length === 0) return "";
+  let bytes = 0;
+  let index = 0;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index);
+    const charBytes = codePoint <= 127 ? 1 : codePoint <= 2047 ? 2 : codePoint <= 65535 ? 3 : 4;
+    if (bytes + charBytes > maxBytes2) break;
+    bytes += charBytes;
+    index += codePoint > 65535 ? 2 : 1;
+  }
+  return value.slice(0, index);
+}
+function truncateStringUtf8(value, maxBytes2) {
+  if (value.length <= Math.floor(maxBytes2 / 3)) {
+    return { text: value, truncated: false };
+  }
+  if (value.length <= maxBytes2 && utf8ByteLength(value) <= maxBytes2) {
+    return { text: value, truncated: false };
+  }
+  const markerBytes = utf8ByteLength(TRUNCATED_STRING_MARKER);
+  const prefixBudget = Math.max(0, maxBytes2 - markerBytes);
+  return {
+    text: `${sliceUtf8BytesSafe(value, prefixBudget)}${TRUNCATED_STRING_MARKER}`,
+    truncated: true
+  };
+}
+function containsErrorFlag(value, depth = 0) {
+  if (depth > 4) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsErrorFlag(item, depth + 1));
+  }
+  if (!isPlainRecord(value)) return false;
+  if (value.isError === true) return true;
+  for (const child of Object.values(value)) {
+    if (containsErrorFlag(child, depth + 1)) return true;
+  }
+  return false;
+}
+function setSafeProperty(target3, key, value) {
+  if (key === "__proto__") return;
+  Object.defineProperty(target3, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true
+  });
+}
+function stripInlineImagePayloads(value, state2, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+  if (typeof value !== "object" || value === null) return value;
+  if (depth > MAX_COMPACT_DEPTH || seen.has(value)) {
+    state2.changed = true;
+    return OMITTED_NESTED_VALUE_TEXT;
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => stripInlineImagePayloads(item, state2, depth + 1, seen));
+    }
+    if (!isPlainRecord(value)) return value;
+    if ((value.type === "image" || value.type === "input_image") && ("data" in value || "url" in value || "image_url" in value)) {
+      state2.changed = true;
+      const next2 = {};
+      for (const [key, child] of Object.entries(value)) {
+        if (key === "data" || key === "url" || key === "image_url") continue;
+        setSafeProperty(next2, key, child);
+      }
+      next2.truncated = true;
+      return next2;
+    }
+    const next = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "__proto__") {
+        state2.changed = true;
+        continue;
+      }
+      setSafeProperty(next, key, stripInlineImagePayloads(child, state2, depth + 1, seen));
+    }
+    return next;
+  } finally {
+    seen.delete(value);
+  }
+}
+function compactValueForBudget(value, maxStringBytes, state2, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+  if (typeof value === "string") {
+    const truncated = truncateStringUtf8(value, maxStringBytes);
+    if (truncated.truncated) state2.changed = true;
+    return truncated.text;
+  }
+  if (typeof value !== "object" || value === null) return value;
+  if (depth > MAX_COMPACT_DEPTH || seen.has(value)) {
+    state2.changed = true;
+    return OMITTED_NESTED_VALUE_TEXT;
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (value.length <= MAX_COMPACT_ARRAY_ITEMS) {
+        return value.map((item) => compactValueForBudget(item, maxStringBytes, state2, depth + 1, seen));
+      }
+      state2.changed = true;
+      const kept = value.slice(0, MAX_COMPACT_ARRAY_ITEMS).map((item) => compactValueForBudget(item, maxStringBytes, state2, depth + 1, seen));
+      const omitted = value.slice(MAX_COMPACT_ARRAY_ITEMS);
+      const omittedCount = omitted.length;
+      const omittedHadError = containsErrorFlag(omitted);
+      kept.push({
+        type: "text",
+        text: `[${omittedCount} history item${omittedCount === 1 ? "" : "s"} omitted to fit transport limit]`,
+        truncated: true,
+        ...omittedHadError ? { isError: true } : {}
+      });
+      return kept;
+    }
+    if (!isPlainRecord(value)) return value;
+    const next = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "__proto__") {
+        state2.changed = true;
+        continue;
+      }
+      if (PRESERVED_DATA_KEYS.has(key)) {
+        setSafeProperty(next, key, child);
+        continue;
+      }
+      setSafeProperty(next, key, compactValueForBudget(child, maxStringBytes, state2, depth + 1, seen));
+    }
+    return next;
+  } finally {
+    seen.delete(value);
+  }
+}
+function pickSafeScalars(source) {
+  const out = {};
+  for (const [key, child] of Object.entries(source)) {
+    if (isSafeScalar(child)) setSafeProperty(out, key, child);
+  }
+  return out;
+}
+function pickSafeScalarIdentity(source) {
+  const out = {};
+  for (const key of SCALAR_IDENTITY_KEYS) {
+    const child = source[key];
+    if (isSafeScalar(child)) setSafeProperty(out, key, child);
+  }
+  if (isPlainRecord(source.source)) {
+    const safeSource = pickSafeScalars(source.source);
+    if (Object.keys(safeSource).length > 0) out.source = safeSource;
+  }
+  if (isPlainRecord(source.attachment)) {
+    const safeAttachment = pickSafeScalars(source.attachment);
+    if (Object.keys(safeAttachment).length > 0) out.attachment = safeAttachment;
+  }
+  return out;
+}
+function collectAttachmentStubs(value, out, depth = 0) {
+  if (depth > 6 || out.length >= MAX_STUB_ATTACHMENTS) return;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (out.length >= MAX_STUB_ATTACHMENTS) break;
+      collectAttachmentStubs(item, out, depth + 1);
+    }
+    return;
+  }
+  if (!isPlainRecord(value)) return;
+  if ((value.type === "image" || value.type === "input_image") && isPlainRecord(value.attachment)) {
+    const safeAttachment = pickSafeScalars(value.attachment);
+    if (Object.keys(safeAttachment).length > 0) {
+      out.push({
+        type: value.type,
+        attachment: safeAttachment,
+        ...typeof value.mediaType === "string" ? { mediaType: value.mediaType } : {},
+        truncated: true
+      });
+    }
+    return;
+  }
+  for (const child of Object.values(value)) {
+    if (out.length >= MAX_STUB_ATTACHMENTS) break;
+    collectAttachmentStubs(child, out, depth + 1);
+  }
+}
+function buildMinimalTransportableStub(entry, attachmentStubs) {
+  const origData = entry.event.data;
+  let stubData;
+  if (isPlainRecord(origData)) {
+    const base = pickSafeScalarIdentity(origData);
+    const hadError = containsErrorFlag(origData);
+    if (isPlainRecord(origData.message)) {
+      const msgBase = pickSafeScalarIdentity(origData.message);
+      const message = {
+        ...msgBase,
+        ...Array.isArray(origData.message.content) ? {
+          content: [
+            { type: "text", text: OMITTED_RECORD_TEXT },
+            ...attachmentStubs
+          ]
+        } : { text: OMITTED_RECORD_TEXT }
+      };
+      stubData = {
+        ...base,
+        message,
+        ...Array.isArray(origData.stream) ? { stream: [] } : {},
+        ...hadError && base.isError === void 0 ? { isError: true } : {},
+        truncated: true
+      };
+    } else if (Array.isArray(origData.content)) {
+      stubData = {
+        ...base,
+        content: [
+          { type: "text", text: OMITTED_RECORD_TEXT },
+          ...attachmentStubs
+        ],
+        ...hadError && base.isError === void 0 ? { isError: true } : {},
+        truncated: true
+      };
+    } else {
+      stubData = {
+        ...base,
+        text: OMITTED_RECORD_TEXT,
+        ...hadError && base.isError === void 0 ? { isError: true } : {},
+        truncated: true
+      };
+    }
+  } else {
+    stubData = {
+      text: OMITTED_RECORD_TEXT,
+      truncated: true
+    };
+  }
+  const stubEvent = {
+    type: entry.event.type,
+    seq: entry.event.seq,
+    ...entry.event.time !== void 0 ? { time: entry.event.time } : {},
+    data: stubData,
+    ...entry.event.surfaceOp !== void 0 ? { surfaceOp: entry.event.surfaceOp } : {},
+    ...entry.event.sourceEventSeqs !== void 0 ? { sourceEventSeqs: [...entry.event.sourceEventSeqs] } : {}
+  };
+  return {
+    ...entry.type !== void 0 ? { type: entry.type } : {},
+    event: stubEvent
+  };
+}
+function withCompactedEventFields(entry, nextData, nextView, markTruncated) {
+  const data2 = markTruncated && isPlainRecord(nextData) ? { ...nextData, truncated: true } : nextData;
+  return {
+    ...entry,
+    event: {
+      ...entry.event,
+      data: data2
+    },
+    ...entry.view !== void 0 ? { view: nextView } : {}
+  };
+}
+function compactOversizedVirtualHistoryEntry(entry, availableRecordBytes, measureRecordBytes) {
+  if (availableRecordBytes <= 0) return void 0;
+  const stageAState = { changed: false };
+  const stageAData = stripInlineImagePayloads(entry.event.data, stageAState);
+  const stageAView = entry.view === void 0 ? void 0 : stripInlineImagePayloads(entry.view, stageAState);
+  const stageACandidate = stageAState.changed ? withCompactedEventFields(entry, stageAData, stageAView, true) : entry;
+  if (stageAState.changed && measureRecordBytes(stageACandidate) <= availableRecordBytes) {
+    return stageACandidate;
+  }
+  for (const maxStringBytes of STAGE_B_STRING_BYTE_LIMITS) {
+    const stageBState = { changed: false };
+    const stageBData = compactValueForBudget(stageAData, maxStringBytes, stageBState);
+    const stageBView = stageAView === void 0 ? void 0 : compactValueForBudget(stageAView, maxStringBytes, stageBState);
+    if (!stageAState.changed && !stageBState.changed) continue;
+    const candidate = withCompactedEventFields(entry, stageBData, stageBView, true);
+    if (measureRecordBytes(candidate) <= availableRecordBytes) {
+      return candidate;
+    }
+  }
+  const attachmentStubs = [];
+  collectAttachmentStubs(entry.event.data, attachmentStubs);
+  if (attachmentStubs.length > 0) {
+    const stubWithAttachments = buildMinimalTransportableStub(entry, attachmentStubs);
+    if (measureRecordBytes(stubWithAttachments) <= availableRecordBytes) {
+      return stubWithAttachments;
+    }
+  }
+  const minimalStub = buildMinimalTransportableStub(entry, []);
+  if (measureRecordBytes(minimalStub) <= availableRecordBytes) {
+    return minimalStub;
+  }
+  return void 0;
+}
+function positiveSafeInt(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+function isSurfaceAppendEvent(entry) {
+  const { type, surfaceOp } = entry.event;
+  return surfaceOp === "append" && (type === "user/message" || type === "assistant/message" || type === "tool/result");
+}
+function utf8JsonByteLength(value) {
+  const serialized = JSON.stringify(value);
+  return serialized === void 0 ? 0 : utf8Encoder.encode(serialized).byteLength;
+}
+function normalizeVirtualHistoryTurnWindow(value) {
+  if (value === void 0 || value === null) return void 0;
+  const direct = positiveSafeInt(value);
+  if (direct !== void 0) return Math.min(direct, VIRTUAL_HISTORY_MAX_MESSAGES);
+  if (!isPlainRecord(value)) return void 0;
+  const rawMinMessages = positiveSafeInt(value.minMessages);
+  const rawMinTurns = positiveSafeInt(value.minTurns);
+  const minMessages = rawMinMessages === void 0 ? void 0 : Math.min(rawMinMessages, VIRTUAL_HISTORY_MAX_MESSAGES);
+  const minTurns = rawMinTurns === void 0 ? void 0 : Math.min(rawMinTurns, VIRTUAL_HISTORY_MAX_MESSAGES);
+  if (minMessages === void 0 && minTurns === void 0) return void 0;
+  return {
+    ...minMessages === void 0 ? {} : { minMessages },
+    ...minTurns === void 0 ? {} : { minTurns }
+  };
+}
+function boundedVirtualHistoryMaxMessages(value, hasTurnWindow = false) {
+  if (value !== void 0) {
+    const clamped = Math.max(1, Math.floor(value));
+    return Math.min(clamped, VIRTUAL_HISTORY_MAX_MESSAGES);
+  }
+  return hasTurnWindow ? VIRTUAL_HISTORY_MAX_MESSAGES : VIRTUAL_HISTORY_DEFAULT_MAX_MESSAGES;
+}
+function findTurnStartIndices(window2, hasLeadingHistory) {
+  const turnStarts = [];
+  let hasExplicitTurnStart = false;
+  for (let index = 0; index < window2.length; index += 1) {
+    if (window2[index].event.type === "turn/start") {
+      hasExplicitTurnStart = true;
+      turnStarts.push(index);
+    }
+  }
+  if (hasExplicitTurnStart || hasLeadingHistory) return turnStarts;
+  for (let index = 0; index < window2.length; index += 1) {
+    if (window2[index].event.type === "user/message") {
+      turnStarts.push(index);
+    }
+  }
+  return turnStarts;
+}
+function selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages) {
+  if (!countSurfaceMessages) {
+    return Math.max(0, window2.length - maxMessages);
+  }
+  let messages = 0;
+  let cutSeq = -Infinity;
+  for (let index = window2.length - 1; index >= 0; index -= 1) {
+    const entry = window2[index];
+    if (!isSurfaceAppendEvent(entry)) continue;
+    messages += 1;
+    if (messages >= maxMessages) {
+      cutSeq = Math.min(entry.event.seq, ...entry.event.sourceEventSeqs ?? []);
+      break;
+    }
+  }
+  if (cutSeq === -Infinity) return 0;
+  for (let index = 0; index < window2.length; index += 1) {
+    if (window2[index].event.seq >= cutSeq) return index;
+  }
+  return window2.length;
+}
+function buildSuffixUnitCounts(window2, countSurfaceMessages) {
+  const suffix = new Int32Array(window2.length + 1);
+  for (let index = window2.length - 1; index >= 0; index -= 1) {
+    const weight = countSurfaceMessages ? isSurfaceAppendEvent(window2[index]) ? 1 : 0 : 1;
+    suffix[index] = suffix[index + 1] + weight;
+  }
+  return suffix;
+}
+function selectTurnWindowCutIndex(window2, turnStarts, turnWindow2, maxMessages, countSurfaceMessages, hasLeadingHistory) {
+  if (turnStarts.length === 0) {
+    return selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages);
+  }
+  const targetMinTurns = typeof turnWindow2 === "number" ? turnWindow2 : turnWindow2.minTurns ?? 1;
+  const targetMinMessages = typeof turnWindow2 === "number" ? 0 : turnWindow2.minMessages ?? 0;
+  const suffixUnits = buildSuffixUnitCounts(window2, countSurfaceMessages);
+  let turnsIncluded = 0;
+  let cutIndex = window2.length;
+  for (let turnIndex = turnStarts.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const candidateStart = turnStarts[turnIndex];
+    const candidateUnits = suffixUnits[candidateStart];
+    if (candidateUnits > maxMessages) {
+      if (turnsIncluded === 0) {
+        return selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages);
+      }
+      break;
+    }
+    cutIndex = candidateStart;
+    turnsIncluded += 1;
+    if (turnsIncluded >= targetMinTurns && candidateUnits >= targetMinMessages) {
+      break;
+    }
+  }
+  if (!hasLeadingHistory && cutIndex === turnStarts[0] && cutIndex > 0 && suffixUnits[0] <= maxMessages) {
+    return 0;
+  }
+  return cutIndex;
+}
+function selectVirtualHistorySlice(window2, options = {}) {
+  const maxBytes2 = options.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES;
+  const hardMaxBytes = options.hardMaxBytes ?? Math.max(maxBytes2, VIRTUAL_HISTORY_HARD_MAX_BYTES);
+  const envelopeBytes = options.envelopeBytes ?? 0;
+  if (window2.length === 0) {
+    if (envelopeBytes > hardMaxBytes) {
+      throw new VirtualHistoryResponseTooLargeError(envelopeBytes, hardMaxBytes);
+    }
+    return { records: [], hasMore: false, cutIndex: 0 };
+  }
+  const turnWindow2 = normalizeVirtualHistoryTurnWindow(options.turnWindow);
+  const countSurfaceMessages = options.countSurfaceMessages === true;
+  const hasLeadingHistory = options.hasLeadingHistory === true;
+  const maxMessages = boundedVirtualHistoryMaxMessages(options.maxMessages, turnWindow2 !== void 0);
+  const turnStarts = turnWindow2 === void 0 ? [] : findTurnStartIndices(window2, hasLeadingHistory);
+  let cutIndex = turnWindow2 === void 0 ? selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages) : selectTurnWindowCutIndex(window2, turnStarts, turnWindow2, maxMessages, countSurfaceMessages, hasLeadingHistory);
+  const measureRecordBytes = options.measureRecordBytes ?? ((entry) => utf8JsonByteLength(entry));
+  let totalBytes = envelopeBytes;
+  let byteCutIndex = window2.length;
+  let trimmedByBytes = false;
+  for (let index = window2.length - 1; index >= cutIndex; index -= 1) {
+    const entry = window2[index];
+    const entryBytes = measureRecordBytes(entry) + (byteCutIndex < window2.length ? 1 : 0);
+    if (byteCutIndex < window2.length && totalBytes + entryBytes > maxBytes2) {
+      trimmedByBytes = true;
+      break;
+    }
+    if (byteCutIndex === window2.length && totalBytes + entryBytes > hardMaxBytes) {
+      const availableRecordBytes = hardMaxBytes - totalBytes;
+      const compacted = availableRecordBytes > 0 ? compactOversizedVirtualHistoryEntry(entry, availableRecordBytes, measureRecordBytes) : void 0;
+      if (compacted === void 0) {
+        throw new VirtualHistoryResponseTooLargeError(totalBytes + entryBytes, hardMaxBytes);
+      }
+      return {
+        records: [compacted],
+        hasMore: index > 0,
+        cutIndex: index
+      };
+    }
+    totalBytes += entryBytes;
+    byteCutIndex = index;
+  }
+  if (trimmedByBytes) {
+    cutIndex = byteCutIndex;
+    if (turnWindow2 !== void 0 && turnStarts.length > 0 && !turnStarts.includes(cutIndex)) {
+      const nextTurnStart = turnStarts.find((start) => start > cutIndex && start < window2.length);
+      if (nextTurnStart !== void 0) {
+        cutIndex = nextTurnStart;
+      }
+    }
+  }
+  return {
+    records: window2.slice(cutIndex),
+    hasMore: cutIndex > 0,
+    cutIndex
+  };
+}
 
 // packages/plugin/src/acp/image-content.ts
 var AGY_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -69990,11 +70507,55 @@ var AcpLiveProjection = class {
     const sessionId = session2.sessionId;
     await this.context.hydrateSession(session2);
     this.context.rememberOpenedSession?.(sessionId);
-    const history2 = this.context.historyPage(session2, {
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50
-    });
-    const queue = new AsyncValueQueue(signal);
     const existing = this.findFollow(sessionId);
+    const step = this.context.backend === "pi" ? existing?.piStep ?? 1 : 1;
+    const existingAssistantStream = existing?.assistantAttempt === void 0 ? void 0 : {
+      revision: existing.assistantStreamRevision,
+      activeAttempt: {
+        attemptId: existing.assistantAttempt.attemptId,
+        startedAfterSeq: existing.assistantAttempt.startedAfterSeq,
+        turn: existing.turn,
+        step,
+        nextIndex: existing.assistantAttempt.nextIndex,
+        stream: existing.assistantAttempt.stream
+      }
+    };
+    const projectionsOverhead = utf8JsonByteLength({
+      type: "snapshot",
+      projections: {
+        asOfSeq: session2.projectionSeq ?? -1,
+        values: {
+          title: session2.title ?? acpBackendLabel(this.context.backend),
+          sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
+          modelSelection: this.context.modelSelectionProjection(session2.sessionId),
+          permissions: this.context.permissionsProjection(session2.sessionId),
+          imageLimits: acpImageLimits(this.context.backend),
+          ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
+          ...session2.todos !== void 0 ? { todos: session2.todos } : {},
+          ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
+        }
+      },
+      ...existingAssistantStream === void 0 ? {} : { assistantStream: existingAssistantStream }
+    }) + 32;
+    let history2;
+    try {
+      history2 = this.context.historyPage(session2, {
+        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        extraEnvelopeBytes: projectionsOverhead
+      });
+    } catch (error62) {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        throw Object.assign(new Error(error62.message), {
+          isDSHRemoteError: true,
+          code: "response-too-large",
+          retryable: false,
+          details: { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes }
+        });
+      }
+      throw error62;
+    }
+    const queue = new AsyncValueQueue(signal);
     if (existing !== void 0) {
       const priorQueue = existing.queue;
       existing.queue = queue;
@@ -71601,26 +72162,39 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (beforeSeq === void 0) {
       this.rememberOpenedSession(sessionId);
     }
-    const page = this.historyPage(session2, {
-      beforeSeq,
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50
-    });
+    const projections = {
+      asOfSeq: session2.projectionSeq ?? -1,
+      values: {
+        title: session2.title ?? acpBackendLabel(this.backend),
+        sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
+        modelSelection: this.modelSelectionProjection(sessionId),
+        permissions: this.permissionsProjection(sessionId),
+        imageLimits: acpImageLimits(this.backend),
+        ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
+        ...session2.todos !== void 0 ? { todos: session2.todos } : {},
+        ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
+      }
+    };
+    let page;
+    try {
+      page = this.historyPage(session2, {
+        beforeSeq,
+        throughSeq: optionalInteger(request.throughSeq),
+        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        extraEnvelopeBytes: utf8JsonByteLength({ events: [], projections }) + 16,
+        measureRecordBytes: (entry) => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1
+      });
+    } catch (error62) {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        return failure2("response-too-large", error62.message, { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes });
+      }
+      throw error62;
+    }
     return success2({
       ...page,
       events: page.records.map((entry) => ({ event: entry.event })),
-      projections: {
-        asOfSeq: session2.projectionSeq ?? -1,
-        values: {
-          title: session2.title ?? acpBackendLabel(this.backend),
-          sessionListMetadata: { blank: session2.blank && session2.events.length === 0, lastPromptAt: null },
-          modelSelection: this.modelSelectionProjection(sessionId),
-          permissions: this.permissionsProjection(sessionId),
-          imageLimits: acpImageLimits(this.backend),
-          ...session2.agentPreset !== void 0 ? { agentPreset: session2.agentPreset } : {},
-          ...session2.todos !== void 0 ? { todos: session2.todos } : {},
-          ...session2.contextUsage !== void 0 ? { contextPressure: contextPressureProjection(session2.contextUsage) } : {}
-        }
-      }
+      projections
     });
   }
   async sessionProjections(request) {
@@ -71635,33 +72209,64 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session2);
-    const page = this.historyPage(session2, {
-      beforeSeq: optionalInteger(request.beforeSeq),
-      throughSeq: optionalInteger(request.throughSeq),
-      limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50
-    });
-    return success2({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
+    try {
+      const page = this.historyPage(session2, {
+        beforeSeq: optionalInteger(request.beforeSeq),
+        throughSeq: optionalInteger(request.throughSeq),
+        limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+      });
+      return success2({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
+    } catch (error62) {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        return failure2("response-too-large", error62.message, { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes });
+      }
+      throw error62;
+    }
   }
   historyPage(session2, options = {}) {
     const lastSessionSeq = session2.events.at(-1)?.event.seq ?? -1;
     const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq);
     const endSeq = Math.min(throughSeq, options.beforeSeq === void 0 ? throughSeq : options.beforeSeq - 1);
     const window2 = endSeq < 0 ? [] : session2.events.filter((entry) => entry.event.seq <= endSeq);
-    const limit = options.limit ?? 50;
-    const records = window2.slice(Math.max(0, window2.length - limit));
-    const cursor3 = records.at(-1)?.event.seq ?? -1;
+    let maxTurn = 0;
+    for (const entry of session2.events) {
+      if (isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" && entry.event.data.turn > maxTurn) {
+        maxTurn = entry.event.data.turn;
+      }
+    }
+    const header = {
+      version: 3,
+      id: session2.sessionId,
+      createdAt: session2.createdAt,
+      cwd: session2.cwd,
+      isSeeded: false
+    };
+    const baseEnvelopeBytes = utf8JsonByteLength({
+      header,
+      cursor: endSeq,
+      nextTurn: maxTurn + 1,
+      records: [],
+      hasMore: true,
+      ...session2.running ? { activeTurnId: "cursor-live" } : {},
+      assistantStream: { revision: 0 }
+    }) + (options.extraEnvelopeBytes ?? 0);
+    const slice = selectVirtualHistorySlice(window2, {
+      maxMessages: options.limit,
+      turnWindow: options.turnWindow,
+      countSurfaceMessages: false,
+      maxBytes: options.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES,
+      hardMaxBytes: options.hardMaxBytes,
+      envelopeBytes: baseEnvelopeBytes,
+      measureRecordBytes: options.measureRecordBytes
+    });
+    const cursor3 = slice.records.at(-1)?.event.seq ?? -1;
     return {
-      header: {
-        version: 3,
-        id: session2.sessionId,
-        createdAt: session2.createdAt,
-        cwd: session2.cwd,
-        isSeeded: false
-      },
+      header,
       cursor: cursor3,
-      nextTurn: Math.max(0, ...session2.events.map((entry) => isRecord4(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)) + 1,
-      records,
-      hasMore: window2.length > records.length,
+      nextTurn: maxTurn + 1,
+      records: slice.records,
+      hasMore: slice.hasMore,
       ...session2.running ? { activeTurnId: "cursor-live" } : {},
       assistantStream: { revision: 0 }
     };
@@ -81071,7 +81676,7 @@ function record4(value) {
 
 // packages/plugin/src/codex/virtual-values.ts
 var CODEX_SESSION_PREFIX = "codex:";
-var CODEX_HISTORY_PAGE_MAX_MESSAGES = 200;
+var CODEX_HISTORY_PAGE_MAX_MESSAGES = VIRTUAL_HISTORY_MAX_MESSAGES;
 function nativeThreadId(sessionId) {
   if (!sessionId.startsWith(CODEX_SESSION_PREFIX) || sessionId.length === CODEX_SESSION_PREFIX.length) {
     throw new Error("The selected Session does not belong to CodeX.");
@@ -81926,7 +82531,7 @@ function projectTurnError(error62) {
 
 // packages/plugin/src/codex/virtual-history.ts
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
-var DEFAULT_HISTORY_MESSAGES = 50;
+var CODEX_PAGE_ENVELOPE_HEADROOM_BYTES = 2048;
 function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
   const entries = [];
   let seq = 0;
@@ -82023,25 +82628,56 @@ function paginateCodexNativeHistory(history2, request) {
   const throughSeq = Math.min(request.throughSeq ?? history2.lastSeq, history2.lastSeq);
   const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
   const window2 = endSeq < 0 ? [] : history2.entries.filter((entry) => entry.event.seq <= endSeq);
-  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES;
-  let messages = 0;
-  let cut = 0;
-  for (let index = window2.length - 1; index >= 0; index -= 1) {
-    const event2 = window2[index].event;
-    if (!isSurfaceEvent2(event2.type) || event2.surfaceOp !== "append") continue;
-    messages += 1;
-    if (messages >= maxMessages) {
-      cut = Math.min(event2.seq, ...event2.sourceEventSeqs ?? []);
-      break;
-    }
-  }
+  const maxBytes2 = request.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES;
+  const headroom = Math.min(CODEX_PAGE_ENVELOPE_HEADROOM_BYTES, Math.floor(maxBytes2 / 8));
+  const envelopeBytes = utf8JsonByteLength({
+    header: history2.header,
+    cursor: history2.lastSeq,
+    nextTurn: history2.nextTurn,
+    records: [],
+    hasMore: true,
+    ...history2.activeTurnId === void 0 ? {} : { activeTurnId: history2.activeTurnId }
+  }) + headroom;
+  const slice = selectVirtualHistorySlice(window2, {
+    maxMessages: request.maxMessages,
+    turnWindow: request.turnWindow,
+    countSurfaceMessages: true,
+    maxBytes: maxBytes2,
+    hardMaxBytes: request.hardMaxBytes,
+    envelopeBytes
+  });
   return {
     header: history2.header,
     cursor: history2.lastSeq,
     nextTurn: history2.nextTurn,
-    records: window2.filter((entry) => entry.event.seq >= cut),
-    hasMore: window2.some((entry) => entry.event.seq < cut),
+    records: slice.records,
+    hasMore: slice.hasMore,
     ...history2.activeTurnId === void 0 ? {} : { activeTurnId: history2.activeTurnId }
+  };
+}
+function enforceCodexHistoryPageBudget(page, options = {}) {
+  const maxBytes2 = options.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES;
+  const headroom = Math.min(CODEX_PAGE_ENVELOPE_HEADROOM_BYTES, Math.floor(maxBytes2 / 8));
+  const envelopeBytes = utf8JsonByteLength({
+    ...page,
+    records: [],
+    hasMore: true
+  }) + headroom;
+  const slice = selectVirtualHistorySlice(page.records, {
+    maxMessages: options.maxMessages ?? VIRTUAL_HISTORY_MAX_MESSAGES,
+    turnWindow: options.turnWindow,
+    countSurfaceMessages: true,
+    hasLeadingHistory: page.hasMore,
+    maxBytes: maxBytes2,
+    hardMaxBytes: options.hardMaxBytes,
+    envelopeBytes
+  });
+  const unchanged = slice.records.length === page.records.length && slice.records.every((entry, index) => entry === page.records[index]);
+  if (unchanged) return page;
+  return {
+    ...page,
+    records: slice.records,
+    hasMore: page.hasMore || slice.hasMore
   };
 }
 function adaptEventData(type, data2, sessionGeneration) {
@@ -82416,8 +83052,27 @@ var CodexLiveProjection = class {
     const sessionId = sessionIdFromAddress2(record5(request.address));
     const threadId = nativeThreadId(sessionId);
     const historyPromise = this.context.readHistoryPage(threadId, {
-      maxMessages: optionalPositiveInteger2(request.maxMessages)
-    }, signal);
+      maxMessages: optionalPositiveInteger2(request.maxMessages) ?? optionalPositiveInteger2(request.limit),
+      turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+    }, signal).catch((error62) => {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        throw Object.assign(new Error(error62.message), {
+          isDSHRemoteError: true,
+          code: "response-too-large",
+          retryable: false,
+          details: { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes }
+        });
+      }
+      if (error62 instanceof Error && errorCode(error62) === "RESPONSE_TOO_LARGE") {
+        throw Object.assign(new Error(error62.message), {
+          isDSHRemoteError: true,
+          code: "response-too-large",
+          retryable: false,
+          details: "details" in error62 && isRecord6(error62.details) ? error62.details : {}
+        });
+      }
+      throw error62;
+    });
     const directoryPromise = this.context.models(signal).catch(() => void 0);
     const [history2, directory] = await Promise.all([historyPromise, directoryPromise]);
     const queue = new AsyncValueQueue2(signal);
@@ -83611,21 +84266,32 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   async sessionPage(request, signal) {
     const sessionId = sessionIdFromAddress2(record5(request.address));
-    const page = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
-      throughSeq: optionalInteger2(request.throughSeq),
-      maxMessages: optionalPositiveInteger2(request.maxMessages)
-    }, signal);
-    return success3({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
+    try {
+      const page = await this.readHistoryPage(nativeThreadId(sessionId), {
+        beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
+        throughSeq: optionalInteger2(request.throughSeq),
+        maxMessages: optionalPositiveInteger2(request.limit) ?? optionalPositiveInteger2(request.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+      }, signal);
+      return success3({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
+    } catch (error62) {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        return failure3("response-too-large", error62.message, { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes });
+      }
+      throw error62;
+    }
   }
   activeTurnId(threadId) {
     for (const follow of this.follows) if (follow.threadId === threadId && follow.stepOpen) return follow.activeTurnId;
     return void 0;
   }
   async readHistoryPage(threadId, page, signal) {
+    const turnWindow2 = normalizeVirtualHistoryTurnWindow(page.turnWindow);
     const boundedPage = {
-      ...page,
-      maxMessages: boundedCodexHistoryPageSize(page.maxMessages)
+      beforeSeq: page.beforeSeq,
+      throughSeq: page.throughSeq,
+      maxMessages: boundedCodexHistoryPageSize(page.maxMessages),
+      ...turnWindow2 === void 0 ? {} : { turnWindow: turnWindow2 }
     };
     const knownUpdatedAt = this.catalog?.sessions.find((item) => item.id === `codex:${threadId}`)?.updatedAt;
     if (!this.blankThreads.has(threadId)) {
@@ -83644,15 +84310,30 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         const readEpoch = this.historyCache.beginReadEpoch();
         let value;
         try {
-          value = record5(await this.client.request("dsh/sessionHistory", {
+          const requestParams = {
             threadId,
             ...boundedPage.beforeSeq === void 0 ? {} : { beforeSeq: boundedPage.beforeSeq },
             ...boundedPage.throughSeq === void 0 ? {} : { throughSeq: boundedPage.throughSeq },
             ...boundedPage.maxMessages === void 0 ? {} : { maxMessages: boundedPage.maxMessages }
-          }, sharedSignal));
+          };
+          try {
+            value = record5(await this.client.request("dsh/sessionHistory", {
+              ...requestParams,
+              ...boundedPage.turnWindow === void 0 ? {} : { turnWindow: boundedPage.turnWindow }
+            }, sharedSignal));
+          } catch (turnWindowError) {
+            if (boundedPage.turnWindow !== void 0 && turnWindowError instanceof Error && errorCode(turnWindowError) === "INVALID_MESSAGE") {
+              value = record5(await this.client.request("dsh/sessionHistory", {
+                ...requestParams,
+                maxMessages: boundedPage.maxMessages ?? VIRTUAL_HISTORY_MAX_MESSAGES
+              }, sharedSignal));
+            } else {
+              throw turnWindowError;
+            }
+          }
         } catch (error62) {
           if (!isLegacySessionHistoryUnsupported(error62)) {
-            if (!sharedSignal.aborted) {
+            if (!sharedSignal.aborted && !(error62 instanceof Error && errorCode(error62) === "RESPONSE_TOO_LARGE")) {
               const stale = this.historyCache.getStalePage(threadId, this.sessionGeneration, boundedPage);
               if (stale !== void 0) return stale;
             }
@@ -83679,7 +84360,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
             {
               beforeSeq: page.beforeSeq,
               throughSeq: page.throughSeq,
-              maxMessages: boundedPage.maxMessages
+              maxMessages: boundedPage.maxMessages,
+              turnWindow: boundedPage.turnWindow
             }
           );
         }
@@ -83687,10 +84369,14 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
           throw new Error("CodeX Remote returned an invalid paginated History.");
         }
+        const bounded = enforceCodexHistoryPageBudget(value, {
+          maxMessages: boundedPage.maxMessages,
+          turnWindow: boundedPage.turnWindow
+        });
         if (!this.blankThreads.has(threadId)) {
-          this.historyCache.setPage(threadId, this.sessionGeneration, boundedPage, value, knownUpdatedAt, readEpoch);
+          this.historyCache.setPage(threadId, this.sessionGeneration, boundedPage, bounded, knownUpdatedAt, readEpoch);
         }
-        return value;
+        return bounded;
       }
     );
     this.applyHistoryMetadata(threadId, resolved);
@@ -83719,10 +84405,20 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   async sessionHistory(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
     const beforeSeq = optionalNonNegativeInteger(request.beforeSeq);
-    const history2 = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq,
-      maxMessages: optionalPositiveInteger2(request.maxMessages)
-    }, signal);
+    let history2;
+    try {
+      history2 = await this.readHistoryPage(nativeThreadId(sessionId), {
+        beforeSeq,
+        throughSeq: optionalInteger2(request.throughSeq),
+        maxMessages: optionalPositiveInteger2(request.maxMessages) ?? optionalPositiveInteger2(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+      }, signal);
+    } catch (error62) {
+      if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+        return failure3("response-too-large", error62.message, { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes });
+      }
+      throw error62;
+    }
     const directory = await this.models(signal).catch(() => void 0);
     if (beforeSeq === void 0) {
       signal.throwIfAborted();
@@ -91760,6 +92456,16 @@ var permissionPreset = external_exports.enum(["workspace-write", "danger-full-ac
 var projectRoot = external_exports.object({
   path: external_exports.string().min(1).max(4096)
 }).strict();
+var turnWindow = external_exports.union([
+  external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES),
+  external_exports.object({
+    minMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
+    minTurns: external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional()
+  }).strict().refine(
+    (value) => value.minMessages !== void 0 || value.minTurns !== void 0,
+    { message: "turnWindow requires minMessages or minTurns." }
+  )
+]);
 var schemas = {
   "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
   "model/list": external_exports.object({
@@ -91794,7 +92500,8 @@ var schemas = {
     threadId: id3,
     beforeSeq: external_exports.number().int().nonnegative().optional(),
     throughSeq: external_exports.number().int().min(-1).optional(),
-    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional()
+    maxMessages: external_exports.number().int().min(1).max(CODEX_HISTORY_PAGE_MAX_MESSAGES).optional(),
+    turnWindow: turnWindow.optional()
   }).strict(),
   "dsh/sessionAttachment": external_exports.object({
     threadId: id3,
@@ -92868,14 +93575,28 @@ var CodexRemoteDomain = class {
       const thread = await this.readThreadForHistory(connectionId, threadId);
       assertCurrent();
       if (watermark !== void 0) this.pruneBufferedFramesAgainstHistory(threadId, thread, watermark);
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger3(call.params.beforeSeq),
-          throughSeq: optionalInteger3(call.params.throughSeq),
-          maxMessages: optionalInteger3(call.params.maxMessages)
+      let page;
+      try {
+        page = paginateCodexNativeHistory(
+          projectCodexNativeHistory(thread, `codex:${threadId}`),
+          {
+            beforeSeq: optionalInteger3(call.params.beforeSeq),
+            throughSeq: optionalInteger3(call.params.throughSeq),
+            maxMessages: optionalInteger3(call.params.maxMessages),
+            turnWindow: normalizeVirtualHistoryTurnWindow(call.params.turnWindow)
+          }
+        );
+      } catch (error62) {
+        if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+          throw new RpcError(
+            "RESPONSE_TOO_LARGE",
+            error62.message,
+            { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes },
+            false
+          );
         }
-      );
+        throw error62;
+      }
       const activeTurnId2 = typeof page.activeTurnId === "string" ? page.activeTurnId : this.turnOwners.get(threadId)?.turnId;
       return {
         ...page,
@@ -109729,7 +110450,7 @@ var HostPluginRuntime = class {
   async codexCloseStream(input4) {
     const peer = this.localCodexPeer;
     if (peer !== void 0) return peer.closeStream(input4);
-    const streamId = isPlainRecord(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
+    const streamId = isPlainRecord2(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Codex stream is required.");
     return { closed: false, streamId };
   }
@@ -109752,7 +110473,7 @@ var HostPluginRuntime = class {
   async acpCloseStream(input4) {
     const peer = this.localAcpPeer;
     if (peer !== void 0) return peer.closeStream(input4);
-    const streamId = isPlainRecord(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
+    const streamId = isPlainRecord2(input4) && typeof input4.streamId === "string" ? input4.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Cursor stream is required.");
     return { closed: false, streamId };
   }
@@ -109953,7 +110674,7 @@ var HostPluginRuntime = class {
 function shortId4(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
-function isPlainRecord(value) {
+function isPlainRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

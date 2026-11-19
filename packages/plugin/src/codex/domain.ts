@@ -11,6 +11,10 @@ import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
 import {
+  normalizeVirtualHistoryTurnWindow,
+  VirtualHistoryResponseTooLargeError,
+} from '../virtual-history-pagination.js'
+import {
   CODEX_THREAD_UNMATERIALIZED,
   CodexAppServerClient,
   CodexAppServerError,
@@ -368,14 +372,28 @@ export class CodexRemoteDomain {
       const thread = await this.readThreadForHistory(connectionId, threadId!)
       assertCurrent()
       if (watermark !== undefined) this.pruneBufferedFramesAgainstHistory(threadId!, thread, watermark)
-      const page = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`),
-        {
-          beforeSeq: optionalInteger(call.params.beforeSeq),
-          throughSeq: optionalInteger(call.params.throughSeq),
-          maxMessages: optionalInteger(call.params.maxMessages),
-        },
-      )
+      let page: ReturnType<typeof paginateCodexNativeHistory>
+      try {
+        page = paginateCodexNativeHistory(
+          projectCodexNativeHistory(thread, `codex:${threadId}`),
+          {
+            beforeSeq: optionalInteger(call.params.beforeSeq),
+            throughSeq: optionalInteger(call.params.throughSeq),
+            maxMessages: optionalInteger(call.params.maxMessages),
+            turnWindow: normalizeVirtualHistoryTurnWindow(call.params.turnWindow),
+          },
+        )
+      } catch (error) {
+        if (error instanceof VirtualHistoryResponseTooLargeError) {
+          throw new RpcError(
+            'RESPONSE_TOO_LARGE',
+            error.message,
+            { actualBytes: error.actualBytes, maxBytes: error.maxBytes },
+            false,
+          )
+        }
+        throw error
+      }
       const activeTurnId = typeof page.activeTurnId === 'string'
         ? page.activeTurnId
         : this.turnOwners.get(threadId!)?.turnId

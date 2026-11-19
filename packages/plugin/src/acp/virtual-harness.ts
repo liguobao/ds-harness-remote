@@ -3,6 +3,14 @@ import type { AcpAvailableCommand, AcpSessionModels, AcpSessionModes } from '@ds
 import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS } from '@dsh-remote/protocol'
 import { AcpSessionHistoryCache, type CachedAcpSessionHistory } from '../session-history-cache.js'
 import type { RemoteTypertGatewayTarget, TypertGatewayRequest, TypertRpcResult } from '../typert-gateway-contract.js'
+import {
+  normalizeVirtualHistoryTurnWindow,
+  selectVirtualHistorySlice,
+  utf8JsonByteLength,
+  VIRTUAL_HISTORY_MAX_BYTES,
+  VirtualHistoryResponseTooLargeError,
+  type VirtualHistoryTurnWindow,
+} from '../virtual-history-pagination.js'
 import type { AcpImage } from './image-content.js'
 import { acpImageContent, acpImageLimits, parseAcpImage } from './image-content.js'
 import type { AcpCatalogBackend, AcpModelSelection, AcpVirtualWorkspaceView } from './virtual-catalog.js'
@@ -953,26 +961,39 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (beforeSeq === undefined) {
       this.rememberOpenedSession(sessionId)
     }
-    const page = this.historyPage(session, {
-      beforeSeq,
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
-    })
+    const projections = {
+      asOfSeq: session.projectionSeq ?? -1,
+      values: {
+        title: session.title ?? acpBackendLabel(this.backend),
+        sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
+        modelSelection: this.modelSelectionProjection(sessionId),
+        permissions: this.permissionsProjection(sessionId),
+        imageLimits: acpImageLimits(this.backend),
+        ...(session.agentPreset !== undefined ? { agentPreset: session.agentPreset } : {}),
+        ...(session.todos !== undefined ? { todos: session.todos } : {}),
+        ...(session.contextUsage !== undefined ? { contextPressure: contextPressureProjection(session.contextUsage) } : {}),
+      },
+    }
+    let page: ReturnType<AcpVirtualHarness['historyPage']>
+    try {
+      page = this.historyPage(session, {
+        beforeSeq,
+        throughSeq: optionalInteger(request.throughSeq),
+        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        extraEnvelopeBytes: utf8JsonByteLength({ events: [], projections }) + 16,
+        measureRecordBytes: entry => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1,
+      })
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        return failure('response-too-large', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+      }
+      throw error
+    }
     return success({
       ...page,
       events: page.records.map(entry => ({ event: entry.event })),
-      projections: {
-        asOfSeq: session.projectionSeq ?? -1,
-        values: {
-          title: session.title ?? acpBackendLabel(this.backend),
-          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
-          modelSelection: this.modelSelectionProjection(sessionId),
-          permissions: this.permissionsProjection(sessionId),
-          imageLimits: acpImageLimits(this.backend),
-          ...(session.agentPreset !== undefined ? { agentPreset: session.agentPreset } : {}),
-          ...(session.todos !== undefined ? { todos: session.todos } : {}),
-          ...(session.contextUsage !== undefined ? { contextPressure: contextPressureProjection(session.contextUsage) } : {}),
-        },
-      },
+      projections,
     })
   }
 
@@ -989,37 +1010,77 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const session = this.lookupSession(requestedId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     await this.hydrateSession(session)
-    const page = this.historyPage(session, {
-      beforeSeq: optionalInteger(request.beforeSeq),
-      throughSeq: optionalInteger(request.throughSeq),
-      limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50,
-    })
-    return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
+    try {
+      const page = this.historyPage(session, {
+        beforeSeq: optionalInteger(request.beforeSeq),
+        throughSeq: optionalInteger(request.throughSeq),
+        limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+      })
+      return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        return failure('response-too-large', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+      }
+      throw error
+    }
   }
 
   private historyPage(
     session: AcpSessionState,
-    options: { beforeSeq?: number; throughSeq?: number; limit?: number } = {},
+    options: {
+      beforeSeq?: number
+      throughSeq?: number
+      limit?: number
+      turnWindow?: VirtualHistoryTurnWindow
+      maxBytes?: number
+      hardMaxBytes?: number
+      extraEnvelopeBytes?: number
+      measureRecordBytes?: (entry: { type: 'event'; event: NativeEvent }) => number
+    } = {},
   ) {
     const lastSessionSeq = session.events.at(-1)?.event.seq ?? -1
     const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq)
     const endSeq = Math.min(throughSeq, options.beforeSeq === undefined ? throughSeq : options.beforeSeq - 1)
     const window = endSeq < 0 ? [] : session.events.filter(entry => entry.event.seq <= endSeq)
-    const limit = options.limit ?? 50
-    const records = window.slice(Math.max(0, window.length - limit))
-    const cursor = records.at(-1)?.event.seq ?? -1
+    let maxTurn = 0
+    for (const entry of session.events) {
+      if (isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' && entry.event.data.turn > maxTurn) {
+        maxTurn = entry.event.data.turn
+      }
+    }
+    const header = {
+      version: 3,
+      id: session.sessionId,
+      createdAt: session.createdAt,
+      cwd: session.cwd,
+      isSeeded: false,
+    }
+    const baseEnvelopeBytes = utf8JsonByteLength({
+      header,
+      cursor: endSeq,
+      nextTurn: maxTurn + 1,
+      records: [],
+      hasMore: true,
+      ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
+      assistantStream: { revision: 0 },
+    }) + (options.extraEnvelopeBytes ?? 0)
+    const slice = selectVirtualHistorySlice(window, {
+      maxMessages: options.limit,
+      turnWindow: options.turnWindow,
+      countSurfaceMessages: false,
+      maxBytes: options.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES,
+      hardMaxBytes: options.hardMaxBytes,
+      envelopeBytes: baseEnvelopeBytes,
+      measureRecordBytes: options.measureRecordBytes,
+    })
+    const cursor = slice.records.at(-1)?.event.seq ?? -1
     return {
-      header: {
-        version: 3,
-        id: session.sessionId,
-        createdAt: session.createdAt,
-        cwd: session.cwd,
-        isSeeded: false,
-      },
+      header,
       cursor,
-      nextTurn: Math.max(0, ...session.events.map(entry => isRecord(entry.event.data) && typeof entry.event.data.turn === 'number' ? entry.event.data.turn : 0)) + 1,
-      records,
-      hasMore: window.length > records.length,
+      nextTurn: maxTurn + 1,
+      records: slice.records,
+      hasMore: slice.hasMore,
       ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
       assistantStream: { revision: 0 },
     }

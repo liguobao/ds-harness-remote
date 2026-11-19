@@ -5,6 +5,12 @@ import type {
   AgentAcpStreamClosedData,
 } from '@dsh-remote/protocol'
 import { acpImageLimits } from './image-content.js'
+import {
+  normalizeVirtualHistoryTurnWindow,
+  utf8JsonByteLength,
+  VirtualHistoryResponseTooLargeError,
+  type VirtualHistoryTurnWindow,
+} from '../virtual-history-pagination.js'
 import { piToolResult } from './pi-tool-result.js'
 import type { AcpCatalogBackend, AcpModelSelection } from './virtual-catalog.js'
 import { acpBackendLabel } from './virtual-catalog.js'
@@ -38,7 +44,14 @@ export interface AcpLiveProjectionContext {
   readonly lookupSession: (sessionId: string) => AcpSessionState | undefined
   readonly sessions: Map<string, AcpSessionState>
   readonly hydrateSession: (session: AcpSessionState) => Promise<void>
-  readonly historyPage: (session: AcpSessionState, options?: { beforeSeq?: number; throughSeq?: number; limit?: number; }) => { assistantStream: { revision: number; }; activeTurnId?: string | undefined; header: { version: number; id: string; createdAt: number; cwd: string; isSeeded: boolean; }; cursor: number; nextTurn: number; records: { type: "event"; event: NativeEvent; }[]; hasMore: boolean; }
+  readonly historyPage: (session: AcpSessionState, options?: {
+    beforeSeq?: number
+    throughSeq?: number
+    limit?: number
+    turnWindow?: VirtualHistoryTurnWindow
+    hardMaxBytes?: number
+    extraEnvelopeBytes?: number
+  }) => { assistantStream: { revision: number; }; activeTurnId?: string | undefined; header: { version: number; id: string; createdAt: number; cwd: string; isSeeded: boolean; }; cursor: number; nextTurn: number; records: { type: "event"; event: NativeEvent; }[]; hasMore: boolean; }
   readonly follows: Set<FollowState>
   readonly backend: AcpCatalogBackend
   readonly modelSelectionProjection: (sessionId: string) => { lastUsed: AcpModelSelection; next: AcpModelSelection; }
@@ -153,11 +166,57 @@ export class AcpLiveProjection {
     const sessionId = session.sessionId
     await this.context.hydrateSession(session)
     this.context.rememberOpenedSession?.(sessionId)
-    const history = this.context.historyPage(session, {
-      limit: optionalPositiveInteger(request.maxMessages) ?? 50,
-    })
-    const queue = new AsyncValueQueue(signal)
     const existing = this.findFollow(sessionId)
+    const step = this.context.backend === 'pi' ? existing?.piStep ?? 1 : 1
+    const existingAssistantStream = existing?.assistantAttempt === undefined
+      ? undefined
+      : {
+          revision: existing.assistantStreamRevision,
+          activeAttempt: {
+            attemptId: existing.assistantAttempt.attemptId,
+            startedAfterSeq: existing.assistantAttempt.startedAfterSeq,
+            turn: existing.turn,
+            step,
+            nextIndex: existing.assistantAttempt.nextIndex,
+            stream: existing.assistantAttempt.stream,
+          },
+        }
+    const projectionsOverhead = utf8JsonByteLength({
+      type: 'snapshot',
+      projections: {
+        asOfSeq: session.projectionSeq ?? -1,
+        values: {
+          title: session.title ?? acpBackendLabel(this.context.backend),
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
+          modelSelection: this.context.modelSelectionProjection(session.sessionId),
+          permissions: this.context.permissionsProjection(session.sessionId),
+          imageLimits: acpImageLimits(this.context.backend),
+          ...(session.agentPreset !== undefined ? { agentPreset: session.agentPreset } : {}),
+          ...(session.todos !== undefined ? { todos: session.todos } : {}),
+          ...(session.contextUsage !== undefined ? { contextPressure: contextPressureProjection(session.contextUsage) } : {}),
+        },
+      },
+      ...(existingAssistantStream === undefined ? {} : { assistantStream: existingAssistantStream }),
+    }) + 32
+    let history: ReturnType<AcpLiveProjectionContext['historyPage']>
+    try {
+      history = this.context.historyPage(session, {
+        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        extraEnvelopeBytes: projectionsOverhead,
+      })
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        throw Object.assign(new Error(error.message), {
+          isDSHRemoteError: true as const,
+          code: 'response-too-large',
+          retryable: false as const,
+          details: { actualBytes: error.actualBytes, maxBytes: error.maxBytes },
+        })
+      }
+      throw error
+    }
+    const queue = new AsyncValueQueue(signal)
     if (existing !== undefined) {
       const priorQueue = existing.queue
       existing.queue = queue

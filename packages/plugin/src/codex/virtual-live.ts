@@ -1,6 +1,11 @@
 import type { CodexPermissionPreset } from '@dsh-remote/protocol'
 import { projectCodexModel } from '@dsh-remote/client-core'
 import type { HarnessSessionGeneration } from '../harness-version.js'
+import {
+  normalizeVirtualHistoryTurnWindow,
+  VirtualHistoryResponseTooLargeError,
+  type VirtualHistoryTurnWindow,
+} from '../virtual-history-pagination.js'
 import { collectImageBlocks, toolOutputImageBlocks } from './codex-image-codec.js'
 import { codexPermissionPresetFromResponse } from './permissions.js'
 import type { CodexModelDirectory, CodexModelSelection } from './virtual-catalog.js'
@@ -29,11 +34,11 @@ import {
 } from './virtual-history.js'
 import { turnEndReason } from './turn-end-reason.js'
 import type { CodexClientLike, JsonRecord } from './virtual-values.js'
-import { array, integer, nativeThreadId, optionalPositiveInteger, record, string } from './virtual-values.js'
+import { array, errorCode, integer, isRecord, nativeThreadId, optionalPositiveInteger, record, string } from './virtual-values.js'
 
 /** Collaborates with one CodexVirtualHarness; never creates a second session or connection state. */
 export interface CodexLiveProjectionContext {
-  readonly readHistoryPage: (threadId: string, page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; }, signal?: AbortSignal) => Promise<CodexNativeHistoryPage>
+  readonly readHistoryPage: (threadId: string, page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow; }, signal?: AbortSignal) => Promise<CodexNativeHistoryPage>
   readonly models: (signal?: AbortSignal) => Promise<CodexModelDirectory>
   readonly pendingRequestIds: Map<string, string>
   readonly follows: Set<FollowState>
@@ -67,8 +72,27 @@ export class CodexLiveProjection {
     // is refreshed after the stream is ready so a slow project/thread index
     // cannot delay the first session snapshot.
     const historyPromise = this.context.readHistoryPage(threadId, {
-      maxMessages: optionalPositiveInteger(request.maxMessages),
-    }, signal)
+      maxMessages: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
+      turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+    }, signal).catch(error => {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        throw Object.assign(new Error(error.message), {
+          isDSHRemoteError: true as const,
+          code: 'response-too-large',
+          retryable: false as const,
+          details: { actualBytes: error.actualBytes, maxBytes: error.maxBytes },
+        })
+      }
+      if (error instanceof Error && errorCode(error) === 'RESPONSE_TOO_LARGE') {
+        throw Object.assign(new Error(error.message), {
+          isDSHRemoteError: true as const,
+          code: 'response-too-large',
+          retryable: false as const,
+          details: 'details' in error && isRecord(error.details) ? error.details : {},
+        })
+      }
+      throw error
+    })
     const directoryPromise = this.context.models(signal).catch(() => undefined)
     const [history, directory] = await Promise.all([historyPromise, directoryPromise])
     const queue = new AsyncValueQueue(signal)
