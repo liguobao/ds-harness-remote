@@ -12,6 +12,7 @@ import {
 	FrameType as Frames,
 	HEARTBEAT_INTERVAL_MS,
 	HEARTBEAT_TIMEOUT_MS,
+	MAX_STREAMS,
 	PING,
 	ProtocolError,
 	WindowBudget,
@@ -153,6 +154,10 @@ export class Connection {
 		}
 		if (this.streams.has(frame.stream)) {
 			throw new ProtocolError(`stream ${frame.stream} is already open`);
+		}
+		if (this.streams.size >= MAX_STREAMS) {
+			this.send(Frames.Reset, frame.stream, encodeText("Too many concurrent streams"));
+			return;
 		}
 		const request = this.options.authorize(decodeOpen(frame.payload));
 		if (request === undefined) {
