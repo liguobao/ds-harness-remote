@@ -13,10 +13,10 @@ import type {
 } from '@dsh-remote/protocol'
 import {
   AGENT_ACP_TRANSFER_CHUNK_BYTES,
-  MAX_AGENT_ACP_TRANSFER_BYTES,
-  MAX_SECURE_MESSAGE_BYTES,
   createEvent,
   encodeMessage,
+  MAX_AGENT_ACP_TRANSFER_BYTES,
+  MAX_SECURE_MESSAGE_BYTES,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { PeerConnectionContext } from '../connection-controller.js'
@@ -155,7 +155,7 @@ export class AcpPeerBridge {
       for await (const value of source) {
         if (controller.signal.aborted || this.closed) break
         const data = { streamId, frame: { method: 'dsh/workspaceTool', params: { value } } }
-        if (Buffer.byteLength(JSON.stringify(data)) > MAX_SECURE_MESSAGE_BYTES) throw new Error('Oversized workspace tool frame')
+        if (encodeMessage(createEvent('agent.acp.frame', data)).byteLength > MAX_SECURE_MESSAGE_BYTES) throw new Error('Oversized workspace tool frame')
         await this.publish('agent.acp.frame', data)
       }
     } catch { reason = 'failed' }
@@ -290,6 +290,9 @@ export class AcpPeerBridge {
     const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength)
     transfer.nextIndex += 1
     transfer.touchedAt = Date.now()
+    if (transfer.nextIndex >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId)
+    }
     return {
       transferId: params.transferId,
       index: params.index,
