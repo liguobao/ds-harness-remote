@@ -3,6 +3,8 @@
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
 !tsconfig.base.json
+!patches/
+!patches/*.patch
 !packages/
 !packages/protocol/
 !packages/protocol/package.json

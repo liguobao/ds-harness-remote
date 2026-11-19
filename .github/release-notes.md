@@ -1,6 +1,6 @@
-# v0.6.6（待发布 / Unreleased）
+# v0.6.6
 
-Android versionCode / iOS buildNumber: **74**。此文档为发布准备，不表示已发布。
+Android versionCode / iOS buildNumber: **74**。
 
 ## 中文
 
@@ -50,8 +50,8 @@ Android versionCode / iOS buildNumber: **74**。此文档为发布准备，不�
 
 ## 升级说明 / Upgrade notes
 
-- 正式发布后，建议 App 与 Remote Host 同步升级到 0.6.6。Node.js 要求仍为 >=24.9；升级或降级前停止所有 Harness 进程并备份 profile 与凭据，见[集成指南](https://github.com/liguobao/ds-harness-remote/blob/main/docs/plugin-integration.md)。
-- After publication, upgrade App and Remote Host together. Stop all Harness processes before upgrading or downgrading; Node.js >=24.9 remains required.
+- 建议 App 与 Remote Host 同步升级到 0.6.6。Node.js 要求仍为 >=24.9。升级或降级前先停止所有 Harness 进程并备份 profile 与凭据。 [集成指南](https://github.com/liguobao/ds-harness-remote/blob/main/docs/plugin-integration.md)
+- Upgrade the app and Remote Host together. Stop all Harness processes before upgrading or downgrading. Node.js >=24.9 remains required.
 - iOS 通过 Xcode Cloud 签名与分发；未签名的 HarmonyOS HAP 需签名后才能安装。鸿蒙保留独立版本号与功能边界，见[鸿蒙说明](https://github.com/liguobao/ds-harness-remote/blob/main/docs/harmony-client.md)。
 
 ## 贡献者 / Contributors
