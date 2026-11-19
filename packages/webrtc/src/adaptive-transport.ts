@@ -928,7 +928,7 @@ function negotiateTimeout(serverMs: number | undefined, localMs: number | undefi
 }
 
 const DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4_000
-const SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6_000
+const SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 2_000
 const SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12_000
 
 // React Native AbortSignal implementations may omit throwIfAborted().

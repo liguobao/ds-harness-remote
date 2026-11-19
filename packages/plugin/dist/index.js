@@ -68627,7 +68627,7 @@ function negotiateTimeout(serverMs, localMs) {
   return Math.min(SERVER_NEGOTIATE_TIMEOUT_MAX_MS, Math.max(SERVER_NEGOTIATE_TIMEOUT_MIN_MS, serverMs));
 }
 var DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4e3;
-var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6e3;
+var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 2e3;
 var SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12e3;
 function throwIfAborted(signal) {
   if (signal?.aborted)
@@ -105750,6 +105750,21 @@ var HostServerConnection = class {
       return;
     }
     if (tunnel.rtc === void 0) {
+      if (tunnel.transport === "relay") {
+        this.logger.warn("client selected WebRTC after responder already fell back to relay", {
+          connectionId: shortId3(tunnel.connectionId),
+          peerDeviceId: shortId3(tunnel.peer.deviceId),
+          transport: payload.transport
+        });
+        await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+        this.sendControl("error", {
+          code: "CONNECTION_FAILED",
+          message: "WebRTC responder already fell back to relay.",
+          retryable: true,
+          connectionId: tunnel.connectionId
+        });
+        return;
+      }
       throw new ControlConnectionError("INVALID_MESSAGE", "Client selected WebRTC before creating a data channel.");
     }
     tunnel.transport = payload.transport;

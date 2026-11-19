@@ -511,6 +511,7 @@ describe('AdaptiveTransport capability negotiation', () => {
   })
   it('separates authorization from RTC timeout while clamping Server budgets', async () => {
     await runScenarios([
+      { name: 'Server three seconds respected without local budget', server: 3000, local: undefined, budget: 3000 },
       { name: 'configured ordinary timeout', server: 8000, local: undefined, configured: true, budget: 8000 },
       { name: 'configured cloud snapshot overrides hello', server: 8000, local: undefined, configured: true, snapshot: 30000, budget: 30000 },
       { name: 'old Server without timeout', server: undefined, local: undefined, budget: 8000 },

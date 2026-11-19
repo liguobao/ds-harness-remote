@@ -135,6 +135,72 @@ describe('HostServerConnection', () => {
     } })))
   })
 
+  it('drops only the timed-out tunnel on late WebRTC transport.selected while still rejecting unoffered WebRTC', async () => {
+    await runScenarios([
+      { name: 'late WebRTC after responder fallback', sendOffer: true },
+      { name: 'unoffered WebRTC before data channel', sendOffer: false },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      const hostKeys = generateKeyPair(new Uint8Array(32).fill(53))
+      const clientKeys = generateKeyPair(new Uint8Array(32).fill(54))
+      const peer = { deviceId: 'client-1', name: 'Client', platform: 'linux', publicKey: clientKeys.publicKey,
+        fingerprint: 'CLIENT', membershipId: 'member', trustedAt: 1 }
+      const socket = new FakeWebSocket()
+      const pc = { connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new',
+        setRemoteDescription: async () => {}, createAnswer: async () => ({ type: 'answer', sdp: 'answer' }),
+        setLocalDescription: async () => {}, getStats: async () => [], close: vi.fn() }
+      const server = new HostServerConnection({ ...config(), forceRelay: false },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...hostKeys },
+        { trustedPeer: () => peer } as unknown as IdentityStore,
+        { baseUrl: 'https://remote.test', authenticate: async () => ({ accessToken: 'test-token' }),
+          deviceFor: async () => ({ ...peer, role: 'client', identityKey: clientKeys.publicKey }),
+          turnCredentials: async () => [],
+        } as unknown as HostServerApi,
+        { close: async () => {} } as unknown as ConnectionController, logger(), () => socket,
+        async () => ({ create: () => pc }) as unknown as RtcPeerConnectionFactory)
+      try {
+        server.start()
+        await vi.advanceTimersByTimeAsync(0)
+        socket.open()
+        socket.receive(createControlFrame('hello.ack', { ...helloAck('control-1'),
+          capabilities: ['transport.p2p', 'transport.relay'],
+          webrtcFallbackTimeoutMs: 3_000,
+        }))
+        socket.receive(createControlFrame('connect.incoming', { connectionId: 'connection-1',
+          clientDeviceId: 'client-1', clientIdentityKey: clientKeys.publicKey,
+          authorization: 'account', preferredTransports: ['p2p', 'relay'],
+        }))
+        if (row.sendOffer) {
+          socket.receive(createControlFrame('signal.offer', { connectionId: 'connection-1', targetDeviceId: 'host-1', sdp: 'offer' }))
+          await vi.advanceTimersByTimeAsync(3_000)
+          expect(pc.close).toHaveBeenCalledOnce()
+        } else {
+          await vi.advanceTimersByTimeAsync(0)
+        }
+        socket.receive(createControlFrame('transport.selected', {
+          connectionId: 'connection-1', targetDeviceId: 'host-1', transport: 'p2p',
+        }))
+        await vi.advanceTimersByTimeAsync(0)
+        if (row.sendOffer) {
+          expect(socket.readyState).toBe(1)
+          const errors = socket.sent.map(frame => JSON.parse(frame)).filter(frame => frame.type === 'error')
+          expect(errors.map(frame => frame.payload)).toContainEqual(expect.objectContaining({
+            code: 'CONNECTION_FAILED',
+            connectionId: 'connection-1',
+            retryable: true,
+          }))
+        } else {
+          expect(socket.readyState).toBe(3)
+        }
+      } finally {
+        try {
+          await server.stop()
+          expect(vi.getTimerCount()).toBe(0)
+        } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+      }
+    } })))
+  })
+
   it('matches the deployed Server frames and exposes RPC only after Noise IK', async () => {
     const hostKeys = generateKeyPair(new Uint8Array(32).fill(11))
     const clientKeys = generateKeyPair(new Uint8Array(32).fill(12))

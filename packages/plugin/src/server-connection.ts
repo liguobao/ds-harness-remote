@@ -1094,6 +1094,21 @@ export class HostServerConnection {
       return
     }
     if (tunnel.rtc === undefined) {
+      if (tunnel.transport === 'relay') {
+        this.logger.warn('client selected WebRTC after responder already fell back to relay', {
+          connectionId: shortId(tunnel.connectionId),
+          peerDeviceId: shortId(tunnel.peer.deviceId),
+          transport: payload.transport,
+        })
+        await this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+        this.sendControl('error', {
+          code: 'CONNECTION_FAILED',
+          message: 'WebRTC responder already fell back to relay.',
+          retryable: true,
+          connectionId: tunnel.connectionId,
+        })
+        return
+      }
       throw new ControlConnectionError('INVALID_MESSAGE', 'Client selected WebRTC before creating a data channel.')
     }
 
