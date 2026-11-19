@@ -1,7 +1,15 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
+import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {
+  CODEX_APP_TRANSFER_CHUNK_BYTES,
+  createEvent,
+  encodeMessage,
+  MAX_SECURE_MESSAGE_BYTES,
+} from '@dsh-remote/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   CodexAppServerInbound,
@@ -16,6 +24,7 @@ import {
 } from '../src/codex/app-server.js'
 import { CodexRemoteDomain, codexBinaryCandidates } from '../src/codex/domain.js'
 import type { SafeLogger } from '../src/logging.js'
+import { RpcError } from '../src/safe-error.js'
 
 const cleanup: string[] = []
 
@@ -1610,6 +1619,790 @@ describe('CodexRemoteDomain', () => {
     await peer.closeAll()
     await domain.close()
   })
+
+  it('buffers missed Codex real-time frames across disconnects and enforces bounds and hygiene', async () => {
+    await runScenarios([
+      {
+        name: 'replays missed deltas and turn/completed in order after disconnect and drains buffer',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const first = domain.createPeer(
+              { connectionId: 'conn-1', peerDeviceId: 'phone-1' },
+              async () => undefined,
+            )!
+            await first.openStream({ streamId: 'stream-1', threadId: 'allowed-thread' })
+            await first.call({
+              method: 'turn/start',
+              params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Run' }] },
+            })
+            await first.closeAll()
+
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'msg-1', delta: 'Hello ' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'msg-1', delta: 'world' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+            expect(app.calls.filter(call => call.method === 'thread/unsubscribe')).toHaveLength(1)
+
+            const replayed: Array<{ event: string; data: unknown }> = []
+            const second = domain.createPeer(
+              { connectionId: 'conn-2', peerDeviceId: 'phone-1' },
+              async (event, data) => { replayed.push({ event, data }) },
+            )!
+            const opened = await second.openStream({ streamId: 'stream-2', threadId: 'allowed-thread' })
+            expect(opened).toEqual({ opened: true, streamId: 'stream-2', threadId: 'allowed-thread' })
+            expect(replayed).toEqual([
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-2',
+                  frame: {
+                    method: 'item/agentMessage/delta',
+                    params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'msg-1', delta: 'Hello ' },
+                  },
+                },
+              },
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-2',
+                  frame: {
+                    method: 'item/agentMessage/delta',
+                    params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'msg-1', delta: 'world' },
+                  },
+                },
+              },
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-2',
+                  frame: {
+                    method: 'turn/completed',
+                    params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+                  },
+                },
+              },
+            ])
+
+            replayed.length = 0
+            await second.openStream({ streamId: 'stream-3', threadId: 'allowed-thread' })
+            expect(replayed).toHaveLength(0)
+            await second.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'buffers frames when live publish fails due to transport disconnect and replays on reconnect',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const broken = domain.createPeer(
+              { connectionId: 'conn-broken', peerDeviceId: 'phone-1' },
+              async () => { throw new Error('transport closed') },
+            )!
+            await broken.openStream({ streamId: 'stream-broken', threadId: 'allowed-thread' })
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: 'in-flight' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+            await broken.closeAll()
+
+            const frames: Array<{ event: string; data: unknown }> = []
+            const next = domain.createPeer(
+              { connectionId: 'conn-next', peerDeviceId: 'phone-1' },
+              async (event, data) => { frames.push({ event, data }) },
+            )!
+            await next.openStream({ streamId: 'stream-next', threadId: 'allowed-thread' })
+            expect(frames.map(entry => isRecord(entry.data) && isRecord(entry.data.frame) ? entry.data.frame.method : undefined))
+              .toEqual(['item/agentMessage/delta', 'turn/completed'])
+            await next.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'truncates overflowed thread buffers to the latest 200 frames and marks replayTruncated',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            for (let index = 0; index < 210; index += 1) {
+              app.emit({
+                kind: 'notification',
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: `chunk-${index}` },
+              })
+            }
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+
+            const frames: Array<{ method: string; delta?: string }> = []
+            const peer = domain.createPeer(
+              { connectionId: 'conn-trunc', peerDeviceId: 'phone-1' },
+              async (_event, data) => {
+                if (isRecord(data) && isRecord(data.frame) && typeof data.frame.method === 'string') {
+                  const delta = isRecord(data.frame.params) && typeof data.frame.params.delta === 'string'
+                    ? data.frame.params.delta
+                    : undefined
+                  frames.push({ method: data.frame.method, ...(delta === undefined ? {} : { delta }) })
+                }
+              },
+            )!
+            const opened = await peer.openStream({ streamId: 'stream-trunc', threadId: 'allowed-thread' })
+            expect(opened).toEqual({
+              opened: true,
+              streamId: 'stream-trunc',
+              threadId: 'allowed-thread',
+              replayTruncated: true,
+            })
+            expect(frames).toHaveLength(200)
+            expect(frames[0]).toEqual({ method: 'item/agentMessage/delta', delta: 'chunk-11' })
+            expect(frames.at(-1)).toEqual({ method: 'turn/completed' })
+            await peer.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'prunes expired frames by TTL, clears on unsolicited thread/closed, and never buffers approvals',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const baseNow = Date.now()
+            const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(baseNow)
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: 'stale' },
+            })
+            await flush()
+
+            nowSpy.mockReturnValue(baseNow + 5 * 60_000 + 1)
+            const frames: unknown[] = []
+            const peer = domain.createPeer(
+              { connectionId: 'conn-ttl', peerDeviceId: 'phone-1' },
+              async (_event, data) => { frames.push(data) },
+            )!
+            await peer.openStream({ streamId: 'stream-ttl', threadId: 'allowed-thread' })
+            expect(frames).toHaveLength(0)
+            await peer.closeStream({ streamId: 'stream-ttl' })
+            nowSpy.mockRestore()
+
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-2', delta: 'before-close' },
+            })
+            await flush()
+            app.emit({
+              kind: 'notification',
+              method: 'thread/closed',
+              params: { threadId: 'allowed-thread' },
+            })
+            await flush()
+
+            app.emit({
+              kind: 'request',
+              id: 77,
+              method: 'item/commandExecution/requestApproval',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', command: 'rm -rf /' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'item/commandExecution/requestApproval',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', command: 'echo hi' },
+            })
+            await flush()
+            expect(app.responses).toContainEqual({ id: 77, result: { decision: 'decline' } })
+
+            await peer.openStream({ streamId: 'stream-after-close', threadId: 'allowed-thread' })
+            expect(frames).toHaveLength(0)
+            await peer.closeAll()
+          } finally {
+            vi.restoreAllMocks()
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'does not pollute replay buffer with oversized frames or RESPONSE_TOO_LARGE publish errors',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const huge = 'x'.repeat(MAX_SECURE_MESSAGE_BYTES)
+            const peerOneEvents: Array<{ event: string; data: unknown }> = []
+            const peerOne = domain.createPeer(
+              { connectionId: 'conn-oversized-1', peerDeviceId: 'phone-1' },
+              async (event, data) => {
+                peerOneEvents.push({ event, data })
+                if (event === 'codex.app.frame') {
+                  throw new RpcError('RESPONSE_TOO_LARGE', 'Frame exceeds secure channel limit.')
+                }
+              },
+            )!
+            await peerOne.openStream({ streamId: 'stream-1', threadId: 'allowed-thread' })
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: 'rejected-too-large' },
+            })
+            await flush()
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-2', delta: huge },
+            })
+            await flush()
+            expect(peerOneEvents).toContainEqual({
+              event: 'codex.app.stream.closed',
+              data: { streamId: 'stream-1', reason: 'failed' },
+            })
+            await peerOne.closeAll()
+
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-3', delta: huge },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+
+            const peerTwoFrames: Array<{ event: string; data: unknown }> = []
+            const peerTwo = domain.createPeer(
+              { connectionId: 'conn-oversized-2', peerDeviceId: 'phone-1' },
+              async (event, data) => { peerTwoFrames.push({ event, data }) },
+            )!
+            await peerTwo.openStream({ streamId: 'stream-2', threadId: 'allowed-thread' })
+            expect(peerTwoFrames).toEqual([
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-2',
+                  frame: {
+                    method: 'turn/completed',
+                    params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+                  },
+                },
+              },
+            ])
+            await peerTwo.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'evicts oldest buffered threads beyond the 64-thread cap',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-old', delta: 'evicted' },
+            })
+            for (let index = 0; index < 64; index += 1) {
+              app.emit({
+                kind: 'notification',
+                method: 'item/agentMessage/delta',
+                params: { threadId: `thread-${index}`, itemId: `msg-${index}`, delta: `d-${index}` },
+              })
+            }
+            await flush()
+            const frames: unknown[] = []
+            const peer = domain.createPeer(
+              { connectionId: 'conn-lru', peerDeviceId: 'phone-1' },
+              async (_event, data) => { frames.push(data) },
+            )!
+            await peer.openStream({ streamId: 'stream-lru', threadId: 'allowed-thread' })
+            expect(frames).toHaveLength(0)
+            await peer.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'prunes persisted turns and items after dsh/sessionHistory and thread/read while keeping unpersisted deltas and concurrent frames',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const original = app.call.bind(app)
+          let historyMode: 'completed' | 'active' = 'completed'
+          let emitDuringHistory: (() => void) | undefined
+          vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+            if (method === 'thread/turns/list') {
+              emitDuringHistory?.()
+              emitDuringHistory = undefined
+              if (historyMode === 'completed') {
+                return {
+                  data: [{
+                    id: 'turn-1',
+                    status: 'completed',
+                    itemsView: 'full',
+                    items: [
+                      { id: 'user-1', type: 'userMessage', text: 'Hi' },
+                      { id: 'msg-1', type: 'agentMessage', text: 'Done' },
+                    ],
+                  }],
+                  nextCursor: null,
+                  backwardsCursor: null,
+                }
+              }
+              return {
+                data: [
+                  {
+                    id: 'turn-1',
+                    status: 'completed',
+                    itemsView: 'full',
+                    items: [{ id: 'user-1', type: 'userMessage', text: 'Old' }],
+                  },
+                  {
+                    id: 'turn-2',
+                    status: 'inProgress',
+                    itemsView: 'full',
+                    items: [{ id: 'user-2', type: 'userMessage', text: 'Now' }],
+                  },
+                ],
+                nextCursor: null,
+                backwardsCursor: null,
+              }
+            }
+            return original(method, params)
+          })
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            // Case A: completed turn persisted; frames < watermark cleared, concurrent frame >= watermark kept.
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'msg-1', delta: 'Done' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+
+            const peer = domain.createPeer(
+              { connectionId: 'conn-dedup', peerDeviceId: 'phone-1' },
+              async (event, data) => { received.push({ event, data }) },
+            )!
+            const received: Array<{ event: string; data: unknown }> = []
+
+            emitDuringHistory = () => {
+              app.emit({
+                kind: 'notification',
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'allowed-thread', turnId: 'turn-2', itemId: 'msg-2', delta: 'concurrent' },
+              })
+            }
+            await peer.call({ method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
+            await peer.openStream({ streamId: 'stream-dedup-1', threadId: 'allowed-thread' })
+            expect(received).toEqual([
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-dedup-1',
+                  frame: {
+                    method: 'item/agentMessage/delta',
+                    params: { threadId: 'allowed-thread', turnId: 'turn-2', itemId: 'msg-2', delta: 'concurrent' },
+                  },
+                },
+              },
+            ])
+            await peer.closeStream({ streamId: 'stream-dedup-1' })
+            received.length = 0
+
+            // Case B: active turn keeps unpersisted streaming deltas while dropping completed turn, metadata, turn/started, and persisted items.
+            historyMode = 'active'
+            app.emit({
+              kind: 'notification',
+              method: 'thread/name/updated',
+              params: { threadId: 'allowed-thread', threadName: 'Renamed' },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/started',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-2', status: 'inProgress', items: [] } },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'item/completed',
+              params: { threadId: 'allowed-thread', turnId: 'turn-2', item: { id: 'user-2', type: 'userMessage', text: 'Now' } },
+            })
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', turnId: 'turn-2', itemId: 'msg-live', delta: 'unpersisted' },
+            })
+            await flush()
+
+            await peer.call({ method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' } })
+            await peer.openStream({ streamId: 'stream-dedup-2', threadId: 'allowed-thread' })
+            expect(received).toEqual([
+              {
+                event: 'codex.app.frame',
+                data: {
+                  streamId: 'stream-dedup-2',
+                  frame: {
+                    method: 'item/agentMessage/delta',
+                    params: { threadId: 'allowed-thread', turnId: 'turn-2', itemId: 'msg-live', delta: 'unpersisted' },
+                  },
+                },
+              },
+            ])
+            await peer.closeStream({ streamId: 'stream-dedup-2' })
+            received.length = 0
+
+            // Case C: thread/read(includeTurns:true) also prunes completed persisted frames.
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', turnId: 'turn-1', itemId: 'assistant-1', delta: 'Second' },
+            })
+            await flush()
+            await peer.call({ method: 'thread/read', params: { threadId: 'allowed-thread', includeTurns: true } })
+            await peer.openStream({ streamId: 'stream-dedup-3', threadId: 'allowed-thread' })
+            expect(received).toHaveLength(0)
+            await peer.closeAll()
+          } finally {
+            vi.restoreAllMocks()
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'preserves order without drops across high-frequency concurrent frames during replay and across multiple subscribers',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            for (let index = 0; index < 5; index += 1) {
+              app.emit({
+                kind: 'notification',
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: `buf-${index}` },
+              })
+            }
+            await flush()
+
+            const singleDeltas: string[] = []
+            let emittedLive = 0
+            const peerOne = domain.createPeer(
+              { connectionId: 'conn-burst-1', peerDeviceId: 'phone-1' },
+              async (_event, data) => {
+                if (isRecord(data) && isRecord(data.frame) && isRecord(data.frame.params)
+                  && typeof data.frame.params.delta === 'string') {
+                  singleDeltas.push(data.frame.params.delta)
+                }
+                if (emittedLive < 10) {
+                  const nextLive = emittedLive++
+                  app.emit({
+                    kind: 'notification',
+                    method: 'item/agentMessage/delta',
+                    params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: `live-${nextLive}` },
+                  })
+                }
+                await new Promise(resolve => setTimeout(resolve, 0))
+              },
+            )!
+            await peerOne.openStream({ streamId: 'stream-burst-1', threadId: 'allowed-thread' })
+            expect(singleDeltas).toEqual([
+              'buf-0', 'buf-1', 'buf-2', 'buf-3', 'buf-4',
+              'live-0', 'live-1', 'live-2', 'live-3', 'live-4',
+              'live-5', 'live-6', 'live-7', 'live-8', 'live-9',
+            ])
+
+            // Multi-subscriber: peerOne is live while peerTwo opens with async replay;
+            // live frames emitted mid-open must reach BOTH peers in order without loss.
+            const peerOneMulti: string[] = []
+            const peerTwoMulti: string[] = []
+            await peerOne.closeAll()
+            const subOne = domain.createPeer(
+              { connectionId: 'conn-multi-1', peerDeviceId: 'phone-1' },
+              async (_event, data) => {
+                if (isRecord(data) && isRecord(data.frame) && isRecord(data.frame.params)
+                  && typeof data.frame.params.delta === 'string') {
+                  peerOneMulti.push(data.frame.params.delta)
+                }
+              },
+            )!
+            await subOne.openStream({ streamId: 'stream-multi-1', threadId: 'allowed-thread' })
+            let releaseReplay!: () => void
+            const replayGate = new Promise<void>(resolve => { releaseReplay = resolve })
+            let replayStarted!: () => void
+            const replayReady = new Promise<void>(resolve => { replayStarted = resolve })
+            const originalReplay = domain.replayBufferedFrames.bind(domain)
+            vi.spyOn(domain, 'replayBufferedFrames').mockImplementation(async (connectionId, streamId, threadId) => {
+              replayStarted()
+              await replayGate
+              return originalReplay(connectionId, streamId, threadId)
+            })
+            const subTwo = domain.createPeer(
+              { connectionId: 'conn-multi-2', peerDeviceId: 'phone-2' },
+              async (_event, data) => {
+                if (isRecord(data) && isRecord(data.frame) && isRecord(data.frame.params)
+                  && typeof data.frame.params.delta === 'string') {
+                  peerTwoMulti.push(data.frame.params.delta)
+                }
+              },
+            )!
+            const openingTwo = subTwo.openStream({ streamId: 'stream-multi-2', threadId: 'allowed-thread' })
+            await replayReady
+            for (let index = 0; index < 4; index += 1) {
+              app.emit({
+                kind: 'notification',
+                method: 'item/agentMessage/delta',
+                params: { threadId: 'allowed-thread', itemId: 'msg-m', delta: `multi-${index}` },
+              })
+            }
+            await flush()
+            releaseReplay()
+            await openingTwo
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-m', delta: 'multi-after' },
+            })
+            await flush()
+            expect(peerOneMulti).toEqual(['multi-0', 'multi-1', 'multi-2', 'multi-3', 'multi-after'])
+            expect(peerTwoMulti).toEqual(['multi-0', 'multi-1', 'multi-2', 'multi-3', 'multi-after'])
+            await subOne.closeAll()
+            await subTwo.closeAll()
+          } finally {
+            vi.restoreAllMocks()
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'blocks boundary-sized Codex frames that exceed MAX_SECURE_MESSAGE_BYTES once wrapped in RemoteMessage',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const streamId = 'stream-boundary'
+            const baseFrame = {
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-b', delta: '' },
+            }
+            const bareBaseBytes = Buffer.byteLength(JSON.stringify({ streamId, frame: baseFrame }))
+            const boundaryDelta = 'x'.repeat(MAX_SECURE_MESSAGE_BYTES - bareBaseBytes - 60)
+            const boundaryFrame = {
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-b', delta: boundaryDelta },
+            }
+            expect(Buffer.byteLength(JSON.stringify({ streamId, frame: boundaryFrame }))).toBeLessThanOrEqual(MAX_SECURE_MESSAGE_BYTES)
+            expect(encodeMessage(createEvent('codex.app.frame', { streamId, frame: boundaryFrame })).byteLength).toBeGreaterThan(MAX_SECURE_MESSAGE_BYTES)
+
+            const liveEvents: Array<{ event: string; data: unknown }> = []
+            const peerOne = domain.createPeer(
+              { connectionId: 'conn-boundary-1', peerDeviceId: 'phone-1' },
+              async (event, data) => { liveEvents.push({ event, data }) },
+            )!
+            await peerOne.openStream({ streamId, threadId: 'allowed-thread' })
+            app.emit({ kind: 'notification', ...boundaryFrame })
+            await flush()
+            expect(liveEvents).toEqual([
+              { event: 'codex.app.stream.closed', data: { streamId, reason: 'failed' } },
+            ])
+            await peerOne.closeAll()
+
+            app.emit({ kind: 'notification', ...boundaryFrame })
+            app.emit({
+              kind: 'notification',
+              method: 'turn/completed',
+              params: { threadId: 'allowed-thread', turn: { id: 'turn-1', status: 'completed', items: [] } },
+            })
+            await flush()
+
+            const replayed: Array<{ event: string; data: unknown }> = []
+            const peerTwo = domain.createPeer(
+              { connectionId: 'conn-boundary-2', peerDeviceId: 'phone-1' },
+              async (event, data) => { replayed.push({ event, data }) },
+            )!
+            await peerTwo.openStream({ streamId: 'stream-boundary-2', threadId: 'allowed-thread' })
+            expect(replayed).toHaveLength(1)
+            expect(replayed[0]).toMatchObject({
+              event: 'codex.app.frame',
+              data: { streamId: 'stream-boundary-2', frame: { method: 'turn/completed' } },
+            })
+            await peerTwo.closeAll()
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'marks replayTruncated when older buffered frames expire by TTL while newer frames remain',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          await domain.start()
+          try {
+            const baseNow = Date.now()
+            const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(baseNow)
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: 'expired' },
+            })
+            nowSpy.mockReturnValue(baseNow + 4 * 60_000)
+            app.emit({
+              kind: 'notification',
+              method: 'item/agentMessage/delta',
+              params: { threadId: 'allowed-thread', itemId: 'msg-1', delta: 'fresh' },
+            })
+            await flush()
+
+            nowSpy.mockReturnValue(baseNow + 5 * 60_000 + 1)
+            const frames: unknown[] = []
+            const peer = domain.createPeer(
+              { connectionId: 'conn-partial-ttl', peerDeviceId: 'phone-1' },
+              async (_event, data) => { frames.push(data) },
+            )!
+            const opened = await peer.openStream({ streamId: 'stream-partial-ttl', threadId: 'allowed-thread' })
+            expect(opened).toEqual({
+              opened: true,
+              streamId: 'stream-partial-ttl',
+              threadId: 'allowed-thread',
+              replayTruncated: true,
+            })
+            expect(frames).toHaveLength(1)
+            await peer.closeAll()
+          } finally {
+            vi.restoreAllMocks()
+            await domain.close()
+          }
+        },
+      },
+    ], cleanupScenario1)
+  }, 20000)
+
+  it('cleans up outgoingTransfers after reading the final chunk across sequential large Codex responses', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const largeText = 'a'.repeat(2_200_000)
+    const original = app.call.bind(app)
+    vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+      if (method === 'thread/read' && isRecord(params) && params.includeTurns === true) {
+        return {
+          thread: {
+            id: 'allowed-thread',
+            cwd: root,
+            turns: [{ id: 'turn-big', status: 'completed', items: [{ id: 'a1', type: 'agentMessage', text: largeText }] }],
+          },
+        }
+      }
+      return original(method, params)
+    })
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peer = domain.createPeer(
+      { connectionId: 'conn-transfer', peerDeviceId: 'phone-1' },
+      async () => undefined,
+    )!
+    try {
+      const requestBytes = new TextEncoder().encode(JSON.stringify({
+        method: 'thread/read',
+        params: { threadId: 'allowed-thread', includeTurns: true },
+      }))
+      const totalRequestChunks = Math.ceil(requestBytes.byteLength / CODEX_APP_TRANSFER_CHUNK_BYTES)
+      for (let round = 0; round < 4; round += 1) {
+        const transferId = randomUUID()
+        peer.openTransfer({ transferId, totalBytes: requestBytes.byteLength, totalChunks: totalRequestChunks })
+        for (let index = 0; index < totalRequestChunks; index += 1) {
+          const start = index * CODEX_APP_TRANSFER_CHUNK_BYTES
+          const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
+          peer.appendTransfer({
+            transferId,
+            index,
+            data: Buffer.from(requestBytes.subarray(start, end)).toString('base64'),
+          })
+        }
+        const committed = await peer.commitTransfer({ transferId })
+        expect(committed.kind).toBe('chunked')
+        if (committed.kind !== 'chunked') throw new Error('expected chunked response')
+        const parts: Uint8Array[] = []
+        for (let index = 0; index < committed.totalChunks; index += 1) {
+          const chunk = peer.readTransfer({ transferId, index })
+          parts.push(Buffer.from(chunk.data, 'base64'))
+        }
+        const decoded = JSON.parse(Buffer.concat(parts).toString('utf8')) as {
+          thread: { turns: Array<{ items: Array<{ text: string }> }> }
+        }
+        expect(decoded.thread.turns[0]!.items[0]!.text.length).toBe(largeText.length)
+        if (round === 3) {
+          expect(peer.closeTransfer({ transferId })).toEqual({ closed: false, transferId })
+        }
+      }
+    } finally {
+      vi.restoreAllMocks()
+      await peer.closeAll()
+      await domain.close()
+    }
+  }, 15000)
 })
 
 class FakeAppServer implements CodexAppServerLike {

@@ -91867,6 +91867,7 @@ var CodexPeerBridge = class {
   }
   compactHistoryEnabled = false;
   streams = /* @__PURE__ */ new Map();
+  openingStreams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   closed = false;
@@ -91895,24 +91896,83 @@ var CodexPeerBridge = class {
   async openStream(input4) {
     this.requireOpen();
     const params = streamOpenSchema.parse(input4);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
-    if (this.streams.size >= MAX_ACTIVE_STREAMS) {
+    if (this.streams.has(params.streamId) || this.openingStreams.has(params.streamId)) {
+      throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
+    }
+    if (this.streams.size + this.openingStreams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
     }
+    let replayTruncated = false;
     await this.domain.useThread(params.threadId, async () => {
       await this.domain.call(this.context.connectionId, {
         method: "thread/read",
         params: { threadId: params.threadId, includeTurns: false }
       });
       this.requireOpen();
-      this.streams.set(params.streamId, params.threadId);
+      if (this.streams.has(params.streamId) || this.openingStreams.has(params.streamId)) {
+        throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
+      }
+      if (this.streams.size + this.openingStreams.size >= MAX_ACTIVE_STREAMS) {
+        throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
+      }
+      const opening = { threadId: params.threadId, queue: [], truncated: false };
+      this.openingStreams.set(params.streamId, opening);
+      try {
+        const replay = typeof this.domain.replayBufferedFrames === "function" ? await this.domain.replayBufferedFrames(this.context.connectionId, params.streamId, params.threadId) : { replayed: 0, truncated: false };
+        replayTruncated = replay.truncated;
+        while (opening.queue.length > 0) {
+          this.requireOpen();
+          if (this.openingStreams.get(params.streamId) !== opening) {
+            throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex stream was closed while opening.");
+          }
+          if (opening.truncated) {
+            replayTruncated = true;
+            opening.truncated = false;
+          }
+          const frame = opening.queue.shift();
+          try {
+            await this.publishReplayFrame(params.streamId, frame);
+          } catch (error62) {
+            if (isResponseTooLargeError(error62)) {
+              this.logger?.warn("Skipped oversized staged Codex frame during stream open", {
+                streamId: params.streamId,
+                method: frame.method
+              });
+              continue;
+            }
+            opening.queue.unshift(frame);
+            throw error62;
+          }
+        }
+        this.requireOpen();
+        if (this.openingStreams.get(params.streamId) !== opening) {
+          throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex stream was closed while opening.");
+        }
+        if (opening.truncated) replayTruncated = true;
+        this.openingStreams.delete(params.streamId);
+        this.streams.set(params.streamId, params.threadId);
+      } catch (error62) {
+        if (this.openingStreams.get(params.streamId) === opening) {
+          this.openingStreams.delete(params.streamId);
+        }
+        if (opening.queue.length > 0 && typeof this.domain.rebufferOpeningFrames === "function") {
+          this.domain.rebufferOpeningFrames(params.threadId, opening.queue, replayTruncated || opening.truncated);
+        }
+        throw error62;
+      }
     });
-    return { opened: true, streamId: params.streamId, threadId: params.threadId };
+    return {
+      opened: true,
+      streamId: params.streamId,
+      threadId: params.threadId,
+      ...replayTruncated ? { replayTruncated: true } : {}
+    };
   }
   async closeStream(input4) {
     const params = streamCloseSchema.parse(input4);
-    const threadId = this.streams.get(params.streamId);
+    const threadId = this.streams.get(params.streamId) ?? this.openingStreams.get(params.streamId)?.threadId;
     this.streams.delete(params.streamId);
+    this.openingStreams.delete(params.streamId);
     if (threadId !== void 0) await this.domain.releaseThread(threadId);
     return { closed: true, streamId: params.streamId };
   }
@@ -92020,6 +92080,9 @@ var CodexPeerBridge = class {
     const end = Math.min(start + CODEX_APP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
     transfer.nextIndex += 1;
     transfer.touchedAt = Date.now();
+    if (transfer.nextIndex >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId);
+    }
     return {
       transferId: params.transferId,
       index: params.index,
@@ -92032,22 +92095,48 @@ var CodexPeerBridge = class {
     return { closed, transferId: params.transferId };
   }
   hasThreadSubscription(threadId) {
-    return [...this.streams.values()].includes(threadId);
+    for (const target3 of this.streams.values()) if (target3 === threadId) return true;
+    for (const opening of this.openingStreams.values()) if (opening.threadId === threadId) return true;
+    return false;
   }
   removeThreadSubscriptions(threadId) {
     for (const [streamId, targetThreadId] of this.streams) {
       if (targetThreadId === threadId) this.streams.delete(streamId);
     }
+    for (const [streamId, opening] of this.openingStreams) {
+      if (opening.threadId === threadId) this.openingStreams.delete(streamId);
+    }
+  }
+  async publishReplayFrame(streamId, frame) {
+    this.requireOpen();
+    const data2 = { streamId, frame };
+    if (encodeMessage(createEvent("codex.app.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+      this.logger?.warn("Skipped oversized buffered Codex frame during replay", { streamId, method: frame.method });
+      return;
+    }
+    await this.publish("codex.app.frame", data2);
   }
   async publishInbound(threadId, frame) {
     if (this.closed) return;
+    for (const [streamId, opening] of this.openingStreams) {
+      if (opening.threadId !== threadId) continue;
+      if (encodeMessage(createEvent("codex.app.frame", { streamId, frame })).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+        this.logger?.warn("Skipped oversized live Codex frame while stream is opening", { streamId, method: frame.method });
+        continue;
+      }
+      opening.queue.push(frame);
+      while (opening.queue.length > MAX_BUFFERED_CODEX_FRAMES) {
+        opening.queue.shift();
+        opening.truncated = true;
+      }
+    }
     const streamIds = [...this.streams.entries()].filter(([, targetThreadId]) => targetThreadId === threadId).map(([streamId]) => streamId);
     for (const streamId of streamIds) {
       const data2 = { streamId, frame };
-      if (new TextEncoder().encode(JSON.stringify(data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+      if (encodeMessage(createEvent("codex.app.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId);
         void this.domain.releaseThread(threadId);
-        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" });
+        await this.publish("codex.app.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
         this.logger?.warn("Codex stream closed after oversized frame", { streamId });
         continue;
       }
@@ -92056,8 +92145,9 @@ var CodexPeerBridge = class {
   }
   async failStreams(reason = "failed") {
     if (this.closed) return;
-    const streamIds = [...this.streams.keys()];
+    const streamIds = [.../* @__PURE__ */ new Set([...this.streams.keys(), ...this.openingStreams.keys()])];
     this.streams.clear();
+    this.openingStreams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
@@ -92068,8 +92158,9 @@ var CodexPeerBridge = class {
   async closeAll() {
     if (this.closed) return;
     this.closed = true;
-    const streamIds = [...this.streams.keys()];
+    const streamIds = [.../* @__PURE__ */ new Set([...this.streams.keys(), ...this.openingStreams.keys()])];
     this.streams.clear();
+    this.openingStreams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     const detach = this.domain.detachPeer(this.context.connectionId);
@@ -92107,6 +92198,9 @@ function isRecord13(value) {
 function safeErrorCode2(error62) {
   if (isRecord13(error62) && typeof error62.code === "string") return error62.code;
   return "UNKNOWN";
+}
+function isResponseTooLargeError(error62) {
+  return isRecord13(error62) && error62.code === "RESPONSE_TOO_LARGE";
 }
 function safeMethod(input4) {
   return isRecord13(input4) && typeof input4.method === "string" ? input4.method : "invalid";
@@ -92167,6 +92261,9 @@ var CodexThreadLifecycle = class {
     state2.pending = true;
     await this.settle(threadId, state2);
   }
+  isReleasing(threadId) {
+    return this.threads.get(threadId)?.releasing === true;
+  }
   closed(threadId) {
     const state2 = this.threads.get(threadId);
     state2?.closed?.();
@@ -92174,6 +92271,7 @@ var CodexThreadLifecycle = class {
       state2.active = false;
       state2.activityVersion += 1;
       state2.pending = false;
+      state2.releasing = false;
       state2.release = void 0;
       state2.closed = void 0;
       if (state2.uses === 0) this.threads.delete(threadId);
@@ -92188,7 +92286,7 @@ var CodexThreadLifecycle = class {
   state(threadId) {
     let state2 = this.threads.get(threadId);
     if (state2 === void 0) {
-      state2 = { uses: 0, active: false, activityVersion: 0, pending: false };
+      state2 = { uses: 0, active: false, activityVersion: 0, pending: false, releasing: false };
       this.threads.set(threadId, state2);
     }
     return state2;
@@ -92200,7 +92298,10 @@ var CodexThreadLifecycle = class {
       this.threads.delete(threadId);
       return;
     }
-    const release = this.unload(threadId, state2);
+    state2.releasing = true;
+    const release = this.unload(threadId, state2).finally(() => {
+      state2.releasing = false;
+    });
     state2.release = release;
     await release.catch((error62) => this.failed(error62));
   }
@@ -92234,6 +92335,35 @@ var MAX_CODEX_PAGES2 = 32;
 var CODEX_HISTORY_PAGE_LIMIT = 25;
 var MAX_CODEX_HISTORY_PAGES = 64;
 var CODEX_DIRECTORY_ENTRY_LIMIT = 500;
+var MAX_BUFFERED_CODEX_FRAMES = 200;
+var MAX_BUFFERED_CODEX_THREADS = 64;
+var CODEX_FRAME_BUFFER_TTL_MS = 5 * 6e4;
+var MAX_STREAM_ID_PROBE = "x".repeat(128);
+var THREAD_METADATA_METHODS = /* @__PURE__ */ new Set([
+  "thread/name/updated",
+  "thread/settings/updated",
+  "thread/status/changed",
+  "thread/archived",
+  "thread/unarchived",
+  "model/rerouted"
+]);
+var BUFFERABLE_CODEX_METHODS = /* @__PURE__ */ new Set([
+  ...THREAD_METADATA_METHODS,
+  "turn/started",
+  "turn/plan/updated",
+  "turn/completed",
+  "item/started",
+  "item/completed",
+  "item/agentMessage/delta",
+  "item/reasoning/summaryPartAdded",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "item/plan/delta",
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "item/mcpToolCall/progress",
+  "item/fileChange/patchUpdated"
+]);
 var TURN_SILENCE_MESSAGE = "CodeX turn timed out waiting for the App Server. The model provider may be unavailable or rate-limited. Please try again later.";
 var CodexRemoteDomain = class {
   constructor(config2, logger2, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS, turnSilenceTimeoutMs = DEFAULT_TURN_SILENCE_TIMEOUT_MS) {
@@ -92263,6 +92393,8 @@ var CodexRemoteDomain = class {
   turnWatchdogs = /* @__PURE__ */ new Map();
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
+  recentFrames = /* @__PURE__ */ new Map();
+  nextBufferSeq = 1;
   approvalExpiryTimer;
   restartTimer;
   restartAttempt = 0;
@@ -92452,7 +92584,11 @@ var CodexRemoteDomain = class {
     }
     const threadId = threadIdFromParams(call.params);
     if (call.method === "dsh/sessionHistory") {
+      const latestHistory = call.params.beforeSeq === void 0 && call.params.throughSeq === void 0;
+      const watermark = latestHistory ? this.nextBufferSeq : void 0;
       const thread = await this.readThreadForHistory(connectionId, threadId);
+      assertCurrent();
+      if (watermark !== void 0) this.pruneBufferedFramesAgainstHistory(threadId, thread, watermark);
       const page = paginateCodexNativeHistory(
         projectCodexNativeHistory(thread, `codex:${threadId}`),
         {
@@ -92492,12 +92628,23 @@ var CodexRemoteDomain = class {
       return this.changeThreadPermission(threadId, call.params, allowedThread, assertCurrent);
     }
     if (call.method === "thread/read") {
-      return this.callUpstream(call.method, call.params);
+      const watermark = call.params.includeTurns === true ? this.nextBufferSeq : void 0;
+      const result = await this.callUpstream(call.method, call.params);
+      assertCurrent();
+      if (watermark !== void 0) {
+        const thread = extractThread(result);
+        if (thread !== void 0 && thread.id === threadId) {
+          this.pruneBufferedFramesAgainstHistory(threadId, thread, watermark);
+        }
+      }
+      return result;
     }
     if (call.method === "thread/unsubscribe") {
       const bridge = this.peers.get(connectionId);
       bridge?.removeThreadSubscriptions(threadId);
+      this.recentFrames.delete(threadId);
       await this.releaseThread(threadId);
+      if (!this.hasSubscriber(threadId)) this.recentFrames.delete(threadId);
       return { status: "unsubscribed" };
     }
     let claimed = false;
@@ -92625,6 +92772,7 @@ var CodexRemoteDomain = class {
     this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
+    this.recentFrames.clear();
     this.knownThreadPromises.clear();
     this.approvals.clear();
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
@@ -92651,6 +92799,7 @@ var CodexRemoteDomain = class {
     this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
+    this.recentFrames.clear();
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
     this.approvalExpiryTimer = void 0;
     this.approvals.clear();
@@ -92719,6 +92868,7 @@ var CodexRemoteDomain = class {
     this.clearAllTurnWatchdogs();
     this.turnOwners.clear();
     this.permissionPresets.clear();
+    this.recentFrames.clear();
     this.approvals.clear();
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
     this.approvalExpiryTimer = void 0;
@@ -92783,10 +92933,12 @@ var CodexRemoteDomain = class {
       this.rememberPermission(threadId, message.params);
     }
     if (message.method === "thread/closed" && threadId !== void 0) {
+      const releasing = this.threadLifecycle.isReleasing(threadId);
       this.permissionPresets.delete(threadId);
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
       this.threadLifecycle.closed(threadId);
+      if (!releasing) this.recentFrames.delete(threadId);
     }
     if (message.method === "turn/completed" && threadId !== void 0) {
       this.turnOwners.delete(threadId);
@@ -92819,10 +92971,207 @@ var CodexRemoteDomain = class {
     if (message.method === "serverRequest/resolved") this.resolveUpstreamApproval(message.params);
     if (threadId === void 0) return;
     if (this.turnOwners.has(threadId)) this.armTurnWatchdog(threadId);
-    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
+    await this.publishToThread(threadId, {
       method: message.method,
       params: message.params
-    })));
+    });
+  }
+  /** Replay buffered real-time frames missed while no stream was subscribed. */
+  async replayBufferedFrames(connectionId, streamId, threadId) {
+    const peer = this.peers.get(connectionId);
+    if (peer === void 0) return { count: 0, truncated: false };
+    this.pruneFrameBuffer(threadId);
+    const buffered = this.recentFrames.get(threadId);
+    if (buffered === void 0 || buffered.frames.length === 0) return { count: 0, truncated: false };
+    this.recentFrames.delete(threadId);
+    const truncated = buffered.truncated;
+    let count = 0;
+    for (let index = 0; index < buffered.frames.length; index += 1) {
+      const frame = buffered.frames[index];
+      try {
+        await peer.publishReplayFrame(streamId, { method: frame.method, params: frame.params });
+        count += 1;
+      } catch (error62) {
+        if (isResponseTooLargeError2(error62)) {
+          this.logger.warn("Skipped oversized buffered Codex frame during replay", {
+            threadId: maskId(threadId),
+            method: frame.method
+          });
+          continue;
+        }
+        this.restoreBufferedFrames(threadId, buffered.frames.slice(index), truncated, buffered.truncatedAtSeq);
+        throw error62;
+      }
+    }
+    if (count > 0 || truncated) {
+      this.logger.info("Replaying buffered Codex frames", {
+        threadId: maskId(threadId),
+        count,
+        ...truncated ? { truncated: true } : {}
+      });
+    }
+    return { count, truncated };
+  }
+  rebufferOpeningFrames(threadId, frames, truncated) {
+    if (frames.length === 0 || this.hasSubscriber(threadId)) return;
+    for (const frame of frames) this.bufferFrame(threadId, frame);
+    if (truncated) {
+      const entry = this.recentFrames.get(threadId);
+      if (entry !== void 0) {
+        entry.truncated = true;
+        entry.truncatedAtSeq = this.nextBufferSeq;
+      }
+    }
+  }
+  async publishToThread(threadId, frame) {
+    const subscribers = [...this.peers.values()].filter((peer) => peer.hasThreadSubscription(threadId));
+    if (subscribers.length === 0) {
+      this.bufferFrame(threadId, frame);
+      return;
+    }
+    let deliveryFailed = false;
+    await Promise.all(subscribers.map(async (peer) => {
+      try {
+        await peer.publishInbound(threadId, frame);
+      } catch (error62) {
+        if (isResponseTooLargeError2(error62)) return;
+        deliveryFailed = true;
+        this.logger.warn("Codex frame publish failed", {
+          threadId: maskId(threadId),
+          method: frame.method,
+          code: errorCode2(error62)
+        });
+      }
+    }));
+    if (deliveryFailed) this.bufferFrame(threadId, frame);
+  }
+  bufferFrame(threadId, frame) {
+    if (!BUFFERABLE_CODEX_METHODS.has(frame.method)) return;
+    if (isOversizedCodexFrame(frame)) {
+      this.logger.warn("Skipped buffering oversized Codex frame", {
+        threadId: maskId(threadId),
+        method: frame.method
+      });
+      return;
+    }
+    this.pruneFrameBuffer();
+    const entry = this.recentFrames.get(threadId) ?? { frames: [], truncated: false, truncatedAtSeq: 0 };
+    this.recentFrames.delete(threadId);
+    entry.frames.push({ seq: this.nextBufferSeq++, method: frame.method, params: frame.params, at: Date.now() });
+    while (entry.frames.length > MAX_BUFFERED_CODEX_FRAMES) {
+      entry.frames.shift();
+      entry.truncated = true;
+      entry.truncatedAtSeq = this.nextBufferSeq;
+    }
+    this.recentFrames.set(threadId, entry);
+    this.evictExcessBufferedThreads();
+  }
+  restoreBufferedFrames(threadId, frames, truncated, truncatedAtSeq) {
+    if (frames.length === 0) return;
+    this.pruneFrameBuffer();
+    const existing = this.recentFrames.get(threadId);
+    const combined = [...frames, ...existing?.frames ?? []];
+    let nextTruncated = truncated || existing?.truncated === true;
+    let nextTruncatedAtSeq = Math.max(truncatedAtSeq, existing?.truncatedAtSeq ?? 0);
+    while (combined.length > MAX_BUFFERED_CODEX_FRAMES) {
+      combined.shift();
+      nextTruncated = true;
+      nextTruncatedAtSeq = this.nextBufferSeq;
+    }
+    this.recentFrames.delete(threadId);
+    this.recentFrames.set(threadId, { frames: combined, truncated: nextTruncated, truncatedAtSeq: nextTruncatedAtSeq });
+    this.evictExcessBufferedThreads();
+  }
+  pruneFrameBuffer(threadId) {
+    const validAfter = Date.now() - CODEX_FRAME_BUFFER_TTL_MS;
+    if (threadId !== void 0) {
+      const entry = this.recentFrames.get(threadId);
+      if (entry === void 0) return;
+      const next = entry.frames.filter((frame) => frame.at >= validAfter);
+      if (next.length === 0) this.recentFrames.delete(threadId);
+      else {
+        if (next.length < entry.frames.length) {
+          entry.truncated = true;
+          entry.truncatedAtSeq = this.nextBufferSeq;
+        }
+        entry.frames = next;
+      }
+      return;
+    }
+    for (const [id7, entry] of this.recentFrames) {
+      const next = entry.frames.filter((frame) => frame.at >= validAfter);
+      if (next.length === 0) this.recentFrames.delete(id7);
+      else {
+        if (next.length < entry.frames.length) {
+          entry.truncated = true;
+          entry.truncatedAtSeq = this.nextBufferSeq;
+        }
+        entry.frames = next;
+      }
+    }
+  }
+  pruneBufferedFramesAgainstHistory(threadId, thread, watermark) {
+    this.pruneFrameBuffer(threadId);
+    const entry = this.recentFrames.get(threadId);
+    if (entry === void 0) return;
+    const turns = Array.isArray(thread.turns) ? thread.turns.filter(isRecord14) : [];
+    if (turns.length === 0) return;
+    let activeTurn;
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (turn.status === "inProgress" || turn.status === "running") {
+        activeTurn = turn;
+        break;
+      }
+    }
+    if (activeTurn === void 0) {
+      const next2 = entry.frames.filter((frame) => frame.seq >= watermark);
+      if (next2.length === 0) this.recentFrames.delete(threadId);
+      else {
+        entry.frames = next2;
+        if (entry.truncated && entry.truncatedAtSeq < watermark) {
+          entry.truncated = false;
+          entry.truncatedAtSeq = 0;
+        }
+      }
+      return;
+    }
+    const activeTurnId2 = typeof activeTurn.id === "string" && activeTurn.id.length > 0 ? activeTurn.id : void 0;
+    const completedTurnIds = /* @__PURE__ */ new Set();
+    const persistedItemIds = /* @__PURE__ */ new Set();
+    for (const turn of turns) {
+      if (turn !== activeTurn && typeof turn.id === "string" && turn.id.length > 0) {
+        completedTurnIds.add(turn.id);
+      }
+      if (Array.isArray(turn.items)) {
+        for (const item of turn.items) {
+          if (isRecord14(item) && typeof item.id === "string" && item.id.length > 0) {
+            persistedItemIds.add(item.id);
+          }
+        }
+      }
+    }
+    const next = entry.frames.filter((frame) => {
+      if (frame.seq >= watermark) return true;
+      if (THREAD_METADATA_METHODS.has(frame.method)) return false;
+      const frameTurnId = extractFrameTurnId(frame.params);
+      if (frameTurnId !== void 0 && completedTurnIds.has(frameTurnId)) return false;
+      if (frame.method === "turn/started" && (activeTurnId2 === void 0 || frameTurnId === void 0 || frameTurnId === activeTurnId2)) {
+        return false;
+      }
+      const frameItemId = extractFrameItemId(frame.params);
+      if (frameItemId !== void 0 && persistedItemIds.has(frameItemId)) return false;
+      return true;
+    });
+    if (next.length === 0) this.recentFrames.delete(threadId);
+    else entry.frames = next;
+  }
+  evictExcessBufferedThreads() {
+    while (this.recentFrames.size > MAX_BUFFERED_CODEX_THREADS) {
+      const oldest = this.recentFrames.keys().next().value;
+      if (oldest === void 0) break;
+      this.recentFrames.delete(oldest);
+    }
   }
   rememberPermission(threadId, value) {
     const preset = codexPermissionPresetFromResponse(value);
@@ -93179,10 +93528,10 @@ var CodexRemoteDomain = class {
       items: []
     };
     this.logger.warn("Codex turn silence watchdog fired", { code: "remote_turn_silence" });
-    await Promise.all([...this.peers.values()].map((peer) => peer.publishInbound(threadId, {
+    await this.publishToThread(threadId, {
       method: "turn/completed",
       params: { threadId, turn }
-    })));
+    });
   }
   requireAppServer() {
     if (!this.config.enabled || !this.isAvailable() || this.appServer === void 0) {
@@ -93702,6 +94051,24 @@ function isActiveWriterMessage(message) {
 }
 function isUnpersistedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === "CODEX_UPSTREAM_ERROR" && error62.message.toLowerCase().includes("not persisted yet");
+}
+function extractFrameTurnId(params) {
+  if (!isRecord14(params)) return void 0;
+  if (typeof params.turnId === "string" && params.turnId.length > 0) return params.turnId;
+  if (isRecord14(params.turn) && typeof params.turn.id === "string" && params.turn.id.length > 0) return params.turn.id;
+  return void 0;
+}
+function extractFrameItemId(params) {
+  if (!isRecord14(params)) return void 0;
+  if (typeof params.itemId === "string" && params.itemId.length > 0) return params.itemId;
+  if (isRecord14(params.item) && typeof params.item.id === "string" && params.item.id.length > 0) return params.item.id;
+  return void 0;
+}
+function isOversizedCodexFrame(frame) {
+  return encodeMessage(createEvent("codex.app.frame", { streamId: MAX_STREAM_ID_PROBE, frame })).byteLength > MAX_SECURE_MESSAGE_BYTES;
+}
+function isResponseTooLargeError2(error62) {
+  return isRecord14(error62) && error62.code === "RESPONSE_TOO_LARGE";
 }
 function isUnmaterializedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === CODEX_THREAD_UNMATERIALIZED;
@@ -98211,7 +98578,7 @@ var AcpPeerBridge = class {
       for await (const value of source) {
         if (controller.signal.aborted || this.closed) break;
         const data2 = { streamId, frame: { method: "dsh/workspaceTool", params: { value } } };
-        if (Buffer8.byteLength(JSON.stringify(data2)) > MAX_SECURE_MESSAGE_BYTES) throw new Error("Oversized workspace tool frame");
+        if (encodeMessage(createEvent("agent.acp.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) throw new Error("Oversized workspace tool frame");
         await this.publish("agent.acp.frame", data2);
       }
     } catch {
@@ -98341,6 +98708,9 @@ var AcpPeerBridge = class {
     const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
     transfer.nextIndex += 1;
     transfer.touchedAt = Date.now();
+    if (transfer.nextIndex >= transfer.totalChunks) {
+      this.outgoingTransfers.delete(params.transferId);
+    }
     return {
       transferId: params.transferId,
       index: params.index,

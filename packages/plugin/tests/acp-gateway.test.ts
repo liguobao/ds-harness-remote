@@ -1,5 +1,7 @@
-import { createEvent, encodeMessage, MAX_SECURE_MESSAGE_BYTES, SecureMessageCodec } from '@dsh-remote/protocol'
+import { AGENT_ACP_TRANSFER_CHUNK_BYTES, createEvent, encodeMessage, MAX_SECURE_MESSAGE_BYTES, SecureMessageCodec } from '@dsh-remote/protocol'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
@@ -1150,19 +1152,186 @@ describe('AcpRemoteGateway', () => {
           )
           expect(peer).toBeDefined()
           await peer!.openStream({ streamId: 'stream-buffer', sessionId: 'sess-buffer' })
-          await vi.waitFor(() => {
-            expect(
-              frames.some((frame) => {
-                if (frame.event !== 'agent.acp.frame') return false
-                const data = frame.data as { frame?: { params?: { update?: { sessionUpdate?: string } } } }
-                return data.frame?.params?.update?.sessionUpdate === 'agent_message_chunk'
-              }),
-            ).toBe(true)
-          })
+            await vi.waitFor(() => {
+              expect(
+                frames.some((frame) => {
+                  if (frame.event !== 'agent.acp.frame') return false
+                  const data = frame.data as { frame?: { params?: { update?: { sessionUpdate?: string } } } }
+                  return data.frame?.params?.update?.sessionUpdate === 'agent_message_chunk'
+                }),
+              ).toBe(true)
+            })
+          },
         },
-      },
     ])
   }, 20000)
+
+  it('does not buffer oversized ACP frames into recentFrames on live or offline publish', async () => {
+    const cwd = await realpath(process.cwd())
+    let inbound:
+      | ((message: { kind: 'notification'; method: string; params: unknown }) => void)
+      | undefined
+    const acp = readyAcp()
+    acp.onInbound = (handler) => {
+      inbound = handler as typeof inbound
+      return () => undefined
+    }
+    acp.call = vi.fn(async (method: string) => {
+      if (method === 'session/new') return { sessionId: 'sess-oversized' }
+      return {}
+    })
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
+      silentLogger(),
+      () => acp,
+    )
+    await gateway.start()
+    const baseFrame = {
+      method: 'session/update',
+      params: {
+        sessionId: 'sess-oversized',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '' } },
+      },
+    }
+    const bareBaseBytes = Buffer.byteLength(JSON.stringify({ streamId: 'session:sess-oversized', frame: baseFrame }))
+    const boundaryText = 'x'.repeat(MAX_SECURE_MESSAGE_BYTES - bareBaseBytes - 60)
+    const boundaryParams = {
+      sessionId: 'sess-oversized',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: boundaryText } },
+    }
+    expect(Buffer.byteLength(JSON.stringify({
+      streamId: 'session:sess-oversized',
+      frame: { method: 'session/update', params: boundaryParams },
+    }))).toBeLessThanOrEqual(MAX_SECURE_MESSAGE_BYTES)
+    expect(encodeMessage(createEvent('agent.acp.frame', {
+      streamId: 'session:sess-oversized',
+      frame: { method: 'session/update', params: boundaryParams },
+    })).byteLength).toBeGreaterThan(MAX_SECURE_MESSAGE_BYTES)
+    const firstEvents: Array<{ event: string; data: unknown }> = []
+    const first = gateway.createPeer(
+      { connectionId: 'conn-oversized-1', peerDeviceId: 'client-1' },
+      async (event, data) => { firstEvents.push({ event, data }) },
+    )!
+    try {
+      await gateway.call('conn-oversized-1', {
+        method: 'session/new',
+        params: { cwd, mcpServers: [] },
+      })
+      await first.openStream({ streamId: 'stream-1', sessionId: 'sess-oversized' })
+
+      inbound?.({
+        kind: 'notification',
+        method: 'session/update',
+        params: boundaryParams,
+      })
+      await (gateway as unknown as { inboundChain: Promise<void> }).inboundChain
+      expect(firstEvents).toEqual([
+        {
+          event: 'agent.acp.stream.closed',
+          data: { streamId: 'stream-1', reason: 'failed' },
+        },
+      ])
+      expect(
+        (gateway as unknown as { recentFrames: Map<string, unknown[]> }).recentFrames.get('sess-oversized'),
+      ).toBeUndefined()
+
+      await first.closeAll()
+      inbound?.({
+        kind: 'notification',
+        method: 'session/update',
+        params: boundaryParams,
+      })
+      inbound?.({
+        kind: 'notification',
+        method: 'session/update',
+        params: {
+          sessionId: 'sess-oversized',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+        },
+      })
+      await (gateway as unknown as { inboundChain: Promise<void> }).inboundChain
+
+      const replayed: Array<{ event: string; data: unknown }> = []
+      const second = gateway.createPeer(
+        { connectionId: 'conn-oversized-2', peerDeviceId: 'client-1' },
+        async (event, data) => { replayed.push({ event, data }) },
+      )!
+      await second.openStream({ streamId: 'stream-2', sessionId: 'sess-oversized' })
+      expect(replayed).toHaveLength(1)
+      expect(replayed[0]).toMatchObject({
+        event: 'agent.acp.frame',
+        data: {
+          frame: {
+            method: 'session/update',
+            params: { update: { content: { text: 'ok' } } },
+          },
+        },
+      })
+      await second.closeAll()
+    } finally {
+      await gateway.close()
+    }
+  }, 15000)
+
+  it('cleans up outgoingTransfers after reading the final chunk across sequential large ACP responses', async () => {
+    const cwd = await realpath(process.cwd())
+    const largeText = 'b'.repeat(2_200_000)
+    const acp = readyAcp() as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
+    acp.call = vi.fn(async (method: string) => {
+      if (method === 'session/new') return { sessionId: 'sess-transfer' }
+      return {}
+    })
+    acp.history = vi.fn(async () => [{ type: 'assistant/message', data: { text: largeText } }])
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'agent', args: ['acp'] }] },
+      silentLogger(),
+      () => acp,
+    )
+    await gateway.start()
+    const peer = gateway.createPeer(
+      { connectionId: 'conn-transfer', peerDeviceId: 'client-1' },
+      async () => undefined,
+    )!
+    try {
+      const requestBytes = new TextEncoder().encode(JSON.stringify({
+        method: 'dsh/sessionHistory',
+        params: { sessionId: 'sess-transfer', backend: 'cursor' },
+      }))
+      const totalRequestChunks = Math.ceil(requestBytes.byteLength / AGENT_ACP_TRANSFER_CHUNK_BYTES)
+      await gateway.call('conn-transfer', { method: 'session/new', params: { cwd, mcpServers: [] } })
+      for (let round = 0; round < 4; round += 1) {
+        const transferId = randomUUID()
+        peer.openTransfer({ transferId, totalBytes: requestBytes.byteLength, totalChunks: totalRequestChunks })
+        for (let index = 0; index < totalRequestChunks; index += 1) {
+          const start = index * AGENT_ACP_TRANSFER_CHUNK_BYTES
+          const end = Math.min(start + AGENT_ACP_TRANSFER_CHUNK_BYTES, requestBytes.byteLength)
+          peer.appendTransfer({
+            transferId,
+            index,
+            data: Buffer.from(requestBytes.subarray(start, end)).toString('base64'),
+          })
+        }
+        const committed = await peer.commitTransfer({ transferId })
+        expect(committed.kind).toBe('chunked')
+        if (committed.kind !== 'chunked') throw new Error('expected chunked response')
+        const parts: Uint8Array[] = []
+        for (let index = 0; index < committed.totalChunks; index += 1) {
+          const chunk = peer.readTransfer({ transferId, index })
+          parts.push(Buffer.from(chunk.data, 'base64'))
+        }
+        const decoded = JSON.parse(Buffer.concat(parts).toString('utf8')) as {
+          events: Array<{ data: { text: string } }>
+        }
+        expect(decoded.events[0]!.data.text.length).toBe(largeText.length)
+        if (round === 3) {
+          expect(peer.closeTransfer({ transferId })).toEqual({ closed: false, transferId })
+        }
+      }
+    } finally {
+      await peer.closeAll()
+      await gateway.close()
+    }
+  }, 15000)
 
   it('only reports antigravity in availableBackends when cursor binary is unavailable', async () => {
     const gateway = new AcpRemoteGateway(
