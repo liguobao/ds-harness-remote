@@ -341,6 +341,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.process !== undefined) {
       throw new OpencodeAcpError('OPENCODE_STARTING', 'OpenCode ACP is already starting.')
     }
+    this.failureNotified = false
     let child: ChildProcessWithoutNullStreams
     if (this.spawnAcp) {
       try {
@@ -368,7 +369,6 @@ export class OpencodeAcpClient implements CursorAcpLike {
       }
     }
     this.process = child
-    this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
     child.stdout.on('data', chunk => {

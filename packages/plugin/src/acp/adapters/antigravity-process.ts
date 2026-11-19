@@ -392,7 +392,9 @@ export class AntigravityAcpClient implements CursorAcpLike {
       this.ready = false
       const cause = error instanceof Error ? error : new Error(String(error))
       if (!this.closed) {
-        this.logger?.warn('Antigravity binary error', { message: cause.message })
+        this.logger?.warn('Antigravity binary error', {
+          code: (cause as NodeJS.ErrnoException).code ?? 'ANTIGRAVITY_BINARY_UNAVAILABLE',
+        })
         this.notifyUnavailable('ANTIGRAVITY_BINARY_UNAVAILABLE')
       }
       throw new AntigravityAcpError('ANTIGRAVITY_BINARY_UNAVAILABLE', 'Failed to start the Antigravity CLI.', { cause })

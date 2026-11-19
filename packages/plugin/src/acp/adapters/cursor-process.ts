@@ -280,6 +280,7 @@ export class CursorAcpClient implements CursorAcpLike {
     if (this.process !== undefined) {
       throw new CursorAcpError(this.code('STARTING'), `${this.adapterLabel} ACP is already starting.`)
     }
+    this.failureNotified = false
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.spawnAcp(this.binary)
@@ -289,7 +290,6 @@ export class CursorAcpClient implements CursorAcpLike {
       throw new CursorAcpError(this.code('BINARY_UNAVAILABLE'), `${this.adapterLabel} ACP communication failed.`, { cause })
     }
     this.process = child
-    this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
     child.stdout.on('data', chunk => {

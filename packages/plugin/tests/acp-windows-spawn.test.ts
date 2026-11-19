@@ -15,6 +15,7 @@ import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
 import { HermesAcpClient } from '../src/acp/adapters/hermes-process.js'
 import { opencodeHasNativeApi } from '../src/acp/adapters/opencode-native-api.js'
 import { OpencodeAcpClient } from '../src/acp/adapters/opencode-process.js'
+import { SafeLogger } from '../src/logging.js'
 import {
   escapeCmdBatchArgument,
   execFileCommand,
@@ -192,17 +193,19 @@ describe('Windows ACP executable filtering and .cmd/.bat spawn safety', () => {
   })
 
   it('catches synchronous spawn exceptions across ACP process clients without crashing the caller', async () => {
-    const syncEinval = Object.assign(new Error('spawn EINVAL'), { code: 'EINVAL' })
+    const syncEinval = Object.assign(new Error('spawn C:\\Users\\secret-user\\bin\\agent.cmd EINVAL'), { code: 'EINVAL' })
     const throwSpawn = () => {
       throw syncEinval
     }
+    const warn = vi.fn()
+    const logger = new SafeLogger({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }, 'debug')
 
     const clients = [
-      { name: 'cursor', client: new CursorAcpClient('agent.cmd', undefined, throwSpawn), code: 'CURSOR_BINARY_UNAVAILABLE' },
-      { name: 'claude', client: new ClaudeAcpClient('claude-agent-acp.cmd', undefined, throwSpawn), code: 'CLAUDE_BINARY_UNAVAILABLE' },
-      { name: 'hermes', client: new HermesAcpClient('hermes.cmd', undefined, throwSpawn), code: 'HERMES_BINARY_UNAVAILABLE' },
-      { name: 'opencode', client: new OpencodeAcpClient('opencode.cmd', undefined, throwSpawn), code: 'OPENCODE_BINARY_UNAVAILABLE' },
-      { name: 'antigravity', client: new AntigravityAcpClient('agy.cmd', undefined, throwSpawn, { sessionWorker: true }), code: 'ANTIGRAVITY_BINARY_UNAVAILABLE' },
+      { name: 'cursor', client: new CursorAcpClient('agent.cmd', logger, throwSpawn), code: 'CURSOR_BINARY_UNAVAILABLE' },
+      { name: 'claude', client: new ClaudeAcpClient('claude-agent-acp.cmd', logger, throwSpawn), code: 'CLAUDE_BINARY_UNAVAILABLE' },
+      { name: 'hermes', client: new HermesAcpClient('hermes.cmd', logger, throwSpawn), code: 'HERMES_BINARY_UNAVAILABLE' },
+      { name: 'opencode', client: new OpencodeAcpClient('opencode.cmd', logger, throwSpawn), code: 'OPENCODE_BINARY_UNAVAILABLE' },
+      { name: 'antigravity', client: new AntigravityAcpClient('agy.cmd', logger, throwSpawn, { sessionWorker: true }), code: 'ANTIGRAVITY_BINARY_UNAVAILABLE' },
     ] as const
 
     await runScenarios(clients.map(entry => ({
@@ -212,8 +215,14 @@ describe('Windows ACP executable filtering and .cmd/.bat spawn safety', () => {
         entry.client.onUnavailable(unavailable)
         try {
           await expect(entry.client.start()).rejects.toMatchObject({ code: entry.code })
+          await expect(entry.client.start()).rejects.toMatchObject({ code: entry.code })
           expect(entry.client.isReady()).toBe(false)
-          expect(unavailable).toHaveBeenCalledWith(entry.code)
+          expect(unavailable).toHaveBeenCalledTimes(2)
+          expect(unavailable).toHaveBeenNthCalledWith(1, entry.code)
+          expect(unavailable).toHaveBeenNthCalledWith(2, entry.code)
+          for (const [message] of warn.mock.calls) {
+            expect(String(message)).not.toContain('secret-user')
+          }
         } finally {
           await entry.client.close()
         }

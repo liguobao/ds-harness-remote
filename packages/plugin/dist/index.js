@@ -94380,6 +94380,7 @@ var CursorAcpClient = class {
     if (this.process !== void 0) {
       throw new CursorAcpError(this.code("STARTING"), `${this.adapterLabel} ACP is already starting.`);
     }
+    this.failureNotified = false;
     let child;
     try {
       child = this.spawnAcp(this.binary);
@@ -94389,7 +94390,6 @@ var CursorAcpClient = class {
       throw new CursorAcpError(this.code("BINARY_UNAVAILABLE"), `${this.adapterLabel} ACP communication failed.`, { cause });
     }
     this.process = child;
-    this.failureNotified = false;
     this.stdoutBuffer = Buffer4.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
@@ -96878,7 +96878,9 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       this.ready = false;
       const cause = error62 instanceof Error ? error62 : new Error(String(error62));
       if (!this.closed) {
-        this.logger?.warn("Antigravity binary error", { message: cause.message });
+        this.logger?.warn("Antigravity binary error", {
+          code: cause.code ?? "ANTIGRAVITY_BINARY_UNAVAILABLE"
+        });
         this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
       }
       throw new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause });
@@ -97615,6 +97617,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.process !== void 0) {
       throw new OpencodeAcpError("OPENCODE_STARTING", "OpenCode ACP is already starting.");
     }
+    this.failureNotified = false;
     let child;
     if (this.spawnAcp) {
       try {
@@ -97644,7 +97647,6 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       }
     }
     this.process = child;
-    this.failureNotified = false;
     this.stdoutBuffer = Buffer7.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
