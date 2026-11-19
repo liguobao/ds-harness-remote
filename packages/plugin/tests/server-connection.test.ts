@@ -8,7 +8,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { ServerApiError, HostServerApi } from '../src/server-api.js'
-import { HostServerConnection } from '../src/server-connection.js'
+import { HostServerConnection, resolveWebRtcNegotiateTimeoutMs } from '../src/server-connection.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import { PLUGIN_VERSION } from '../src/version.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
@@ -71,11 +71,23 @@ describe('HostServerConnection', () => {
     }
   })
 
-  it('keeps the responder alive for the Server RTC budget and preserves legacy defaults', async () => {
+  it('respects bounded Server RTC fallback hints and filters invalid or extreme values', async () => {
+    for (const invalid of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 3000.5, '3000']) {
+      expect(resolveWebRtcNegotiateTimeoutMs(invalid)).toBe(12_000)
+    }
+    expect(resolveWebRtcNegotiateTimeoutMs(1)).toBe(2_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(1_999)).toBe(2_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(3_000)).toBe(3_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(60_000)).toBe(60_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(60_001)).toBe(60_000)
+
     await runScenarios([
-      { name: 'twenty-second Server', timeout: 20000, expected: 20000 },
-      { name: 'legacy Server without timeout', timeout: undefined, expected: 12000 },
-      { name: 'shorter Server budget preserves local minimum', timeout: 8000, expected: 12000 },
+      { name: 'twenty-second Server', timeout: 20_000, expected: 20_000 },
+      { name: 'legacy Server without timeout', timeout: undefined, expected: 12_000 },
+      { name: 'no-TURN Server short budget', timeout: 3_000, expected: 3_000 },
+      { name: 'eight-second Server budget', timeout: 8_000, expected: 8_000 },
+      { name: 'tiny Server budget clamped to minimum', timeout: 500, expected: 2_000 },
+      { name: 'excessive Server budget clamped to ceiling', timeout: 120_000, expected: 60_000 },
     ].map(row => ({ name: row.name, run: async () => {
       vi.useFakeTimers()
       const hostKeys = generateKeyPair(new Uint8Array(32).fill(51))

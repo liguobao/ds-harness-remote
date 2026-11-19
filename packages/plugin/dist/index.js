@@ -104866,6 +104866,14 @@ function createNodeWebSocket(url2) {
 
 // packages/plugin/src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
+var MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS = 2e3;
+var MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS = 6e4;
+function resolveWebRtcNegotiateTimeoutMs(hint) {
+  if (typeof hint !== "number" || !Number.isSafeInteger(hint) || hint <= 0) {
+    return DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
+  }
+  return Math.min(MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS, Math.max(MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS, hint));
+}
 var HostServerConnection = class {
   constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
     this.config = config2;
@@ -105023,6 +105031,7 @@ var HostServerConnection = class {
     this.socket = socket;
     this.controlFrameLimits = {};
     this.heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
     let acknowledged = false;
     let retainOnClose = false;
     let invalidControl = false;
@@ -105236,10 +105245,7 @@ var HostServerConnection = class {
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
             this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
-            this.webRtcNegotiateTimeoutMs = Math.max(
-              DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
-              payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
-            );
+            this.webRtcNegotiateTimeoutMs = resolveWebRtcNegotiateTimeoutMs(payload.webrtcFallbackTimeoutMs);
             this.authRecoveryAttempted = false;
             this.controlFrameLimits = {
               maxControlFrameBytes: payload.maxControlFrameBytes,

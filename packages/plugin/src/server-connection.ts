@@ -95,6 +95,15 @@ interface PendingTunnel {
 }
 
 const DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
+const MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS = 2_000
+const MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS = 60_000
+
+export function resolveWebRtcNegotiateTimeoutMs(hint: unknown): number {
+  if (typeof hint !== 'number' || !Number.isSafeInteger(hint) || hint <= 0) {
+    return DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
+  }
+  return Math.min(MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS, Math.max(MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS, hint))
+}
 
 export class HostServerConnection {
   private socket?: WebSocketLike
@@ -262,6 +271,7 @@ export class HostServerConnection {
     this.socket = socket
     this.controlFrameLimits = {}
     this.heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS
+    this.webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
     let acknowledged = false
     let retainOnClose = false
     let invalidControl = false
@@ -503,10 +513,7 @@ export class HostServerConnection {
           if (frame.type === 'hello.ack') {
             const payload = requireHelloAck(frame.payload)
             this.heartbeatIntervalMs = payload.heartbeatIntervalMs
-            this.webRtcNegotiateTimeoutMs = Math.max(
-              DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
-              payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
-            )
+            this.webRtcNegotiateTimeoutMs = resolveWebRtcNegotiateTimeoutMs(payload.webrtcFallbackTimeoutMs)
             this.authRecoveryAttempted = false
             this.controlFrameLimits = {
               maxControlFrameBytes: payload.maxControlFrameBytes,
