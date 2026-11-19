@@ -236,6 +236,12 @@ export const disconnected: ConnectionSnapshot = {
   stats: { mode: 'Disconnected', connected: false },
 }
 
+const EMPTY_STRINGS: readonly string[] = []
+
+export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends'>): readonly string[] {
+  return state.customAcpBackends ?? EMPTY_STRINGS
+}
+
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
