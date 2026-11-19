@@ -314,7 +314,6 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 <Text style={styles.deviceName}>{device.name}</Text>
                 <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
               </View>
-              <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
             </View>
 
             {connection.error !== undefined && isSelected && (
@@ -344,6 +343,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                 : <>
                     <SectionTitle>{zhCN.devices.info}</SectionTitle>
                     <View style={styles.group}>
+                      <KeyValue label={zhCN.devices.operatingSystem} value={platformName(device.platform)} />
                       <KeyValue label={zhCN.devices.harnessShort} value={descriptor?.version ?? device.harnessVersion ?? zhCN.devices.unknownVersion} />
                       <KeyValue label={zhCN.devices.plugin} value={device.clientVersion ?? zhCN.devices.unknownVersion} />
                       <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
@@ -629,7 +629,6 @@ function createStyles(colors: ThemeColors) {
   deviceIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   deviceHeroCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   deviceName: { ...type.title, color: colors.ink, flexShrink: 1 },
-  devicePlatform: { ...type.small, color: colors.muted, maxWidth: '30%', flexShrink: 1, textAlign: 'right' },
   connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.xl, backgroundColor: colors.card, gap: spacing.lg },
   connectCopy: { ...type.body, color: colors.muted },
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },

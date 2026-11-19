@@ -713,7 +713,7 @@ const zhTW = {
       secure: { title: '建立安全通道', body: '核對裝置身份並完成加密握手' },
       loading: { title: '讀取工作區', body: '同步工作區和對話列表' },
     },
-    info: '裝置資訊', harness: 'DeepSeek Harness', harnessShort: 'DSH', pluginShort: 'Plugin', plugin: 'Remote 外掛', provider: '模型服務', directory: '當前目錄', model: '當前模型', workspaces: '工作區', conversations: '對話', secureConnection: '連線資訊', path: '連線方式', probeOrder: '探測順序', encryption: '安全保護', viewWorkspaces: '檢視工作區和對話', unknownVersion: '版本資訊不可用',
+    info: '裝置資訊', operatingSystem: '作業系統', harness: 'DeepSeek Harness', harnessShort: 'DSH', pluginShort: 'Plugin', plugin: 'Remote 外掛', provider: '模型服務', directory: '當前目錄', model: '當前模型', workspaces: '工作區', conversations: '對話', secureConnection: '連線資訊', path: '連線方式', probeOrder: '探測順序', encryption: '安全保護', viewWorkspaces: '檢視工作區和對話', unknownVersion: '版本資訊不可用',
     networkDetails: '網路詳情', phoneEndpoint: '手機端點', computerEndpoint: '電腦端點', relayPath: "中繼路徑", relayControl: "控制通道轉發", relayAttached: "已連線至獨立中繼", relayNodeAddress: "節點地址", relayNodeId: "節點 ID", connectionServer: '連線伺服器', networkProtocol: '網路協議', candidatePath: '候選路徑', roundTripTime: '往返延遲', availableBitrate: '可用上行頻寬', traffic: '本次流量', connectedAt: '連線時間', sent: '傳送', received: '接收',
     forgetTitle: (name: string) => `解除“${name}”的繫結？`, forgetBody: '這會從賬號中移除這臺裝置並斷開遠端連線。再次使用前，需要在電腦端重新繫結。', forget: '解除繫結',
     identityChangedError: '偵測到裝置安全身分已變更，已停止自動信任以保護你的資料。請在設定中清除本地資料或重新繫結裝置。',

@@ -715,7 +715,7 @@ const jaJP = {
       secure: { title: "安全なチャネルを開く", body: "デバイスの ID を確認し、暗号化を完了する" },
       loading: { title: "ワークスペースをロードする", body: "ワークスペースと会話を同期する" },
     },
-    info: "デバイス情報", harness: "DeepSeek Harness", harnessShort: "DSH", pluginShort: "プラグイン", plugin: "リモートプラグイン", provider: "モデルプロバイダー", directory: "現在のディレクトリ", model: "現行モデル", workspaces: "ワークスペース", conversations: "会話", secureConnection: "接続情報", path: "接続方法", probeOrder: "プローブの順序", encryption: "安全", viewWorkspaces: "ワークスペースと会話を表示する", unknownVersion: "バージョンが利用できません",
+    info: "デバイス情報", operatingSystem: "OS", harness: "DeepSeek Harness", harnessShort: "DSH", pluginShort: "プラグイン", plugin: "リモートプラグイン", provider: "モデルプロバイダー", directory: "現在のディレクトリ", model: "現行モデル", workspaces: "ワークスペース", conversations: "会話", secureConnection: "接続情報", path: "接続方法", probeOrder: "プローブの順序", encryption: "安全", viewWorkspaces: "ワークスペースと会話を表示する", unknownVersion: "バージョンが利用できません",
     networkDetails: "ネットワークの詳細", phoneEndpoint: "電話エンドポイント", computerEndpoint: "コンピュータのエンドポイント", relayPath: "リレー経路", relayControl: "制御チャネル経由", relayAttached: "リレーノードに接続済み", relayNodeAddress: "ノードアドレス", relayNodeId: "ノード ID", connectionServer: "接続サーバー", networkProtocol: "ネットワークプロトコル", candidatePath: "候補パス", roundTripTime: "往復時間", availableBitrate: "利用可能なアップリンク", traffic: "接続トラフィック", connectedAt: "接続先", sent: "送信済み", received: "受け取った",
     forgetTitle: (name: string) => `「${name}」のバインドを解除しますか?`, forgetBody: "これにより、アカウントからデバイスが削除され、リモート アクセスが切断されます。この携帯電話から使用する前に、コンピュータで再度バインドしてください。", forget: "バインドを解除する",
     identityChangedError: "デバイスのセキュリティ識別情報が変更されたため、データを保護するために自動信頼を停止しました。設定からローカルデータを消去するかデバイスを再バインドしてください。",
