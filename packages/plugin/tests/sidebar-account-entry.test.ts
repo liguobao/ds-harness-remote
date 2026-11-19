@@ -416,4 +416,67 @@ describe('compact sidebar entry rendering', () => {
       },
     }])
   })
+
+  it('keeps the remote Host label and Exit action in compact mode without measuring the account row as a footer lane', async () => {
+    await runScenarios([{
+      name: 'active remote entry portalled into the account row stays labelled and does not bind the footer lane ref',
+      run: () => {
+        const { root, rows } = setup()
+        const row = accountRow(root, 'VOzbGW_triggerRow')
+        rows.set(nativeSelector, [row])
+        const shim = createReactShim()
+        const { React, unmount } = shim
+        const portal = vi.fn((children: unknown, container: Element) => ({ children, container }))
+        const Action = createRemoteWorkspaceAction(React, portal as any) as any
+        const remoteStatus = {
+          mode: 'remote' as const,
+          available: true,
+          hostAuthorizationAvailable: false,
+          target: { deviceId: 'host-1', name: 'Office Mac' },
+        }
+        const props = {
+          wide: true,
+          control: vi.fn(async (endpoint: string) =>
+            endpoint === 'settings.get' ? { config: { sidebar: { entry: 'compact' } } } : {}),
+          statusFeed: {
+            subscribe: (listener: (status: typeof remoteStatus) => void) => {
+              listener(remoteStatus)
+              return () => undefined
+            },
+            getSnapshot: () => remoteStatus,
+          },
+          subscribeOpen: () => () => undefined,
+          preferredQrProvider: 'github',
+          sidebarEntry: { read: () => 'compact', subscribe: () => () => undefined, publish: () => undefined },
+          portal: portal as any,
+          t: (key: string) => key,
+        }
+
+        Action(props)
+        shim.restore({ state: 0, effects: 0 })
+        const tree = Action(props)
+        const entry = findElement(tree, node => node?.props?.portal === portal && 'fallback' in node.props)
+        expect(entry).toBeTruthy()
+        // Standard fallback retains the footer-lane ref; the portalled account-row entry does not.
+        expect(typeof entry.props.fallback.props.ref).toBe('function')
+
+        const entryProps = { ...entry.props, children: entry.children[0] }
+        const mark = shim.checkpoint()
+        shim.restore(mark)
+        entry.type(entryProps)
+        shim.restore(mark)
+        entry.type(entryProps)
+
+        expect(portal).toHaveBeenCalledTimes(1)
+        const portalled = portal.mock.calls[0]![0] as { props: { ref?: unknown; className: string }; children?: unknown[] }
+        expect(portalled.props.ref).toBeUndefined()
+        expect(portalled.props.className).toContain('isWide')
+        expect(portalled.props.className).toContain('isActive')
+        expect(portalled.props.className).toContain('isAccountRow')
+        expect(findElement(portalled, node => node?.props?.className === 'dshRemoteSidebarLabel')).toBeTruthy()
+        expect(findElement(portalled, node => node?.props?.className === 'dshRemoteExitLink')).toBeTruthy()
+        unmount()
+      },
+    }])
+  })
 })

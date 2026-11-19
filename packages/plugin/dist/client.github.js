@@ -5122,8 +5122,11 @@ If a code was sent, recover the original submission without changing it.`,
       // The official sidebar.footer.action slot owns the surrounding layout.
       // Style only our entry so other footer actions, usage and Settings keep
       // their host-defined geometry, including third-party sidebar variants.
-      // Match native workspace rows: 8px inset, 16px icon slot and 6px label gap.
-      ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:36px;margin:0}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;justify-content:flex-start;gap:6px;padding:0 8px;border-radius:8px;font:inherit;font-size:14px;line-height:20px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
+      // Match the shared footer capacity contract (see `footer-lane.ts`): one
+      // 42px labelled row per occupant while the row can hold 112px of label per
+      // seat, otherwise the 36x36 icon target. Both use the host's 12px radius,
+      // 9px inline paint inset and a 2px inline margin (4px between neighbours).
+      ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block;margin:4px 2px}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:var(--dsw-radius-md,12px)}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:42px}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;height:42px;justify-content:flex-start;gap:var(--dsh-sidebar-label-gap,6px);padding:0 calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px));border-inline:var(--dsh-sidebar-paint-inset,3px) solid transparent;background-clip:padding-box;border-radius:var(--dsw-radius-md,12px);font:inherit;font-size:14px;line-height:22px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
       ".dshRemoteSidebarEntry.isWide.isActive .dshRemoteSidebarLabel{max-width:170px}",
       ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-secondary)}.dshRemoteSidebarEntry.isWide .dshRemoteComputerIcon{width:16px;height:16px;flex-basis:16px}",
       // Compact entry: the same button portalled to the end of the host account row.
@@ -5133,7 +5136,7 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteEntryStyleChoices{box-sizing:border-box;height:30px;flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3)}.dshRemoteEntryStyleChoices>button{box-sizing:border-box;height:24px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;font-weight:500;line-height:1;padding:0 10px;border-radius:6px;white-space:nowrap;cursor:pointer;transition:color .14s,background .14s}.dshRemoteEntryStyleChoices>button:hover:not(:disabled):not(.isSelected){color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button.isSelected{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-shadow:0 1px 2px rgba(0,0,0,.12)}.dshRemoteEntryStyleChoices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteEntryStyleChoices>button:disabled{opacity:.45;cursor:default}",
       // Keep Exit in flow: an absolute action and reserved padding can overlap
       // the icon or adjacent plugins when the host shrinks this flex item.
-      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:8px}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
+      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px))}.dshRemoteSidebarEntry.isAccountRow{margin:0}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:42px;border:0;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:22px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
       // The strip sits inside the 40px Windows caption row, which the shell declares as the
       // window drag region. Without an explicit opt-out every press starts a window drag and
       // never reaches these buttons; the shell's own caption controls (sidebar toggle, new
@@ -5155,7 +5158,7 @@ If a code was sent, recover the original submission without changing it.`,
       // sidebar entry button (full width again, as before cab95ec) carries the
       // DesktopUpdateIndicator palette (8% brand fill, 20% brand border, 12px/500
       // suffix); icon-only rail/compact entries get the official 6px brand dot.
-      ".dshRemoteSidebarEntry.isWide.hasUpdate .dshRemoteModeButton{border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 20%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 8%,transparent);color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary));font-weight:500}.dshRemoteSidebarEntry .dshRemoteModeButton,.dshRemoteAccountEntry .dshRemoteAccountEntryButton{position:relative}.dshRemoteUpdateSuffix{flex:0 0 auto;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;font-weight:500}.dshRemoteUpdateDot{position:absolute;inset-inline-end:2px;top:2px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary))}",
+      ".dshRemoteSidebarEntry.isWide.hasUpdate .dshRemoteModeButton{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 20%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 8%,transparent);color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary));font-weight:500}.dshRemoteSidebarEntry .dshRemoteModeButton,.dshRemoteAccountEntry .dshRemoteAccountEntryButton{position:relative}.dshRemoteUpdateSuffix{flex:0 0 auto;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;font-weight:500}.dshRemoteUpdateDot{position:absolute;inset-inline-end:2px;top:2px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary))}",
       ".dshRemoteSectionHeading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.dshRemoteSectionTitle{min-width:0;display:flex;align-items:center;gap:10px}.dshRemoteSectionTitle>strong{font-size:14px}.dshRemoteManageHosts{color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none;white-space:nowrap}.dshRemoteManageHosts:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteSectionActions{display:flex;align-items:center;gap:14px}.dshRemoteSectionActions>button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px}.dshRemoteSectionActions>button:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}",
       ".dshRemoteSectionTitle{flex:1}.dshRemoteSectionTitle>.dshRemoteConnectedMenu{margin-left:auto}",
       ".dshRemoteAcpSetting{display:block!important;width:100%}.dshRemoteAcpSetting>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;cursor:pointer;list-style:none}.dshRemoteAcpSetting>summary::-webkit-details-marker{display:none}.dshRemoteAcpSummaryText{min-width:0;flex:1}.dshRemoteAcpSummaryText strong{display:block;line-height:1.45}.dshRemoteAcpSummaryText p{max-width:58ch;margin:4px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45}.dshRemoteDocLink{color:var(--dsw-alias-brand-primary);font-weight:500;text-decoration:none}.dshRemoteDocLink:hover{text-decoration:underline;text-underline-offset:3px}.dshRemoteDocLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:3px}.dshRemoteAcpSummaryMeta{flex:0 0 auto;display:inline-flex;align-items:center;gap:10px}.dshRemoteAcpCountText{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary)}.dshRemoteAcpChevron{flex:0 0 auto;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);transition:transform .18s ease-out,color .15s}.dshRemoteAcpSetting>summary:hover .dshRemoteAcpChevron{color:var(--dsw-alias-label-primary)}.dshRemoteAcpSetting[open]>summary .dshRemoteAcpChevron{transform:rotate(180deg)}",
@@ -5279,6 +5282,72 @@ If a code was sent, recover the original submission without changing it.`,
     };
   }
 
+  // packages/plugin/src/client/footer-lane.ts
+  var NO_FACTS = { row: null, lane: !1, wrapped: !1, count: 0, rowWidth: Number.NaN };
+  function footerRequiredWidth(count) {
+    return count <= 0 ? 0 : count * 112 + (count - 1) * 4 + 16;
+  }
+  function resolveFooterForm(count, rowWidth) {
+    return count <= 0 ? "label" : count > 2 || !Number.isFinite(rowWidth) ? "icon" : rowWidth >= footerRequiredWidth(count) ? "label" : "icon";
+  }
+  function occupiesFooterSeat(entry) {
+    return entry == null || entry.position === "fixed" || entry.position === "absolute" ? !1 : (entry.width ?? 0) > 0 && (entry.height ?? 0) > 0;
+  }
+  function measureFooterSeat(entry, view = globalThis) {
+    let styleOf = view !== void 0 && typeof view.getComputedStyle == "function" ? view.getComputedStyle.bind(view) : null;
+    if (entry == null || styleOf === null) return { ...NO_FACTS };
+    let node = entry;
+    for (; node !== null && node.parentElement != null; ) {
+      let row = node.parentElement, style = styleOf(row);
+      if (style.display === "contents") {
+        node = row;
+        continue;
+      }
+      if (style.display !== "flex" && style.display !== "inline-flex") {
+        if (row.children.length === 1) {
+          node = row;
+          continue;
+        }
+        return { ...NO_FACTS };
+      }
+      let facts = {
+        row,
+        lane: style.flexDirection.startsWith("row"),
+        wrapped: style.flexWrap !== "nowrap",
+        count: 1,
+        rowWidth: row.clientWidth
+      };
+      if (!facts.lane) return facts;
+      let collect = (container) => {
+        for (let child of Array.from(container.children)) {
+          let childStyle = styleOf(child);
+          if (childStyle.display === "contents") {
+            collect(child);
+            continue;
+          }
+          if (child.contains(entry)) continue;
+          let rect = typeof child.getBoundingClientRect == "function" ? child.getBoundingClientRect() : { width: 0, height: 0 };
+          occupiesFooterSeat({ position: childStyle.position, width: rect.width, height: rect.height }) && (facts.count += 1);
+        }
+      };
+      return collect(row), facts;
+    }
+    return { ...NO_FACTS };
+  }
+  function footerFormFor(facts, wide) {
+    return wide ? facts.row === null || !facts.lane || facts.wrapped ? "label" : resolveFooterForm(facts.count, facts.rowWidth) : "icon";
+  }
+  function watchFooterLane(entry, wide, onForm, view = globalThis) {
+    let reported, row = null, resize, mutation, disposed = !1, sync = () => {
+      if (disposed) return;
+      let facts = measureFooterSeat(entry, view), nextForm = footerFormFor(facts, wide());
+      nextForm !== reported && (reported = nextForm, onForm(nextForm)), facts.row !== row && (resize?.disconnect(), mutation?.disconnect(), resize = void 0, mutation = void 0, row = facts.row, row !== null && (typeof ResizeObserver == "function" && (resize = new ResizeObserver(sync), resize.observe(row), resize.observe(entry)), typeof MutationObserver == "function" && (mutation = new MutationObserver(sync), mutation.observe(row, { childList: !0, subtree: !0, attributes: !0, attributeFilter: ["style", "class", "hidden"] }))));
+    };
+    return sync(), typeof window < "u" && window.addEventListener("resize", sync), () => {
+      disposed = !0, resize?.disconnect(), mutation?.disconnect(), typeof window < "u" && window.removeEventListener("resize", sync);
+    };
+  }
+
   // packages/plugin/src/client/workspaces.ts
   var import_qrcode3 = __toESM(require_browser(), 1);
 
@@ -5348,6 +5417,13 @@ If a code was sent, recover the original submission without changing it.`,
   var hostedServerUrl = "https://dsh.r2049.cn";
   function createRemoteWorkspaceAction(React, portal) {
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), RemoteProgressView = createRemoteProgressView(React);
+    function useFooterLane(wide) {
+      let [form, setForm] = React.useState(wide ? "label" : "icon"), [node, setNode] = React.useState(null);
+      return React.useEffect(() => {
+        if (node !== null)
+          return watchFooterLane(node, () => wide, (next) => setForm((previous) => previous === next ? previous : next));
+      }, [wide, node]), [setNode, wide ? form : "icon"];
+    }
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       if (React.useEffect(
@@ -5361,7 +5437,7 @@ If a code was sent, recover the original submission without changing it.`,
       }
     }
     function RemoteWorkspaceAction(props) {
-      let { t } = props, connectionErrorMessageFor = (reason, translate) => {
+      let { t } = props, [attachEntry, entryForm] = useFooterLane(props.wide), connectionErrorMessageFor = (reason, translate) => {
         if (typeof reason == "object" && reason !== null && "code" in reason) {
           let code = reason.code;
           if (typeof code == "string") return connectionErrorMessage(code, translate);
@@ -5836,30 +5912,36 @@ If a code was sent, recover the original submission without changing it.`,
         },
         React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
         React.createElement("path", { d: "M8 21h8M12 17v4" })
-      ), remoteActive = status?.mode === "remote", updateSuffix = localUpdateAvailable && props.wide ? React.createElement("span", {
-        className: "dshRemoteUpdateSuffix",
-        title: updateNotice,
-        "aria-hidden": !0
-      }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null, updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, entry = React.createElement(
-        "div",
-        { className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}` },
-        React.createElement(remoteActive && props.wide && !reauth ? "div" : "button", {
-          ...remoteActive && props.wide && !reauth ? {} : {
-            type: "button",
-            disabled: remoteActive && busy,
-            onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+      ), remoteActive = status?.mode === "remote", labelled = props.wide && entryForm === "label", updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, renderEntry = (entryLabelled, options = {}) => {
+        let updateSuffix = localUpdateAvailable && entryLabelled ? React.createElement("span", {
+          className: "dshRemoteUpdateSuffix",
+          title: updateNotice,
+          "aria-hidden": !0
+        }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null;
+        return React.createElement(
+          "div",
+          {
+            ...options.ref === void 0 ? {} : { ref: options.ref },
+            className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${entryLabelled ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}${options.inAccountRow ? " isAccountRow" : ""}`
           },
-          className: "dshRemoteModeButton",
-          title: props.wide ? remoteLabel : remoteActionLabel,
-          "aria-label": props.wide ? remoteLabel : remoteActionLabel
-        }, computerIcon, props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, props.wide ? updateSuffix : updateDot),
-        remoteActive && props.wide ? React.createElement("button", {
-          type: "button",
-          className: "dshRemoteExitLink",
-          disabled: busy,
-          onClick: () => void openLocalWorkspaces()
-        }, t("exitRemote")) : null
-      ), accountEntry = remoteActive ? entry : React.createElement(
+          React.createElement(remoteActive && entryLabelled && !reauth ? "div" : "button", {
+            ...remoteActive && entryLabelled && !reauth ? {} : {
+              type: "button",
+              disabled: remoteActive && busy,
+              onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+            },
+            className: "dshRemoteModeButton",
+            title: entryLabelled ? remoteLabel : remoteActionLabel,
+            "aria-label": entryLabelled ? remoteLabel : remoteActionLabel
+          }, computerIcon, entryLabelled ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, entryLabelled ? updateSuffix : updateDot),
+          remoteActive && entryLabelled ? React.createElement("button", {
+            type: "button",
+            className: "dshRemoteExitLink",
+            disabled: busy,
+            onClick: () => void openLocalWorkspaces()
+          }, t("exitRemote")) : null
+        );
+      }, entry = renderEntry(labelled, { ref: attachEntry }), accountEntry = remoteActive ? renderEntry(props.wide, { inAccountRow: !0 }) : React.createElement(
         "div",
         { className: `dshRemoteAccountEntry${remoteActive ? " isActive" : ""}` },
         React.createElement("button", {
@@ -7674,7 +7756,10 @@ If a code was sent, recover the original submission without changing it.`,
         }, RemoteSessionHeaderAction)), ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
           name: "sidebar.footer.action",
           id: "ds-harness-remote-workspace",
-          order: -20,
+          // Shared footer ordering: integrations (chat import 20) and device
+          // entries (mobile 40) sort after this workspace entry, which stays the
+          // leftmost seat of the row.
+          order: 0,
           locale: localeNamespace,
           inject: () => ({
             control,

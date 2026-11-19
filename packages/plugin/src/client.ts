@@ -641,7 +641,10 @@ window.__ModuleLoader__.load({
       ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
         name: 'sidebar.footer.action',
         id: 'ds-harness-remote-workspace',
-        order: -20,
+        // Shared footer ordering: integrations (chat import 20) and device
+        // entries (mobile 40) sort after this workspace entry, which stays the
+        // leftmost seat of the row.
+        order: 0,
         locale: localeNamespace,
         inject: () => ({
           control,
