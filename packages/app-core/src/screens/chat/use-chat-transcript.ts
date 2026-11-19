@@ -3,12 +3,13 @@ import { isSubagentSession } from '../../lib/session-kind'
 import { hasVisibleMessageText } from '../../state/event-reducer'
 import type { ChatSection } from '../../state/message-helpers'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../../state/message-helpers'
+import { aggregateTurnUsageByTurn } from '../chat-process'
 import type { ChatItem, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import { useSessionUiArtifacts } from './use-session-ui-artifacts'
 
 export function useChatTranscript({ session, sessions, messages, hostId }: { session: RemoteSession | undefined; sessions: RemoteSession[]; messages: ChatItem[]; hostId: string | undefined }) {
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
-    item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued'
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && !item.usageOnly && item.sendState !== 'queued'
       && (
         hasVisibleMessageText(item.text)
         || hasVisibleMessageText(item.reasoning ?? '')
@@ -16,6 +17,7 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
         // Output-less failure turns keep an empty assistant row carrying only the
         // turnEnd reason — it must stay visible so the failure is explainable.
         || item.turnEnd !== undefined))), [messages, session?.backend])
+  const turnUsageByTurn = useMemo(() => aggregateTurnUsageByTurn(messages), [messages])
   // Feed the previous list back so untouched groups keep their identity; the
   // streaming delta then only rebuilds the group that actually changed.
   const previousSectionsRef = useRef<readonly ChatSection[]>([])
@@ -72,5 +74,5 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
     return { members, tasks } satisfies { members: TeamMemberSnapshot[]; tasks: TeamTaskSnapshot[] }
   }, [session?.projections?.values])
-  return { visibleMessages, visibleSections, uiBySection, visibleUiIds, queueItems, childSessions, teamState }
+  return { visibleMessages, visibleSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState }
 }

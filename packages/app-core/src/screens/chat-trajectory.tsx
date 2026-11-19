@@ -41,7 +41,8 @@ export function ChatTrajectory({ items, renderItem, renderImages, hasMore, loadi
   const [query, setQuery] = useState('')
   const rows = useMemo(() => {
     const search = query.trim().toLocaleLowerCase()
-    return items.filter(item => (filter === 'all' || category(item) === filter)
+    return items.filter(item => !(item.kind === 'message' && item.usageOnly === true)
+      && (filter === 'all' || category(item) === filter)
       && `${content(item)}\n${item.turn ?? ''}`.toLocaleLowerCase().includes(search))
   }, [items, filter, query])
   return <View style={[styles.root, { width: '100%', maxWidth: contentMaxWidth, alignSelf: 'center' }]}>

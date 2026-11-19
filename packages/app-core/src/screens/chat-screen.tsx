@@ -388,7 +388,7 @@ export function ChatScreen({
   const [newSessionPending, setNewSessionPending] = useState(false)
   const creatingSessionRef = useRef(false)
   const lastNewSessionTimeRef = useRef(0)
-  const { visibleMessages, visibleSections, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
+  const { visibleMessages, visibleSections, turnUsageByTurn, uiBySection, visibleUiIds, queueItems, childSessions, teamState } = useChatTranscript({ session, sessions, messages, hostId })
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
@@ -477,10 +477,20 @@ export function ChatScreen({
 
   // Artifact changes must invalidate FlatList cells even when their section is
   // reused (a later turn can patch a card owned by an earlier turn).
-  const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+  const renderChatItem = useCallback(({ item, index }: { item: ChatSection; index: number }) => item.kind === 'process'
+    ? <ChatProcessGroup
+        items={item.items}
+        artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS}
+        updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS}
+        availableUiIds={visibleUiIds}
+        busyAction={busy}
+        isTurnRunning={index === visibleSections.length - 1 && (session?.running === true || busy === 'stop-session')}
+        turnUsage={turnUsageByTurn.get(item.turn)}
+        onApproval={respondApproval}
+        onQuestion={respondQuestion}
+      />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
+  [busy, respondApproval, respondQuestion, session?.running, turnUsageByTurn, uiBySection, visibleSections.length, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can

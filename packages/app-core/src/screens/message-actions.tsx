@@ -7,6 +7,7 @@ import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import { useTheme } from '../ui/theme-context'
 import { formatTokens } from '../ui/quote-helpers'
+import { resolveUncachedInputTokens } from './chat-process'
 import {
   IconBranchOutline,
   IconCheckOutline,
@@ -47,13 +48,12 @@ export function TurnUsageModal({
   const u = item.usage
   if (!u) return null
 
-  const totalTokens = u.totalTokens ?? 0
-  const inputTokens = u.inputTokens ?? 0
+  const totalTokens = u.totalTokens
   const cacheReadTokens = u.cacheReadTokens ?? 0
   const cacheWriteTokens = u.cacheWriteTokens ?? 0
   const outputTokens = u.outputTokens ?? 0
   const reasoningTokens = u.reasoningTokens ?? 0
-  const uncachedInput = Math.max(0, inputTokens - cacheReadTokens)
+  const uncachedInput = resolveUncachedInputTokens(u)
   const sessionModels = useAppStore.getState().sessionModels
   const currentModelStr = sessionModels?.current
     ? `${sessionModels.current.provider ? `${sessionModels.current.provider}/` : ''}${sessionModels.current.model}`
@@ -81,9 +81,11 @@ export function TurnUsageModal({
               <IconDatabaseOutline size={15} color={colors.ink} />
               <Text style={[styles.usageTitleText, { color: colors.ink }]}>{strings.messageActions.turnUsageTitle ?? '本轮用量'}</Text>
             </View>
-            <Text style={[styles.usageTotalText, { color: colors.ink }]}>
-              {totalTokens.toLocaleString()} tok
-            </Text>
+            {totalTokens !== undefined && (
+              <Text style={[styles.usageTotalText, { color: colors.ink }]}>
+                {totalTokens.toLocaleString()} tok
+              </Text>
+            )}
           </View>
 
           {/* Divider */}
