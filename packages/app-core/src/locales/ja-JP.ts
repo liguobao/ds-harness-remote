@@ -638,6 +638,7 @@ const jaJP = {
     server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
   },
   settings: {
+    membership: { plan: "会員プラン", title: "会員ステータス", expiresAt: "有効期限", loading: "読み込み中…", none: "未加入", active: "有効", expired: "期限切れ", revoked: "取り消し済み" },
     identityHint: "項目をタップすると全文を表示してコピーできます。",
     copyIdentity: "コピー",
     identityCopyFailed: "コピーできませんでした。再試行してください。",
@@ -660,8 +661,6 @@ const jaJP = {
     language: "言語", languageSystem: "システム設定に従う", languageChinese: "简体中文", languageEnglish: "English", languageNote: "「システム設定に従う」を選ぶと、Android の言語設定に合わせて自動的に切り替わります。",
     compactHistorySaveFailed: "コンパクト会話設定を保存できませんでした",
     compactHistory: "会話履歴を簡略化", compactHistoryNote: "ツール履歴を短縮し、テキストとステータスを保持します。ホストのサポートが必要です。これを変更した後、会話を再開してください。",
-    typographyDensity: "レイアウト密度", typographyDensityNote: "行間、段落余白、メッセージの余白を調整します",
-    densityStandard: "標準", densityCompact: "コンパクト", typographyDensitySaveFailed: "レイアウト密度設定を保存できませんでした",
     chatAppearance: "チャットの書体と配色",
     chatAppearanceNote: "文字サイズ、行間、字間、アクセント色、吹き出しとコードスタイルを調整します",
     chatAppearanceReset: "リセット",
@@ -919,7 +918,7 @@ const jaJP = {
     hourUnit: '時間',
   },
   time: { unavailable: "更新時間が利用できません", lastSeenUnavailable: "アクティブ時間が利用できません", lastActive: (value: string) => `最終アクティブ: ${value}`, now: "たった今", justNow: "たった今更新", minutesAgo: (n: number) => `${n} 分前`, hoursAgo: (n: number) => `${n} 時間前`, updatedSuffix: "", locale: "ja-JP" },
-  transport: { auto: "自動（推奨）", autoDescription: "直接接続か TURN を選び、失敗時はサーバー経由。", turn: "TURN 中継", turnDescription: "直接接続せず、TURN 失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "直接接続・TURN を使わず、常にサーバー経由。" },
+  transport: { auto: "自動（推奨）", autoDescription: "LAN / P2P を優先し、順次フォールバック。", turn: "TURN 中継", turnDescription: "直接接続せず、TURN 失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "直接接続・TURN を使わず、常にサーバー経由。" },
   workspaces: {
     loadFailed: "ワークスペースを読み込めませんでした",
     offlineBody: "コンピューターに再接続して、ワークスペースと会話を表示します。",

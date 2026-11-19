@@ -9,17 +9,8 @@ import { useTheme } from '../ui/theme-context'
 
 type Rpc = (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>
 
-const MEMBERSHIP_ERROR_CODES = new Set(['WEB_ENTITLEMENT_REQUIRED', 'MEMBERSHIP_REQUIRED'])
 const FATAL_SAME_ORIGIN_HTTP_STATUSES = new Set([401, 502, 503, 504])
 export const DSH_WEB_GRANT_CLOCK_SKEW_MS = 60_000
-
-export function isDshWebMembershipError(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && typeof error.code === 'string'
-    && MEMBERSHIP_ERROR_CODES.has(error.code)
-}
 
 export function isDshWebGrantUsable(grant: DshWebGrant, now = Date.now()): boolean {
   return grant.expiresAt + DSH_WEB_GRANT_CLOCK_SKEW_MS > now
@@ -46,7 +37,6 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
   const { colors } = useTheme()
   const [grant, setGrant] = useState<DshWebGrant>()
   const [failed, setFailed] = useState(false)
-  const [membership, setMembership] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const pendingCloseRef = useRef<Promise<unknown> | undefined>(undefined)
 
@@ -54,7 +44,6 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
     const abort = new AbortController()
     let shouldClose = false
     setFailed(false)
-    setMembership(false)
     setGrant(undefined)
 
     const startOpen = () => {
@@ -74,10 +63,9 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
             setFailed(true)
           }
         },
-        error => {
+        () => {
           if (abort.signal.aborted) return
           shouldClose = false
-          setMembership(isDshWebMembershipError(error))
           setFailed(true)
         },
       )
@@ -114,7 +102,6 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
 
   const retry = () => {
     setFailed(false)
-    setMembership(false)
     setGrant(undefined)
     setAttempt(current => current + 1)
   }
@@ -131,10 +118,8 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
       <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>
         <TopBar title={title} onBack={onClose} />
         {failed ? <ErrorBanner
-          message={membership
-            ? (chinese ? '此功能需要有效会员。' : 'An active membership is required.')
-            : (chinese ? '无法打开 DSH Web，请重试。' : 'Could not open DSH Web. Please try again.')}
-          onRetry={membership ? undefined : retry}
+          message={chinese ? '无法打开 DSH Web，请重试。' : 'Could not open DSH Web. Please try again.'}
+          onRetry={retry}
         />
           : !source || !grant ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
             : <WebView

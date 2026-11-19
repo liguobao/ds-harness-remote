@@ -272,7 +272,7 @@ export function TopBar({
   )
 }
 
-export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop, filled = false }: {
+export function IconButton({ label, icon: Icon, onPress, disabled = false, tint, fill, dense = false, hitSlop, filled = false, large = false }: {
   label: string
   icon: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
   onPress: () => void
@@ -288,6 +288,8 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
   fill?: string
   /** Tighter 40dp box for rows with several trailing actions; hitSlop keeps a 48dp target. */
   dense?: boolean
+  /** Larger 56dp controls for touch-first toolbars. */
+  large?: boolean
   /** Optional larger touch expansion for controls placed at screen edges. */
   hitSlop?: number
   /** Solid DeepSeek-blue disc for the screen's primary action (e.g. create). */
@@ -307,12 +309,13 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
         styles.iconButton,
         dense && styles.iconButtonDense,
         inChip && styles.iconButtonInChip,
+        large && styles.iconButtonLarge,
         filled && styles.iconButtonFilled,
         pressed && (filled ? styles.iconButtonFilledPressed : styles.iconButtonPressed),
         disabled && styles.disabled,
       ]}
     >
-      <Icon size={dense || inChip ? 20 : 21} color={filled ? colors.white : tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={filled ? 2.2 : 1.9} />
+      <Icon size={large ? 25 : dense || inChip ? 20 : 21} color={filled ? colors.white : tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={filled ? 2.2 : 1.9} />
     </Pressable>
   )
 }
@@ -647,6 +650,7 @@ function createStyles(colors: ThemeColors) {
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconButtonDense: { width: 40, height: 40 },
     iconButtonInChip: { width: 40, height: 40 },
+    iconButtonLarge: { width: 56, height: 56 },
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
     iconButtonFilled: { backgroundColor: colors.primary },
     iconButtonFilledPressed: { backgroundColor: colors.primaryPressed },

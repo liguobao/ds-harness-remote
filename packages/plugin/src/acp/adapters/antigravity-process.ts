@@ -1,7 +1,8 @@
 import { readAgyModels, cachedAgyModels, agySelectionArgs, type AgyCatalog, type AgySelection } from './antigravity/models.js'
 import { prepareAgyImageDirectory, stageAgyImages, agyImagePrompt } from './antigravity/image-store.js'
 import { parseAcpImage } from '../image-content.js'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnCommand } from '../windows-spawn.js'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import type { SafeLogger } from '../../logging.js'
@@ -65,6 +66,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   private ready = false
   private closed = false
   private startPromise?: Promise<void>
+  private stopPending?: Promise<void>
   private activeConversationId?: string
   private readonly skipPermissions: boolean
   private readonly sessionWorker: boolean
@@ -89,7 +91,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string = 'agy',
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args, cwd) => spawn(bin, args, {
+    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args, cwd) => spawnCommand(bin, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -129,6 +131,22 @@ export class AntigravityAcpClient implements CursorAcpLike {
       ...(conversationId === undefined ? {} : { conversationId }),
     })
     worker.onInbound(frame => { for (const handler of this.inboundHandlers) handler(frame) })
+    worker.onUnavailable(code => {
+      for (const [sid, entry] of this.sessions) {
+        if (entry === worker) this.sessions.delete(sid)
+      }
+      const currentSpare = this.spare
+      if (currentSpare !== undefined) {
+        void currentSpare.then(sp => {
+          if (sp === worker && this.spare === currentSpare) this.spare = undefined
+        }).catch(() => undefined)
+      }
+      this.logger?.warn('Antigravity session worker unavailable', {
+        conversationId: worker.activeConversationId,
+        code,
+      })
+      void worker.close().catch(() => undefined)
+    })
     return worker.start().then(async () => {
       if (this.closed) {
         await worker.close()
@@ -231,8 +249,10 @@ export class AntigravityAcpClient implements CursorAcpLike {
         this.sessions.set(p.sessionId, replacement)
         this.selections.set(p.sessionId, chosen.selection)
         replacement.selections.set(p.sessionId, chosen.selection)
+        if (p.sessionId === this.activeConversationId) this.initialConversationClaimed = true
         if (current && current !== this) await current.close()
         else if (current === this) {
+          this.initialConversationClaimed = true
           this.watcher?.stop()
           this.watcher = undefined
           const child = this.process
@@ -318,14 +338,18 @@ export class AntigravityAcpClient implements CursorAcpLike {
     this.ready = false
     this.stdoutBuffer = Buffer.alloc(0)
 
-    if (child !== undefined && child.exitCode === null && !child.killed) {
+    if (child !== undefined && child.exitCode === null && child.signalCode === null && !child.killed) {
       child.stdout.removeAllListeners('data')
       child.stderr.removeAllListeners('data')
-      child.kill('SIGINT')
-      const timer = setTimeout(() => {
-        if (child.exitCode === null && !child.killed) child.kill('SIGKILL')
-      }, 1_000)
-      timer.unref?.()
+      const stopping = this.stopChildProcess(child)
+      this.stopPending = stopping
+      try {
+        await stopping
+      } finally {
+        if (this.stopPending === stopping) this.stopPending = undefined
+      }
+    } else if (this.stopPending) {
+      await this.stopPending
     }
 
     if (this.activeConversationId && !this.closed) {
@@ -333,6 +357,30 @@ export class AntigravityAcpClient implements CursorAcpLike {
         this.logger?.warn('Failed to restart Antigravity process after cancellation', { error: String(err) })
       })
     }
+  }
+
+  private async stopChildProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null || child.killed) return
+    await new Promise<void>(resolve => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(sigkillTimer)
+        clearTimeout(fallbackTimer)
+        child.removeListener('exit', onExit)
+        resolve()
+      }
+      const onExit = () => finish()
+      const sigkillTimer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      }, 1_000)
+      sigkillTimer.unref?.()
+      const fallbackTimer = setTimeout(finish, 2_000)
+      fallbackTimer.unref?.()
+      child.once('exit', onExit)
+      child.kill('SIGINT')
+    })
   }
 
   async close(): Promise<void> {
@@ -355,8 +403,11 @@ export class AntigravityAcpClient implements CursorAcpLike {
     }
     const child = this.process
     this.process = undefined
-    if (child === undefined || child.exitCode !== null || child.killed) return
-    await new Promise<void>(resolve => {
+    if (child === undefined || child.exitCode !== null || child.killed) {
+      await this.stopPending
+      return
+    }
+    await Promise.all([this.stopPending, new Promise<void>(resolve => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
         resolve()
@@ -367,10 +418,12 @@ export class AntigravityAcpClient implements CursorAcpLike {
         resolve()
       })
       child.kill('SIGTERM')
-    })
+    })])
   }
 
   private async startOnce(): Promise<void> {
+    if (this.stopPending) await this.stopPending
+    if (this.closed) throw new AntigravityAcpError('ANTIGRAVITY_CLOSED', 'The Antigravity domain is closed.')
     if (this.process !== undefined) {
       throw new AntigravityAcpError('ANTIGRAVITY_STARTING', 'Antigravity ACP is already starting.')
     }
@@ -384,7 +437,20 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.skipPermissions) {
       args.push('--dangerously-skip-permissions')
     }
-    const child = this.spawnAcp(bin, args, this.cwd)
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = this.spawnAcp(bin, args, this.cwd)
+    } catch (error) {
+      this.ready = false
+      const cause = error instanceof Error ? error : new Error(String(error))
+      if (!this.closed) {
+        this.logger?.warn('Antigravity binary error', {
+          code: (cause as NodeJS.ErrnoException).code ?? 'ANTIGRAVITY_BINARY_UNAVAILABLE',
+        })
+        this.notifyUnavailable('ANTIGRAVITY_BINARY_UNAVAILABLE')
+      }
+      throw new AntigravityAcpError('ANTIGRAVITY_BINARY_UNAVAILABLE', 'Failed to start the Antigravity CLI.', { cause })
+    }
     this.process = child
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0

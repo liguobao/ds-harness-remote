@@ -638,6 +638,7 @@ const enUS = {
     server: 'Server address', serverHint: 'Use an HTTPS address.', trustTitle: 'Protect your devices and conversations', trustBody: 'Conversation data is encrypted in transit. Only trusted devices signed in to the same account can access it.',
   },
   settings: {
+    membership: { plan: "Membership plan", title: "Membership", expiresAt: "Expiration date", loading: "Loading…", none: "Not enrolled", active: "Active", expired: "Expired", revoked: "Revoked" },
     identityHint: "Tap a field to view and copy its full value.",
     copyIdentity: "Copy",
     identityCopyFailed: "Could not copy. Try again.",
@@ -660,8 +661,6 @@ const enUS = {
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
     compactHistorySaveFailed: 'Could not save compact conversation setting',
     compactHistory: 'Compact conversations', compactHistoryNote: 'Shortens tool history, keeping text and status. Requires Host support. Reopen the conversation after changing this.',
-    typographyDensity: 'Reading density', typographyDensityNote: 'Adjust text line height, paragraph spacing, and bubble padding',
-    densityStandard: 'Standard', densityCompact: 'Compact', typographyDensitySaveFailed: 'Could not save reading density setting',
     chatAppearance: 'Chat appearance',
     chatAppearanceNote: 'Customize font size, spacing, accent color, bubble and code block styles',
     chatAppearanceReset: 'Reset',
@@ -919,7 +918,7 @@ const enUS = {
     hourUnit: 'hours',
   },
   time: { unavailable: 'Update time unavailable', lastSeenUnavailable: 'Active time unavailable', lastActive: (value: string) => `Active ${value}`, now: 'just now', justNow: 'Updated just now', minutesAgo: (n: number) => `${n} min ago`, hoursAgo: (n: number) => `${n} hr ago`, updatedSuffix: '', locale: 'en-US' },
-  transport: { auto: "Automatic (recommended)", autoDescription: "Direct or TURN; server relay on failure.", turn: "TURN relay", turnDescription: "TURN only; server relay on failure.", relay: "Server relay", relayDescription: "No direct or TURN; all data via server." },
+  transport: { auto: "Automatic (recommended)", autoDescription: "LAN / P2P first, with fallback in order.", turn: "TURN relay", turnDescription: "TURN only; server relay on failure.", relay: "Server relay", relayDescription: "No direct or TURN; all data via server." },
   workspaces: {
     loadFailed: 'Could not load workspaces',
     offlineBody: 'Reconnect to your computer to view workspaces and conversations.',

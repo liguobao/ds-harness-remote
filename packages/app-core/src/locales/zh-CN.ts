@@ -636,6 +636,7 @@ const zhCN = {
     server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: 'P2P网络优先，TURN 转发候选，对话内容全程端到端加密。',
   },
   settings: {
+    membership: { plan: "会员方案", title: "会员状态", expiresAt: "到期日期", loading: "查询中…", none: "未开通", active: "有效", expired: "已过期", revoked: "已撤销" },
     identityHint: "点击字段查看完整内容并复制。",
     copyIdentity: "复制",
     identityCopyFailed: "复制失败，请重试。",
@@ -658,8 +659,6 @@ const zhCN = {
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     compactHistorySaveFailed: '无法保存会话精简设置',
     compactHistory: '会话精简模式', compactHistoryNote: '缩减历史工具详情，保留正文和状态。需 Host 支持；切换后重新打开会话生效。',
-    typographyDensity: '排版密度', typographyDensityNote: '调整正文行距、段间距与气泡紧凑度',
-    densityStandard: '标准', densityCompact: '紧凑', typographyDensitySaveFailed: '无法保存排版密度设置',
     chatAppearance: '会话排版与配色',
     chatAppearanceNote: '自定义字体大小、字距、行距、主题色、气泡与代码块样式',
     chatAppearanceReset: '恢复默认',
@@ -917,7 +916,7 @@ const zhCN = {
     hourUnit: '小时',
   },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
-  transport: { auto: "自动（推荐）", autoDescription: "LAN / P2P 优先，TURN → Relay 逐级回退。", turn: "TURN 中转", turnDescription: "跳过直连，TURN 优先，Relay 回退。", relay: "服务器转发", relayDescription: "仅通过服务器 Relay 连接。" },
+  transport: { auto: "自动（推荐）", autoDescription: "LAN / P2P 优先，逐级回退。", turn: "TURN 中转", turnDescription: "跳过直连，TURN 优先，Relay 回退。", relay: "服务器转发", relayDescription: "仅通过服务器 Relay 连接。" },
   workspaces: {
     loadFailed: '工作区加载失败',
     offlineBody: '重新连接电脑后，即可查看工作区和对话。',

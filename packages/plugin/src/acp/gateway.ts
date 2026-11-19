@@ -1,4 +1,4 @@
-import type { AcpAuthDiagnostic } from '@dsh-remote/protocol'
+import { createEvent, encodeMessage, MAX_SECURE_MESSAGE_BYTES, type AcpAuthDiagnostic } from '@dsh-remote/protocol'
 import { IsolatedAcpClient } from './adapters/isolated-process.js'
 import { WorkspaceBridge, WorkspaceBridgeState, type RemoteTerminalSpawner } from '../workspace-bridge.js'
 import { TerminalPolicy } from '../terminal-policy.js'
@@ -122,7 +122,7 @@ export class AcpRemoteGateway {
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private readonly restartAttempts = new Map<string, number>()
   private readonly restartTimers = new Map<string, NodeJS.Timeout>()
-  private readonly launching = new Map<string, Promise<void>>()
+  private readonly launching = new Map<string, { configKey: string; promise: Promise<void> }>()
   private available = false
   private closed = false
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
@@ -311,7 +311,11 @@ export class AcpRemoteGateway {
     const envelope = parseCallEnvelope(input)
     const call = parseAcpCall(envelope.method, envelope.params)
     const sessionId = sessionIdFromParams(call.method, call.params)
-    const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
+    const backend = typeof call.params.backend === 'string'
+      ? call.params.backend
+      : call.method === 'dsh/sessionHistory'
+        ? this.resolveHistoryTarget(call.params).backend
+        : (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
     const assertCurrent = this.captureCallScope(connectionId, typeof backend === 'string' ? backend : this.defaultBackend())
     const reserve = backend === 'opencode' && sessionId !== undefined && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)
     if (reserve) {
@@ -330,6 +334,23 @@ export class AcpRemoteGateway {
         else this.opencodeOperations.delete(sessionId!)
       }
     }
+  }
+
+  private resolveHistoryTarget(params: Record<string, unknown>): {
+    rawSessionId: string
+    parsedPrefix: ReturnType<typeof parsePublicSessionId>
+    conversationId: string
+    boundBackend: string | undefined
+    backend: string
+  } {
+    const rawSessionId = String(params.sessionId)
+    const parsedPrefix = parsePublicSessionId(rawSessionId)
+    const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId
+    const boundBackend = this.sessionBackends.get(conversationId)
+    const backend = typeof params.backend === 'string'
+      ? params.backend
+      : parsedPrefix?.backend ?? boundBackend ?? this.defaultBackend()
+    return { rawSessionId, parsedPrefix, conversationId, boundBackend, backend }
   }
 
   private captureCallScope(connectionId: string, backend: string): () => void {
@@ -600,11 +621,7 @@ export class AcpRemoteGateway {
     }
 
     if (call.method === 'dsh/sessionHistory') {
-      const rawSessionId = String(call.params.sessionId)
-      const parsedPrefix = parsePublicSessionId(rawSessionId)
-      const conversationId = parsedPrefix ? parsedPrefix.nativeId : rawSessionId
-      const boundBackend = this.sessionBackends.get(conversationId)
-      const backend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend ?? this.defaultBackend()
+      const { rawSessionId, parsedPrefix, conversationId, boundBackend, backend } = this.resolveHistoryTarget(call.params)
       if ((boundBackend !== undefined && boundBackend !== backend)
         || (parsedPrefix && parsedPrefix.backend !== backend)) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
@@ -702,25 +719,39 @@ export class AcpRemoteGateway {
         await this.listCatalogSessions(targetBackend).catch(() => undefined)
       }
       assertCurrent()
-      this.requireSessionOwner(connectionId, sessionId!)
+      const existingOwner = this.sessionOwners.get(sessionId!)
+      if (existingOwner !== undefined && existingOwner !== connectionId) {
+        throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this session.')
+      }
       const acp = this.requireAcp(targetBackend)
-      // Track pending loads too, so reconfiguration revokes their ownership
-      // before an upstream result can arrive.
-      this.sessionBackends.set(sessionId!, targetBackend)
       const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd, mcpServers: [] } : {}) })
       assertCurrent()
       const loadedId = readSessionId(result) ?? sessionId
       if (loadedId !== undefined) {
-        if (loadedId !== sessionId || (this.sessionBackends.has(loadedId) && targetBackend !== undefined && this.sessionBackends.get(loadedId) !== targetBackend)) {
+        const currentOwner = this.sessionOwners.get(loadedId)
+        if (currentOwner !== undefined && currentOwner !== connectionId) {
+          throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this session.')
+        }
+        const currentBackend = this.sessionBackends.get(loadedId)
+        if (loadedId !== sessionId || (currentBackend !== undefined && currentBackend !== targetBackend)) {
           throw new RpcError('ACP_SESSION_COLLISION', 'The ACP backend returned a different session identifier.')
         }
-        this.sessionOwners.set(loadedId, connectionId)
-        if (targetBackend) this.sessionBackends.set(loadedId, targetBackend)
+        let persistedPreset: string | undefined
         if (!this.sessionPermissions.has(loadedId)) {
-          const persistedPreset = await this.workspaceStore.getSessionPermission(loadedId)
+          persistedPreset = await this.workspaceStore.getSessionPermission(loadedId)
           assertCurrent()
-          if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset)
+          const postOwner = this.sessionOwners.get(loadedId)
+          if (postOwner !== undefined && postOwner !== connectionId) {
+            throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this session.')
+          }
+          const postBackend = this.sessionBackends.get(loadedId)
+          if (postBackend !== undefined && postBackend !== targetBackend) {
+            throw new RpcError('ACP_SESSION_COLLISION', 'The ACP backend returned a different session identifier.')
+          }
         }
+        this.sessionOwners.set(loadedId, connectionId)
+        this.sessionBackends.set(loadedId, targetBackend)
+        if (persistedPreset) this.sessionPermissions.set(loadedId, persistedPreset)
       }
       return sanitizeSessionResult(result)
     }
@@ -921,35 +952,21 @@ export class AcpRemoteGateway {
         stopReason,
         catchUp: catchUp.length,
       })
-      await this.publishToSession(sessionId, {
-        method: 'session/update',
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: 'prompt_completed',
-            stopReason,
-            ...(usage ? { usage } : {}),
-            ...(catchUp.length > 0 ? { catchUp } : {}),
-          },
-        },
-      })
+      await this.publishToSession(sessionId, this.buildTerminalPromptFrame(sessionId, {
+        sessionUpdate: 'prompt_completed',
+        stopReason,
+        ...(usage ? { usage } : {}),
+      }, catchUp))
     } catch (error) {
       if (!accepted()) return
       this.logger?.warn('ACP session/prompt failed', { code: errorCode(error) })
       await this.inboundChain.catch(() => undefined)
       if (!accepted()) return
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
-      await this.publishToSession(sessionId, {
-        method: 'session/update',
-        params: {
-          sessionId,
-          update: {
-            sessionUpdate: 'prompt_failed',
-            code: errorCode(error),
-            ...(catchUp.length > 0 ? { catchUp } : {}),
-          },
-        },
-      }).catch(() => undefined)
+      await this.publishToSession(sessionId, this.buildTerminalPromptFrame(sessionId, {
+        sessionUpdate: 'prompt_failed',
+        code: errorCode(error),
+      }, catchUp)).catch(() => undefined)
     } finally {
       if (this.promptsInProgress.get(sessionId) === task) {
         this.promptsInProgress.delete(sessionId)
@@ -1154,7 +1171,18 @@ export class AcpRemoteGateway {
       count: buffered.length,
     })
     for (const frame of buffered) {
-      await peer.publishInbound(sessionId, { method: frame.method, params: frame.params })
+      try {
+        await peer.publishInbound(sessionId, { method: frame.method, params: frame.params })
+      } catch (error) {
+        if (isResponseTooLarge(error)) {
+          this.logger.warn('Skipped oversized buffered ACP frame during replay', {
+            sessionId: shortSessionId(sessionId),
+            method: frame.method,
+          })
+          continue
+        }
+        throw error
+      }
     }
   }
 
@@ -1183,6 +1211,10 @@ export class AcpRemoteGateway {
     }
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
     await this.startPromise?.catch(() => undefined)
+    const inFlightLaunching = [...changed]
+      .map(id => this.launching.get(id)?.promise)
+      .filter((task): task is Promise<void> => task !== undefined)
+    if (inFlightLaunching.length > 0) await Promise.allSettled(inFlightLaunching)
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
@@ -1277,14 +1309,19 @@ export class AcpRemoteGateway {
     const candidate = this.config.backends.find(item => item.id === id)
     if (candidate === undefined || !this.enabledBackends().includes(id) || this.pendingReconfiguration.has(id)) return Promise.resolve()
     if (this.backendInstances.get(id)?.client.isReady()) return Promise.resolve()
+    const configKey = JSON.stringify(candidate)
     const inFlight = this.launching.get(id)
-    if (inFlight !== undefined) return inFlight
-    let task: Promise<void>
-    task = this.launchCandidateBinaries(candidate).finally(() => {
-      if (this.launching.get(id) === task) this.launching.delete(id)
+    if (inFlight !== undefined) {
+      if (inFlight.configKey === configKey) return inFlight.promise
+      return inFlight.promise.catch(() => undefined).then(() => this.launchSerialized(id))
+    }
+    let entry!: { configKey: string; promise: Promise<void> }
+    const promise = this.launchCandidateBinaries(candidate).finally(() => {
+      if (this.launching.get(id) === entry) this.launching.delete(id)
     })
-    this.launching.set(id, task)
-    return task
+    entry = { configKey, promise }
+    this.launching.set(id, entry)
+    return promise
   }
 
   private async launchCandidateBinaries(candidate: ResolvedAcpBackendConfig): Promise<void> {
@@ -1336,9 +1373,11 @@ export class AcpRemoteGateway {
       else this.backendDiagnostics.delete(id)
       this.backendErrors.delete(id)
     } catch (error) {
-      const diag = (error instanceof CursorAcpError ? error.authDiagnostic : undefined) ?? acp.diagnostics?.()
-      if (diag) this.backendDiagnostics.set(id, diag)
-      this.backendErrors.set(id, errorCode(error))
+      if (this.backendCurrent(backend)) {
+        const diag = (error instanceof CursorAcpError ? error.authDiagnostic : undefined) ?? acp.diagnostics?.()
+        if (diag) this.backendDiagnostics.set(id, diag)
+        this.backendErrors.set(id, errorCode(error))
+      }
       await acp.close()
       throw error
     } finally {
@@ -1436,21 +1475,76 @@ export class AcpRemoteGateway {
   }
 
   private async publishToSession(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
-    this.recordTurnCatchUp(sessionId, frame)
+    const oversized = isOversizedAcpFrame(sessionId, frame)
+    if (!oversized) this.recordTurnCatchUp(sessionId, frame)
     const ownerId = this.sessionOwners.get(sessionId)
     const owner = ownerId === undefined ? undefined : this.peers.get(ownerId)
     // A session belongs to exactly one connection (claimSession rejects a second
     // owner), so its live output must never reach another device. Unclaimed or
     // departed owners buffer for the next claimer instead of broadcasting.
     if (owner === undefined) {
+      if (oversized) {
+        this.logger.warn('Dropped oversized ACP frame without buffering', {
+          sessionId: shortSessionId(sessionId),
+          method: frame.method,
+        })
+        return
+      }
       this.bufferFrame(sessionId, frame)
       return
     }
     try {
       await owner.publishInbound(sessionId, frame)
-    } catch {
+    } catch (error) {
+      if (oversized || isResponseTooLarge(error)) {
+        const list = this.turnCatchUp.get(sessionId)
+        if (list !== undefined && list.at(-1)?.params === frame.params) list.pop()
+        this.logger.warn('Dropped oversized ACP frame without buffering', {
+          sessionId: shortSessionId(sessionId),
+          method: frame.method,
+        })
+        return
+      }
       this.bufferFrame(sessionId, frame)
     }
+  }
+
+  private buildTerminalPromptFrame(
+    sessionId: string,
+    baseUpdate: Record<string, unknown>,
+    catchUp: Array<{ method: string; params: unknown }>,
+  ): { method: string; params: unknown } {
+    const build = (items: Array<{ method: string; params: unknown }>) => ({
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: {
+          ...baseUpdate,
+          ...(items.length > 0 ? { catchUp: items } : {}),
+        },
+      },
+    })
+    if (catchUp.length === 0) return build([])
+    const full = build(catchUp)
+    if (!isOversizedAcpFrame(sessionId, full)) return full
+    let low = 1
+    let high = catchUp.length - 1
+    let best: { method: string; params: unknown } = build([])
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2)
+      const candidate = build(catchUp.slice(catchUp.length - mid))
+      if (!isOversizedAcpFrame(sessionId, candidate)) {
+        best = candidate
+        low = mid + 1
+      } else {
+        high = mid - 1
+      }
+    }
+    this.logger.warn('Trimmed ACP turn catchUp to fit secure channel limit', {
+      sessionId: shortSessionId(sessionId),
+      originalCount: catchUp.length,
+    })
+    return best
   }
 
 
@@ -1468,6 +1562,13 @@ export class AcpRemoteGateway {
   }
 
   private bufferFrame(sessionId: string, frame: { method: string; params: unknown }): void {
+    if (isOversizedAcpFrame(sessionId, frame)) {
+      this.logger.warn('Dropped oversized ACP frame without buffering', {
+        sessionId: shortSessionId(sessionId),
+        method: frame.method,
+      })
+      return
+    }
     this.pruneFrameBuffer(sessionId)
     const list = this.recentFrames.get(sessionId) ?? []
     list.push({ method: frame.method, params: frame.params, at: Date.now() })
@@ -1531,11 +1632,17 @@ export class AcpRemoteGateway {
   // Retries are tracked per backend so one failing adapter cannot consume, or be
   // reset by, another adapter's attempts.
   private scheduleBackendRestart(backend: string): void {
-    if (this.closed || !this.config.enabled) return
+    if (this.closed) return
+    if (!this.config.enabled || !this.enabledBackends().includes(backend)) {
+      this.syncIdleUnavailableState()
+      return
+    }
+    if (this.pendingReconfiguration.has(backend)) return
     if (this.restartTimers.has(backend)) return
     const attempt = this.restartAttempts.get(backend) ?? 0
     if (attempt >= this.restartDelaysMs.length) {
       this.logger.warn('ACP backend restart attempts exhausted', { id: backend })
+      this.syncIdleUnavailableState()
       return
     }
     this.restartAttempts.set(backend, attempt + 1)
@@ -1547,6 +1654,12 @@ export class AcpRemoteGateway {
     this.restartTimers.set(backend, timer)
   }
 
+  private syncIdleUnavailableState(): void {
+    if (this.closed || this.pendingReconfiguration.size > 0 || this.isAvailable()) return
+    if (this.restartTimers.size > 0 || this.launching.size > 0) return
+    this.state = this.config.enabled && this.enabledBackends().length > 0 ? 'unavailable' : 'disabled'
+  }
+
   private async restartBackend(backend: string): Promise<void> {
     if (this.closed) return
     try {
@@ -1554,6 +1667,7 @@ export class AcpRemoteGateway {
       if (!this.closed && this.pendingReconfiguration.size === 0 && this.isAvailable()) this.state = 'ready'
     } catch (error) {
       this.logger.warn('ACP backend restart failed', { id: backend, code: errorCode(error) })
+      if (!this.isAvailable()) this.unavailableCode ??= errorCode(error)
     }
     if (this.closed) return
     if (this.availableBackends().includes(backend)) return
@@ -2022,6 +2136,40 @@ export function cursorBinaryCandidates(configured: string): string[] {
 function errorCode(error: unknown): string {
   if (error instanceof CursorAcpError || error instanceof OpencodeAcpError || error instanceof RpcError) return error.code
   return 'CURSOR_UNAVAILABLE'
+}
+
+const OVERSIZED_FRAME_ERROR_CODES = new Set(['RESPONSE_TOO_LARGE', 'FRAME_TOO_LARGE', 'PAYLOAD_TOO_LARGE'])
+
+function isOversizedAcpFrame(sessionId: string, frame: { method: string; params: unknown }): boolean {
+  return encodeMessage(createEvent('agent.acp.frame', {
+    streamId: `session:${sessionId}`,
+    frame,
+  })).byteLength > MAX_SECURE_MESSAGE_BYTES
+}
+
+function isResponseTooLarge(error: unknown): boolean {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current !== undefined && current !== null && !seen.has(current) && seen.size < 8) {
+    seen.add(current)
+    if (isRecord(current) && typeof current.code === 'string' && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
+      return true
+    }
+    const message = current instanceof Error
+      ? current.message
+      : isRecord(current) && typeof current.message === 'string'
+        ? current.message
+        : undefined
+    if (message !== undefined && /secure message exceeds the reassembly limit|exceeds the secure channel limit/i.test(message)) {
+      return true
+    }
+    current = current instanceof Error
+      ? current.cause
+      : isRecord(current)
+        ? current.cause
+        : undefined
+  }
+  return false
 }
 
 function shortSessionId(sessionId: string): string {

@@ -10,7 +10,7 @@ import {
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { applyCursorFrame, cursorNativeId, normalizeAcpTodos } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
-import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
+import { applyMuxFrameToMessages, sessionRunningForMuxFrame, settleOrphanedQueuedItems } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
@@ -148,25 +148,31 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ...(key === 'title' && typeof value === 'string' && value !== '' ? { title: value } : {}),
             projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
           }
-          const currentSession = state.sessions.find(item => item.sessionId === sessionId) ?? state.selectedSession
+          const currentSession = state.sessions.find(item => item.sessionId === sessionId)
+            ?? (state.selectedSession?.sessionId === sessionId ? state.selectedSession : undefined)
           const nextValues = {
             ...currentSession?.projections?.values,
             [key]: value,
           }
           // Only local pending rows follow the inbox. A durable user/message
           // echo is stronger evidence than a delayed control-stream projection.
-          // Leaving the inbox may mean execution, steering, or removal; keep the
-          // row visible as unconfirmed until an echo/history or explicit action
-          // settles it. No second projection or timer is needed for visibility.
+          // Leaving the inbox is the normal claim/execution handoff (idle send,
+          // next-turn claim, or steer): return the row to the timeline without
+          // flagging a delivery error while awaiting its durable echo. Unadopted
+          // idle rows and stop/failure/reload paths still settle lost prompts.
           const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
             const queued = inboxRpcIds(value)
+            const isIdle = currentSession?.running === false
             const next = items.map(item => {
               if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
                 || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
               if (queued.has(item.requestRpcId)) {
                 return { ...item, sendState: 'queued' as const, queuedAdopted: true, sendError: undefined }
               }
-              if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
+              if (item.queuedAdopted === true && item.sendState === 'queued') {
+                return { ...item, sendState: undefined, sendError: undefined }
+              }
+              if (isIdle && item.sendState === 'queued') {
                 return { ...item, sendState: 'unconfirmed' as const, sendError: undefined }
               }
               return item
@@ -205,9 +211,11 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         // Row status marks mirror the official session dots: a finished turn
         // leaves a "done" reminder (green) until the session is opened; a failed
         // turn leaves the red mark instead.
-        const turnReason = running === false && frame.payload.event?.type === 'turn/end'
-          ? frame.payload.event.data.reason
-          : undefined
+        const isTurnEnd = running === false && frame.payload.event?.type === 'turn/end'
+        const turnReason = isTurnEnd ? frame.payload.event?.data.reason : undefined
+        const isStoppedTurn = isTurnEnd && (isRecord(turnReason)
+          ? turnReason.kind === 'aborted' || turnReason.kind === 'interrupted'
+          : turnReason === 'aborted' || turnReason === 'interrupted')
         const finishedMark = running === undefined ? undefined
           : running ? undefined
             : isRecord(turnReason) && (turnReason.kind === 'failed' || turnReason.kind === 'error') ? 'failed' as const
@@ -217,8 +225,24 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ? { ...session, running }
             : session
         )
+        let nextMessages = applyMuxFrameToMessages(state.messages, frame)
+        if (isTurnEnd && sessionId !== undefined) {
+          const currentSession = state.sessions.find(item => item.sessionId === sessionId)
+            ?? (state.selectedSession?.sessionId === sessionId ? state.selectedSession : undefined)
+          const inboxSnapshot = currentSession?.projections?.values?.inbox
+          if (isStoppedTurn || finishedMark === 'failed') {
+            const sessionItems = nextMessages[sessionId] ?? []
+            const settled = settleOrphanedQueuedItems(
+              sessionItems,
+              inboxSnapshot === undefined ? undefined : inboxRpcIds(inboxSnapshot),
+            )
+            if (settled !== sessionItems) {
+              nextMessages = { ...nextMessages, [sessionId]: settled }
+            }
+          }
+        }
         return {
-          messages: applyMuxFrameToMessages(state.messages, frame),
+          messages: nextMessages,
           ...(sessionId === undefined || running === undefined ? {} : {
             sessions: state.sessions.map(updateRunning),
             selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
@@ -314,24 +338,38 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         && typeof update.used === 'number' && typeof update.size === 'number'
         ? { used: update.used, size: update.size, ratio: update.size > 0 ? Math.min(1, Math.max(0, update.used / update.size)) : 0 }
         : undefined
+      const isTurnTerminalFrame = kind === 'prompt_completed' || kind === 'prompt_failed'
+      const isTurnActiveFrame = !isTurnTerminalFrame && (
+        kind === 'agent_message_chunk'
+        || kind === 'agent_message'
+        || kind === 'agent_thought_chunk'
+        || kind === 'agent_thought'
+        || kind === 'tool_call'
+        || kind === 'tool_call_update'
+        || kind === 'user_message_chunk'
+      )
+      const markOpencodePending = session.backend === 'opencode' && kind === 'prompt_completed'
       const applySessionMetadata = (item: RemoteSession): RemoteSession => {
         if (item.sessionId !== session.sessionId) return item
         const nextValues = {
           ...item.projections?.values,
           ...(nextTodos !== undefined ? { todos: nextTodos } : {}),
           ...(nextContextPressure !== undefined ? { contextPressure: nextContextPressure } : {}),
+          ...(markOpencodePending ? { pendingCatalog: true } : {}),
         }
         return {
           ...item,
-          ...(kind === 'prompt_completed' || kind === 'prompt_failed' ? { running: false } : {}),
+          ...(isTurnTerminalFrame ? { running: false } : isTurnActiveFrame ? { running: true } : {}),
           ...(nextMode !== undefined ? { agentPreset: nextMode } : {}),
           ...(nextCommands !== undefined ? { availableCommands: nextCommands } : {}),
-          ...((nextTodos !== undefined || nextContextPressure !== undefined)
+          ...((nextTodos !== undefined || nextContextPressure !== undefined || markOpencodePending)
             ? { projections: { ...item.projections, values: nextValues } }
             : {}),
         }
       }
-      const sessionMetaChanged = kind === 'prompt_completed' || kind === 'prompt_failed'
+      const needsRunningRestore = isTurnActiveFrame
+        && (!session.running || get().sessions.some(item => item.sessionId === session.sessionId && !item.running))
+      const sessionMetaChanged = isTurnTerminalFrame || needsRunningRestore || markOpencodePending
         || nextTodos !== undefined || nextMode !== undefined || nextCommands !== undefined || nextContextPressure !== undefined
       set(state => ({
         messages: {

@@ -40,7 +40,7 @@ export type RemoteCompactionRunner = (sessionId: string, signal: AbortSignal) =>
 /** Outcome of inspecting the Session log for the compaction lifecycle. */
 export type RemoteCompactionConfirmation =
   | { kind: 'finished'; error?: string }
-  | { kind: 'not-yet' }
+  | { kind: 'not-yet'; started?: boolean; commandRecorded?: boolean }
   | { kind: 'unknown' }
 
 /**
@@ -57,6 +57,11 @@ export interface RemoteCompactionOperationsOptions {
   confirm?: RemoteCompactionConfirmer
   logger?: SafeLogger
   now?: () => number
+  /**
+   * Maximum time an abort-interrupted operation may remain `cancelling` after
+   * the command call settles without `session/events` confirming completion.
+   */
+  cancellingGraceMs?: number
 }
 
 type SettledState = 'succeeded' | 'failed' | 'cancelled' | 'unconfirmed'
@@ -78,21 +83,33 @@ interface CompactionOperation {
   cancelled: boolean
   timedOut: boolean
   commandSettledFlag: boolean
+  commandSettledAt?: number
+  abortInterrupted: boolean
+  commandErrorResult: boolean
+  commandFailureMessage?: string
   commandId?: string
   confirmation: 'pending' | 'finished' | 'unknown'
   confirmError?: string
+  cancellingDeadlineAt?: number
+  inFlightReconcile?: Promise<void>
   timer?: ReturnType<typeof setTimeout>
+  graceTimer?: ReturnType<typeof setTimeout>
 }
 
 const MIN_BUDGET_MS = 60_000
 const MAX_BUDGET_MS = 7_200_000
 const DEFAULT_BUDGET_MS = 1_800_000
+const DEFAULT_CANCELLING_GRACE_MS = 120_000
 /** Keep settled operations readable long enough for a reconnect to collect them. */
 const RETENTION_MS = 600_000
 /** A cancel request waits this long for the command call to settle. */
 const CANCEL_SETTLE_MS = 15_000
-/** Bound bound records so a client cannot create unbounded tasks. */
+/** Bound tracked records so a client cannot create unbounded tasks. */
 const MAX_OPERATIONS = 32
+const ABORT_CODE_PATTERN = /(?:^|[/_-])(abort(?:ed)?|cancel(?:led|ed)?|timeout|timed[_-]?out|etimedout)(?:$|[/_-])/iu
+const GENERIC_ERROR_CODE_PATTERN = /^(?:gateway\/)?(?:internal|unknown)$/iu
+const ABORT_MESSAGE_PATTERN = /\b(abort(?:ed)?|cancel(?:led|ed)?|timed?\s*out|timeout|exceeded\s+(?:its\s+)?budget|budget\s+(?:exceeded|expired))\b/iu
+const MAX_CAUSE_DEPTH = 8
 
 function requestIndexKey(ownerDeviceId: string, sessionId: string, requestId: string): string {
   return `${ownerDeviceId}\u0000${sessionId}\u0000${requestId}`
@@ -113,6 +130,7 @@ export class RemoteCompactionOperations {
   private readonly confirm?: RemoteCompactionConfirmer
   private readonly logger?: SafeLogger
   private readonly now: () => number
+  private readonly cancellingGraceMs: number
   private closed = false
 
   constructor(
@@ -122,10 +140,12 @@ export class RemoteCompactionOperations {
     this.confirm = options.confirm
     this.logger = options.logger
     this.now = options.now ?? Date.now
+    this.cancellingGraceMs = normalizeCancellingGrace(options.cancellingGraceMs)
   }
 
   submit(params: RemoteCompactionSubmitParams, owner: RemoteCompactionOwner): RemoteCompactionSubmitResult {
     if (this.closed) throw new RpcError('HARNESS_UNAVAILABLE', 'The Remote Host is shutting down.')
+    this.expireCancellingOperations()
     this.prune()
     const key = requestIndexKey(owner.deviceId, params.sessionId, params.requestId)
     const existing = this.requestIndex.get(key)
@@ -162,7 +182,7 @@ export class RemoteCompactionOperations {
     const operation = this.find(params, owner)
     if (operation === undefined) return this.interrupted(params)
     if (operation.finishedAt === undefined && operation.commandSettledFlag
-      && (operation.state === 'cancelling' || operation.state === 'unconfirmed')) {
+      && (operation.cancelled || operation.timedOut || operation.state === 'cancelling' || operation.state === 'unconfirmed')) {
       await this.reconcile(operation)
     }
     return this.view(operation)
@@ -181,7 +201,7 @@ export class RemoteCompactionOperations {
     }
     // `withAbort` settles the command call early; reconciliation below waits for
     // the compaction lifecycle (or reports that it is still unconfirmed).
-    await Promise.race([operation.commandSettled, delay(CANCEL_SETTLE_MS)])
+    await waitWithTimeout(operation.commandSettled, CANCEL_SETTLE_MS)
     if (operation.commandSettledFlag) await this.reconcile(operation)
     return this.view(operation)
   }
@@ -217,6 +237,8 @@ export class RemoteCompactionOperations {
       cancelled: false,
       timedOut: false,
       commandSettledFlag: false,
+      abortInterrupted: false,
+      commandErrorResult: false,
       confirmation: 'pending',
     }
   }
@@ -228,6 +250,7 @@ export class RemoteCompactionOperations {
       operation.timedOut = true
       operation.controller.abort(new Error('Remote compaction exceeded its budget.'))
     }, operation.budgetMs)
+    operation.timer.unref?.()
     let result: TypertRpcResult | undefined
     let thrown: unknown
     try {
@@ -239,10 +262,19 @@ export class RemoteCompactionOperations {
         clearTimeout(operation.timer)
         operation.timer = undefined
       }
+      operation.commandId = commandIdOf(result)
+      operation.commandSettledAt = this.now()
+      const succeeded = result?.ok === true && isCommandSuccess(result)
+      if (!succeeded) {
+        operation.abortInterrupted = isAbortOutcome(operation.controller.signal, result, thrown)
+        operation.commandErrorResult = result?.ok === true
+        if (!operation.abortInterrupted) {
+          operation.commandFailureMessage = this.commandFailureMessage(operation, result, thrown)
+        }
+      }
       operation.commandSettledFlag = true
       operation.resolveCommandSettled()
     }
-    operation.commandId = commandIdOf(result)
 
     if (result?.ok === true && isCommandSuccess(result)) {
       this.settle(operation, 'succeeded', commandText(result) ?? undefined)
@@ -255,7 +287,7 @@ export class RemoteCompactionOperations {
       await this.reconcile(operation)
       return
     }
-    this.settle(operation, 'failed', this.commandFailureMessage(operation, result, thrown))
+    this.settle(operation, 'failed', operation.commandFailureMessage ?? this.commandFailureMessage(operation, result, thrown))
   }
 
   /**
@@ -264,13 +296,29 @@ export class RemoteCompactionOperations {
    * without error means it committed, but the final persistence result is no
    * longer observable after the abort.
    */
-  private async reconcile(operation: CompactionOperation): Promise<void> {
+  private reconcile(operation: CompactionOperation): Promise<void> {
+    if (operation.finishedAt !== undefined || !operation.commandSettledFlag) return Promise.resolve()
+    if (operation.inFlightReconcile !== undefined) return operation.inFlightReconcile
+    const task = this.reconcileOnce(operation).finally(() => {
+      if (operation.inFlightReconcile === task) operation.inFlightReconcile = undefined
+    })
+    operation.inFlightReconcile = task
+    return task
+  }
+
+  private async reconcileOnce(operation: CompactionOperation): Promise<void> {
     if (operation.finishedAt !== undefined) return
     if (!operation.commandSettledFlag) return
     if (this.confirm === undefined) {
-      operation.state = 'unconfirmed'
-      operation.message = 'The Host cannot observe the compaction lifecycle for this run.'
-      operation.finishedAt = this.now()
+      if (!operation.abortInterrupted && operation.commandErrorResult) {
+        this.settle(
+          operation,
+          'failed',
+          operation.commandFailureMessage ?? 'The Host rejected the compaction command.',
+        )
+        return
+      }
+      this.settle(operation, 'unconfirmed', 'The Host cannot observe the compaction lifecycle for this run.')
       return
     }
     let confirmation: RemoteCompactionConfirmation
@@ -279,6 +327,7 @@ export class RemoteCompactionOperations {
     } catch {
       confirmation = { kind: 'unknown' }
     }
+    if (operation.finishedAt !== undefined) return
     this.logger?.info('remote compaction confirmation', {
       operationId: operation.operationId,
       kind: confirmation.kind,
@@ -305,6 +354,34 @@ export class RemoteCompactionOperations {
       return
     }
     if (confirmation.kind === 'not-yet' || confirmation.kind === 'unknown') {
+      const stillPossiblyRunning = operation.abortInterrupted
+        || (confirmation.kind === 'not-yet'
+          && (confirmation.started === true
+            || (!operation.commandErrorResult && confirmation.commandRecorded === true)))
+      if (!stillPossiblyRunning) {
+        operation.confirmation = 'unknown'
+        if (confirmation.kind === 'not-yet' || operation.commandErrorResult) {
+          this.settle(
+            operation,
+            'failed',
+            operation.commandFailureMessage ?? 'The Host failed to run the compaction command.',
+          )
+          return
+        }
+        this.settle(
+          operation,
+          'unconfirmed',
+          this.unconfirmedFailureMessage(operation),
+        )
+        return
+      }
+      const deadline = this.cancellingDeadlineOf(operation)
+      if (this.now() >= deadline) {
+        operation.confirmation = 'unknown'
+        this.settle(operation, 'unconfirmed', this.cancellingGraceExpiredMessage(operation))
+        return
+      }
+      this.scheduleCancellingGrace(operation, deadline)
       operation.confirmation = 'unknown'
       operation.state = 'cancelling'
       operation.message = operation.cancelled
@@ -312,6 +389,52 @@ export class RemoteCompactionOperations {
         : 'The compaction budget expired; the Host is still waiting for the compaction to finish.'
       return
     }
+  }
+
+  private cancellingDeadlineOf(operation: CompactionOperation): number {
+    if (operation.cancellingDeadlineAt !== undefined) return operation.cancellingDeadlineAt
+    const settledAt = operation.commandSettledAt ?? this.now()
+    const graceMs = Math.min(this.cancellingGraceMs, operation.budgetMs)
+    const deadline = settledAt + graceMs
+    operation.cancellingDeadlineAt = deadline
+    return deadline
+  }
+
+  private scheduleCancellingGrace(operation: CompactionOperation, deadline: number): void {
+    if (operation.graceTimer !== undefined || operation.finishedAt !== undefined) return
+    const remainingMs = Math.max(0, deadline - this.now())
+    operation.graceTimer = setTimeout(() => {
+      operation.graceTimer = undefined
+      void this.reconcile(operation)
+    }, remainingMs)
+    operation.graceTimer.unref?.()
+  }
+
+  private expireCancellingOperations(): void {
+    const now = this.now()
+    for (const operation of this.operations.values()) {
+      if (operation.finishedAt !== undefined) continue
+      if (operation.cancellingDeadlineAt === undefined || now < operation.cancellingDeadlineAt) continue
+      operation.confirmation = 'unknown'
+      this.settle(
+        operation,
+        'unconfirmed',
+        this.cancellingGraceExpiredMessage(operation),
+        operation.cancellingDeadlineAt,
+      )
+    }
+  }
+
+  private cancellingGraceExpiredMessage(operation: CompactionOperation): string {
+    return operation.cancelled
+      ? 'Cancellation was requested, but the Host could not confirm compaction completion within the grace window.'
+      : 'The compaction budget expired, and the Host could not confirm compaction completion within the grace window.'
+  }
+
+  private unconfirmedFailureMessage(operation: CompactionOperation): string {
+    return operation.cancelled
+      ? 'Compaction failed after cancellation was requested, and the Host could not inspect the Session log to confirm its state.'
+      : 'Compaction failed after its budget expired, and the Host could not inspect the Session log to confirm its state.'
   }
 
   private commandFailureMessage(
@@ -324,8 +447,8 @@ export class RemoteCompactionOperations {
       return text === undefined ? 'The Host rejected the compaction command.' : sanitizeMessage(text)
     }
     if (result !== undefined && result.ok === false) return sanitizeMessage(result.error.message)
-    if (operation.timedOut) return `Compaction exceeded its ${operation.budgetMs}ms budget.`
     if (thrown instanceof RpcError) return sanitizeMessage(thrown.message)
+    if (operation.timedOut) return `Compaction exceeded its ${operation.budgetMs}ms budget.`
     this.logger?.warn('remote compaction failed', {
       operationId: operation.operationId,
       reason: thrown instanceof Error ? thrown.name : 'unknown',
@@ -333,14 +456,23 @@ export class RemoteCompactionOperations {
     return 'The Host failed to run the compaction command.'
   }
 
-  private settle(operation: CompactionOperation, state: SettledState | 'interrupted', message?: string): void {
+  private settle(
+    operation: CompactionOperation,
+    state: SettledState | 'interrupted',
+    message?: string,
+    settledAt?: number,
+  ): void {
     if (operation.finishedAt !== undefined) return
     if (operation.timer !== undefined) {
       clearTimeout(operation.timer)
       operation.timer = undefined
     }
+    if (operation.graceTimer !== undefined) {
+      clearTimeout(operation.graceTimer)
+      operation.graceTimer = undefined
+    }
     operation.state = state
-    operation.finishedAt = this.now()
+    operation.finishedAt = settledAt ?? this.now()
     if (message !== undefined) operation.message = message
     this.logger?.info('remote compaction settled', {
       operationId: operation.operationId,
@@ -402,6 +534,64 @@ function clampBudget(value: number | undefined): number {
   return Math.min(Math.max(value, MIN_BUDGET_MS), MAX_BUDGET_MS)
 }
 
+function normalizeCancellingGrace(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_CANCELLING_GRACE_MS
+  if (!Number.isFinite(value) || !Number.isSafeInteger(value) || value < 1) {
+    throw new RpcError('INVALID_MESSAGE', 'cancellingGraceMs must be a positive safe integer.')
+  }
+  return Math.min(value, MAX_BUDGET_MS)
+}
+
+function isAbortOutcome(
+  signal: AbortSignal,
+  result: TypertRpcResult | undefined,
+  thrown: unknown,
+): boolean {
+  if (!signal.aborted) return false
+  if (result !== undefined) {
+    if (result.ok) return false
+    return ABORT_CODE_PATTERN.test(result.error.code)
+      || matchesSignalReason(result.error.message, signal.reason)
+      || (GENERIC_ERROR_CODE_PATTERN.test(result.error.code) && ABORT_MESSAGE_PATTERN.test(result.error.message))
+      || ('cause' in result.error.details && isAbortThrown(result.error.details.cause, signal.reason))
+  }
+  return isAbortThrown(thrown, signal.reason)
+}
+
+function isAbortThrown(thrown: unknown, reason: unknown): boolean {
+  const seen = new Set<unknown>()
+  let current: unknown = thrown
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current !== undefined && current !== null; depth += 1) {
+    if (seen.has(current)) return false
+    seen.add(current)
+    if (current === reason) return true
+    if (typeof current === 'string') {
+      return matchesSignalReason(current, reason) || ABORT_MESSAGE_PATTERN.test(current)
+    }
+    if (current instanceof Error) {
+      if (current.name === 'AbortError' || current.name === 'TimeoutError') return true
+      if ('code' in current && typeof current.code === 'string' && ABORT_CODE_PATTERN.test(current.code)) return true
+      if (matchesSignalReason(current.message, reason)) return true
+      if (!(current instanceof RpcError) && ABORT_MESSAGE_PATTERN.test(current.message)) return true
+      current = 'cause' in current ? current.cause : undefined
+      continue
+    }
+    if (isRecord(current)) {
+      if (typeof current.code === 'string' && ABORT_CODE_PATTERN.test(current.code)) return true
+      if (typeof current.message === 'string' && matchesSignalReason(current.message, reason)) return true
+      current = current.cause
+      continue
+    }
+    return false
+  }
+  return false
+}
+
+function matchesSignalReason(message: string, reason: unknown): boolean {
+  const reasonMessage = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : undefined
+  return reasonMessage !== undefined && reasonMessage !== '' && message.includes(reasonMessage)
+}
+
 function isCommandSuccess(result: TypertRpcResult): boolean {
   if (result.ok !== true || !isRecord(result.value)) return false
   const command = isRecord(result.value.result) ? result.value.result : undefined
@@ -418,8 +608,15 @@ function sanitizeMessage(message: string): string {
   return message.length <= 2_000 ? message : `${message.slice(0, 2_000)}…`
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function waitWithTimeout(promise: Promise<void>, ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { resolve() }, ms)
+    timer.unref?.()
+    void promise.finally(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 }
 
 /**
@@ -441,17 +638,37 @@ export function readCompactionConfirmation(
     if (isRecord(event) && typeof event.type === 'string') events.push(event)
   }
   if (events.length === 0) return { kind: 'unknown' }
-  const resolvedCommandId = commandId ?? latestCompactCommandId(events, acceptedAt)
+  const matchedCommandRun = commandId === undefined
+    ? latestCompactCommandId(events, acceptedAt)
+    : hasCompactCommandRun(events, commandId) ? commandId : undefined
+  const resolvedCommandId = commandId ?? matchedCommandRun
   if (resolvedCommandId === undefined) return { kind: 'not-yet' }
   const end = [...events].reverse().find(event => {
     if (event.type !== 'compaction/end') return false
     const data = isRecord(event.data) ? event.data : undefined
     return data?.sourceCommandId === resolvedCommandId
   })
-  if (end === undefined) return { kind: 'not-yet' }
+  if (end === undefined) {
+    const hasCompactionStart = events.some(event => {
+      if (event.type !== 'compaction/start') return false
+      const data = isRecord(event.data) ? event.data : undefined
+      return data?.sourceCommandId === resolvedCommandId
+    })
+    if (hasCompactionStart) return { kind: 'not-yet', started: true }
+    if (matchedCommandRun !== undefined) return { kind: 'not-yet', commandRecorded: true }
+    return { kind: 'not-yet' }
+  }
   const data = isRecord(end.data) ? end.data : {}
   const error = data.error === undefined ? undefined : errorText(data.error)
   return error === undefined ? { kind: 'finished' } : { kind: 'finished', error }
+}
+
+function hasCompactCommandRun(events: Array<Record<string, unknown>>, commandId: string): boolean {
+  return events.some(event => {
+    if (event.type !== 'command/run') return false
+    const data = isRecord(event.data) ? event.data : undefined
+    return data?.name === 'compact' && data.commandId === commandId
+  })
 }
 
 function latestCompactCommandId(events: Array<Record<string, unknown>>, acceptedAt: number): string | undefined {

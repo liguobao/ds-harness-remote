@@ -2,11 +2,13 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { homedir } from 'node:os'
+import { StringDecoder } from 'node:string_decoder'
 import type { AntigravityEvents, StepLogRecord } from './types.js'
 
 export class TranscriptWatcher extends EventEmitter {
   private offset = 0
   private lineRemainder = ''
+  private decoder = new StringDecoder('utf8')
   private readTail = Promise.resolve()
   private readQueued = false
   private pollTimer?: NodeJS.Timeout
@@ -57,6 +59,21 @@ export class TranscriptWatcher extends EventEmitter {
       clearTimeout(this.pollTimer)
       this.pollTimer = undefined
     }
+    this.resetDecoder()
+  }
+
+  /**
+   * 重置读取偏移与解码器状态
+   */
+  reset(): void {
+    this.offset = 0
+    this.resetDecoder()
+  }
+
+  private resetDecoder(): void {
+    this.lineRemainder = ''
+    this.decoder.end()
+    this.decoder = new StringDecoder('utf8')
   }
 
   /**
@@ -91,13 +108,15 @@ export class TranscriptWatcher extends EventEmitter {
       const bytesToRead = stat.size - this.offset
       const buffer = Buffer.alloc(bytesToRead)
       const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset)
+      if (this.closed || bytesRead === 0) return
       this.offset += bytesRead
 
-      const text = this.lineRemainder + buffer.subarray(0, bytesRead).toString('utf-8')
+      const text = this.lineRemainder + this.decoder.write(buffer.subarray(0, bytesRead))
       const lines = text.split('\n')
       this.lineRemainder = lines.pop() ?? ''
 
       for (const line of lines) {
+        if (this.closed) return
         const trimmed = line.trim()
         if (!trimmed) continue
         await this.parseAndDispatch(trimmed)

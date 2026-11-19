@@ -638,6 +638,7 @@ const esES = {
     server: "Dirección del servidor", serverHint: "Utilice una dirección HTTPS.", trustTitle: "Protege tus dispositivos y conversaciones", trustBody: "Los datos de la conversación se cifran en tránsito. Solo los dispositivos confiables que hayan iniciado sesión en la misma cuenta pueden acceder a él.",
   },
   settings: {
+    membership: { plan: "Plan de membresía", title: "Membresía", expiresAt: "Fecha de vencimiento", loading: "Cargando…", none: "Sin membresía", active: "Activa", expired: "Vencida", revoked: "Revocada" },
     identityHint: "Toca un campo para ver y copiar su valor completo.",
     copyIdentity: "Copiar",
     identityCopyFailed: "No se pudo copiar. Inténtalo de nuevo.",
@@ -660,8 +661,6 @@ const esES = {
     language: "Idioma", languageSystem: "Seguir el sistema", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Con el sistema predeterminado, la aplicación sigue automáticamente la configuración de idioma de Android.",
     compactHistorySaveFailed: "No se pudo guardar la configuración de conversación compacta",
     compactHistory: "Conversaciones compactas", compactHistoryNote: "Acorta el historial de la herramienta, manteniendo el texto y el estado. Requiere soporte de anfitrión. Vuelva a abrir la conversación después de cambiar esto.",
-    typographyDensity: "Densidad de lectura", typographyDensityNote: "Ajustar interlineado, espacio entre párrafos y relleno de burbujas",
-    densityStandard: "Estándar", densityCompact: "Compacto", typographyDensitySaveFailed: "No se pudo guardar la configuración de densidad de lectura",
     chatAppearance: "Tipografía y color del chat",
     chatAppearanceNote: "Personaliza tamaño de letra, espaciado, color de acento, burbujas y código",
     chatAppearanceReset: "Restablecer",
@@ -919,7 +918,7 @@ const esES = {
     hourUnit: 'horas',
   },
   time: { unavailable: "Hora de actualización no disponible", lastSeenUnavailable: "Tiempo activo no disponible", lastActive: (value: string) => `Activo ${value}`, now: "En este momento", justNow: "Actualizado hace un momento", minutesAgo: (n: number) => `Hace ${n} minutos`, hoursAgo: (n: number) => `Hace ${n} hora`, updatedSuffix: "", locale: "es-ES" },
-  transport: { auto: "Automático (recomendado)", autoDescription: "Directa o TURN; servidor si falla.", turn: "Retransmisión TURN", turnDescription: "Solo TURN; servidor si falla.", relay: "Retransmisión del servidor", relayDescription: "Todo por servidor, sin directa ni TURN." },
+  transport: { auto: "Automático (recomendado)", autoDescription: "LAN / P2P primero, con alternativas en orden.", turn: "Retransmisión TURN", turnDescription: "Solo TURN; servidor si falla.", relay: "Retransmisión del servidor", relayDescription: "Todo por servidor, sin directa ni TURN." },
   workspaces: {
     loadFailed: "No se pudieron cargar los espacios de trabajo",
     offlineBody: "Vuelva a conectarse a su computadora para ver espacios de trabajo y conversaciones.",

@@ -12,7 +12,7 @@ import { RemoteHostDevice } from '../model/Types';
 import { DirectoryEntry, HarnessWorkspace } from '../net/HarnessClient';
 import { HarnessRemoteSession, HarnessSchedule, HarnessScheduleDelivery } from '../net/HarnessClient';
 import { applyTint, darkPalette, lightPalette, Palette } from '../services/Theme';
-import { OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
+import { AccountMembership, OAuthProvider, clientVersion as appVersion } from '../net/ServerApi';
 import { t, english, LANG_SYSTEM, LANG_ZH, LANG_EN } from '../services/I18n';
 import {
   Breakpoint, FoldState, breakpointOf, contentColumnWidth, deviceColumns, foldStateOf,
@@ -27,6 +27,8 @@ import { isVisibleSession } from '../util/SessionVisibility';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import BuildProfile from 'BuildProfile';
+
+const MEMBERSHIP_PRICING_URL: string = 'https://dsh.r2049.cn/pricing';
 
 @Entry
 @Component
@@ -157,6 +159,10 @@ struct Index {
   @State previewIsPdf: boolean = false;
   @State pdfError: string = '';
   private pdfController?: pdfViewManager.PdfController;
+  private pdfRequest: number = 0;
+  @State pdfPage: number = 0;
+  @State pdfPages: number = 0;
+  @State pdfZoom: number = 1;
   /** 消息操作面板（自绘，替代系统 ActionSheet）。 */
   @State messageActionsOpen: boolean = false;
   @State messageActionText: string = '';
@@ -253,6 +259,9 @@ struct Index {
   @State languageMode: number = 0;
   @State isDarkUi: boolean = false;
   @State showSettings: boolean = false;
+  @State membershipStatus: string = '';
+  @State membershipExpiry: number = 0;
+  private membershipRequest: number = 0;
   /** 是否跟随最新消息；用户往上翻时置 false，避免流式输出把列表一直拽到底。 */
   @State stickToBottom: boolean = true;
   private searchDebounceTimer: number = -1;
@@ -353,7 +362,7 @@ struct Index {
       return true;
     }
     if (this.filePreviewOpen) {
-      this.filePreviewOpen = false;
+      this.closeFilePreview();
       return true;
     }
     if (this.writingMenuOpen) {
@@ -519,6 +528,13 @@ struct Index {
     if (url.length === 0) {
       return;
     }
+    this.openBrowserLink(url);
+  }
+
+  private openBrowserLink(url: string): void {
+    if (!/^https?:\/\//i.test(url)) {
+      return;
+    }
     const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
     context.openLink(url).catch(() => {
       const want: Want = {
@@ -527,6 +543,7 @@ struct Index {
         uri: url
       };
       context.startAbility(want).catch(() => {
+        promptAction.showToast({ message: this.tr('无法打开链接') });
       });
     });
   }
@@ -1849,17 +1866,9 @@ struct Index {
     this.expandedRuns = next;
   }
 
-  /** 设备卡第二行：平台 + 主机版本（Host 没上报版本时只显示平台）。 */
   private hostSubtitle(device: RemoteHostDevice): string {
-    const head: string = device.platform.length > 0 ? device.platform : this.tr('远程主机');
-    let base: string = head;
-    if (device.harnessVersion.length > 0) {
-      base = `${head} · ${this.tr('主机')} ${device.harnessVersion}`;
-    } else if (device.clientVersion.length > 0) {
-      base = `${head} · ${this.tr('插件')} ${device.clientVersion}`;
-    }
-    const seen: string = this.hostSeenLabel(device);
-    return device.online ? base : `${base} · ${seen}`;
+    const platform: string = device.platform.length > 0 ? device.platform : this.tr('远程主机');
+    return device.online ? platform : `${platform} · ${this.hostSeenLabel(device)}`;
   }
 
   /** 设备卡第三行：在线状态用绿点表达，这里只补「最近活动」，避免「在线」重复两遍。 */
@@ -2334,113 +2343,108 @@ struct Index {
     .height('100%')
   }
 
-  /**
-   * 设备页「更多」面板：系统菜单在深色/浅色下对比度不受控（退出登录看不清），
-   * 改成自己画：每行大字号 + 明确的底色，退出登录用红底白字。
-   */
   @Builder
   MoreMenuOverlay() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Stack({ alignContent: Alignment.TopEnd }) {
       Column()
         .width('100%')
         .height('100%')
         .backgroundColor(this.pal().backdrop)
-        .onClick(() => {
-          this.showMoreMenu = false;
+        .onClick(() => { this.showMoreMenu = false; })
+      Column() {
+        this.MoreMenuRow(this.tr('会员方案'), false, () => {
+          this.openBrowserLink(MEMBERSHIP_PRICING_URL);
         })
-      Column({ space: 10 }) {
-        Text(this.tr('更多'))
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.pal().text)
-          .width('100%')
-        Row({ space: 8 }) {
-          Text(this.tr('切换服务器'))
-            .fontSize(15)
-            .fontColor(this.pal().text)
-          Text(this.runtime.email.length > 0 ? this.runtime.email : '')
-            .fontSize(11)
-            .fontColor(this.pal().text3)
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-        .padding({ top: 14, bottom: 14, left: 16, right: 16 })
-        .backgroundColor(this.pal().card)
-        .borderRadius(14)
-        .border({ width: 1, color: this.pal().border })
-        .onClick(() => {
-          this.showMoreMenu = false;
-          this.openAccountSwitcher();
-        })
-        Row({ space: 8 }) {
-          Text('⌁')
-            .fontSize(15)
-            .fontColor('#22D3EE')
-          Text(this.tr('执行轨迹'))
-            .fontSize(15)
-            .fontColor(this.pal().text)
-        }
-        .width('100%')
-        .padding({ top: 14, bottom: 14, left: 16, right: 16 })
-        .backgroundColor(this.pal().card)
-        .borderRadius(14)
-        .border({ width: 1, color: this.pal().border })
-        .onClick(() => {
-          this.showMoreMenu = false;
-          this.trajectoryOpen = true;
-        })
-        Text(this.tr('退出登录'))
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 14, bottom: 14 })
-          .backgroundColor('#E5484D')
-          .borderRadius(14)
-          .onClick(() => {
-            this.showMoreMenu = false;
-            AlertDialog.show({
-              title: this.tr('退出登录'),
-              message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
-              autoCancel: true,
-              primaryButton: {
-                value: this.tr('取消'),
-                action: () => {
-                }
-              },
-              secondaryButton: {
-                value: this.tr('退出'),
-                fontColor: '#F85749',
-                action: () => {
-                  this.runtime.logout();
-                }
+        this.MoreMenuRow(this.tr('设置'), false, () => { this.showSettings = true; })
+        this.MoreMenuRow(this.tr('切换服务器'), false, () => { this.openAccountSwitcher(); })
+        this.MoreMenuRow(this.tr('执行轨迹'), false, () => { this.trajectoryOpen = true; })
+        this.MoreMenuRow(this.tr('退出登录'), true, () => {
+          AlertDialog.show({
+            title: this.tr('退出登录'),
+            message: this.tr('将清除本机保存的主机凭据，需要重新绑定才能连接。'),
+            autoCancel: true,
+            primaryButton: {
+              value: this.tr('取消'),
+              action: () => {
               }
-            });
-          })
-        Text(this.tr('取消'))
-          .fontSize(14)
-          .fontColor(this.pal().text2)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 12, bottom: 12 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(14)
-          .onClick(() => {
-            this.showMoreMenu = false;
-          })
+            },
+            secondaryButton: {
+              value: this.tr('退出'),
+              fontColor: '#F85749',
+              action: () => {
+                this.runtime.logout();
+              }
+            }
+          });
+        })
       }
-      .width('100%')
-      .constraintSize({ maxWidth: 420 })
-      .padding({ left: 20, right: 20, top: 18, bottom: 26 })
+      .width(this.en() ? 224 : 210)
+      .constraintSize({ maxWidth: '90%' })
+      .margin({ top: 56, right: 16 })
+      .padding(6)
       .backgroundColor(this.pal().panel)
-      .borderRadius({ topLeft: 20, topRight: 20 })
+      .borderRadius(18)
       .border({ width: 1, color: this.pal().border })
     }
     .width('100%')
     .height('100%')
+  }
+
+  @Builder
+  MoreMenuRow(label: string, danger: boolean, action: () => void) {
+    Button(label, { type: ButtonType.Normal })
+      .width('100%')
+      .height(48)
+      .fontSize(15)
+      .fontColor(danger ? '#F85749' : this.pal().text)
+      .backgroundColor(Color.Transparent)
+      .align(Alignment.Start)
+      .padding({ left: 14, right: 14 })
+      .onClick(() => {
+        this.showMoreMenu = false;
+        action();
+      })
+  }
+
+  private loadMembership(): void {
+    const request: number = ++this.membershipRequest;
+    const account: string = this.runtime.email;
+    const server: string = this.runtime.serverUrl;
+    this.membershipStatus = '';
+    this.membershipExpiry = 0;
+    if (account.length === 0 || server.length === 0) {
+      return;
+    }
+    this.runtime.readAccountMembership().then((membership: AccountMembership) => {
+      if (this.showSettings && request === this.membershipRequest
+        && account === this.runtime.email && server === this.runtime.serverUrl) {
+        this.membershipStatus = membership.status;
+        this.membershipExpiry = membership.expiresAt;
+      }
+    }).catch(() => {
+      if (this.showSettings && request === this.membershipRequest
+        && account === this.runtime.email && server === this.runtime.serverUrl) {
+        this.membershipStatus = 'unavailable';
+      }
+    });
+  }
+
+  private membershipLabel(): string {
+    switch (this.membershipStatus) {
+      case 'none': return this.tr('未开通');
+      case 'active': return this.tr('有效');
+      case 'expired': return this.tr('已过期');
+      case 'revoked': return this.tr('已撤销');
+      case 'unavailable': return this.tr('不可用');
+      default: return this.tr('查询中…');
+    }
+  }
+
+  private copyAccountId(): void {
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.runtime.email);
+    pasteboard.getSystemPasteboard().setData(data).catch(() => {
+      promptAction.showToast({ message: this.tr('复制失败') });
+    });
   }
 
   /** 设置面板：主题做成可选列表，不再靠一颗按钮循环切。 */
@@ -2473,13 +2477,26 @@ struct Index {
         .padding({ bottom: 6 })
         Scroll() {
           Column({ space: 16 }) {
-            // —— 服务器 ——
+            // —— 账号与服务器 ——
             Column({ space: 8 }) {
-              Text(this.tr('服务器'))
+              Text(this.tr('账号与服务器'))
                 .fontSize(11)
                 .fontColor(this.pal().text3)
                 .width('100%')
                 .padding({ left: 4 })
+              if (this.runtime.serverUrl.length > 0) {
+                this.SettingsRow(this.tr('服务器'), serverHostLabel(this.runtime.serverUrl), false,
+                  () => { this.openBrowserLink(this.runtime.serverUrl); })
+              }
+              if (this.runtime.email.length > 0 && this.runtime.serverUrl.length > 0 && this.phase !== PHASE_SETUP) {
+                this.SettingsRow(this.tr('账号'), this.runtime.email, false, () => { this.copyAccountId(); })
+                this.SettingsRow(this.tr('会员状态'), this.membershipLabel(), false,
+                  this.membershipStatus === 'none' ? () => { this.openBrowserLink(MEMBERSHIP_PRICING_URL); } : undefined)
+                if (this.membershipExpiry > 0) {
+                  this.SettingsRow(this.tr('到期日期'),
+                    new Date(this.membershipExpiry).toLocaleDateString(this.en() ? 'en-US' : 'zh-CN'), false, undefined)
+                }
+              }
               this.SettingsRow(this.tr('切换服务器'), this.currentServerSummary(), false, () => {
                 this.showSettings = false;
                 this.showServerSwitch = true;
@@ -2683,11 +2700,12 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .onAppear(() => { if (this.phase !== PHASE_SETUP) this.loadMembership(); })
   }
 
   /** 设置里的一行：左边标题、右边当前值 + 箭头。 */
   @Builder
-  SettingsRow(title: string, value: string, danger: boolean, action: () => void) {
+  SettingsRow(title: string, value: string, danger: boolean, action: (() => void) | undefined) {
     Row({ space: 10 }) {
       Text(title)
         .fontSize(14)
@@ -2701,9 +2719,9 @@ struct Index {
           .constraintSize({ maxWidth: 170 })
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
-      Text('›')
-        .fontSize(15)
-        .fontColor(this.pal().text3)
+      if (action !== undefined) {
+        Text('›').fontSize(15).fontColor(this.pal().text3)
+      }
     }
     .width('100%')
     .padding({ top: 13, bottom: 13, left: 14, right: 14 })
@@ -2711,7 +2729,7 @@ struct Index {
     .borderRadius(12)
     .border({ width: 1, color: this.pal().border })
     .onClick(() => {
-      action();
+      action?.();
     })
   }
 
@@ -3468,19 +3486,6 @@ struct Index {
         Row({ space: 8 }) {
           Blank()
           Button({ type: ButtonType.Circle }) {
-            Image($r('app.media.ic_settings'))
-              .width(18)
-              .height(18)
-              .fillColor(this.pal().text2)
-          }
-          .width(32)
-          .height(32)
-          .backgroundColor(this.pal().chip)
-          .border({ width: 1, color: this.pal().borderStrong })
-          .onClick(() => {
-            this.showSettings = true;
-          })
-          Button({ type: ButtonType.Circle }) {
             Image($r('app.media.ic_refresh'))
               .width(18)
               .height(18)
@@ -3494,6 +3499,19 @@ struct Index {
           .onClick(() => {
             this.runtime.refreshDevices();
           })
+          Button({ type: ButtonType.Normal }) {
+            Image($r('app.media.ic_more'))
+              .width(19)
+              .height(19)
+              .rotate({ angle: 90 })
+              .fillColor(this.pal().text)
+          }
+          .width(44)
+          .height(44)
+          .padding(0)
+          .backgroundColor(Color.Transparent)
+          .accessibilityText(this.tr('更多'))
+          .onClick(() => { this.showMoreMenu = true; })
         }
         .width('100%')
       }
@@ -3833,8 +3851,6 @@ struct Index {
             .height(6)
             .borderRadius(3)
             .backgroundColor(device.online ? '#34D399' : this.pal().text3)
-          // 手机上右侧三个按钮把这一列压得很窄，单行省略会把版本号整段吃掉，
-          // 所以允许折到第二行（整卡可点即连接，别指望用户读截断的字）
           Text(this.hostSubtitle(device))
             .fontSize(11)
             .fontColor(this.pal().text3)
@@ -3869,28 +3885,41 @@ struct Index {
             })
         }
       } else {
-        Text('⋯')
-          .fontSize(15)
-          .fontColor(this.pal().text2)
-          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-          .backgroundColor(this.pal().chip)
-          .borderRadius(13)
-          .border({ width: 1, color: this.pal().borderStrong })
-          .onClick(() => {
-            this.deviceMenuId = device.deviceId;
-          })
-        if (device.online) {
-          Text(this.tr('连接'))
-            .fontSize(14)
-            .fontColor('#FFFFFF')
-            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-            .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
-            .borderRadius(20)
-            .shadow({ radius: 10, color: 'rgba(77,107,254,0.30)', offsetX: 0, offsetY: 3 })
-            .onClick(() => {
-              this.runtime.connectDevice(device.deviceId);
-            })
+        Column({ space: 4 }) {
+          Row({ space: 8 }) {
+            Text('⋯')
+              .fontSize(15)
+              .fontColor(this.pal().text2)
+              .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+              .backgroundColor(this.pal().chip)
+              .borderRadius(13)
+              .border({ width: 1, color: this.pal().borderStrong })
+              .onClick(() => {
+                this.deviceMenuId = device.deviceId;
+              })
+            if (device.online) {
+              Text(this.tr('连接'))
+                .fontSize(14)
+                .fontColor('#FFFFFF')
+                .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+                .linearGradient({ angle: 135, colors: [['#4D6BFE', 0], ['#22D3EE', 1]] })
+                .borderRadius(20)
+                .shadow({ radius: 10, color: 'rgba(77,107,254,0.30)', offsetX: 0, offsetY: 3 })
+                .onClick(() => {
+                  this.runtime.connectDevice(device.deviceId);
+                })
+            }
+          }
+          if (device.harnessVersion.length > 0 || device.clientVersion.length > 0) {
+            Text(device.harnessVersion.length > 0 ? device.harnessVersion : device.clientVersion)
+              .fontSize(11)
+              .fontColor(this.pal().text3)
+              .maxLines(1)
+              .constraintSize({ maxWidth: 108 })
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
         }
+        .alignItems(HorizontalAlign.End)
       }
     }
     .width('100%')
@@ -4299,6 +4328,13 @@ struct Index {
                   Text(this.tr('发送第一条消息开始对话'))
                     .fontSize(this.fs(13))
                     .fontColor(this.pal().text2)
+                  Text(this.tr('对话全程加密，远程操作受 DeepSeek Harness 权限控制。'))
+                    .fontSize(this.fs(11))
+                    .fontColor(this.pal().text3)
+                    .textAlign(TextAlign.Center)
+                    .width('100%')
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                   if (this.runtime.prompts.length > 0) {
                     ForEach(this.runtime.prompts.slice(0, 3), (item: string) => {
                       Text(item)
@@ -7065,13 +7101,30 @@ struct Index {
     this.messageActionsOpen = true;
   }
 
-  /** 点开一个文件：PDF 交给系统 PDF Kit，其它按文本预览。 */
+  private releasePdfPreview(): void {
+    ++this.pdfRequest;
+    this.pdfController?.releaseDocument();
+    this.pdfController = undefined;
+    this.pdfPage = 0;
+    this.pdfPages = 0;
+    this.pdfZoom = 1;
+  }
+
+  private closeFilePreview(): void {
+    this.filePreviewOpen = false;
+    if (this.previewIsPdf) {
+      this.releasePdfPreview();
+      this.runtime.filePreviewLoading = false;
+    }
+  }
+
+  /** PDF 交给系统 PDF Kit，其它文件按文本预览。 */
   private openFilePreview(path: string): void {
-    const lower: string = path.toLowerCase();
-    const isPdf: boolean = lower.endsWith('.pdf');
-    this.previewIsPdf = isPdf;
+    this.releasePdfPreview();
+    const request: number = this.pdfRequest;
+    this.previewIsPdf = path.toLowerCase().endsWith('.pdf');
     this.pdfError = '';
-    if (!isPdf) {
+    if (!this.previewIsPdf) {
       this.runtime.previewFile(path);
       return;
     }
@@ -7079,18 +7132,72 @@ struct Index {
     this.runtime.filePreviewLoading = true;
     this.runtime.filePreviewError = '';
     this.runtime.notify();
-    this.runtime.readFileBuffer(path).then((buffer: ArrayBuffer) => {
-      const controller: pdfViewManager.PdfController = this.pdfController ?? new pdfViewManager.PdfController();
-      this.pdfController = controller;
-      return controller.loadDocumentFromMemory(buffer);
-    }).then(() => {
+    this.runtime.readFileBuffer(path).then(async (buffer: ArrayBuffer) => {
+      if (request !== this.pdfRequest) {
+        return;
+      }
+      const controller: pdfViewManager.PdfController = new pdfViewManager.PdfController();
+      try {
+        const result: pdfService.ParseResult = await controller.loadDocumentFromMemory(buffer);
+        if (request !== this.pdfRequest || result !== pdfService.ParseResult.PARSE_SUCCESS) {
+          if (request !== this.pdfRequest) {
+            controller.releaseDocument();
+            return;
+          }
+          throw new Error(String(result));
+        }
+        controller.setPageContinuous(false);
+        controller.setDisplayDirection(pdfViewManager.DisplayDirection.HORIZONTAL);
+        controller.registerPageChangedListener((page: number) => {
+          if (request === this.pdfRequest) this.pdfPage = page;
+        });
+        controller.registerScaleChangedListener((zoom: number) => {
+          if (request === this.pdfRequest) this.pdfZoom = zoom;
+        });
+        this.pdfPages = controller.getPageCount();
+        this.pdfPage = controller.getPageIndex();
+        this.pdfZoom = controller.getPageZoom();
+        this.pdfController = controller;
+      } catch (error) {
+        controller.releaseDocument();
+        throw new Error(errorMessage(error));
+      }
       this.runtime.filePreviewLoading = false;
       this.runtime.notify();
     }).catch((error: Error) => {
+      if (request !== this.pdfRequest) return;
       this.pdfError = error.message;
       this.runtime.filePreviewLoading = false;
       this.runtime.notify();
     });
+  }
+
+  private turnPdfPage(delta: number): void {
+    const page: number = this.pdfPage + delta;
+    if (page >= 0 && page < this.pdfPages) {
+      this.pdfController?.goToPage(page);
+    }
+  }
+
+  private zoomPdf(factor: number): void {
+    const controller: pdfViewManager.PdfController | undefined = this.pdfController;
+    if (controller !== undefined) {
+      controller.setPageZoom(Math.max(0.1, Math.min(10, controller.getPageZoom() * factor)));
+    }
+  }
+
+  @Builder
+  PdfTool(symbol: string, label: string, enabled: boolean, action: () => void) {
+    Button(symbol, { type: ButtonType.Normal })
+      .width(56)
+      .height(48)
+      .fontSize(24)
+      .fontColor(this.pal().text)
+      .backgroundColor(Color.Transparent)
+      .opacity(enabled ? 1 : 0.36)
+      .accessibilityText(this.tr(label))
+      .enabled(enabled)
+      .onClick(action)
   }
 
   private copyActionText(): void {
@@ -7322,7 +7429,7 @@ struct Index {
         .height('100%')
         .backgroundColor(this.pal().backdrop)
         .onClick(() => {
-          this.filePreviewOpen = false;
+          this.closeFilePreview();
         })
       Column({ space: 8 }) {
         Row({ space: 10 }) {
@@ -7333,11 +7440,13 @@ struct Index {
               .fontColor(this.pal().text)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.runtime.filePreviewPath)
-              .fontSize(this.fs(10))
-              .fontColor(this.pal().text3)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (!this.previewIsPdf) {
+              Text(this.runtime.filePreviewPath)
+                .fontSize(this.fs(10))
+                .fontColor(this.pal().text3)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
@@ -7348,7 +7457,7 @@ struct Index {
             .backgroundColor(this.pal().chip)
             .borderRadius(9)
             .onClick(() => {
-              this.filePreviewOpen = false;
+              this.closeFilePreview();
             })
         }
         .width('100%')
@@ -7365,10 +7474,23 @@ struct Index {
           }
           .padding({ top: 12, bottom: 12 })
         } else if (this.previewIsPdf && this.pdfError.length === 0 && this.pdfController !== undefined) {
+          Row() {
+            Row() {
+              this.PdfTool('‹', '上一页', this.pdfPage > 0, () => { this.turnPdfPage(-1); })
+              Text(`${this.pdfPage + 1} / ${this.pdfPages}`)
+                .fontSize(this.fs(12))
+                .fontColor(this.pal().text2)
+              this.PdfTool('›', '下一页', this.pdfPage + 1 < this.pdfPages, () => { this.turnPdfPage(1); })
+            }
+            .layoutWeight(1)
+            this.PdfTool('−', '缩小', this.pdfZoom > 0.1, () => { this.zoomPdf(0.8); })
+            this.PdfTool('+', '放大', this.pdfZoom < 10, () => { this.zoomPdf(1.25); })
+          }
+          .width('100%')
           PdfView({
             controller: this.pdfController,
             pageLayout: pdfService.PageLayout.LAYOUT_SINGLE,
-            isContinuous: true,
+            isContinuous: false,
             showScroll: true,
             pageFit: pdfService.PageFit.FIT_WIDTH
           })

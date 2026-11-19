@@ -5,6 +5,7 @@ import type {
   AgentBackend,
   ApprovalActivity,
   AskUserQuestionItem,
+  ChatImage,
   ChatItem,
   ChatMessage,
   HistoryEntry,
@@ -15,6 +16,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import { foldHistory } from '../state/event-reducer'
+import { insertTerminalLocalMessages, isTerminalLocalMessage } from '../state/message-helpers'
 
 export function acpWorkspaceId(backend: AcpManagedBackend, path: string): string {
   return `${backend}:cwd:${encodeURIComponent(path)}`
@@ -150,9 +152,10 @@ export async function readAcpHistory(
   client: AgentAcpClient,
   sessionId: string,
   backend: AgentBackend,
+  signal?: AbortSignal,
 ): Promise<{ events: unknown[]; modes?: { currentModeId?: string; availableModes?: Array<{ id: string; name?: string; description?: string }> }; availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>; permissionPreset?: string }> {
   if (typeof client.loadSessionDetails === 'function') {
-    const details = await client.loadSessionDetails(sessionId, backend)
+    const details = await client.loadSessionDetails(sessionId, backend, signal)
     return {
       events: details.events,
       ...(details.modes !== undefined ? { modes: details.modes } : {}),
@@ -160,7 +163,7 @@ export async function readAcpHistory(
       ...(details.permissionPreset !== undefined ? { permissionPreset: details.permissionPreset } : {}),
     }
   }
-  const events = await client.loadSessionHistory(sessionId, backend)
+  const events = await client.loadSessionHistory(sessionId, backend, signal)
   return { events }
 }
 
@@ -464,7 +467,8 @@ let acpTurnSeq = 0
 function activeAcpTurn(messages: ChatItem[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const item = messages[index]!
-    if ((item.kind === 'message' && item.role === 'user') || item.turnEnd !== undefined) return undefined
+    if (item.turnEnd !== undefined) return undefined
+    if (item.kind === 'message' && item.role === 'user' && item.nativeSeq !== undefined) return undefined
     if (item.turn?.startsWith('acp-live:')) return item.turn
   }
   return undefined
@@ -484,7 +488,6 @@ export async function createCursorWorkspaceSession(
   const session = createCursorSession({
     acpSessionId: created.sessionId,
     cwd: path,
-    title: workspace.title,
   })
   return {
     workspace: { ...workspace, sessionIds: [session.sessionId], updatedAt: new Date().toISOString() },
@@ -550,11 +553,33 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
  * globally dedupe identical answers (which may belong to separate turns).
  */
 export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): ChatItem[] {
+  const historyIds = new Set(history.map(item => item.id))
+  const terminalLocals: ChatItem[] = []
+  const nonTerminalLive: ChatItem[] = []
+  for (const item of live) {
+    if (isTerminalLocalMessage(item)) {
+      if (!historyIds.has(item.id)) terminalLocals.push(item)
+    } else {
+      nonTerminalLive.push(item)
+    }
+  }
+  const sameMessageImages = (a?: ChatImage[], b?: ChatImage[]): boolean => {
+    const left = a ?? []
+    const right = b ?? []
+    if (left.length !== right.length) return false
+    return left.every((img, idx) => {
+      const other = right[idx]!
+      if (img.attachmentId !== undefined && other.attachmentId !== undefined) {
+        return img.attachmentId === other.attachmentId
+      }
+      return true
+    })
+  }
   const same = (a: ChatItem, b: ChatItem): boolean => {
     if (a.kind !== b.kind) return false
     if (a.kind === 'message' && b.kind === 'message') {
       return a.role === b.role && a.text === b.text && (a.reasoning ?? '') === (b.reasoning ?? '')
-        && a.images === undefined && b.images === undefined
+        && sameMessageImages(a.images, b.images)
     }
     if (a.kind === 'tool' && b.kind === 'tool') {
       // ACP live tool IDs contain a local turn prefix; history uses the call ID.
@@ -562,31 +587,46 @@ export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): C
     }
     return a.id === b.id
   }
-  for (let count = Math.min(history.length, live.length); count > 0; count--) {
+  for (let count = Math.min(history.length, nonTerminalLive.length); count > 0; count--) {
     const suffix = history.slice(history.length - count)
-    // Text alone is not identity: two independent turns can say the same thing.
-    // Require a shared ID or a tool call anchor before collapsing an overlap.
-    const anchored = live.slice(0, count).some((item, index) => {
+    const slice = nonTerminalLive.slice(0, count)
+    // Text alone is not identity: two independent assistant replies can say the
+    // same thing. Require a shared ID, a tool call anchor, a local optimistic
+    // user prompt matching the history suffix, or a full user+assistant turn.
+    const anchored = slice.some((item, index) => {
       const previous = suffix[index]!
-      return previous.id === item.id || (previous.kind === 'tool' && item.kind === 'tool' && same(previous, item))
-    })
-    if (anchored && live.slice(0, count).every((item, index) => same(suffix[index]!, item))) {
+      return previous.id === item.id
+        || (previous.kind === 'tool' && item.kind === 'tool' && same(previous, item))
+        || (previous.kind === 'message' && item.kind === 'message' && previous.role === 'user' && item.id.startsWith('local:'))
+    }) || (
+      count >= 2
+      && slice.some((item, index) => suffix[index]!.kind === 'message' && item.kind === 'message' && item.role === 'user')
+      && slice.some((item, index) => suffix[index]!.kind === 'message' && item.kind === 'message' && item.role === 'assistant')
+    )
+    if (anchored && slice.every((item, index) => same(suffix[index]!, item))) {
       // Prefer live rows at the boundary: preserve completion/stream state and
       // keep their IDs so subsequent chunks update rather than duplicate them.
-      const overlap = live.slice(0, count).map((item, index) => {
+      const overlap = slice.map((item, index) => {
         const previous = suffix[index]!
         const nativeTime = item.nativeTime ?? previous.nativeTime
-        return item.kind === 'tool' && previous.kind === 'tool'
-          ? { ...previous, ...item,
-              state: item.state === 'running' && previous.state !== 'running' ? previous.state : item.state,
-              arguments: item.arguments ?? previous.arguments,
-              callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
-          : nativeTime === undefined ? item : { ...item, nativeTime }
+        if (item.kind === 'tool' && previous.kind === 'tool') {
+          return { ...previous, ...item,
+            state: item.state === 'running' && previous.state !== 'running' ? previous.state : item.state,
+            arguments: item.arguments ?? previous.arguments,
+            callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
+        }
+        if (item.kind === 'message' && previous.kind === 'message'
+          && previous.images !== undefined && previous.images.length > 0
+          && (item.images === undefined || !item.images.some(img => img.attachmentId !== undefined || img.uri?.startsWith('data:')))) {
+          return { ...item, ...(nativeTime === undefined ? {} : { nativeTime }), images: previous.images }
+        }
+        return nativeTime === undefined ? item : { ...item, nativeTime }
       })
-      return [...history.slice(0, history.length - count), ...overlap, ...live.slice(count)]
+      const merged = [...history.slice(0, history.length - count), ...overlap, ...nonTerminalLive.slice(count)]
+      return insertTerminalLocalMessages(merged, terminalLocals)
     }
   }
-  return [...history, ...live]
+  return insertTerminalLocalMessages([...history, ...nonTerminalLive], terminalLocals)
 }
 
 /** Fold Host ACP transcript events into the Android chat projection. */

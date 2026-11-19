@@ -2034,7 +2034,7 @@ If a code was sent, recover the original submission without changing it.`,
     acpAvailable: "ACP available",
     acpUnavailable: "ACP unavailable",
     agentBackends: "More Coding Agents",
-    acpDocumentation: "Read the documentation.",
+    acpDocumentation: "Read the documentation",
     acpHint: "Connect through ACP. ",
     acpCheckPassed: "Check passed",
     acpCheckFailed: "Check failed",
@@ -2429,13 +2429,13 @@ If a code was sent, recover the original submission without changing it.`,
     acpAvailable: "ACP \u53EF\u7528",
     acpUnavailable: "ACP \u4E0D\u53EF\u7528",
     agentBackends: "\u66F4\u591A Coding Agent",
-    acpDocumentation: "\u8BE6\u7EC6\u8BF7\u67E5\u9605\u3002",
+    acpDocumentation: "\u8BE6\u7EC6\u8BF7\u67E5\u9605",
     acpHint: "\u901A\u8FC7 ACP \u7EDF\u4E00\u63A5\u5165\uFF0C",
     acpCheckPassed: "\u68C0\u6D4B\u901A\u8FC7",
     acpCheckFailed: "\u68C0\u6D4B\u5931\u8D25",
     installOrConfigureAcp: "\u4E00\u952E\u914D\u7F6E/\u5B89\u88C5",
-    configureAcp: "\u81EA\u52A8\u626B\u63CF\u914D\u7F6E",
-    installAcp: "\u4E00\u952E\u5B89\u88C5\u914D\u7F6E",
+    configureAcp: "\u626B\u63CF\u914D\u7F6E",
+    installAcp: "\u5B89\u88C5\u914D\u7F6E",
     installingAcp: "\u6B63\u5728\u914D\u7F6E\u2026",
     acpConfiguredNotice: "\u5DF2\u81EA\u52A8\u5B9A\u4F4D\u5E76\u542F\u7528 ACP \u540E\u7AEF\u3002",
     acpInstalledNotice: "\u5DF2\u5B8C\u6210\u9759\u9ED8\u5B89\u88C5\u5E76\u81EA\u52A8\u542F\u7528\u3002",
@@ -2823,7 +2823,7 @@ If a code was sent, recover the original submission without changing it.`,
     acpAvailable: "ACP \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     acpUnavailable: "ACP \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",
     agentBackends: "\u0414\u0440\u0443\u0433\u0438\u0435 \u0430\u0433\u0435\u043D\u0442\u044B \u0434\u043B\u044F \u043A\u043E\u0434\u0430",
-    acpDocumentation: "\u041F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435 \u0432 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438.",
+    acpDocumentation: "\u041F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435 \u0432 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u0438",
     acpHint: "\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0447\u0435\u0440\u0435\u0437 ACP. ",
     acpCheckPassed: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u0430",
     acpCheckFailed: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u0430",
@@ -3217,7 +3217,7 @@ If a code was sent, recover the original submission without changing it.`,
     acpAvailable: "ACP \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439",
     acpUnavailable: "ACP \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0438\u0439",
     agentBackends: "\u0406\u043D\u0448\u0456 \u0430\u0433\u0435\u043D\u0442\u0438 \u0434\u043B\u044F \u043A\u043E\u0434\u0443\u0432\u0430\u043D\u043D\u044F",
-    acpDocumentation: "\u041E\u0437\u043D\u0430\u0439\u043E\u043C\u0442\u0435\u0441\u044F \u0437 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0456\u0454\u044E.",
+    acpDocumentation: "\u041E\u0437\u043D\u0430\u0439\u043E\u043C\u0442\u0435\u0441\u044F \u0437 \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0456\u0454\u044E",
     acpHint: "\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044F \u0447\u0435\u0440\u0435\u0437 ACP. ",
     acpCheckPassed: "\u041F\u0435\u0440\u0435\u0432\u0456\u0440\u043A\u0443 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E",
     acpCheckFailed: "\u041F\u0435\u0440\u0435\u0432\u0456\u0440\u043A\u0443 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E",
@@ -3910,7 +3910,15 @@ If a code was sent, recover the original submission without changing it.`,
   var sidebarEntryChoices = [
     { value: "standard", label: "sidebarEntryStandard" },
     { value: "compact", label: "sidebarEntryCompact" }
-  ];
+  ], BUILTIN_ACP_LABELS = {
+    codex: "CodeX",
+    cursor: "Cursor",
+    antigravity: "AGY",
+    claude: "Claude",
+    pi: "Pi",
+    opencode: "OpenCode",
+    hermes: "Hermes"
+  }, BUILTIN_ACP_SCAN_ONLY = /* @__PURE__ */ new Set(["cursor", "antigravity", "hermes"]);
   function createRemotePluginOptions(React) {
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React);
     function RemotePluginOptions(props) {
@@ -3920,7 +3928,7 @@ If a code was sent, recover the original submission without changing it.`,
         subscribeStatus,
         getStatusSnapshot,
         getStatusSnapshot
-      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpDiagnostics, setAcpDiagnostics] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [newAcpId, setNewAcpId] = React.useState(""), [newAcpCommand, setNewAcpCommand] = React.useState(""), [newAcpArgs, setNewAcpArgs] = React.useState("acp"), [addingAcp, setAddingAcp] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
+      ), [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [savingServer, setSavingServer] = React.useState(!1), [editingServer, setEditingServer] = React.useState(!1), serverDraftEdited = React.useRef(!1), [remoteToolsBusy, setRemoteToolsBusy] = React.useState(!1), [remoteToolsEnabled, setRemoteToolsEnabled] = React.useState(!0), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [debugBusy, setDebugBusy] = React.useState(!1), [debugLogging, setDebugLogging] = React.useState(!1), [logsOpen, setLogsOpen] = React.useState(!1), [logsFilter, setLogsFilter] = React.useState("all"), [logsLoading, setLogsLoading] = React.useState(!1), [logsClearing, setLogsClearing] = React.useState(!1), [logsSnapshot, setLogsSnapshot] = React.useState(void 0), [logsError, setLogsError] = React.useState(void 0), [logsCopyState, setLogsCopyState] = React.useState("idle"), logsRequestRun = React.useRef(0), logsCopyTimer = React.useRef(void 0), logsViewportRef = React.useRef(null), [resetBusy, setResetBusy] = React.useState(!1), [retryStartupBusy, setRetryStartupBusy] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [sidebarEntry, setSidebarEntry] = React.useState(() => props.sidebarEntry?.read?.() ?? "standard"), [sidebarEntryBusy, setSidebarEntryBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpDiagnostics, setAcpDiagnostics] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpInstalling, setAcpInstalling] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [newAcpId, setNewAcpId] = React.useState(""), [newAcpCommand, setNewAcpCommand] = React.useState(""), [newAcpArgs, setNewAcpArgs] = React.useState("acp"), [addingAcp, setAddingAcp] = React.useState(!1), [addAcpFormOpen, setAddAcpFormOpen] = React.useState(!1), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), [signInOpen, setSignInOpen] = React.useState(!1), [loginEmail, setLoginEmail] = React.useState(""), [loginPassword, setLoginPassword] = React.useState(""), [loginMethod, setLoginMethod] = React.useState("password"), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [pairingServerUrl, setPairingServerUrl] = React.useState(void 0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [qrFailed, setQrFailed] = React.useState(!1), [qrBusy, setQrBusy] = React.useState(!1), [qrCompleted, setQrCompleted] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [completionReload, setCompletionReload] = React.useState(0), qrFlowRun = React.useRef(0), providerRequestRun = React.useRef(0), loginMethodManuallySelected = React.useRef(!1), associationReadRun = React.useRef(0), association = associations.client ?? associations.host;
       React.useEffect(() => {
         association !== void 0 && setSignInOpen(!1);
       }, [association]);
@@ -4153,7 +4161,7 @@ If a code was sent, recover the original submission without changing it.`,
           setAddingAcp(!0), setError(void 0);
           try {
             let view = await props.control("settings.acp.add", { id, command, args, enabled: !0 });
-            applyView(view), setNewAcpId(""), setNewAcpCommand(""), setNewAcpArgs("acp"), setNotice({ key: "acpAddedNotice" });
+            applyView(view), setNewAcpId(""), setNewAcpCommand(""), setNewAcpArgs("acp"), setAddAcpFormOpen(!1), setNotice({ key: "acpAddedNotice" });
           } catch (reason) {
             setError(messageOf(reason, t));
           } finally {
@@ -4281,12 +4289,28 @@ If a code was sent, recover the original submission without changing it.`,
             React.createElement(
               "div",
               { className: "dshRemoteDebugLogControls" },
-              React.createElement("button", {
-                type: "button",
-                className: "dshRemoteLogToggleBtn",
-                "aria-expanded": logsOpen,
-                onClick: toggleLogsDrawer
-              }, logsOpen ? t("debugLogsToggleClose") + " \u25B4" : t("debugLogsToggleOpen") + " \u25BE"),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "dshRemoteLogToggleBtn",
+                  "aria-expanded": logsOpen,
+                  onClick: toggleLogsDrawer
+                },
+                React.createElement("span", null, t(logsOpen ? "debugLogsToggleClose" : "debugLogsToggleOpen")),
+                React.createElement("svg", {
+                  className: "dshRemoteLogToggleChevron",
+                  viewBox: "0 0 16 16",
+                  width: 14,
+                  height: 14,
+                  fill: "none",
+                  stroke: "currentColor",
+                  strokeWidth: 1.75,
+                  strokeLinecap: "round",
+                  strokeLinejoin: "round",
+                  "aria-hidden": !0
+                }, React.createElement("path", { d: "M4 6l4 4 4-4" }))
+              ),
               React.createElement("input", {
                 type: "checkbox",
                 role: "switch",
@@ -4479,7 +4503,7 @@ If a code was sent, recover the original submission without changing it.`,
           disabled: sidebarEntryBusy || !writable,
           onClick: () => void setSidebarEntryStyle(choice.value)
         }, t(choice.label))))
-      ), acpSetting = React.createElement(
+      ), acpEnabledCount = settingsView?.config.acp?.enabled === !0 ? acpBackends.filter((item) => item.enabled && acpAvailability[item.id] === !0).length : 0, acpSummaryCount = acpBackends.length > 0 ? `${acpEnabledCount}/${acpBackends.length}` : void 0, acpDocEndPunctuation = t("acpHint").includes("\uFF0C") ? "\u3002" : ".", acpSetting = React.createElement(
         "details",
         { className: "dshRemoteAuthorizationSetting dshRemoteAcpSetting" },
         React.createElement(
@@ -4489,71 +4513,97 @@ If a code was sent, recover the original submission without changing it.`,
             "div",
             { className: "dshRemoteAcpSummaryText" },
             React.createElement("strong", null, t("agentBackends")),
-            React.createElement("p", null, t("acpHint"), React.createElement("a", {
-              href: "https://github.com/liguobao/ds-harness-remote/blob/feat/cursor-remote/docs/acp-remote.md",
-              target: "_blank",
-              rel: "noopener noreferrer",
-              onClick: (event) => event.stopPropagation()
-            }, t("acpDocumentation")))
+            React.createElement(
+              "p",
+              null,
+              t("acpHint"),
+              React.createElement("a", {
+                className: "dshRemoteDocLink",
+                href: "https://github.com/liguobao/ds-harness-remote/blob/main/docs/acp-remote.md",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                onClick: (event) => event.stopPropagation()
+              }, t("acpDocumentation")),
+              acpDocEndPunctuation
+            )
+          ),
+          React.createElement(
+            "span",
+            { className: "dshRemoteAcpSummaryMeta" },
+            acpSummaryCount === void 0 ? null : React.createElement("span", { className: "dshRemoteAcpCountText" }, acpSummaryCount),
+            React.createElement(
+              "span",
+              { className: "dshRemoteAcpChevron", "aria-hidden": !0 },
+              React.createElement("svg", {
+                viewBox: "0 0 16 16",
+                width: 16,
+                height: 16,
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: 1.75,
+                strokeLinecap: "round",
+                strokeLinejoin: "round"
+              }, React.createElement("path", { d: "M4 6l4 4 4-4" }))
+            )
           )
         ),
-        React.createElement("div", { className: "dshRemoteAcpList" }, acpBackends.map((item) => {
-          let diag = acpDiagnostics?.[item.id];
+        acpBackends.length === 0 ? null : React.createElement("div", { className: "dshRemoteAcpList" }, acpBackends.map((item) => {
+          let diag = acpDiagnostics?.[item.id], isBuiltin = Object.prototype.hasOwnProperty.call(BUILTIN_ACP_LABELS, item.id), displayName = BUILTIN_ACP_LABELS[item.id] ?? item.id, available = acpAvailability[item.id] === !0, checking = acpChecking[item.id] === !0, installing = acpInstalling[item.id] === !0, checkResult = acpCheckResults[item.id], showConfigure = writable && !busy && !available && isBuiltin, statusMeta = checking ? { cls: " isChecking", label: t("checkingAcp") } : checkResult !== void 0 ? { cls: checkResult ? " isPassed" : " isFailed", label: t(checkResult ? "acpCheckPassed" : "acpCheckFailed") } : void 0, diagDetail = diag && (diag.auth.authStatus === "auth_required" || diag.state === "unavailable") ? [
+            diag.auth.authStatus === "auth_required" ? `${t("acpAuthRequired")}: ` : "",
+            diag.auth.guidance ?? diag.errorCode ?? "",
+            diag.auth.loginCommand ? ` \xB7 ${t("acpLoginCommand", { command: diag.auth.loginCommand })}` : ""
+          ].join("").replace(/^ · /, "").trim() : "";
           return React.createElement(
             "div",
             { key: item.id, className: "dshRemoteAcpRow" },
             React.createElement(
               "div",
-              { className: "dshRemoteAuthorizationSetting" },
-              React.createElement("div", null, React.createElement("strong", null, item.id === "codex" ? "CodeX" : item.id === "cursor" ? "Cursor" : item.id === "antigravity" ? "AGY" : item.id === "claude" ? "Claude" : item.id === "pi" ? "Pi" : item.id === "opencode" ? "OpenCode" : item.id === "hermes" ? "Hermes" : item.id), null),
+              { className: "dshRemoteAcpRowMain" },
               React.createElement(
-                "span",
-                { className: "dshRemoteAcpCheckCell" },
-                // One entry per backend: while the command is unresolved this slot is
-                // the fix (scan / install), once it resolves it turns back into the
-                // read-only availability check. Keeping both visible at once made the
-                // row read as two competing actions.
-                writable && !busy && acpAvailability[item.id] !== !0 && ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id) ? React.createElement("a", {
-                  href: `#install-acp-${item.id}`,
-                  className: `dshRemoteAcpInstallLink${acpInstalling[item.id] ? " isInstalling" : ""}`,
-                  onClick: (event) => {
-                    event.preventDefault(), installOrConfigureAcp(item.id);
-                  }
-                }, acpInstalling[item.id] ? t("installingAcp") : ["cursor", "antigravity", "hermes"].includes(item.id) ? t("configureAcp") : t("installAcp")) : React.createElement(
-                  "a",
-                  { href: `#check-acp-${item.id}`, className: `dshRemoteAcpCheckLink${acpChecking[item.id] ? " isChecking" : acpCheckResults[item.id] === void 0 ? "" : acpCheckResults[item.id] ? " isPassed" : " isFailed"}`, onClick: (event) => {
-                    event.preventDefault(), checkAcp(item.id);
-                  } },
-                  acpChecking[item.id] ? t("checkingAcp") : acpCheckResults[item.id] === void 0 ? t("checkAcp") : t(acpCheckResults[item.id] ? "acpCheckPassed" : "acpCheckFailed")
-                )
+                "div",
+                { className: "dshRemoteAcpRowInfo" },
+                React.createElement("strong", { className: "dshRemoteAcpName" }, displayName),
+                statusMeta === void 0 ? null : React.createElement("span", { className: `dshRemoteAcpStatus${statusMeta.cls}` }, statusMeta.label)
               ),
-              ["codex", "cursor", "antigravity", "pi", "claude", "opencode", "hermes"].includes(item.id) ? null : React.createElement("a", { href: `#remove-acp-${item.id}`, className: "dshRemoteAcpRemoveLink", onClick: (event) => {
-                event.preventDefault(), removeAcp(item.id);
-              } }, t("removeAcp")),
+              React.createElement(
+                "div",
+                { className: "dshRemoteAcpRowActions" },
+                isBuiltin ? null : React.createElement("button", {
+                  type: "button",
+                  className: "dshRemoteAcpRemoveBtn",
+                  disabled: busy || !writable,
+                  onClick: () => void removeAcp(item.id)
+                }, t("removeAcp")),
+                showConfigure ? React.createElement("button", {
+                  type: "button",
+                  className: `dshRemoteAcpActionBtn isConfigure${installing ? " isInstalling" : ""}`,
+                  disabled: installing,
+                  onClick: () => void installOrConfigureAcp(item.id)
+                }, installing ? t("installingAcp") : BUILTIN_ACP_SCAN_ONLY.has(item.id) ? t("configureAcp") : t("installAcp")) : React.createElement("button", {
+                  type: "button",
+                  className: `dshRemoteAcpActionBtn${checking ? " isChecking" : ""}`,
+                  disabled: checking,
+                  onClick: () => void checkAcp(item.id)
+                }, t(checking ? "checkingAcp" : "checkAcp"))
+              ),
               React.createElement("input", {
                 type: "checkbox",
                 role: "switch",
-                checked: settingsView?.config.acp?.enabled === !0 && item.enabled && acpAvailability[item.id] === !0,
+                className: "dshRemoteSwitch",
+                checked: settingsView?.config.acp?.enabled === !0 && item.enabled && available,
                 "aria-label": item.id,
-                disabled: busy || !writable || acpChecking[item.id] === !0 || acpAvailability[item.id] !== !0,
+                disabled: busy || !writable || checking || !available,
                 onChange: (event) => void props.control("settings.acp.set", { backend: item.id, enabled: event.target.checked }).then((view) => {
                   applyView(view), setAcpBackends((view.config.acp?.backends ?? []).map((v) => ({ id: v.id, enabled: v.enabled !== !1 })));
                 }).catch((reason) => setError(messageOf(reason, t)))
               })
             ),
-            diag && (diag.auth.authStatus === "auth_required" || diag.state === "unavailable") ? React.createElement(
-              "p",
-              { className: "dshRemoteSettingsState", role: "status" },
-              diag.auth.authStatus === "auth_required" ? `${t("acpAuthRequired")}: ` : "",
-              diag.auth.guidance ?? diag.errorCode ?? "",
-              diag.auth.loginCommand ? ` \xB7 ${t("acpLoginCommand", { command: diag.auth.loginCommand })}` : ""
-            ) : null
+            diagDetail === "" ? null : React.createElement("p", { className: "dshRemoteAcpDiag", role: "status" }, diagDetail)
           );
         })),
-        writable ? React.createElement(
+        writable ? addAcpFormOpen ? React.createElement(
           "div",
           { className: "dshRemoteAcpAddForm" },
-          React.createElement("strong", null, t("addCustomAcp")),
           React.createElement(
             "div",
             { className: "dshRemoteAcpAddInputs" },
@@ -4585,9 +4635,20 @@ If a code was sent, recover the original submission without changing it.`,
               type: "button",
               disabled: busy || addingAcp || newAcpId.trim() === "" || newAcpCommand.trim() === "",
               onClick: () => void addCustomAcp()
-            }, t("addAcp"))
+            }, t("addAcp")),
+            React.createElement("button", {
+              type: "button",
+              className: "isGhost",
+              disabled: addingAcp,
+              onClick: () => setAddAcpFormOpen(!1)
+            }, t("cancelServiceAddressEdit"))
           )
-        ) : null
+        ) : React.createElement("button", {
+          type: "button",
+          className: "dshRemoteAcpAddTrigger",
+          disabled: busy,
+          onClick: () => setAddAcpFormOpen(!0)
+        }, `+ ${t("addCustomAcp")}`) : null
       );
       if (props.view === "summary") return React.createElement("span", null, t("pluginDescription"));
       let orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), passwordVisible = !savingServer && !serverDirty && loginMethod === "password" && (loginMethodManuallySelected.current || !providersLoading && oauthProviders.length === 0), qrLoginTab = (provider) => React.createElement("button", {
@@ -5061,18 +5122,21 @@ If a code was sent, recover the original submission without changing it.`,
       // The official sidebar.footer.action slot owns the surrounding layout.
       // Style only our entry so other footer actions, usage and Settings keep
       // their host-defined geometry, including third-party sidebar variants.
-      // Match native workspace rows: 8px inset, 16px icon slot and 6px label gap.
-      ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:36px;margin:0}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;justify-content:flex-start;gap:6px;padding:0 8px;border-radius:8px;font:inherit;font-size:14px;line-height:20px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
+      // Match the shared footer capacity contract (see `footer-lane.ts`): one
+      // 42px labelled row per occupant while the row can hold 112px of label per
+      // seat, otherwise the 36x36 icon target. Both use the host's 12px radius,
+      // 9px inline paint inset and a 2px inline margin (4px between neighbours).
+      ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block;margin:4px 2px}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:var(--dsw-radius-md,12px)}.dshRemoteSidebarEntry.isWide{flex:0 1 auto;width:fit-content;min-width:36px;max-width:100%;height:42px}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:auto;max-width:100%;min-width:0;height:42px;justify-content:flex-start;gap:var(--dsh-sidebar-label-gap,6px);padding:0 calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px));border-inline:var(--dsh-sidebar-paint-inset,3px) solid transparent;background-clip:padding-box;border-radius:var(--dsw-radius-md,12px);font:inherit;font-size:14px;line-height:22px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:36px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
       ".dshRemoteSidebarEntry.isWide.isActive .dshRemoteSidebarLabel{max-width:170px}",
       ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-secondary)}.dshRemoteSidebarEntry.isWide .dshRemoteComputerIcon{width:16px;height:16px;flex-basis:16px}",
       // Compact entry: the same button portalled to the end of the host account row.
       ".dshRemoteAccountEntry{display:inline-flex;align-items:center;flex:none}.dshRemoteAccountEntry .dshRemoteAccountEntryButton{box-sizing:border-box;width:26px;height:26px;min-width:26px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}.dshRemoteAccountEntry .dshRemoteAccountEntryButton:disabled{opacity:.45;cursor:default}.dshRemoteAccountEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}",
       // Segmented control for the entry style; scoped through the group because the
       // page body rule for bare buttons outranks a single class.
-      ".dshRemoteEntryStyleChoices{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3)}.dshRemoteEntryStyleChoices>button{box-sizing:border-box;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;padding:3px 10px;border-radius:6px;white-space:nowrap;cursor:pointer}.dshRemoteEntryStyleChoices>button:hover:not(:disabled):not(.isSelected){color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button.isSelected{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteEntryStyleChoices>button:disabled{opacity:.45;cursor:default}",
+      ".dshRemoteEntryStyleChoices{box-sizing:border-box;height:30px;flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3)}.dshRemoteEntryStyleChoices>button{box-sizing:border-box;height:24px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;font-weight:500;line-height:1;padding:0 10px;border-radius:6px;white-space:nowrap;cursor:pointer;transition:color .14s,background .14s}.dshRemoteEntryStyleChoices>button:hover:not(:disabled):not(.isSelected){color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button.isSelected{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-shadow:0 1px 2px rgba(0,0,0,.12)}.dshRemoteEntryStyleChoices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteEntryStyleChoices>button:disabled{opacity:.45;cursor:default}",
       // Keep Exit in flow: an absolute action and reserved padding can overlap
       // the icon or adjacent plugins when the host shrinks this flex item.
-      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:8px}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
+      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px))}.dshRemoteSidebarEntry.isAccountRow{margin:0}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:42px;border:0;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:22px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
       // The strip sits inside the 40px Windows caption row, which the shell declares as the
       // window drag region. Without an explicit opt-out every press starts a window drag and
       // never reaches these buttons; the shell's own caption controls (sidebar toggle, new
@@ -5094,14 +5158,14 @@ If a code was sent, recover the original submission without changing it.`,
       // sidebar entry button (full width again, as before cab95ec) carries the
       // DesktopUpdateIndicator palette (8% brand fill, 20% brand border, 12px/500
       // suffix); icon-only rail/compact entries get the official 6px brand dot.
-      ".dshRemoteSidebarEntry.isWide.hasUpdate .dshRemoteModeButton{border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 20%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 8%,transparent);color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary));font-weight:500}.dshRemoteSidebarEntry .dshRemoteModeButton,.dshRemoteAccountEntry .dshRemoteAccountEntryButton{position:relative}.dshRemoteUpdateSuffix{flex:0 0 auto;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;font-weight:500}.dshRemoteUpdateDot{position:absolute;inset-inline-end:2px;top:2px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary))}",
+      ".dshRemoteSidebarEntry.isWide.hasUpdate .dshRemoteModeButton{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 20%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary)) 8%,transparent);color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary));font-weight:500}.dshRemoteSidebarEntry .dshRemoteModeButton,.dshRemoteAccountEntry .dshRemoteAccountEntryButton{position:relative}.dshRemoteUpdateSuffix{flex:0 0 auto;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;font-weight:500}.dshRemoteUpdateDot{position:absolute;inset-inline-end:2px;top:2px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary-new-colorprimary-new-color,var(--dsw-alias-brand-primary))}",
       ".dshRemoteSectionHeading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.dshRemoteSectionTitle{min-width:0;display:flex;align-items:center;gap:10px}.dshRemoteSectionTitle>strong{font-size:14px}.dshRemoteManageHosts{color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none;white-space:nowrap}.dshRemoteManageHosts:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteSectionActions{display:flex;align-items:center;gap:14px}.dshRemoteSectionActions>button{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px}.dshRemoteSectionActions>button:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}",
       ".dshRemoteSectionTitle{flex:1}.dshRemoteSectionTitle>.dshRemoteConnectedMenu{margin-left:auto}",
-      '.dshRemoteAcpSetting{display:block!important;width:100%;padding:0}.dshRemoteAcpSetting>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;cursor:pointer;list-style:none}.dshRemoteAcpSetting>summary::-webkit-details-marker{display:none}.dshRemoteAcpSetting>summary::after{content:"\u2304";color:var(--dsw-alias-label-secondary);transition:transform .18s ease-out}.dshRemoteAcpSetting[open]>summary::after{transform:rotate(180deg)}.dshRemoteAcpSummaryText{min-width:0}.dshRemoteAcpSummaryText strong{display:block}.dshRemoteAcpSummaryText p{margin:4px 0 0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.4}.dshRemoteAcpCheckLink{grid-column:2;grid-row:1;color:var(--dsw-alias-brand-primary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpCheckLink:hover{color:var(--dsw-alias-label-primary)}.dshRemoteAcpCheckResult{grid-column:3;grid-row:1;font-size:11px;line-height:1.4;white-space:nowrap}.dshRemoteAcpCheckResult.isPassed{color:var(--dsw-alias-state-success-primary)}.dshRemoteAcpCheckResult.isFailed{color:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpList{display:flex;flex-direction:column;gap:0;margin-top:12px;padding-top:0;border-top:0}.dshRemoteAcpList>.dshRemoteAuthorizationSetting{display:grid;width:100%;grid-template-columns:minmax(0,1fr) auto auto auto auto;align-items:center;column-gap:18px;line-height:1.4}.dshRemoteAcpList>.dshRemoteAuthorizationSetting>span:first-child{min-width:0;line-height:1.4}.dshRemoteAcpList>.dshRemoteAuthorizationSetting>input{grid-column:4;grid-row:1}',
-      ".dshRemoteAcpAddLink{align-self:flex-start;margin-top:12px;color:var(--dsw-alias-brand-primary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpAddForm{display:grid;grid-template-columns:minmax(100px,.8fr) minmax(140px,1fr) minmax(100px,1fr) auto;gap:8px;margin-top:12px}.dshRemoteAcpAddForm input{min-width:0;height:34px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-2);color:inherit;padding:0 10px}.dshRemoteAcpAddForm button{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);padding:0 12px;cursor:pointer;font:inherit;font-size:12px}.dshRemoteAcpAddForm button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAcpRemoveLink{grid-column:3;grid-row:1;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:underline;text-underline-offset:3px}.dshRemoteAcpRemoveLink:hover{color:var(--dsw-alias-state-danger-primary)}",
-      ".dshRemoteAcpCheckResult.isPassed,.dshRemoteAcpCheckResult.isFailed{color:var(--dsw-alias-label-secondary)}",
-      ".dshRemoteAcpList>.dshRemoteAuthorizationSetting{grid-template-columns:minmax(0,1fr) auto 40px 56px;column-gap:18px}.dshRemoteAcpCheckCell{grid-column:2;display:flex;align-items:center;gap:10px;min-width:0}.dshRemoteAcpCheckLink,.dshRemoteAcpRemoveLink{justify-self:start}.dshRemoteAcpCheckResult{position:static}",
-      ".dshRemoteAcpCheckLink.isPassed{color:var(--dsw-alias-state-success-primary)}.dshRemoteAcpCheckLink.isFailed{color:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpCheckLink.isChecking{color:var(--dsw-alias-label-secondary)}.dshRemoteAcpInstallLink{color:var(--dsw-alias-brand-primary);font-size:12px;text-decoration:underline;text-underline-offset:3px;cursor:pointer;white-space:nowrap}.dshRemoteAcpInstallLink.isInstalling{color:var(--dsw-alias-label-secondary);pointer-events:none}",
+      ".dshRemoteAcpSetting{display:block!important;width:100%}.dshRemoteAcpSetting>summary{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;cursor:pointer;list-style:none}.dshRemoteAcpSetting>summary::-webkit-details-marker{display:none}.dshRemoteAcpSummaryText{min-width:0;flex:1}.dshRemoteAcpSummaryText strong{display:block;line-height:1.45}.dshRemoteAcpSummaryText p{max-width:58ch;margin:4px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45}.dshRemoteDocLink{color:var(--dsw-alias-brand-primary);font-weight:500;text-decoration:none}.dshRemoteDocLink:hover{text-decoration:underline;text-underline-offset:3px}.dshRemoteDocLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;border-radius:3px}.dshRemoteAcpSummaryMeta{flex:0 0 auto;display:inline-flex;align-items:center;gap:10px}.dshRemoteAcpCountText{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary)}.dshRemoteAcpChevron{flex:0 0 auto;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);transition:transform .18s ease-out,color .15s}.dshRemoteAcpSetting>summary:hover .dshRemoteAcpChevron{color:var(--dsw-alias-label-primary)}.dshRemoteAcpSetting[open]>summary .dshRemoteAcpChevron{transform:rotate(180deg)}",
+      ".dshRemoteAcpList{display:flex;flex-direction:column;margin-top:10px;padding-left:16px;border-top:1px solid var(--dsw-alias-border-l3)}.dshRemoteAcpRow{display:flex;flex-direction:column;gap:4px;padding:10px 0}.dshRemoteAcpRow+.dshRemoteAcpRow{border-top:1px solid var(--dsw-alias-border-l3)}.dshRemoteAcpRowMain{display:grid;grid-template-columns:minmax(0,1fr) auto 38px;align-items:center;column-gap:16px;min-width:0}.dshRemoteAcpRowInfo{display:flex;align-items:center;gap:12px;min-width:0}.dshRemoteAcpName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;line-height:1.45;color:var(--dsw-alias-label-primary)}",
+      '.dshRemoteAcpStatus{display:inline-flex;align-items:center;gap:6px;min-width:0;font-size:12px;font-weight:400;line-height:1.45;color:var(--dsw-alias-label-tertiary);white-space:nowrap}.dshRemoteAcpStatus::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-dimmed);flex:0 0 auto}.dshRemoteAcpStatus.isPassed{color:var(--dsw-alias-label-secondary)}.dshRemoteAcpStatus.isPassed::before{background:var(--dsw-alias-state-success-primary)}.dshRemoteAcpStatus.isFailed{color:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpStatus.isFailed::before{background:var(--dsw-alias-state-danger-primary)}.dshRemoteAcpStatus.isChecking{color:var(--dsw-alias-label-secondary)}.dshRemoteAcpStatus.isChecking::before{background:var(--dsw-alias-brand-primary)}',
+      ".dshRemoteAcpRowActions{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;justify-self:end}.dshRemoteAcpActionBtn,.dshRemoteAcpRemoveBtn,.dshRemoteAcpAddTrigger{appearance:none;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;transition:color .14s,background .14s}.dshRemoteAcpActionBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAcpActionBtn.isConfigure{color:var(--dsw-alias-brand-primary)}.dshRemoteAcpActionBtn.isConfigure:hover:not(:disabled){color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}.dshRemoteAcpActionBtn:disabled,.dshRemoteAcpRemoveBtn:disabled,.dshRemoteAcpAddTrigger:disabled{opacity:.45;cursor:default}.dshRemoteAcpRemoveBtn{color:var(--dsw-alias-label-tertiary)}.dshRemoteAcpRemoveBtn:hover:not(:disabled){color:var(--dsw-alias-state-danger-primary);background:color-mix(in srgb,var(--dsw-alias-state-danger-primary) 10%,transparent)}",
+      ".dshRemoteAcpDiag{margin:0;font-size:12px;line-height:1.45;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}.dshRemoteAcpAddTrigger{margin-top:6px;margin-left:8px;align-self:flex-start;color:var(--dsw-alias-label-tertiary)}.dshRemoteAcpAddTrigger:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAcpAddForm{margin-top:8px;padding:12px 0 2px 16px;border-top:1px solid var(--dsw-alias-border-l3)}.dshRemoteAcpAddInputs{display:grid;grid-template-columns:minmax(90px,.85fr) minmax(130px,1.15fr) minmax(90px,.9fr) auto auto;gap:8px;align-items:center}.dshRemoteAcpAddInputs input{box-sizing:border-box;width:100%;min-width:0;height:32px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);padding:0 10px;font:inherit;font-size:12px}.dshRemoteAcpAddInputs input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteAcpAddInputs button{box-sizing:border-box;height:32px;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);padding:0 12px;cursor:pointer;font:inherit;font-size:12px;font-weight:500;white-space:nowrap;transition:border-color .15s,background .15s}.dshRemoteAcpAddInputs button.isGhost{border-color:transparent;color:var(--dsw-alias-label-tertiary)}.dshRemoteAcpAddInputs button:hover:not(:disabled){border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAcpAddInputs button.isGhost:hover:not(:disabled){border-color:transparent;color:var(--dsw-alias-label-primary)}.dshRemoteAcpAddInputs button:disabled{opacity:.45;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAcpChevron{transition:none}}",
       ".dshRemoteCancelWorkspace{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 0;cursor:pointer}.dshRemoteCancelWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteCancelWorkspace:disabled{opacity:.5;cursor:default}",
       ".dshRemoteHostLoading{display:flex;align-items:center;justify-content:center;gap:8px;position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap;color:var(--dsw-alias-label-secondary)}",
       '.dshRemoteHostList{display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2);max-height:296px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.dshRemoteHostList.isCollapsed{max-height:none;overflow-y:visible}.dshRemoteHostList>button{min-height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:10px 20px 10px 4px;cursor:pointer}.dshRemoteHostList>button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button:disabled{opacity:.5;cursor:default}.dshRemoteHostList>button[aria-current="true"]{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteHostList>button>span{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostList>button strong{font-size:14px;font-weight:500}.dshRemoteHostList small{color:var(--dsw-alias-label-secondary);font-size:12px}',
@@ -5113,7 +5177,7 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemotePage.hasSelectedHost>.dshRemotePageHeader{flex-shrink:0}.dshRemotePage.hasSelectedHost>.dshRemotePageBody{min-height:0;overflow:hidden}.dshRemotePage.hasSelectedHost .dshRemotePageBody>button,.dshRemotePage.hasSelectedHost .dshRemotePageBody>p{flex-shrink:0}.dshRemotePage.hasSelectedHost .dshRemoteBrowser{min-height:0;flex:1 1 auto}.dshRemoteBrowser>.dshRemoteWorkspaceHeading{flex-shrink:0}.dshRemoteWorkspaceLists,.dshRemoteFolderBrowser{min-height:0;overflow:auto;overscroll-behavior:contain;flex:1 1 auto}",
       ".dshRemoteDirectoryList{min-height:72px;display:flex;flex-direction:column;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteDirectoryList>button{min-height:52px;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;text-align:left;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:8px 4px;cursor:pointer}.dshRemoteDirectoryList>button:hover,.dshRemoteDirectoryList>button.isSelected{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteDirectoryList>button.isSelected{color:var(--dsw-alias-label-primary)}.dshRemoteDirectoryList>button>span:first-child,.dshRemoteDirectoryList>button>.dshRemoteWorkspaceIcon{grid-row:1/3}.dshRemoteWorkspaceIcon{box-sizing:border-box;width:22px;height:22px;align-self:center;object-fit:contain}.dshRemoteWorkspaceIcon.isGpt{border-radius:6px}.dshRemoteDirectoryList>button>span:not(:first-child),.dshRemoteDirectoryList>button>small{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteDirectoryList>button>small{grid-column:2;color:var(--dsw-alias-label-secondary)}.dshRemoteDirectoryList>p,.dshRemoteHint{margin:12px 0;color:var(--dsw-alias-label-secondary);font-size:13px}",
       ".dshRemoteAddWorkspace{box-sizing:border-box;width:40px;height:40px;display:inline-grid;place-items:center;flex:0 0 auto;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;cursor:pointer}.dshRemoteAddWorkspace:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteAddWorkspace:disabled{opacity:.5;cursor:default}.dshRemoteAddWorkspaceIcon{width:20px;height:20px}.dshRemoteCodexWorkspaceGroup{margin-top:16px}.dshRemoteWorkspaceSourceHeading{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 4px 7px}.dshRemoteWorkspaceSourceText{min-width:0;display:flex;flex-direction:column;gap:2px}.dshRemoteWorkspaceSourceText>strong{font-size:13px}.dshRemoteWorkspaceSourceText>small{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteCodexWorkspaceList{min-height:0}.dshRemoteDirectoryList>.dshRemoteWorkspaceMore,.dshRemoteCodexWorkspaceGroup>.dshRemoteWorkspaceMore{box-sizing:border-box;width:100%;min-height:48px;display:flex;align-items:center;justify-content:center;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);padding:8px 4px;text-align:center;font-size:16px;cursor:pointer}.dshRemoteWorkspaceMore>span{display:block;line-height:1;transform:translateY(-2px)}.dshRemoteWorkspaceMore:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:transparent}.dshRemoteWorkspaceMore:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteWorkspaceMore:disabled{opacity:.5;cursor:default}",
-      ".dshRemotePreviewAction,.dshRemotePreviewForm{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemotePreviewForm input{width:90px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);padding:6px}.dshRemotePreviewForm [role=alert]{max-width:360px;white-space:normal}.dshRemoteDevelopmentSettings{width:100%;margin:16px 0}.dshRemoteDevelopmentSettings .dshRemotePathField{display:flex;flex-direction:column;gap:6px;margin:8px 0}.dshRemoteDevelopmentSettings .dshRemotePathField>label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteDevelopmentSettings .dshRemotePortsRow{display:flex;gap:8px;align-items:stretch;width:100%}.dshRemoteDevelopmentSettings .dshRemotePortsRow>input{box-sizing:border-box;width:100%;flex:1;min-width:0;height:34px;border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit;font-size:13px;line-height:1.5}.dshRemoteDevelopmentSettings button{min-height:34px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;padding:5px 14px;white-space:nowrap;font-size:13px;line-height:1.5}.dshRemoteAcpAddForm>label{display:flex;min-width:0;flex-direction:column;gap:5px;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteAcpAddForm>label>input{box-sizing:border-box;width:100%;height:34px;border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);padding:0 12px;font:inherit;font-size:13px;line-height:1.5}",
+      ".dshRemotePreviewAction,.dshRemotePreviewForm{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemotePreviewForm input{width:90px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);padding:6px}.dshRemotePreviewForm [role=alert]{max-width:360px;white-space:normal}.dshRemoteDevelopmentSettings{width:100%;margin:0}.dshRemoteDevelopmentSettings .dshRemotePathField{display:flex;flex-direction:column;gap:6px;margin:8px 0}.dshRemoteDevelopmentSettings .dshRemotePathField>label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteDevelopmentSettings .dshRemotePortsRow{display:flex;gap:8px;align-items:stretch;width:100%}.dshRemoteDevelopmentSettings .dshRemotePortsRow>input{box-sizing:border-box;width:100%;flex:1;min-width:0;height:34px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit;font-size:13px;line-height:1.5}.dshRemoteDevelopmentSettings .dshRemotePortsRow>button{min-height:34px;color:inherit;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:5px 14px;white-space:nowrap;font-size:13px;line-height:1.5}",
       ".dshRemoteFolderBrowser{margin-top:14px}.dshRemoteFolderBrowser>p,.dshRemoteFolderList>p{margin:12px 0;color:var(--dsw-alias-label-secondary);font-size:13px}.dshRemoteFolderList{max-height:260px;overflow:auto;border-block:1px solid var(--dsw-alias-border-l2)}.dshRemoteFolderList>button{width:100%;min-height:42px;display:flex;align-items:center;gap:9px;border:0;border-bottom:1px solid var(--dsw-alias-border-l2);background:transparent;padding:7px 6px;text-align:left;cursor:pointer}.dshRemoteFolderList>button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteFolderBrowser>small{display:block;margin-top:8px;color:var(--dsw-alias-state-warn-label)}",
       ".dshRemotePathField{display:flex;flex-direction:column;gap:6px;margin-top:20px}.dshRemotePathField>span{font-size:13px;font-weight:600}.dshRemotePathField>input{min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemotePathField>small{color:var(--dsw-alias-label-secondary)}",
       ".dshRemoteOpenBar{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:20px;padding:14px 0;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteOpenBar>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteOpenBar span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteOpenBar strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.dshRemoteOpenBar>button,.dshRemoteEnable>button{min-height:40px;flex:0 0 auto;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}.dshRemoteOpenBar>button:disabled,.dshRemoteEnable>button:disabled{opacity:.5;cursor:default}",
@@ -5148,11 +5212,11 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemotePluginCard.dshRemotePluginModern:hover,.dshRemotePluginCard.dshRemotePluginModern.isOpen{border-color:transparent;background:transparent}",
       ".dshRemotePluginCardHeader{display:flex;align-items:center}.dshRemotePluginCardToggle{appearance:none;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer;background:transparent;border:0;border-radius:12px;display:flex;align-items:center;gap:12px;padding:14px 16px}.dshRemotePluginCardToggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}",
       ".dshRemotePluginCardHeading{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.dshRemotePluginCardHeading>strong{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4}.dshRemotePluginCardHeading>span{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}.dshRemotePluginCardStatus{white-space:nowrap;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:17px}.dshRemotePluginCardStatus.isOnline{color:var(--dsw-alias-state-success-primary)}.dshRemotePluginCardStatus.isReconnecting{color:var(--dsw-alias-state-warn-label)}.dshRemotePluginCardStatus.isOffline{color:var(--dsw-alias-state-error-primary)}.dshRemotePluginCardChevron{color:var(--dsw-alias-label-tertiary);font-size:18px;line-height:14px;transition:transform .16s}.dshRemotePluginCard.isOpen .dshRemotePluginCardChevron{transform:rotate(180deg)}",
-      ".dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:none}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:0 0 12px}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}",
-      ".dshRemotePluginModern .dshRemoteField input{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md,8px);height:40px}.dshRemotePluginModern .dshRemoteSettingsFooter button{border-radius:var(--dsw-radius-md,8px);min-height:32px}",
-      ".dshRemoteSettingsSignIn{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:4px;padding:16px 0 12px;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteSettingsSignIn p{max-width:70ch}.dshRemoteSettingsSignIn button{flex-shrink:0}",
+      ".dshRemotePluginCardBody{border-top:1px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px}.dshRemoteSettings{display:flex;flex-direction:column;max-width:none}.dshRemoteSettingsTop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:2px 0 14px}.dshRemoteSettingsState{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5}",
+      ".dshRemotePluginModern .dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md,8px);height:40px}.dshRemotePluginModern .dshRemoteSettingsFooter button{border-radius:var(--dsw-radius-md,8px);min-height:32px}",
+      ".dshRemoteSettingsSignIn{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 0 12px;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteSettingsSignIn p{max-width:70ch;margin:0;font-size:13px;line-height:1.5}.dshRemoteSettingsSignIn button{flex-shrink:0}",
       ".dshRemoteInlineSignIn{box-sizing:border-box;width:100%;margin-top:4px;padding-top:12px;padding-bottom:12px;border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteInlineSignIn .dshRemoteClientLogin,.dshRemoteInlineSignIn .dshRemoteQrLogin{height:auto;min-height:0;padding-bottom:8px}",
-      ".dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-weight:400}",
+      ".dshRemoteHostIdentity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;padding:14px 0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteSettings>.dshRemoteHostIdentity:first-child{border-top:0;padding-top:2px}.dshRemoteHostIdentity>div{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteHostIdentity span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.4}.dshRemoteHostIdentity strong,.dshRemoteHostIdentity code{min-width:0;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.45}.dshRemoteHostIdentity code{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px;font-weight:400;color:var(--dsw-alias-label-secondary)}",
       ".dshRemoteField{display:flex;flex-direction:column;gap:6px;padding:12px 0}.dshRemoteField+.dshRemoteField{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteField label{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:1.5}.dshRemoteField input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5}.dshRemoteField input:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}.dshRemoteField input:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}.dshRemoteFieldValue{min-width:0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5;overflow-wrap:anywhere}.dshRemoteField p{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
       ".dshRemotePairing{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary)}.dshRemotePairing h3{font-size:14px;margin:0 0 8px}.dshRemotePairing p{font-size:13px;line-height:1.5;margin:8px 0}.dshRemotePairingQr{box-sizing:border-box;display:block;width:min(200px,100%);height:auto;margin:12px auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px;background:#fff}.dshRemotePairingIdentity code{overflow-wrap:anywhere;font-size:12px}.dshRemotePairing label{display:grid;gap:8px}.dshRemotePairing input{width:100%;max-width:240px;box-sizing:border-box;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:20px;letter-spacing:.15em}.dshRemotePairing input:focus-visible,.dshRemotePairing button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemotePairingActions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}",
       ".dshRemoteServiceAddress:has(form){height:auto;flex-wrap:wrap;justify-content:flex-start;row-gap:6px}.dshRemoteServiceAddress:has(form)>span{width:100%;text-align:left}.dshRemoteServiceAddress .dshRemoteLoginServer{box-sizing:border-box;width:100%;flex:1 0 100%;display:flex;flex-wrap:wrap;gap:6px}.dshRemoteServiceAddress .dshRemoteLoginServer>input,.dshRemoteServiceAddress .dshRemoteLoginServer>button{box-sizing:border-box;height:36px;min-height:36px;font-size:13px;line-height:normal;border-radius:8px;padding:0 10px}.dshRemoteServiceAddress .dshRemoteLoginServer>input{flex:1 1 180px;width:0;min-width:180px}.dshRemoteServiceAddress .dshRemoteLoginServer>button{flex:0 1 auto}",
@@ -5162,13 +5226,13 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteInlineSignIn .dshRemoteClientLogin{max-width:440px}.dshRemoteInlineSignIn .dshRemoteClientLogin>input,.dshRemoteInlineSignIn .dshRemoteClientLogin>button{height:36px;min-height:36px;font-size:13px}.dshRemoteInlineSignIn{width:min(440px,100%);max-width:100%;margin:0 auto 48px;padding-top:0;border-top:0}.dshRemoteInlineSignIn .dshRemoteSettingsServer{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 20px!important}.dshRemoteInlineSignIn .dshRemoteSettingsServer>label{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap}.dshRemoteInlineSignIn .dshRemoteSettingsServer>input{height:34px;min-height:34px;font-size:13px;padding:0 10px;background:transparent;border-radius:6px}.dshRemoteInlineSignIn .dshRemoteSettingsServer>button{height:34px;min-height:34px;padding:0 12px;font-size:12px;border-radius:6px;background:transparent}.dshRemoteInlineSignIn .dshRemoteLoginTabs{width:100%;justify-content:stretch;gap:0}.dshRemoteInlineSignIn .dshRemoteLoginTabs>button{flex:1 0 0;min-width:max-content;min-height:38px;padding:6px 10px;font-size:13px}.dshRemoteInlineSignIn .dshRemotePairing{padding:20px 0 8px;border-bottom:0}.dshRemoteInlineSignIn .dshRemotePairing h3{margin:0 0 12px;font-size:14px}.dshRemoteInlineSignIn .dshRemotePairingInstructions{font-size:13px;line-height:1.8;margin:0 0 12px}.dshRemoteInlineSignIn .dshRemotePairingPolicy{font-size:12px;color:var(--dsw-alias-label-secondary);margin:0 0 20px}.dshRemoteInlineSignIn .dshRemotePairingActions{margin:16px 0 0}.dshRemoteInlineSignIn .dshRemotePairingActions>button{width:100%;min-height:36px;padding:8px 14px;font-size:13px;border-radius:8px}.dshRemoteInlineSignIn .dshRemotePairing .dshRemoteError{font-size:12px;line-height:1.7}",
       ".dshRemoteLoginContent .dshRemotePairingQr{margin:4px auto}.dshRemotePairingActions:empty{display:none}.dshRemotePairingQrActions{display:flex;align-items:center;justify-content:center;gap:16px;min-height:48px}.dshRemotePairingQrActions>.dshRemotePairingCountdown{font-size:18px;line-height:1.4}.dshRemotePairingQrActions>button{min-height:44px;padding:8px 18px;font-size:15px}.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingInstructions{font-size:15px;line-height:1.6}.dshRemotePairingInstructionPrimary{font-size:18px}.dshRemotePairingInstructionSecondary{font-size:15px}.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingInstructions,.dshRemoteLoginContent .dshRemotePairing .dshRemotePairingPolicy{margin-bottom:4px}",
       ".dshRemotePairingHeading{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;margin-bottom:12px}.dshRemotePairingHeading>.dshRemotePairingInstructions{margin:0!important}.dshRemotePairingHeading>.dshRemotePairingCountdown{white-space:nowrap}.dshRemotePairing .dshRemotePairingIdentity{margin:12px 0 20px}.dshRemotePairingIdentity>strong{display:inline-block;margin-bottom:4px}.dshRemotePairingIdentity code{display:inline-block;font-size:11px;line-height:1.6;color:var(--dsw-alias-label-secondary)}.dshRemotePairingCodeForm{display:grid;gap:12px;margin-top:20px}.dshRemotePairingCodeForm>label{font-size:13px;gap:8px}.dshRemotePairingCodeForm input{height:44px;padding:8px 12px;font-size:20px}.dshRemotePairing .dshRemotePairingCodeWarning{margin:0;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary)}.dshRemotePairingCodeActions{display:flex;gap:8px;flex-wrap:wrap}.dshRemotePairingCodeActions>button{min-height:36px;font-size:13px}",
-      '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 0}.dshRemoteAuthorizationSetting>div{min-width:0}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500}.dshRemoteAuthorizationSetting p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px}.dshRemoteAuthorizationSetting>input,.dshRemoteDebugLogControls>input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked,.dshRemoteDebugLogControls>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after,.dshRemoteDebugLogControls>input:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible,.dshRemoteDebugLogControls>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled,.dshRemoteDebugLogControls>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input,.dshRemoteDebugLogControls>input::after{transition:none}}',
-      ".dshRemoteAssociation{min-width:0;flex:1;display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);align-items:baseline;column-gap:12px;row-gap:4px}.dshRemoteAssociation>span{grid-column:1/-1;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteAssociation strong{grid-column:1;min-width:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5;overflow-wrap:anywhere}.dshRemoteAssociation p{grid-column:2;color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}",
-      ".dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:1.5}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect{appearance:none;flex:0 0 auto;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:34px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteReconnect:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}",
-      ".dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}",
-      ".dshRemoteDebugLogGroup{border-top:1px solid var(--dsw-alias-border-l2);padding:12px 0}.dshRemoteDebugLogHeader{display:flex;align-items:center;justify-content:space-between;gap:16px}.dshRemoteDebugLogTrigger{appearance:none;border:0!important;border-radius:6px!important;background:transparent!important;padding:0!important;margin:0;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0;flex:1;min-height:unset!important;white-space:normal}.dshRemoteDebugLogTrigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:6px}.dshRemoteDebugLogTitleRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.dshRemoteDebugLogTitleRow strong{font-size:13px;font-weight:500}.dshRemoteDebugLogTrigger p{margin:3px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.4;white-space:normal}.dshRemoteDebugLogLevelBadge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:500;line-height:1.5;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2)}.dshRemoteDebugLogLevelBadge.isDebug{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}.dshRemoteDebugLogControls{display:flex;align-items:center;gap:10px;flex:0 0 auto}",
-      ".dshRemoteLogToggleBtn,.dshRemoteLogActionBtn,.dshRemoteLogFilterBtn{appearance:none;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);min-height:28px!important;padding:3px 10px!important;font-size:12px!important;line-height:1.4!important;white-space:nowrap}.dshRemoteLogToggleBtn:hover:not(:disabled),.dshRemoteLogActionBtn:hover:not(:disabled),.dshRemoteLogFilterBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogToggleBtn:disabled,.dshRemoteLogActionBtn:disabled,.dshRemoteLogFilterBtn:disabled{opacity:.45;cursor:default}.dshRemoteLogFilterBtn.isActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-label-secondary);font-weight:500}.dshRemoteLogDrawer{margin-top:12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:8px}.dshRemoteLogToolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.dshRemoteLogFilterGroup,.dshRemoteLogActions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dshRemoteLogMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4}.dshRemoteLogMeta code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}.dshRemoteLogFallback{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogViewport{box-sizing:border-box;width:100%;max-height:260px;min-height:120px;overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}.dshRemoteLogLine{display:block;color:var(--dsw-alias-label-primary);margin-bottom:3px}.dshRemoteLogLine:last-child{margin-bottom:0}.dshRemoteLogLine.isDebug{color:var(--dsw-alias-label-tertiary)}.dshRemoteLogLine.isWarn{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogLine.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteLogEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0;padding:16px 0;text-align:center}",
-      "@media(max-width:620px){.dshRemotePluginCardStatus{display:none}.dshRemoteSettingsTop{gap:10px}.dshRemoteConnection{align-items:flex-start}.dshRemoteReconnect{min-height:40px}.dshRemotePortsRow{flex-direction:column}.dshRemoteAcpAddForm{grid-template-columns:1fr}.dshRemoteAcpAddForm button{min-height:40px}}"
+      '.dshRemoteAuthorizationSetting{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:24px;padding:14px 0}.dshRemoteAuthorizationSetting>div:first-child{min-width:0;flex:1}.dshRemoteAuthorizationSetting>div:first-child>p{max-width:58ch}.dshRemoteAuthorizationSetting strong{font-size:13px;font-weight:500;line-height:1.45;color:var(--dsw-alias-label-primary)}.dshRemoteAuthorizationSetting p{margin:4px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45}.dshRemoteAuthorizationSetting>input,.dshRemoteDebugLogControls>input,.dshRemoteSwitch{appearance:none;box-sizing:border-box;position:relative;width:38px;height:22px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input::after,.dshRemoteSwitch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteAuthorizationSetting>input:checked,.dshRemoteDebugLogControls>input:checked,.dshRemoteSwitch:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteAuthorizationSetting>input:checked::after,.dshRemoteDebugLogControls>input:checked::after,.dshRemoteSwitch:checked::after{transform:translateX(16px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteAuthorizationSetting>input:focus-visible,.dshRemoteDebugLogControls>input:focus-visible,.dshRemoteSwitch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteAuthorizationSetting>input:disabled,.dshRemoteDebugLogControls>input:disabled,.dshRemoteSwitch:disabled{opacity:.45;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteAuthorizationSetting>input,.dshRemoteAuthorizationSetting>input::after,.dshRemoteDebugLogControls>input,.dshRemoteDebugLogControls>input::after,.dshRemoteSwitch,.dshRemoteSwitch::after{transition:none}}',
+      ".dshRemoteAssociation{min-width:0;flex:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:baseline;column-gap:20px;row-gap:4px}.dshRemoteAssociation>span{grid-column:1;grid-row:1;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45}.dshRemoteAssociation strong{grid-column:1;grid-row:2;min-width:0;color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.dshRemoteAssociation p{grid-column:2;grid-row:2;color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.45;overflow-wrap:anywhere}",
+      ".dshRemoteConnection{border-top:1px solid var(--dsw-alias-border-l2);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0}.dshRemoteConnectionSummary{min-width:0;display:flex;flex-direction:column;gap:4px}.dshRemoteConnectionSummary>span{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45}.dshRemoteConnectionSummary strong{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-primary);font-size:13.5px;font-weight:500;line-height:1.45}.dshRemoteConnectionSummary p,.dshRemoteConnectionIssue{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.45}.dshRemoteConnectionDot{width:8px;height:8px;flex:0 0 auto;border-radius:999px;background:var(--dsw-alias-label-tertiary)}.dshRemoteConnectionDot.isOnline{background:var(--dsw-alias-state-success-primary)}.dshRemoteConnectionDot.isReconnecting{background:var(--dsw-alias-state-warn-primary)}.dshRemoteConnectionDot.isOffline{background:var(--dsw-alias-state-error-primary)}.dshRemoteConnectionIssue{color:var(--dsw-alias-state-error-primary);padding:0 0 12px}.dshRemoteReconnect,.dshRemoteAuthorizationSetting>.dshRemoteDiscard{appearance:none;box-sizing:border-box;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:transparent;color:var(--dsw-alias-label-secondary);min-height:30px;padding:0 12px;font-size:12px;font-weight:500;line-height:1;white-space:nowrap;transition:color .15s,border-color .15s,background .15s}.dshRemoteReconnect:hover:not(:disabled),.dshRemoteAuthorizationSetting>.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteReconnect:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteReconnect:disabled{opacity:.4;cursor:default}",
+      ".dshRemoteSettingsFooter{border-top:1px solid var(--dsw-alias-border-l2);display:flex;justify-content:flex-end;align-items:center;gap:12px;padding:14px 0 4px}.dshRemoteSettingsFooter .dshRemoteError,.dshRemoteNotice{min-width:0;flex:1;margin:0;font-size:12px;line-height:1.5}.dshRemoteNotice{color:var(--dsw-alias-label-tertiary)}.dshRemoteDiscard,.dshRemoteSave{appearance:none;box-sizing:border-box;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:7px;padding:5px 14px;font-size:12.5px;font-weight:500;line-height:1.5;transition:color .15s,border-color .15s,background .15s}.dshRemoteDiscard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:transparent}.dshRemoteDiscard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteSave{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.dshRemoteDiscard:disabled,.dshRemoteSave:disabled{opacity:.4;cursor:default}.dshRemoteDiscard:focus-visible,.dshRemoteSave:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}",
+      '.dshRemoteDebugLogGroup{border-top:1px solid var(--dsw-alias-border-l2);padding:14px 0}.dshRemoteDevelopmentSettings>.dshRemoteDebugLogGroup:first-child{border-top:0}.dshRemoteError+.dshRemoteDevelopmentSettings>.dshRemoteDebugLogGroup:first-child{border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteDebugLogHeader{display:flex;align-items:center;justify-content:space-between;gap:24px}.dshRemoteDebugLogTrigger{appearance:none;border:0;border-radius:6px;background:transparent;padding:0;margin:0;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0;flex:1;white-space:normal}.dshRemoteDebugLogTrigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:4px;border-radius:6px}.dshRemoteDebugLogTitleRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dshRemoteDebugLogTitleRow strong{font-size:13px;font-weight:500;line-height:1.45;color:var(--dsw-alias-label-primary)}.dshRemoteDebugLogTrigger p{max-width:58ch;margin:4px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.45;white-space:normal}.dshRemoteDebugLogLevelBadge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;line-height:1.45;color:var(--dsw-alias-label-tertiary)}.dshRemoteDebugLogLevelBadge::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--dsw-alias-label-dimmed);flex:0 0 auto}.dshRemoteDebugLogLevelBadge.isDebug{color:var(--dsw-alias-label-secondary)}.dshRemoteDebugLogLevelBadge.isDebug::before{background:var(--dsw-alias-state-success-primary)}.dshRemoteDebugLogControls{display:flex;align-items:center;gap:10px;flex:0 0 auto}',
+      '.dshRemoteLogToggleBtn,.dshRemoteLogActionBtn,.dshRemoteLogFilterBtn{appearance:none;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l2);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);min-height:28px;padding:0 10px;font-size:12px;font-weight:500;line-height:1;white-space:nowrap;transition:color .14s,border-color .14s,background .14s}.dshRemoteLogToggleBtn{border-color:transparent;background:transparent;padding:0 8px}.dshRemoteLogToggleChevron{flex:0 0 auto;transition:transform .18s ease-out}.dshRemoteLogToggleBtn[aria-expanded="true"] .dshRemoteLogToggleChevron{transform:rotate(180deg)}.dshRemoteLogToggleBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:transparent;background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogActionBtn:hover:not(:disabled),.dshRemoteLogFilterBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteLogToggleBtn:disabled,.dshRemoteLogActionBtn:disabled,.dshRemoteLogFilterBtn:disabled{opacity:.45;cursor:default}.dshRemoteLogFilterBtn.isActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-label-secondary);font-weight:500}.dshRemoteLogDrawer{margin-top:12px;padding:12px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));display:flex;flex-direction:column;gap:8px}.dshRemoteLogToolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.dshRemoteLogFilterGroup,.dshRemoteLogActions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.dshRemoteLogMeta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4}.dshRemoteLogMeta code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}.dshRemoteLogFallback{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogViewport{box-sizing:border-box;width:100%;max-height:260px;min-height:120px;overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}.dshRemoteLogLine{display:block;color:var(--dsw-alias-label-primary);margin-bottom:3px}.dshRemoteLogLine:last-child{margin-bottom:0}.dshRemoteLogLine.isDebug{color:var(--dsw-alias-label-tertiary)}.dshRemoteLogLine.isWarn{color:var(--dsw-alias-state-warn-primary)}.dshRemoteLogLine.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteLogEmpty{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0;padding:16px 0;text-align:center}',
+      "@media(max-width:620px){.dshRemotePluginCardStatus{display:none}.dshRemoteSettingsTop{gap:10px}.dshRemoteAssociation{grid-template-columns:1fr}.dshRemoteAssociation p{grid-column:1;grid-row:3}.dshRemoteHostIdentity{grid-template-columns:1fr}.dshRemoteConnection{align-items:flex-start}.dshRemoteReconnect{min-height:36px}.dshRemotePortsRow{flex-direction:column}.dshRemoteAcpList{padding-left:8px}.dshRemoteAcpRowMain{column-gap:10px}.dshRemoteAcpAddInputs{grid-template-columns:1fr}.dshRemoteAcpAddInputs button{min-height:36px}}"
     ].join(""), document.head.append(style), () => style.remove();
   }
   function installTerminalAvailabilityNotice(feed, t) {
@@ -5215,6 +5279,72 @@ If a code was sent, recover the original submission without changing it.`,
     };
     return sync(), () => {
       timer !== void 0 && window.clearTimeout(timer), observer?.disconnect(), host?.remove();
+    };
+  }
+
+  // packages/plugin/src/client/footer-lane.ts
+  var NO_FACTS = { row: null, lane: !1, wrapped: !1, count: 0, rowWidth: Number.NaN };
+  function footerRequiredWidth(count) {
+    return count <= 0 ? 0 : count * 112 + (count - 1) * 4 + 16;
+  }
+  function resolveFooterForm(count, rowWidth) {
+    return count <= 0 ? "label" : count > 2 || !Number.isFinite(rowWidth) ? "icon" : rowWidth >= footerRequiredWidth(count) ? "label" : "icon";
+  }
+  function occupiesFooterSeat(entry) {
+    return entry == null || entry.position === "fixed" || entry.position === "absolute" ? !1 : (entry.width ?? 0) > 0 && (entry.height ?? 0) > 0;
+  }
+  function measureFooterSeat(entry, view = globalThis) {
+    let styleOf = view !== void 0 && typeof view.getComputedStyle == "function" ? view.getComputedStyle.bind(view) : null;
+    if (entry == null || styleOf === null) return { ...NO_FACTS };
+    let node = entry;
+    for (; node !== null && node.parentElement != null; ) {
+      let row = node.parentElement, style = styleOf(row);
+      if (style.display === "contents") {
+        node = row;
+        continue;
+      }
+      if (style.display !== "flex" && style.display !== "inline-flex") {
+        if (row.children.length === 1) {
+          node = row;
+          continue;
+        }
+        return { ...NO_FACTS };
+      }
+      let facts = {
+        row,
+        lane: style.flexDirection.startsWith("row"),
+        wrapped: style.flexWrap !== "nowrap",
+        count: 1,
+        rowWidth: row.clientWidth
+      };
+      if (!facts.lane) return facts;
+      let collect = (container) => {
+        for (let child of Array.from(container.children)) {
+          let childStyle = styleOf(child);
+          if (childStyle.display === "contents") {
+            collect(child);
+            continue;
+          }
+          if (child.contains(entry)) continue;
+          let rect = typeof child.getBoundingClientRect == "function" ? child.getBoundingClientRect() : { width: 0, height: 0 };
+          occupiesFooterSeat({ position: childStyle.position, width: rect.width, height: rect.height }) && (facts.count += 1);
+        }
+      };
+      return collect(row), facts;
+    }
+    return { ...NO_FACTS };
+  }
+  function footerFormFor(facts, wide) {
+    return wide ? facts.row === null || !facts.lane || facts.wrapped ? "label" : resolveFooterForm(facts.count, facts.rowWidth) : "icon";
+  }
+  function watchFooterLane(entry, wide, onForm, view = globalThis) {
+    let reported, row = null, resize, mutation, disposed = !1, sync = () => {
+      if (disposed) return;
+      let facts = measureFooterSeat(entry, view), nextForm = footerFormFor(facts, wide());
+      nextForm !== reported && (reported = nextForm, onForm(nextForm)), facts.row !== row && (resize?.disconnect(), mutation?.disconnect(), resize = void 0, mutation = void 0, row = facts.row, row !== null && (typeof ResizeObserver == "function" && (resize = new ResizeObserver(sync), resize.observe(row), resize.observe(entry)), typeof MutationObserver == "function" && (mutation = new MutationObserver(sync), mutation.observe(row, { childList: !0, subtree: !0, attributes: !0, attributeFilter: ["style", "class", "hidden"] }))));
+    };
+    return sync(), typeof window < "u" && window.addEventListener("resize", sync), () => {
+      disposed = !0, resize?.disconnect(), mutation?.disconnect(), typeof window < "u" && window.removeEventListener("resize", sync);
     };
   }
 
@@ -5287,6 +5417,13 @@ If a code was sent, recover the original submission without changing it.`,
   var hostedServerUrl = "https://dsh.r2049.cn";
   function createRemoteWorkspaceAction(React, portal) {
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), RemoteProgressView = createRemoteProgressView(React);
+    function useFooterLane(wide) {
+      let [form, setForm] = React.useState(wide ? "label" : "icon"), [node, setNode] = React.useState(null);
+      return React.useEffect(() => {
+        if (node !== null)
+          return watchFooterLane(node, () => wide, (next) => setForm((previous) => previous === next ? previous : next));
+      }, [wide, node]), [setNode, wide ? form : "icon"];
+    }
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
       if (React.useEffect(
@@ -5300,7 +5437,7 @@ If a code was sent, recover the original submission without changing it.`,
       }
     }
     function RemoteWorkspaceAction(props) {
-      let { t } = props, connectionErrorMessageFor = (reason, translate) => {
+      let { t } = props, [attachEntry, entryForm] = useFooterLane(props.wide), connectionErrorMessageFor = (reason, translate) => {
         if (typeof reason == "object" && reason !== null && "code" in reason) {
           let code = reason.code;
           if (typeof code == "string") return connectionErrorMessage(code, translate);
@@ -5775,30 +5912,36 @@ If a code was sent, recover the original submission without changing it.`,
         },
         React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
         React.createElement("path", { d: "M8 21h8M12 17v4" })
-      ), remoteActive = status?.mode === "remote", updateSuffix = localUpdateAvailable && props.wide ? React.createElement("span", {
-        className: "dshRemoteUpdateSuffix",
-        title: updateNotice,
-        "aria-hidden": !0
-      }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null, updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, entry = React.createElement(
-        "div",
-        { className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}` },
-        React.createElement(remoteActive && props.wide && !reauth ? "div" : "button", {
-          ...remoteActive && props.wide && !reauth ? {} : {
-            type: "button",
-            disabled: remoteActive && busy,
-            onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+      ), remoteActive = status?.mode === "remote", labelled = props.wide && entryForm === "label", updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, renderEntry = (entryLabelled, options = {}) => {
+        let updateSuffix = localUpdateAvailable && entryLabelled ? React.createElement("span", {
+          className: "dshRemoteUpdateSuffix",
+          title: updateNotice,
+          "aria-hidden": !0
+        }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null;
+        return React.createElement(
+          "div",
+          {
+            ...options.ref === void 0 ? {} : { ref: options.ref },
+            className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${entryLabelled ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}${options.inAccountRow ? " isAccountRow" : ""}`
           },
-          className: "dshRemoteModeButton",
-          title: props.wide ? remoteLabel : remoteActionLabel,
-          "aria-label": props.wide ? remoteLabel : remoteActionLabel
-        }, computerIcon, props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, props.wide ? updateSuffix : updateDot),
-        remoteActive && props.wide ? React.createElement("button", {
-          type: "button",
-          className: "dshRemoteExitLink",
-          disabled: busy,
-          onClick: () => void openLocalWorkspaces()
-        }, t("exitRemote")) : null
-      ), accountEntry = remoteActive ? entry : React.createElement(
+          React.createElement(remoteActive && entryLabelled && !reauth ? "div" : "button", {
+            ...remoteActive && entryLabelled && !reauth ? {} : {
+              type: "button",
+              disabled: remoteActive && busy,
+              onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+            },
+            className: "dshRemoteModeButton",
+            title: entryLabelled ? remoteLabel : remoteActionLabel,
+            "aria-label": entryLabelled ? remoteLabel : remoteActionLabel
+          }, computerIcon, entryLabelled ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, entryLabelled ? updateSuffix : updateDot),
+          remoteActive && entryLabelled ? React.createElement("button", {
+            type: "button",
+            className: "dshRemoteExitLink",
+            disabled: busy,
+            onClick: () => void openLocalWorkspaces()
+          }, t("exitRemote")) : null
+        );
+      }, entry = renderEntry(labelled, { ref: attachEntry }), accountEntry = remoteActive ? renderEntry(props.wide, { inAccountRow: !0 }) : React.createElement(
         "div",
         { className: `dshRemoteAccountEntry${remoteActive ? " isActive" : ""}` },
         React.createElement("button", {
@@ -7613,7 +7756,10 @@ If a code was sent, recover the original submission without changing it.`,
         }, RemoteSessionHeaderAction)), ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
           name: "sidebar.footer.action",
           id: "ds-harness-remote-workspace",
-          order: -20,
+          // Shared footer ordering: integrations (chat import 20) and device
+          // entries (mobile 40) sort after this workspace entry, which stays the
+          // leftmost seat of the row.
+          order: 0,
           locale: localeNamespace,
           inject: () => ({
             control,

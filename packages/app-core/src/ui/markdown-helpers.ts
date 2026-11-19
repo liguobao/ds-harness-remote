@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native'
-import { radius, resolveChatMetrics, spacing, typeForDensity } from './theme'
-import type { ChatAppearance, ThemeColors, TypographyDensity } from './theme'
+import { compactType, DEFAULT_CHAT_APPEARANCE, radius, resolveChatMetrics } from './theme'
+import type { ChatAppearance, ThemeColors } from './theme'
 import type { Token } from 'markdown-it'
 
 export interface MarkdownNode {
@@ -175,61 +175,10 @@ export function headingStyle(tag: string, styles: ReturnType<typeof createMarkdo
 
 export function createMarkdownStyles(
   colors: ThemeColors,
-  density: TypographyDensity = 'compact',
-  appearance?: ChatAppearance,
+  appearance: ChatAppearance = DEFAULT_CHAT_APPEARANCE,
 ) {
-  const isCompact = density === 'compact'
-  const t = typeForDensity(density)
-  if (appearance === undefined) {
-    return StyleSheet.create({
-      container: { alignSelf: 'stretch' },
-      paragraph: { ...t.body, fontSize: isCompact ? 15 : 16, lineHeight: isCompact ? 23 : 25, color: colors.ink, marginBottom: isCompact ? 5 : 7 },
-      heading: { color: colors.ink, fontWeight: '700', marginTop: isCompact ? 6 : 8, marginBottom: isCompact ? 6 : 8 },
-      h1: isCompact ? { fontSize: 21, lineHeight: 27, includeFontPadding: false } : { fontSize: 24, lineHeight: 31, includeFontPadding: false },
-      h2: isCompact ? { fontSize: 18, lineHeight: 23, includeFontPadding: false } : { fontSize: 20, lineHeight: 26, includeFontPadding: false },
-      h3: isCompact ? { fontSize: 16, lineHeight: 21, includeFontPadding: false } : { fontSize: 17, lineHeight: 23, includeFontPadding: false },
-      h4: isCompact ? { fontSize: 14, lineHeight: 19, includeFontPadding: false } : { fontSize: 15, lineHeight: 20, includeFontPadding: false },
-      strong: { fontWeight: '700' },
-      emphasis: { fontStyle: 'italic' },
-      strike: { textDecorationLine: 'line-through' },
-      link: { color: colors.primary },
-      linkExternal: { color: colors.primary, fontWeight: '500' },
-      linkExternalIcon: { fontSize: 11, color: colors.primary, fontWeight: '600' },
-      citationBadge: { backgroundColor: colors.surfaceStrong, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginHorizontal: 2 },
-      citationText: { fontSize: 11, fontWeight: '600', color: colors.primary },
-      blockedLink: { color: colors.muted, textDecorationLine: 'line-through' },
-      inlineCode: { fontFamily: 'monospace', fontSize: isCompact ? 12.5 : 13.5, color: colors.ink, backgroundColor: colors.surfaceStrong, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, includeFontPadding: false },
-      mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 4, paddingHorizontal: 4 },
-      imageAlt: { color: colors.muted, fontStyle: 'italic' },
-      codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.surface, padding: isCompact ? 8 : 10, marginBottom: isCompact ? 5 : 8 },
-      code: { fontFamily: 'monospace', fontSize: isCompact ? 12 : 13, lineHeight: isCompact ? 17 : 18.5, color: colors.ink, includeFontPadding: false },
-      blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, backgroundColor: colors.surfaceStrong, paddingLeft: isCompact ? 10 : 12, paddingRight: isCompact ? 8 : 10, paddingVertical: isCompact ? 6 : 8, borderRadius: 6, marginBottom: isCompact ? 6 : 8 },
-      blockquotePreview: { backgroundColor: colors.surfaceStrong, borderColor: 'transparent', borderLeftWidth: 3, borderLeftColor: colors.primary, borderRadius: 6, marginVertical: isCompact ? 4 : 6 },
-      calloutCard: { borderRadius: radius.md, borderWidth: 1, padding: isCompact ? 10 : 12, marginVertical: isCompact ? 6 : 8, alignSelf: 'stretch' },
-      calloutHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-      calloutIconWrap: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-      calloutTitle: { ...t.smallStrong, fontWeight: '600' },
-      calloutBody: { ...t.body, fontSize: isCompact ? 14 : 15, lineHeight: isCompact ? 20 : 22 },
-      calloutBodyContainer: { marginTop: 4 },
-      list: { gap: isCompact ? 2 : 3, marginBottom: isCompact ? 6 : 8 },
-      listItem: { flexDirection: 'row', alignItems: 'flex-start' },
-      listMarker: { ...t.body, color: colors.muted, width: isCompact ? 22 : 26 },
-      listContent: { flex: 1 },
-      checkboxChecked: { width: 16, height: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center' as const, marginRight: isCompact ? 6 : 8, marginTop: isCompact ? 3 : 4 },
-      checkboxUnchecked: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, marginRight: isCompact ? 6 : 8, marginTop: isCompact ? 3 : 4 },
-      rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: isCompact ? spacing.sm : spacing.md },
-      tableContainer: { alignSelf: 'stretch', marginVertical: isCompact ? 6 : 8 },
-      tableScrollContent: { minWidth: '100%' },
-      table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, overflow: 'hidden', minWidth: '100%' },
-      tableRow: { flexDirection: 'row', minWidth: '100%' },
-      tableCell: { minWidth: isCompact ? 80 : 96, paddingHorizontal: isCompact ? 8 : 12, paddingVertical: isCompact ? 6 : 8, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border, justifyContent: 'center' },
-      tableHeader: { backgroundColor: colors.surfaceStrong },
-      tableHeaderText: { ...t.smallStrong, fontWeight: '600', color: colors.ink },
-      tableText: { ...t.small, color: colors.ink },
-    })
-  }
-
-  const m = resolveChatMetrics(density, appearance)
+  const t = compactType
+  const m = resolveChatMetrics(appearance)
   return StyleSheet.create({
     container: { alignSelf: 'stretch' },
     paragraph: {
@@ -272,7 +221,7 @@ export function createMarkdownStyles(
     },
     mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 5, paddingHorizontal: 5 },
     imageAlt: { color: colors.muted, fontStyle: 'italic' },
-    codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.codeSurface ?? colors.surface, padding: isCompact ? 10 : 12, marginBottom: m.paragraphGap },
+    codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.codeSurface ?? colors.surface, padding: 10, marginBottom: m.paragraphGap },
     code: { fontFamily: 'monospace', fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, includeFontPadding: false },
     blockquote: {
       borderLeftWidth: 3,
@@ -285,7 +234,7 @@ export function createMarkdownStyles(
       marginBottom: m.paragraphGap,
     },
     blockquotePreview: { backgroundColor: colors.surfaceStrong, borderColor: 'transparent', borderLeftWidth: 3, borderLeftColor: colors.primary, borderRadius: 6, marginVertical: m.listGap },
-    calloutCard: { borderRadius: radius.md, borderWidth: 1, padding: isCompact ? 10 : 12, marginVertical: m.paragraphGap, alignSelf: 'stretch' },
+    calloutCard: { borderRadius: radius.md, borderWidth: 1, padding: 10, marginVertical: m.paragraphGap, alignSelf: 'stretch' },
     calloutHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
     calloutIconWrap: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
     calloutTitle: { ...t.smallStrong, fontWeight: '600' },
@@ -293,7 +242,7 @@ export function createMarkdownStyles(
     calloutBodyContainer: { marginTop: 4 },
     list: { gap: m.listGap, marginBottom: m.paragraphGap },
     listItem: { flexDirection: 'row', alignItems: 'flex-start' },
-    listMarker: { ...t.body, fontSize: m.bodyFontSize, lineHeight: m.bodyLineHeight, color: colors.muted, width: isCompact ? 22 : 26 },
+    listMarker: { ...t.body, fontSize: m.bodyFontSize, lineHeight: m.bodyLineHeight, color: colors.muted, width: 22 },
     listContent: { flex: 1 },
     checkboxChecked: { width: 16, height: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center' as const, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
     checkboxUnchecked: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
@@ -302,7 +251,7 @@ export function createMarkdownStyles(
     tableScrollContent: { minWidth: '100%' },
     table: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, overflow: 'hidden', minWidth: '100%' },
     tableRow: { flexDirection: 'row', minWidth: '100%' },
-    tableCell: { minWidth: isCompact ? 80 : 96, paddingHorizontal: isCompact ? 9 : 12, paddingVertical: isCompact ? 7 : 9, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border, justifyContent: 'center' },
+    tableCell: { minWidth: 80, paddingHorizontal: 9, paddingVertical: 7, borderRightWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border, justifyContent: 'center' },
     tableHeader: { backgroundColor: colors.surfaceStrong },
     tableHeaderText: { ...t.smallStrong, fontSize: Math.max(12.5, m.bodyFontSize - 1.5), fontWeight: '600', color: colors.ink },
     tableText: { ...t.small, fontSize: Math.max(12.5, m.bodyFontSize - 1.5), lineHeight: Math.round(Math.max(12.5, m.bodyFontSize - 1.5) * 1.45), color: colors.ink },

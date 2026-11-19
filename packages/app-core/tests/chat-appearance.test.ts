@@ -29,8 +29,8 @@ describe('chat appearance normalization, metrics and syntax highlighting', () =>
   })
 
   it('derives monotonic typography metrics and safe foreground contrast for all accent palettes', () => {
-    const smTight = resolveChatMetrics('compact', { ...DEFAULT_CHAT_APPEARANCE, fontScale: 'sm', spacingScale: 'tight', letterSpacing: 'normal' })
-    const xlRelaxed = resolveChatMetrics('standard', { ...DEFAULT_CHAT_APPEARANCE, fontScale: 'xl', spacingScale: 'relaxed', letterSpacing: 'wider' })
+    const smTight = resolveChatMetrics({ ...DEFAULT_CHAT_APPEARANCE, fontScale: 'sm', spacingScale: 'tight', letterSpacing: 'normal' })
+    const xlRelaxed = resolveChatMetrics({ ...DEFAULT_CHAT_APPEARANCE, fontScale: 'xl', spacingScale: 'relaxed', letterSpacing: 'wider' })
 
     expect(xlRelaxed.bodyFontSize).toBeGreaterThan(smTight.bodyFontSize)
     expect(xlRelaxed.bodyLineHeight).toBeGreaterThan(smTight.bodyLineHeight)

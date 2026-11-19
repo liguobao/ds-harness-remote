@@ -97,7 +97,10 @@ export function enforceSessionMessageLimits(
     entry.visitedAt ?? entry.seenAt ?? entry.session?.updatedAt ?? 0
 
   const entriesWithMessages = Object.entries(entries).filter(
-    ([_, entry]) => (entry.messages && entry.messages.length > 0) || Object.keys(entry.groupRounds ?? {}).length > 0,
+    ([_, entry]) =>
+      (entry.messages && entry.messages.length > 0)
+      || Object.keys(entry.groupRounds ?? {}).length > 0
+      || (entry.images && entry.images.length > 0),
   )
 
   if (entriesWithMessages.length <= MAX_CACHED_SESSIONS) return entries
@@ -109,8 +112,8 @@ export function enforceSessionMessageLimits(
 
   const next: Record<string, BrowseEntry> = {}
   for (const [k, entry] of Object.entries(entries)) {
-    if ((entry.messages || entry.groupRounds) && !allowedKeys.has(k)) {
-      const { messages: _dropped, groupRounds: _rounds, ...rest } = entry
+    if ((entry.messages || entry.groupRounds || entry.images) && !allowedKeys.has(k)) {
+      const { messages: _dropped, groupRounds: _rounds, images: _images, ...rest } = entry
       next[k] = rest
     } else {
       next[k] = entry
@@ -191,12 +194,56 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: Rea
     deletedKeys,
   )
 }
+const MAX_DRAFT_IMAGES = 4
+const MAX_DRAFT_IMAGE_BYTES = 8 * 1024 * 1024
+const MAX_DRAFT_IMAGE_BASE64_CHARS = Math.ceil(MAX_DRAFT_IMAGE_BYTES / 3) * 4 + 4
+const MAX_DRAFT_QUOTES = 20
+const DRAFT_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+function sanitizeDraftImages(images?: PromptImage[]): PromptImage[] | undefined {
+  if (!Array.isArray(images) || images.length === 0) return undefined
+  const valid = images
+    .filter((img): img is PromptImage =>
+      typeof img === 'object' && img !== null
+      && typeof img.uri === 'string' && img.uri.length > 0
+      && typeof img.mediaType === 'string' && DRAFT_IMAGE_MEDIA_TYPES.has(img.mediaType)
+      && typeof img.data === 'string' && img.data.length > 0 && img.data.length <= MAX_DRAFT_IMAGE_BASE64_CHARS
+      && typeof img.bytes === 'number' && Number.isFinite(img.bytes) && img.bytes > 0 && img.bytes <= MAX_DRAFT_IMAGE_BYTES
+      && typeof img.width === 'number' && Number.isFinite(img.width) && img.width > 0
+      && typeof img.height === 'number' && Number.isFinite(img.height) && img.height > 0)
+    .slice(0, MAX_DRAFT_IMAGES)
+    .map(img => ({
+      uri: img.uri,
+      mediaType: img.mediaType,
+      data: img.data,
+      bytes: img.bytes,
+      width: img.width,
+      height: img.height,
+      ...(typeof img.name === 'string' ? { name: img.name } : {}),
+    }))
+  return valid.length === 0 ? undefined : valid
+}
+
+function sanitizeDraftQuotes(quotes?: string[]): string[] | undefined {
+  if (!Array.isArray(quotes) || quotes.length === 0) return undefined
+  const valid = quotes
+    .filter((item): item is string => typeof item === 'string' && item.length > 0)
+    .slice(0, MAX_DRAFT_QUOTES)
+    .map(item => capText(item) ?? '')
+    .filter(item => item.length > 0)
+  return valid.length === 0 ? undefined : valid
+}
+
 function savedEntry(value: BrowseEntry): BrowseEntry {
   const messages = sanitizeCachedMessages(value.messages)
+  const images = sanitizeDraftImages(value.images)
+  const quotes = sanitizeDraftQuotes(value.quotes)
   return { draft: value.draft, position: value.position, starred: value.starred,
     seenAt: value.seenAt, visitedAt: value.visitedAt,
     session: value.session === undefined ? undefined : safeSession(value.session),
     groupRounds: sanitizeGroupRounds(value.groupRounds),
+    ...(images !== undefined ? { images } : {}),
+    ...(quotes !== undefined ? { quotes } : {}),
     ...(messages !== undefined ? { messages } : {}) }
 }
 function snapshot(): Snapshot {

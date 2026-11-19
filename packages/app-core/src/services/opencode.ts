@@ -41,7 +41,8 @@ export function mergeOpencodeCatalog(
     workspaces,
     sessions,
     options,
-    keepExistingSession: (item, catalogIds) => catalogIds.has(item.sessionId) || item.blank || item.running,
+    keepExistingSession: (item, catalogIds) =>
+      catalogIds.has(item.sessionId) || item.blank || item.running || item.projections?.values?.pendingCatalog === true,
   })
 }
 

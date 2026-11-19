@@ -24,9 +24,9 @@ interface AttachedLeg {
 }
 
 interface DrainingLeg {
-  readonly leg: SequencedOutboundTransport
   endCounter?: number
   readonly timer: ReturnType<typeof setTimeout>
+  readonly dispose: () => void
 }
 
 export class SecureTransport implements RemoteTransport, UpgradeableSecureChannel {
@@ -39,7 +39,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
   private messageCb?: (data: Uint8Array) => void
   private readonly closeHandlers = new Set<(error?: Error) => void>()
   private readonly attachedLegs = new Map<SequencedOutboundTransport, AttachedLeg>()
-  private readonly drainingLegs = new Map<SequencedOutboundTransport, DrainingLeg>()
+  private readonly drainingLegs = new Map<RemoteTransport, DrainingLeg>()
   private readonly reorderBuffer: SequencedCiphertextReorderBuffer
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
@@ -116,7 +116,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
       if (this.noise !== undefined && Number(this.noise.receivingCounter()) >= previousLegEndCounter) {
         clearTimeout(entry.timer)
         this.drainingLegs.delete(draining)
-        void this.detachLeg(draining)
+        entry.dispose()
       }
     }
   }
@@ -146,14 +146,32 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
       const prev = this.activeOutbound
       this.activeOutbound = leg
       const endCounter = this.outboundCounter
-      if (options.closePrevious && prev !== undefined && prev !== leg && prev !== this.inner && isSequencedOutboundTransport(prev)) {
-        const drainMs = options.drainMs ?? DEFAULT_PREVIOUS_LEG_DRAIN_MS
-        const timer = setTimeout(() => {
-          this.drainingLegs.delete(prev)
-          void this.detachLeg(prev)
-        }, drainMs)
-        ;(timer as { unref?: () => void }).unref?.()
-        this.drainingLegs.set(prev, { leg: prev, timer })
+      if (options.closePrevious && prev !== undefined && prev !== leg) {
+        const dispose = prev === this.inner
+          ? this.inner.retireRelayDataSocket !== undefined
+            ? () => {
+                this.inner.retireRelayDataSocket?.(
+                  () => !this.closed && this.activeOutbound !== undefined && this.activeOutbound !== this.inner && this.activeOutbound.getStats().connected,
+                )
+              }
+            : undefined
+          : isSequencedOutboundTransport(prev)
+            ? () => { void this.detachLeg(prev) }
+            : undefined
+        if (dispose !== undefined) {
+          const existing = this.drainingLegs.get(prev)
+          if (existing !== undefined) clearTimeout(existing.timer)
+          const drainMs = options.drainMs ?? DEFAULT_PREVIOUS_LEG_DRAIN_MS
+          const timer = setTimeout(() => {
+            const entry = this.drainingLegs.get(prev)
+            if (entry !== undefined) {
+              this.drainingLegs.delete(prev)
+              entry.dispose()
+            }
+          }, drainMs)
+          ;(timer as { unref?: () => void }).unref?.()
+          this.drainingLegs.set(prev, { timer, dispose })
+        }
       }
       return endCounter
     })
@@ -263,7 +281,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
       if (draining.endCounter !== undefined && currentReceiving >= draining.endCounter) {
         clearTimeout(draining.timer)
         this.drainingLegs.delete(leg)
-        void this.detachLeg(leg)
+        draining.dispose()
       }
     }
     setStage('reassembly')

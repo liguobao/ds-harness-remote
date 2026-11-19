@@ -50,6 +50,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
+import { selectCustomAcpBackends } from '../state/store-state'
 import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
 import type { AgentBackend, RemoteSession, WorkspaceView } from '../types'
@@ -232,12 +233,12 @@ export function HostSessionsDrawer({
   const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
   const claudeAvailable = useAppStore(state => state.claudeAvailable)
   const hermesAvailable = useAppStore(state => state.hermesAvailable)
-  const customAcpBackends = useAppStore(state => state.customAcpBackends ?? [])
+  const customAcpBackends = useAppStore(selectCustomAcpBackends)
   const availableBackends = useAppStore(state => [
     'harness', state.codexAvailable && 'codex', state.cursorAvailable && 'cursor',
     state.antigravityAvailable && 'antigravity', state.piAvailable && 'pi',
     state.opencodeAvailable && 'opencode', state.claudeAvailable && 'claude',
-    state.hermesAvailable && 'hermes', ...(state.customAcpBackends ?? []),
+    state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
   ].filter(Boolean).join(','))
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
@@ -369,7 +370,7 @@ export function HostSessionsDrawer({
       case 'opencode': return useAppStore.getState().opencodeAvailable
       case 'claude': return useAppStore.getState().claudeAvailable
       case 'hermes': return useAppStore.getState().hermesAvailable
-      default: return (useAppStore.getState().customAcpBackends ?? []).includes(target)
+      default: return selectCustomAcpBackends(useAppStore.getState()).includes(target)
     }
   }
 
@@ -1154,7 +1155,7 @@ export function HostSessionsDrawer({
               accessibilityLabel={strings.settings.more}
               onPress={() => { Keyboard.dismiss(); setAppMenuOpen(true) }}
               hitSlop={8}
-              style={({ pressed }) => [styles.iconBtnRound, pressed && styles.pressedBg]}
+              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressedFade]}
             >
               <MoreVertical size={18} color={colors.ink} strokeWidth={1.9} />
             </Pressable>

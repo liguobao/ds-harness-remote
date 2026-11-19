@@ -30,6 +30,11 @@ interface AccountLoginResult {
   isAdmin: boolean
 }
 
+export interface AccountMembership {
+  status: 'none' | 'active' | 'expired' | 'revoked'
+  expiresAt?: number
+}
+
 export interface AuthorizedPeerDevice {
   deviceId: string
   name: string
@@ -187,6 +192,17 @@ export class RemoteServerApi {
     const body = await this.request<unknown>('/api/v1/auth/me', {}, false, accountToken)
     if (!isRecord(body) || typeof body.account !== 'string' || body.account.length === 0) invalidResponse('account profile')
     return { account: body.account }
+  }
+
+  async deviceAccountMembership(): Promise<AccountMembership> {
+    const body = await this.request<unknown>('/api/v1/devices/self/membership')
+    if (!isRecord(body)) invalidResponse('device account membership')
+    const { status, expiresAt } = body
+    if (status === 'none' && expiresAt === null) return { status }
+    if ((status !== 'active' && status !== 'expired' && status !== 'revoked')
+      || typeof expiresAt !== 'number' || !Number.isSafeInteger(expiresAt)
+      || expiresAt <= 0 || expiresAt > 8.64e15) invalidResponse('device account membership')
+    return { status, expiresAt }
   }
 
   async removeSelf(): Promise<void> {

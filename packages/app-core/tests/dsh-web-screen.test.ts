@@ -106,7 +106,6 @@ import {
   DSH_WEB_GRANT_CLOCK_SKEW_MS,
   DshWebScreen,
   isDshWebGrantUsable,
-  isDshWebMembershipError,
   isFatalDshWebHttpError,
 } from '../src/screens/dsh-web-screen'
 
@@ -150,21 +149,12 @@ afterEach(() => {
 })
 
 describe('DshWebScreen helpers and lifecycle', () => {
-  it('classifies membership errors, clock-skew grant validity, and fatal HTTP errors', async () => {
+  it('classifies clock-skew grant validity, and fatal HTTP errors', async () => {
     const grantUrl = 'https://p2a3b4c5d6e7.tunnel.example.com/'
     const sessionUri = 'https://p2a3b4c5d6e7.tunnel.example.com/__remote/session'
     const now = 1_700_000_000_000
 
     await runScenarios([
-      {
-        name: 'membership error codes',
-        run: () => {
-          expect(isDshWebMembershipError({ code: 'WEB_ENTITLEMENT_REQUIRED' })).toBe(true)
-          expect(isDshWebMembershipError({ code: 'MEMBERSHIP_REQUIRED' })).toBe(true)
-          expect(isDshWebMembershipError({ code: 'TUNNEL_UNAVAILABLE' })).toBe(false)
-          expect(isDshWebMembershipError(new Error('network'))).toBe(false)
-        },
-      },
       {
         name: 'grant clock skew tolerance',
         run: () => {
@@ -196,10 +186,10 @@ describe('DshWebScreen helpers and lifecycle', () => {
     ])
   })
 
-  it('skips dsh.web.close when open rejects, distinguishes membership errors, and retries non-membership failures', async () => {
+  it('skips dsh.web.close when open rejects, and offers retry after a rejected open', async () => {
     await runScenarios([
       {
-        name: 'membership errors hide retry and skip close on unmount',
+        name: 'authorization errors offer retry and skip close on unmount',
         run: async () => {
           for (const code of ['WEB_ENTITLEMENT_REQUIRED', 'MEMBERSHIP_REQUIRED']) {
             const rpc = vi.fn(async (method: string) => {
@@ -211,7 +201,7 @@ describe('DshWebScreen helpers and lifecycle', () => {
             const tree = renderScreen(rpc)
             const banner = findElement(tree, el => el.type === 'ErrorBanner')
             expect(banner).toBeDefined()
-            expect(banner?.props?.onRetry).toBeUndefined()
+            expect(typeof banner?.props?.onRetry).toBe('function')
             reactHarness.unmount()
             expect(rpc.mock.calls.map(([method]) => method)).toEqual(['dsh.web.open'])
           }

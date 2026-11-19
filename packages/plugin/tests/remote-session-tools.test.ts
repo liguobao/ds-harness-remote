@@ -20,6 +20,12 @@ function fixture() {
     hasMore: false,
     cursor: 1,
     frames: [] as Record<string, unknown>[],
+    snapshotProjections: {} as Record<string, unknown>,
+    presets: [
+      { id: 'standard', isDefault: true, name: 'Standard' },
+      { id: 'analytics', isDefault: false, name: 'Analytics', description: 'Data checks' },
+      { id: 'broken-preset', isDefault: false, broken: 'missing plugin' },
+    ] as Record<string, unknown>[],
     queries: [] as string[],
     closed: 0,
     supported: true,
@@ -37,14 +43,17 @@ function fixture() {
         if (endpoint === 'workspace/follow') {
           yield { type: 'baseline', value: { items: [{ workspaceId: 'workspace', path: '/project', title: 'Project', sessionIds: state.ids }] } }
         } else if (endpoint === 'session/follow') {
-          yield { type: 'snapshot', cursor: state.cursor, records: state.history, hasMore: state.hasMore, projections: { values: {} } }
+          yield { type: 'snapshot', cursor: state.cursor, records: state.history, hasMore: state.hasMore, projections: { values: state.snapshotProjections } }
           for (const frame of state.frames) yield frame
           if (!active.aborted) await new Promise<void>(resolve => active.addEventListener('abort', () => resolve(), { once: true }))
         } else throw new Error('Unexpected stream')
       } finally { state.closed++ }
     })()
   })
-  const dispatch = vi.spyOn(RemoteTypertGateway.prototype, 'dispatch').mockResolvedValue({ ok: true, value: { accepted: true } })
+  const dispatch = vi.spyOn(RemoteTypertGateway.prototype, 'dispatch').mockImplementation(async endpoint => {
+    if (endpoint === 'agentPresets/list') return { ok: true, value: { presets: state.presets } }
+    return { ok: true, value: { accepted: true } }
+  })
   const connect: RemoteToolConnection = async (_host, active, query) => {
     active.throwIfAborted()
     return query({ features: { remoteGateway: state.supported }, client: {} } as ConnectedRemote, active)
@@ -202,5 +211,120 @@ describe('Native Remote session tool boundaries', () => {
     finish({ ok: true })
     await rejected
     expect(await f.tools.run('remote_get_operation', { operationId }, signal())).toMatchObject({ status: 'not_found', warning: expect.stringContaining('does not prove') })
+  })
+
+  it('lists presets, creates sessions with atomic or fallback preset selection, and preserves sessionId if fallback select fails', async () => {
+    const f = fixture()
+    const { sessionId: _, ...workspace } = target
+    expect(await f.tools.run('remote_list_presets', { hostId: 'host', backend: 'harness' }, signal())).toMatchObject({
+      hostId: 'host',
+      backend: 'harness',
+      presets: [
+        { id: 'standard', isDefault: true, name: 'Standard' },
+        { id: 'analytics', isDefault: false, name: 'Analytics', description: 'Data checks' },
+        { id: 'broken-preset', isDefault: false, broken: 'missing plugin' },
+      ],
+    })
+    expect(await f.tools.run('remote_list_presets', workspace, signal())).toMatchObject({ workspaceId: 'workspace' })
+
+    // Invalid or broken preset is rejected before session/create is ever dispatched, leaving operationId reusable.
+    await expect(f.tools.run('remote_create_session', { ...workspace, preset: 'missing', operationId }, signal())).rejects.toThrow('PRESET_NOT_FOUND')
+    await expect(f.tools.run('remote_create_session', { ...workspace, preset: 'broken-preset', operationId }, signal())).rejects.toThrow('PRESET_BROKEN')
+    expect(f.dispatch.mock.calls.every(([endpoint]) => endpoint !== 'session/create')).toBe(true)
+
+    // Native session/create accepts agentPreset directly in one mutation dispatch.
+    f.dispatch.mockImplementation(async (endpoint, payload) => {
+      if (endpoint === 'agentPresets/list') return { ok: true, value: { presets: f.state.presets } }
+      if (endpoint === 'session/create') {
+        const req = (payload as { args: { request: Record<string, unknown> } }).args.request
+        return { ok: true, value: { sessionId: 'created-analytics', agentPreset: req.agentPreset } }
+      }
+      throw new Error(`Unexpected dispatch: ${endpoint}`)
+    })
+    const created = await f.tools.run('remote_create_session', { ...workspace, preset: 'analytics', operationId }, signal())
+    expect(created).toMatchObject({ status: 'accepted', sessionId: 'created-analytics', agentPreset: 'analytics' })
+    await expect(f.tools.run('remote_create_session', { ...workspace, preset: 'standard', operationId }, signal())).rejects.toThrow('OPERATION_ID_CONFLICT')
+
+    // Fallback matrix for older Hosts: strictCodec rejection or omitted agentPreset falls back to agentPresets/select and preserves sessionId on failure.
+    await runScenarios(['strict-reject-ok', 'omitted-ok', 'select-fails-keeps-id', 'create-race-not-found', 'presets-unavailable'].map(kind => ({ name: kind, run: async () => {
+      const s = fixture()
+      if (kind === 'presets-unavailable') {
+        s.dispatch.mockResolvedValue({ ok: false, error: { code: 'gateway/method-not-found', message: 'private', details: {} } })
+        await expect(s.tools.run('remote_list_presets', workspace, signal())).rejects.toThrow('AGENT_PRESETS_UNAVAILABLE')
+        await expect(s.tools.run('remote_create_session', { ...workspace, preset: 'analytics', operationId }, signal())).rejects.toThrow('AGENT_PRESETS_UNAVAILABLE')
+        return
+      }
+      let creates = 0
+      s.dispatch.mockImplementation(async (endpoint, payload) => {
+        if (endpoint === 'agentPresets/list') return { ok: true, value: { presets: s.state.presets } }
+        if (endpoint === 'session/create') {
+          creates++
+          if (kind === 'create-race-not-found') return { ok: false, error: { code: 'agent-preset/not-found', message: 'private', details: {} } }
+          if (kind === 'strict-reject-ok' && creates === 1) return { ok: false, error: { code: 'gateway/arguments-invalid', message: 'private', details: {} } }
+          return { ok: true, value: { sessionId: `fallback-${creates}` } }
+        }
+        if (endpoint === 'agentPresets/select') {
+          if (kind === 'select-fails-keeps-id') return { ok: false, error: { code: 'agent-preset/invalid', message: 'private', details: {} } }
+          const args = (payload as { args: { agentPreset: string } }).args
+          return { ok: true, value: args.agentPreset }
+        }
+        throw new Error(`Unexpected dispatch: ${endpoint}`)
+      })
+      const result = await s.tools.run('remote_create_session', { ...workspace, preset: 'analytics', operationId }, signal())
+      expect(JSON.stringify(result)).not.toContain('private')
+      if (kind === 'create-race-not-found') {
+        expect(result).toMatchObject({ status: 'rejected', reason: 'PRESET_NOT_FOUND' })
+        expect(result).not.toHaveProperty('sessionId')
+      } else if (kind === 'select-fails-keeps-id') {
+        expect(result).toMatchObject({ status: 'rejected', sessionId: 'fallback-1', reason: 'PRESET_BROKEN' })
+      } else {
+        expect(result).toMatchObject({ status: 'accepted', sessionId: kind === 'strict-reject-ok' ? 'fallback-2' : 'fallback-1', agentPreset: 'analytics' })
+      }
+    } })), cleanup)
+  })
+
+  it('selects presets only before the first turn and surfaces agentPreset in read and list summaries', async () => {
+    const f = fixture()
+    f.state.rows = [{ sessionId: 'session', title: 'Session', running: false, blank: true, updatedAt: 2, projections: { values: { agentPreset: 'standard' } } }]
+    f.state.snapshotProjections = { agentPreset: 'analytics' }
+
+    expect(await f.tools.run('remote_list_sessions', { hostId: 'host', backend: 'harness', workspaceId: 'workspace' }, signal())).toMatchObject({
+      sessions: [{ sessionId: 'session', agentPreset: 'standard', blank: true }],
+    })
+    expect(await f.tools.run('remote_read_session', target, signal())).toMatchObject({
+      sessionId: 'session',
+      agentPreset: 'analytics',
+    })
+    expect(await f.tools.run('remote_read_session', { ...target, cursor: { throughSeq: 2, beforeSeq: 2 } }, signal())).toMatchObject({
+      sessionId: 'session',
+      agentPreset: 'standard',
+    })
+
+    // Select succeeds on blank session.
+    f.dispatch.mockImplementation(async (endpoint, payload) => {
+      if (endpoint === 'agentPresets/list') return { ok: true, value: { presets: f.state.presets } }
+      if (endpoint === 'agentPresets/select') {
+        const args = (payload as { args: { agentId: string; agentPreset: string } }).args
+        return { ok: true, value: args.agentPreset }
+      }
+      throw new Error(`Unexpected dispatch: ${endpoint}`)
+    })
+    const selected = await f.tools.run('remote_select_preset', { ...target, operationId, preset: 'analytics' }, signal())
+    expect(selected).toMatchObject({ status: 'accepted', sessionId: 'session', agentPreset: 'analytics' })
+    expect(f.dispatch).toHaveBeenLastCalledWith('agentPresets/select', { args: { agentId: 'session', agentPreset: 'analytics' } }, expect.any(AbortSignal))
+    expect(await f.tools.run('remote_get_operation', { operationId }, signal())).toEqual(selected)
+
+    // Already started session is rejected cleanly before dispatch, and Host lock race maps to PRESET_LOCKED without leaking details.
+    f.state.rows[0]!.blank = false
+    await expect(f.tools.run('remote_select_preset', { ...target, operationId: 'operation_00000002', preset: 'analytics' }, signal())).rejects.toThrow('PRESET_LOCKED')
+    f.state.rows[0]!.blank = true
+    f.dispatch.mockImplementation(async endpoint => {
+      if (endpoint === 'agentPresets/list') return { ok: true, value: { presets: f.state.presets } }
+      if (endpoint === 'agentPresets/select') return { ok: false, error: { code: 'agent-preset/locked', message: 'private', details: {} } }
+      throw new Error(`Unexpected dispatch: ${endpoint}`)
+    })
+    const locked = await f.tools.run('remote_select_preset', { ...target, operationId: 'operation_00000003', preset: 'analytics' }, signal())
+    expect(locked).toMatchObject({ status: 'rejected', sessionId: 'session', reason: 'PRESET_LOCKED' })
+    expect(JSON.stringify(locked)).not.toContain('private')
   })
 })

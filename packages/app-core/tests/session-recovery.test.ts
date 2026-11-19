@@ -3,15 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../src/types'
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
 import { mergeAcpHistoryAndLive } from '../src/services/cursor'
-import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
+import { inboxQueuedItems, mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 import { workspaceStableKey } from '../src/lib/workspace-key'
 import { ForegroundConnectionRecovery } from '../src/services/connection-recovery'
 
 const { proxy, transport, storage, authenticate, acp, codex, botDispatch, network } = vi.hoisted(() => ({
-  proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
+  proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(), sessionSelectModel: vi.fn(),
+    agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), sessionCancel: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn() },
-  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), setMode: vi.fn(), selectPermission: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
   authenticate: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('../src/services/connection', async () => {
     hasOpencode = transport.hasOpencode
     hasClaude = transport.hasClaude
     hasHermes = transport.hasHermes
+    requireSessionTools = transport.requireSessionTools
     requireCursor() { return acp }
     requireAntigravity() { return acp }
     requirePi() { return acp }
@@ -51,7 +53,8 @@ vi.mock('../src/services/connection', async () => {
 vi.mock('../src/services/storage', () => storage)
 vi.mock('../src/services/login', () => ({}))
 vi.mock('../src/services/server-session', () => ({ serverSession: { authenticate } }))
-import { useAppStore } from '../src/state/store'
+import { sessionChatImageLoader, useAppStore } from '../src/state/store'
+import { createCursorWorkspaceSession } from '../src/services/cursor'
 import { useBotTeamStore } from '../src/state/bot-store'
 
 const session: RemoteSession = { sessionId: 's1', updatedAt: 1, running: false, blank: false,
@@ -85,6 +88,7 @@ const prepareScenario1 = () => {
     selectedDevice: { deviceId: 'host' } as never,
     sessions: [session],
     busyAction: undefined,
+    error: undefined,
     busySendMode: 'queue',
     connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } },
   })
@@ -270,7 +274,7 @@ describe('ordered history recovery', () => {
           expect(row()).not.toHaveProperty('sendState')
         } else if (adopted) {
           const inQueue = (useAppStore.getState().selectedSession?.projections?.values?.inbox as { 'next-turn': unknown[] })['next-turn'].length > 0
-          expect(row()).toMatchObject({ queuedAdopted: true, sendState: inQueue ? 'queued' : 'unconfirmed' })
+          expect(row()).toMatchObject({ queuedAdopted: true, sendState: inQueue ? 'queued' : undefined })
         }
       }
       // A late echo heals the released row once, retaining native identity.
@@ -280,6 +284,58 @@ describe('ordered history recovery', () => {
       expect(row()).not.toHaveProperty('sendState')
       expect(row()).not.toHaveProperty('queuedAdopted')
     } })), prepareScenario1)
+  })
+
+  it('keeps idle send inbox claim out of unconfirmed while still settling lost adopted prompts on stop', async () => {
+    await runScenarios([
+      {
+        name: 'idle send inbox add then claim awaits echo without flagging unconfirmed',
+        run: async () => {
+          const idle = { ...session, running: false }
+          useAppStore.setState({ selectedSession: idle, sessions: [idle] })
+          let acknowledge!: () => void
+          proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
+          const rpcId = 'idle-claim-1'
+          const sending = useAppStore.getState().sendMessage('what is zhihu', [], rpcId)
+          const message = { id: 'host-idle-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'what is zhihu' }] }
+          const inbox = (items: unknown[], seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value: { 'next-turn': items },
+          } } as MuxStreamFrame)
+          inbox([message], 1)
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: 'queued' })
+          inbox([], 2)
+          acknowledge()
+          expect(await sending).toBe('sent')
+          const claimed = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(claimed).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: undefined })
+          useAppStore.getState().handleMuxFrame(frame(entry('user/message', 10, { turn: 1, message })))
+          const echoed = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(echoed).toMatchObject({ id: 'host-idle-1', nativeSeq: 10 })
+          expect(echoed).not.toHaveProperty('sendState')
+          expect(echoed).not.toHaveProperty('queuedAdopted')
+        },
+      },
+      {
+        name: 'claimed adopted prompt without echo settles to unconfirmed on stopped turn/end',
+        run: async () => {
+          const running = { ...session, running: true }
+          useAppStore.setState({ selectedSession: running, sessions: [running] })
+          proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+          const rpcId = 'claimed-aborted-1'
+          expect(await useAppStore.getState().sendMessage('aborted after claim', [], rpcId)).toBe('sent')
+          const message = { id: 'host-abort-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'aborted after claim' }] }
+          useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq: 1, value: { 'next-turn': [message] },
+          } } as MuxStreamFrame)
+          useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq: 2, value: { 'next-turn': [] },
+          } } as MuxStreamFrame)
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: undefined })
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 25, { turn: 1, reason: { kind: 'aborted' } })))
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, sendState: 'unconfirmed' })
+        },
+      },
+    ], prepareScenario1)
   })
 
   it('settles explicit queue actions without reviving removed rows or overwriting durable echoes', async () => {
@@ -309,7 +365,7 @@ describe('ordered history recovery', () => {
           expect(row).toMatchObject({ id: 'host-item', nativeSeq: 3 })
           expect(row).not.toHaveProperty('sendState')
           expect(row).not.toHaveProperty('queuedAdopted')
-        } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : 'unconfirmed' })
+        } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : undefined })
       },
     }))), prepareScenario1)
   })
@@ -1719,4 +1775,611 @@ describe('authoritative permission projection', () => {
     })
   }, 15000)
 
+})
+
+describe('selector guards, post-stop queue cleanup, and failed message history ordering (#494)', () => {
+  it('resets permissionSelecting on disconnect/offline/navigation and blocks stale model and preset completions', async () => {
+    await runScenarios([
+      ...(['onClose', 'setOffline', 'openSession'] as const).flatMap(interruption =>
+        (['resolve', 'reject'] as const).map(outcome => ({
+          name: `selectPermission interrupted by ${interruption} then ${outcome}`,
+          run: async () => {
+            const device = { deviceId: 'host' } as never
+            useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+            expect(await useAppStore.getState().connectDevice(device)).toBe(true)
+            const s2: RemoteSession = { ...session, sessionId: 's2' }
+            useAppStore.setState({ selectedSession: session, sessions: [session, s2] })
+
+            let finishPerm!: () => void
+            let failPerm!: (error: Error) => void
+            proxy.sessionSelectPermission.mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+              finishPerm = resolve
+              failPerm = reject
+            }))
+            proxy.sessionList.mockResolvedValue([
+              { ...session, projections: { values: { permissions: { currentValue: 'read-only' } } } },
+              s2,
+            ])
+
+            const selecting = useAppStore.getState().selectPermission('read-only')
+            expect(useAppStore.getState().permissionSelecting).toBe(true)
+
+            let s2Selecting: Promise<boolean> | undefined
+            let finishS2Perm: (() => void) | undefined
+            if (interruption === 'onClose') {
+              const options = transport.connect.mock.calls[0]![5] as { onClose?: () => void }
+              options.onClose?.()
+            } else if (interruption === 'setOffline') {
+              useAppStore.getState().setOffline()
+            } else {
+              expect(await useAppStore.getState().openSession(s2)).toBe(true)
+              expect(useAppStore.getState().permissionSelecting).toBe(false)
+              // Start a fresh permission change on s2 so the stale s1 completion must not clear s2's flag.
+              proxy.sessionSelectPermission.mockImplementationOnce(() => new Promise<void>(resolve => {
+                finishS2Perm = resolve
+              }))
+              proxy.sessionList.mockResolvedValue([
+                session,
+                { ...s2, projections: { values: { permissions: { currentValue: 'workspace-write' } } } },
+              ])
+              s2Selecting = useAppStore.getState().selectPermission('workspace-write')
+              expect(useAppStore.getState().permissionSelecting).toBe(true)
+            }
+
+            if (interruption !== 'openSession') {
+              expect(useAppStore.getState().permissionSelecting).toBe(false)
+            }
+            if (outcome === 'resolve') finishPerm()
+            else failPerm(new Error('stale permission failure'))
+
+            expect(await selecting).toBe(false)
+            expect(useAppStore.getState().error).toBeUndefined()
+            if (interruption === 'openSession') {
+              expect(useAppStore.getState().selectedSession?.sessionId).toBe('s2')
+              expect(useAppStore.getState().permissionSelecting).toBe(true)
+              finishS2Perm?.()
+              expect(await s2Selecting).toBe(true)
+              expect(useAppStore.getState().permissionSelecting).toBe(false)
+              expect(useAppStore.getState().selectedSession?.projections?.values?.permissions).toEqual({
+                currentValue: 'workspace-write',
+              })
+            } else {
+              expect(useAppStore.getState().permissionSelecting).toBe(false)
+              expect(useAppStore.getState().selectedSession?.projections?.values?.permissions).toEqual({
+                currentValue: 'default',
+              })
+            }
+          },
+        }))),
+      ...(['resolve', 'reject'] as const).map(outcome => ({
+        name: `Harness selectModel stale ${outcome} does not pollute new session`,
+        run: async () => {
+          const s2: RemoteSession = { ...session, sessionId: 's2' }
+          useAppStore.setState({
+            selectedSession: session,
+            sessions: [session, s2],
+            sessionModels: { current: { provider: 'deepseek', model: 'chat' }, routable: true, groups: [], failures: [] },
+          })
+          let finishModel!: (value: { provider: string; model: string }) => void
+          let failModel!: (error: Error) => void
+          proxy.sessionSelectModel.mockImplementationOnce(() => new Promise((resolve, reject) => {
+            finishModel = resolve
+            failModel = reject
+          }))
+          const selecting = useAppStore.getState().selectModel({ provider: 'deepseek', model: 'reasoner' })
+          expect(useAppStore.getState().modelSelecting).toBe(true)
+          expect(await useAppStore.getState().openSession(s2)).toBe(true)
+          expect(useAppStore.getState().modelSelecting).toBe(false)
+          useAppStore.setState({
+            sessionModels: { current: { provider: 'deepseek', model: 's2-model' }, routable: true, groups: [], failures: [] },
+          })
+          if (outcome === 'resolve') finishModel({ provider: 'deepseek', model: 'reasoner' })
+          else failModel(new Error('late model error'))
+          expect(await selecting).toBe(false)
+          expect(useAppStore.getState().sessionModels?.current).toEqual({ provider: 'deepseek', model: 's2-model' })
+          expect(useAppStore.getState().modelSelecting).toBe(false)
+          expect(useAppStore.getState().error).toBeUndefined()
+        },
+      })),
+      ...(['openSession', 'setOffline'] as const).flatMap(interruption =>
+        (['resolve', 'reject'] as const).map(outcome => ({
+          name: `selectAgentPreset interrupted by ${interruption} then ${outcome}`,
+          run: async () => {
+            const s2: RemoteSession = { ...session, sessionId: 's2', agentPreset: 'default' }
+            useAppStore.setState({ selectedSession: { ...session, agentPreset: 'default' }, sessions: [{ ...session, agentPreset: 'default' }, s2] })
+            let finishPreset!: (value: string) => void
+            let failPreset!: (error: Error) => void
+            proxy.agentPresetSelect.mockImplementationOnce(() => new Promise<string>((resolve, reject) => {
+              finishPreset = resolve
+              failPreset = reject
+            }))
+            const selecting = useAppStore.getState().selectAgentPreset('plan')
+            expect(useAppStore.getState().agentPresetSelecting).toBe(true)
+            if (interruption === 'openSession') {
+              expect(await useAppStore.getState().openSession(s2)).toBe(true)
+            } else {
+              useAppStore.getState().setOffline()
+            }
+            expect(useAppStore.getState().agentPresetSelecting).toBe(false)
+            if (outcome === 'resolve') finishPreset('plan')
+            else failPreset(new Error('late preset error'))
+            expect(await selecting).toBe(false)
+            expect(useAppStore.getState().agentPresetSelecting).toBe(false)
+            expect(useAppStore.getState().error).toBeUndefined()
+            expect(useAppStore.getState().selectedSession?.agentPreset).toBe('default')
+          },
+        }))),
+      {
+        name: 'loadAgentPresets ignores stale completion after navigation without clearing new session loading state, and archiveSession resets selector flags',
+        run: async () => {
+          const s2: RemoteSession = { ...session, sessionId: 's2' }
+          useAppStore.setState({ selectedSession: session, sessions: [session, s2] })
+          let finishS1!: (value: { presets: Array<{ id: string; isDefault: boolean }> }) => void
+          let finishS2!: (value: { presets: Array<{ id: string; isDefault: boolean }> }) => void
+          proxy.agentPresetList
+            .mockImplementationOnce(() => new Promise(resolve => { finishS1 = resolve }))
+            .mockImplementationOnce(() => new Promise(resolve => { finishS2 = resolve }))
+          const loadingS1 = useAppStore.getState().loadAgentPresets()
+          expect(useAppStore.getState().agentPresetLoading).toBe(true)
+          expect(await useAppStore.getState().openSession(s2)).toBe(true)
+          expect(useAppStore.getState().agentPresetLoading).toBe(false)
+          const loadingS2 = useAppStore.getState().loadAgentPresets()
+          expect(useAppStore.getState().agentPresetLoading).toBe(true)
+          finishS1({ presets: [{ id: 'stale', isDefault: false }] })
+          expect(await loadingS1).toBe(false)
+          expect(useAppStore.getState().agentPresetLoading).toBe(true)
+          finishS2({ presets: [{ id: 'fresh', isDefault: true }] })
+          expect(await loadingS2).toBe(true)
+          expect(useAppStore.getState().agentPresetOptions).toEqual([{ id: 'fresh', isDefault: true }])
+          expect(useAppStore.getState().agentPresetLoading).toBe(false)
+
+          useAppStore.setState({ permissionSelecting: true, modelSelecting: true, agentPresetSelecting: true, agentPresetLoading: true })
+          proxy.workspaceArchiveSession.mockResolvedValueOnce(['s2'])
+          expect(await useAppStore.getState().archiveSession('s2')).toBe(true)
+          expect(useAppStore.getState()).toMatchObject({
+            selectedSession: undefined,
+            permissionSelecting: false,
+            modelSelecting: false,
+            agentPresetSelecting: false,
+            agentPresetLoading: false,
+          })
+        },
+      },
+    ], prepareScenario1)
+  })
+
+  it('cleans up stale QueueDock items after stop without global error banners while preserving real errors and live queued turns', async () => {
+    await runScenarios([
+      ...(['session/queue-item-not-found', 'queue-item-not-found'] as const).map(code => ({
+        name: `post-stop remove hitting ${code} prunes inbox and local row silently`,
+        run: async () => {
+          const running = { ...session, running: true }
+          useAppStore.setState({ selectedSession: running, sessions: [running] })
+          proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+          proxy.sessionCancel.mockResolvedValueOnce(undefined)
+          const rpcId = `stop-remove-${code}`
+          expect(await useAppStore.getState().sendMessage('queued after stop', [], rpcId)).toBe('sent')
+          const inboxEntry = { id: 'q-stale-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'queued after stop' }] }
+          useAppStore.getState().handleMuxFrame({
+            rpcId: '',
+            payload: { type: 'session/projection', sessionId: 's1', key: 'inbox', seq: 1, value: { 'next-turn': [inboxEntry] } },
+          } as MuxStreamFrame)
+          await useAppStore.getState().stopSession()
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 20, { turn: 1, reason: { kind: 'aborted' } })))
+          // Stale inbox still carries q-stale-1; user taps remove and Host reports it is already gone.
+          proxy.sessionUpdateQueue.mockRejectedValueOnce(Object.assign(new Error('Queue item not found'), { code }))
+          expect(await useAppStore.getState().updateQueueItem('q-stale-1', 'remove', rpcId)).toBe(true)
+          expect(useAppStore.getState().error).toBeUndefined()
+          expect(inboxQueuedItems(useAppStore.getState().selectedSession?.projections?.values?.inbox)).toEqual([])
+          expect(inboxQueuedItems(useAppStore.getState().sessions.find(s => s.sessionId === 's1')?.projections?.values?.inbox)).toEqual([])
+          const row = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(row).toMatchObject({ id: `local:${rpcId}`, sendState: 'canceled', queuedAdopted: true })
+        },
+      })),
+      {
+        name: 'real updateQueueItem failure still surfaces global error and preserves inbox',
+        run: async () => {
+          const withQueue: RemoteSession = {
+            ...session,
+            running: true,
+            projections: {
+              values: {
+                inbox: { 'next-turn': [{ id: 'q-live-1', source: { kind: 'user', rpcId: 'rpc-live' }, content: [{ type: 'text', text: 'keep me' }] }] },
+              },
+            },
+          }
+          useAppStore.setState({ selectedSession: withQueue, sessions: [withQueue] })
+          proxy.sessionUpdateQueue.mockRejectedValueOnce(Object.assign(new Error('session/writer-held'), { code: 'session/writer-held' }))
+          expect(await useAppStore.getState().updateQueueItem('q-live-1', 'remove', 'rpc-live')).toBe(false)
+          expect(useAppStore.getState().error).toBeTruthy()
+          expect(inboxQueuedItems(useAppStore.getState().selectedSession?.projections?.values?.inbox)).toHaveLength(1)
+        },
+      },
+      {
+        name: 'steer hitting queue-item-not-found marks local row unconfirmed (retryable and healable by echo) without global error',
+        run: async () => {
+          const rpcId = 'steer-not-found-1'
+          const running: RemoteSession = {
+            ...session,
+            running: true,
+            projections: {
+              values: {
+                inbox: { 'next-turn': [{ id: 'q-steer-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'steer me' }] }] },
+              },
+            },
+          }
+          const preAckLocal: ChatItem = {
+            kind: 'message', id: `local:${rpcId}`, sessionId: 's1', role: 'user',
+            text: 'steer me', createdAt: 10, requestRpcId: rpcId,
+          }
+          useAppStore.setState({ selectedSession: running, sessions: [running], messages: { s1: [preAckLocal] } })
+          proxy.sessionUpdateQueue.mockRejectedValueOnce(Object.assign(new Error('Queue item not found'), { code: 'session/queue-item-not-found' }))
+          expect(await useAppStore.getState().updateQueueItem('q-steer-1', 'steer', rpcId)).toBe(true)
+          expect(useAppStore.getState().error).toBeUndefined()
+          expect(inboxQueuedItems(useAppStore.getState().selectedSession?.projections?.values?.inbox)).toEqual([])
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({
+            id: `local:${rpcId}`, sendState: 'unconfirmed', queuedAdopted: true,
+          })
+          // Unconfirmed row remains retryable...
+          proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+          expect(await useAppStore.getState().retrySendMessage(`local:${rpcId}`)).toBe(true)
+          // ...and is cleanly replaced when a late durable user/message echo arrives.
+          const echoed = { id: 'host-steer-echo', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'steer me' }] }
+          useAppStore.getState().handleMuxFrame(frame(entry('user/message', 30, { turn: 2, message: echoed })))
+          const settled = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(settled).toMatchObject({ id: 'host-steer-echo', nativeSeq: 30 })
+          expect(settled).not.toHaveProperty('sendState')
+        },
+      },
+      {
+        name: 'completed turn/end arriving before delayed inbox projection keeps newly ACKed prompt queued',
+        run: async () => {
+          const running: RemoteSession = {
+            ...session,
+            running: true,
+            projections: { values: { inbox: { 'next-turn': [] } } },
+          }
+          useAppStore.setState({ selectedSession: running, sessions: [running] })
+          proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+          const rpcId = 'race-completed-before-inbox'
+          expect(await useAppStore.getState().sendMessage('next turn prompt', [], rpcId)).toBe('sent')
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, sendState: 'queued' })
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 22, { turn: 1, reason: { kind: 'completed' } })))
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, sendState: 'queued' })
+        },
+      },
+      {
+        name: 'stopSession turn/end arriving before sessionPrompt ACK settles as unconfirmed instead of sticking queued',
+        run: async () => {
+          const running: RemoteSession = {
+            ...session,
+            running: true,
+            projections: { values: { inbox: { 'next-turn': [] } } },
+          }
+          useAppStore.setState({ selectedSession: running, sessions: [running] })
+          let ackPrompt!: () => void
+          proxy.sessionPrompt.mockImplementationOnce(() => new Promise<void>(resolve => { ackPrompt = resolve }))
+          const rpcId = 'race-stop-before-ack'
+          const sending = useAppStore.getState().sendMessage('stopped before ack', [], rpcId)
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 23, { turn: 1, reason: { kind: 'aborted' } })))
+          ackPrompt()
+          expect(await sending).toBe('sent')
+          expect(useAppStore.getState().busyAction).toBeUndefined()
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, sendState: 'unconfirmed' })
+        },
+      },
+      {
+        name: 'turn/end settles unadopted local queued ghost rows while keeping inbox-backed prompts queued for the next turn',
+        run: async () => {
+          const running: RemoteSession = {
+            ...session,
+            running: true,
+            projections: {
+              values: {
+                inbox: {
+                  'next-turn': [
+                    { id: 'q-kept', source: { kind: 'user', rpcId: 'rpc-kept' }, content: [{ type: 'text', text: 'valid next turn' }] },
+                  ],
+                },
+              },
+            },
+          }
+          const orphanLocal: ChatItem = {
+            kind: 'message', id: 'local:rpc-orphan', sessionId: 's1', role: 'user',
+            text: 'unadopted ghost', createdAt: 10, requestRpcId: 'rpc-orphan', sendState: 'queued',
+          }
+          const keptLocal: ChatItem = {
+            kind: 'message', id: 'local:rpc-kept', sessionId: 's1', role: 'user',
+            text: 'valid next turn', createdAt: 11, requestRpcId: 'rpc-kept', sendState: 'queued', queuedAdopted: true,
+          }
+          useAppStore.setState({ selectedSession: running, sessions: [running], messages: { s1: [orphanLocal, keptLocal] } })
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 25, { turn: 1, reason: { kind: 'aborted' } })))
+          const messages = useAppStore.getState().messages.s1 ?? []
+          expect(messages.find(item => item.id === 'local:rpc-orphan')).toMatchObject({ sendState: 'unconfirmed' })
+          expect(messages.find(item => item.id === 'local:rpc-kept')).toMatchObject({ sendState: 'queued', queuedAdopted: true })
+        },
+      },
+    ], prepareScenario1)
+  })
+
+  it('preserves chronological position of failed/unconfirmed/canceled local rows across Harness and ACP history merges', async () => {
+    await runScenarios([
+      {
+        name: 'Harness mergeHistoryAndLive and prependHistory keep early terminal local rows in place while keeping in-flight rows at the tail',
+        run: () => {
+          const history = foldHistory([
+            { event: { type: 'user/message', seq: 1, time: 1000, data: { turn: 1, message: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] } } } },
+            { event: { type: 'assistant/message', seq: 2, time: 1100, data: { turn: 1, message: { id: 'a1', content: [{ type: 'text', text: 'reply 1' }] } } } },
+            { event: { type: 'user/message', seq: 3, time: 2000, data: { turn: 2, message: { id: 'u2', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] } } } },
+            { event: { type: 'assistant/message', seq: 4, time: 2100, data: { turn: 2, message: { id: 'a2', content: [{ type: 'text', text: 'reply 2' }] } } } },
+            { event: { type: 'user/message', seq: 5, time: 3000, data: { turn: 3, message: { id: 'u3', source: { kind: 'user' }, content: [{ type: 'text', text: 'third' }] } } } },
+          ], 's1')
+          const failedA: ChatItem = {
+            kind: 'message', id: 'local:fail-1', sessionId: 's1', role: 'user',
+            text: 'failed mid', createdAt: 1500, requestRpcId: 'fail-1', sendState: 'failed',
+          }
+          const failedTie: ChatItem = {
+            kind: 'message', id: 'local:fail-2', sessionId: 's1', role: 'user',
+            text: 'failed tie', createdAt: 1500, requestRpcId: 'fail-2', sendState: 'unconfirmed',
+          }
+          const canceledLater: ChatItem = {
+            kind: 'message', id: 'local:cancel-1', sessionId: 's1', role: 'user',
+            text: 'canceled mid', createdAt: 2500, requestRpcId: 'cancel-1', sendState: 'canceled',
+          }
+          const inFlight: ChatItem = {
+            kind: 'message', id: 'local:sending-1', sessionId: 's1', role: 'user',
+            text: 'still sending', createdAt: 1200, requestRpcId: 'sending-1',
+          }
+          const merged = mergeHistoryAndLive(history, [failedA, failedTie, canceledLater, inFlight])
+          expect(merged.map(item => item.id)).toEqual([
+            'u1', 'a1', 'local:fail-1', 'local:fail-2', 'u2', 'a2', 'local:cancel-1', 'u3', 'local:sending-1',
+          ])
+          // Pagination prepend keeps the failed row between older and newer pages.
+          const tailOnly = mergeHistoryAndLive(history.slice(2), [failedA])
+          expect(tailOnly.map(item => item.id)).toEqual(['local:fail-1', 'u2', 'a2', 'u3'])
+          expect(prependHistory(history.slice(0, 2), tailOnly).map(item => item.id)).toEqual([
+            'u1', 'a1', 'local:fail-1', 'u2', 'a2', 'u3',
+          ])
+        },
+      },
+      {
+        name: 'ACP mergeAcpHistoryAndLive keeps early failed local rows in place with or without boundary overlap and ignores untimestamped history',
+        run: () => {
+          const msg = (id: string, role: 'user' | 'assistant', text: string, nativeTime?: number, nativeSeq?: number): ChatItem => ({
+            kind: 'message', id, sessionId: 'pi:s1', role, text,
+            createdAt: nativeTime ?? 999_999,
+            ...(nativeTime === undefined ? {} : { nativeTime }),
+            ...(nativeSeq === undefined ? {} : { nativeSeq, nativeOrderSeq: nativeSeq }),
+          })
+          const failed: ChatItem = {
+            kind: 'message', id: 'local:acp-fail', sessionId: 'pi:s1', role: 'user',
+            text: 'failed prompt', createdAt: 1500, requestRpcId: 'acp-fail', sendState: 'failed',
+          }
+          const history = [msg('u1', 'user', 'one', 1000, 0), msg('a1', 'assistant', 'r1', 1100, 1), msg('u2', 'user', 'two', 2000, 2), msg('a2', 'assistant', 'r2', 2100, 3)]
+          expect(mergeAcpHistoryAndLive(history, [failed]).map(item => item.id)).toEqual([
+            'u1', 'a1', 'local:acp-fail', 'u2', 'a2',
+          ])
+          // With boundary overlap plus a failed row earlier in live: overlap still collapses and failed stays at 1500.
+          const tool: ChatItem = { kind: 'tool', id: 'call-1', sessionId: 'pi:s1', toolName: 'bash', state: 'running', createdAt: 2000, nativeTime: 2000, nativeSeq: 2, nativeOrderSeq: 2 }
+          const liveTool: ChatItem = { ...tool, id: 'cursor-tool:acp-live:1:call-1', state: 'finished', nativeSeq: undefined, nativeOrderSeq: undefined }
+          expect(mergeAcpHistoryAndLive([msg('u1', 'user', 'one', 1000, 0), tool], [failed, liveTool]).map(item => item.id)).toEqual([
+            'u1', 'local:acp-fail', 'cursor-tool:acp-live:1:call-1',
+          ])
+          // Untimestamped history (nativeSeq present, nativeTime absent) must not push failed rows to index 0.
+          const untimestamped = [msg('u1', 'user', 'one', undefined, 0), msg('a1', 'assistant', 'r1', undefined, 1)]
+          expect(mergeAcpHistoryAndLive(untimestamped, [failed]).map(item => item.id)).toEqual([
+            'u1', 'a1', 'local:acp-fail',
+          ])
+        },
+      },
+      {
+        name: 'Harness openSession after reconnect settles an early orphaned local row and places it chronologically on first open',
+        run: async () => {
+          const device = { deviceId: 'host' } as never
+          useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          expect(await useAppStore.getState().connectDevice(device)).toBe(true)
+          const historyEvents: HistoryEntry[] = [
+            { event: { type: 'user/message', seq: 1, time: 1000, data: { turn: 1, message: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] } } } },
+            { event: { type: 'assistant/message', seq: 2, time: 1100, data: { turn: 1, message: { id: 'a1', content: [{ type: 'text', text: 'reply 1' }] } } } },
+            { event: { type: 'user/message', seq: 3, time: 2000, data: { turn: 2, message: { id: 'u2', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] } } } },
+            { event: { type: 'assistant/message', seq: 4, time: 2100, data: { turn: 2, message: { id: 'a2', content: [{ type: 'text', text: 'reply 2' }] } } } },
+          ]
+          const idleWithInbox: RemoteSession = {
+            ...session,
+            running: false,
+            projections: { values: { permissions: { currentValue: 'default' }, inbox: { 'next-turn': [] } } },
+          }
+          const orphanedLocal: ChatItem = {
+            kind: 'message', id: 'local:orphan-early', sessionId: 's1', role: 'user',
+            text: 'orphaned mid', createdAt: 1500, requestRpcId: 'orphan-early', sendState: 'queued',
+          }
+          useAppStore.setState({
+            selectedSession: idleWithInbox,
+            sessions: [idleWithInbox],
+            messages: { s1: [...foldHistory(historyEvents.slice(0, 2), 's1', true), orphanedLocal] },
+          })
+          proxy.sessionHistory.mockResolvedValueOnce(page(historyEvents, 4))
+          expect(await useAppStore.getState().openSession(idleWithInbox)).toBe(true)
+          const restored = useAppStore.getState().messages.s1 ?? []
+          expect(restored.map(item => item.id)).toEqual(['u1', 'a1', 'local:orphan-early', 'u2', 'a2'])
+          expect(restored.find(item => item.id === 'local:orphan-early')).toMatchObject({ sendState: 'canceled' })
+        },
+      },
+    ], prepareScenario1)
+  })
+})
+
+describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP reconnect running, setOffline cleanup, opencode catalog)', () => {
+  it('loads ACP image attachments by Host capability and allows claude/hermes workspace image preview while blocking codex', async () => {
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    const expectedUri = `data:image/png;base64,${pngBase64}`
+    const statFile = vi.fn(async () => ({ absolutePath: '/work/chart.png', version: 'v1', bytes: 68 }))
+    const readBytes = vi.fn(async () => ({ absolutePath: '/work/chart.png', version: 'v1', offset: 0, eof: true, bytes: 68, data: pngBase64 }))
+    transport.requireSessionTools.mockReturnValue({ statFile, readBytes })
+    transport.hasAntigravity.mockReturnValue(true)
+    transport.hasHermes.mockReturnValue(true)
+    transport.hasClaude.mockReturnValue(true)
+    acp.transferCall.mockResolvedValue({
+      events: [{
+        event: {
+          type: 'user/message',
+          seq: 0,
+          time: 100,
+          data: {
+            id: 'u1',
+            source: { kind: 'user' },
+            content: [{
+              type: 'image',
+              attachment: { attachmentId: 'agy-image:1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 },
+              mediaType: 'image/png',
+              data: pngBase64,
+            }],
+          },
+        },
+      }],
+    })
+
+    const agySession: RemoteSession = { sessionId: 'antigravity:s1', nativeId: 's1', backend: 'antigravity', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: agySession, sessions: [agySession] })
+    const agyLoader = sessionChatImageLoader(agySession)
+    await expect(agyLoader({ attachmentId: 'agy-image:1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, new AbortController().signal))
+      .resolves.toBe(expectedUri)
+
+    transport.hasAntigravity.mockReturnValue(false)
+    await expect(agyLoader({ attachmentId: 'agy-image:1', mediaType: 'image/png' }, new AbortController().signal))
+      .rejects.toThrow('Image attachment unavailable')
+
+    // Concurrent multi-image load in one session deduplicates dsh/sessionHistory to a single RPC
+    // and survives individual image AbortSignal cancellation.
+    transport.hasHermes.mockReturnValue(true)
+    acp.transferCall.mockClear()
+    acp.transferCall.mockResolvedValue({
+      events: [{
+        event: {
+          type: 'user/message',
+          seq: 0,
+          time: 100,
+          data: {
+            id: 'u-multi',
+            source: { kind: 'user' },
+            content: [
+              { type: 'image', attachment: { attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+              { type: 'image', attachment: { attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+            ],
+          },
+        },
+      }],
+    })
+    const hermesMulti: RemoteSession = { sessionId: 'hermes:multi', nativeId: 'multi', backend: 'hermes', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: hermesMulti, sessions: [hermesMulti] })
+    const multiLoader = sessionChatImageLoader(hermesMulti)
+    const c1 = new AbortController()
+    const c2 = new AbortController()
+    const p1 = multiLoader({ attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c1.signal)
+    const p2 = multiLoader({ attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c2.signal)
+    c1.abort()
+    await expect(p1).rejects.toThrow()
+    await expect(p2).resolves.toBe(expectedUri)
+    expect(acp.transferCall).toHaveBeenCalledTimes(1)
+
+    for (const backend of ['claude', 'hermes'] as const) {
+      const acpSession: RemoteSession = { sessionId: `${backend}:s1`, nativeId: 's1', backend, updatedAt: 1, running: false, blank: false }
+      useAppStore.setState({ selectedSession: acpSession, sessions: [acpSession] })
+      const loader = sessionChatImageLoader(acpSession)
+      await expect(loader({ uri: '/work/chart.png' }, new AbortController().signal)).resolves.toBe(expectedUri)
+    }
+
+    const codexSession: RemoteSession = { sessionId: 'codex:t1', nativeId: 't1', backend: 'codex', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: codexSession, sessions: [codexSession] })
+    await expect(sessionChatImageLoader(codexSession)({ uri: '/work/chart.png' }, new AbortController().signal))
+      .rejects.toThrow('Image preview unavailable')
+  })
+
+  it('creates new Cursor sessions with blank: true and no hardcoded title', async () => {
+    transport.hasCursor.mockReturnValue(true)
+    acp.createSession.mockResolvedValue({ sessionId: 'cur-new-1' })
+    const workspace = { workspaceId: 'cursor:cwd:%2Fwork', backend: 'cursor' as const, path: '/work', title: 'work', sessionIds: [], createdAt: '', updatedAt: '' }
+    useAppStore.setState({ workspaces: [workspace], sessions: [] })
+    expect(await useAppStore.getState().createSession(workspace.workspaceId, 'cursor')).toBe(true)
+    const created = useAppStore.getState().sessions.find(s => s.sessionId === 'cursor:cur-new-1')
+    expect(created).toMatchObject({ blank: true })
+    expect(created?.title).toBeUndefined()
+
+    const helperResult = await createCursorWorkspaceSession(acp as never, '/work')
+    expect(helperResult.session.blank).toBe(true)
+    expect(helperResult.session.title).toBeUndefined()
+  })
+
+  it('restores ACP running: true on reconnect when live frames are active, and closes Codex/Cursor streams in setOffline', async () => {
+    const agy: RemoteSession = { sessionId: 'antigravity:live-1', nativeId: 'live-1', backend: 'antigravity', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: agy, sessions: [agy], messages: {} })
+
+    let receive!: (frame: unknown) => void
+    const streamClose = vi.fn(async () => undefined)
+    acp.openStream.mockImplementationOnce(async (_sid: string, onFrame: (f: unknown) => void) => {
+      receive = onFrame
+      return { streamId: 's-live', close: streamClose }
+    })
+    let finishHistory!: (v: unknown) => void
+    acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finishHistory = resolve }))
+
+    const opening = useAppStore.getState().openSession(agy)
+    await vi.waitFor(() => expect(acp.openStream).toHaveBeenCalled())
+    receive({ streamId: 's-live', frame: { method: 'session/update', params: { sessionId: 'live-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'still streaming' } } } } })
+    expect(useAppStore.getState().selectedSession?.running).toBe(true)
+
+    finishHistory({ events: [] })
+    expect(await opening).toBe(true)
+    expect(useAppStore.getState().selectedSession?.running).toBe(true)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(true)
+
+    // setOffline must clear active Cursor & Codex stream handles so no remote close or ghost frames fire.
+    useAppStore.setState({ codexReadySessionId: 'codex:c1' })
+    useAppStore.getState().setOffline()
+    expect(useAppStore.getState().connection.phase).toBe('offline')
+    expect(useAppStore.getState().codexReadySessionId).toBeUndefined()
+    expect(streamClose).not.toHaveBeenCalled()
+    // Re-opening after setOffline should not observe stale stream state.
+    receive({ streamId: 's-live', frame: { method: 'session/update', params: { sessionId: 'live-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ghost' } } } } })
+    expect(useAppStore.getState().messages[agy.sessionId]?.some(m => m.kind === 'message' && m.text.includes('ghost'))).toBe(false)
+
+    // setOffline resets ACP running=false; if the turn finished while offline (history settled, no live frames), reconnect stays running=false.
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
+    useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
+    acp.openStream.mockResolvedValueOnce({ streamId: 's-reconnected', close: async () => undefined })
+    acp.transferCall.mockResolvedValueOnce({
+      events: [
+        entry('user/message', 0, { id: 'u-done', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }),
+        entry('assistant/message', 1, { turn: 1, message: { id: 'a-done', content: [{ type: 'text', text: 'done offline' }] } }),
+        entry('turn/end', 2, { turn: 1, reason: { kind: 'completed' } }),
+      ],
+    })
+    expect(await useAppStore.getState().openSession(useAppStore.getState().selectedSession!)).toBe(true)
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
+  })
+
+  it('preserves a newly completed OpenCode session across immediate refreshOpencodeCatalog when Host has not flushed yet', async () => {
+    transport.hasOpencode.mockReturnValue(true)
+    const opc: RemoteSession = { sessionId: 'opencode:fresh-turn', nativeId: 'fresh-turn', backend: 'opencode', updatedAt: 1, running: true, blank: false, title: 'My question' }
+    const ws = { workspaceId: 'opencode:cwd:%2Fproj', backend: 'opencode' as const, path: '/proj', title: 'proj', sessionIds: [opc.sessionId], createdAt: '', updatedAt: '' }
+    useAppStore.setState({ selectedSession: opc, sessions: [opc], workspaces: [ws], messages: { [opc.sessionId]: [] } })
+
+    acp.call.mockImplementation(async (method: string) => {
+      if (method === 'dsh/workspaceList') return [{ path: '/proj', title: 'proj' }]
+      if (method === 'dsh/sessionList') return { items: [] }
+      return []
+    })
+
+    useAppStore.getState().handleCursorFrame({
+      streamId: 's-opc',
+      frame: { method: 'session/update', params: { sessionId: 'fresh-turn', update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' } } },
+    })
+
+    await vi.waitFor(() => expect(acp.call).toHaveBeenCalledWith('dsh/sessionList', expect.objectContaining({ backend: 'opencode' })))
+    expect(useAppStore.getState().sessions.some(s => s.sessionId === opc.sessionId)).toBe(true)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === opc.sessionId)?.running).toBe(false)
+    expect(useAppStore.getState().workspaces[0]?.sessionIds).toContain(opc.sessionId)
+  })
 })

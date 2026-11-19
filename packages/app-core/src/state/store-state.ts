@@ -33,7 +33,7 @@ import type {
   WorkspaceShortcut,
   WorkspaceView,
 } from '../types'
-import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 type BootPhase = 'loading' | 'ready' | 'error'
@@ -115,7 +115,6 @@ export interface AppState {
   language: AppLanguage
   statusBarVisible: boolean
   themePreference: ThemePreference
-  typographyDensity: TypographyDensity
   chatAppearance: ChatAppearance
   activityDockMode: ActivityDockMode
   drawerLayoutMode: DrawerLayoutMode
@@ -212,7 +211,6 @@ export interface AppState {
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
-  setTypographyDensity(density: TypographyDensity): Promise<void>
   setChatAppearance(appearance: Partial<ChatAppearance>): Promise<void>
   resetChatAppearance(): Promise<void>
   setActivityDockMode(mode: ActivityDockMode): Promise<void>
@@ -236,9 +234,15 @@ export const disconnected: ConnectionSnapshot = {
   stats: { mode: 'Disconnected', connected: false },
 }
 
+const EMPTY_STRINGS: readonly string[] = []
+
+export function selectCustomAcpBackends(state: Pick<AppState, 'customAcpBackends'>): readonly string[] {
+  return state.customAcpBackends ?? EMPTY_STRINGS
+}
+
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'hostSessionEvents' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'customAcpBackends' | 'workspaceCatalog' | 'workspaces' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' | 'agentPresetOptions' | 'agentPresetLoading' | 'agentPresetSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -258,6 +262,7 @@ export function initialData(): Pick<AppState,
     opencodeAvailable: false,
     claudeAvailable: false,
     hermesAvailable: false,
+    customAcpBackends: [],
     workspaceCatalog: undefined,
     workspaces: [],
     favoriteWorkspaces: [],
@@ -276,6 +281,9 @@ export function initialData(): Pick<AppState,
     sessionModels: undefined,
     modelSelecting: false,
     permissionSelecting: false,
+    agentPresetOptions: undefined,
+    agentPresetLoading: false,
+    agentPresetSelecting: false,
     historyHasMore: false,
     historyLoadingOlder: false,
     oldestLoadedSeq: undefined,
