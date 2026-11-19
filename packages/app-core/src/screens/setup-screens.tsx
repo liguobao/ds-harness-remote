@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -18,11 +18,12 @@ import { DsBotSettingsModal } from './bot/ds-bot-settings-screen'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { foregroundService } from '../services/foreground-service'
-import type { OAuthProviderInfo } from '../services/api'
+import { serverSession } from '../services/server-session'
+import type { AccountMembership, OAuthProviderInfo } from '../services/api'
 import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, KeyValue, Screen, SectionTitle, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
-import type { DefaultPermissionPreset, LoginMethod } from '../types'
+import type { DefaultPermissionPreset, DeviceIdentity, LoginMethod } from '../types'
 import { QrCode } from '../ui/qr-code'
 import Svg, { Path, Polygon } from 'react-native-svg'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
@@ -35,11 +36,12 @@ import { easingCurve, resolveMotion } from '../ui/motion'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ActivityDockMode, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, DrawerLayoutMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 const defaultServerUrl = 'https://dsh.r2049.cn'
+const membershipPricingUrl = 'https://dsh.r2049.cn/pricing'
 const updateUrl = 'https://github.com/liguobao/ds-harness-remote/releases/latest'
 const testFlightUrl = 'https://testflight.apple.com/join/aSkJfmUJ'
 const releaseApiUrl = 'https://api.github.com/repos/liguobao/ds-harness-remote/releases/latest'
@@ -610,6 +612,51 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
+async function openSettingsUrl(url: string) {
+  try {
+    await Linking.openURL(url)
+  } catch {
+    Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
+  }
+}
+
+function copySettingsValue(value: string, onCopied?: () => void) {
+  void Clipboard.setStringAsync(value).then(
+    onCopied,
+    () => Alert.alert(zhCN.settings.identityCopyFailed),
+  )
+}
+
+function AccountMembershipRows({ active, baseUrl, identity }: { active: boolean; baseUrl: string; identity: DeviceIdentity }) {
+  const language = useAppStore(state => state.language)
+  const [membership, setMembership] = useState<AccountMembership | null>()
+  useEffect(() => {
+    if (!active) return
+    let current = true
+    setMembership(undefined)
+    void serverSession.authenticate(baseUrl, identity)
+      .then(({ api }) => current ? api.deviceAccountMembership() : undefined)
+      .then(result => { if (current && result !== undefined) setMembership(result) })
+      .catch(() => { if (current) setMembership(null) })
+    return () => { current = false }
+  }, [active, baseUrl, identity])
+
+  const labels = zhCN.settings.membership
+  const value = membership === undefined ? labels.loading : membership === null ? zhCN.common.unavailable : labels[membership.status]
+  return <>
+    <GroupRow
+      icon={ShieldCheck}
+      label={labels.title}
+      value={value}
+      accessibilityLabel={`${labels.title} · ${value}`}
+      onPress={membership?.status === 'none' ? () => void openSettingsUrl(membershipPricingUrl) : undefined}
+    />
+    {membership?.expiresAt !== undefined && (
+      <GroupRow icon={Clock} label={labels.expiresAt} value={new Date(membership.expiresAt).toLocaleDateString(language)} />
+    )}
+  </>
+}
+
 export function SettingsScreen({
   active = true,
   onBack,
@@ -637,8 +684,6 @@ export function SettingsScreen({
   const currentLanguageLabel = languageOptions().find(o => o.value === languagePreference)?.name ?? zhCN.settings.languageSystem
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
-  const typographyDensity = useAppStore(state => state.typographyDensity)
-  const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
   const { phase: updatePhase, progress: updateProgress, latestVersion, checkForUpdates } = useUpdateCheck()
   const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
   const buildVersion = Application.nativeBuildVersion
@@ -647,12 +692,7 @@ export function SettingsScreen({
     if (!value) return
     Alert.alert(label, value, [
       { text: zhCN.common.close, style: 'cancel' },
-      { text: zhCN.settings.copyIdentity, onPress: () => {
-        void Clipboard.setStringAsync(value).then(
-          () => Alert.alert(zhCN.diagram.copied),
-          () => Alert.alert(zhCN.settings.identityCopyFailed),
-        )
-      } },
+      { text: zhCN.settings.copyIdentity, onPress: () => copySettingsValue(value, () => Alert.alert(zhCN.diagram.copied)) },
     ])
   }
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
@@ -665,9 +705,6 @@ export function SettingsScreen({
     setLogCount(connectionLogEntries().length)
     return subscribeConnectionLog(() => setLogCount(connectionLogEntries().length))
   }, [])
-  const [densitySaving, setDensitySaving] = useState(false)
-  const [densityPickerOpen, setDensityPickerOpen] = useState(false)
-  const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
   const activityDockMode = useAppStore(state => state.activityDockMode)
   const setActivityDockMode = useAppStore(state => state.setActivityDockMode)
   const [activityDockSaving, setActivityDockSaving] = useState(false)
@@ -736,14 +773,6 @@ export function SettingsScreen({
     try { await setCompactHistory(value) }
     catch { Alert.alert(zhCN.settings.compactHistorySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setCompactSaving(false) }
-  }
-
-  const toggleTypographyDensity = async (value: TypographyDensity) => {
-    if (densitySaving || value === typographyDensity) return
-    setDensitySaving(true)
-    try { await setTypographyDensity(value) }
-    catch { Alert.alert(zhCN.settings.typographyDensitySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
-    finally { setDensitySaving(false) }
   }
 
   const toggleActivityDockMode = async (value: ActivityDockMode) => {
@@ -889,13 +918,6 @@ export function SettingsScreen({
                 onPress={() => setAppearanceOpen(true)}
               />
               <GroupRow
-                icon={Type}
-                label={zhCN.settings.typographyDensity}
-                value={currentDensityLabel}
-                chevron
-                onPress={() => setDensityPickerOpen(true)}
-              />
-              <GroupRow
                 icon={Layers}
                 label={zhCN.settings.activityDockMode}
                 value={currentActivityDockLabel}
@@ -1037,8 +1059,24 @@ export function SettingsScreen({
 
             <SectionTitle>{zhCN.settings.accountAndServer}</SectionTitle>
             <GroupCard>
-              <GroupRow first icon={Globe} label={zhCN.settings.server} value={config?.baseUrl?.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured} />
-              <GroupRow icon={UserRound} label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
+              <GroupRow
+                first
+                icon={Globe}
+                label={zhCN.settings.server}
+                value={config?.baseUrl.replace(/^https?:\/\//, '') ?? zhCN.settings.notConfigured}
+                onPress={config === undefined ? undefined : () => void openSettingsUrl(config.baseUrl)}
+              />
+              <GroupRow
+                icon={UserRound}
+                label={zhCN.settings.account}
+                value={account ?? zhCN.settings.notSignedIn}
+                accessibilityLabel={account === undefined ? undefined : `${zhCN.settings.account} · ${zhCN.settings.copyIdentity}`}
+                accessory={account === undefined ? undefined : <Copy size={18} color={colors.muted} />}
+                onPress={account === undefined ? undefined : () => copySettingsValue(account)}
+              />
+              {account !== undefined && config !== undefined && identity !== undefined && (
+                <AccountMembershipRows key={JSON.stringify([config.baseUrl, account, identity.deviceId])} active={active} baseUrl={config.baseUrl} identity={identity} />
+              )}
               <GroupRow icon={KeyRound} label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
               <GroupRow icon={Cable} label={zhCN.settings.protocol} value="DSH Remote v1" />
             </GroupCard>
@@ -1163,40 +1201,6 @@ export function SettingsScreen({
             </ScrollView>
       </SheetModal>
       <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
-      <SheetModal
-        visible={densityPickerOpen}
-        onClose={() => setDensityPickerOpen(false)}
-        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
-      >
-            <View style={styles.languageHeader}>
-              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.typographyDensity}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setDensityPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
-              <GroupCard>
-                {([
-                  { value: 'standard' as const, name: zhCN.settings.densityStandard },
-                  { value: 'compact' as const, name: zhCN.settings.densityCompact },
-                ]).map((option, index) => {
-                  const chosen = option.value === typographyDensity
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => {
-                        setDensityPickerOpen(false)
-                        void toggleTypographyDensity(option.value)
-                      }}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-      </SheetModal>
       <SheetModal
         visible={activityDockPickerOpen}
         onClose={() => setActivityDockPickerOpen(false)}
@@ -1404,11 +1408,12 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   pluginsDisabled?: boolean
   onAutomationTasks?: () => void
 }) {
+  const language = useAppStore(state => state.language)
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
-  const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
+  const { width: windowWidth, height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
   const reduceMotion = useReduceMotion()
   // The menu is anchored under the toolbar chip; growing from that corner
   // avoids a card that pops in from nowhere.
@@ -1433,6 +1438,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   const shortWindow = landscape || compactHeight
   const menuTop = insets.top + (shortWindow ? 48 : 56)
   const menuMaxHeight = Math.max(120, windowHeight - menuTop - insets.bottom - spacing.xs)
+  const menuWidth = Math.min(/^(zh|ja)-/.test(language) ? 210 : 224, windowWidth - spacing.md * 2)
 
   return (
     <View style={styles.homeMenuLayer} pointerEvents="box-none">
@@ -1448,6 +1454,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-none"
         style={[styles.homeMenuCard, {
           top: menuTop,
+          width: menuWidth,
           maxHeight: menuMaxHeight,
           opacity: entrance,
           transform: [
@@ -1479,6 +1486,10 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
             <HomeMenuRow icon={SlidersHorizontal} label={zhCN.remoteHosts.title} onPress={onRemoteHosts} />
           )}
           {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
+          <HomeMenuRow icon={ShieldCheck} label={zhCN.settings.membership.plan} onPress={() => {
+            onClose()
+            void openSettingsUrl(membershipPricingUrl)
+          }} />
           <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
           <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
           <HomeMenuRow
@@ -1642,7 +1653,7 @@ function HomeMenuRow({ icon: Icon, label, subtitle, onPress, disabled = false, b
       <View style={styles.homeMenuRowIcon}><Icon size={20} color={disabled ? colors.muted : colors.ink} strokeWidth={1.8} /></View>
       <View style={styles.homeMenuRowCopy}>
         <Text style={[styles.homeMenuRowLabel, disabled && styles.homeMenuRowLabelDisabled]}>{label}</Text>
-        {subtitle !== undefined && <Text style={styles.homeMenuRowSubtitle} numberOfLines={1}>{subtitle}</Text>}
+        {subtitle !== undefined && <Text style={styles.homeMenuRowSubtitle}>{subtitle}</Text>}
       </View>
       {busy
         ? <ActivityIndicator size="small" color={colors.primary} />
@@ -1928,19 +1939,11 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
 function SettingsLink({ label, url, value }: { label: string; url: string; value?: string }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const open = async () => {
-    try {
-      await Linking.openURL(url)
-    } catch {
-      Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
-    }
-  }
-
   return (
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`${label}：${value ?? url}`}
-      onPress={() => void open()}
+      onPress={() => void openSettingsUrl(url)}
       style={({ pressed }) => [styles.settingsLink, pressed && styles.settingsLinkPressed]}
     >
       <View style={styles.settingsLinkCopy}>
@@ -2074,12 +2077,6 @@ function createStyles(colors: ThemeColors) {
   themeTileDot: { position: 'absolute', right: 10, bottom: 10, width: 12, height: 12, borderRadius: 6 },
   themeTileLabel: { ...type.small, fontSize: 15, color: colors.ink },
   themeTileLabelSelected: { color: colors.primary, fontWeight: '600' },
-  densityRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.md, paddingRight: spacing.md, paddingTop: spacing.md },
-  densityIcon: { width: 28, marginRight: spacing.sm, alignItems: 'center' },
-  densityCopy: { flex: 1, gap: 2 },
-  densityLabel: { ...type.body, fontSize: 16, color: colors.ink },
-  densityNote: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
-  densitySegments: { marginRight: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md, marginLeft: 56 },
   signOutCard: { marginTop: spacing.xxl },
   keyNoteText: { ...type.small, color: colors.muted, flex: 1 },
   settingsLink: { minHeight: 68, paddingVertical: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
@@ -2089,7 +2086,7 @@ function createStyles(colors: ThemeColors) {
   settingsLinkUrl: { ...type.caption, color: colors.primary },
   homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
-  homeMenuCard: { position: 'absolute', right: spacing.md, width: 260, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, zIndex: 1, ...floatingShadow(colors, 'high') },
+  homeMenuCard: { position: 'absolute', right: spacing.md, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, zIndex: 1, ...floatingShadow(colors, 'high') },
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
   // capped landscape card scroll instead of clipping its last row.
   homeMenuScroll: { flexGrow: 0, flexShrink: 1 },

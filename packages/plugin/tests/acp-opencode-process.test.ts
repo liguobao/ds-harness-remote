@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { access, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpencodeNativeApi } from '../src/acp/adapters/opencode-native-api.js'
 import { PassThrough } from 'node:stream'
@@ -10,6 +10,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { OpencodeAcpClient, OpencodeAcpError } from '../src/acp/adapters/opencode-process.js'
 import type { SafeLogger } from '../src/logging.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, realpath: vi.fn(actual.realpath) }
+})
 
 describe('OpencodeAcpClient', () => {
   it('negotiates native-listener and stdio-only CLIs without breaking ACP or weakening the private listener', async () => {
@@ -202,6 +207,59 @@ describe('OpencodeAcpClient', () => {
       })
       expect(request).toHaveBeenCalledTimes(2)
       await expect(client.call('session/prompt', { sessionId: 'archived', prompt: [] })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+    } finally { await client.close() }
+  })
+
+  it('truncates oversized session/list pages, caches realpath per query, and isolates per-item failures (#466)', async () => {
+    const fake = fakeProcess()
+    const cwd = await realpath(process.cwd())
+    const cwdAlias = `${cwd}${sep}.`
+    const missingCwd = join(cwd, 'non-existent-opencode-dir-466')
+    const oversizedSessions = [
+      // 1005 items: 5 oldest items should be dropped when keeping the 1000 most recent.
+      ...Array.from({ length: 5 }, (_, i) => ({
+        sessionId: `stale-${i}`,
+        cwd: cwdAlias,
+        updatedAt: `2025-01-01T00:00:0${i}Z`,
+      })),
+      { sessionId: 'missing-dir', cwd: missingCwd, updatedAt: '2026-11-18T12:00:00Z' },
+      { sessionId: 'archive-timeout', cwd: cwdAlias, updatedAt: '2026-11-18T11:59:00Z' },
+      ...Array.from({ length: 998 }, (_, i) => ({
+        sessionId: `recent-${i}`,
+        cwd: cwdAlias,
+        updatedAt: `2026-11-18T10:${String(Math.floor((997 - i) / 60)).padStart(2, '0')}:${String((997 - i) % 60).padStart(2, '0')}Z`,
+      })),
+    ]
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line)
+        const result = message.method === 'initialize'
+          ? { protocolVersion: 1 }
+          : { sessions: oversizedSessions }
+        fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
+      }
+    })
+    const request = vi.fn(async (url: unknown) => {
+      const id = new URL(String(url)).pathname.split('/').at(-1)
+      if (id === 'archive-timeout') {
+        throw new Error('Request timed out')
+      }
+      return new Response(JSON.stringify({ id, directory: cwd, time: {} }))
+    })
+    const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+    Object.assign(client, { nativeApi: new OpencodeNativeApi('http://127.0.0.1:12345', request as typeof fetch) })
+    try {
+      await client.start()
+      vi.mocked(realpath).mockClear()
+      const listed = await client.call('session/list', {}) as { sessions: Array<{ sessionId: string; archived: boolean }> }
+      expect(listed.sessions).toHaveLength(998)
+      expect(listed.sessions.some(s => s.sessionId.startsWith('stale-'))).toBe(false)
+      expect(listed.sessions.some(s => s.sessionId === 'missing-dir')).toBe(false)
+      expect(listed.sessions.some(s => s.sessionId === 'archive-timeout')).toBe(false)
+      expect(listed.sessions[0]).toMatchObject({ sessionId: 'recent-0', archived: false })
+      // Within one session/list query, item.cwd realpath is resolved once per unique raw path.
+      const itemRealpathCalls = vi.mocked(realpath).mock.calls.filter(([p]) => p === cwdAlias)
+      expect(itemRealpathCalls).toHaveLength(1)
     } finally { await client.close() }
   })
 

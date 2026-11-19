@@ -636,6 +636,7 @@ const zhTW = {
     server: '服務地址', serverHint: '請使用 HTTPS 地址。', trustTitle: '保護你的裝置和對話', trustBody: '對話內容會加密傳輸。只有登入同一賬號的可信裝置才能訪問。',
   },
   settings: {
+    membership: { plan: "會員方案", title: "會員狀態", expiresAt: "到期日期", loading: "查詢中…", none: "未開通", active: "有效", expired: "已過期", revoked: "已撤銷" },
     identityHint: "點按欄位查看完整內容並複製。",
     copyIdentity: "複製",
     identityCopyFailed: "複製失敗，請重試。",
@@ -658,8 +659,6 @@ const zhTW = {
     language: '語言', languageSystem: '跟隨系統', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '選擇“跟隨系統”後，App 會隨 Android 的語言設定自動切換。',
     compactHistorySaveFailed: '無法儲存會話精簡設定',
     compactHistory: '會話精簡模式', compactHistoryNote: '縮減歷史工具詳情，保留正文和狀態。需 Host 支援；切換後重新開啟會話生效。',
-    typographyDensity: '排版密度', typographyDensityNote: '調整正文行距、段落間距與氣泡邊距',
-    densityStandard: '標準', densityCompact: '緊湊', typographyDensitySaveFailed: '無法儲存排版密度設定',
     chatAppearance: '會話排版與配色',
     chatAppearanceNote: '自訂字體大小、字距、行距、主題色、氣泡與程式碼區塊樣式',
     chatAppearanceReset: '恢復預設',
@@ -917,7 +916,7 @@ const zhTW = {
     hourUnit: '小時',
   },
   time: { unavailable: '更新時間不可用', lastSeenUnavailable: '活躍時間不可用', lastActive: (value: string) => `${value}活躍`, now: '剛剛', justNow: '剛剛更新', minutesAgo: (n: number) => `${n} 分鐘前`, hoursAgo: (n: number) => `${n} 小時前`, updatedSuffix: '更新', locale: 'zh-TW' },
-  transport: { auto: "自動（推薦）", autoDescription: "LAN / P2P 優先，TURN → Relay 逐級回退。", turn: "TURN 中轉", turnDescription: "略過直連，TURN 優先，Relay 回退。", relay: "伺服器轉發", relayDescription: "僅透過伺服器 Relay 連線。" },
+  transport: { auto: "自動（推薦）", autoDescription: "LAN / P2P 優先，逐級回退。", turn: "TURN 中轉", turnDescription: "略過直連，TURN 優先，Relay 回退。", relay: "伺服器轉發", relayDescription: "僅透過伺服器 Relay 連線。" },
   workspaces: {
     loadFailed: '工作區載入失敗',
     offlineBody: '重新連線電腦後，即可檢視工作區和對話。',

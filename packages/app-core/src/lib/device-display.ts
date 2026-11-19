@@ -29,15 +29,6 @@ export function deviceVersionSubtitle(device: RemoteDevice): string {
   ].filter(Boolean).join(' · ')
 }
 
-/** Compact subtitle for the host switcher: remote tag, OS and raw version. */
-export function switcherDeviceSubtitle(device: RemoteDevice, remoteTag: string): string {
-  return [
-    remoteTag,
-    platformName(device.platform),
-    device.harnessVersion,
-  ].filter(Boolean).join(' · ')
-}
-
 /** Host name shown beside an account or a web-console link. */
 export function serverHostLabel(baseUrl?: string): string {
   if (!baseUrl) return ''

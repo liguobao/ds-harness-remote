@@ -4,7 +4,7 @@ import { util } from '@kit.ArkTS';
 import { notificationManager } from '@kit.NotificationKit';
 import { SecureStore, StoredServerConfig, SavedProfile } from './SecureStore';
 import { RemoteServerApi, RemoteApiError, normalizeServerUrl, websocketUrl, QrLoginSession, QrLoginPoll,
-  OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
+  AccountMembership, OAuthProvider, HostPresence, initClientVersion } from '../net/ServerApi';
 import { CloseVerdict, RelayConnectionInfo, RelayTransport, RelayTransportOptions } from '../net/RelayTransport';
 import { SecureTransport } from '../net/SecureTransport';
 import { TransportUpgrader, TransportUpgraderOptions, TransportUpgradeTelemetry } from '../net/TransportUpgrader';
@@ -637,6 +637,30 @@ export class AppRuntime {
     }
     this.setBusy(false);
     this.notify();
+  }
+
+  async readAccountMembership(): Promise<AccountMembership> {
+    const config: StoredServerConfig | undefined = this.config;
+    const credentials: TokenPair | undefined = this.credentials;
+    const api: RemoteServerApi = await this.ensureApi();
+    if (config !== this.config) {
+      throw new Error('Account changed');
+    }
+    try {
+      return await api.deviceAccountMembership();
+    } catch (error) {
+      if (!(error instanceof RemoteApiError) || error.status !== 401 || config !== this.config) {
+        throw asError(error);
+      }
+      if (credentials === this.credentials) {
+        this.dropAccessToken();
+      }
+      const retried: RemoteServerApi = await this.ensureApi();
+      if (config !== this.config) {
+        throw new Error('Account changed');
+      }
+      return await retried.deviceAccountMembership();
+    }
   }
 
   async refreshDevices(): Promise<void> {

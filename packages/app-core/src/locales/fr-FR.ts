@@ -638,6 +638,7 @@ const frFR = {
     server: "Adresse du serveur", serverHint: "Utilisez une adresse HTTPS.", trustTitle: "Protégez vos appareils et vos conversations", trustBody: "Les données de conversation sont cryptées pendant leur transit. Seuls les appareils de confiance connectés au même compte peuvent y accéder.",
   },
   settings: {
+    membership: { plan: "Offre d’abonnement", title: "Abonnement", expiresAt: "Date d’expiration", loading: "Chargement…", none: "Aucun abonnement", active: "Actif", expired: "Expiré", revoked: "Révoqué" },
     identityHint: "Touchez un champ pour afficher et copier sa valeur complète.",
     copyIdentity: "Copier",
     identityCopyFailed: "Impossible de copier. Réessayez.",
@@ -660,8 +661,6 @@ const frFR = {
     language: "Langue", languageSystem: "Langue du système", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Avec le système par défaut, l'application suit automatiquement le paramètre de langue Android.",
     compactHistorySaveFailed: "Impossible d'enregistrer le paramètre de conversation compacte",
     compactHistory: "Conversations compactes", compactHistoryNote: "Raccourcit l'historique de l'outil, en conservant le texte et l'état. Nécessite le support de l'hôte. Rouvrez la conversation après avoir modifié cela.",
-    typographyDensity: "Densité de lecture", typographyDensityNote: "Ajuster l'interligne, l'espacement des paragraphes et le rembourrage des bulles",
-    densityStandard: "Standard", densityCompact: "Compact", typographyDensitySaveFailed: "Impossible d'enregistrer le paramètre de densité de lecture",
     chatAppearance: "Typographie et couleurs",
     chatAppearanceNote: "Personnaliser la taille, les espacements, la couleur d'accent, les bulles et le code",
     chatAppearanceReset: "Réinitialiser",
@@ -919,7 +918,7 @@ const frFR = {
     hourUnit: 'heures',
   },
   time: { unavailable: "Heure de mise à jour indisponible", lastSeenUnavailable: "Temps d'activité indisponible", lastActive: (value: string) => `Actif ${value}`, now: "tout à l' heure", justNow: "Mis à jour tout à l'heure", minutesAgo: (n: number) => `Il y a ${n} minutes`, hoursAgo: (n: number) => `Il y a ${n} heures`, updatedSuffix: "", locale: "fr-FR" },
-  transport: { auto: "Automatique (recommandé)", autoDescription: "Direct ou TURN, sinon relais serveur.", turn: "Relais TURN", turnDescription: "TURN seul, sinon relais serveur.", relay: "Relais serveur", relayDescription: "Tout via le serveur, sans direct ni TURN." },
+  transport: { auto: "Automatique (recommandé)", autoDescription: "LAN / P2P en priorité, puis repli par étapes.", turn: "Relais TURN", turnDescription: "TURN seul, sinon relais serveur.", relay: "Relais serveur", relayDescription: "Tout via le serveur, sans direct ni TURN." },
   workspaces: {
     loadFailed: "Impossible de charger les espaces de travail",
     offlineBody: "Reconnectez-vous à votre ordinateur pour afficher les espaces de travail et les conversations.",

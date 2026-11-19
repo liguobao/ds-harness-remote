@@ -638,6 +638,7 @@ const deDE = {
     server: "Serveradresse", serverHint: "Verwenden Sie eine HTTPS-Adresse.", trustTitle: "Schützen Sie Ihre Geräte und Gespräche", trustBody: "Gesprächsdaten werden während der Übertragung verschlüsselt. Nur vertrauenswürdige Geräte, die bei demselben Konto angemeldet sind, können darauf zugreifen.",
   },
   settings: {
+    membership: { plan: "Mitgliedschaftsplan", title: "Mitgliedschaft", expiresAt: "Ablaufdatum", loading: "Wird geladen…", none: "Keine Mitgliedschaft", active: "Aktiv", expired: "Abgelaufen", revoked: "Widerrufen" },
     identityHint: "Tippe auf ein Feld, um den vollständigen Wert anzuzeigen und zu kopieren.",
     copyIdentity: "Kopieren",
     identityCopyFailed: "Kopieren fehlgeschlagen. Versuche es erneut.",
@@ -660,8 +661,6 @@ const deDE = {
     language: "Sprache", languageSystem: "Systemsprache", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Bei der Systemstandardeinstellung folgt die App automatisch der Android-Spracheinstellung.",
     compactHistorySaveFailed: "Die Einstellung für die kompakte Konversation konnte nicht gespeichert werden",
     compactHistory: "Kompakte Gespräche", compactHistoryNote: "Verkürzt den Werkzeugverlauf und behält Text und Status bei. Erfordert Hostunterstützung. Öffnen Sie die Konversation erneut, nachdem Sie dies geändert haben.",
-    typographyDensity: "Layout-Dichte", typographyDensityNote: "Zeilenhöhe, Absatzabstand und Nachrichten-Padding anpassen",
-    densityStandard: "Standard", densityCompact: "Kompakt", typographyDensitySaveFailed: "Die Einstellung der Layout-Dichte konnte nicht gespeichert werden",
     chatAppearance: "Chat-Schrift & Farben",
     chatAppearanceNote: "Schriftgröße, Abstände, Akzentfarbe, Sprechblasen und Codeblöcke anpassen",
     chatAppearanceReset: "Zurücksetzen",
@@ -919,7 +918,7 @@ const deDE = {
     hourUnit: 'Std',
   },
   time: { unavailable: "Aktualisierungszeit nicht verfügbar", lastSeenUnavailable: "Aktive Zeit nicht verfügbar", lastActive: (value: string) => `Aktiv ${value}`, now: "soeben", justNow: "Gerade erst aktualisiert", minutesAgo: (n: number) => `Vor ${n} Min`, hoursAgo: (n: number) => `Vor ${n} Stunden`, updatedSuffix: "", locale: "de-DE" },
-  transport: { auto: "Automatisch (empfohlen)", autoDescription: "Direkt oder TURN, sonst Server-Relay.", turn: "TURN-Relay", turnDescription: "Nur TURN, sonst Server-Relay.", relay: "Server-Relay", relayDescription: "Alle Daten per Server, kein Direkt/TURN." },
+  transport: { auto: "Automatisch (empfohlen)", autoDescription: "LAN / P2P zuerst, danach stufenweise ausweichen.", turn: "TURN-Relay", turnDescription: "Nur TURN, sonst Server-Relay.", relay: "Server-Relay", relayDescription: "Alle Daten per Server, kein Direkt/TURN." },
   workspaces: {
     loadFailed: "Arbeitsbereiche konnten nicht geladen werden",
     offlineBody: "Stellen Sie eine erneute Verbindung zu Ihrem Computer her, um Arbeitsbereiche und Konversationen anzuzeigen.",

@@ -161,6 +161,7 @@ export class RtcDataChannelTransport {
   private channel?: RtcDataChannel
   private readonly remoteCandidates: RtcIceCandidateInit[] = []
   private remoteDescriptionSet = false
+  private opening = false
   private opened = false
   private closed = false
 
@@ -342,6 +343,7 @@ export class RtcDataChannelTransport {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.opening = false
     this.clearNegotiation()
     this.openReject?.(new RtcConnectError('RTC_CLOSED', 'WebRTC transport closed during negotiation.'))
     this.openResolve = undefined
@@ -455,19 +457,24 @@ export class RtcDataChannelTransport {
     this.channel = channel
     channel.binaryType = 'arraybuffer'
     channel.onopen = () => {
-      if (this.closed || this.opened) return
-      this.opened = true
-      const resolve = this.openResolve
+      if (this.closed || this.opened || this.opening) return
+      this.opening = true
       this.clearNegotiation()
       void this.resolveSelectedTransport().then(() => {
-        if (this.closed) return
+        this.opening = false
+        if (this.closed || this.channel !== channel || channel.readyState !== 'open') {
+          this.failOpen(new RtcConnectError('RTC_CLOSED', 'WebRTC data channel closed.'))
+          return
+        }
+        this.opened = true
+        const resolve = this.openResolve
         this.openResolve = undefined
         this.openReject = undefined
         resolve?.()
       })
     }
     channel.onmessage = event => {
-      if (this.closed || !this.opened) return
+      if (this.closed || (!this.opened && !this.opening)) return
       const data = event.data
       const frame = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data)
       this.bytesReceived += frame.byteLength
@@ -481,10 +488,14 @@ export class RtcDataChannelTransport {
     }
     channel.onclose = () => {
       if (this.closed) return
+      const wasOpening = this.opening
+      this.opening = false
       this.failOpen(new RtcConnectError('RTC_CLOSED', 'WebRTC data channel closed.'))
       if (this.opened) {
         this.opened = false
         for (const handler of this.closeHandlers) handler()
+      } else if (wasOpening) {
+        void this.close()
       }
     }
     channel.onerror = () => {
@@ -541,6 +552,7 @@ export class RtcDataChannelTransport {
     if (this.closed || this.opened || this.openReject === undefined) return
     const reject = this.openReject
     this.clearNegotiation()
+    this.opening = false
     this.openResolve = undefined
     this.openReject = undefined
     reject(error)

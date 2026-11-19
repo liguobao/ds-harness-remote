@@ -6,8 +6,6 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 import MarkdownIt from 'markdown-it'
 import type { Token } from 'markdown-it'
-import { radius, spacing, typeForDensity } from './theme'
-import type { TypographyDensity } from './theme'
 import { installMath } from './markdown-math'
 import { MathFormula } from './math-formula'
 import { MermaidBlock } from './mermaid/mermaid-block'
@@ -124,7 +122,7 @@ export const NativeMarkdown = memo(function NativeMarkdown({ text, colors: palet
   const onLinkPress = useContext(markdownLinkContext)
   const transformText = useContext(markdownTextContext)
   const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
-  const styles = useMemo(() => createStyles(colors, theme.density, theme.appearance), [colors, theme.density, theme.appearance])
+  const styles = useMemo(() => createStyles(colors, theme.appearance), [colors, theme.appearance])
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // Normalize CR / CRLF to LF
   const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/g, "\n")), [source])

@@ -646,6 +646,7 @@ const ruRU = {
     server: 'Адрес сервера', serverHint: 'Используйте адрес HTTPS.', trustTitle: 'Защитите свои устройства и диалоги', trustBody: 'Данные диалогов шифруются при передаче. Доступ к ним есть только у доверенных устройств, вошедших в тот же аккаунт.',
   },
   settings: {
+    membership: { plan: "План подписки", title: "Подписка", expiresAt: "Дата окончания", loading: "Загрузка…", none: "Нет подписки", active: "Активна", expired: "Истекла", revoked: "Отозвана" },
     drawerLayoutMode: 'Макет боковой панели', drawerLayoutCompact: 'Компактный', drawerLayoutClassic: 'Развёрнутые карточки', drawerLayoutModeSaveFailed: 'Не удалось сохранить макет боковой панели',
     quickPromptActionMode: 'Нажатие на быстрый запрос', quickPromptActionFill: 'Вставить в поле ввода', quickPromptActionSend: 'Отправить сразу', quickPromptActionSaveFailed: 'Не удалось сохранить настройку быстрых запросов',
     busySendMode: 'Отправка во время генерации', busySendQueue: 'В очередь', busySendQueueNote: 'Отложить над полем ввода; нажмите, чтобы вставить в любой момент', busySendSteer: 'Вне очереди', busySendSteerNote: 'Сразу вставить в текущий ход ответа', busySendModeSaveFailed: 'Не удалось сохранить настройку режима отправки',
@@ -671,8 +672,6 @@ const ruRU = {
     language: 'Язык', languageSystem: 'Как в системе', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'В режиме «Как в системе» приложение автоматически следует языку Android.',
     compactHistorySaveFailed: 'Не удалось сохранить настройку компактных диалогов',
     compactHistory: 'Компактные диалоги', compactHistoryNote: 'Сокращает историю инструментов, сохраняя текст и статусы. Требуется поддержка на хосте. После изменения откройте диалог заново.',
-    typographyDensity: 'Плотность текста', typographyDensityNote: 'Высота строк, интервалы между абзацами и отступы в пузырях',
-    densityStandard: 'Стандартная', densityCompact: 'Компактная', typographyDensitySaveFailed: 'Не удалось сохранить настройку плотности текста',
     chatAppearance: 'Оформление чата',
     chatAppearanceNote: 'Размер шрифта, интервалы, акцентный цвет, стиль пузырей и блоков кода',
     chatAppearanceReset: 'Сбросить',
@@ -927,7 +926,7 @@ const ruRU = {
     hourUnit: 'ч',
   },
   time: { unavailable: 'Время обновления неизвестно', lastSeenUnavailable: 'Время активности неизвестно', lastActive: (value: string) => `Активность: ${value}`, now: 'только что', justNow: 'Обновлено только что', minutesAgo: (n: number) => `${n} мин назад`, hoursAgo: (n: number) => `${n} ч назад`, updatedSuffix: '', locale: 'ru-RU' },
-  transport: { auto: "Автоматически (рекомендуется)", autoDescription: "Напрямую или через TURN; при сбое — ретрансляция через сервер.", turn: "Ретрансляция TURN", turnDescription: "Только TURN; при сбое — ретрансляция через сервер.", relay: "Ретрансляция через сервер", relayDescription: "Без прямого подключения и TURN; все данные идут через сервер." },
+  transport: { auto: "Автоматически (рекомендуется)", autoDescription: "Сначала LAN / P2P, затем резервные варианты по порядку.", turn: "Ретрансляция TURN", turnDescription: "Только TURN; при сбое — ретрансляция через сервер.", relay: "Ретрансляция через сервер", relayDescription: "Без прямого подключения и TURN; все данные идут через сервер." },
   workspaces: {
     loadFailed: 'Не удалось загрузить рабочие области',
     offlineBody: 'Переподключитесь к компьютеру, чтобы увидеть рабочие области и диалоги.',

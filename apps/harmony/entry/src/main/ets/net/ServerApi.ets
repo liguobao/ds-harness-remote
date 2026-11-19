@@ -31,6 +31,11 @@ export function clientVersion(): string {
   return clientVersionValue;
 }
 
+export class AccountMembership {
+  status: string = '';
+  expiresAt: number = 0;
+}
+
 export class RemoteApiError extends Error {
   code: string;
   status: number;
@@ -292,6 +297,22 @@ export class RemoteServerApi {
       throw new RemoteApiError('INVALID_MESSAGE', 'The server returned an invalid account profile.', 0);
     }
     return account;
+  }
+
+  async deviceAccountMembership(): Promise<AccountMembership> {
+    const text: string = await this.requestText('/api/v1/devices/self/membership', 'GET', undefined, this.requireToken());
+    const root: Record<string, Object> = JSON.parse(text) as Record<string, Object>;
+    const status: string = jsonStr(root, 'status', '');
+    const expiry: number = jsonNum(root, 'expiresAt', 0);
+    if (!(status === 'none' && root['expiresAt'] === null)
+      && (!(status === 'active' || status === 'expired' || status === 'revoked')
+        || !Number.isSafeInteger(expiry) || expiry <= 0 || expiry > 8.64e15)) {
+      throw new RemoteApiError('INVALID_MESSAGE', 'The server returned invalid membership information.', 0);
+    }
+    const result: AccountMembership = new AccountMembership();
+    result.status = status;
+    result.expiresAt = expiry;
+    return result;
   }
 
   async loginAccount(email: string, password: string): Promise<AccountLoginResult> {

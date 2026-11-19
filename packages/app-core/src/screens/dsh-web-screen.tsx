@@ -14,7 +14,6 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
   const { colors } = useTheme()
   const [grant, setGrant] = useState<DshWebGrant>()
   const [failed, setFailed] = useState(false)
-  const [membership, setMembership] = useState(false)
 
   useEffect(() => {
     const abort = new AbortController()
@@ -23,9 +22,8 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
       const parsed = dshWebGrantSchema.parse(result)
       if (parsed.expiresAt <= Date.now()) { setFailed(true); return }
       setGrant(parsed)
-    }).catch(error => {
+    }).catch(() => {
       if (abort.signal.aborted) return
-      setMembership(error?.code === 'WEB_ENTITLEMENT_REQUIRED')
       setFailed(true)
     })
     return () => {
@@ -49,9 +47,7 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
     <Modal visible onRequestClose={onClose} animationType="slide">
       <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>
         <TopBar title={title} onBack={onClose} />
-        {failed ? <ErrorBanner message={membership
-          ? (chinese ? '此功能需要有效会员。' : 'An active membership is required.')
-          : (chinese ? '无法打开 DSH Web，请关闭后重试。' : 'Could not open DSH Web. Close and try again.')} />
+        {failed ? <ErrorBanner message={chinese ? '无法打开 DSH Web，请关闭后重试。' : 'Could not open DSH Web. Close and try again.'} />
           : !source || !grant ? <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
             : <WebView
                 source={source}

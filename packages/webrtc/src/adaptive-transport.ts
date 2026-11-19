@@ -1,6 +1,7 @@
 import { ControlLease } from './control-lease.js'
 import { waitForRelayCapacity } from './websocket-backpressure.js'
 import {
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
   PROTOCOL_VERSION,
   errorCodeSchema,
   type ErrorCode,
@@ -135,6 +136,8 @@ export class AdaptiveTransport extends BaseTransport {
   private lastRtcDiagnostics?: RtcConnectionDiagnostics
   private relayAssignment?: RelayAssignment
   private dataReady = false
+  private dataSocketTimer?: ReturnType<typeof setTimeout>
+  private isUpgradedLegActive?: () => boolean
   private recoveryTicket?: string
   private relayRecoveryTicket?: string
   private lease?: ControlLease
@@ -158,6 +161,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.webrtcEnabled = true
     this.serverNegotiateTimeoutMs = undefined
     this.dataMode = 'relay'
+    this.isUpgradedLegActive = undefined
     this.selected = undefined
     this.connectedAt = undefined
     this.relayCounter = 0
@@ -465,6 +469,7 @@ export class AdaptiveTransport extends BaseTransport {
           selected = 'relay'
         } else {
           this.dataMode = 'webrtc'
+          this.retireDataSocket(this.dataSocket)
           selected = wireSelected
         }
       } catch (error) {
@@ -590,7 +595,16 @@ export class AdaptiveTransport extends BaseTransport {
     const ticket = this.dataMode === 'webrtc' ? this.recoveryTicket : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN ? this.relayRecoveryTicket : undefined
     if (!ticket || !this.connectionId || this.lease) return
     this.lease = new ControlLease(this.connectionId, ticket, payload => {
-      if (this.controlReady && this.lastControlReceivedAt !== undefined && Date.now() - this.lastControlReceivedAt >= 75_000) {
+      if (!this.controlReady) {
+        throw Object.assign(new Error('Adaptive control channel is not authenticated'), { code: 'TRANSPORT_CLOSED' })
+      }
+      const intervalMs = typeof this.heartbeatIntervalMs === 'number'
+        && Number.isFinite(this.heartbeatIntervalMs)
+        && this.heartbeatIntervalMs > 0
+        ? this.heartbeatIntervalMs
+        : DEFAULT_HEARTBEAT_INTERVAL_MS
+      const heartbeatTimeoutMs = Math.max(15_000, intervalMs * 3)
+      if (this.lastControlReceivedAt !== undefined && Date.now() - this.lastControlReceivedAt >= heartbeatTimeoutMs) {
         this.controlLost(new Error('Control heartbeat timed out'), { reason: 'control-error' })
         throw new Error('Control heartbeat timed out')
       }
@@ -599,9 +613,21 @@ export class AdaptiveTransport extends BaseTransport {
     this.lease.start()
   }
 
+  /**
+   * Retire the independent Relay data socket once an in-band upgrade has moved
+   * traffic onto WebRTC, so an idle close on the old Relay leg cannot tear down
+   * the healthy upgraded connection.
+   */
+  retireRelayDataSocket(isUpgradedLegActive?: () => boolean): void {
+    this.isUpgradedLegActive = isUpgradedLegActive
+    this.retireDataSocket(this.dataSocket)
+  }
+
   private controlLost(error: Error, diagnostic: AdaptiveDisconnectDiagnostic): void {
-    if ((error as Error & { retryable?: boolean }).retryable === false || !this.lease?.canDetach()
-      || !(this.dataMode === 'webrtc' ? this.rtc?.getStats().connected : this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN)) {
+    const dataPlaneAlive = this.dataMode === 'webrtc'
+      ? this.rtc?.getStats().connected === true
+      : (this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN) || this.isUpgradedLegActive?.() === true
+    if ((error as Error & { retryable?: boolean }).retryable === false || !this.lease?.canDetach() || !dataPlaneAlive) {
       this.failConnection(error, diagnostic)
       return
     }
@@ -716,17 +742,28 @@ export class AdaptiveTransport extends BaseTransport {
     socket.binaryType = 'arraybuffer'
     this.dataSocket = socket
     await new Promise<void>((resolve, reject) => {
+      const clearTimer = (): void => {
+        if (this.dataSocketTimer !== undefined) clearTimeout(this.dataSocketTimer)
+        this.dataSocketTimer = undefined
+      }
       const timer = setTimeout(() => {
+        if (this.dataSocket !== socket) return
+        clearTimer()
+        this.retireDataSocket(socket)
         reject(new Error('Relay data attach timed out'))
-        socket.close()
       }, this.options.handshakeTimeoutMs ?? 15_000)
-      socket.onopen = () => socket.send(encodeRelayDataFrame(createRelayDataFrame('relay.attach', {
-        connectionId: this.connectionId,
-        deviceId: this.options.deviceId,
-        peerDeviceId: this.options.targetDeviceId,
-        ticket: assignment.relayTicket,
-      }), this.controlFrameLimits))
+      this.dataSocketTimer = timer
+      socket.onopen = () => {
+        if (this.dataSocket !== socket) return
+        socket.send(encodeRelayDataFrame(createRelayDataFrame('relay.attach', {
+          connectionId: this.connectionId,
+          deviceId: this.options.deviceId,
+          peerDeviceId: this.options.targetDeviceId,
+          ticket: assignment.relayTicket,
+        }), this.controlFrameLimits))
+      }
       socket.onmessage = event => {
+        if (this.dataSocket !== socket) return
         try {
           if (typeof event.data !== 'string') throw new Error('Relay data frames must be text JSON')
           const data = decodeRelayDataFrame(event.data, this.controlFrameLimits)
@@ -735,40 +772,71 @@ export class AdaptiveTransport extends BaseTransport {
               || (assignment.relayEpoch !== undefined && data.payload.epoch !== assignment.relayEpoch)) {
               throw new Error('Relay data attach assignment mismatch')
             }
-            clearTimeout(timer)
+            clearTimer()
             this.dataReady = true
             resolve()
             return
           }
-          void this.handleDataSocketFrame(data.type, data.payload).catch(error => {
-            this.failConnection(error instanceof Error ? error : new Error('Invalid Relay data frame'))
+          void this.handleDataSocketFrame(socket, data.type, data.payload).catch(error => {
+            if (this.dataSocket === socket && this.dataMode === 'relay') {
+              this.failConnection(error instanceof Error ? error : new Error('Invalid Relay data frame'))
+            }
           })
         } catch (error) {
-          clearTimeout(timer)
+          clearTimer()
           reject(error instanceof Error ? error : new Error('Invalid Relay data frame'))
-          this.failConnection(error instanceof Error ? error : new Error('Invalid Relay data frame'))
+          if (this.dataSocket === socket && this.dataMode === 'relay') {
+            this.failConnection(error instanceof Error ? error : new Error('Invalid Relay data frame'))
+          }
         }
       }
       socket.onerror = () => {
-        clearTimeout(timer)
+        if (this.dataSocket !== socket) return
+        clearTimer()
         reject(new Error('Relay data socket failed'))
       }
       socket.onclose = () => {
-        clearTimeout(timer)
-        if (!this.dataReady) reject(new Error('Relay data socket closed before attach'))
-        else this.failConnection(new Error('Relay data socket closed'))
+        if (this.dataSocket !== socket) return
+        clearTimer()
+        if (!this.dataReady) {
+          this.dataSocket = undefined
+          reject(new Error('Relay data socket closed before attach'))
+        } else if (this.dataMode === 'relay') {
+          this.failConnection(new Error('Relay data socket closed'))
+        } else {
+          this.retireDataSocket(socket)
+        }
       }
     })
   }
 
-  private async handleDataSocketFrame(type: string, payload: Record<string, unknown>): Promise<void> {
+  private retireDataSocket(socket: WebSocket | undefined): void {
+    if (socket === undefined) return
+    if (this.dataSocket === socket) {
+      this.dataSocket = undefined
+      this.dataReady = false
+      if (this.dataSocketTimer !== undefined) {
+        clearTimeout(this.dataSocketTimer)
+        this.dataSocketTimer = undefined
+      }
+    }
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onerror = socket.readyState === 0 ? () => undefined : null
+    socket.onclose = null
+    try { socket.close() } catch { /* already closed */ }
+  }
+
+  private async handleDataSocketFrame(socket: WebSocket, type: string, payload: Record<string, unknown>): Promise<void> {
+    if (this.dataSocket !== socket) return
     if (type === 'relay.detach') {
-      this.failConnection(new Error('Relay peer detached'))
+      if (this.dataMode === 'relay') this.failConnection(new Error('Relay peer detached'))
+      else this.retireDataSocket(socket)
       return
     }
     if (type === 'ping') {
-      if (this.dataSocket?.readyState === WebSocket.OPEN) {
-        this.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame('pong', payload), this.controlFrameLimits))
+      if (this.dataSocket === socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(encodeRelayDataFrame(createRelayDataFrame('pong', payload), this.controlFrameLimits))
       }
       return
     }
@@ -842,13 +910,18 @@ export class AdaptiveTransport extends BaseTransport {
     this.socket = undefined
     this.dataSocket = undefined
     this.dataReady = false
+    this.isUpgradedLegActive = undefined
+    if (this.dataSocketTimer !== undefined) {
+      clearTimeout(this.dataSocketTimer)
+      this.dataSocketTimer = undefined
+    }
     this.relayAssignment = undefined
     this.connectionId = undefined
     this.connectedAt = undefined
     lifetime?.abort()
     reject?.(error)
     void rtc?.close()
-    dataSocket?.close()
+    this.retireDataSocket(dataSocket)
     socket?.close()
     if (established && diagnostic !== undefined) {
       try { this.options.onDisconnect?.(diagnostic) } catch { /* diagnostics must not prevent close */ }
@@ -928,7 +1001,7 @@ function negotiateTimeout(serverMs: number | undefined, localMs: number | undefi
 }
 
 const DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4_000
-const SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6_000
+const SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 2_000
 const SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12_000
 
 // React Native AbortSignal implementations may omit throwIfAborted().

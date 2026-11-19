@@ -18,12 +18,12 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatComposer, type ComposerInputBridge } from '../chat/composer'
 import { applyQuickPromptDraft } from '../chat/composer-gate'
 import { type ExpandedComposerProps } from '../chat/expanded-composer'
-import { ChatActivityGroup, ChatItemView, QueueDock } from '../chat/messages'
+import { ChatActivityGroup, ChatItemView, QueueDock, isActiveChatItem } from '../chat/messages'
 import { PromptEditor, PromptsManager, PromptsPicker } from '../chat/pickers'
 import { createStyles as createChatStyles } from '../chat/styles'
 import { useChatPrompts } from '../chat/use-chat-prompts'
 import { chatSections, inboxQueuedItems, inboxRpcIds, type ChatSection } from '../../state/message-helpers'
-import { processSegments } from '../chat-process'
+import { processSegments, shouldShowTurnResponseActions } from '../chat-process'
 import { useSessionUiArtifacts } from '../chat/use-session-ui-artifacts'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import type { ToolActivity } from '../../types'
@@ -45,7 +45,7 @@ import { browseScope, browseKey, updateBrowseEntry, useBrowseMemory, saveGroupRo
 
 const EMPTY: ChatItem[] = []
 type BotChatRow =
-  | { kind: 'item'; key: string; item: ChatItem; artifacts?: UiArtifact[] }
+  | { kind: 'item'; key: string; item: ChatItem; artifacts?: UiArtifact[]; showActions?: boolean }
   | { kind: 'activity'; key: string; items: ChatItem[]; closed: boolean }
   | { kind: 'ui'; key: string; artifact: UiArtifact }
   | { kind: 'ui-pointer'; key: string; artifact: UiArtifact }
@@ -509,8 +509,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const hidden = state.exchangeTurns[session.sessionId]
   const visible = useMemo(() => {
     const hiddenTurns = new Set(Array.isArray(hidden) ? hidden.map(String) : [])
-    return messages.filter(item => item.kind === 'approval' || item.kind === 'question'
-      || !(item.turn !== undefined && hiddenTurns.has(item.turn)))
+    return messages.filter(item => !(item.kind === 'message' && item.usageOnly === true)
+      && (item.kind === 'approval' || item.kind === 'question'
+        || !(item.turn !== undefined && hiddenTurns.has(item.turn))))
   }, [messages, hidden])
   const hostId = useAppStore(store => store.selectedDevice?.deviceId)
   const previousSectionsRef = useRef<readonly ChatSection[]>([])
@@ -549,7 +550,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (item.state === 'finished') return (parseBotReplyPayload(item.resultDetail?.text)?.rows.length ?? 0) > 0
     return false
   }
-  const rows: BotChatRow[] = visibleSections.flatMap((section): BotChatRow[] => {
+  const rows: BotChatRow[] = visibleSections.flatMap((section, sectionIndex): BotChatRow[] => {
     if (section.kind === 'item') {
       // Native system context/receipts can arrive without a turn identifier.
       // They still belong in a disclosure rather than the visible chat body.
@@ -570,14 +571,25 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
 
     const segments = processSegments(section.items)
     const lastResponseIndex = segments.map(s => s.kind).lastIndexOf('response')
+    const turnEnded = section.items.some(item => item.turnEnd !== undefined)
+    const hasActiveItem = section.items.some(isActiveChatItem)
+    const isTurnRunning = sectionIndex === visibleSections.length - 1 && (selected?.running === true || storeBusy === 'stop-session')
 
     const sectionRows: BotChatRow[] = segments.flatMap((segment, index): BotChatRow[] => {
       if (segment.kind === 'response') {
         const attachArtifacts = index === lastResponseIndex && cards.length > 0
+        const showActions = shouldShowTurnResponseActions({
+          segmentIndex: index,
+          lastResponseIndex,
+          turnEnded,
+          hasActiveItem,
+          isTurnRunning,
+        })
         return [{
           kind: 'item',
           key: segment.key,
           item: segment.item,
+          showActions,
           ...(attachArtifacts ? { artifacts: cards } : {}),
         }]
       }
@@ -638,7 +650,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     const { contentOffset, contentSize, layoutMeasurement } = nativeEvent
     atEnd.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 90
   }
-  const render = (item: ChatItem, artifacts?: UiArtifact[]) => {
+  const render = (item: ChatItem, artifacts?: UiArtifact[], showActions?: boolean) => {
     if (item.kind === 'tool' && item.toolKey === 'ask_user') {
       const closedStatus = text(closedCards[item.id])
       if (closedStatus !== '') {
@@ -677,7 +689,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       }
     }
     if (item.kind === 'tool') return null
-    return <ChatItemView item={item} compact={false} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
+    return <ChatItemView item={item} compact={false} showActions={showActions} artifacts={artifacts} onSendPrompt={onSendPrompt} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} userBubble={room !== undefined} />
   }
   const composerLabel = bot ? s.bots.askBot(bot.name) : room ? s.bots.askBot(room.name) : s.bots.message
   const hasComposerContent = draft.trim().length > 0 || stagedReferences.length > 0
@@ -756,7 +768,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
             Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.
           </Text>
         ) : (
-          render(item.item, item.artifacts)
+          render(item.item, item.artifacts, item.showActions)
         )}
       </View>
     )}
@@ -852,7 +864,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       visible={plusMenuOpen}
       onClose={() => setPlusMenuOpen(false)}
       onReferenceChat={() => setReferenceChatOpen(true)}
-      onOpenPrompts={() => setPromptsPickerOpen(true)}
       onOpenSchedules={() => void perform('schedules')}
     />
     <ReferenceChatModal

@@ -2,15 +2,9 @@ export type ColorScheme = 'light' | 'dark'
 
 export type ThemePreference = 'system' | ColorScheme
 
-export type TypographyDensity = 'standard' | 'compact'
-
 export type ActivityDockMode = 'compact' | 'cards' | 'hidden'
 
 export type DrawerLayoutMode = 'compact' | 'classic'
-
-export function isTypographyDensity(value: unknown): value is TypographyDensity {
-  return value === 'standard' || value === 'compact'
-}
 
 export function isActivityDockMode(value: unknown): value is ActivityDockMode {
   return value === 'compact' || value === 'cards' || value === 'hidden'
@@ -297,10 +291,9 @@ export interface ChatMetrics {
 }
 
 export function resolveChatMetrics(
-  density: TypographyDensity,
   appearance: ChatAppearance = DEFAULT_CHAT_APPEARANCE,
 ): ChatMetrics {
-  const baseFont = density === 'compact' ? 14.5 : 15.5
+  const baseFont = 14.5
   const fontDelta = appearance.fontScale === 'sm' ? -1
     : appearance.fontScale === 'lg' ? 1.5
       : appearance.fontScale === 'xl' ? 3
@@ -425,9 +418,5 @@ export const compactType = {
   smallStrong: { fontSize: 13, lineHeight: 17, fontWeight: '600' as const, includeFontPadding: false },
   caption: { fontSize: 11, lineHeight: 15, fontWeight: '500' as const, includeFontPadding: false },
 } as const
-
-export function typeForDensity(density: TypographyDensity) {
-  return density === 'compact' ? compactType : standardType
-}
 
 export const type = standardType

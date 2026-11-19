@@ -296,6 +296,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       if (session === undefined || (session.backend !== undefined && session.backend !== 'harness')
         || get().connection.phase !== 'connected') return false
       const generation = runtime.connectionGeneration
+      let notFound = false
       try {
         await runtime.connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
       } catch (error) {
@@ -304,14 +305,15 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           set({ error: friendlyError(error) })
           return false
         }
+        notFound = true
       }
       if (generation !== runtime.connectionGeneration) return false
       // Settle the matching local optimistic row together with the Host queue:
       // the dock lists local `queued` rows the inbox has not adopted, so without
       // this the steered/removed item is immediately re-listed from local state
-      // and the buttons look like no-ops. Steer hands the row back to the
-      // timeline (its echo replaces it); remove retires it quietly and prunes
-      // the stale inbox entry.
+      // and the buttons look like no-ops. A confirmed steer hands the row back
+      // to the timeline awaiting its echo (only a missing queue entry is
+      // unconfirmed); remove retires it quietly and prunes the stale inbox entry.
       set(state => {
         const currentSession = state.selectedSession?.sessionId === session.sessionId
           ? state.selectedSession
@@ -330,7 +332,9 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             },
           },
         }
-        const nextSendState = action === 'remove' ? 'canceled' as const : 'unconfirmed' as const
+        const nextSendState = action === 'remove'
+          ? 'canceled' as const
+          : notFound ? 'unconfirmed' as const : undefined
         const existingMessages = state.messages[session.sessionId] ?? []
         let messagesChanged = false
         const nextMessages = effectiveRpcId === undefined ? existingMessages : existingMessages.map(item => {

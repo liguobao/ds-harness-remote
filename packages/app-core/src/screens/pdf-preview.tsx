@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
+import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { pdfHtml } from '../generated/pdf-html'
 import { MAX_PDF_PREVIEW_BYTES } from '../services/workspace-file-preview'
 import { strings as t } from '../locales/i18n'
-import { Button } from '../ui/components'
+import { Button, IconButton } from '../ui/components'
 import { useTheme } from '../ui/theme-context'
 import { spacing, type } from '../ui/theme'
 
@@ -24,6 +25,8 @@ interface RendererMessage {
   index?: number
   page?: number
   pages?: number
+  canZoomIn?: boolean
+  canZoomOut?: boolean
   code?: string
 }
 
@@ -45,6 +48,7 @@ export function PdfPreview({ data, label }: { data: string; label: string }) {
   const [ready, setReady] = useState(false)
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(0)
+  const [zoomLimits, setZoomLimits] = useState({ canZoomIn: false, canZoomOut: false })
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string>()
 
@@ -123,6 +127,7 @@ export function PdfPreview({ data, label }: { data: string; label: string }) {
       transfer.current = undefined
       if (typeof message.page === 'number' && message.page > 0) setPage(message.page)
       if (typeof message.pages === 'number' && message.pages > 0) setPages(message.pages)
+      setZoomLimits({ canZoomIn: message.canZoomIn === true, canZoomOut: message.canZoomOut === true })
       setBusy(false)
       setError(undefined)
       return
@@ -146,14 +151,23 @@ export function PdfPreview({ data, label }: { data: string; label: string }) {
     setRevision(value => value + 1)
   }
 
+  const controlsDisabled = busy || error !== undefined || pages === 0
+
   return <View style={styles.container}>
-    <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
-      <Button label={t.tools.previous} variant="secondary" disabled={busy || error !== undefined || page <= 1} onPress={() => send(`window.showPage(${page - 1})`)} />
-      <Text style={[styles.caption, { color: colors.muted }]}>{pages > 0 ? t.tools.pdfPage(page, pages) : ''}</Text>
-      <Button label={t.tools.next} variant="secondary" disabled={busy || error !== undefined || page >= pages} onPress={() => send(`window.showPage(${page + 1})`)} />
-      <Button label={t.tools.zoomOut} variant="secondary" disabled={busy || error !== undefined || pages === 0} onPress={() => send(`window.zoomPdf(${-ZOOM_STEP})`)} />
-      <Button label={t.tools.zoomIn} variant="secondary" disabled={busy || error !== undefined || pages === 0} onPress={() => send(`window.zoomPdf(${ZOOM_STEP})`)} />
-    </ScrollView>
+    <View style={[styles.controls, { borderBottomColor: colors.separator }]}>
+      <View style={styles.pagination}>
+        <IconButton large hitSlop={0} label={t.tools.previous} icon={ChevronLeft} disabled={controlsDisabled || page <= 1} onPress={() => send(`window.showPage(${page - 1})`)} />
+        <Text accessibilityLabel={pages > 0 ? t.tools.pdfPage(page, pages) : undefined}
+          numberOfLines={1} adjustsFontSizeToFit style={[styles.caption, { color: colors.ink }]}>
+          {pages > 0 ? `${page} / ${pages}` : ''}
+        </Text>
+        <IconButton large hitSlop={0} label={t.tools.next} icon={ChevronRight} disabled={controlsDisabled || page >= pages} onPress={() => send(`window.showPage(${page + 1})`)} />
+      </View>
+      <View style={[styles.zoom, { borderStartColor: colors.separator }]}>
+        <IconButton large hitSlop={0} label={t.tools.zoomOut} icon={ZoomOut} disabled={controlsDisabled || !zoomLimits.canZoomOut} onPress={() => send(`window.zoomPdf(${-ZOOM_STEP})`)} />
+        <IconButton large hitSlop={0} label={t.tools.zoomIn} icon={ZoomIn} disabled={controlsDisabled || !zoomLimits.canZoomIn} onPress={() => send(`window.zoomPdf(${ZOOM_STEP})`)} />
+      </View>
+    </View>
     <View style={styles.stage}>
       <WebView accessibilityLabel={label} ref={web} key={revision} source={SOURCE} style={[styles.viewer, { backgroundColor: colors.background }]}
         originWhitelist={['*']} javaScriptEnabled incognito cacheEnabled={false} domStorageEnabled={false}
@@ -179,9 +193,10 @@ export function PdfPreview({ data, label }: { data: string; label: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  controls: { flexGrow: 0 },
-  row: { gap: spacing.sm, padding: spacing.sm, alignItems: 'center' },
-  caption: { ...type.caption },
+  controls: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth },
+  pagination: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  zoom: { flexDirection: 'row', borderStartWidth: StyleSheet.hairlineWidth, marginStart: spacing.sm, paddingStart: spacing.sm },
+  caption: { ...type.small, minWidth: 0, flexShrink: 1, textAlign: 'center', fontVariant: ['tabular-nums'] },
   stage: { flex: 1 },
   viewer: { flex: 1 },
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.md },

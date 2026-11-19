@@ -649,6 +649,7 @@ const ukUA = {
     server: 'Адреса сервера', serverHint: 'Використовуйте адресу HTTPS.', trustTitle: 'Захистіть свої пристрої та діалоги', trustBody: 'Дані діалогів шифруються під час передавання. Доступ до них мають лише довірені пристрої, на яких виконано вхід у той самий обліковий запис.',
   },
   settings: {
+    membership: { plan: "План підписки", title: "Підписка", expiresAt: "Дата завершення", loading: "Завантаження…", none: "Немає підписки", active: "Активна", expired: "Завершилася", revoked: "Відкликана" },
     drawerLayoutMode: 'Макет бічної панелі', drawerLayoutCompact: 'Компактний', drawerLayoutClassic: 'Розгорнуті картки', drawerLayoutModeSaveFailed: 'Не вдалося зберегти макет бічної панелі',
     quickPromptActionMode: 'Натискання на швидкий запит', quickPromptActionFill: 'Вставити в поле введення', quickPromptActionSend: 'Надіслати відразу', quickPromptActionSaveFailed: 'Не вдалося зберегти налаштування швидких запитів',
     busySendMode: 'Надсилання під час генерації', busySendQueue: 'У чергу', busySendQueueNote: 'Відкласти над полем введення; торкніться, щоб вставити будь-коли', busySendSteer: 'Поза чергою', busySendSteerNote: 'Одразу вставити в поточний хід відповіді', busySendModeSaveFailed: 'Не вдалося зберегти налаштування режиму надсилання',
@@ -674,8 +675,6 @@ const ukUA = {
     language: 'Мова', languageSystem: 'Як у системі', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'Якщо вибрано «Як у системі», застосунок автоматично використовує мову Android.',
     compactHistorySaveFailed: 'Не вдалося зберегти налаштування компактних діалогів',
     compactHistory: 'Компактні діалоги', compactHistoryNote: 'Скорочує історію інструментів, зберігаючи текст і стани. Потребує підтримки на Хості. Після зміни відкрийте діалог знову.',
-    typographyDensity: 'Щільність тексту', typographyDensityNote: 'Налаштуйте міжрядковий інтервал, відступи між абзацами й поля бульбашок',
-    densityStandard: 'Стандартна', densityCompact: 'Компактна', typographyDensitySaveFailed: 'Не вдалося зберегти налаштування щільності тексту',
     chatAppearance: 'Вигляд чату',
     chatAppearanceNote: 'Налаштуйте розмір шрифту, інтервали, акцентний колір, стиль бульбашок і блоків коду',
     chatAppearanceReset: 'Скинути',
@@ -930,7 +929,7 @@ const ukUA = {
     hourUnit: 'год',
   },
   time: { unavailable: 'Час оновлення недоступний', lastSeenUnavailable: 'Час активності недоступний', lastActive: (value: string) => `Активність: ${value}`, now: 'щойно', justNow: 'Щойно оновлено', minutesAgo: (n: number) => `${n} хв тому`, hoursAgo: (n: number) => `${n} год тому`, updatedSuffix: '', locale: 'uk-UA' },
-  transport: { auto: "Автоматично (рекомендовано)", autoDescription: "Напряму або через TURN; у разі збою — ретрансляція через сервер.", turn: "Ретрансляція TURN", turnDescription: "Лише TURN; у разі збою — ретрансляція через сервер.", relay: "Ретрансляція через сервер", relayDescription: "Без прямого зʼєднання й TURN; усі дані йдуть через сервер." },
+  transport: { auto: "Автоматично (рекомендовано)", autoDescription: "Спочатку LAN / P2P, далі резервні варіанти за порядком.", turn: "Ретрансляція TURN", turnDescription: "Лише TURN; у разі збою — ретрансляція через сервер.", relay: "Ретрансляція через сервер", relayDescription: "Без прямого зʼєднання й TURN; усі дані йдуть через сервер." },
   workspaces: {
     loadFailed: 'Не вдалося завантажити робочі простори',
     offlineBody: 'Перепідключіться до компʼютера, щоб переглянути робочі простори й діалоги.',

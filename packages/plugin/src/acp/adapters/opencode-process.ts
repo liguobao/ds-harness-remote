@@ -6,7 +6,8 @@ import {
   parseInitializeMetadata,
   type AcpInitializeMetadata,
 } from './auth-diagnostics.js'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnCommand } from '../windows-spawn.js'
 import { Buffer } from 'node:buffer'
 import { realpath } from 'node:fs/promises'
 import type { SafeLogger } from '../../logging.js'
@@ -22,6 +23,7 @@ const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
 const MAX_ACP_LINE_BYTES = 288 * 1024 * 1024
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
+const MAX_OPENCODE_SESSION_LIST = 1000
 
 interface PendingRequest {
   resolve: (value: unknown) => void
@@ -248,8 +250,25 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (method === 'session/list' && nativeApi && isRecord(result) && Array.isArray(result.sessions)) {
       // ACP list may return archived native records, including after a restart.
       // Recheck every item against OpenCode; process-local caches are insufficient.
-      if (result.sessions.length > 1000) throw new OpencodeAcpError('INVALID_MESSAGE', 'The OpenCode catalog page is too large.')
-      const items = result.sessions
+      const rawItems = result.sessions
+      const items = rawItems.length > MAX_OPENCODE_SESSION_LIST
+        ? [...rawItems]
+            .sort((a, b) => {
+              const ta = isRecord(a) && typeof a.updatedAt === 'string' ? Date.parse(a.updatedAt) || 0 : 0
+              const tb = isRecord(b) && typeof b.updatedAt === 'string' ? Date.parse(b.updatedAt) || 0 : 0
+              return tb - ta
+            })
+            .slice(0, MAX_OPENCODE_SESSION_LIST)
+        : rawItems
+      const realpathCache = new Map<string, Promise<string | undefined>>()
+      const resolveCwd = (rawCwd: string): Promise<string | undefined> => {
+        let cached = realpathCache.get(rawCwd)
+        if (!cached) {
+          cached = realpath(rawCwd).catch(() => undefined)
+          realpathCache.set(rawCwd, cached)
+        }
+        return cached
+      }
       const archivedItems = new Map<number, boolean>()
       let next = 0
       await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
@@ -258,9 +277,19 @@ export class OpencodeAcpClient implements CursorAcpLike {
           if (index >= items.length) return
           const item = items[index]
           if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
-          const cwd = await realpath(item.cwd).catch(() => undefined)
+          let cwd: string | undefined
+          try {
+            cwd = await resolveCwd(item.cwd)
+          } catch {
+            continue
+          }
           if (!cwd) continue
-          const archived = await nativeApi.isArchived(item.sessionId, cwd)
+          let archived: boolean
+          try {
+            archived = await nativeApi.isArchived(item.sessionId, cwd)
+          } catch {
+            continue
+          }
           if (archived) this.archivedSessions.add(item.sessionId)
           else this.archivedSessions.delete(item.sessionId)
           archivedItems.set(index, archived)
@@ -340,21 +369,34 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.process !== undefined) {
       throw new OpencodeAcpError('OPENCODE_STARTING', 'OpenCode ACP is already starting.')
     }
+    this.failureNotified = false
     let child: ChildProcessWithoutNullStreams
-    if (this.spawnAcp) child = this.spawnAcp(this.binary)
-    else {
+    if (this.spawnAcp) {
+      try {
+        child = this.spawnAcp(this.binary)
+      } catch (error) {
+        const cause = error instanceof Error ? error : new Error(String(error))
+        this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', cause)
+        throw new OpencodeAcpError('OPENCODE_BINARY_UNAVAILABLE', 'OpenCode ACP communication failed.', { cause })
+      }
+    } else {
       const args = this.options.args ?? ['acp']
       const nativeApiSupported = await opencodeHasNativeApi(this.binary, args, this.options.cwd, this.startupAbort.signal)
       const port = nativeApiSupported ? await opencodeLoopbackPort() : undefined
       if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       if (port !== undefined) this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`)
-      child = spawn(this.binary, opencodePrivateArgs(args, port), {
-        cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-        env: { ...process.env, ...(this.nativeApi ? { OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {}) },
-      })
+      try {
+        child = spawnCommand(this.binary, opencodePrivateArgs(args, port), {
+          cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+          env: { ...process.env, ...(this.nativeApi ? { OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {}) },
+        })
+      } catch (error) {
+        const cause = error instanceof Error ? error : new Error(String(error))
+        this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', cause)
+        throw new OpencodeAcpError('OPENCODE_BINARY_UNAVAILABLE', 'OpenCode ACP communication failed.', { cause })
+      }
     }
     this.process = child
-    this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
     child.stdout.on('data', chunk => {

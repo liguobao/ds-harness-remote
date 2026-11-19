@@ -1,8 +1,23 @@
+import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
 import { AppState } from 'react-native'
 import { useAppStore } from '../state/store'
+import type { AgentBackend } from '../types'
 import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
 import { foregroundService } from './foreground-service'
+
+function isItemWaitingInput(session: { backend?: AgentBackend }, item: any): boolean {
+  if (!item || item.outcome !== undefined) return false
+  if (item.kind === 'approval') {
+    return session.backend === 'codex'
+      || isAcpManagedBackend(session.backend)
+      || item.frameRpcId !== undefined
+  }
+  if (item.kind === 'question') {
+    return item.questionState !== 'continued'
+  }
+  return false
+}
 
 /** Maps a backend identifier to the compact single-character badge shown in the live task notification. */
 export function backendBadge(backend?: string): string {
@@ -59,10 +74,7 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
     if (!session || typeof session.sessionId !== 'string') continue
     const active = Boolean(lifecycles[session.sessionId]?.running ?? session.running)
     const sessionMessages = messagesMap[session.sessionId] ?? []
-    const isWaitingInput = sessionMessages.some((item: any) =>
-      (item.kind === 'approval' && item.outcome === undefined && (session.backend === 'codex' || item.frameRpcId !== undefined)) ||
-      (item.kind === 'question' && item.frameRpcId !== undefined && item.outcome === undefined && item.questionState !== 'continued')
-    )
+    const isWaitingInput = sessionMessages.some((item: any) => isItemWaitingInput(session, item))
 
     if (active || isWaitingInput) {
       candidates.push({
@@ -135,6 +147,7 @@ export function startBrowseTracking(): () => void {
   let previousUpdated = 0
   let lastLiveTaskKey: string | undefined = undefined
   let liveTaskSyncTail: Promise<void> = Promise.resolve()
+  let disposed = false
   const running = new Map<string, boolean>()
   const questions = new Set<string>()
 
@@ -166,8 +179,8 @@ export function startBrowseTracking(): () => void {
     }
     for (const session of state.sessions) {
       const id = browseKey(scope, session.sessionId), entry = memory.entries[id]
-      const known = session.backend !== 'codex' || state.sessionLifecycles[session.sessionId] !== undefined
-      const active = state.sessionLifecycles[session.sessionId]?.running ?? session.running
+      const known = session.backend !== 'codex' || state.sessionLifecycles?.[session.sessionId] !== undefined
+      const active = state.sessionLifecycles?.[session.sessionId]?.running ?? session.running
       const watched = entry?.starred || entry?.visitedAt !== undefined || selected?.sessionId === session.sessionId
       const notify = memory.notifications && watched && (AppState.currentState !== 'active' || selected?.sessionId !== session.sessionId)
       if (known) {
@@ -175,7 +188,7 @@ export function startBrowseTracking(): () => void {
         running.set(id, active)
       }
       for (const item of state.messages[session.sessionId] ?? []) {
-        const needsInput = (item.kind === 'approval' && item.outcome === undefined && (session.backend === 'codex' || item.frameRpcId !== undefined)) || (item.kind === 'question' && item.frameRpcId !== undefined && item.outcome === undefined && item.questionState !== 'continued')
+        const needsInput = isItemWaitingInput(session, item)
         const questionKey = id + ':' + item.id
         if (needsInput && !questions.has(questionKey)) {
           questions.add(questionKey)
@@ -183,6 +196,8 @@ export function startBrowseTracking(): () => void {
         }
       }
     }
+
+    if (disposed) return
 
     // Sync active live task lock screen notification
     const liveTask = pickActiveLiveTask(state)
@@ -221,18 +236,32 @@ export function startBrowseTracking(): () => void {
     }
   }
 
+  const flushPendingObserve = () => {
+    if (timer === undefined) return
+    clearTimeout(timer)
+    timer = undefined
+    observe()
+  }
   const unsubscribe = useAppStore.subscribe(() => {
     if (timer !== undefined) return
     timer = setTimeout(() => {timer = undefined; observe()}, 800)
   })
-  const background = AppState.addEventListener('change', phase => {if (phase !== 'active') void flushBrowseMemory()})
+  const background = AppState.addEventListener('change', phase => {
+    if (phase !== 'active') {
+      flushPendingObserve()
+      void flushBrowseMemory()
+    }
+  })
   observe()
   return () => {
+    disposed = true
     unsubscribe()
     background.remove()
-    if (timer !== undefined) clearTimeout(timer)
+    flushPendingObserve()
     void flushBrowseMemory()
     lastLiveTaskKey = undefined
-    void foregroundService.clearLiveTask()
+    liveTaskSyncTail = liveTaskSyncTail
+      .then(() => foregroundService.clearLiveTask())
+      .catch(() => undefined)
   }
 }

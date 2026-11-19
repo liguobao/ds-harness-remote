@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { deriveCodexCwdWorkspaces } from '@dsh-remote/client-core'
 import type { CodexAppFrameData, CodexAppStreamClosedData, CodexPermissionPreset } from '@dsh-remote/protocol'
+import { createEvent, encodeMessage, MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 import type { ResolvedCodexConfig } from '../config.js'
 import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
@@ -40,7 +41,49 @@ const MAX_CODEX_PAGES = 32
 const CODEX_HISTORY_PAGE_LIMIT = 25
 const MAX_CODEX_HISTORY_PAGES = 64
 const CODEX_DIRECTORY_ENTRY_LIMIT = 500
+export const MAX_BUFFERED_CODEX_FRAMES = 200
+const MAX_BUFFERED_CODEX_THREADS = 64
+const CODEX_FRAME_BUFFER_TTL_MS = 5 * 60_000
+const MAX_STREAM_ID_PROBE = 'x'.repeat(128)
+const THREAD_METADATA_METHODS: ReadonlySet<string> = new Set([
+  'thread/name/updated',
+  'thread/settings/updated',
+  'thread/status/changed',
+  'thread/archived',
+  'thread/unarchived',
+  'model/rerouted',
+])
+const BUFFERABLE_CODEX_METHODS: ReadonlySet<string> = new Set([
+  ...THREAD_METADATA_METHODS,
+  'turn/started',
+  'turn/plan/updated',
+  'turn/completed',
+  'item/started',
+  'item/completed',
+  'item/agentMessage/delta',
+  'item/reasoning/summaryPartAdded',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+  'item/plan/delta',
+  'item/commandExecution/outputDelta',
+  'item/fileChange/outputDelta',
+  'item/mcpToolCall/progress',
+  'item/fileChange/patchUpdated',
+])
 const TURN_SILENCE_MESSAGE = 'CodeX turn timed out waiting for the App Server. The model provider may be unavailable or rate-limited. Please try again later.'
+
+interface BufferedCodexFrame {
+  seq: number
+  method: string
+  params: unknown
+  at: number
+}
+
+interface BufferedCodexThread {
+  frames: BufferedCodexFrame[]
+  truncated: boolean
+  truncatedAtSeq: number
+}
 
 interface PendingApproval {
   upstreamId: string | number
@@ -104,6 +147,8 @@ export class CodexRemoteDomain {
   private readonly turnWatchdogs = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly approvals = new Map<string, PendingApproval>()
   private readonly permissionPresets = new Map<string, CodexPermissionPreset>()
+  private readonly recentFrames = new Map<string, BufferedCodexThread>()
+  private nextBufferSeq = 1
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
   private restartAttempt = 0
@@ -322,7 +367,11 @@ export class CodexRemoteDomain {
     const threadId = threadIdFromParams(call.params)
 
     if (call.method === 'dsh/sessionHistory') {
+      const latestHistory = call.params.beforeSeq === undefined && call.params.throughSeq === undefined
+      const watermark = latestHistory ? this.nextBufferSeq : undefined
       const thread = await this.readThreadForHistory(connectionId, threadId!)
+      assertCurrent()
+      if (watermark !== undefined) this.pruneBufferedFramesAgainstHistory(threadId!, thread, watermark)
       let page: ReturnType<typeof paginateCodexNativeHistory>
       try {
         page = paginateCodexNativeHistory(
@@ -383,12 +432,23 @@ export class CodexRemoteDomain {
     if (call.method === 'thread/read') {
       // assertThreadAllowed already produced a bounded summary, but make the
       // requested read again so includeTurns has its official semantics.
-      return this.callUpstream(call.method, call.params)
+      const watermark = call.params.includeTurns === true ? this.nextBufferSeq : undefined
+      const result = await this.callUpstream(call.method, call.params)
+      assertCurrent()
+      if (watermark !== undefined) {
+        const thread = extractThread(result)
+        if (thread !== undefined && thread.id === threadId) {
+          this.pruneBufferedFramesAgainstHistory(threadId!, thread, watermark)
+        }
+      }
+      return result
     }
     if (call.method === 'thread/unsubscribe') {
       const bridge = this.peers.get(connectionId)
       bridge?.removeThreadSubscriptions(threadId!)
+      this.recentFrames.delete(threadId!)
       await this.releaseThread(threadId!)
+      if (!this.hasSubscriber(threadId!)) this.recentFrames.delete(threadId!)
       return { status: 'unsubscribed' }
     }
 
@@ -535,6 +595,7 @@ export class CodexRemoteDomain {
     this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
+    this.recentFrames.clear()
     this.knownThreadPromises.clear()
     this.approvals.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
@@ -562,6 +623,7 @@ export class CodexRemoteDomain {
     this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
+    this.recentFrames.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
     this.approvals.clear()
@@ -633,6 +695,7 @@ export class CodexRemoteDomain {
     this.clearAllTurnWatchdogs()
     this.turnOwners.clear()
     this.permissionPresets.clear()
+    this.recentFrames.clear()
     this.approvals.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
@@ -702,10 +765,12 @@ export class CodexRemoteDomain {
       this.rememberPermission(threadId, message.params)
     }
     if (message.method === 'thread/closed' && threadId !== undefined) {
+      const releasing = this.threadLifecycle.isReleasing(threadId)
       this.permissionPresets.delete(threadId)
       this.turnOwners.delete(threadId)
       this.clearTurnWatchdog(threadId)
       this.threadLifecycle.closed(threadId)
+      if (!releasing) this.recentFrames.delete(threadId)
     }
     if (message.method === 'turn/completed' && threadId !== undefined) {
       this.turnOwners.delete(threadId)
@@ -744,10 +809,233 @@ export class CodexRemoteDomain {
     if (message.method === 'serverRequest/resolved') this.resolveUpstreamApproval(message.params)
     if (threadId === undefined) return
     if (this.turnOwners.has(threadId)) this.armTurnWatchdog(threadId)
-    await Promise.all([...this.peers.values()].map(peer => peer.publishInbound(threadId, {
+    await this.publishToThread(threadId, {
       method: message.method,
       params: message.params,
-    })))
+    })
+  }
+
+  /** Replay buffered real-time frames missed while no stream was subscribed. */
+  async replayBufferedFrames(
+    connectionId: string,
+    streamId: string,
+    threadId: string,
+  ): Promise<{ count: number; truncated: boolean }> {
+    const peer = this.peers.get(connectionId)
+    if (peer === undefined) return { count: 0, truncated: false }
+    this.pruneFrameBuffer(threadId)
+    const buffered = this.recentFrames.get(threadId)
+    if (buffered === undefined || buffered.frames.length === 0) return { count: 0, truncated: false }
+    this.recentFrames.delete(threadId)
+    const truncated = buffered.truncated
+    let count = 0
+    for (let index = 0; index < buffered.frames.length; index += 1) {
+      const frame = buffered.frames[index]!
+      try {
+        await peer.publishReplayFrame(streamId, { method: frame.method, params: frame.params })
+        count += 1
+      } catch (error) {
+        if (isResponseTooLargeError(error)) {
+          this.logger.warn('Skipped oversized buffered Codex frame during replay', {
+            threadId: maskId(threadId),
+            method: frame.method,
+          })
+          continue
+        }
+        this.restoreBufferedFrames(threadId, buffered.frames.slice(index), truncated, buffered.truncatedAtSeq)
+        throw error
+      }
+    }
+    if (count > 0 || truncated) {
+      this.logger.info('Replaying buffered Codex frames', {
+        threadId: maskId(threadId),
+        count,
+        ...(truncated ? { truncated: true } : {}),
+      })
+    }
+    return { count, truncated }
+  }
+
+  rebufferOpeningFrames(
+    threadId: string,
+    frames: ReadonlyArray<{ method: string; params: unknown }>,
+    truncated: boolean,
+  ): void {
+    if (frames.length === 0 || this.hasSubscriber(threadId)) return
+    for (const frame of frames) this.bufferFrame(threadId, frame)
+    if (truncated) {
+      const entry = this.recentFrames.get(threadId)
+      if (entry !== undefined) {
+        entry.truncated = true
+        entry.truncatedAtSeq = this.nextBufferSeq
+      }
+    }
+  }
+
+  private async publishToThread(threadId: string, frame: { method: string; params: unknown }): Promise<void> {
+    const subscribers = [...this.peers.values()].filter(peer => peer.hasThreadSubscription(threadId))
+    if (subscribers.length === 0) {
+      this.bufferFrame(threadId, frame)
+      return
+    }
+    let deliveryFailed = false
+    await Promise.all(subscribers.map(async peer => {
+      try {
+        await peer.publishInbound(threadId, frame)
+      } catch (error) {
+        if (isResponseTooLargeError(error)) return
+        deliveryFailed = true
+        this.logger.warn('Codex frame publish failed', {
+          threadId: maskId(threadId),
+          method: frame.method,
+          code: errorCode(error),
+        })
+      }
+    }))
+    if (deliveryFailed) this.bufferFrame(threadId, frame)
+  }
+
+  private bufferFrame(threadId: string, frame: { method: string; params: unknown }): void {
+    if (!BUFFERABLE_CODEX_METHODS.has(frame.method)) return
+    if (isOversizedCodexFrame(frame)) {
+      this.logger.warn('Skipped buffering oversized Codex frame', {
+        threadId: maskId(threadId),
+        method: frame.method,
+      })
+      return
+    }
+    this.pruneFrameBuffer()
+    const entry = this.recentFrames.get(threadId) ?? { frames: [], truncated: false, truncatedAtSeq: 0 }
+    this.recentFrames.delete(threadId)
+    entry.frames.push({ seq: this.nextBufferSeq++, method: frame.method, params: frame.params, at: Date.now() })
+    while (entry.frames.length > MAX_BUFFERED_CODEX_FRAMES) {
+      entry.frames.shift()
+      entry.truncated = true
+      entry.truncatedAtSeq = this.nextBufferSeq
+    }
+    this.recentFrames.set(threadId, entry)
+    this.evictExcessBufferedThreads()
+  }
+
+  private restoreBufferedFrames(
+    threadId: string,
+    frames: BufferedCodexFrame[],
+    truncated: boolean,
+    truncatedAtSeq: number,
+  ): void {
+    if (frames.length === 0) return
+    this.pruneFrameBuffer()
+    const existing = this.recentFrames.get(threadId)
+    const combined = [...frames, ...(existing?.frames ?? [])]
+    let nextTruncated = truncated || existing?.truncated === true
+    let nextTruncatedAtSeq = Math.max(truncatedAtSeq, existing?.truncatedAtSeq ?? 0)
+    while (combined.length > MAX_BUFFERED_CODEX_FRAMES) {
+      combined.shift()
+      nextTruncated = true
+      nextTruncatedAtSeq = this.nextBufferSeq
+    }
+    this.recentFrames.delete(threadId)
+    this.recentFrames.set(threadId, { frames: combined, truncated: nextTruncated, truncatedAtSeq: nextTruncatedAtSeq })
+    this.evictExcessBufferedThreads()
+  }
+
+  private pruneFrameBuffer(threadId?: string): void {
+    const validAfter = Date.now() - CODEX_FRAME_BUFFER_TTL_MS
+    if (threadId !== undefined) {
+      const entry = this.recentFrames.get(threadId)
+      if (entry === undefined) return
+      const next = entry.frames.filter(frame => frame.at >= validAfter)
+      if (next.length === 0) this.recentFrames.delete(threadId)
+      else {
+        if (next.length < entry.frames.length) {
+          entry.truncated = true
+          entry.truncatedAtSeq = this.nextBufferSeq
+        }
+        entry.frames = next
+      }
+      return
+    }
+    for (const [id, entry] of this.recentFrames) {
+      const next = entry.frames.filter(frame => frame.at >= validAfter)
+      if (next.length === 0) this.recentFrames.delete(id)
+      else {
+        if (next.length < entry.frames.length) {
+          entry.truncated = true
+          entry.truncatedAtSeq = this.nextBufferSeq
+        }
+        entry.frames = next
+      }
+    }
+  }
+
+  private pruneBufferedFramesAgainstHistory(
+    threadId: string,
+    thread: Record<string, unknown>,
+    watermark: number,
+  ): void {
+    this.pruneFrameBuffer(threadId)
+    const entry = this.recentFrames.get(threadId)
+    if (entry === undefined) return
+    const turns = Array.isArray(thread.turns) ? thread.turns.filter(isRecord) : []
+    if (turns.length === 0) return
+    let activeTurn: Record<string, unknown> | undefined
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index]!
+      if (turn.status === 'inProgress' || turn.status === 'running') {
+        activeTurn = turn
+        break
+      }
+    }
+    if (activeTurn === undefined) {
+      const next = entry.frames.filter(frame => frame.seq >= watermark)
+      if (next.length === 0) this.recentFrames.delete(threadId)
+      else {
+        entry.frames = next
+        if (entry.truncated && entry.truncatedAtSeq < watermark) {
+          entry.truncated = false
+          entry.truncatedAtSeq = 0
+        }
+      }
+      return
+    }
+    const activeTurnId = typeof activeTurn.id === 'string' && activeTurn.id.length > 0 ? activeTurn.id : undefined
+    const completedTurnIds = new Set<string>()
+    const persistedItemIds = new Set<string>()
+    for (const turn of turns) {
+      if (turn !== activeTurn && typeof turn.id === 'string' && turn.id.length > 0) {
+        completedTurnIds.add(turn.id)
+      }
+      if (Array.isArray(turn.items)) {
+        for (const item of turn.items) {
+          if (isRecord(item) && typeof item.id === 'string' && item.id.length > 0) {
+            persistedItemIds.add(item.id)
+          }
+        }
+      }
+    }
+    const next = entry.frames.filter(frame => {
+      if (frame.seq >= watermark) return true
+      if (THREAD_METADATA_METHODS.has(frame.method)) return false
+      const frameTurnId = extractFrameTurnId(frame.params)
+      if (frameTurnId !== undefined && completedTurnIds.has(frameTurnId)) return false
+      if (frame.method === 'turn/started'
+        && (activeTurnId === undefined || frameTurnId === undefined || frameTurnId === activeTurnId)) {
+        return false
+      }
+      const frameItemId = extractFrameItemId(frame.params)
+      if (frameItemId !== undefined && persistedItemIds.has(frameItemId)) return false
+      return true
+    })
+    if (next.length === 0) this.recentFrames.delete(threadId)
+    else entry.frames = next
+  }
+
+  private evictExcessBufferedThreads(): void {
+    while (this.recentFrames.size > MAX_BUFFERED_CODEX_THREADS) {
+      const oldest = this.recentFrames.keys().next().value
+      if (oldest === undefined) break
+      this.recentFrames.delete(oldest)
+    }
   }
 
   private rememberPermission(threadId: string, value: unknown): void {
@@ -1169,10 +1457,10 @@ export class CodexRemoteDomain {
       items: [],
     }
     this.logger.warn('Codex turn silence watchdog fired', { code: 'remote_turn_silence' })
-    await Promise.all([...this.peers.values()].map(peer => peer.publishInbound(threadId, {
+    await this.publishToThread(threadId, {
       method: 'turn/completed',
       params: { threadId, turn },
-    })))
+    })
   }
 
   private requireAppServer(): CodexAppServerLike {
@@ -1821,6 +2109,28 @@ function isUnpersistedThreadError(error: unknown): boolean {
   return error instanceof RpcError
     && error.code === 'CODEX_UPSTREAM_ERROR'
     && error.message.toLowerCase().includes('not persisted yet')
+}
+
+function extractFrameTurnId(params: unknown): string | undefined {
+  if (!isRecord(params)) return undefined
+  if (typeof params.turnId === 'string' && params.turnId.length > 0) return params.turnId
+  if (isRecord(params.turn) && typeof params.turn.id === 'string' && params.turn.id.length > 0) return params.turn.id
+  return undefined
+}
+
+function extractFrameItemId(params: unknown): string | undefined {
+  if (!isRecord(params)) return undefined
+  if (typeof params.itemId === 'string' && params.itemId.length > 0) return params.itemId
+  if (isRecord(params.item) && typeof params.item.id === 'string' && params.item.id.length > 0) return params.item.id
+  return undefined
+}
+
+function isOversizedCodexFrame(frame: { method: string; params: unknown }): boolean {
+  return encodeMessage(createEvent('codex.app.frame', { streamId: MAX_STREAM_ID_PROBE, frame })).byteLength > MAX_SECURE_MESSAGE_BYTES
+}
+
+function isResponseTooLargeError(error: unknown): boolean {
+  return isRecord(error) && error.code === 'RESPONSE_TOO_LARGE'
 }
 
 /** A new Thread is materialized by its first user message; before that its
