@@ -101610,6 +101610,7 @@ function redact(value, key = "") {
 
 // packages/plugin/src/dsh-web-host.ts
 import { randomUUID as randomUUID16 } from "node:crypto";
+import { setTimeout as sleep2 } from "node:timers/promises";
 
 // packages/plugin/src/hostc/protocol/constants.ts
 var PROTOCOL_VERSION2 = 5;
@@ -102264,13 +102265,18 @@ var Connection2 = class _Connection {
   windowBudget = new WindowBudget();
   heartbeat;
   pongTimeout;
-  static open(options) {
+  static open(options, signal) {
     return new Promise((resolve10, reject) => {
+      signal?.throwIfAborted();
       const socket = new import_websocket.default(options.tunnel.connectUrl, {
         headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
         perMessageDeflate: false,
         handshakeTimeout: 6e3
       });
+      const abort = () => socket.terminate();
+      const removeAbort = () => signal?.removeEventListener("abort", abort);
+      signal?.addEventListener("abort", abort, { once: true });
+      socket.once("close", removeAbort);
       socket.once("unexpected-response", (_request, response) => {
         reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
         response.destroy();
@@ -102280,6 +102286,7 @@ var Connection2 = class _Connection {
         reject(new TunnelError("network_error", `Could not connect: ${error62.message}`, { cause: error62 }));
       });
       socket.once("open", () => {
+        removeAbort();
         socket.removeAllListeners("error");
         resolve10(new _Connection(socket, options));
       });
@@ -102387,6 +102394,10 @@ function closeDescription(code) {
 }
 
 // packages/plugin/src/dsh-web-host.ts
+var cordisOriginal = Symbol.for("cordis.original");
+function originalAuth(auth) {
+  return Reflect.get(auth, cordisOriginal) ?? auth;
+}
 var allocationSchema = external_exports.object({
   sessionId: external_exports.string().regex(/^[pt][abcdefghijkmnpqrstuvwxyz23456789]{11}$/),
   url: external_exports.url(),
@@ -102445,6 +102456,7 @@ var DshWebPeer = class {
       signal.throwIfAborted();
       const runtime = this.resolveRuntime();
       if (runtime === void 0) throw new RpcError("DSH_WEB_NOT_READY", "The DSH Web GUI is unavailable.", void 0, true);
+      const authInstance = originalAuth(runtime.auth);
       const cookie = browserCookie(runtime);
       const local = await fetch(runtime.origin, { headers: { cookie }, redirect: "manual", signal });
       await local.body?.cancel();
@@ -102459,18 +102471,18 @@ var DshWebPeer = class {
         throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid tunnel.");
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal]);
-      const connect4 = () => Connection2.open({
+      const connect4 = (connectSignal) => Connection2.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
         target: runtime.origin,
         authorize: (request) => {
           if (lease.stop.signal.aborted || Date.now() >= lease.request.leaseExpiresAt) return;
           const current = this.resolveRuntime();
-          if (current?.origin.href !== runtime.origin.href || current.auth !== runtime.auth) return;
+          if (current?.origin.href !== runtime.origin.href || originalAuth(current.auth) !== authInstance) return;
           return authorizeUpstream(request, publicUrl, cookie);
         },
         stripResponseHeaders,
         onRequest: () => void 0
-      });
+      }, connectSignal);
       await attachConnector(lease, connect4, listenSignal);
       const result = dshWebGrantSchema.parse(await this.api.dshWebRequest("grant", lease.request, listenSignal));
       if (result.url !== publicUrl.href || result.expiresAt <= Date.now() || result.expiresAt > lease.request.leaseExpiresAt)
@@ -102508,13 +102520,22 @@ var DshWebPeer = class {
   }
 };
 async function attachConnector(lease, dial, signal) {
-  signal.throwIfAborted();
-  const connector = await dial();
-  if (signal.aborted) {
-    connector.close(CLOSE_SHUTDOWN, "session closed");
+  for (const retryDelay of [200, 500, void 0]) {
     signal.throwIfAborted();
+    try {
+      const connector = await dial(signal);
+      if (signal.aborted) {
+        connector.close(CLOSE_SHUTDOWN, "session closed");
+        signal.throwIfAborted();
+      }
+      lease.connector = connector;
+      return;
+    } catch (error62) {
+      signal.throwIfAborted();
+      if (retryDelay === void 0 || !(error62 instanceof TunnelError) || error62.code !== "network_error") throw error62;
+      await sleep2(retryDelay, void 0, { signal });
+    }
   }
-  lease.connector = connector;
 }
 async function waitForCheck(connector, signal) {
   let timer2;

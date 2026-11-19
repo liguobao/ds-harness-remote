@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { dshWebGrantSchema, type DshWebGrant } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import { Connection } from './hostc/connection.js'
+import { TunnelError } from './hostc/api.js'
 import { CLOSE_REPLACED, CLOSE_SHUTDOWN, type HeaderList, type OpenMessage } from './hostc/protocol/index.js'
 import { RpcError } from './safe-error.js'
 import { ServerApiError, type DshWebRequest, type HostServerApi } from './server-api.js'
@@ -17,7 +19,16 @@ export interface DshWebBrowserAuth {
 
 export type DshWebRuntime = { origin: URL; auth: DshWebBrowserAuth }
 type ResolveRuntime = () => DshWebRuntime | undefined
+type DialConnector = (signal: AbortSignal) => Promise<Connection>
+type WebSessionApi = Pick<HostServerApi, 'dshWebRequest' | 'closeDshWeb'>
 type Peer = Pick<DshWebRequest, 'clientDeviceId' | 'connectionId'>
+
+// Cordis returns a fresh tracing proxy on each context lookup.
+const cordisOriginal = Symbol.for('cordis.original')
+
+function originalAuth(auth: DshWebBrowserAuth): unknown {
+  return Reflect.get(auth, cordisOriginal) ?? auth
+}
 
 const allocationSchema = z.object({
   sessionId: z.string().regex(/^[pt][abcdefghijkmnpqrstuvwxyz23456789]{11}$/),
@@ -40,7 +51,7 @@ export class DshWebPeer {
   private openingStop?: AbortController
   private readonly lifetime = new AbortController()
 
-  constructor(private readonly api: HostServerApi, private readonly peer: Peer, private readonly resolveRuntime: ResolveRuntime) {}
+  constructor(private readonly api: WebSessionApi, private readonly peer: Peer, private readonly resolveRuntime: ResolveRuntime) {}
 
   available(): boolean {
     try { return this.resolveRuntime() !== undefined } catch { return false }
@@ -84,6 +95,7 @@ export class DshWebPeer {
       signal.throwIfAborted()
       const runtime = this.resolveRuntime()
       if (runtime === undefined) throw new RpcError('DSH_WEB_NOT_READY', 'The DSH Web GUI is unavailable.', undefined, true)
+      const authInstance = originalAuth(runtime.auth)
       const cookie = browserCookie(runtime)
       const local = await fetch(runtime.origin, { headers: { cookie }, redirect: 'manual', signal })
       await local.body?.cancel()
@@ -100,18 +112,18 @@ export class DshWebPeer {
         throw new RpcError('TUNNEL_UNAVAILABLE', 'The Server returned an invalid tunnel.')
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal])
-      const connect = () => Connection.open({
+      const connect: DialConnector = connectSignal => Connection.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
         target: runtime.origin,
         authorize: request => {
           if (lease.stop.signal.aborted || Date.now() >= lease.request.leaseExpiresAt) return
           const current = this.resolveRuntime()
-          if (current?.origin.href !== runtime.origin.href || current.auth !== runtime.auth) return
+          if (current?.origin.href !== runtime.origin.href || originalAuth(current.auth) !== authInstance) return
           return authorizeUpstream(request, publicUrl, cookie)
         },
         stripResponseHeaders,
         onRequest: () => undefined,
-      })
+      }, connectSignal)
       await attachConnector(lease, connect, listenSignal)
       const result = dshWebGrantSchema.parse(await this.api.dshWebRequest('grant', lease.request, listenSignal))
       if (result.url !== publicUrl.href || result.expiresAt <= Date.now() || result.expiresAt > lease.request.leaseExpiresAt)
@@ -127,7 +139,7 @@ export class DshWebPeer {
     }
   }
 
-  private async monitor(lease: Lease, connect: () => Promise<Connection>): Promise<void> {
+  private async monitor(lease: Lease, connect: DialConnector): Promise<void> {
     const timer = setTimeout(() => { if (this.active === lease) void this.close() }, Math.max(0, lease.request.leaseExpiresAt - Date.now()))
     timer.unref()
     try {
@@ -148,14 +160,24 @@ export class DshWebPeer {
   }
 }
 
-async function attachConnector(lease: Lease, dial: () => Promise<Connection>, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted()
-  const connector = await dial()
-  if (signal.aborted) {
-    connector.close(CLOSE_SHUTDOWN, 'session closed')
+async function attachConnector(lease: Lease, dial: DialConnector, signal: AbortSignal): Promise<void> {
+  for (const retryDelay of [200, 500, undefined]) {
     signal.throwIfAborted()
+    try {
+      const connector = await dial(signal)
+      if (signal.aborted) {
+        connector.close(CLOSE_SHUTDOWN, 'session closed')
+        signal.throwIfAborted()
+      }
+      lease.connector = connector
+      return
+    } catch (error) {
+      signal.throwIfAborted()
+      // Reuse the allocation. Authorization and protocol errors require a new open.
+      if (retryDelay === undefined || !(error instanceof TunnelError) || error.code !== 'network_error') throw error
+      await sleep(retryDelay, undefined, { signal })
+    }
   }
-  lease.connector = connector
 }
 
 async function waitForCheck(connector: Connection, signal: AbortSignal) {

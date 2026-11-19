@@ -52,14 +52,6 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 - Android、iOS、Web、原生DSH 都有对应客户端，全平台可用。
 - 多个客户端可以同时连接同一个 Harness Host，RPC 与数据流按连接隔离。
 
-## 鸿蒙原生客户端
-
-[鸿蒙客户端源码](apps/harmony/)支持 HarmonyOS 7.0（API 26）及以上系统，使用 DevEco Studio 构建。安装、签名、安全边界和验证方式见[客户端说明](docs/harmony-client.md)。
-
-| 会话抽屉 | 新会话 | 输入坞 |
-| --- | --- | --- |
-| ![会话抽屉](docs/images/harmony/sessions-drawer.jpg) | ![新会话](docs/images/harmony/chat-empty.jpg) | ![输入坞](docs/images/harmony/composer.jpg) |
-
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
@@ -67,7 +59,7 @@ Harness 始终运行在工作电脑上，原有的工作区、工具和项目配
 | DSH 插件 | Remote 侧栏 | 已支持 | 主控、被控任君差遣~ |
 | Web | 浏览器页面 | 已支持 | 打开 [https://dsh.r2049.cn](https://dsh.r2049.cn)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
-| HarmonyOS | 原生 App | 提供源码 | HarmonyOS 7.0（API 26）及以上，使用 DevEco Studio 构建，见[客户端说明](docs/harmony-client.md) |
+| HarmonyOS | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 |
 | DSH Go | C佬精品 | 已支持 | 详情见：[ccch1mneyyy/dsh-go: 手机上直接跑，也能遥控你电脑上的 DSH。](https://github.com/ccch1mneyyy/dsh-go)
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
 | dsh-TUI | 独立 Host 组合包 + CLI | 核心真机验收通过 | 安装同版本 `ds-harness-remote-tui`，见[验证版本与边界](docs/compatibility.md)；安装脚本不会为它自动创建 Web 服务 |
@@ -300,6 +292,7 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 
 - 友情链接：[DSH Go](https://github.com/ccch1mneyyy/dsh-go) — 把 DeepSeek Harness 装进口袋：手机本机运行，也能遥控你的电脑。「已适配 Remote。」
 - 友情链接：[dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)（终端优先的 Harness 客户端，Remote Host 使用独立 `ds-harness-remote-tui` 组合包）
+- 友情链接：[akazwz/hostc](https://github.com/akazwz/hostc) Localhost, anywhere. One command gives your dev server a public HTTPS URL, with WebSockets and hot reload. Free, no account, runs on Cloudflare Workers.
 - 友情链接：[LINUX DO 社区](https://linux.do/)
 - 友情链接：[赛博刘看山](https://kanshan.r2049.cn/)
 

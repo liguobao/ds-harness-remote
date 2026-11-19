@@ -30,7 +30,11 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
     })
     return () => {
       abort.abort()
-      void rpc('dsh.web.close', {}, AbortSignal.timeout(4_000)).catch(() => undefined)
+      const close = new AbortController()
+      const deadline = setTimeout(() => close.abort(), 4_000)
+      void rpc('dsh.web.close', {}, close.signal)
+        .catch(() => undefined)
+        .finally(() => clearTimeout(deadline))
     }
   }, [rpc])
 

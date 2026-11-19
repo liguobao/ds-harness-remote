@@ -43,13 +43,18 @@ export class Connection {
 	private readonly heartbeat: NodeJS.Timeout;
 	private pongTimeout: NodeJS.Timeout | undefined;
 
-	static open(options: ConnectionOptions): Promise<Connection> {
+	static open(options: ConnectionOptions, signal?: AbortSignal): Promise<Connection> {
 		return new Promise((resolve, reject) => {
+			signal?.throwIfAborted();
 			const socket = new WebSocket(options.tunnel.connectUrl, {
 				headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
 				perMessageDeflate: false,
 				handshakeTimeout: 6_000,
 			});
+			const abort = () => socket.terminate();
+			const removeAbort = () => signal?.removeEventListener("abort", abort);
+			signal?.addEventListener("abort", abort, { once: true });
+			socket.once("close", removeAbort);
 			socket.once("unexpected-response", (_request, response) => {
 				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
 				response.destroy();
@@ -59,6 +64,7 @@ export class Connection {
 				reject(new TunnelError("network_error", `Could not connect: ${error.message}`, { cause: error }));
 			});
 			socket.once("open", () => {
+				removeAbort();
 				socket.removeAllListeners("error");
 				resolve(new Connection(socket, options));
 			});
