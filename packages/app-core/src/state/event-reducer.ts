@@ -83,9 +83,9 @@ function applyNativeEvent(
     const detail = turnEndDetail(reasonData)
     const settled: ChatItem[] = settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
       ? { ...item, turnEnd: { reason, time: event.time, ...(detail === undefined ? {} : { detail }) } } : item)
-    // User bubbles do not render turn-end state, and context is hidden. A turn
-    // with only those rows still needs a process row to carry the failure.
-    const owned = settled.some(item => (item.kind !== 'message' || (item.role === 'assistant' && !item.context))
+    // User bubbles do not render turn-end state, and context/usage-only rows are hidden.
+    // A turn with only those rows still needs a process row to carry the failure.
+    const owned = settled.some(item => (item.kind !== 'message' || (item.role === 'assistant' && !item.context && !item.usageOnly))
       && (item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)))
     // Only a real failure payload (kind 'failed'/'error') warrants the
     // synthetic row: a bare/legacy turn/end without `reason` must not be
@@ -237,7 +237,8 @@ export function settleOrphanedQueuedItems(
   let changed = false
   const next = current.map(item => {
     if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
-      || item.nativeSeq !== undefined || item.sendState !== 'queued') {
+      || item.nativeSeq !== undefined
+      || !(item.sendState === 'queued' || (item.queuedAdopted === true && item.sendState === undefined))) {
       return item
     }
     if (item.requestRpcId !== undefined && queuedRpcIds?.has(item.requestRpcId)) {
@@ -302,7 +303,19 @@ function addAssistantMessage(current: ChatItem[], data: UnknownRecord, sessionId
   const group = replyGroup(data) ?? (streamed?.kind === 'message' ? streamed.replyGroup : undefined)
   if (images.length === 0 && !hasVisibleMessageText(finalText) && !hasVisibleMessageText(finalReasoning ?? '')) {
     // Native assistant messages may contain only tool/content metadata. They
-    // are not chat text and must not leave an empty avatar/"Remote" row.
+    // are not visible chat text, but when the step carries LLM usage we retain
+    // a silent usage-only ledger row so multi-step turn totals stay accurate.
+    if (group !== undefined && nativeUsage(data) !== undefined) {
+      const ledger: ChatMessage = {
+        kind: 'message', id, sessionId, role: 'assistant', text: '', createdAt: now(data),
+        replyGroup: group, usageOnly: true,
+      }
+      if (streamingIndex >= 0) {
+        return current.map((item, index) => index === streamingIndex ? ledger : item)
+      }
+      if (current.some(item => item.id === id)) return current
+      return [...current, ledger]
+    }
     if (streamingIndex < 0) return current
     return current.filter((_, index) => index !== streamingIndex)
   }

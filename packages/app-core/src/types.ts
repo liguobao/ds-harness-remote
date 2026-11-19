@@ -293,9 +293,9 @@ export interface ChatMessage extends ChatItemBase {
    * the `inbox` projection) — hidden from the timeline and shown in the queue
    * dock until an inbox update releases it or a `user/message` echo replaces it.
    * `failed`: the Host rejected the prompt — kept with a retry affordance.
-   * `unconfirmed`: timeout/disconnect, or leaving the inbox without an echo,
-   * left the outcome unknown — visible until a
-   * history/inbox reconciliation decides its fate (never judged by timers).
+   * `unconfirmed`: timeout/disconnect, missing queue item on steer, or an
+   * aborted/idle reconciliation without an echo left the outcome unknown —
+   * visible until a history/inbox reconciliation decides its fate (never judged by timers).
    * `canceled`: reconciliation found the queued prompt neither echoed nor in
    * the inbox (removed remotely); kept quiet in the timeline, and a late echo
    * still replaces it.
@@ -308,6 +308,8 @@ export interface ChatMessage extends ChatItemBase {
   /** Original prompt image payloads kept for retries (the row's `images` are display-only). */
   promptImages?: PromptImage[]
   context?: boolean
+  /** Silent tool-only assistant step retained solely for turn-level token usage aggregation. */
+  usageOnly?: true
   feedback?: 'positive' | 'negative'
   usage?: { inputTokens: number; outputTokens: number; totalTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
 }

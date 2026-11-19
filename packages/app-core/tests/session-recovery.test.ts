@@ -274,7 +274,7 @@ describe('ordered history recovery', () => {
           expect(row()).not.toHaveProperty('sendState')
         } else if (adopted) {
           const inQueue = (useAppStore.getState().selectedSession?.projections?.values?.inbox as { 'next-turn': unknown[] })['next-turn'].length > 0
-          expect(row()).toMatchObject({ queuedAdopted: true, sendState: inQueue ? 'queued' : 'unconfirmed' })
+          expect(row()).toMatchObject({ queuedAdopted: true, sendState: inQueue ? 'queued' : undefined })
         }
       }
       // A late echo heals the released row once, retaining native identity.
@@ -284,6 +284,58 @@ describe('ordered history recovery', () => {
       expect(row()).not.toHaveProperty('sendState')
       expect(row()).not.toHaveProperty('queuedAdopted')
     } })), prepareScenario1)
+  })
+
+  it('keeps idle send inbox claim out of unconfirmed while still settling lost adopted prompts on stop', async () => {
+    await runScenarios([
+      {
+        name: 'idle send inbox add then claim awaits echo without flagging unconfirmed',
+        run: async () => {
+          const idle = { ...session, running: false }
+          useAppStore.setState({ selectedSession: idle, sessions: [idle] })
+          let acknowledge!: () => void
+          proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
+          const rpcId = 'idle-claim-1'
+          const sending = useAppStore.getState().sendMessage('what is zhihu', [], rpcId)
+          const message = { id: 'host-idle-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'what is zhihu' }] }
+          const inbox = (items: unknown[], seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value: { 'next-turn': items },
+          } } as MuxStreamFrame)
+          inbox([message], 1)
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: 'queued' })
+          inbox([], 2)
+          acknowledge()
+          expect(await sending).toBe('sent')
+          const claimed = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(claimed).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: undefined })
+          useAppStore.getState().handleMuxFrame(frame(entry('user/message', 10, { turn: 1, message })))
+          const echoed = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+          expect(echoed).toMatchObject({ id: 'host-idle-1', nativeSeq: 10 })
+          expect(echoed).not.toHaveProperty('sendState')
+          expect(echoed).not.toHaveProperty('queuedAdopted')
+        },
+      },
+      {
+        name: 'claimed adopted prompt without echo settles to unconfirmed on stopped turn/end',
+        run: async () => {
+          const running = { ...session, running: true }
+          useAppStore.setState({ selectedSession: running, sessions: [running] })
+          proxy.sessionPrompt.mockResolvedValueOnce(undefined)
+          const rpcId = 'claimed-aborted-1'
+          expect(await useAppStore.getState().sendMessage('aborted after claim', [], rpcId)).toBe('sent')
+          const message = { id: 'host-abort-1', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'aborted after claim' }] }
+          useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq: 1, value: { 'next-turn': [message] },
+          } } as MuxStreamFrame)
+          useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq: 2, value: { 'next-turn': [] },
+          } } as MuxStreamFrame)
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, queuedAdopted: true, sendState: undefined })
+          useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 25, { turn: 1, reason: { kind: 'aborted' } })))
+          expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ id: `local:${rpcId}`, sendState: 'unconfirmed' })
+        },
+      },
+    ], prepareScenario1)
   })
 
   it('settles explicit queue actions without reviving removed rows or overwriting durable echoes', async () => {
@@ -313,7 +365,7 @@ describe('ordered history recovery', () => {
           expect(row).toMatchObject({ id: 'host-item', nativeSeq: 3 })
           expect(row).not.toHaveProperty('sendState')
           expect(row).not.toHaveProperty('queuedAdopted')
-        } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : 'unconfirmed' })
+        } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : undefined })
       },
     }))), prepareScenario1)
   })

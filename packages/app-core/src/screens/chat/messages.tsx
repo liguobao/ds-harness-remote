@@ -46,18 +46,20 @@ import { parseBotReplyPayload } from '../bot/replies'
 import { BotReplies } from '../bot/reply-view'
 import type { BotObject } from '../../services/bot-catalog'
 import type { ProcessActivity, ProcessSegment } from '../chat-process'
-import { processSummary, processDetail, processSegments, toolActivity, toolDisplayName } from '../chat-process'
+import { aggregateTurnUsage, processSummary, processDetail, processSegments, sameUsage, shouldShowTurnResponseActions, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import { createStyles } from './styles'
 
 /** Only activity ranges fold; completing a turn must never hide spoken replies. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, onApproval, onQuestion }: {
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, isTurnRunning = false, turnUsage, onApproval, onQuestion }: {
   items: ChatItem[]
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
   availableUiIds: ReadonlySet<string>
   busyAction?: string
+  isTurnRunning?: boolean
+  turnUsage?: ChatMessage['usage']
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
@@ -65,10 +67,13 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   const styles = useThemedStyles(createStyles)
   const backend = useAppStore(state => state.selectedSession?.backend)
   const last = items.at(-1)
-  const codexClosed = backend === 'codex' && !items.some(isActiveChatItem)
+  const hasActiveItem = items.some(isActiveChatItem)
+  const codexClosed = backend === 'codex' && !isTurnRunning && !hasActiveItem
     && last?.kind === 'message' && last.role === 'assistant'
   const end = items.find(item => item.turnEnd !== undefined)?.turnEnd
     ?? (codexClosed ? { reason: 'completed' as const, time: 0 } : undefined)
+  const fallbackTurnUsage = useMemo(() => aggregateTurnUsage(items), [items])
+  const resolvedTurnUsage = turnUsage ?? fallbackTurnUsage
   const segments = useMemo(() => processSegments(items).flatMap((segment):
     (ProcessSegment | { kind: 'botReplies'; key: string; rows: BotObject[]; groupRelay: boolean })[] => {
     if (segment.kind === 'response') return [segment]
@@ -137,18 +142,40 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     {end !== undefined && !(end.reason === 'completed' && (hasGroupRelayReplies || hasToolSummary)) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
     </View>}
-    {segments.map((segment, index) => segment.kind === 'response'
-      ? <MessageBubble
+    {segments.map((segment, index) => {
+      if (segment.kind === 'response') {
+        const showActions = shouldShowTurnResponseActions({
+          segmentIndex: index,
+          lastResponseIndex,
+          turnEnded: end !== undefined,
+          hasActiveItem,
+          isTurnRunning,
+        })
+        return (
+          <MessageBubble
+            key={segment.key}
+            item={segment.item}
+            compact
+            showActions={showActions}
+            turnUsage={showActions ? resolvedTurnUsage : undefined}
+            artifacts={index === lastResponseIndex ? artifacts : undefined}
+            editedFiles={index === lastResponseIndex ? editedFiles : undefined}
+            onFilePress={onFilePress}
+          />
+        )
+      }
+      if (segment.kind === 'botReplies') return <BotReplies key={segment.key} rows={segment.rows} />
+      return (
+        <ChatActivityGroup
           key={segment.key}
-          item={segment.item}
-          compact
-          artifacts={index === lastResponseIndex ? artifacts : undefined}
-          editedFiles={index === lastResponseIndex ? editedFiles : undefined}
-          onFilePress={onFilePress}
+          items={segment.items}
+          closed={end !== undefined || index < segments.length - 1}
+          busyAction={busyAction}
+          onApproval={onApproval}
+          onQuestion={onQuestion}
         />
-      : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
-      : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
-        busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
+      )
+    })}
     {lastResponseIndex === -1 && <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} />}
     {lastResponseIndex === -1 && artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
@@ -158,6 +185,8 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   // Every field below is a reference that streaming rebuilds, so compare their
   // contents: a group whose text did not change keeps its rendered subtree.
   if (prev.busyAction !== next.busyAction) return false
+  if (prev.isTurnRunning !== next.isTurnRunning) return false
+  if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
   if (prev.onApproval !== next.onApproval || prev.onQuestion !== next.onQuestion) return false
   if (prev.items !== next.items) {
     if (prev.items.length !== next.items.length) return false
@@ -241,10 +270,12 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
   </View>
 })
 
-export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onApproval, onQuestion, artifacts, onSendPrompt, userBubble }: {
+export const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, showActions, turnUsage, onApproval, onQuestion, artifacts, onSendPrompt, userBubble }: {
   item: ChatItem
   busyAction?: string
   compact: boolean
+  showActions?: boolean
+  turnUsage?: ChatMessage['usage']
   /** Paint the user's own message as a bubble on the inverse surface (group chats). */
   userBubble?: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
@@ -260,7 +291,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
     && !hasArtifacts
     && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
-  return <MessageBubble item={item} compact={compact} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} />
+  return <MessageBubble item={item} compact={compact} showActions={showActions} turnUsage={turnUsage} artifacts={artifacts} onSendPrompt={onSendPrompt} userBubble={userBubble} />
 })
 
 /** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
@@ -331,9 +362,11 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
   )
 }
 
-function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
+function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
   item: ChatMessage
   compact: boolean
+  showActions?: boolean
+  turnUsage?: ChatMessage['usage']
   userBubble?: boolean
   artifacts?: UiArtifact[]
   editedFiles?: { path: string; name?: string; action?: 'created' | 'edited' }[]
@@ -352,6 +385,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
 
   // Harness renders assistant prose directly on the conversation canvas.
   if (remote) {
+    const actionsItem = turnUsage === undefined || turnUsage === item.usage ? item : { ...item, usage: turnUsage }
     return (
       <View style={styles.assistantBlock}>
         {showReasoning && <ReasoningDisclosure item={item} />}
@@ -368,7 +402,7 @@ function MessageBubble({ item, compact, artifacts, editedFiles, onFilePress, onS
           <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} onSendPrompt={onSendPrompt} />
         ))}
         {editedFiles?.length && onFilePress ? <PresentedFileGroup files={editedFiles} onFilePress={onFilePress} /> : null}
-        {!item.streaming && (showText || hasArtifacts) && <MessageActions item={item} />}
+        {showActions && !item.streaming && (showText || hasArtifacts) && <MessageActions item={actionsItem} />}
       </View>
     )
   }

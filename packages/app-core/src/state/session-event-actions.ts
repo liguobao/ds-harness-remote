@@ -156,9 +156,10 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           }
           // Only local pending rows follow the inbox. A durable user/message
           // echo is stronger evidence than a delayed control-stream projection.
-          // Leaving the inbox may mean execution, steering, or removal; keep the
-          // row visible as unconfirmed until an echo/history or explicit action
-          // settles it. No second projection or timer is needed for visibility.
+          // Leaving the inbox is the normal claim/execution handoff (idle send,
+          // next-turn claim, or steer): return the row to the timeline without
+          // flagging a delivery error while awaiting its durable echo. Unadopted
+          // idle rows and stop/failure/reload paths still settle lost prompts.
           const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
             const queued = inboxRpcIds(value)
             const isIdle = currentSession?.running === false
@@ -168,8 +169,10 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
               if (queued.has(item.requestRpcId)) {
                 return { ...item, sendState: 'queued' as const, queuedAdopted: true, sendError: undefined }
               }
-              if ((item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined))
-                || (isIdle && item.sendState === 'queued')) {
+              if (item.queuedAdopted === true && item.sendState === 'queued') {
+                return { ...item, sendState: undefined, sendError: undefined }
+              }
+              if (isIdle && item.sendState === 'queued') {
                 return { ...item, sendState: 'unconfirmed' as const, sendError: undefined }
               }
               return item

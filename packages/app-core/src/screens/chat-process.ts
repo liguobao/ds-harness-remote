@@ -30,6 +30,130 @@ export function processSegments(items: ChatItem[]): ProcessSegment[] {
   return segments
 }
 
+/**
+ * Only the final response of a settled turn owns the turn footer (copy,
+ * branch, turn usage, timestamp). Rendering it on intermediate preamble text
+ * before tool calls visually splits one turn into two conversations.
+ */
+export function shouldShowTurnResponseActions(options: {
+  segmentIndex: number
+  lastResponseIndex: number
+  turnEnded: boolean
+  hasActiveItem: boolean
+  isTurnRunning: boolean
+}): boolean {
+  if (options.segmentIndex !== options.lastResponseIndex) return false
+  if (options.turnEnded) return true
+  return !options.isTurnRunning && !options.hasActiveItem
+}
+
+/**
+ * Resolve uncached input tokens consistently across Harness and ACP payloads.
+ * Native Harness reports `inputTokens` excluding cached prompt tokens
+ * (`totalTokens >= inputTokens + cacheRead + cacheWrite + outputTokens`), while
+ * ACP reports `inputTokens` inclusive of cached tokens (`totalTokens < sum`).
+ */
+export function resolveUncachedInputTokens(usage: NonNullable<ChatMessage['usage']>): number {
+  const cacheRead = usage.cacheReadTokens ?? 0
+  const cacheWrite = usage.cacheWriteTokens ?? 0
+  const additiveTotal = usage.inputTokens + cacheRead + cacheWrite + usage.outputTokens
+  if (usage.totalTokens !== undefined && usage.totalTokens < additiveTotal) {
+    return Math.max(0, usage.inputTokens - cacheRead - cacheWrite)
+  }
+  return usage.inputTokens
+}
+
+/** Value comparison for memoized turn-level usage props. */
+export function sameUsage(a: ChatMessage['usage'], b: ChatMessage['usage']): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.inputTokens === b.inputTokens
+    && a.outputTokens === b.outputTokens
+    && a.totalTokens === b.totalTokens
+    && a.cacheReadTokens === b.cacheReadTokens
+    && a.cacheWriteTokens === b.cacheWriteTokens
+    && a.reasoningTokens === b.reasoningTokens
+}
+
+/** Aggregate per-step LLM usage across every assistant message in one turn. */
+export function aggregateTurnUsage(items: readonly ChatItem[]): ChatMessage['usage'] {
+  const usages: NonNullable<ChatMessage['usage']>[] = []
+  for (const item of items) {
+    if (item.kind === 'message' && item.role === 'assistant' && !item.context && item.usage !== undefined) {
+      usages.push(item.usage)
+    }
+  }
+  if (usages.length === 0) return undefined
+  if (usages.length === 1) return usages[0]
+
+  let inputTokens = 0
+  let outputTokens = 0
+  let totalTokens = 0
+  let allHaveTotalTokens = true
+  let cacheReadTokens = 0
+  let hasCacheRead = false
+  let cacheWriteTokens = 0
+  let hasCacheWrite = false
+  let reasoningTokens = 0
+  let hasReasoning = false
+
+  for (const usage of usages) {
+    inputTokens += usage.inputTokens
+    outputTokens += usage.outputTokens
+    if (usage.cacheReadTokens !== undefined) {
+      cacheReadTokens += usage.cacheReadTokens
+      hasCacheRead = true
+    }
+    if (usage.cacheWriteTokens !== undefined) {
+      cacheWriteTokens += usage.cacheWriteTokens
+      hasCacheWrite = true
+    }
+    if (usage.reasoningTokens !== undefined) {
+      reasoningTokens += usage.reasoningTokens
+      hasReasoning = true
+    }
+    if (usage.totalTokens !== undefined) {
+      totalTokens += usage.totalTokens
+    } else {
+      allHaveTotalTokens = false
+    }
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(allHaveTotalTokens ? { totalTokens } : {}),
+    ...(hasCacheRead ? { cacheReadTokens } : {}),
+    ...(hasCacheWrite ? { cacheWriteTokens } : {}),
+    ...(hasReasoning ? { reasoningTokens } : {}),
+  }
+}
+
+/**
+ * Aggregate per-turn usage from raw session messages (including silent
+ * tool-only `usageOnly` assistant steps filtered out of the visible transcript).
+ */
+export function aggregateTurnUsageByTurn(items: readonly ChatItem[]): Map<string, NonNullable<ChatMessage['usage']>> {
+  const byTurn = new Map<string, ChatItem[]>()
+  for (const item of items) {
+    if (item.kind !== 'message' || item.role !== 'assistant' || item.context || item.usage === undefined) continue
+    const turn = item.turn ?? item.replyGroup
+    if (turn === undefined) continue
+    let bucket = byTurn.get(turn)
+    if (bucket === undefined) {
+      bucket = []
+      byTurn.set(turn, bucket)
+    }
+    bucket.push(item)
+  }
+  const aggregated = new Map<string, NonNullable<ChatMessage['usage']>>()
+  for (const [turn, bucket] of byTurn) {
+    const usage = aggregateTurnUsage(bucket)
+    if (usage !== undefined) aggregated.set(turn, usage)
+  }
+  return aggregated
+}
+
 export type ProcessActivity = 'thinking' | 'read' | 'readImage' | 'write' | 'search' | 'edit' | 'commands'
   | 'code' | 'webSearch' | 'webFetch' | 'subagents' | 'plan' | 'questions' | 'tools'
 
