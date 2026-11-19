@@ -86,3 +86,25 @@ it('does not open the camera when permission is refused', async () => {
   expect(result.files).toEqual([])
   expect(mocks.alert).toHaveBeenCalledTimes(1)
 })
+
+it('uses accurate offline image fallback: allows hermes and antigravity direct images while staging cursor images as files', async () => {
+  mocks.library.mockResolvedValue({ canceled: false, assets: [
+    { uri: 'file:///photo.jpg', fileName: 'photo.jpg', mimeType: 'image/jpeg', type: 'image', base64: '/9j/AAAA', width: 20, height: 20 },
+  ] })
+
+  for (const backend of ['hermes', 'antigravity'] as const) {
+    vi.clearAllMocks()
+    const result = picker(backend)
+    await result.pickImages()
+    expect(mocks.library).toHaveBeenCalledWith(expect.objectContaining({ base64: true }))
+    expect(result.setImages).toHaveBeenCalledWith([expect.objectContaining({ mediaType: 'image/jpeg', name: 'photo.jpg' })])
+    expect(result.files).toEqual([])
+  }
+
+  vi.clearAllMocks()
+  const cursorResult = picker('cursor')
+  await cursorResult.pickImages()
+  expect(mocks.library).toHaveBeenCalledWith(expect.objectContaining({ base64: false }))
+  expect(cursorResult.setImages).not.toHaveBeenCalled()
+  expect(cursorResult.files).toEqual([expect.objectContaining({ name: 'photo.jpg', mimeType: 'image/jpeg' })])
+})

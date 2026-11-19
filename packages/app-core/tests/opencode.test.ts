@@ -44,4 +44,26 @@ describe('OpenCode catalog and recovery', () => {
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ toolName: 'bash', state: 'finished', arguments: '{\n  "command": "ls -la"\n}', resultDetail: { text: 'total 0' } })
   })
+
+  it('retains a newly completed OpenCode session marked pendingCatalog until Host catalog persists it', () => {
+    const workspace = { ...createOpencodeWorkspace('/host/project'), sessionIds: ['opencode:fresh-1'] }
+    const pendingSession = {
+      ...createOpencodeSession({ acpSessionId: 'fresh-1', cwd: '/host/project', title: 'First prompt' }),
+      blank: false,
+      running: false,
+      projections: { values: { backend: 'opencode', pendingCatalog: true } },
+    }
+    const emptyCatalog = { workspaces: [createOpencodeWorkspace('/host/project')], sessions: [] }
+    const kept = mergeOpencodeCatalog(emptyCatalog, [workspace], [pendingSession])
+    expect(kept.sessions.map(s => s.sessionId)).toEqual(['opencode:fresh-1'])
+    expect(kept.workspaces[0]?.sessionIds).toEqual(['opencode:fresh-1'])
+
+    // Once Host catalog reports it, pendingCatalog is cleared and archived sessions still prune normally.
+    const persistedCatalog = {
+      workspaces: [{ ...createOpencodeWorkspace('/host/project'), sessionIds: ['opencode:fresh-1'] }],
+      sessions: [createOpencodeSession({ acpSessionId: 'fresh-1', cwd: '/host/project', title: 'First prompt' })],
+    }
+    const reconciled = mergeOpencodeCatalog(persistedCatalog, kept.workspaces, kept.sessions)
+    expect(reconciled.sessions[0]?.projections?.values?.pendingCatalog).toBeUndefined()
+  })
 })

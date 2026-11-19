@@ -56,7 +56,17 @@ function acpPermissionsValue(currentValue: string) {
   }
 }
 
-function acpClientForBackend(connection: SessionAccess['runtime']['connection'], backend: string) {
+export function hasAcpBackendFor(connection: SessionAccess['runtime']['connection'], backend: string): boolean {
+  if (backend === 'claude') return connection.hasClaude()
+  if (backend === 'hermes') return connection.hasHermes()
+  if (backend === 'opencode') return connection.hasOpencode()
+  if (backend === 'pi') return connection.hasPi()
+  if (backend === 'antigravity') return connection.hasAntigravity()
+  if (backend === 'cursor') return connection.hasCursor()
+  return connection.hasAcpBackend(backend)
+}
+
+export function acpClientForBackend(connection: SessionAccess['runtime']['connection'], backend: string) {
   if (backend === 'claude') return connection.requireClaude()
   if (backend === 'hermes') return connection.requireHermes()
   if (backend === 'opencode') return connection.requireOpencode()
@@ -394,7 +404,12 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           // History replaces the previous connection's projection. Retain existing displayed
           // messages so opening or reconnecting does not flash white, then in-place merge.
           set(state => ({
-            selectedSession: session, sessionModels: undefined, historyHasMore: false,
+            selectedSession: {
+              ...session,
+              running: session.running || (state.selectedSession?.sessionId === session.sessionId && state.selectedSession.running),
+            },
+            sessionModels: undefined,
+            historyHasMore: false,
             ...(cleanExisting.length !== existingMessages.length
               ? { messages: { ...state.messages, [session.sessionId]: cleanExisting } }
               : {}),
@@ -448,7 +463,17 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             if (older.length > 0) acpOlderHistory.set(session.sessionId, older)
             else acpOlderHistory.delete(session.sessionId)
             if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, tail)
-            const active = state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, ...enrichedSession } : enrichedSession
+            const currentSession = state.selectedSession?.sessionId === session.sessionId
+              ? state.selectedSession
+              : state.sessions.find(item => item.sessionId === session.sessionId)
+            const hasLiveTurnInFlight = merged.some(item =>
+              (item.kind === 'message' && item.streaming === true)
+              || ((item.kind === 'message' || item.kind === 'tool') && item.turn?.startsWith('acp-live:') && item.turnEnd === undefined),
+            )
+            const resolvedRunning = hasLiveTurnInFlight ? true : (currentSession?.running ?? session.running)
+            const active = state.selectedSession?.sessionId === session.sessionId
+              ? { ...state.selectedSession, ...enrichedSession, running: resolvedRunning }
+              : { ...enrichedSession, running: resolvedRunning }
             enrichedSession = active
             return {
               selectedSession: active,
@@ -702,7 +727,6 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const session = createCursorSession({
               acpSessionId: created.sessionId,
               cwd,
-              title: workspace?.title ?? 'Cursor',
             })
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],

@@ -11,7 +11,7 @@ const { proxy, transport, storage, authenticate, acp, codex, botDispatch, networ
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(), sessionSelectModel: vi.fn(),
     agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), sessionCancel: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), setMode: vi.fn(), selectPermission: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
@@ -39,6 +39,7 @@ vi.mock('../src/services/connection', async () => {
     hasOpencode = transport.hasOpencode
     hasClaude = transport.hasClaude
     hasHermes = transport.hasHermes
+    requireSessionTools = transport.requireSessionTools
     requireCursor() { return acp }
     requireAntigravity() { return acp }
     requirePi() { return acp }
@@ -52,7 +53,8 @@ vi.mock('../src/services/connection', async () => {
 vi.mock('../src/services/storage', () => storage)
 vi.mock('../src/services/login', () => ({}))
 vi.mock('../src/services/server-session', () => ({ serverSession: { authenticate } }))
-import { useAppStore } from '../src/state/store'
+import { sessionChatImageLoader, useAppStore } from '../src/state/store'
+import { createCursorWorkspaceSession } from '../src/services/cursor'
 import { useBotTeamStore } from '../src/state/bot-store'
 
 const session: RemoteSession = { sessionId: 's1', updatedAt: 1, running: false, blank: false,
@@ -2152,5 +2154,180 @@ describe('selector guards, post-stop queue cleanup, and failed message history o
         },
       },
     ], prepareScenario1)
+  })
+})
+
+describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP reconnect running, setOffline cleanup, opencode catalog)', () => {
+  it('loads ACP image attachments by Host capability and allows claude/hermes workspace image preview while blocking codex', async () => {
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    const expectedUri = `data:image/png;base64,${pngBase64}`
+    const statFile = vi.fn(async () => ({ absolutePath: '/work/chart.png', version: 'v1', bytes: 68 }))
+    const readBytes = vi.fn(async () => ({ absolutePath: '/work/chart.png', version: 'v1', offset: 0, eof: true, bytes: 68, data: pngBase64 }))
+    transport.requireSessionTools.mockReturnValue({ statFile, readBytes })
+    transport.hasAntigravity.mockReturnValue(true)
+    transport.hasHermes.mockReturnValue(true)
+    transport.hasClaude.mockReturnValue(true)
+    acp.transferCall.mockResolvedValue({
+      events: [{
+        event: {
+          type: 'user/message',
+          seq: 0,
+          time: 100,
+          data: {
+            id: 'u1',
+            source: { kind: 'user' },
+            content: [{
+              type: 'image',
+              attachment: { attachmentId: 'agy-image:1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 },
+              mediaType: 'image/png',
+              data: pngBase64,
+            }],
+          },
+        },
+      }],
+    })
+
+    const agySession: RemoteSession = { sessionId: 'antigravity:s1', nativeId: 's1', backend: 'antigravity', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: agySession, sessions: [agySession] })
+    const agyLoader = sessionChatImageLoader(agySession)
+    await expect(agyLoader({ attachmentId: 'agy-image:1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, new AbortController().signal))
+      .resolves.toBe(expectedUri)
+
+    transport.hasAntigravity.mockReturnValue(false)
+    await expect(agyLoader({ attachmentId: 'agy-image:1', mediaType: 'image/png' }, new AbortController().signal))
+      .rejects.toThrow('Image attachment unavailable')
+
+    // Concurrent multi-image load in one session deduplicates dsh/sessionHistory to a single RPC
+    // and survives individual image AbortSignal cancellation.
+    transport.hasHermes.mockReturnValue(true)
+    acp.transferCall.mockClear()
+    acp.transferCall.mockResolvedValue({
+      events: [{
+        event: {
+          type: 'user/message',
+          seq: 0,
+          time: 100,
+          data: {
+            id: 'u-multi',
+            source: { kind: 'user' },
+            content: [
+              { type: 'image', attachment: { attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+              { type: 'image', attachment: { attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+            ],
+          },
+        },
+      }],
+    })
+    const hermesMulti: RemoteSession = { sessionId: 'hermes:multi', nativeId: 'multi', backend: 'hermes', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: hermesMulti, sessions: [hermesMulti] })
+    const multiLoader = sessionChatImageLoader(hermesMulti)
+    const c1 = new AbortController()
+    const c2 = new AbortController()
+    const p1 = multiLoader({ attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c1.signal)
+    const p2 = multiLoader({ attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c2.signal)
+    c1.abort()
+    await expect(p1).rejects.toThrow()
+    await expect(p2).resolves.toBe(expectedUri)
+    expect(acp.transferCall).toHaveBeenCalledTimes(1)
+
+    for (const backend of ['claude', 'hermes'] as const) {
+      const acpSession: RemoteSession = { sessionId: `${backend}:s1`, nativeId: 's1', backend, updatedAt: 1, running: false, blank: false }
+      useAppStore.setState({ selectedSession: acpSession, sessions: [acpSession] })
+      const loader = sessionChatImageLoader(acpSession)
+      await expect(loader({ uri: '/work/chart.png' }, new AbortController().signal)).resolves.toBe(expectedUri)
+    }
+
+    const codexSession: RemoteSession = { sessionId: 'codex:t1', nativeId: 't1', backend: 'codex', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: codexSession, sessions: [codexSession] })
+    await expect(sessionChatImageLoader(codexSession)({ uri: '/work/chart.png' }, new AbortController().signal))
+      .rejects.toThrow('Image preview unavailable')
+  })
+
+  it('creates new Cursor sessions with blank: true and no hardcoded title', async () => {
+    transport.hasCursor.mockReturnValue(true)
+    acp.createSession.mockResolvedValue({ sessionId: 'cur-new-1' })
+    const workspace = { workspaceId: 'cursor:cwd:%2Fwork', backend: 'cursor' as const, path: '/work', title: 'work', sessionIds: [], createdAt: '', updatedAt: '' }
+    useAppStore.setState({ workspaces: [workspace], sessions: [] })
+    expect(await useAppStore.getState().createSession(workspace.workspaceId, 'cursor')).toBe(true)
+    const created = useAppStore.getState().sessions.find(s => s.sessionId === 'cursor:cur-new-1')
+    expect(created).toMatchObject({ blank: true })
+    expect(created?.title).toBeUndefined()
+
+    const helperResult = await createCursorWorkspaceSession(acp as never, '/work')
+    expect(helperResult.session.blank).toBe(true)
+    expect(helperResult.session.title).toBeUndefined()
+  })
+
+  it('restores ACP running: true on reconnect when live frames are active, and closes Codex/Cursor streams in setOffline', async () => {
+    const agy: RemoteSession = { sessionId: 'antigravity:live-1', nativeId: 'live-1', backend: 'antigravity', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: agy, sessions: [agy], messages: {} })
+
+    let receive!: (frame: unknown) => void
+    const streamClose = vi.fn(async () => undefined)
+    acp.openStream.mockImplementationOnce(async (_sid: string, onFrame: (f: unknown) => void) => {
+      receive = onFrame
+      return { streamId: 's-live', close: streamClose }
+    })
+    let finishHistory!: (v: unknown) => void
+    acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finishHistory = resolve }))
+
+    const opening = useAppStore.getState().openSession(agy)
+    await vi.waitFor(() => expect(acp.openStream).toHaveBeenCalled())
+    receive({ streamId: 's-live', frame: { method: 'session/update', params: { sessionId: 'live-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'still streaming' } } } } })
+    expect(useAppStore.getState().selectedSession?.running).toBe(true)
+
+    finishHistory({ events: [] })
+    expect(await opening).toBe(true)
+    expect(useAppStore.getState().selectedSession?.running).toBe(true)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(true)
+
+    // setOffline must clear active Cursor & Codex stream handles so no remote close or ghost frames fire.
+    useAppStore.setState({ codexReadySessionId: 'codex:c1' })
+    useAppStore.getState().setOffline()
+    expect(useAppStore.getState().connection.phase).toBe('offline')
+    expect(useAppStore.getState().codexReadySessionId).toBeUndefined()
+    expect(streamClose).not.toHaveBeenCalled()
+    // Re-opening after setOffline should not observe stale stream state.
+    receive({ streamId: 's-live', frame: { method: 'session/update', params: { sessionId: 'live-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ghost' } } } } })
+    expect(useAppStore.getState().messages[agy.sessionId]?.some(m => m.kind === 'message' && m.text.includes('ghost'))).toBe(false)
+
+    // setOffline resets ACP running=false; if the turn finished while offline (history settled, no live frames), reconnect stays running=false.
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
+    useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
+    acp.openStream.mockResolvedValueOnce({ streamId: 's-reconnected', close: async () => undefined })
+    acp.transferCall.mockResolvedValueOnce({
+      events: [
+        entry('user/message', 0, { id: 'u-done', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }),
+        entry('assistant/message', 1, { turn: 1, message: { id: 'a-done', content: [{ type: 'text', text: 'done offline' }] } }),
+        entry('turn/end', 2, { turn: 1, reason: { kind: 'completed' } }),
+      ],
+    })
+    expect(await useAppStore.getState().openSession(useAppStore.getState().selectedSession!)).toBe(true)
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
+  })
+
+  it('preserves a newly completed OpenCode session across immediate refreshOpencodeCatalog when Host has not flushed yet', async () => {
+    transport.hasOpencode.mockReturnValue(true)
+    const opc: RemoteSession = { sessionId: 'opencode:fresh-turn', nativeId: 'fresh-turn', backend: 'opencode', updatedAt: 1, running: true, blank: false, title: 'My question' }
+    const ws = { workspaceId: 'opencode:cwd:%2Fproj', backend: 'opencode' as const, path: '/proj', title: 'proj', sessionIds: [opc.sessionId], createdAt: '', updatedAt: '' }
+    useAppStore.setState({ selectedSession: opc, sessions: [opc], workspaces: [ws], messages: { [opc.sessionId]: [] } })
+
+    acp.call.mockImplementation(async (method: string) => {
+      if (method === 'dsh/workspaceList') return [{ path: '/proj', title: 'proj' }]
+      if (method === 'dsh/sessionList') return { items: [] }
+      return []
+    })
+
+    useAppStore.getState().handleCursorFrame({
+      streamId: 's-opc',
+      frame: { method: 'session/update', params: { sessionId: 'fresh-turn', update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' } } },
+    })
+
+    await vi.waitFor(() => expect(acp.call).toHaveBeenCalledWith('dsh/sessionList', expect.objectContaining({ backend: 'opencode' })))
+    expect(useAppStore.getState().sessions.some(s => s.sessionId === opc.sessionId)).toBe(true)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === opc.sessionId)?.running).toBe(false)
+    expect(useAppStore.getState().workspaces[0]?.sessionIds).toContain(opc.sessionId)
   })
 })
