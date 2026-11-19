@@ -424,6 +424,116 @@ describe('AntigravityAcpClient', () => {
     await client.close()
     await fs.rm(testDir, { recursive: true, force: true }).catch(() => undefined)
   })
+
+  it('cleans up crashed session workers via worker.onUnavailable without disrupting parent (#466)', async () => {
+    const processes: Array<ReturnType<typeof fakeProcess>> = []
+    const log = logger()
+    const client = new AntigravityAcpClient('agy', log, (_bin, args) => {
+      const proc = fakeProcess()
+      const index = processes.push(proc) - 1
+      const convFlag = args.indexOf('--conversation')
+      const convId = convFlag >= 0 ? args[convFlag + 1]! : `conv-${index}`
+      proc.stdin.on('data', chunk => {
+        const msg = JSON.parse(String(chunk))
+        proc.stdout.write(`${JSON.stringify({ event: 'result', result: { conversation_id: convId, status: 'SUCCESS', response: `ok-${index}` } })}\n`)
+        void msg
+      })
+      queueMicrotask(() => proc.stdout.write(`${JSON.stringify({ event: 'init', conversation_id: convId })}\n`))
+      return proc.child
+    }, { cwd: '/test', readModels: async () => ({ groups: [], variants: new Map() }) })
+    const parentUnavailable = vi.fn()
+    client.onUnavailable(parentUnavailable)
+    try {
+      await client.start()
+      const s1 = await client.call('session/new', { cwd: '/test' }) as { sessionId: string }
+      const s2 = await client.call('session/new', { cwd: '/test' }) as { sessionId: string }
+      expect(s1.sessionId).toBe('conv-0')
+      expect(s2.sessionId).toBe('conv-1')
+
+      // Crash worker for s2 unexpectedly
+      processes[1]!.child.emit('exit', 1, null)
+      await vi.waitFor(() => expect(log.warn).toHaveBeenCalledWith(
+        'Antigravity session worker unavailable',
+        expect.objectContaining({ conversationId: 'conv-1', code: 'ANTIGRAVITY_EXITED' }),
+      ))
+      expect(parentUnavailable).not.toHaveBeenCalled()
+      expect((client as any).sessions.has('conv-1')).toBe(false)
+
+      // Next prompt on conv-1 transparently spawns a fresh worker instead of touching dead one
+      const beforeRespawn = processes.length
+      await expect(client.call('session/prompt', {
+        sessionId: 'conv-1',
+        prompt: [{ type: 'text', text: 'recover' }],
+      })).resolves.toMatchObject({ stopReason: 'end_turn', response: expect.stringMatching(/^ok-/) })
+      expect(processes.length).toBeGreaterThan(beforeRespawn)
+    } finally { await client.close() }
+  })
+
+  it('marks initialConversationClaimed when dsh/selectModel replaces root process (#466)', async () => {
+    const processes: Array<ReturnType<typeof fakeProcess>> = []
+    const client = new AntigravityAcpClient('agy', logger(), (_bin, args) => {
+      const proc = fakeProcess()
+      const index = processes.push(proc) - 1
+      const convFlag = args.indexOf('--conversation')
+      const convId = convFlag >= 0 ? args[convFlag + 1]! : `conv-init-${index}`
+      queueMicrotask(() => proc.stdout.write(`${JSON.stringify({ event: 'init', conversation_id: convId })}\n`))
+      return proc.child
+    }, {
+      cwd: '/test',
+      readModels: async () => ({
+        groups: [{ id: 'antigravity', name: 'Antigravity', models: [{ id: 'gemini-3-pro', name: 'Gemini 3 Pro' }] }],
+        variants: new Map([['gemini-3-pro/', 'gemini-3-pro']]),
+      }),
+    })
+    try {
+      await client.start()
+      await expect(client.call('dsh/selectModel', {
+        sessionId: 'conv-init-0',
+        model: 'gemini-3-pro',
+      })).resolves.toMatchObject({ selected: { model: 'gemini-3-pro' } })
+
+      // Subsequent session/new must NOT reuse conv-init-0
+      const created = await client.call('session/new', { cwd: '/test' }) as { sessionId: string }
+      expect(created.sessionId).not.toBe('conv-init-0')
+    } finally { await client.close() }
+  })
+
+  it('waits for old process exit before restarting in cancelTurn (#466)', async () => {
+    const processes: Array<ReturnType<typeof fakeProcess>> = []
+    let releaseFirstExit!: () => void
+    const firstExited = new Promise<void>(resolve => { releaseFirstExit = resolve })
+    const client = new AntigravityAcpClient('agy', logger(), () => {
+      const proc = fakeProcess()
+      const index = processes.push(proc) - 1
+      if (index === 0) {
+        // Delay 'exit' until explicitly released to simulate graceful SIGINT teardown
+        proc.child.kill = vi.fn(() => {
+          Object.assign(proc.child, { killed: true })
+          void firstExited.then(() => proc.child.emit('exit', 0, 'SIGINT'))
+          return true
+        })
+      }
+      queueMicrotask(() => proc.stdout.write(`${JSON.stringify({ event: 'init', conversation_id: 'conv-wait' })}\n`))
+      return proc.child
+    }, { cwd: '/test', sessionWorker: true })
+    try {
+      await client.start()
+      const prompt = client.call('session/prompt', {
+        sessionId: 'conv-wait',
+        prompt: [{ type: 'text', text: 'slow cancel' }],
+      })
+      const cancelling = client.call('session/cancel', { sessionId: 'conv-wait' })
+      await vi.waitFor(() => expect(processes[0]!.child.kill).toHaveBeenCalledWith('SIGINT'))
+      // Replacement process must NOT spawn while old process has not exited yet
+      await new Promise(resolve => setTimeout(resolve, 25))
+      expect(processes).toHaveLength(1)
+
+      releaseFirstExit()
+      await expect(cancelling).resolves.toEqual({ cancelled: true })
+      await expect(prompt).resolves.toEqual({ stopReason: 'cancelled' })
+      await vi.waitFor(() => expect(processes).toHaveLength(2))
+    } finally { await client.close() }
+  })
 })
 
 function fakeProcess(): {

@@ -281,4 +281,35 @@ describe('TranscriptLoader', () => {
     expect(await discoverAntigravitySessions('', 10, brain, join(base, 'missing.db'))).toEqual([])
   })
 
+  it('reads transcript first lines longer than 4096 bytes with multi-byte UTF-8 and bounds oversized lines (#466)', async () => {
+    const longPrefix = '中文前缀🚀'.repeat(1000) // ~16 KB (> 4096B) crossing chunk boundaries
+    await writeTranscript('long-first-line', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: `${longPrefix}\nrest` },
+    ])
+    await writeTranscript('oversized-first-line', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'x'.repeat(260 * 1024) },
+    ])
+
+    // 1) Filesystem fallback discovery (no SQLite DB)
+    const fallbackSessions = await discoverAntigravitySessions('', 10, base, join(base, 'missing.db'))
+    expect(fallbackSessions.map(s => s.conversationId)).toEqual(['long-first-line'])
+    expect(fallbackSessions[0]?.title).toBe(longPrefix.slice(0, 40))
+
+    // 2) SQLite empty-title fallback (readTranscriptSummary)
+    const workspace = join(base, 'ws')
+    await mkdir(workspace)
+    const { db, dbPath } = createDatabase()
+    try {
+      const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?)')
+      insert.run('long-first-line', '', JSON.stringify([pathToFileURL(workspace).href]), 0, createdAt)
+      insert.run('oversized-first-line', '', JSON.stringify([pathToFileURL(workspace).href]), 0, createdAt)
+    } finally {
+      db.close()
+    }
+    const dbSessions = await discoverAntigravitySessions(workspace, 10, base, dbPath)
+    expect(dbSessions).toHaveLength(1)
+    expect(dbSessions[0]?.conversationId).toBe('long-first-line')
+    expect(dbSessions[0]?.title).toBe(longPrefix.slice(0, 40))
+  })
+
 })
