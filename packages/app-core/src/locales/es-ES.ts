@@ -638,6 +638,7 @@ const esES = {
     server: "Dirección del servidor", serverHint: "Utilice una dirección HTTPS.", trustTitle: "Protege tus dispositivos y conversaciones", trustBody: "Los datos de la conversación se cifran en tránsito. Solo los dispositivos confiables que hayan iniciado sesión en la misma cuenta pueden acceder a él.",
   },
   settings: {
+    membership: { plan: "Plan de membresía", title: "Membresía", expiresAt: "Fecha de vencimiento", loading: "Cargando…", none: "Sin membresía", active: "Activa", expired: "Vencida", revoked: "Revocada" },
     identityHint: "Toca un campo para ver y copiar su valor completo.",
     copyIdentity: "Copiar",
     identityCopyFailed: "No se pudo copiar. Inténtalo de nuevo.",
@@ -919,7 +920,7 @@ const esES = {
     hourUnit: 'horas',
   },
   time: { unavailable: "Hora de actualización no disponible", lastSeenUnavailable: "Tiempo activo no disponible", lastActive: (value: string) => `Activo ${value}`, now: "En este momento", justNow: "Actualizado hace un momento", minutesAgo: (n: number) => `Hace ${n} minutos`, hoursAgo: (n: number) => `Hace ${n} hora`, updatedSuffix: "", locale: "es-ES" },
-  transport: { auto: "Automático (recomendado)", autoDescription: "Directa o TURN; servidor si falla.", turn: "Retransmisión TURN", turnDescription: "Solo TURN; servidor si falla.", relay: "Retransmisión del servidor", relayDescription: "Todo por servidor, sin directa ni TURN." },
+  transport: { auto: "Automático (recomendado)", autoDescription: "LAN / P2P primero, con alternativas en orden.", turn: "Retransmisión TURN", turnDescription: "Solo TURN; servidor si falla.", relay: "Retransmisión del servidor", relayDescription: "Todo por servidor, sin directa ni TURN." },
   workspaces: {
     loadFailed: "No se pudieron cargar los espacios de trabajo",
     offlineBody: "Vuelva a conectarse a su computadora para ver espacios de trabajo y conversaciones.",

@@ -638,6 +638,7 @@ const frFR = {
     server: "Adresse du serveur", serverHint: "Utilisez une adresse HTTPS.", trustTitle: "Protégez vos appareils et vos conversations", trustBody: "Les données de conversation sont cryptées pendant leur transit. Seuls les appareils de confiance connectés au même compte peuvent y accéder.",
   },
   settings: {
+    membership: { plan: "Offre d’abonnement", title: "Abonnement", expiresAt: "Date d’expiration", loading: "Chargement…", none: "Aucun abonnement", active: "Actif", expired: "Expiré", revoked: "Révoqué" },
     identityHint: "Touchez un champ pour afficher et copier sa valeur complète.",
     copyIdentity: "Copier",
     identityCopyFailed: "Impossible de copier. Réessayez.",
@@ -919,7 +920,7 @@ const frFR = {
     hourUnit: 'heures',
   },
   time: { unavailable: "Heure de mise à jour indisponible", lastSeenUnavailable: "Temps d'activité indisponible", lastActive: (value: string) => `Actif ${value}`, now: "tout à l' heure", justNow: "Mis à jour tout à l'heure", minutesAgo: (n: number) => `Il y a ${n} minutes`, hoursAgo: (n: number) => `Il y a ${n} heures`, updatedSuffix: "", locale: "fr-FR" },
-  transport: { auto: "Automatique (recommandé)", autoDescription: "Direct ou TURN, sinon relais serveur.", turn: "Relais TURN", turnDescription: "TURN seul, sinon relais serveur.", relay: "Relais serveur", relayDescription: "Tout via le serveur, sans direct ni TURN." },
+  transport: { auto: "Automatique (recommandé)", autoDescription: "LAN / P2P en priorité, puis repli par étapes.", turn: "Relais TURN", turnDescription: "TURN seul, sinon relais serveur.", relay: "Relais serveur", relayDescription: "Tout via le serveur, sans direct ni TURN." },
   workspaces: {
     loadFailed: "Impossible de charger les espaces de travail",
     offlineBody: "Reconnectez-vous à votre ordinateur pour afficher les espaces de travail et les conversations.",

@@ -638,6 +638,7 @@ const enUS = {
     server: 'Server address', serverHint: 'Use an HTTPS address.', trustTitle: 'Protect your devices and conversations', trustBody: 'Conversation data is encrypted in transit. Only trusted devices signed in to the same account can access it.',
   },
   settings: {
+    membership: { plan: "Membership plan", title: "Membership", expiresAt: "Expiration date", loading: "Loading…", none: "Not enrolled", active: "Active", expired: "Expired", revoked: "Revoked" },
     identityHint: "Tap a field to view and copy its full value.",
     copyIdentity: "Copy",
     identityCopyFailed: "Could not copy. Try again.",
@@ -919,7 +920,7 @@ const enUS = {
     hourUnit: 'hours',
   },
   time: { unavailable: 'Update time unavailable', lastSeenUnavailable: 'Active time unavailable', lastActive: (value: string) => `Active ${value}`, now: 'just now', justNow: 'Updated just now', minutesAgo: (n: number) => `${n} min ago`, hoursAgo: (n: number) => `${n} hr ago`, updatedSuffix: '', locale: 'en-US' },
-  transport: { auto: "Automatic (recommended)", autoDescription: "Direct or TURN; server relay on failure.", turn: "TURN relay", turnDescription: "TURN only; server relay on failure.", relay: "Server relay", relayDescription: "No direct or TURN; all data via server." },
+  transport: { auto: "Automatic (recommended)", autoDescription: "LAN / P2P first, with fallback in order.", turn: "TURN relay", turnDescription: "TURN only; server relay on failure.", relay: "Server relay", relayDescription: "No direct or TURN; all data via server." },
   workspaces: {
     loadFailed: 'Could not load workspaces',
     offlineBody: 'Reconnect to your computer to view workspaces and conversations.',

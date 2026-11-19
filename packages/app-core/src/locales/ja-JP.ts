@@ -638,6 +638,7 @@ const jaJP = {
     server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
   },
   settings: {
+    membership: { plan: "会員プラン", title: "会員ステータス", expiresAt: "有効期限", loading: "読み込み中…", none: "未加入", active: "有効", expired: "期限切れ", revoked: "取り消し済み" },
     identityHint: "項目をタップすると全文を表示してコピーできます。",
     copyIdentity: "コピー",
     identityCopyFailed: "コピーできませんでした。再試行してください。",
@@ -919,7 +920,7 @@ const jaJP = {
     hourUnit: '時間',
   },
   time: { unavailable: "更新時間が利用できません", lastSeenUnavailable: "アクティブ時間が利用できません", lastActive: (value: string) => `最終アクティブ: ${value}`, now: "たった今", justNow: "たった今更新", minutesAgo: (n: number) => `${n} 分前`, hoursAgo: (n: number) => `${n} 時間前`, updatedSuffix: "", locale: "ja-JP" },
-  transport: { auto: "自動（推奨）", autoDescription: "直接接続か TURN を選び、失敗時はサーバー経由。", turn: "TURN 中継", turnDescription: "直接接続せず、TURN 失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "直接接続・TURN を使わず、常にサーバー経由。" },
+  transport: { auto: "自動（推奨）", autoDescription: "LAN / P2P を優先し、順次フォールバック。", turn: "TURN 中継", turnDescription: "直接接続せず、TURN 失敗時はサーバー経由。", relay: "サーバー中継", relayDescription: "直接接続・TURN を使わず、常にサーバー経由。" },
   workspaces: {
     loadFailed: "ワークスペースを読み込めませんでした",
     offlineBody: "コンピューターに再接続して、ワークスペースと会話を表示します。",
