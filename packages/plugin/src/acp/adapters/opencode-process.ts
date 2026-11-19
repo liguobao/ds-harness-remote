@@ -6,7 +6,8 @@ import {
   parseInitializeMetadata,
   type AcpInitializeMetadata,
 } from './auth-diagnostics.js'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnCommand } from '../windows-spawn.js'
 import { Buffer } from 'node:buffer'
 import { realpath } from 'node:fs/promises'
 import type { SafeLogger } from '../../logging.js'
@@ -341,17 +342,30 @@ export class OpencodeAcpClient implements CursorAcpLike {
       throw new OpencodeAcpError('OPENCODE_STARTING', 'OpenCode ACP is already starting.')
     }
     let child: ChildProcessWithoutNullStreams
-    if (this.spawnAcp) child = this.spawnAcp(this.binary)
-    else {
+    if (this.spawnAcp) {
+      try {
+        child = this.spawnAcp(this.binary)
+      } catch (error) {
+        const cause = error instanceof Error ? error : new Error(String(error))
+        this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', cause)
+        throw new OpencodeAcpError('OPENCODE_BINARY_UNAVAILABLE', 'OpenCode ACP communication failed.', { cause })
+      }
+    } else {
       const args = this.options.args ?? ['acp']
       const nativeApiSupported = await opencodeHasNativeApi(this.binary, args, this.options.cwd, this.startupAbort.signal)
       const port = nativeApiSupported ? await opencodeLoopbackPort() : undefined
       if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       if (port !== undefined) this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`)
-      child = spawn(this.binary, opencodePrivateArgs(args, port), {
-        cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-        env: { ...process.env, ...(this.nativeApi ? { OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {}) },
-      })
+      try {
+        child = spawnCommand(this.binary, opencodePrivateArgs(args, port), {
+          cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+          env: { ...process.env, ...(this.nativeApi ? { OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {}) },
+        })
+      } catch (error) {
+        const cause = error instanceof Error ? error : new Error(String(error))
+        this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', cause)
+        throw new OpencodeAcpError('OPENCODE_BINARY_UNAVAILABLE', 'OpenCode ACP communication failed.', { cause })
+      }
     }
     this.process = child
     this.failureNotified = false

@@ -7,7 +7,8 @@ import {
   type AcpInitializeMetadata,
 } from './auth-diagnostics.js'
 import { AcpSessionModelState } from './session-models.js'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnCommand } from '../windows-spawn.js'
 import { Buffer } from 'node:buffer'
 import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
@@ -139,7 +140,7 @@ export class CursorAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnCursorAcp = binary => spawn(binary, options.args ?? ['acp'], {
+    private readonly spawnAcp: SpawnCursorAcp = binary => spawnCommand(binary, options.args ?? ['acp'], {
       cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -279,7 +280,14 @@ export class CursorAcpClient implements CursorAcpLike {
     if (this.process !== undefined) {
       throw new CursorAcpError(this.code('STARTING'), `${this.adapterLabel} ACP is already starting.`)
     }
-    const child = this.spawnAcp(this.binary)
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = this.spawnAcp(this.binary)
+    } catch (error) {
+      const cause = error instanceof Error ? error : new Error(String(error))
+      this.handleProcessFailure(this.code('BINARY_UNAVAILABLE'), cause)
+      throw new CursorAcpError(this.code('BINARY_UNAVAILABLE'), `${this.adapterLabel} ACP communication failed.`, { cause })
+    }
     this.process = child
     this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
