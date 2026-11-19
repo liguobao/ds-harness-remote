@@ -97,7 +97,10 @@ export function enforceSessionMessageLimits(
     entry.visitedAt ?? entry.seenAt ?? entry.session?.updatedAt ?? 0
 
   const entriesWithMessages = Object.entries(entries).filter(
-    ([_, entry]) => (entry.messages && entry.messages.length > 0) || Object.keys(entry.groupRounds ?? {}).length > 0,
+    ([_, entry]) =>
+      (entry.messages && entry.messages.length > 0)
+      || Object.keys(entry.groupRounds ?? {}).length > 0
+      || (entry.images && entry.images.length > 0),
   )
 
   if (entriesWithMessages.length <= MAX_CACHED_SESSIONS) return entries
@@ -109,8 +112,8 @@ export function enforceSessionMessageLimits(
 
   const next: Record<string, BrowseEntry> = {}
   for (const [k, entry] of Object.entries(entries)) {
-    if ((entry.messages || entry.groupRounds) && !allowedKeys.has(k)) {
-      const { messages: _dropped, groupRounds: _rounds, ...rest } = entry
+    if ((entry.messages || entry.groupRounds || entry.images) && !allowedKeys.has(k)) {
+      const { messages: _dropped, groupRounds: _rounds, images: _images, ...rest } = entry
       next[k] = rest
     } else {
       next[k] = entry
@@ -192,6 +195,8 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string], deletedKeys?: Rea
   )
 }
 const MAX_DRAFT_IMAGES = 4
+const MAX_DRAFT_IMAGE_BYTES = 8 * 1024 * 1024
+const MAX_DRAFT_IMAGE_BASE64_CHARS = Math.ceil(MAX_DRAFT_IMAGE_BYTES / 3) * 4 + 4
 const MAX_DRAFT_QUOTES = 20
 const DRAFT_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
@@ -202,8 +207,8 @@ function sanitizeDraftImages(images?: PromptImage[]): PromptImage[] | undefined 
       typeof img === 'object' && img !== null
       && typeof img.uri === 'string' && img.uri.length > 0
       && typeof img.mediaType === 'string' && DRAFT_IMAGE_MEDIA_TYPES.has(img.mediaType)
-      && typeof img.data === 'string' && img.data.length > 0
-      && typeof img.bytes === 'number' && Number.isFinite(img.bytes) && img.bytes > 0
+      && typeof img.data === 'string' && img.data.length > 0 && img.data.length <= MAX_DRAFT_IMAGE_BASE64_CHARS
+      && typeof img.bytes === 'number' && Number.isFinite(img.bytes) && img.bytes > 0 && img.bytes <= MAX_DRAFT_IMAGE_BYTES
       && typeof img.width === 'number' && Number.isFinite(img.width) && img.width > 0
       && typeof img.height === 'number' && Number.isFinite(img.height) && img.height > 0)
     .slice(0, MAX_DRAFT_IMAGES)

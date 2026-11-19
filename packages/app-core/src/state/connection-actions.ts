@@ -1,6 +1,7 @@
 import { browseScope, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
+import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
@@ -366,9 +367,9 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         runtime.clearHarnessCatalogSync()
         void runtime.closeActiveCodexStream(false)
         void runtime.closeActiveCursorStream(false)
-        set({
+        set(state => ({
           connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable,
-            ...(get().connection.retryable === false ? { retryable: false } : {}) },
+            ...(state.connection.retryable === false ? { retryable: false } : {}) },
           hostSessionEvents: false,
           codexAvailable: false,
           busyAction: undefined,
@@ -382,7 +383,13 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           opencodeAvailable: false,
           claudeAvailable: false,
           hermesAvailable: false,
-        })
+          sessions: state.sessions.map(item =>
+            isAcpManagedBackend(item.backend) && item.running ? { ...item, running: false } : item,
+          ),
+          selectedSession: state.selectedSession !== undefined && isAcpManagedBackend(state.selectedSession.backend) && state.selectedSession.running
+            ? { ...state.selectedSession, running: false }
+            : state.selectedSession,
+        }))
       }
     },
   }

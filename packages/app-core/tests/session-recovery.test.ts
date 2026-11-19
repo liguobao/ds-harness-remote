@@ -2197,6 +2197,39 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     await expect(agyLoader({ attachmentId: 'agy-image:1', mediaType: 'image/png' }, new AbortController().signal))
       .rejects.toThrow('Image attachment unavailable')
 
+    // Concurrent multi-image load in one session deduplicates dsh/sessionHistory to a single RPC
+    // and survives individual image AbortSignal cancellation.
+    transport.hasHermes.mockReturnValue(true)
+    acp.transferCall.mockClear()
+    acp.transferCall.mockResolvedValue({
+      events: [{
+        event: {
+          type: 'user/message',
+          seq: 0,
+          time: 100,
+          data: {
+            id: 'u-multi',
+            source: { kind: 'user' },
+            content: [
+              { type: 'image', attachment: { attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+              { type: 'image', attachment: { attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, mediaType: 'image/png', data: pngBase64 },
+            ],
+          },
+        },
+      }],
+    })
+    const hermesMulti: RemoteSession = { sessionId: 'hermes:multi', nativeId: 'multi', backend: 'hermes', updatedAt: 1, running: false, blank: false }
+    useAppStore.setState({ selectedSession: hermesMulti, sessions: [hermesMulti] })
+    const multiLoader = sessionChatImageLoader(hermesMulti)
+    const c1 = new AbortController()
+    const c2 = new AbortController()
+    const p1 = multiLoader({ attachmentId: 'agy-image:m1', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c1.signal)
+    const p2 = multiLoader({ attachmentId: 'agy-image:m2', mediaType: 'image/png', bytes: 68, width: 1, height: 1 }, c2.signal)
+    c1.abort()
+    await expect(p1).rejects.toThrow()
+    await expect(p2).resolves.toBe(expectedUri)
+    expect(acp.transferCall).toHaveBeenCalledTimes(1)
+
     for (const backend of ['claude', 'hermes'] as const) {
       const acpSession: RemoteSession = { sessionId: `${backend}:s1`, nativeId: 's1', backend, updatedAt: 1, running: false, blank: false }
       useAppStore.setState({ selectedSession: acpSession, sessions: [acpSession] })
@@ -2257,6 +2290,22 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     // Re-opening after setOffline should not observe stale stream state.
     receive({ streamId: 's-live', frame: { method: 'session/update', params: { sessionId: 'live-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ghost' } } } } })
     expect(useAppStore.getState().messages[agy.sessionId]?.some(m => m.kind === 'message' && m.text.includes('ghost'))).toBe(false)
+
+    // setOffline resets ACP running=false; if the turn finished while offline (history settled, no live frames), reconnect stays running=false.
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
+    useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
+    acp.openStream.mockResolvedValueOnce({ streamId: 's-reconnected', close: async () => undefined })
+    acp.transferCall.mockResolvedValueOnce({
+      events: [
+        entry('user/message', 0, { id: 'u-done', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }),
+        entry('assistant/message', 1, { turn: 1, message: { id: 'a-done', content: [{ type: 'text', text: 'done offline' }] } }),
+        entry('turn/end', 2, { turn: 1, reason: { kind: 'completed' } }),
+      ],
+    })
+    expect(await useAppStore.getState().openSession(useAppStore.getState().selectedSession!)).toBe(true)
+    expect(useAppStore.getState().selectedSession?.running).toBe(false)
+    expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(false)
   })
 
   it('preserves a newly completed OpenCode session across immediate refreshOpencodeCatalog when Host has not flushed yet', async () => {

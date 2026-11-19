@@ -2,7 +2,7 @@ import { isAcpManagedBackend } from '../lib/workspace-key'
 import { chatImageAttachmentReference, createChatImageLoader } from '../services/chat-image-loader'
 import { cursorNativeId, foldAcpHistory, readAcpHistory } from '../services/cursor'
 import { loadWorkspacePreview } from '../services/workspace-file-preview'
-import type { RemoteSession } from '../types'
+import type { ChatImage, RemoteSession } from '../types'
 import { create } from 'zustand'
 import { getActiveLanguage } from '../locales/i18n'
 import { DEFAULT_CHAT_APPEARANCE } from '../ui/theme'
@@ -120,6 +120,38 @@ export const chatImageConnectionGeneration = () => runtime.connectionGeneration
 export function sessionChatImageLoader(session: RemoteSession) {
   const generation = runtime.connectionGeneration
   const proxy = runtime.connection.requireProxy()
+  let acpAttachmentsPromise: Promise<Map<string, ChatImage>> | undefined
+  const loadAcpAttachments = (backend: string): Promise<Map<string, ChatImage>> => {
+    if (acpAttachmentsPromise !== undefined) return acpAttachmentsPromise
+    const acpClient = acpClientForBackend(runtime.connection, backend)
+    const nativeId = cursorNativeId(session)
+    const pending = (async () => {
+      let events: unknown[] = []
+      if (typeof acpClient.loadSessionDetails === 'function') {
+        events = (await readAcpHistory(acpClient, nativeId, backend)).events
+      } else {
+        const result = await acpClient.transferCall('dsh/sessionHistory', { sessionId: nativeId, backend })
+        if (typeof result === 'object' && result !== null && Array.isArray((result as { events?: unknown }).events)) {
+          events = (result as { events: unknown[] }).events
+        }
+      }
+      const map = new Map<string, ChatImage>()
+      for (const item of foldAcpHistory(events, session.sessionId)) {
+        if (item.kind !== 'message' && item.kind !== 'tool') continue
+        for (const candidate of item.images ?? []) {
+          if (candidate.attachmentId !== undefined && candidate.uri?.startsWith('data:')) {
+            map.set(candidate.attachmentId, candidate)
+          }
+        }
+      }
+      return map
+    })().catch(error => {
+      if (acpAttachmentsPromise === pending) acpAttachmentsPromise = undefined
+      throw error
+    })
+    acpAttachmentsPromise = pending
+    return pending
+  }
   return createChatImageLoader({
     sessionId: session.sessionId,
     assertCurrent: () => {
@@ -139,37 +171,22 @@ export function sessionChatImageLoader(session: RemoteSession) {
         if (image.attachmentId === undefined || !hasAcpBackendFor(runtime.connection, session.backend)) {
           throw new Error('Image attachment unavailable')
         }
-        const acpClient = acpClientForBackend(runtime.connection, session.backend)
-        const nativeId = cursorNativeId(session)
-        let events: unknown[] = []
-        if (typeof acpClient.loadSessionDetails === 'function') {
-          events = (await readAcpHistory(acpClient, nativeId, session.backend, signal)).events
-        } else {
-          const result = await acpClient.transferCall('dsh/sessionHistory', { sessionId: nativeId, backend: session.backend }, signal)
-          if (typeof result === 'object' && result !== null && Array.isArray((result as { events?: unknown }).events)) {
-            events = (result as { events: unknown[] }).events
-          }
+        const attachments = await loadAcpAttachments(session.backend)
+        const candidate = attachments.get(image.attachmentId)
+        if (candidate?.uri === undefined) throw new Error('Image attachment unavailable')
+        const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/u.exec(candidate.uri)
+        if (!match) throw new Error('Image attachment unavailable')
+        return {
+          attachment: {
+            attachmentId: image.attachmentId,
+            mediaType: candidate.mediaType ?? match[1],
+            ...(candidate.bytes !== undefined ? { bytes: candidate.bytes } : {}),
+            ...(candidate.width !== undefined ? { width: candidate.width } : {}),
+            ...(candidate.height !== undefined ? { height: candidate.height } : {}),
+            ...(candidate.name !== undefined ? { name: candidate.name } : {}),
+          },
+          data: match[2],
         }
-        for (const item of foldAcpHistory(events, session.sessionId)) {
-          if (item.kind !== 'message' && item.kind !== 'tool') continue
-          for (const candidate of item.images ?? []) {
-            if (candidate.attachmentId !== image.attachmentId || !candidate.uri?.startsWith('data:')) continue
-            const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/u.exec(candidate.uri)
-            if (!match) continue
-            return {
-              attachment: {
-                attachmentId: image.attachmentId,
-                mediaType: candidate.mediaType ?? match[1],
-                ...(candidate.bytes !== undefined ? { bytes: candidate.bytes } : {}),
-                ...(candidate.width !== undefined ? { width: candidate.width } : {}),
-                ...(candidate.height !== undefined ? { height: candidate.height } : {}),
-                ...(candidate.name !== undefined ? { name: candidate.name } : {}),
-              },
-              data: match[2],
-            }
-          }
-        }
-        throw new Error('Image attachment unavailable')
       }
       if (session.backend !== undefined && session.backend !== 'harness') throw new Error('Image attachment unavailable')
       return runtime.connection.readSessionImageAttachment(sessionId, chatImageAttachmentReference(image), signal)

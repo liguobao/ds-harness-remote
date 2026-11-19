@@ -225,5 +225,25 @@ it('persists and restores valid draft images and quotes while dropping malformed
   expect(entry.draft).toBe('explain this')
   expect(entry.images).toEqual([validImage])
   expect(entry.quotes).toEqual(['quoted snippet 1', 'quoted snippet 2'])
-  await b.clearBrowseMemory()
+
+  // Oversized draft images are dropped by size/base64 limits, and multi-session draft images obey MAX_CACHED_SESSIONS (10) LRU eviction.
+  const oversizeBytesImage = { ...validImage, bytes: 8 * 1024 * 1024 + 1 }
+  const oversizeDataImage = { ...validImage, data: 'A'.repeat(Math.ceil((8 * 1024 * 1024) / 3) * 4 + 8) }
+  b.updateBrowseEntry(scope, 's-oversize', { draft: 'keep text', images: [oversizeBytesImage, oversizeDataImage] })
+  for (let i = 1; i <= 12; i++) {
+    b.updateBrowseEntry(scope, `s-img-${i}`, {
+      draft: `draft-${i}`,
+      visitedAt: i * 1000,
+      images: [validImage],
+    })
+  }
+  await b.flushBrowseMemory()
+  const c = await load()
+  const cEntries = c.useBrowseMemory.getState().entries
+  expect(cEntries[c.browseKey(scope, 's-oversize')]?.images).toBeUndefined()
+  expect(cEntries[c.browseKey(scope, 's-oversize')]?.draft).toBe('keep text')
+  expect(cEntries[c.browseKey(scope, 's-img-1')]?.images).toBeUndefined()
+  expect(cEntries[c.browseKey(scope, 's-img-1')]?.draft).toBe('draft-1')
+  expect(cEntries[c.browseKey(scope, 's-img-12')]?.images).toEqual([validImage])
+  await c.clearBrowseMemory()
 })
