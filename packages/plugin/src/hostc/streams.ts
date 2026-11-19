@@ -107,6 +107,7 @@ class HttpStream implements Stream {
 		request.on("error", () => {
 			if (!this.finished) {
 				this.context.send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
+				this.abort();
 				this.finish(502);
 			}
 		});
@@ -121,11 +122,16 @@ class HttpStream implements Stream {
 			case FrameType.Data: {
 				const request = this.request;
 				const bytes = frame.payload.byteLength;
+				if (bytes === 0) {
+					return;
+				}
 				// Return the window once the bytes are handed to the local socket.
 				request?.write(frame.payload, () => {
 					if (!this.finished) {
-						const extra = this.window.delivered(bytes, request.writableLength === 0);
-						this.context.send(FrameType.Window, this.id, encodeWindow(bytes + extra));
+						const grant = bytes + this.window.delivered(bytes, request.writableLength === 0);
+						if (grant > 0) {
+							this.context.send(FrameType.Window, this.id, encodeWindow(grant));
+						}
 					}
 				});
 				return;
@@ -200,6 +206,7 @@ class HttpStream implements Stream {
 		} catch (error) {
 			if (!this.finished) {
 				this.context.send(FrameType.Reset, this.id, encodeText(`local response failed: ${String(error)}`));
+				this.abort();
 				this.finish(status);
 			}
 		}
@@ -275,7 +282,11 @@ class WebSocketStream implements Stream {
 		});
 		socket.on("unexpected-response", (_request, response) => {
 			const status = response.statusCode ?? 502;
-			const headers = stripHopByHop(fromRawHeaders(response.rawHeaders), ["content-length"]);
+			const headers = toPublicResponseHeaders(
+				this.context.stripResponseHeaders(stripHopByHop(fromRawHeaders(response.rawHeaders), ["content-length"])),
+				this.context.publicOrigin,
+				this.context.target,
+			);
 			send(FrameType.Head, this.id, encodeHead({ status, headers, body: false }));
 			response.resume();
 			this.settle(status);

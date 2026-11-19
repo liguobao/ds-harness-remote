@@ -101620,6 +101620,7 @@ var HEARTBEAT_TIMEOUT_MS = 1e4;
 var MAX_CHUNK_BYTES = 64 * 1024;
 var STREAM_WINDOW_BYTES = 256 * 1024;
 var MAX_WEBSOCKET_MESSAGE_BYTES = 1024 * 1024 - 64;
+var MAX_STREAMS2 = 256;
 var CONNECT_GRACE_MS = 2 * 6e4;
 var RECONNECT_GRACE_MS = 10 * 6e4;
 var CLOSE_SHUTDOWN = 4e3;
@@ -101996,6 +101997,7 @@ var HttpStream = class {
     request.on("error", () => {
       if (!this.finished) {
         this.context.send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
+        this.abort();
         this.finish(502);
       }
     });
@@ -102009,10 +102011,15 @@ var HttpStream = class {
       case FrameType.Data: {
         const request = this.request;
         const bytes = frame.payload.byteLength;
+        if (bytes === 0) {
+          return;
+        }
         request?.write(frame.payload, () => {
           if (!this.finished) {
-            const extra2 = this.window.delivered(bytes, request.writableLength === 0);
-            this.context.send(FrameType.Window, this.id, encodeWindow(bytes + extra2));
+            const grant = bytes + this.window.delivered(bytes, request.writableLength === 0);
+            if (grant > 0) {
+              this.context.send(FrameType.Window, this.id, encodeWindow(grant));
+            }
           }
         });
         return;
@@ -102084,6 +102091,7 @@ var HttpStream = class {
     } catch (error62) {
       if (!this.finished) {
         this.context.send(FrameType.Reset, this.id, encodeText(`local response failed: ${String(error62)}`));
+        this.abort();
         this.finish(status2);
       }
     }
@@ -102151,7 +102159,11 @@ var WebSocketStream = class {
     });
     socket.on("unexpected-response", (_request, response) => {
       const status2 = response.statusCode ?? 502;
-      const headers = stripHopByHop(fromRawHeaders(response.rawHeaders), ["content-length"]);
+      const headers = toPublicResponseHeaders(
+        this.context.stripResponseHeaders(stripHopByHop(fromRawHeaders(response.rawHeaders), ["content-length"])),
+        this.context.publicOrigin,
+        this.context.target
+      );
       send(FrameType.Head, this.id, encodeHead({ status: status2, headers, body: false }));
       response.resume();
       this.settle(status2);
@@ -102265,24 +102277,68 @@ var Connection2 = class _Connection {
   heartbeat;
   pongTimeout;
   static open(options) {
+    const { signal } = options;
+    if (signal?.aborted) {
+      return Promise.reject(new TunnelError("network_error", "Connection aborted", { cause: signal.reason }));
+    }
     return new Promise((resolve10, reject) => {
+      let settled = false;
       const socket = new import_websocket.default(options.tunnel.connectUrl, {
         headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
         perMessageDeflate: false,
         handshakeTimeout: 6e3
       });
-      socket.once("unexpected-response", (_request, response) => {
-        reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+      const cleanup = () => {
+        signal?.removeEventListener("abort", onAbort);
+        socket.off("unexpected-response", onUnexpectedResponse);
+        socket.off("error", onError);
+        socket.off("open", onOpen);
+      };
+      const onAbort = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        socket.on("error", () => {
+        });
+        socket.terminate();
+        reject(new TunnelError("network_error", "Connection aborted", { cause: signal?.reason }));
+      };
+      const onUnexpectedResponse = (_request, response) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        socket.on("error", () => {
+        });
         response.destroy();
         socket.terminate();
-      });
-      socket.once("error", (error62) => {
+        reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+      };
+      const onError = (error62) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        socket.on("error", () => {
+        });
         reject(new TunnelError("network_error", `Could not connect: ${error62.message}`, { cause: error62 }));
-      });
-      socket.once("open", () => {
-        socket.removeAllListeners("error");
+      };
+      const onOpen = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
         resolve10(new _Connection(socket, options));
-      });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      socket.once("unexpected-response", onUnexpectedResponse);
+      socket.once("error", onError);
+      socket.once("open", onOpen);
     });
   }
   constructor(socket, options) {
@@ -102355,6 +102411,10 @@ var Connection2 = class _Connection {
     if (this.streams.has(frame.stream)) {
       throw new ProtocolError(`stream ${frame.stream} is already open`);
     }
+    if (this.streams.size >= MAX_STREAMS2) {
+      this.send(FrameType.Reset, frame.stream, encodeText("Too many concurrent streams"));
+      return;
+    }
     const request = this.options.authorize(decodeOpen(frame.payload));
     if (request === void 0) {
       this.send(FrameType.Head, frame.stream, encodeHead({ status: 403, headers: [], body: false }));
@@ -102403,6 +102463,7 @@ var DshWebPeer = class {
   active;
   opening;
   openingStop;
+  closing;
   lifetime = new AbortController();
   available() {
     try {
@@ -102412,17 +102473,41 @@ var DshWebPeer = class {
     }
   }
   open() {
-    if (this.opening) return this.opening;
-    this.openingStop = new AbortController();
-    this.opening = this.start(this.openingStop.signal).finally(() => {
-      this.opening = void 0;
-      this.openingStop = void 0;
+    if (this.opening && !this.openingStop?.signal.aborted) return this.opening;
+    const priorOpening = this.opening;
+    const priorClose = this.closing;
+    const stop = new AbortController();
+    this.openingStop = stop;
+    const promise2 = (async () => {
+      await priorClose;
+      await priorOpening?.catch(() => void 0);
+      if (stop.signal.aborted || this.lifetime.signal.aborted) {
+        throw new RpcError("TUNNEL_UNAVAILABLE", "The DSH Web tunnel could not be opened.", void 0, true);
+      }
+      return await this.start(stop.signal);
+    })().finally(() => {
+      if (this.opening === promise2) {
+        this.opening = void 0;
+        this.openingStop = void 0;
+      }
     });
-    return this.opening;
+    this.opening = promise2;
+    return promise2;
   }
-  async close() {
+  close() {
     this.openingStop?.abort();
-    await this.closeActive();
+    const priorClose = this.closing;
+    const opening = this.opening;
+    const run = (async () => {
+      await priorClose;
+      await this.closeActive();
+      await opening?.catch(() => void 0);
+      await this.closeActive();
+    })().finally(() => {
+      if (this.closing === run) this.closing = void 0;
+    });
+    this.closing = run;
+    return run;
   }
   async closeActive() {
     const active2 = this.active;
@@ -102435,7 +102520,6 @@ var DshWebPeer = class {
   async dispose() {
     this.lifetime.abort();
     await this.close();
-    await this.opening?.catch(() => void 0);
   }
   async start(openingSignal) {
     await this.closeActive();
@@ -102459,7 +102543,7 @@ var DshWebPeer = class {
         throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid tunnel.");
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal]);
-      const connect4 = () => Connection2.open({
+      const connect4 = (dialSignal) => Connection2.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
         target: runtime.origin,
         authorize: (request) => {
@@ -102469,12 +102553,14 @@ var DshWebPeer = class {
           return authorizeUpstream(request, publicUrl, cookie);
         },
         stripResponseHeaders,
-        onRequest: () => void 0
+        onRequest: () => void 0,
+        signal: dialSignal
       });
       await attachConnector(lease, connect4, listenSignal);
       const result = dshWebGrantSchema.parse(await this.api.dshWebRequest("grant", lease.request, listenSignal));
       if (result.url !== publicUrl.href || result.expiresAt <= Date.now() || result.expiresAt > lease.request.leaseExpiresAt)
         throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid browser grant.");
+      listenSignal.throwIfAborted();
       void this.monitor(lease, connect4);
       return result;
     } catch (error62) {
@@ -102487,7 +102573,7 @@ var DshWebPeer = class {
   }
   async monitor(lease, connect4) {
     const timer2 = setTimeout(() => {
-      if (this.active === lease) void this.close();
+      if (this.active === lease) void this.closeActive();
     }, Math.max(0, lease.request.leaseExpiresAt - Date.now()));
     timer2.unref();
     try {
@@ -102503,13 +102589,13 @@ var DshWebPeer = class {
     } catch {
     } finally {
       clearTimeout(timer2);
-      if (this.active === lease) await this.close();
+      if (this.active === lease) await this.closeActive();
     }
   }
 };
 async function attachConnector(lease, dial, signal) {
   signal.throwIfAborted();
-  const connector = await dial();
+  const connector = await dial(signal);
   if (signal.aborted) {
     connector.close(CLOSE_SHUTDOWN, "session closed");
     signal.throwIfAborted();

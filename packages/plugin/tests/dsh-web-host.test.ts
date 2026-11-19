@@ -1,6 +1,107 @@
-import { describe, expect, it } from 'vitest'
-import { authorizeUpstream } from '../src/dsh-web-host.js'
-import type { OpenMessage } from '../src/hostc/protocol/index.js'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import type { Duplex } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { type RawData, WebSocket, WebSocketServer } from 'ws'
+import { authorizeUpstream, DshWebPeer, type DshWebBrowserAuth } from '../src/dsh-web-host.js'
+import { Connection } from '../src/hostc/connection.js'
+import {
+  CLOSE_SHUTDOWN,
+  decodeFrame,
+  decodeHead,
+  decodeText,
+  decodeWindow,
+  encodeFrame,
+  encodeOpen,
+  encodeText,
+  type Frame,
+  FrameType,
+  type HeaderList,
+  MAX_STREAMS,
+  type OpenMessage,
+} from '../src/hostc/protocol/index.js'
+import type { HostServerApi } from '../src/server-api.js'
+
+const stripResponseHeaders = (headers: HeaderList): HeaderList =>
+  headers.filter(([name, value]) => name.toLowerCase() !== 'set-cookie'
+    && !(name.toLowerCase() === 'location' && /[?&]token=/i.test(value)))
+
+function rawToUint8Array(data: RawData): Uint8Array {
+  if (Array.isArray(data)) return Buffer.concat(data)
+  return data instanceof ArrayBuffer ? new Uint8Array(data) : data
+}
+
+async function listenHttp(handler: http.RequestListener): Promise<{ server: http.Server; origin: URL; close: () => Promise<void> }> {
+  const server = http.createServer(handler)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address() as AddressInfo
+  return {
+    server,
+    origin: new URL(`http://127.0.0.1:${port}`),
+    close: () => new Promise<void>(resolve => {
+      server.closeAllConnections()
+      server.close(() => resolve())
+    }),
+  }
+}
+
+async function listenWs(): Promise<{
+  wss: WebSocketServer
+  url: string
+  nextClient: () => Promise<WebSocket>
+  close: () => Promise<void>
+}> {
+  const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await new Promise<void>(resolve => wss.once('listening', resolve))
+  const { port } = wss.address() as AddressInfo
+  const queue: WebSocket[] = []
+  const waiters: Array<(ws: WebSocket) => void> = []
+  wss.on('connection', ws => {
+    const waiter = waiters.shift()
+    if (waiter) waiter(ws)
+    else queue.push(ws)
+  })
+  return {
+    wss,
+    url: `ws://127.0.0.1:${port}`,
+    nextClient: () => {
+      const existing = queue.shift()
+      if (existing) return Promise.resolve(existing)
+      return new Promise<WebSocket>(resolve => waiters.push(resolve))
+    },
+    close: () => new Promise<void>(resolve => {
+      for (const client of wss.clients) client.terminate()
+      wss.close(() => resolve())
+    }),
+  }
+}
+
+function collectFrames(ws: WebSocket) {
+  const frames: Frame[] = []
+  const listeners = new Set<() => void>()
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) return
+    frames.push(decodeFrame(rawToUint8Array(data)))
+    for (const notify of listeners) notify()
+  })
+  const waitFor = (predicate: (all: Frame[]) => boolean, timeoutMs = 5_000): Promise<void> => {
+    if (predicate(frames)) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        listeners.delete(check)
+        reject(new Error(`timed out waiting for tunnel frame (received ${frames.length} frames)`))
+      }, timeoutMs)
+      const check = () => {
+        if (!predicate(frames)) return
+        clearTimeout(timer)
+        listeners.delete(check)
+        resolve()
+      }
+      listeners.add(check)
+    })
+  }
+  return { frames, waitFor }
+}
 
 describe('DSH Web Host forwarding boundary', () => {
   const url = new URL('https://test.hostc.4ba.io/')
@@ -17,5 +118,559 @@ describe('DSH Web Host forwarding boundary', () => {
       ['origin', url.origin],
     ] }, url, 'local=owned')?.headers).toEqual([['origin', url.origin], ['cookie', 'local=owned']])
     expect(authorizeUpstream({ ...request, headers: [['origin', url.origin + '.other.test']] }, url, 'local=owned')).toBeUndefined()
+  })
+})
+
+describe('hostc tunnel stream and lifecycle hardening', () => {
+  const cleanups: Array<() => Promise<void> | void> = []
+
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    while (cleanups.length > 0) {
+      await cleanups.pop()?.()
+    }
+  })
+
+  it('ignores 0-byte HTTP Data frames without sending Window(0) and keeps the tunnel alive', async () => {
+    const local = await listenHttp((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', chunk => chunks.push(chunk as Buffer))
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'text/plain' })
+        res.end(req.url === '/echo' ? Buffer.concat(chunks) : 'alive')
+      })
+    })
+    cleanups.push(local.close)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: local.origin,
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    peerWs.send(encodeFrame(FrameType.Open, 1, encodeOpen({ method: 'POST', path: '/echo', headers: [], body: true })))
+    peerWs.send(encodeFrame(FrameType.Data, 1, new Uint8Array(0)))
+    peerWs.send(encodeFrame(FrameType.Data, 1, encodeText('hello')))
+    peerWs.send(encodeFrame(FrameType.End, 1))
+
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.End))
+
+    const windowFrames = frames.filter(f => f.stream === 1 && f.type === FrameType.Window)
+    expect(windowFrames.length).toBeGreaterThan(0)
+    for (const wf of windowFrames) {
+      expect(decodeWindow(wf.payload)).toBeGreaterThan(0)
+    }
+    expect(windowFrames.reduce((sum, wf) => sum + decodeWindow(wf.payload), 0)).toBe(5)
+
+    const stream1Body = Buffer.concat(
+      frames.filter(f => f.stream === 1 && f.type === FrameType.Data).map(f => Buffer.from(f.payload)),
+    ).toString('utf8')
+    expect(stream1Body).toBe('hello')
+
+    peerWs.send(encodeFrame(FrameType.Open, 2, encodeOpen({ method: 'GET', path: '/ping', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === 2 && f.type === FrameType.End))
+    const stream2Body = Buffer.concat(
+      frames.filter(f => f.stream === 2 && f.type === FrameType.Data).map(f => Buffer.from(f.payload)),
+    ).toString('utf8')
+    expect(stream2Body).toBe('alive')
+  })
+
+  it('destroys an in-flight SSE response when the upstream request errors while preserving keep-alive on normal and 204 completions', async () => {
+    let resolveServerClosed!: () => void
+    const serverClosed = new Promise<void>(resolve => { resolveServerClosed = resolve })
+    const keepAliveSockets: Array<import('node:net').Socket> = []
+
+    const local = await listenHttp((req, res) => {
+      if (req.url === '/sse') {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write('data: tick\n\n')
+        res.on('close', resolveServerClosed)
+        return
+      }
+      keepAliveSockets.push(req.socket)
+      if (req.url === '/no-content') {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('ok')
+    })
+    cleanups.push(local.close)
+
+    const realHttpRequest = http.request
+    let sseRequest: http.ClientRequest | undefined
+    let sseResponse: http.IncomingMessage | undefined
+    vi.spyOn(http, 'request').mockImplementation(((...args: Parameters<typeof http.request>) => {
+      const req = realHttpRequest(...args)
+      const options = args[0] as http.RequestOptions
+      if (options?.path === '/sse') {
+        sseRequest = req
+        req.on('response', res => { sseResponse = res })
+      }
+      return req
+    }) as typeof http.request)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const logs: Array<{ path: string; status: number }> = []
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: local.origin,
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: entry => { logs.push({ path: entry.path, status: entry.status }) },
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    // Sequential /normal -> /no-content (204) -> /normal must reuse the same keep-alive socket without Reset.
+    peerWs.send(encodeFrame(FrameType.Open, 1, encodeOpen({ method: 'GET', path: '/normal', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.End))
+    peerWs.send(encodeFrame(FrameType.Open, 2, encodeOpen({ method: 'GET', path: '/no-content', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === 2 && f.type === FrameType.Head))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    peerWs.send(encodeFrame(FrameType.Open, 3, encodeOpen({ method: 'GET', path: '/normal', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === 3 && f.type === FrameType.End))
+
+    expect(frames.filter(f => f.stream <= 3 && f.type === FrameType.Reset)).toHaveLength(0)
+    expect(decodeHead(frames.find(f => f.stream === 2 && f.type === FrameType.Head)!.payload).status).toBe(204)
+    expect(keepAliveSockets).toHaveLength(3)
+    expect(keepAliveSockets[1]).toBe(keepAliveSockets[0])
+    expect(keepAliveSockets[2]).toBe(keepAliveSockets[0])
+
+    // Streaming SSE response where upstream request errors mid-stream.
+    peerWs.send(encodeFrame(FrameType.Open, 4, encodeOpen({ method: 'GET', path: '/sse', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === 4 && f.type === FrameType.Data))
+    expect(sseRequest).toBeDefined()
+    expect(sseResponse).toBeDefined()
+    expect(sseResponse!.destroyed).toBe(false)
+
+    sseRequest!.emit('error', new Error('simulated upstream error'))
+
+    await waitFor(all => all.some(f => f.stream === 4 && f.type === FrameType.Reset))
+    await serverClosed
+    expect(sseResponse!.destroyed).toBe(true)
+    expect(frames.filter(f => f.stream === 4 && f.type === FrameType.Reset)).toHaveLength(1)
+    expect(frames.filter(f => f.stream === 4 && f.type === FrameType.End)).toHaveLength(0)
+    expect(logs).toContainEqual({ path: '/sse', status: 502 })
+  })
+
+  it('strips sensitive headers and rewrites local Location on WebSocket unexpected-response', async () => {
+    const local = await listenHttp((req, res) => {
+      if (req.url === '/ws-redirect-safe') {
+        res.writeHead(302, {
+          'Set-Cookie': 'dsh=secret; HttpOnly',
+          Location: `${local.origin.origin}/login`,
+          'X-Safe': 'ok',
+        })
+        res.end()
+        return
+      }
+      if (req.url === '/ws-redirect-token') {
+        res.writeHead(302, {
+          'Set-Cookie': 'dsh=secret',
+          Location: `${local.origin.origin}/auth?token=leaked-secret`,
+          'X-Keep': 'yes',
+        })
+        res.end()
+        return
+      }
+      res.writeHead(401, {
+        'Set-Cookie': 'sid=leak',
+        'WWW-Authenticate': 'Bearer',
+      })
+      res.end()
+    })
+    cleanups.push(local.close)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: local.origin,
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    peerWs.send(encodeFrame(FrameType.Open, 1, encodeOpen({ method: 'GET', path: '/ws-redirect-safe', headers: [], body: false, websocket: [] })))
+    peerWs.send(encodeFrame(FrameType.Open, 2, encodeOpen({ method: 'GET', path: '/ws-redirect-token', headers: [], body: false, websocket: [] })))
+    peerWs.send(encodeFrame(FrameType.Open, 3, encodeOpen({ method: 'GET', path: '/ws-unauth', headers: [], body: false, websocket: [] })))
+
+    await waitFor(all =>
+      all.some(f => f.stream === 1 && f.type === FrameType.Head)
+      && all.some(f => f.stream === 2 && f.type === FrameType.Head)
+      && all.some(f => f.stream === 3 && f.type === FrameType.Head))
+
+    const head1 = decodeHead(frames.find(f => f.stream === 1 && f.type === FrameType.Head)!.payload)
+    expect(head1.status).toBe(302)
+    expect(head1.headers.some(([k]) => k.toLowerCase() === 'set-cookie')).toBe(false)
+    expect(head1.headers).toContainEqual(['Location', 'https://test.hostc.4ba.io/login'])
+    expect(head1.headers).toContainEqual(['X-Safe', 'ok'])
+
+    const head2 = decodeHead(frames.find(f => f.stream === 2 && f.type === FrameType.Head)!.payload)
+    expect(head2.status).toBe(302)
+    expect(head2.headers.some(([k]) => k.toLowerCase() === 'set-cookie')).toBe(false)
+    expect(head2.headers.some(([k]) => k.toLowerCase() === 'location')).toBe(false)
+    expect(head2.headers).toContainEqual(['X-Keep', 'yes'])
+
+    const head3 = decodeHead(frames.find(f => f.stream === 3 && f.type === FrameType.Head)!.payload)
+    expect(head3.status).toBe(401)
+    expect(head3.headers.some(([k]) => k.toLowerCase() === 'set-cookie')).toBe(false)
+    expect(head3.headers).toContainEqual(['WWW-Authenticate', 'Bearer'])
+  })
+
+  it('resets Open frames beyond MAX_STREAMS without disturbing existing streams', async () => {
+    const held: http.ServerResponse[] = []
+    let overflowHits = 0
+
+    const local = await listenHttp((req, res) => {
+      if (req.url === '/overflow') {
+        overflowHits++
+        res.writeHead(200)
+        res.end('should-not-hit')
+        return
+      }
+      if (req.url === '/hold') {
+        held.push(res)
+        return
+      }
+      res.writeHead(200)
+      res.end('after')
+    })
+    cleanups.push(local.close)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: local.origin,
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    const batchSize = 32
+    for (let start = 1; start <= MAX_STREAMS; start += batchSize) {
+      const end = Math.min(start + batchSize - 1, MAX_STREAMS)
+      for (let id = start; id <= end; id++) {
+        peerWs.send(encodeFrame(FrameType.Open, id, encodeOpen({ method: 'GET', path: '/hold', headers: [], body: false })))
+      }
+      const deadline = Date.now() + 5_000
+      while (held.length < end && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      expect(held.length).toBe(end)
+    }
+    const overflowId = MAX_STREAMS + 1
+    peerWs.send(encodeFrame(FrameType.Open, overflowId, encodeOpen({ method: 'GET', path: '/overflow', headers: [], body: false })))
+
+    await waitFor(all => all.some(f => f.stream === overflowId && f.type === FrameType.Reset))
+    const resetFrame = frames.find(f => f.stream === overflowId && f.type === FrameType.Reset)!
+    expect(decodeText(resetFrame.payload)).toContain('Too many concurrent streams')
+    expect(overflowHits).toBe(0)
+
+    expect(held.length).toBe(MAX_STREAMS)
+    for (const res of held) {
+      res.writeHead(200)
+      res.end('ok')
+    }
+
+    await waitFor(all => all.filter(f => f.stream <= MAX_STREAMS && f.type === FrameType.End).length === MAX_STREAMS)
+    expect(frames.filter(f => f.stream <= MAX_STREAMS && f.type === FrameType.Reset)).toHaveLength(0)
+
+    const afterId = MAX_STREAMS + 2
+    peerWs.send(encodeFrame(FrameType.Open, afterId, encodeOpen({ method: 'GET', path: '/after', headers: [], body: false })))
+    await waitFor(all => all.some(f => f.stream === afterId && f.type === FrameType.End))
+    expect(decodeHead(frames.find(f => f.stream === afterId && f.type === FrameType.Head)!.payload).status).toBe(200)
+  })
+
+  it('aborts an in-flight Connection.open handshake immediately on close() and lets an immediate re-open succeed', async () => {
+    const preAborted = new AbortController()
+    preAborted.abort(new Error('already cancelled'))
+    await expect(Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: 'ws://127.0.0.1:1', token: 'tok' },
+      target: new URL('http://127.0.0.1:1'),
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+      signal: preAborted.signal,
+    })).rejects.toThrow(/aborted/i)
+
+    const localGui = await listenHttp((req, res) => {
+      if (req.headers.cookie === 'dsh=local') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<html>ok</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+    cleanups.push(localGui.close)
+
+    let resolveUpgradeStarted!: () => void
+    const upgradeStarted = new Promise<void>(resolve => { resolveUpgradeStarted = resolve })
+    let resolveHangingClosed!: () => void
+    const hangingClosed = new Promise<void>(resolve => { resolveHangingClosed = resolve })
+    const hangingSockets = new Set<Duplex>()
+
+    const hangingServer = http.createServer()
+    hangingServer.on('upgrade', (_req, socket) => {
+      hangingSockets.add(socket)
+      socket.on('error', () => {})
+      socket.once('end', () => socket.destroy())
+      socket.once('close', () => {
+        hangingSockets.delete(socket)
+        resolveHangingClosed()
+      })
+      socket.resume()
+      resolveUpgradeStarted()
+    })
+    await new Promise<void>(resolve => hangingServer.listen(0, '127.0.0.1', resolve))
+    const hangingPort = (hangingServer.address() as AddressInfo).port
+    cleanups.push(() => new Promise<void>(resolve => {
+      for (const s of hangingSockets) s.destroy()
+      hangingServer.close(() => resolve())
+    }))
+
+    const healthyTunnel = await listenWs()
+    cleanups.push(healthyTunnel.close)
+
+    const realOpen = Connection.open.bind(Connection)
+    let dialAttempt = 0
+    vi.spyOn(Connection, 'open').mockImplementation(options => {
+      dialAttempt++
+      expect(options.signal).toBeDefined()
+      expect(options.signal?.aborted).toBe(false)
+      const connectUrl = dialAttempt === 1 ? `ws://127.0.0.1:${hangingPort}` : healthyTunnel.url
+      return realOpen({ ...options, tunnel: { ...options.tunnel, connectUrl } })
+    })
+
+    const closedSessions: string[] = []
+    let allocateCount = 0
+    const api = {
+      async dshWebRequest(action: string, input: { leaseExpiresAt: number }) {
+        if (action === 'allocate') {
+          allocateCount++
+          const sessionId = allocateCount === 1 ? 'p22222222222' : 'p33333333333'
+          return {
+            sessionId,
+            url: `https://${sessionId}.tunnel.example/`,
+            connectUrl: `wss://tunnel.example/api/tunnels/${sessionId}/connect`,
+            connectToken: (allocateCount === 1 ? 'a' : 'b').repeat(43),
+            leaseExpiresAt: input.leaseExpiresAt,
+          }
+        }
+        if (action === 'grant') {
+          const sessionId = allocateCount === 1 ? 'p22222222222' : 'p33333333333'
+          return {
+            url: `https://${sessionId}.tunnel.example/`,
+            browserGrant: 'g'.repeat(43),
+            expiresAt: input.leaseExpiresAt,
+          }
+        }
+        return {}
+      },
+      async closeDshWeb(sessionId: string) {
+        closedSessions.push(sessionId)
+      },
+    } as unknown as HostServerApi
+
+    const auth: DshWebBrowserAuth = {
+      authenticatedUrl: origin => `${origin}?token=boot`,
+      authorizeIndex: (_req, res) => {
+        res.writeHead(303, { 'set-cookie': 'dsh=local; Path=/; HttpOnly' })
+        res.end()
+        return true
+      },
+      requestRejection: req => (req.headers.cookie === 'dsh=local' ? undefined : 401),
+    }
+
+    const peer = new DshWebPeer(
+      api,
+      { clientDeviceId: 'dev-1', connectionId: 'conn-1' },
+      () => ({ origin: localGui.origin, auth }),
+    )
+    cleanups.push(() => peer.dispose())
+
+    const firstOpen = peer.open()
+    const firstOpenResult = firstOpen.catch((error: unknown) => error)
+
+    await Promise.race([
+      upgradeStarted,
+      firstOpenResult.then(err => Promise.reject(new Error(`first open settled before upgrade: ${String(err)}`))),
+    ])
+    const startedCloseAt = Date.now()
+    await peer.close()
+    const closeElapsedMs = Date.now() - startedCloseAt
+
+    await hangingClosed
+    expect(closeElapsedMs).toBeLessThan(2_000)
+    expect(await firstOpenResult).toBeInstanceOf(Error)
+    expect(closedSessions).toContain('p22222222222')
+
+    const healthyClientPromise = healthyTunnel.nextClient()
+    const secondGrant = await peer.open()
+    await healthyClientPromise
+
+    expect(secondGrant.url).toBe('https://p33333333333.tunnel.example/')
+    expect(dialAttempt).toBe(2)
+
+    await peer.dispose()
+    expect(closedSessions).toContain('p33333333333')
+  })
+
+  it('serializes an unawaited async close() before an immediate concurrent open() without killing the new lease', async () => {
+    const localGui = await listenHttp((req, res) => {
+      if (req.headers.cookie === 'dsh=local') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<html>ok</html>')
+        return
+      }
+      res.writeHead(401)
+      res.end()
+    })
+    cleanups.push(localGui.close)
+
+    let resolveUpgradeStarted!: () => void
+    const upgradeStarted = new Promise<void>(resolve => { resolveUpgradeStarted = resolve })
+    const hangingSockets = new Set<Duplex>()
+    const hangingServer = http.createServer()
+    hangingServer.on('upgrade', (_req, socket) => {
+      hangingSockets.add(socket)
+      socket.on('error', () => {})
+      socket.once('end', () => socket.destroy())
+      socket.once('close', () => hangingSockets.delete(socket))
+      socket.resume()
+      resolveUpgradeStarted()
+    })
+    await new Promise<void>(resolve => hangingServer.listen(0, '127.0.0.1', resolve))
+    const hangingPort = (hangingServer.address() as AddressInfo).port
+    cleanups.push(() => new Promise<void>(resolve => {
+      for (const s of hangingSockets) s.destroy()
+      hangingServer.close(() => resolve())
+    }))
+
+    const healthyTunnel = await listenWs()
+    cleanups.push(healthyTunnel.close)
+
+    const realOpen = Connection.open.bind(Connection)
+    let dialAttempt = 0
+    vi.spyOn(Connection, 'open').mockImplementation(options => {
+      dialAttempt++
+      const connectUrl = dialAttempt === 1 ? `ws://127.0.0.1:${hangingPort}` : healthyTunnel.url
+      return realOpen({ ...options, tunnel: { ...options.tunnel, connectUrl } })
+    })
+
+    let resolveCloseEntered!: () => void
+    const closeEntered = new Promise<void>(resolve => { resolveCloseEntered = resolve })
+    let releaseFirstClose!: () => void
+    const firstCloseGate = new Promise<void>(resolve => { releaseFirstClose = resolve })
+
+    const closedSessions: string[] = []
+    let allocateCount = 0
+    const api = {
+      async dshWebRequest(action: string, input: { leaseExpiresAt: number }) {
+        if (action === 'allocate') {
+          allocateCount++
+          const sessionId = allocateCount === 1 ? 'p22222222222' : 'p33333333333'
+          return {
+            sessionId,
+            url: `https://${sessionId}.tunnel.example/`,
+            connectUrl: `wss://tunnel.example/api/tunnels/${sessionId}/connect`,
+            connectToken: (allocateCount === 1 ? 'a' : 'b').repeat(43),
+            leaseExpiresAt: input.leaseExpiresAt,
+          }
+        }
+        if (action === 'grant') {
+          const sessionId = allocateCount === 1 ? 'p22222222222' : 'p33333333333'
+          return {
+            url: `https://${sessionId}.tunnel.example/`,
+            browserGrant: 'g'.repeat(43),
+            expiresAt: input.leaseExpiresAt,
+          }
+        }
+        return {}
+      },
+      async closeDshWeb(sessionId: string) {
+        closedSessions.push(sessionId)
+        if (sessionId === 'p22222222222') {
+          resolveCloseEntered()
+          await firstCloseGate
+        }
+      },
+    } as unknown as HostServerApi
+
+    const auth: DshWebBrowserAuth = {
+      authenticatedUrl: origin => `${origin}?token=boot`,
+      authorizeIndex: (_req, res) => {
+        res.writeHead(303, { 'set-cookie': 'dsh=local; Path=/; HttpOnly' })
+        res.end()
+        return true
+      },
+      requestRejection: req => (req.headers.cookie === 'dsh=local' ? undefined : 401),
+    }
+
+    const peer = new DshWebPeer(
+      api,
+      { clientDeviceId: 'dev-1', connectionId: 'conn-1' },
+      () => ({ origin: localGui.origin, auth }),
+    )
+    cleanups.push(() => peer.dispose())
+
+    const firstOpen = peer.open()
+    const firstOpenResult = firstOpen.catch((error: unknown) => error)
+
+    await Promise.race([
+      upgradeStarted,
+      firstOpenResult.then(err => Promise.reject(new Error(`first open settled before upgrade: ${String(err)}`))),
+    ])
+
+    // Fire close() without awaiting, then immediately open() on the same turn.
+    const closePromise = peer.close()
+    const secondOpen = peer.open()
+    expect(secondOpen).not.toBe(firstOpen)
+
+    await closeEntered
+    expect(await firstOpenResult).toBeInstanceOf(Error)
+    expect(allocateCount).toBe(1)
+
+    const healthyClientPromise = healthyTunnel.nextClient()
+    releaseFirstClose()
+    await closePromise
+
+    const secondGrant = await secondOpen
+    const healthyClient = await healthyClientPromise
+
+    expect(secondGrant.url).toBe('https://p33333333333.tunnel.example/')
+    expect(dialAttempt).toBe(2)
+    expect(healthyClient.readyState).toBe(WebSocket.OPEN)
+    expect(closedSessions).toEqual(['p22222222222'])
+
+    await peer.dispose()
+    expect(closedSessions).toEqual(['p22222222222', 'p33333333333'])
   })
 })

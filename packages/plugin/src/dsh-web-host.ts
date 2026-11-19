@@ -38,6 +38,7 @@ export class DshWebPeer {
   private active?: Lease
   private opening?: Promise<DshWebGrant>
   private openingStop?: AbortController
+  private closing?: Promise<void>
   private readonly lifetime = new AbortController()
 
   constructor(private readonly api: HostServerApi, private readonly peer: Peer, private readonly resolveRuntime: ResolveRuntime) {}
@@ -47,18 +48,42 @@ export class DshWebPeer {
   }
 
   open(): Promise<DshWebGrant> {
-    if (this.opening) return this.opening
-    this.openingStop = new AbortController()
-    this.opening = this.start(this.openingStop.signal).finally(() => {
-      this.opening = undefined
-      this.openingStop = undefined
+    if (this.opening && !this.openingStop?.signal.aborted) return this.opening
+    const priorOpening = this.opening
+    const priorClose = this.closing
+    const stop = new AbortController()
+    this.openingStop = stop
+    const promise = (async () => {
+      await priorClose
+      await priorOpening?.catch(() => undefined)
+      if (stop.signal.aborted || this.lifetime.signal.aborted) {
+        throw new RpcError('TUNNEL_UNAVAILABLE', 'The DSH Web tunnel could not be opened.', undefined, true)
+      }
+      return await this.start(stop.signal)
+    })().finally(() => {
+      if (this.opening === promise) {
+        this.opening = undefined
+        this.openingStop = undefined
+      }
     })
-    return this.opening
+    this.opening = promise
+    return promise
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.openingStop?.abort()
-    await this.closeActive()
+    const priorClose = this.closing
+    const opening = this.opening
+    const run = (async () => {
+      await priorClose
+      await this.closeActive()
+      await opening?.catch(() => undefined)
+      await this.closeActive()
+    })().finally(() => {
+      if (this.closing === run) this.closing = undefined
+    })
+    this.closing = run
+    return run
   }
 
   private async closeActive(): Promise<void> {
@@ -73,7 +98,6 @@ export class DshWebPeer {
   async dispose(): Promise<void> {
     this.lifetime.abort()
     await this.close()
-    await this.opening?.catch(() => undefined)
   }
 
   private async start(openingSignal: AbortSignal): Promise<DshWebGrant> {
@@ -100,7 +124,7 @@ export class DshWebPeer {
         throw new RpcError('TUNNEL_UNAVAILABLE', 'The Server returned an invalid tunnel.')
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal])
-      const connect = () => Connection.open({
+      const connect = (dialSignal: AbortSignal) => Connection.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
         target: runtime.origin,
         authorize: request => {
@@ -111,11 +135,13 @@ export class DshWebPeer {
         },
         stripResponseHeaders,
         onRequest: () => undefined,
+        signal: dialSignal,
       })
       await attachConnector(lease, connect, listenSignal)
       const result = dshWebGrantSchema.parse(await this.api.dshWebRequest('grant', lease.request, listenSignal))
       if (result.url !== publicUrl.href || result.expiresAt <= Date.now() || result.expiresAt > lease.request.leaseExpiresAt)
         throw new RpcError('TUNNEL_UNAVAILABLE', 'The Server returned an invalid browser grant.')
+      listenSignal.throwIfAborted()
       void this.monitor(lease, connect)
       return result
     } catch (error) {
@@ -127,8 +153,8 @@ export class DshWebPeer {
     }
   }
 
-  private async monitor(lease: Lease, connect: () => Promise<Connection>): Promise<void> {
-    const timer = setTimeout(() => { if (this.active === lease) void this.close() }, Math.max(0, lease.request.leaseExpiresAt - Date.now()))
+  private async monitor(lease: Lease, connect: (signal: AbortSignal) => Promise<Connection>): Promise<void> {
+    const timer = setTimeout(() => { if (this.active === lease) void this.closeActive() }, Math.max(0, lease.request.leaseExpiresAt - Date.now()))
     timer.unref()
     try {
       while (this.active === lease && lease.connector) {
@@ -143,14 +169,18 @@ export class DshWebPeer {
     } catch { /* Authorization or reconnect failed. Close the lease. */ }
     finally {
       clearTimeout(timer)
-      if (this.active === lease) await this.close()
+      if (this.active === lease) await this.closeActive()
     }
   }
 }
 
-async function attachConnector(lease: Lease, dial: () => Promise<Connection>, signal: AbortSignal): Promise<void> {
+async function attachConnector(
+  lease: Lease,
+  dial: (signal: AbortSignal) => Promise<Connection>,
+  signal: AbortSignal,
+): Promise<void> {
   signal.throwIfAborted()
-  const connector = await dial()
+  const connector = await dial(signal)
   if (signal.aborted) {
     connector.close(CLOSE_SHUTDOWN, 'session closed')
     signal.throwIfAborted()

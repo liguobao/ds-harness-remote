@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import {
 	CLOSE_PROTOCOL_ERROR,
 	type CreateTunnelResponse,
@@ -12,6 +13,7 @@ import {
 	FrameType as Frames,
 	HEARTBEAT_INTERVAL_MS,
 	HEARTBEAT_TIMEOUT_MS,
+	MAX_STREAMS,
 	PING,
 	ProtocolError,
 	WindowBudget,
@@ -29,6 +31,7 @@ export type ConnectionOptions = {
 	onRequest: (entry: RequestLog) => void;
 	/** Heartbeat timing; tests shorten it. */
 	heartbeat?: { intervalMs: number; timeoutMs: number };
+	signal?: AbortSignal;
 };
 
 export type CloseInfo = { code: number; reason: string };
@@ -44,24 +47,65 @@ export class Connection {
 	private pongTimeout: NodeJS.Timeout | undefined;
 
 	static open(options: ConnectionOptions): Promise<Connection> {
+		const { signal } = options;
+		if (signal?.aborted) {
+			return Promise.reject(new TunnelError("network_error", "Connection aborted", { cause: signal.reason }));
+		}
 		return new Promise((resolve, reject) => {
+			let settled = false;
 			const socket = new WebSocket(options.tunnel.connectUrl, {
 				headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
 				perMessageDeflate: false,
 				handshakeTimeout: 6_000,
 			});
-			socket.once("unexpected-response", (_request, response) => {
-				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+			const cleanup = () => {
+				signal?.removeEventListener("abort", onAbort);
+				socket.off("unexpected-response", onUnexpectedResponse);
+				socket.off("error", onError);
+				socket.off("open", onOpen);
+			};
+			const onAbort = () => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				socket.on("error", () => {});
+				socket.terminate();
+				reject(new TunnelError("network_error", "Connection aborted", { cause: signal?.reason }));
+			};
+			const onUnexpectedResponse = (_request: unknown, response: IncomingMessage) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				socket.on("error", () => {});
 				response.destroy();
 				socket.terminate();
-			});
-			socket.once("error", (error) => {
+				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+			};
+			const onError = (error: Error) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				socket.on("error", () => {});
 				reject(new TunnelError("network_error", `Could not connect: ${error.message}`, { cause: error }));
-			});
-			socket.once("open", () => {
-				socket.removeAllListeners("error");
+			};
+			const onOpen = () => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
 				resolve(new Connection(socket, options));
-			});
+			};
+			signal?.addEventListener("abort", onAbort, { once: true });
+			socket.once("unexpected-response", onUnexpectedResponse);
+			socket.once("error", onError);
+			socket.once("open", onOpen);
 		});
 	}
 
@@ -147,6 +191,10 @@ export class Connection {
 		}
 		if (this.streams.has(frame.stream)) {
 			throw new ProtocolError(`stream ${frame.stream} is already open`);
+		}
+		if (this.streams.size >= MAX_STREAMS) {
+			this.send(Frames.Reset, frame.stream, encodeText("Too many concurrent streams"));
+			return;
 		}
 		const request = this.options.authorize(decodeOpen(frame.payload));
 		if (request === undefined) {
