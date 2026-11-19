@@ -68627,7 +68627,7 @@ function negotiateTimeout(serverMs, localMs) {
   return Math.min(SERVER_NEGOTIATE_TIMEOUT_MAX_MS, Math.max(SERVER_NEGOTIATE_TIMEOUT_MIN_MS, serverMs));
 }
 var DEFAULT_EMPTY_ICE_NEGOTIATE_TIMEOUT_MS = 4e3;
-var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 6e3;
+var SERVER_NEGOTIATE_TIMEOUT_MIN_MS = 2e3;
 var SERVER_NEGOTIATE_TIMEOUT_MAX_MS = 12e3;
 function throwIfAborted(signal) {
   if (signal?.aborted)
@@ -105262,6 +105262,14 @@ function createNodeWebSocket(url2) {
 
 // packages/plugin/src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
+var MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS = 2e3;
+var MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS = 6e4;
+function resolveWebRtcNegotiateTimeoutMs(hint) {
+  if (typeof hint !== "number" || !Number.isSafeInteger(hint) || hint <= 0) {
+    return DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
+  }
+  return Math.min(MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS, Math.max(MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS, hint));
+}
 var HostServerConnection = class {
   constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
     this.config = config2;
@@ -105419,6 +105427,7 @@ var HostServerConnection = class {
     this.socket = socket;
     this.controlFrameLimits = {};
     this.heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
     let acknowledged = false;
     let retainOnClose = false;
     let invalidControl = false;
@@ -105632,10 +105641,7 @@ var HostServerConnection = class {
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
             this.heartbeatIntervalMs = payload.heartbeatIntervalMs;
-            this.webRtcNegotiateTimeoutMs = Math.max(
-              DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
-              payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
-            );
+            this.webRtcNegotiateTimeoutMs = resolveWebRtcNegotiateTimeoutMs(payload.webrtcFallbackTimeoutMs);
             this.authRecoveryAttempted = false;
             this.controlFrameLimits = {
               maxControlFrameBytes: payload.maxControlFrameBytes,
@@ -106140,6 +106146,21 @@ var HostServerConnection = class {
       return;
     }
     if (tunnel.rtc === void 0) {
+      if (tunnel.transport === "relay") {
+        this.logger.warn("client selected WebRTC after responder already fell back to relay", {
+          connectionId: shortId3(tunnel.connectionId),
+          peerDeviceId: shortId3(tunnel.peer.deviceId),
+          transport: payload.transport
+        });
+        await this.dropTunnel(tunnel.connectionId, "CONNECTION_FAILED");
+        this.sendControl("error", {
+          code: "CONNECTION_FAILED",
+          message: "WebRTC responder already fell back to relay.",
+          retryable: true,
+          connectionId: tunnel.connectionId
+        });
+        return;
+      }
       throw new ControlConnectionError("INVALID_MESSAGE", "Client selected WebRTC before creating a data channel.");
     }
     tunnel.transport = payload.transport;

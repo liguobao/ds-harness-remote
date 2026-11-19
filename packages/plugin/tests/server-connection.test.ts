@@ -8,7 +8,7 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore, TrustedPeer } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { ServerApiError, HostServerApi } from '../src/server-api.js'
-import { HostServerConnection } from '../src/server-connection.js'
+import { HostServerConnection, resolveWebRtcNegotiateTimeoutMs } from '../src/server-connection.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import { PLUGIN_VERSION } from '../src/version.js'
 import { ServerCredentialStore } from '../src/server-credentials.js'
@@ -71,11 +71,23 @@ describe('HostServerConnection', () => {
     }
   })
 
-  it('keeps the responder alive for the Server RTC budget and preserves legacy defaults', async () => {
+  it('respects bounded Server RTC fallback hints and filters invalid or extreme values', async () => {
+    for (const invalid of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 3000.5, '3000']) {
+      expect(resolveWebRtcNegotiateTimeoutMs(invalid)).toBe(12_000)
+    }
+    expect(resolveWebRtcNegotiateTimeoutMs(1)).toBe(2_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(1_999)).toBe(2_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(3_000)).toBe(3_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(60_000)).toBe(60_000)
+    expect(resolveWebRtcNegotiateTimeoutMs(60_001)).toBe(60_000)
+
     await runScenarios([
-      { name: 'twenty-second Server', timeout: 20000, expected: 20000 },
-      { name: 'legacy Server without timeout', timeout: undefined, expected: 12000 },
-      { name: 'shorter Server budget preserves local minimum', timeout: 8000, expected: 12000 },
+      { name: 'twenty-second Server', timeout: 20_000, expected: 20_000 },
+      { name: 'legacy Server without timeout', timeout: undefined, expected: 12_000 },
+      { name: 'no-TURN Server short budget', timeout: 3_000, expected: 3_000 },
+      { name: 'eight-second Server budget', timeout: 8_000, expected: 8_000 },
+      { name: 'tiny Server budget clamped to minimum', timeout: 500, expected: 2_000 },
+      { name: 'excessive Server budget clamped to ceiling', timeout: 120_000, expected: 60_000 },
     ].map(row => ({ name: row.name, run: async () => {
       vi.useFakeTimers()
       const hostKeys = generateKeyPair(new Uint8Array(32).fill(51))
@@ -114,6 +126,72 @@ describe('HostServerConnection', () => {
         await vi.advanceTimersByTimeAsync(1)
         expect(pc.close).toHaveBeenCalledOnce()
         expect(socket.readyState).toBe(1)
+      } finally {
+        try {
+          await server.stop()
+          expect(vi.getTimerCount()).toBe(0)
+        } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+      }
+    } })))
+  })
+
+  it('drops only the timed-out tunnel on late WebRTC transport.selected while still rejecting unoffered WebRTC', async () => {
+    await runScenarios([
+      { name: 'late WebRTC after responder fallback', sendOffer: true },
+      { name: 'unoffered WebRTC before data channel', sendOffer: false },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      const hostKeys = generateKeyPair(new Uint8Array(32).fill(53))
+      const clientKeys = generateKeyPair(new Uint8Array(32).fill(54))
+      const peer = { deviceId: 'client-1', name: 'Client', platform: 'linux', publicKey: clientKeys.publicKey,
+        fingerprint: 'CLIENT', membershipId: 'member', trustedAt: 1 }
+      const socket = new FakeWebSocket()
+      const pc = { connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new',
+        setRemoteDescription: async () => {}, createAnswer: async () => ({ type: 'answer', sdp: 'answer' }),
+        setLocalDescription: async () => {}, getStats: async () => [], close: vi.fn() }
+      const server = new HostServerConnection({ ...config(), forceRelay: false },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...hostKeys },
+        { trustedPeer: () => peer } as unknown as IdentityStore,
+        { baseUrl: 'https://remote.test', authenticate: async () => ({ accessToken: 'test-token' }),
+          deviceFor: async () => ({ ...peer, role: 'client', identityKey: clientKeys.publicKey }),
+          turnCredentials: async () => [],
+        } as unknown as HostServerApi,
+        { close: async () => {} } as unknown as ConnectionController, logger(), () => socket,
+        async () => ({ create: () => pc }) as unknown as RtcPeerConnectionFactory)
+      try {
+        server.start()
+        await vi.advanceTimersByTimeAsync(0)
+        socket.open()
+        socket.receive(createControlFrame('hello.ack', { ...helloAck('control-1'),
+          capabilities: ['transport.p2p', 'transport.relay'],
+          webrtcFallbackTimeoutMs: 3_000,
+        }))
+        socket.receive(createControlFrame('connect.incoming', { connectionId: 'connection-1',
+          clientDeviceId: 'client-1', clientIdentityKey: clientKeys.publicKey,
+          authorization: 'account', preferredTransports: ['p2p', 'relay'],
+        }))
+        if (row.sendOffer) {
+          socket.receive(createControlFrame('signal.offer', { connectionId: 'connection-1', targetDeviceId: 'host-1', sdp: 'offer' }))
+          await vi.advanceTimersByTimeAsync(3_000)
+          expect(pc.close).toHaveBeenCalledOnce()
+        } else {
+          await vi.advanceTimersByTimeAsync(0)
+        }
+        socket.receive(createControlFrame('transport.selected', {
+          connectionId: 'connection-1', targetDeviceId: 'host-1', transport: 'p2p',
+        }))
+        await vi.advanceTimersByTimeAsync(0)
+        if (row.sendOffer) {
+          expect(socket.readyState).toBe(1)
+          const errors = socket.sent.map(frame => JSON.parse(frame)).filter(frame => frame.type === 'error')
+          expect(errors.map(frame => frame.payload)).toContainEqual(expect.objectContaining({
+            code: 'CONNECTION_FAILED',
+            connectionId: 'connection-1',
+            retryable: true,
+          }))
+        } else {
+          expect(socket.readyState).toBe(3)
+        }
       } finally {
         try {
           await server.stop()

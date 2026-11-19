@@ -527,11 +527,13 @@ describe('webrtc signaling and TURN credentials', () => {
     expect(await partial.next('hello.ack')).toMatchObject({
       capabilities: ['transport.p2p', 'transport.relay'],
       webrtcEnabled: true,
-      webrtcFallbackTimeoutMs: 12_000,
+      webrtcFallbackTimeoutMs: 3_000,
     })
     const withoutTurn = await socket(await device(), { capabilities: fullCapabilities })
     expect(await withoutTurn.next('hello.ack')).toMatchObject({
       capabilities: ['transport.lan', 'transport.p2p', 'transport.relay'],
+      webrtcEnabled: true,
+      webrtcFallbackTimeoutMs: 3_000,
     })
     await app.close()
     await start(password, [], {
@@ -544,7 +546,11 @@ describe('webrtc signaling and TURN credentials', () => {
     })
     accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
     const withTurn = await socket(await device(), { capabilities: fullCapabilities })
-    expect(await withTurn.next('hello.ack')).toMatchObject({ capabilities: fullCapabilities })
+    expect(await withTurn.next('hello.ack')).toMatchObject({
+      capabilities: fullCapabilities,
+      webrtcEnabled: true,
+      webrtcFallbackTimeoutMs: 12_000,
+    })
   })
 
   it('disables WebRTC when negotiation leaves only relay (#449)', async () => {
@@ -555,7 +561,10 @@ describe('webrtc signaling and TURN credentials', () => {
       })
     }
     const lan = await socket(await device(), { capabilities: ['transport.lan', 'transport.relay'] })
-    expect(await lan.next('hello.ack')).toMatchObject({ webrtcEnabled: true })
+    expect(await lan.next('hello.ack')).toMatchObject({
+      webrtcEnabled: true,
+      webrtcFallbackTimeoutMs: 3_000,
+    })
   })
 
   it('forwards ordered WebRTC signaling and transport selection', async () => {

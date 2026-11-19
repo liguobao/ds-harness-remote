@@ -46,8 +46,10 @@ const MAX_DROPPED_LINKS = 16_384
 
 /** Protocol v1 default: at most 256 ICE candidates per logical connection. */
 export const MAX_ICE_CANDIDATES_PER_CONNECTION = 256
-/** Mirrors docs/protocol.md: Clients use max(server, local) and default to 12 s. */
+/** Default fallback budget when TURN is enabled (or WebRTC is disabled). */
 const WEBRTC_FALLBACK_TIMEOUT_MS = 12_000
+/** Shorter fallback budget when only direct LAN/P2P paths are available without TURN. */
+const DIRECT_ONLY_WEBRTC_FALLBACK_TIMEOUT_MS = 3_000
 const SUPPORTED_TRANSPORTS = ['transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay'] as const
 const TRANSPORT_NAMES = ['lan', 'p2p', 'turn', 'relay'] as const
 type TransportName = (typeof TRANSPORT_NAMES)[number]
@@ -448,6 +450,11 @@ export class Gateway {
             clientVersion: safeText(peer.version),
             capabilities: peer.capabilities.filter(capability => typeof capability === 'string' && SAFE_TEXT.test(capability)).slice(0, 8),
           })
+          const webrtcEnabled = peer.capabilities.some(capability =>
+            capability === 'transport.lan' || capability === 'transport.p2p' || capability === 'transport.turn')
+          const webrtcFallbackTimeoutMs = webrtcEnabled && !this.turnEnabled
+            ? DIRECT_ONLY_WEBRTC_FALLBACK_TIMEOUT_MS
+            : WEBRTC_FALLBACK_TIMEOUT_MS
           this.send(peer, createControlFrame('hello.ack', {
             protocol: 1,
             serverVersion: 'self-hosted/0.1.0',
@@ -456,9 +463,8 @@ export class Gateway {
             maxControlFrameBytes: MAX_CONTROL_FRAME_BYTES,
             maxRelayFrameBytes: MAX_RELAY_FRAME_BYTES,
             capabilities: peer.capabilities,
-            webrtcEnabled: peer.capabilities.some(capability =>
-              capability === 'transport.lan' || capability === 'transport.p2p' || capability === 'transport.turn'),
-            webrtcFallbackTimeoutMs: WEBRTC_FALLBACK_TIMEOUT_MS,
+            webrtcEnabled,
+            webrtcFallbackTimeoutMs,
           }))
           return
         }
