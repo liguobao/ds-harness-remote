@@ -852,7 +852,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       visible={plusMenuOpen}
       onClose={() => setPlusMenuOpen(false)}
       onReferenceChat={() => setReferenceChatOpen(true)}
-      onOpenPrompts={() => setPromptsPickerOpen(true)}
       onOpenSchedules={() => void perform('schedules')}
     />
     <ReferenceChatModal
