@@ -2429,8 +2429,8 @@ struct Index {
     });
   }
 
-  private membershipLabel(): string {
-    switch (this.membershipStatus) {
+  private membershipLabel(status: string): string {
+    switch (status) {
       case 'none': return this.tr('未开通');
       case 'active': return this.tr('有效');
       case 'expired': return this.tr('已过期');
@@ -2490,8 +2490,7 @@ struct Index {
               }
               if (this.runtime.email.length > 0 && this.runtime.serverUrl.length > 0 && this.phase !== PHASE_SETUP) {
                 this.SettingsRow(this.tr('账号'), this.runtime.email, false, () => { this.copyAccountId(); })
-                this.SettingsRow(this.tr('会员状态'), this.membershipLabel(), false,
-                  this.membershipStatus === 'none' ? () => { this.openBrowserLink(MEMBERSHIP_PRICING_URL); } : undefined)
+                this.MembershipStatusRow()
                 if (this.membershipExpiry > 0) {
                   this.SettingsRow(this.tr('到期日期'),
                     new Date(this.membershipExpiry).toLocaleDateString(this.en() ? 'en-US' : 'zh-CN'), false, undefined)
@@ -2704,6 +2703,32 @@ struct Index {
   }
 
   /** 设置里的一行：左边标题、右边当前值 + 箭头。 */
+  @Builder
+  MembershipStatusRow() {
+    Row({ space: 10 }) {
+      Text(this.tr('会员状态'))
+        .fontSize(14)
+        .fontColor(this.pal().text)
+      Blank()
+      Text(this.membershipLabel(this.membershipStatus))
+        .fontSize(12)
+        .fontColor(this.pal().text3)
+      if (this.membershipStatus === 'none') {
+        Text('›').fontSize(15).fontColor(this.pal().text3)
+      }
+    }
+    .width('100%')
+    .padding({ top: 13, bottom: 13, left: 14, right: 14 })
+    .backgroundColor(this.pal().card)
+    .borderRadius(12)
+    .border({ width: 1, color: this.pal().border })
+    .onClick(() => {
+      if (this.membershipStatus === 'none') {
+        this.openBrowserLink(MEMBERSHIP_PRICING_URL);
+      }
+    })
+  }
+
   @Builder
   SettingsRow(title: string, value: string, danger: boolean, action: (() => void) | undefined) {
     Row({ space: 10 }) {
