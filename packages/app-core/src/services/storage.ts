@@ -7,7 +7,7 @@ import { Platform } from 'react-native'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isActivityDockMode, isDrawerLayoutMode, isThemePreference, isTypographyDensity, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type DrawerLayoutMode, type ThemePreference, type TypographyDensity } from '../ui/theme'
+import { isActivityDockMode, isDrawerLayoutMode, isThemePreference, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type DrawerLayoutMode, type ThemePreference } from '../ui/theme'
 import { isBusySendMode, isQuickPromptActionMode, type BusySendMode, type QuickPromptActionMode } from '../screens/chat/composer-gate'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
@@ -30,7 +30,6 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
-  typographyDensity: 'dshremote.typography-density.v1',
   chatAppearance: 'dshremote.chat-appearance.v1',
   activityDockMode: 'dshremote.activity-dock-mode.v1',
   drawerLayoutMode: 'dshremote.drawer-layout-mode.v1',
@@ -412,8 +411,12 @@ export async function clearCodexPermissionPresets(hostDeviceId: string): Promise
   await writeJson(KEYS.codexPermissionPresets, { byHost })
 }
 
+const LEGACY_KEYS = [
+  'dshremote.typography-density.v1',
+] as const
+
 export async function clearLocalData(): Promise<void> {
-  await Promise.all(Object.values(KEYS).map(key => SecureStore.deleteItemAsync(key, secureOptions)))
+  await Promise.all([...Object.values(KEYS), ...LEGACY_KEYS].map(key => SecureStore.deleteItemAsync(key, secureOptions)))
 }
 
 /** Persisted compaction attempts keyed by Host scope and Session id. */
@@ -594,15 +597,6 @@ export async function loadCompactHistory(): Promise<boolean> {
 }
 export async function saveCompactHistory(value: boolean): Promise<void> {
   await writeJson(KEYS.compactHistory, { value })
-}
-
-export async function loadTypographyDensity(): Promise<TypographyDensity> {
-  const stored = await readJson<{ value: unknown }>(KEYS.typographyDensity)
-  return isTypographyDensity(stored?.value) ? stored.value : 'compact'
-}
-
-export async function saveTypographyDensity(value: TypographyDensity): Promise<void> {
-  await writeJson(KEYS.typographyDensity, { value })
 }
 
 export async function loadActivityDockMode(): Promise<ActivityDockMode> {

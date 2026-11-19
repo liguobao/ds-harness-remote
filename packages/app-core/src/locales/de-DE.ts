@@ -660,8 +660,6 @@ const deDE = {
     language: "Sprache", languageSystem: "Systemsprache", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Bei der Systemstandardeinstellung folgt die App automatisch der Android-Spracheinstellung.",
     compactHistorySaveFailed: "Die Einstellung für die kompakte Konversation konnte nicht gespeichert werden",
     compactHistory: "Kompakte Gespräche", compactHistoryNote: "Verkürzt den Werkzeugverlauf und behält Text und Status bei. Erfordert Hostunterstützung. Öffnen Sie die Konversation erneut, nachdem Sie dies geändert haben.",
-    typographyDensity: "Layout-Dichte", typographyDensityNote: "Zeilenhöhe, Absatzabstand und Nachrichten-Padding anpassen",
-    densityStandard: "Standard", densityCompact: "Kompakt", typographyDensitySaveFailed: "Die Einstellung der Layout-Dichte konnte nicht gespeichert werden",
     chatAppearance: "Chat-Schrift & Farben",
     chatAppearanceNote: "Schriftgröße, Abstände, Akzentfarbe, Sprechblasen und Codeblöcke anpassen",
     chatAppearanceReset: "Zurücksetzen",

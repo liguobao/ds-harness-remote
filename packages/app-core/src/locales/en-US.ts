@@ -660,8 +660,6 @@ const enUS = {
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
     compactHistorySaveFailed: 'Could not save compact conversation setting',
     compactHistory: 'Compact conversations', compactHistoryNote: 'Shortens tool history, keeping text and status. Requires Host support. Reopen the conversation after changing this.',
-    typographyDensity: 'Reading density', typographyDensityNote: 'Adjust text line height, paragraph spacing, and bubble padding',
-    densityStandard: 'Standard', densityCompact: 'Compact', typographyDensitySaveFailed: 'Could not save reading density setting',
     chatAppearance: 'Chat appearance',
     chatAppearanceNote: 'Customize font size, spacing, accent color, bubble and code block styles',
     chatAppearanceReset: 'Reset',

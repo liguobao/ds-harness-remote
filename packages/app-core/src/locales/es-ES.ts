@@ -660,8 +660,6 @@ const esES = {
     language: "Idioma", languageSystem: "Seguir el sistema", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Con el sistema predeterminado, la aplicación sigue automáticamente la configuración de idioma de Android.",
     compactHistorySaveFailed: "No se pudo guardar la configuración de conversación compacta",
     compactHistory: "Conversaciones compactas", compactHistoryNote: "Acorta el historial de la herramienta, manteniendo el texto y el estado. Requiere soporte de anfitrión. Vuelva a abrir la conversación después de cambiar esto.",
-    typographyDensity: "Densidad de lectura", typographyDensityNote: "Ajustar interlineado, espacio entre párrafos y relleno de burbujas",
-    densityStandard: "Estándar", densityCompact: "Compacto", typographyDensitySaveFailed: "No se pudo guardar la configuración de densidad de lectura",
     chatAppearance: "Tipografía y color del chat",
     chatAppearanceNote: "Personaliza tamaño de letra, espaciado, color de acento, burbujas y código",
     chatAppearanceReset: "Restablecer",

@@ -24,9 +24,8 @@ const MONOSPACE_FONT = 'monospace'
 const COPY_RESET_MS = 2000
 
 export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
-  const { colors, scheme, density, appearance } = useTheme()
-  const isCompact = density === 'compact'
-  const metrics = resolveChatMetrics(density, appearance)
+  const { colors, scheme, appearance } = useTheme()
+  const metrics = resolveChatMetrics(appearance)
   const useDarkCode = appearance.codeTheme === 'dark' || (appearance.codeTheme === 'auto' && scheme === 'dark')
   const palette = useDarkCode ? DARK_CODE_PALETTE : LIGHT_CODE_PALETTE
   const [wrap, setWrap] = useState<boolean>(false)
@@ -133,7 +132,7 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
       </View>
 
       {wrap ? (
-        <View style={[styles.wrapBody, { padding: isCompact ? 10 : 12 }]}>
+        <View style={[styles.wrapBody, { padding: 10 }]}>
           {renderedTokens}
         </View>
       ) : (
@@ -141,7 +140,7 @@ export const CodeBlockView = memo(function CodeBlockView({ code, language, style
           horizontal
           nestedScrollEnabled
           showsHorizontalScrollIndicator
-          contentContainerStyle={[styles.scrollContent, { padding: isCompact ? 10 : 12 }]}
+          contentContainerStyle={[styles.scrollContent, { padding: 10 }]}
           keyboardShouldPersistTaps="handled"
         >
           {renderedTokens}

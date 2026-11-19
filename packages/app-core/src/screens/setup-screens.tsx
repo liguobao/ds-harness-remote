@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, Type, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -35,7 +35,7 @@ import { easingCurve, resolveMotion } from '../ui/motion'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ActivityDockMode, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, DrawerLayoutMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
@@ -637,8 +637,6 @@ export function SettingsScreen({
   const currentLanguageLabel = languageOptions().find(o => o.value === languagePreference)?.name ?? zhCN.settings.languageSystem
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
-  const typographyDensity = useAppStore(state => state.typographyDensity)
-  const setTypographyDensity = useAppStore(state => state.setTypographyDensity)
   const { phase: updatePhase, progress: updateProgress, latestVersion, checkForUpdates } = useUpdateCheck()
   const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
   const buildVersion = Application.nativeBuildVersion
@@ -665,9 +663,6 @@ export function SettingsScreen({
     setLogCount(connectionLogEntries().length)
     return subscribeConnectionLog(() => setLogCount(connectionLogEntries().length))
   }, [])
-  const [densitySaving, setDensitySaving] = useState(false)
-  const [densityPickerOpen, setDensityPickerOpen] = useState(false)
-  const currentDensityLabel = typographyDensity === 'compact' ? zhCN.settings.densityCompact : zhCN.settings.densityStandard
   const activityDockMode = useAppStore(state => state.activityDockMode)
   const setActivityDockMode = useAppStore(state => state.setActivityDockMode)
   const [activityDockSaving, setActivityDockSaving] = useState(false)
@@ -736,14 +731,6 @@ export function SettingsScreen({
     try { await setCompactHistory(value) }
     catch { Alert.alert(zhCN.settings.compactHistorySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setCompactSaving(false) }
-  }
-
-  const toggleTypographyDensity = async (value: TypographyDensity) => {
-    if (densitySaving || value === typographyDensity) return
-    setDensitySaving(true)
-    try { await setTypographyDensity(value) }
-    catch { Alert.alert(zhCN.settings.typographyDensitySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
-    finally { setDensitySaving(false) }
   }
 
   const toggleActivityDockMode = async (value: ActivityDockMode) => {
@@ -887,13 +874,6 @@ export function SettingsScreen({
                 value={chatAppearanceSummary}
                 chevron
                 onPress={() => setAppearanceOpen(true)}
-              />
-              <GroupRow
-                icon={Type}
-                label={zhCN.settings.typographyDensity}
-                value={currentDensityLabel}
-                chevron
-                onPress={() => setDensityPickerOpen(true)}
               />
               <GroupRow
                 icon={Layers}
@@ -1163,40 +1143,6 @@ export function SettingsScreen({
             </ScrollView>
       </SheetModal>
       <DsBotSettingsModal visible={dsBotSettingsOpen} onClose={() => setDsBotSettingsOpen(false)} />
-      <SheetModal
-        visible={densityPickerOpen}
-        onClose={() => setDensityPickerOpen(false)}
-        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
-      >
-            <View style={styles.languageHeader}>
-              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.typographyDensity}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setDensityPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
-              <GroupCard>
-                {([
-                  { value: 'standard' as const, name: zhCN.settings.densityStandard },
-                  { value: 'compact' as const, name: zhCN.settings.densityCompact },
-                ]).map((option, index) => {
-                  const chosen = option.value === typographyDensity
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => {
-                        setDensityPickerOpen(false)
-                        void toggleTypographyDensity(option.value)
-                      }}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-      </SheetModal>
       <SheetModal
         visible={activityDockPickerOpen}
         onClose={() => setActivityDockPickerOpen(false)}
@@ -2074,12 +2020,6 @@ function createStyles(colors: ThemeColors) {
   themeTileDot: { position: 'absolute', right: 10, bottom: 10, width: 12, height: 12, borderRadius: 6 },
   themeTileLabel: { ...type.small, fontSize: 15, color: colors.ink },
   themeTileLabelSelected: { color: colors.primary, fontWeight: '600' },
-  densityRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.md, paddingRight: spacing.md, paddingTop: spacing.md },
-  densityIcon: { width: 28, marginRight: spacing.sm, alignItems: 'center' },
-  densityCopy: { flex: 1, gap: 2 },
-  densityLabel: { ...type.body, fontSize: 16, color: colors.ink },
-  densityNote: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
-  densitySegments: { marginRight: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md, marginLeft: 56 },
   signOutCard: { marginTop: spacing.xxl },
   keyNoteText: { ...type.small, color: colors.muted, flex: 1 },
   settingsLink: { minHeight: 68, paddingVertical: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },

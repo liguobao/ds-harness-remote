@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   storage: Object.fromEntries([
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
-    'saveCompactHistory', 'saveThemePreference', 'saveTypographyDensity', 'loadTypographyDensity',
+    'saveCompactHistory', 'saveThemePreference',
     'saveActivityDockMode', 'loadActivityDockMode', 'saveDrawerLayoutMode', 'loadDrawerLayoutMode', 'saveQuickPromptActionMode', 'loadQuickPromptActionMode', 'saveStatusBarVisible', 'saveDefaultPermissionPreset',
     'saveFavoriteWorkspaces', 'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
     'saveCodexPermissionPreset',

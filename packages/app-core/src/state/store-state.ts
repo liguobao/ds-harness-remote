@@ -33,7 +33,7 @@ import type {
   WorkspaceShortcut,
   WorkspaceView,
 } from '../types'
-import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference, TypographyDensity } from '../ui/theme'
+import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 type BootPhase = 'loading' | 'ready' | 'error'
@@ -115,7 +115,6 @@ export interface AppState {
   language: AppLanguage
   statusBarVisible: boolean
   themePreference: ThemePreference
-  typographyDensity: TypographyDensity
   chatAppearance: ChatAppearance
   activityDockMode: ActivityDockMode
   drawerLayoutMode: DrawerLayoutMode
@@ -212,7 +211,6 @@ export interface AppState {
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
-  setTypographyDensity(density: TypographyDensity): Promise<void>
   setChatAppearance(appearance: Partial<ChatAppearance>): Promise<void>
   resetChatAppearance(): Promise<void>
   setActivityDockMode(mode: ActivityDockMode): Promise<void>

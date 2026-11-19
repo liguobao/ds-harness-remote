@@ -658,8 +658,6 @@ const zhCN = {
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     compactHistorySaveFailed: '无法保存会话精简设置',
     compactHistory: '会话精简模式', compactHistoryNote: '缩减历史工具详情，保留正文和状态。需 Host 支持；切换后重新打开会话生效。',
-    typographyDensity: '排版密度', typographyDensityNote: '调整正文行距、段间距与气泡紧凑度',
-    densityStandard: '标准', densityCompact: '紧凑', typographyDensitySaveFailed: '无法保存排版密度设置',
     chatAppearance: '会话排版与配色',
     chatAppearanceNote: '自定义字体大小、字距、行距、主题色、气泡与代码块样式',
     chatAppearanceReset: '恢复默认',

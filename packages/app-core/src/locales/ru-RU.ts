@@ -671,8 +671,6 @@ const ruRU = {
     language: 'Язык', languageSystem: 'Как в системе', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'В режиме «Как в системе» приложение автоматически следует языку Android.',
     compactHistorySaveFailed: 'Не удалось сохранить настройку компактных диалогов',
     compactHistory: 'Компактные диалоги', compactHistoryNote: 'Сокращает историю инструментов, сохраняя текст и статусы. Требуется поддержка на хосте. После изменения откройте диалог заново.',
-    typographyDensity: 'Плотность текста', typographyDensityNote: 'Высота строк, интервалы между абзацами и отступы в пузырях',
-    densityStandard: 'Стандартная', densityCompact: 'Компактная', typographyDensitySaveFailed: 'Не удалось сохранить настройку плотности текста',
     chatAppearance: 'Оформление чата',
     chatAppearanceNote: 'Размер шрифта, интервалы, акцентный цвет, стиль пузырей и блоков кода',
     chatAppearanceReset: 'Сбросить',

@@ -674,8 +674,6 @@ const ukUA = {
     language: 'Мова', languageSystem: 'Як у системі', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'Якщо вибрано «Як у системі», застосунок автоматично використовує мову Android.',
     compactHistorySaveFailed: 'Не вдалося зберегти налаштування компактних діалогів',
     compactHistory: 'Компактні діалоги', compactHistoryNote: 'Скорочує історію інструментів, зберігаючи текст і стани. Потребує підтримки на Хості. Після зміни відкрийте діалог знову.',
-    typographyDensity: 'Щільність тексту', typographyDensityNote: 'Налаштуйте міжрядковий інтервал, відступи між абзацами й поля бульбашок',
-    densityStandard: 'Стандартна', densityCompact: 'Компактна', typographyDensitySaveFailed: 'Не вдалося зберегти налаштування щільності тексту',
     chatAppearance: 'Вигляд чату',
     chatAppearanceNote: 'Налаштуйте розмір шрифту, інтервали, акцентний колір, стиль бульбашок і блоків коду',
     chatAppearanceReset: 'Скинути',

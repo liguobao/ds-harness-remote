@@ -660,8 +660,6 @@ const frFR = {
     language: "Langue", languageSystem: "Langue du système", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Avec le système par défaut, l'application suit automatiquement le paramètre de langue Android.",
     compactHistorySaveFailed: "Impossible d'enregistrer le paramètre de conversation compacte",
     compactHistory: "Conversations compactes", compactHistoryNote: "Raccourcit l'historique de l'outil, en conservant le texte et l'état. Nécessite le support de l'hôte. Rouvrez la conversation après avoir modifié cela.",
-    typographyDensity: "Densité de lecture", typographyDensityNote: "Ajuster l'interligne, l'espacement des paragraphes et le rembourrage des bulles",
-    densityStandard: "Standard", densityCompact: "Compact", typographyDensitySaveFailed: "Impossible d'enregistrer le paramètre de densité de lecture",
     chatAppearance: "Typographie et couleurs",
     chatAppearanceNote: "Personnaliser la taille, les espacements, la couleur d'accent, les bulles et le code",
     chatAppearanceReset: "Réinitialiser",

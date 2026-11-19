@@ -63,7 +63,7 @@ function OptionSegments<T extends string>({
 }
 
 export function ChatAppearanceScreen({ active = true, onBack }: { active?: boolean; onBack: () => void }) {
-  const { colors, scheme, density, appearance } = useTheme()
+  const { colors, scheme, appearance } = useTheme()
   const setChatAppearance = useAppStore(state => state.setChatAppearance)
   const resetChatAppearance = useAppStore(state => state.resetChatAppearance)
   const styles = useThemedStyles(createStyles)
@@ -89,7 +89,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
     && appearance.bubbleStyle === DEFAULT_CHAT_APPEARANCE.bubbleStyle
     && appearance.codeTheme === DEFAULT_CHAT_APPEARANCE.codeTheme
 
-  const metrics = resolveChatMetrics(density, appearance)
+  const metrics = resolveChatMetrics(appearance)
   const solidText = colors.onPrimary ?? colors.white
   const isSolid = appearance.bubbleStyle === 'solid'
   const bubbleContainerStyle =

@@ -7,7 +7,7 @@ vi.mock('react-native', () => ({
   },
 }))
 
-import { lightColors, darkColors } from '../src/ui/theme'
+import { DEFAULT_CHAT_APPEARANCE, lightColors, darkColors } from '../src/ui/theme'
 import {
   createMarkdownStyles as createStyles,
   parseCallout,
@@ -20,49 +20,48 @@ import MarkdownIt from 'markdown-it'
 
 describe('chat session typography and rich components', () => {
   describe('typography hierarchy and line height ratios', () => {
-    it('standard density headings and body adhere to balanced reading proportions', () => {
-      const styles = createStyles(lightColors, 'standard')
+    it('default chat appearance headings and body adhere to balanced reading proportions', () => {
+      const styles = createStyles(lightColors)
 
       // H1-H4 size ladder
-      expect(styles.h1.fontSize).toBe(24)
-      expect(styles.h1.lineHeight).toBe(31)
-      expect(styles.h2.fontSize).toBe(20)
-      expect(styles.h2.lineHeight).toBe(26)
-      expect(styles.h3.fontSize).toBe(17)
-      expect(styles.h3.lineHeight).toBe(23)
+      expect(styles.h1.fontSize).toBe(21)
+      expect(styles.h1.lineHeight).toBe(28)
+      expect(styles.h2.fontSize).toBe(18)
+      expect(styles.h2.lineHeight).toBe(24)
+      expect(styles.h3.fontSize).toBe(16)
+      expect(styles.h3.lineHeight).toBe(22)
       expect(styles.h4.fontSize).toBe(15)
-      expect(styles.h4.lineHeight).toBe(20)
+      expect(styles.h4.lineHeight).toBe(21)
 
       // Paragraph line-height ratio >= 1.5 for comfortable continuous reading
-      expect(styles.paragraph.fontSize).toBe(16)
-      expect(styles.paragraph.lineHeight).toBe(25)
-      const ratio = (styles.paragraph.lineHeight as number) / (styles.paragraph.fontSize as number)
-      expect(ratio).toBeGreaterThanOrEqual(1.5)
-      expect(ratio).toBeLessThanOrEqual(1.65)
-    })
-
-    it('compact density provides proportional scaling for small displays', () => {
-      const styles = createStyles(lightColors, 'compact')
-
-      expect(styles.h1.fontSize).toBe(21)
-      expect(styles.h1.lineHeight).toBe(27)
-      expect(styles.h2.fontSize).toBe(18)
-      expect(styles.h2.lineHeight).toBe(23)
-      expect(styles.h3.fontSize).toBe(16)
-      expect(styles.h3.lineHeight).toBe(21)
-      expect(styles.h4.fontSize).toBe(14)
-      expect(styles.h4.lineHeight).toBe(19)
-
-      expect(styles.paragraph.fontSize).toBe(15)
+      expect(styles.paragraph.fontSize).toBe(14.5)
       expect(styles.paragraph.lineHeight).toBe(23)
       const ratio = (styles.paragraph.lineHeight as number) / (styles.paragraph.fontSize as number)
       expect(ratio).toBeGreaterThanOrEqual(1.5)
       expect(ratio).toBeLessThanOrEqual(1.65)
     })
 
+    it('chat appearance font and spacing presets scale headings and paragraph rhythm proportionally', () => {
+      const smallTight = createStyles(lightColors, {
+        ...DEFAULT_CHAT_APPEARANCE,
+        fontScale: 'sm',
+        spacingScale: 'tight',
+      })
+      const largeRelaxed = createStyles(lightColors, {
+        ...DEFAULT_CHAT_APPEARANCE,
+        fontScale: 'lg',
+        spacingScale: 'relaxed',
+      })
+
+      expect(largeRelaxed.paragraph.fontSize).toBeGreaterThan(smallTight.paragraph.fontSize as number)
+      expect(largeRelaxed.paragraph.lineHeight).toBeGreaterThan(smallTight.paragraph.lineHeight as number)
+      expect(largeRelaxed.paragraph.marginBottom).toBeGreaterThan(smallTight.paragraph.marginBottom as number)
+      expect(largeRelaxed.h1.fontSize).toBeGreaterThan(smallTight.h1.fontSize as number)
+    })
+
     it('inline code has padded pill background with rounded corners', () => {
-      const styles = createStyles(lightColors, 'standard')
-      expect(styles.inlineCode.borderRadius).toBe(4)
+      const styles = createStyles(lightColors)
+      expect(styles.inlineCode.borderRadius).toBe(5)
       expect(styles.inlineCode.paddingHorizontal).toBe(5)
       expect(styles.inlineCode.fontFamily).toBe('monospace')
     })
@@ -70,34 +69,28 @@ describe('chat session typography and rich components', () => {
 
   describe('table horizontal scroll container and column alignment', () => {
     it('table has horizontal scroll container and non-crushing cell bounds', () => {
-      const stdStyles = createStyles(lightColors, 'standard')
-      const compactStyles = createStyles(lightColors, 'compact')
+      const styles = createStyles(lightColors)
 
       // Scroll container properties
-      expect(stdStyles.tableContainer.alignSelf).toBe('stretch')
-      expect(stdStyles.tableScrollContent.minWidth).toBe('100%')
+      expect(styles.tableContainer.alignSelf).toBe('stretch')
+      expect(styles.tableScrollContent.minWidth).toBe('100%')
 
-      // Standard cell min-width and padding (column flex basis is planned per table in markdown.tsx)
-      expect(stdStyles.tableCell.minWidth).toBe(96)
-      expect(stdStyles.tableCell.paddingHorizontal).toBe(12)
-      expect(stdStyles.tableCell.paddingVertical).toBe(8)
-      expect(stdStyles.tableHeader.backgroundColor).toBe(lightColors.surfaceStrong)
-
-      // Compact cell min-width and padding
-      expect(compactStyles.tableCell.minWidth).toBe(80)
-      expect(compactStyles.tableCell.paddingHorizontal).toBe(8)
-      expect(compactStyles.tableCell.paddingVertical).toBe(6)
+      // Cell min-width and padding (column flex basis is planned per table in markdown.tsx)
+      expect(styles.tableCell.minWidth).toBe(80)
+      expect(styles.tableCell.paddingHorizontal).toBe(9)
+      expect(styles.tableCell.paddingVertical).toBe(7)
+      expect(styles.tableHeader.backgroundColor).toBe(lightColors.surfaceStrong)
     })
 
     it('table row spans full width so all cells in each row align vertically across columns', () => {
-      const stdStyles = createStyles(lightColors, 'standard')
-      expect(stdStyles.table.minWidth).toBe('100%')
-      expect(stdStyles.tableRow.minWidth).toBe('100%')
-      expect(stdStyles.tableRow.flexDirection).toBe('row')
+      const styles = createStyles(lightColors)
+      expect(styles.table.minWidth).toBe('100%')
+      expect(styles.tableRow.minWidth).toBe('100%')
+      expect(styles.tableRow.flexDirection).toBe('row')
     })
 
     it('dark theme table correctly uses theme-specific surface and borders', () => {
-      const darkStyles = createStyles(darkColors, 'standard')
+      const darkStyles = createStyles(darkColors)
       expect(darkStyles.tableHeader.backgroundColor).toBe(darkColors.surfaceStrong)
       expect(darkStyles.tableCell.borderColor).toBe(darkColors.border)
     })
@@ -202,7 +195,7 @@ describe('chat session typography and rich components', () => {
     })
 
     it('checkbox styles have proper size and alignments', () => {
-      const styles = createStyles(lightColors, 'standard')
+      const styles = createStyles(lightColors)
       expect(styles.checkboxChecked.width).toBe(16)
       expect(styles.checkboxChecked.height).toBe(16)
       expect(styles.checkboxChecked.borderRadius).toBe(4)
@@ -328,14 +321,14 @@ describe('chat session typography and rich components', () => {
     })
 
     it('callout card and standard blockquote have balanced container styling', () => {
-      const styles = createStyles(lightColors, 'standard')
+      const styles = createStyles(lightColors)
       expect(styles.calloutCard.borderRadius).toBe(12)
       expect(styles.calloutCard.borderWidth).toBe(1)
       expect(styles.calloutHeader.flexDirection).toBe('row')
 
       expect(styles.blockquote.borderLeftWidth).toBe(3)
       expect(styles.blockquote.borderRadius).toBe(6)
-      expect(styles.blockquote.backgroundColor).toBe(lightColors.surfaceStrong)
+      expect(styles.blockquote.backgroundColor).toBe(lightColors.toolSurface)
     })
   })
 })
