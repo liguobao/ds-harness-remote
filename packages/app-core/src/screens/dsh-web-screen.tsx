@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Modal, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Modal, Platform, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import WebView from 'react-native-webview'
 import { dshWebGrantSchema, type DshWebGrant } from '@dsh-remote/protocol'
@@ -133,7 +133,7 @@ export function DshWebScreen({ rpc, onClose }: { rpc: Rpc; onClose: () => void }
                   if (isFatalDshWebHttpError(nativeEvent, grant.url, source.uri)) setFailed(true)
                 }}
                 onContentProcessDidTerminate={() => setFailed(true)}
-                incognito
+                incognito={Platform.OS === 'ios'}
                 sharedCookiesEnabled={false}
                 thirdPartyCookiesEnabled={false}
                 setSupportMultipleWindows={false}

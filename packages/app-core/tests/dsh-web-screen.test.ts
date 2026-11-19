@@ -77,6 +77,7 @@ vi.mock('react', async importOriginal => {
 vi.mock('react-native', () => ({
   ActivityIndicator: 'ActivityIndicator',
   Modal: 'Modal',
+  Platform: { OS: 'android' },
   StyleSheet: { create: <T,>(styles: T) => styles },
   View: 'View',
 }))
@@ -208,7 +209,7 @@ describe('DshWebScreen helpers and lifecycle', () => {
         },
       },
       {
-        name: 'transient open failure offers retry without spurious close and enables incognito once recovered',
+        name: 'transient open failure offers retry without spurious close and shows the WebView once recovered',
         run: async () => {
           let calls = 0
           const rpc = vi.fn(async (method: string) => {
@@ -233,7 +234,6 @@ describe('DshWebScreen helpers and lifecycle', () => {
           const readyTree = renderScreen(rpc)
           const webView = findElement(readyTree, el => el.type === 'WebView')
           expect(webView).toBeDefined()
-          expect(webView?.props?.incognito).toBe(true)
 
           reactHarness.unmount()
           expect(rpc.mock.calls.map(([method]) => method)).toEqual(['dsh.web.open', 'dsh.web.open', 'dsh.web.close'])
