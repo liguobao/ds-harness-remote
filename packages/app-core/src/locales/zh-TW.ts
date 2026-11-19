@@ -659,8 +659,6 @@ const zhTW = {
     language: '語言', languageSystem: '跟隨系統', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '選擇“跟隨系統”後，App 會隨 Android 的語言設定自動切換。',
     compactHistorySaveFailed: '無法儲存會話精簡設定',
     compactHistory: '會話精簡模式', compactHistoryNote: '縮減歷史工具詳情，保留正文和狀態。需 Host 支援；切換後重新開啟會話生效。',
-    typographyDensity: '排版密度', typographyDensityNote: '調整正文行距、段落間距與氣泡邊距',
-    densityStandard: '標準', densityCompact: '緊湊', typographyDensitySaveFailed: '無法儲存排版密度設定',
     chatAppearance: '會話排版與配色',
     chatAppearanceNote: '自訂字體大小、字距、行距、主題色、氣泡與程式碼區塊樣式',
     chatAppearanceReset: '恢復預設',

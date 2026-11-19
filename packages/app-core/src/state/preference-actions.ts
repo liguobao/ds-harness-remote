@@ -10,7 +10,6 @@ import {
   saveCompactHistory,
   saveLanguagePreference,
   saveThemePreference,
-  saveTypographyDensity,
   saveStatusBarVisible,
   saveTransportPreference,
 } from '../services/storage'
@@ -18,7 +17,7 @@ import type { AppState } from './store-state'
 import type { SessionAccess } from './session-runtime'
 
 export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setTypographyDensity' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setDrawerLayoutMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setDrawerLayoutMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
@@ -74,11 +73,6 @@ export function createPreferenceActions({ set, get, runtime }: SessionAccess): P
     async setThemePreference(themePreference) {
       await saveThemePreference(themePreference)
       set({ themePreference })
-    },
-
-    async setTypographyDensity(typographyDensity) {
-      await saveTypographyDensity(typographyDensity)
-      set({ typographyDensity })
     },
 
     async setChatAppearance(partial) {

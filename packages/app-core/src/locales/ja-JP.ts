@@ -661,8 +661,6 @@ const jaJP = {
     language: "言語", languageSystem: "システム設定に従う", languageChinese: "简体中文", languageEnglish: "English", languageNote: "「システム設定に従う」を選ぶと、Android の言語設定に合わせて自動的に切り替わります。",
     compactHistorySaveFailed: "コンパクト会話設定を保存できませんでした",
     compactHistory: "会話履歴を簡略化", compactHistoryNote: "ツール履歴を短縮し、テキストとステータスを保持します。ホストのサポートが必要です。これを変更した後、会話を再開してください。",
-    typographyDensity: "レイアウト密度", typographyDensityNote: "行間、段落余白、メッセージの余白を調整します",
-    densityStandard: "標準", densityCompact: "コンパクト", typographyDensitySaveFailed: "レイアウト密度設定を保存できませんでした",
     chatAppearance: "チャットの書体と配色",
     chatAppearanceNote: "文字サイズ、行間、字間、アクセント色、吹き出しとコードスタイルを調整します",
     chatAppearanceReset: "リセット",

@@ -94,7 +94,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   language: getActiveLanguage(),
   compactHistory: false,
   themePreference: 'system',
-  typographyDensity: 'compact',
   chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
   activityDockMode: 'compact',
   drawerLayoutMode: 'compact',
