@@ -1077,8 +1077,8 @@ export function SettingsScreen({
               {account !== undefined && config !== undefined && identity !== undefined && (
                 <AccountMembershipRows key={JSON.stringify([config.baseUrl, account, identity.deviceId])} active={active} baseUrl={config.baseUrl} identity={identity} />
               )}
-              <GroupRow icon={KeyRound} label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
-              <GroupRow icon={Cable} label={zhCN.settings.protocol} value="DSH Remote v1" />
+              <GroupRow icon={KeyRound} label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} onPress={() => showIdentity(zhCN.settings.loginMethod, config?.loginMethod ? loginMethodLabel(config.loginMethod) : undefined)} disabled={!config?.loginMethod} />
+              <GroupRow icon={Cable} label={zhCN.settings.protocol} value="DSH Remote v1" onPress={() => showIdentity(zhCN.settings.protocol, 'DSH Remote v1')} />
             </GroupCard>
 
             <SectionTitle>{zhCN.settings.transport}</SectionTitle>
