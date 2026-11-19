@@ -259,16 +259,17 @@ export class SessionTransferPeer {
         if (state.received !== input.totalBytes || createHash('sha256').update(data).digest('hex') !== input.sha256) {
           fail('INVALID_PARAMS', 'The imported data does not match its size or digest.')
         }
-        this.incoming = undefined
         const key = this.commitKey(state.batchId, input.requestId)
         const fingerprint = JSON.stringify([state.workspaceId, state.sourceSessionId, input.sha256])
         for (const [entry, commit] of this.commits) if (commit.expires <= Date.now()) this.commits.delete(entry)
         const previous = this.commits.get(key)
         if (previous) {
           if (previous.fingerprint !== fingerprint) fail('INVALID_PARAMS', 'The request ID was used for another import.')
+          this.incoming = undefined
           return previous.result
         }
         if (this.commits.size >= 1024) fail('RATE_LIMITED', 'Too many recent session imports.')
+        this.incoming = undefined
         const result = this.write(state.workspaceId, data)
         const commit = { fingerprint, result, expires: Infinity }
         this.commits.set(key, commit)
