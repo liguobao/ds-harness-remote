@@ -35,7 +35,7 @@ export interface GatewayOptions extends GatewayTimingOptions {
  */
 type ConnectionState = 'awaiting_hello' | 'authenticated' | 'closing' | 'closed'
 
-type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; nonce?: string; evictedTombstoneUntil?: number }
+type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; pendingNonces: string[]; evictedTombstoneUntil?: number }
 type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: TransportName[]; iceCandidates: number }
 type DroppedLink = { host: string; client: string; expiresAt: number; droppedFrames: number }
 
@@ -181,8 +181,10 @@ export class Gateway {
           this.disconnect(peer.id, 'CONNECTION_FAILED')
           continue
         }
-        peer.nonce = randomUUID()
-        this.send(peer, createControlFrame('ping', { nonce: peer.nonce }))
+        const nonce = randomUUID()
+        peer.pendingNonces.push(nonce)
+        if (peer.pendingNonces.length > 2) peer.pendingNonces.shift()
+        this.send(peer, createControlFrame('ping', { nonce }))
       }
       for (const link of this.links.values()) {
         if (link.stage !== 'ready' && Date.now() - link.created > 30_000) this.drop(link, 'CONNECTION_FAILED')
@@ -441,7 +443,7 @@ export class Gateway {
           // Keep the negotiated set (what hello.ack advertises), so a link can
           // never coordinate a transport this Server did not offer — e.g. TURN
           // while no TURN deployment is configured.
-          peer = { ws, id: device.deviceId, role: device.role, capabilities: this.negotiatedCapabilities(p.capabilities), version: p.clientVersion ?? device.clientVersion, lastPong: Date.now() }
+          peer = { ws, id: device.deviceId, role: device.role, capabilities: this.negotiatedCapabilities(p.capabilities), version: p.clientVersion ?? device.clientVersion, lastPong: Date.now(), pendingNonces: [] }
           this.peers.set(peer.id, peer)
           this.store.touch(peer.id, p.clientVersion, p.harnessVersion)
           this.logger.info('ws_hello_authenticated', {
@@ -514,7 +516,14 @@ export class Gateway {
     const p = frame.payload as Record<string, unknown>
     if (frame.type === 'ping') { this.send(peer, createControlFrame('pong', { nonce: p.nonce })); return }
     if (frame.type === 'pong') {
-      if (peer.nonce && p.nonce === peer.nonce) { peer.lastPong = Date.now(); peer.nonce = undefined }
+      const nonce = typeof p.nonce === 'string' ? p.nonce : undefined
+      if (nonce !== undefined) {
+        const index = peer.pendingNonces.indexOf(nonce)
+        if (index !== -1) {
+          peer.lastPong = Date.now()
+          peer.pendingNonces.splice(0, index + 1)
+        }
+      }
       return
     }
     if (frame.type === 'connect.request') {

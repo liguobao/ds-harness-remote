@@ -1518,4 +1518,59 @@ describe('stale link frame dropping and configurable rate limit', () => {
       ;(globalThis as Record<string, unknown>).WebSocket = prevWs
     }
   })
+
+  it('accepts a delayed pong for the previous ping nonce while rejecting stale or replayed nonces', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      await app.close()
+      await start(password, [], { heartbeatIntervalMs: 25_000, heartbeatDisconnectMs: 75_000 })
+      accountToken = (await request('/auth/login', 'POST', { email: account, password })).data.token
+      const d = await device()
+      const wire = await socket(d)
+      await wire.next('hello.ack')
+      const peer = app.gateway.peers.get(d.deviceId)!
+
+      // Two consecutive pings arrive across a jitter boundary before the client answers the first.
+      vi.advanceTimersByTime(25_000)
+      const ping1 = await wire.next('ping')
+      vi.advanceTimersByTime(25_000)
+      const ping2 = await wire.next('ping')
+
+      const baseline = Date.now() - 30_000
+      peer.lastPong = baseline
+      wire.send('pong', { nonce: ping1.nonce })
+      wire.send('ping', { nonce: 'sync-1' })
+      await wire.next('pong')
+      expect(peer.lastPong).toBeGreaterThan(baseline)
+
+      // Replaying the already-consumed previous nonce must not refresh lastPong again.
+      peer.lastPong = baseline
+      wire.send('pong', { nonce: ping1.nonce })
+      wire.send('ping', { nonce: 'sync-2' })
+      await wire.next('pong')
+      expect(peer.lastPong).toBe(baseline)
+
+      // The second ping nonce remains valid and refreshes lastPong.
+      wire.send('pong', { nonce: ping2.nonce })
+      wire.send('ping', { nonce: 'sync-3' })
+      await wire.next('pong')
+      expect(peer.lastPong).toBeGreaterThan(baseline)
+
+      // After three new pings, the oldest nonce has been evicted from the 2-nonce window.
+      vi.advanceTimersByTime(25_000)
+      const ping3 = await wire.next('ping')
+      vi.advanceTimersByTime(25_000)
+      await wire.next('ping')
+      vi.advanceTimersByTime(25_000)
+      await wire.next('ping')
+
+      peer.lastPong = baseline
+      wire.send('pong', { nonce: ping3.nonce })
+      wire.send('ping', { nonce: 'sync-4' })
+      await wire.next('pong')
+      expect(peer.lastPong).toBe(baseline)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

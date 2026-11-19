@@ -92,6 +92,8 @@ interface PendingTunnel {
   relayAssignment?: RelayAssignment
   dataSocket?: WebSocketLike
   dataReady?: boolean
+  dataSocketOpening?: Promise<void>
+  abortDataSocketOpen?: () => void
 }
 
 const DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
@@ -775,7 +777,9 @@ export class HostServerConnection {
     if (tunnel === undefined || payload.targetDeviceId !== this.identity.deviceId || payload.step !== 1) {
       throw new ControlConnectionError('SECURE_CHANNEL_FAILED', 'Noise IK handshake is not valid for this connection.')
     }
-    if (tunnel.transport === 'negotiating' && (tunnel.rtc !== undefined || tunnel.relayAssignment !== undefined)) {
+    const awaitingRelayData = tunnel.transport === 'relay' && tunnel.relayAssignment !== undefined && !tunnel.dataReady
+    if ((tunnel.transport === 'negotiating' && (tunnel.rtc !== undefined || tunnel.relayAssignment !== undefined))
+      || awaitingRelayData) {
       // transport.selected and secure.handshake traverse the Server control
       // plane separately. Do not guess Relay if forwarding or the responder's
       // RTC-ready callback delivers the handshake first; resume as soon as
@@ -820,9 +824,11 @@ export class HostServerConnection {
           connectionId: shortId(tunnel.connectionId), reason: diagnosticReason(error),
         })
       }
-      tunnel.dataSocket?.close()
+      tunnel.abortDataSocketOpen?.()
+      const dataSocket = tunnel.dataSocket
       tunnel.dataSocket = undefined
       tunnel.dataReady = false
+      dataSocket?.close()
     }, mode, this.rtcFactoryProvider === undefined || this.config.forceRelay ? undefined : (publishEvent: (message: RemoteMessage) => Promise<void>): TransportUpgradeHost => new TransportUpgradeHost({
       connectionId: tunnel.connectionId,
       peerDeviceId: tunnel.peer.deviceId,
@@ -848,6 +854,8 @@ export class HostServerConnection {
       },
       adoptRtc: async (rtc, upgradedMode, attemptId) => {
         const prevRtc = tunnel.rtc
+        const drainingRtc = prevRtc !== undefined && prevRtc !== rtc ? prevRtc : undefined
+        const drainingDataSocket = drainingRtc === undefined ? tunnel.dataSocket : undefined
         tunnel.rtc = rtc
         tunnel.transport = wireFromTransportTier(upgradedMode)
         tunnel.transportMode = upgradedMode
@@ -861,20 +869,32 @@ export class HostServerConnection {
             void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
           }
         })
-        if (prevRtc !== undefined && prevRtc !== rtc) {
+        if (drainingRtc !== undefined) {
           tunnel.drainingRtcs ??= new Set()
-          tunnel.drainingRtcs.add(prevRtc)
+          tunnel.drainingRtcs.add(drainingRtc)
         }
-        const endCounter = await channel.upgradeTransport(
-          upgradedMode,
-          (counter: number, ciphertext: Uint8Array) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
-          prevRtc,
-          attemptId,
-          (stale: RtcDataChannelTransport) => {
-            tunnel.drainingRtcs?.delete(stale)
-            void stale.close().catch(() => undefined)
-          },
-        )
+        const endCounter = drainingRtc !== undefined
+          ? await channel.upgradeTransport(
+              upgradedMode,
+              (counter: number, ciphertext: Uint8Array) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
+              drainingRtc,
+              attemptId,
+              (stale: RtcDataChannelTransport) => {
+                tunnel.drainingRtcs?.delete(stale)
+                void stale.close().catch(() => undefined)
+              },
+            )
+          : await channel.upgradeTransport(
+              upgradedMode,
+              (counter: number, ciphertext: Uint8Array) => rtc.send(wrapUpgradedTransportFrame(counter, ciphertext)),
+              drainingDataSocket,
+              attemptId,
+              drainingDataSocket === undefined
+                ? undefined
+                : (stale: WebSocketLike) => {
+                    this.retireDataSocket(tunnel, stale)
+                  },
+            )
         return endCounter
       },
       confirmPreviousLegDrain: (attemptId, clientPreviousLegEndCounter) => {
@@ -899,8 +919,11 @@ export class HostServerConnection {
       : tunnel.transport === 'relay' && tunnel.dataReady && tunnel.dataSocket?.readyState === 1 ? tunnel.relayRecoveryTicket : undefined
     if (leaseTicket) {
       tunnel.lease = new ControlLease(tunnel.connectionId, leaseTicket, payload => {
+        if (!this.online) {
+          throw new ControlConnectionError('CONNECTION_FAILED', 'Server control socket is not authenticated.')
+        }
         const heartbeatTimeoutMs = Math.max(15_000, this.heartbeatIntervalMs * 3)
-        if (this.online && this.lastActiveAt !== undefined && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
+        if (this.lastActiveAt !== undefined && Date.now() - this.lastActiveAt >= heartbeatTimeoutMs) {
           if (this.forceCloseSocket) this.forceCloseSocket(4009, 'heartbeat timeout')
           else this.socket?.close(4009, 'heartbeat timeout')
           throw new Error('Control heartbeat timed out')
@@ -917,6 +940,8 @@ export class HostServerConnection {
   }
 
   private async resumePendingHandshake(tunnel: PendingTunnel): Promise<void> {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return
+    if (tunnel.transport === 'relay' && tunnel.relayAssignment !== undefined && !tunnel.dataReady) return
     const payload = tunnel.pendingHandshake
     if (payload === undefined || tunnel.channel !== undefined || tunnel.transport === 'negotiating') return
     tunnel.pendingHandshake = undefined
@@ -1071,25 +1096,7 @@ export class HostServerConnection {
       tunnel.transport = 'relay'
       tunnel.transportMode = undefined
       await rtc?.close()
-      if (tunnel.relayAssignment !== undefined) {
-        try {
-          await this.openDataSocket(tunnel)
-        } catch (error) {
-          this.logger.warn('relay data attach failed', {
-            connectionId: shortId(tunnel.connectionId),
-            peerDeviceId: shortId(tunnel.peer.deviceId),
-            reason: diagnosticReason(error),
-          })
-          await this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
-          this.sendControl('error', {
-            code: 'CONNECTION_FAILED',
-            message: 'Relay data connection failed.',
-            retryable: true,
-            connectionId: tunnel.connectionId,
-          })
-          return
-        }
-      }
+      if (!await this.attachRelayDataSocket(tunnel)) return
       await this.resumePendingHandshake(tunnel)
       return
     }
@@ -1232,7 +1239,72 @@ export class HostServerConnection {
         ...webrtcDiagnosticsLogFields(diagnostics),
       })
     }
-    await this.resumePendingHandshake(tunnel)
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.channel !== undefined || tunnel.transport !== 'relay') return
+    if (!await this.attachRelayDataSocket(tunnel)) return
+    try {
+      await this.resumePendingHandshake(tunnel)
+    } catch (handshakeError) {
+      this.logger.warn('pending secure handshake failed', {
+        connectionId: shortId(tunnel.connectionId),
+        reason: diagnosticReason(handshakeError),
+      })
+      await this.dropTunnel(tunnel.connectionId, 'SECURE_CHANNEL_FAILED')
+    }
+  }
+
+  private async attachRelayDataSocket(tunnel: PendingTunnel): Promise<boolean> {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return false
+    if (tunnel.relayAssignment === undefined || tunnel.dataReady) return true
+    try {
+      await this.openDataSocket(tunnel)
+    } catch (error) {
+      if (this.tunnels.get(tunnel.connectionId) !== tunnel) return false
+      this.logger.warn('relay data attach failed', {
+        connectionId: shortId(tunnel.connectionId),
+        peerDeviceId: shortId(tunnel.peer.deviceId),
+        reason: diagnosticReason(error),
+      })
+      await this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+      if (this.socket?.readyState === 1) {
+        try {
+          this.sendControl('error', {
+            code: 'CONNECTION_FAILED',
+            message: 'Relay data connection failed.',
+            retryable: true,
+            connectionId: tunnel.connectionId,
+          })
+        } catch { /* control socket already closed */ }
+      }
+      return false
+    }
+    return this.tunnels.get(tunnel.connectionId) === tunnel && tunnel.transport === 'relay'
+  }
+
+  private retireDataSocket(tunnel: PendingTunnel, socket: WebSocketLike | undefined): void {
+    if (socket === undefined) return
+    if (tunnel.dataSocket === socket) {
+      tunnel.dataSocket = undefined
+      tunnel.dataReady = false
+    }
+    socket.onopen = null
+    socket.onmessage = null
+    if (socket.readyState === 3) {
+      socket.onerror = null
+      socket.onclose = null
+      return
+    }
+    socket.onerror = () => undefined
+    socket.onclose = () => {
+      socket.onopen = null
+      socket.onerror = null
+      socket.onclose = null
+    }
+    try {
+      socket.close(1000, 'transport upgraded')
+    } catch {
+      socket.onerror = null
+      socket.onclose = null
+    }
   }
 
   private sendTransportSelected(tunnel: PendingTunnel, transport: SelectedTransport): void {
@@ -1277,23 +1349,35 @@ export class HostServerConnection {
   }
 
   private async openDataSocket(tunnel: PendingTunnel): Promise<void> {
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel) throw new Error('Relay tunnel closed')
+    if (tunnel.dataReady && tunnel.dataSocket !== undefined) return
+    if (tunnel.dataSocketOpening !== undefined) return tunnel.dataSocketOpening
     const assignment = tunnel.relayAssignment
-    if (assignment === undefined || tunnel.dataSocket !== undefined) return
+    if (assignment === undefined) return
     if (typeof assignment.relayEndpoint !== 'string' || typeof assignment.relayTicket !== 'string') return
     const socket = this.createWebSocket(assignment.relayEndpoint)
     socket.binaryType = 'arraybuffer'
     tunnel.dataSocket = socket
-    await new Promise<void>((resolve, reject) => {
+    const opening = new Promise<void>((resolve, reject) => {
       let settled = false
       const timer = setTimeout(() => finish(new Error('Relay data attach timed out')), 15_000)
       const finish = (error?: Error): void => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        if (error === undefined) resolve()
-        else reject(error)
+        if (tunnel.abortDataSocketOpen === abort) tunnel.abortDataSocketOpen = undefined
+        if (tunnel.dataSocketOpening === opening) tunnel.dataSocketOpening = undefined
+        if (error === undefined) {
+          resolve()
+        } else {
+          if (!tunnel.dataReady) this.retireDataSocket(tunnel, socket)
+          reject(error)
+        }
       }
+      const abort = (): void => finish(new Error('Relay tunnel closed'))
+      tunnel.abortDataSocketOpen = abort
       socket.onopen = () => {
+        if (tunnel.dataSocket !== socket) return
         try {
           socket.send(encodeRelayDataFrame(createRelayDataFrame('relay.attach', {
             connectionId: tunnel.connectionId,
@@ -1306,10 +1390,15 @@ export class HostServerConnection {
         }
       }
       socket.onmessage = event => {
+        if (tunnel.dataSocket !== socket) return
         try {
           if (typeof event.data !== 'string') throw new ControlConnectionError('INVALID_MESSAGE', 'Relay data frames must be text JSON.')
           const frame = decodeRelayDataFrame(event.data, this.controlFrameLimits)
           if (frame.type === 'relay.ready') {
+            if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.transport !== 'relay') {
+              finish(new Error('Relay tunnel closed'))
+              return
+            }
             if (frame.payload.connectionId !== tunnel.connectionId
               || (assignment.relayEpoch !== undefined && frame.payload.epoch !== assignment.relayEpoch)) {
               throw new ControlConnectionError('INVALID_MESSAGE', 'Relay data attach does not match the assigned connection.')
@@ -1318,36 +1407,49 @@ export class HostServerConnection {
             finish()
             return
           }
-          void this.handleDataSocketFrame(tunnel, frame.type, frame.payload).catch(error => {
+          void this.handleDataSocketFrame(tunnel, socket, frame.type, frame.payload).catch(error => {
             finish(asError(error))
-            void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+            if (tunnel.dataSocket === socket && tunnel.transport === 'relay') {
+              void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+            }
           })
         } catch (error) {
           finish(asError(error))
-          void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+          if (tunnel.dataSocket === socket && tunnel.transport === 'relay') {
+            void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+          }
         }
       }
-      socket.onerror = () => finish(new Error('Relay data socket failed'))
+      socket.onerror = () => {
+        if (tunnel.dataSocket !== socket) return
+        finish(new Error('Relay data socket failed'))
+      }
       socket.onclose = () => {
+        if (tunnel.dataSocket !== socket) return
         if (!tunnel.dataReady) finish(new Error('Relay data socket closed before attach'))
-        else void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+        else if (tunnel.transport === 'relay') void this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+        else this.retireDataSocket(tunnel, socket)
       }
     })
+    tunnel.dataSocketOpening = opening
+    await opening
   }
 
   private async handleDataSocketFrame(
     tunnel: PendingTunnel,
+    socket: WebSocketLike,
     type: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    if (this.tunnels.get(tunnel.connectionId) !== tunnel) return
+    if (this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.dataSocket !== socket) return
     if (type === 'relay.detach') {
-      await this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+      if (tunnel.transport === 'relay') await this.dropTunnel(tunnel.connectionId, 'CONNECTION_FAILED')
+      else this.retireDataSocket(tunnel, socket)
       return
     }
     if (type === 'ping') {
-      if (tunnel.dataSocket?.readyState === 1) {
-        tunnel.dataSocket.send(encodeRelayDataFrame(createRelayDataFrame('pong', payload), this.controlFrameLimits))
+      if (tunnel.dataSocket === socket && socket.readyState === 1) {
+        socket.send(encodeRelayDataFrame(createRelayDataFrame('pong', payload), this.controlFrameLimits))
       }
       return
     }
@@ -1371,8 +1473,12 @@ export class HostServerConnection {
     this.tunnels.clear()
     await Promise.all(tunnels.map(async tunnel => {
       tunnel.lease?.stop()
+      tunnel.abortDataSocketOpen?.()
       if (tunnel.rtc !== undefined) await tunnel.rtc.close()
-      tunnel.dataSocket?.close()
+      const dataSocket = tunnel.dataSocket
+      tunnel.dataSocket = undefined
+      tunnel.dataReady = false
+      dataSocket?.close()
       if (tunnel.channel !== undefined) await tunnel.channel.close()
       else tunnel.noise.destroy()
     }))
@@ -1389,6 +1495,7 @@ export class HostServerConnection {
     this.notifyTunnelClosed(tunnel)
     this.tunnels.delete(connectionId)
     tunnel.lease?.stop()
+    tunnel.abortDataSocketOpen?.()
     try {
       await tunnel.rtc?.close()
       for (const stale of tunnel.drainingRtcs ?? []) await stale.close().catch(() => undefined)
@@ -1399,9 +1506,10 @@ export class HostServerConnection {
         reason: diagnosticReason(error),
       })
     }
-    tunnel.dataSocket?.close()
+    const dataSocket = tunnel.dataSocket
     tunnel.dataSocket = undefined
     tunnel.dataReady = false
+    dataSocket?.close()
     if (tunnel.channel !== undefined) {
       try {
         const closed = detail === undefined
@@ -1443,12 +1551,11 @@ const TERMINAL_AUTH_ERRORS = new Set([
   'TOKEN_EXPIRED',
 ])
 
-interface DrainingRtcLeg {
-  rtc: RtcDataChannelTransport
-  attemptId: string
+interface DrainingLeg {
+  readonly attemptId: string
   endCounter?: number
-  timer: ReturnType<typeof setTimeout>
-  dispose: (rtc: RtcDataChannelTransport) => void
+  readonly timer: ReturnType<typeof setTimeout>
+  readonly dispose: () => void
 }
 
 export class ServerNoiseChannel implements AuthenticatedPeerChannel {
@@ -1461,7 +1568,7 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
   private transmitSequenced?: (counter: number, ciphertext: Uint8Array) => Promise<void>
 
   private readonly reorderBuffer: SequencedCiphertextReorderBuffer
-  private readonly drainingLegs = new Map<RtcDataChannelTransport, DrainingRtcLeg>()
+  private readonly drainingLegs = new Map<object, DrainingLeg>()
   private readonly handlers = new Set<(message: RemoteMessage) => void>()
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
@@ -1494,37 +1601,36 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
 
   get outboundCounter(): number { return Number(this.tunnel.noise.sendingCounter()) }
 
-  async upgradeTransport(
+  async upgradeTransport<T extends object = RtcDataChannelTransport>(
     nextMode: 'LAN' | 'P2P' | 'TURN',
     nextTransmit: (counter: number, ciphertext: Uint8Array) => Promise<void>,
-    previousRtc?: RtcDataChannelTransport,
+    previousLeg?: T,
     attemptId = '',
-    disposePreviousRtc?: (rtc: RtcDataChannelTransport) => void,
+    disposePreviousLeg?: (leg: T) => void,
   ): Promise<number> {
-    // Do NOT close previousRtc during activate: the Client is still using
-    // previousRtc as activeOutbound until the activate response arrives and
-    // switchOutboundLeg completes. Retain previousRtc in drainingLegs until
+    // Do NOT close the previous leg during activate: the Client is still using
+    // it as activeOutbound until the activate response arrives and
+    // switchOutboundLeg completes. Retain it in drainingLegs until
     // confirmPreviousLegDrain supplies the true final outbound watermark.
     this.mode = nextMode
     this.transmitSequenced = nextTransmit
     const endCounter = Number(this.tunnel.noise.sendingCounter())
-    if (previousRtc !== undefined && disposePreviousRtc !== undefined && previousRtc !== undefined) {
-      const existing = this.drainingLegs.get(previousRtc)
+    if (previousLeg !== undefined && disposePreviousLeg !== undefined) {
+      const existing = this.drainingLegs.get(previousLeg)
       if (existing !== undefined) clearTimeout(existing.timer)
       const timer = setTimeout(() => {
-        const leg = this.drainingLegs.get(previousRtc)
+        const leg = this.drainingLegs.get(previousLeg)
         if (leg !== undefined) {
-          this.drainingLegs.delete(previousRtc)
-          leg.dispose(previousRtc)
+          this.drainingLegs.delete(previousLeg)
+          leg.dispose()
         }
       }, DEFAULT_PREVIOUS_LEG_DRAIN_MS)
       timer.unref?.()
-      this.drainingLegs.set(previousRtc, {
-        rtc: previousRtc,
+      this.drainingLegs.set(previousLeg, {
         attemptId,
         endCounter: undefined,
         timer,
-        dispose: disposePreviousRtc,
+        dispose: () => disposePreviousLeg(previousLeg),
       })
     }
     return endCounter
@@ -1533,13 +1639,13 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
   confirmPreviousLegDrain(attemptId: string, clientPreviousLegEndCounter: number): void {
     if (this.closed) return
     const received = Number(this.tunnel.noise.receivingCounter())
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [legKey, leg] of this.drainingLegs) {
       if (leg.attemptId !== attemptId) continue
       leg.endCounter = clientPreviousLegEndCounter
       if (received >= clientPreviousLegEndCounter) {
         clearTimeout(leg.timer)
-        this.drainingLegs.delete(rtc)
-        leg.dispose(rtc)
+        this.drainingLegs.delete(legKey)
+        leg.dispose()
       }
     }
   }
@@ -1583,11 +1689,11 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     const plaintext = this.incoming.decode(this.tunnel.noise.decrypt(ciphertext))
     const currentReceiving = Number(this.tunnel.noise.receivingCounter())
     this.reorderBuffer.onExpectedAdvanced(currentReceiving)
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [legKey, leg] of this.drainingLegs) {
       if (leg.endCounter !== undefined && currentReceiving >= leg.endCounter) {
         clearTimeout(leg.timer)
-        this.drainingLegs.delete(rtc)
-        leg.dispose(rtc)
+        this.drainingLegs.delete(legKey)
+        leg.dispose()
       }
     }
     if (plaintext === undefined) return
@@ -1625,9 +1731,9 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     if (this.closed) return
     this.closed = true
     this.reorderBuffer.clear()
-    for (const [rtc, leg] of this.drainingLegs) {
+    for (const [, leg] of this.drainingLegs) {
       clearTimeout(leg.timer)
-      leg.dispose(rtc)
+      leg.dispose()
     }
     this.drainingLegs.clear()
     this.handlers.clear()
