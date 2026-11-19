@@ -1,4 +1,6 @@
+import { isAcpManagedBackend } from '../lib/workspace-key'
 import { chatImageAttachmentReference, createChatImageLoader } from '../services/chat-image-loader'
+import { cursorNativeId, foldAcpHistory, readAcpHistory } from '../services/cursor'
 import { loadWorkspacePreview } from '../services/workspace-file-preview'
 import type { RemoteSession } from '../types'
 import { create } from 'zustand'
@@ -9,7 +11,7 @@ import { createConnectionActions } from './connection-actions'
 import { createPreferenceActions } from './preference-actions'
 import { createPromptActions } from './prompt-actions'
 import { createScheduleActions } from './schedule-actions'
-import { createSessionActions } from './session-actions'
+import { acpClientForBackend, createSessionActions, hasAcpBackendFor } from './session-actions'
 import { createSessionEventActions } from './session-event-actions'
 import { SessionRuntime } from './session-runtime'
 import type { AppState } from './store-state'
@@ -126,18 +128,54 @@ export function sessionChatImageLoader(session: RemoteSession) {
         || runtime.connection.requireProxy() !== proxy
         || state.selectedSession?.sessionId !== session.sessionId) throw new Error('Image connection expired')
     },
-    attachment: (sessionId, image, signal) => {
+    attachment: async (sessionId, image, signal) => {
       if (session.backend === 'codex') {
         if (image.attachmentId === undefined) throw new Error('Image attachment unavailable')
         return runtime.connection.requireCodex().request('dsh/sessionAttachment', {
           threadId: sessionId.replace(/^codex:/u, ''), attachmentId: image.attachmentId,
         }, signal)
       }
+      if (isAcpManagedBackend(session.backend)) {
+        if (image.attachmentId === undefined || !hasAcpBackendFor(runtime.connection, session.backend)) {
+          throw new Error('Image attachment unavailable')
+        }
+        const acpClient = acpClientForBackend(runtime.connection, session.backend)
+        const nativeId = cursorNativeId(session)
+        let events: unknown[] = []
+        if (typeof acpClient.loadSessionDetails === 'function') {
+          events = (await readAcpHistory(acpClient, nativeId, session.backend, signal)).events
+        } else {
+          const result = await acpClient.transferCall('dsh/sessionHistory', { sessionId: nativeId, backend: session.backend }, signal)
+          if (typeof result === 'object' && result !== null && Array.isArray((result as { events?: unknown }).events)) {
+            events = (result as { events: unknown[] }).events
+          }
+        }
+        for (const item of foldAcpHistory(events, session.sessionId)) {
+          if (item.kind !== 'message' && item.kind !== 'tool') continue
+          for (const candidate of item.images ?? []) {
+            if (candidate.attachmentId !== image.attachmentId || !candidate.uri?.startsWith('data:')) continue
+            const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/u.exec(candidate.uri)
+            if (!match) continue
+            return {
+              attachment: {
+                attachmentId: image.attachmentId,
+                mediaType: candidate.mediaType ?? match[1],
+                ...(candidate.bytes !== undefined ? { bytes: candidate.bytes } : {}),
+                ...(candidate.width !== undefined ? { width: candidate.width } : {}),
+                ...(candidate.height !== undefined ? { height: candidate.height } : {}),
+                ...(candidate.name !== undefined ? { name: candidate.name } : {}),
+              },
+              data: match[2],
+            }
+          }
+        }
+        throw new Error('Image attachment unavailable')
+      }
       if (session.backend !== undefined && session.backend !== 'harness') throw new Error('Image attachment unavailable')
       return runtime.connection.readSessionImageAttachment(sessionId, chatImageAttachmentReference(image), signal)
     },
     workspace: (path, signal) => {
-      if (session.backend === 'codex' || session.backend === 'claude' || session.backend === 'hermes') throw new Error('Image preview unavailable')
+      if (session.backend === 'codex') throw new Error('Image preview unavailable')
       return loadWorkspacePreview(runtime.connection.requireSessionTools(session.sessionId), session.sessionId, path, 'image', signal)
     },
   })

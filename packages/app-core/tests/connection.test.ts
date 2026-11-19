@@ -541,4 +541,31 @@ afterEach(async () => {
 
     await connection.close()
   })
+
+  it('clears cursor client when ACP backends become empty and refreshes capabilities on live switches', async () => {
+    testState.capabilities = ['harness.remote.v1', 'agent.acp.opencode.v1']
+    testState.workspaceTypes = [{ id: 'opencode', name: 'OpenCode', capability: 'agent.acp.opencode.v1', available: true }]
+    const connection = new AndroidRemoteConnection()
+    await connection.connect('https://server.example.com', identity, host, 'access-token', () => undefined, { forceRelay: true })
+
+    expect(connection.hasOpencode()).toBe(true)
+    expect(connection.requireOpencode().supportsArchive('opencode')).toBe(false)
+
+    // Host advertises archive capability later: ??= must not block updating AgentAcpClient capabilities.
+    testState.capabilities = ['harness.remote.v1', 'agent.acp.opencode.v1', 'agent.acp.opencode.archive.v1']
+    await connection.refreshBackends()
+    expect(connection.requireOpencode().supportsArchive('opencode')).toBe(true)
+
+    // When all ACP backends become unavailable, this.cursor must be cleared.
+    testState.workspaceTypes = [{ id: 'opencode', name: 'OpenCode', capability: 'agent.acp.opencode.v1', available: false }]
+    await connection.refreshBackends()
+    expect(connection.hasOpencode()).toBe(false)
+    expect(connection.hasAcpBackend('opencode')).toBe(false)
+    expect(() => connection.requireAcpBackend('opencode')).toThrow()
+    expect(() => connection.requireSessionTools('opencode:ses_1').listFiles('opencode:ses_1', '.')).not.toThrow()
+    // Ensure requireSessionTools fell back to Harness tools rather than AcpSessionTools with a stale cursor.
+    expect(testState.cores[0]?.rpcCalls.some(c => c.method === 'agent.acp.call')).toBe(false)
+
+    await connection.close()
+  })
 })

@@ -201,3 +201,29 @@ it('keeps the last non-empty rows when a later poll knows nothing yet', async ()
   expect(memory.getCachedGroupRound('host-a', 'room', 'call:1')).toEqual([{ text: 'said more' }])
   await memory.clearBrowseMemory()
 })
+
+it('persists and restores valid draft images and quotes while dropping malformed image entries', async () => {
+  const a = await load()
+  const scope = 'scope-drafts'
+  const validImage = {
+    uri: 'file:///draft/photo.png',
+    mediaType: 'image/png' as const,
+    data: 'iVBORw0KGgo=',
+    bytes: 8,
+    width: 10,
+    height: 10,
+    name: 'photo.png',
+  }
+  a.updateBrowseEntry(scope, 's-draft', {
+    draft: 'explain this',
+    images: [validImage, { uri: 'invalid-only' } as never],
+    quotes: ['quoted snippet 1', '', 'quoted snippet 2'],
+  })
+  await a.flushBrowseMemory()
+  const b = await load()
+  const entry = b.useBrowseMemory.getState().entries[b.browseKey(scope, 's-draft')]!
+  expect(entry.draft).toBe('explain this')
+  expect(entry.images).toEqual([validImage])
+  expect(entry.quotes).toEqual(['quoted snippet 1', 'quoted snippet 2'])
+  await b.clearBrowseMemory()
+})

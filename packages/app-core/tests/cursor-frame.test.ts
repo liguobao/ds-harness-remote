@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyCursorFrame, foldAcpHistory } from '../src/services/cursor'
+import { applyCursorFrame, foldAcpHistory, mergeAcpHistoryAndLive } from '../src/services/cursor'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { ChatItem } from '../src/types'
 
@@ -135,5 +135,79 @@ describe('applyCursorFrame', () => {
       { kind: 'message', role: 'user', text: '请检查项目', nativeSeq: 0, nativeTime: 100 },
       { kind: 'message', role: 'assistant', text: '项目结构正常。', reasoning: '先读取目录', turn: '1', nativeSeq: 1, nativeTime: 200 },
     ])
+  })
+
+  it('keeps the active ACP turn intact across trailing optimistic user messages and user_message_chunk', () => {
+    const sid = 'antigravity:acp-turn'
+    const frame = (update: Record<string, unknown>) => ({
+      streamId: 's1',
+      frame: { method: 'session/update', params: { sessionId: 'acp-turn', update } },
+    })
+    let messages = applyCursorFrame([], sid, frame({ sessionUpdate: 'tool_call', callId: 't1', name: 'bash' }))
+    const turnId = messages[0]!.turn
+    expect(turnId).toMatch(/^acp-live:/)
+
+    // Append an optimistic local user message mid-turn (e.g. queued/steered)
+    messages = [
+      ...messages,
+      { kind: 'message', id: 'local:queued-1', sessionId: sid, role: 'user', text: 'next prompt', createdAt: 10 },
+    ]
+    messages = applyCursorFrame(messages, sid, frame({ sessionUpdate: 'user_message_chunk', text: 'echoed' }))
+    messages = applyCursorFrame(messages, sid, frame({ sessionUpdate: 'agent_message_chunk', text: 'Working...' }))
+    expect(messages.at(-1)?.turn).toBe(turnId)
+
+    messages = applyCursorFrame(messages, sid, frame({ sessionUpdate: 'prompt_completed', stopReason: 'end_turn' }))
+    expect(messages[0]).toMatchObject({ kind: 'tool', turn: turnId, state: 'finished', turnEnd: { reason: 'completed' } })
+    expect(messages.at(-1)).toMatchObject({ kind: 'message', role: 'assistant', text: 'Working...', turn: turnId, turnEnd: { reason: 'completed' } })
+
+    // A subsequent turn after turnEnd must open a fresh acp-live turn.
+    messages = applyCursorFrame(messages, sid, frame({ sessionUpdate: 'agent_message_chunk', text: 'Turn 2' }))
+    expect(messages.at(-1)?.turn).not.toBe(turnId)
+  })
+
+  it('deduplicates ACP pure-text and image turns without collapsing independent identical assistant replies', () => {
+    const sid = 'antigravity:acp-merge'
+    const historyImg = { attachmentId: 'agy-image:1', sessionId: sid, uri: 'data:image/png;base64,iVBORw0KGgo=', mediaType: 'image/png', bytes: 8, width: 1, height: 1 }
+    const localImg = { uri: 'file:///photo.png', name: 'photo.png' }
+
+    // 1. Pure-text turn: [user, assistant] vs [local:user, cursor-assistant]
+    const textHistory: ChatItem[] = [
+      { kind: 'message', id: 'h-u1', sessionId: sid, role: 'user', text: '你好', createdAt: 1, nativeSeq: 0, nativeTime: 100 },
+      { kind: 'message', id: 'h-a1', sessionId: sid, role: 'assistant', text: '你好！', createdAt: 2, nativeSeq: 1, nativeTime: 200 },
+    ]
+    const textLive: ChatItem[] = [
+      { kind: 'message', id: 'local:1', sessionId: sid, role: 'user', text: '你好', createdAt: 10 },
+      { kind: 'message', id: 'cursor-assistant:1', sessionId: sid, role: 'assistant', text: '你好！', createdAt: 20 },
+    ]
+    const mergedText = mergeAcpHistoryAndLive(textHistory, textLive)
+    expect(mergedText).toHaveLength(2)
+    expect(mergedText.map(i => (i.kind === 'message' ? i.text : ''))).toEqual(['你好', '你好！'])
+
+    // 2. Image turn: preserves durable attachmentId image reference from history
+    const imgHistory: ChatItem[] = [
+      { kind: 'message', id: 'h-u2', sessionId: sid, role: 'user', text: '看图', images: [historyImg], createdAt: 1, nativeSeq: 0, nativeTime: 100 },
+      { kind: 'message', id: 'h-a2', sessionId: sid, role: 'assistant', text: '收到', createdAt: 2, nativeSeq: 1, nativeTime: 200 },
+    ]
+    const imgLive: ChatItem[] = [
+      { kind: 'message', id: 'local:2', sessionId: sid, role: 'user', text: '看图', images: [localImg], createdAt: 10 },
+      { kind: 'message', id: 'cursor-assistant:2', sessionId: sid, role: 'assistant', text: '收到', createdAt: 20 },
+    ]
+    const mergedImg = mergeAcpHistoryAndLive(imgHistory, imgLive)
+    expect(mergedImg).toHaveLength(2)
+    expect(mergedImg[0]).toMatchObject({ role: 'user', text: '看图', images: [historyImg] })
+
+    // 3. Single trailing local user prompt with image matching history user message
+    const mergedPromptOnly = mergeAcpHistoryAndLive(
+      [imgHistory[0]!],
+      [imgLive[0]!, { kind: 'message', id: 'cursor-assistant-live', sessionId: sid, role: 'assistant', text: '分析中', createdAt: 30, streaming: true }],
+    )
+    expect(mergedPromptOnly).toHaveLength(2)
+    expect(mergedPromptOnly[0]).toMatchObject({ role: 'user', images: [historyImg] })
+
+    // 4. Independent identical assistant replies still do not collapse
+    expect(mergeAcpHistoryAndLive(
+      [{ kind: 'message', id: 'h-ok', sessionId: sid, role: 'assistant', text: 'OK', createdAt: 1 }],
+      [{ kind: 'message', id: 'l-ok', sessionId: sid, role: 'assistant', text: 'OK', createdAt: 2 }],
+    )).toHaveLength(2)
   })
 })

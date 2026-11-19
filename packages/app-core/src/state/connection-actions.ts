@@ -364,6 +364,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
+        void runtime.closeActiveCodexStream(false)
+        void runtime.closeActiveCursorStream(false)
         set({
           connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable,
             ...(get().connection.retryable === false ? { retryable: false } : {}) },
