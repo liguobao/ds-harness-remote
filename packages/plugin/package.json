@@ -55,6 +55,7 @@
     "public.d.ts",
     "README.md",
     "LICENSE",
+    "LICENSE-hostc",
     "icon.png"
   ],
   "dsh": {

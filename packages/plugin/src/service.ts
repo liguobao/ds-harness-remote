@@ -1,3 +1,4 @@
+import { DshWebPeer, type DshWebRuntime } from './dsh-web-host.js'
 import { SessionTransferHost, type TransferServices } from './session-transfer.js'
 import { LanUploadHost } from './lan-upload.js'
 import { HostPairing } from './host-pairing.js'
@@ -109,6 +110,7 @@ export class HostPluginRuntime {
     /** Host `schedule` service; absent on Hosts whose composition omits reminders. */
     private readonly schedule?: ScheduleCreateService,
     transferServices?: () => TransferServices,
+    resolveDshWeb?: () => DshWebRuntime | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -231,6 +233,10 @@ export class HostPluginRuntime {
         lanUpload,
         context.createTransportUpgradeHost?.(send),
         sessionTransfer?.peer(context.peerDeviceId),
+        this.serverApi && resolveDshWeb ? new DshWebPeer(this.serverApi, {
+          clientDeviceId: context.peerDeviceId,
+          connectionId: context.connectionId,
+        }, resolveDshWeb) : undefined,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -542,10 +548,10 @@ export class HostPluginRuntime {
     if (this.closed) return
     this.closed = true
     this.pairing?.close()
-    this.serverApi?.close()
     await this.serverConnection?.stop()
     this.compactionOperations.closeAll()
     await this.connections.close()
+    this.serverApi?.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined
     await this.localAcpPeer?.closeAll()

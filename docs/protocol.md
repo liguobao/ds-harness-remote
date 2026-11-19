@@ -2295,3 +2295,19 @@ When the Host advertises `remote.transport.upgrade.v1` in `harness.transport.des
 - **RPCs & events**: `remote.transport.upgrade.offer` (`{ attemptId, sdp } -> { attemptId, sdp }`), `remote.transport.upgrade.ice` (`{ attemptId, candidate } -> { ok: true }`, with responder trickle ICE emitted as `remote.transport.upgrade.ice` event), `remote.transport.upgrade.activate` (`{ attemptId, transport? } -> { activated, mode, previousLegEndCounter? }`), `remote.transport.upgrade.drain` (`{ attemptId, previousLegEndCounter } -> { ok: true }`), and `remote.transport.upgrade.abort` (`{ attemptId? } -> { ok: true }`).
 - **Authoritative Host path verification**: Tier promotion (`Relay < TURN < P2P < LAN`) strictly trusts the Host's own verified ICE candidate-pair telemetry (`connectionDetails().mode`); client hints never elevate a lower-tier path into `LAN` or `P2P`.
 - **Sequenced framing, watermark draining & bounded reorder**: Upgraded DataChannel frames prepend a 12-byte big-endian sequence header (`'DSHU' || uint64 noiseCounter`) before RTCH chunking. Both endpoints buffer out-of-order frames in `SequencedCiphertextReorderBuffer` (bounded by 256 frames, 4 MiB total bytes, and a 5 s gap timeout) and drain superseded WebRTC legs until `receivingCounter >= previousLegEndCounter` (bounded by a 3 s fallback deadline). Upgrade failure before activation keeps the current carrier intact; DataChannel loss after activation closes the tunnel so normal reconnect recovery runs.
+
+### DSH Web browser handoff
+
+A Host with a mounted DSH Web app and compatible browser authentication advertises
+`dsh.web.v1` in `harness.transport.describe`. On the authenticated Noise connection,
+`dsh.web.open({})` returns `{ url, browserGrant, expiresAt }`. The Host identifies the
+Client from the authenticated peer. The HTTPS URL is the tunnel origin root and
+`expiresAt` is the grant redemption deadline in Unix milliseconds.
+
+Android and iOS submit `browserGrant` as a URL-encoded form field in a top-level
+`POST /__remote/session` in their WebView. The Worker consumes the grant once,
+sets its host-only session cookie, and redirects with 303 to `/`.
+`dsh.web.close({})` closes the active lease for that Noise connection.
+The Host checks authorization at least every 15 seconds while connected and
+before reconnecting the allocated tunnel. The official DSH application cookie
+stays in Host memory and authenticates the local upstream.

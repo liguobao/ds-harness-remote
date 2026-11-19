@@ -64,7 +64,7 @@ export class AndroidRemoteRuntime {
     return Object.assign((method:string, params:unknown, signal?:AbortSignal):Promise<unknown> => {
       if (generation !== this.generation || !this.connected) return Promise.reject(new Error('The upload connection was replaced or closed.'))
       return this.client.rpc(method, params, signal)
-    }, { supportsBinaryUpload: this.supportsBinaryUpload() })
+    }, { supportsBinaryUpload: this.supportsBinaryUpload(), supportsDshWeb: this.connected && this.client.supportsDshWeb() })
   }
 
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }

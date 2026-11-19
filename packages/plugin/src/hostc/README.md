@@ -1,0 +1,1 @@
+Derived from akazwz/hostc at c19ff673f36ee5bf43bfe8e8c6233feb53e922e3 (Apache-2.0). The license is included in packages/plugin/LICENSE-hostc. This copy uses only preallocated protocol 5 tunnels. DSH supplies per-request admission, cookie isolation and TLS verification.

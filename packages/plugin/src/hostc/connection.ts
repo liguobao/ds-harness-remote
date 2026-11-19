@@ -1,0 +1,182 @@
+import {
+	CLOSE_PROTOCOL_ERROR,
+	type CreateTunnelResponse,
+	decodeFrame,
+	decodeOpen,
+	encodeFrame,
+	encodeText,
+	type Frame,
+	encodeHead,
+	type OpenMessage,
+	type FrameType,
+	FrameType as Frames,
+	HEARTBEAT_INTERVAL_MS,
+	HEARTBEAT_TIMEOUT_MS,
+	PING,
+	ProtocolError,
+	WindowBudget,
+} from "./protocol/index.js";
+import { type RawData, WebSocket } from "ws";
+
+import { errorFromResponse, PROTOCOL_HEADERS, TunnelError } from "./api.js";
+import { createStream, type RequestLog, type Stream } from "./streams.js";
+
+export type ConnectionOptions = {
+	tunnel: CreateTunnelResponse;
+	target: URL;
+	authorize: (request: OpenMessage) => OpenMessage | undefined;
+	stripResponseHeaders: (headers: import("./protocol/index.js").HeaderList) => import("./protocol/index.js").HeaderList;
+	onRequest: (entry: RequestLog) => void;
+	/** Heartbeat timing; tests shorten it. */
+	heartbeat?: { intervalMs: number; timeoutMs: number };
+};
+
+export type CloseInfo = { code: number; reason: string };
+
+/** One WebSocket session with the tunnel server. */
+export class Connection {
+	readonly closed: Promise<CloseInfo>;
+	private readonly socket: WebSocket;
+	private readonly options: ConnectionOptions;
+	private readonly streams = new Map<number, Stream>();
+	private readonly windowBudget = new WindowBudget();
+	private readonly heartbeat: NodeJS.Timeout;
+	private pongTimeout: NodeJS.Timeout | undefined;
+
+	static open(options: ConnectionOptions): Promise<Connection> {
+		return new Promise((resolve, reject) => {
+			const socket = new WebSocket(options.tunnel.connectUrl, {
+				headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
+				perMessageDeflate: false,
+				handshakeTimeout: 6_000,
+			});
+			socket.once("unexpected-response", (_request, response) => {
+				reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+				response.destroy();
+				socket.terminate();
+			});
+			socket.once("error", (error) => {
+				reject(new TunnelError("network_error", `Could not connect: ${error.message}`, { cause: error }));
+			});
+			socket.once("open", () => {
+				socket.removeAllListeners("error");
+				resolve(new Connection(socket, options));
+			});
+		});
+	}
+
+	private constructor(socket: WebSocket, options: ConnectionOptions) {
+		this.socket = socket;
+		this.options = options;
+		let resolveClosed!: (info: CloseInfo) => void;
+		this.closed = new Promise((resolve) => {
+			resolveClosed = resolve;
+		});
+
+		socket.on("message", (data, isBinary) => {
+			// Anything that arrives proves the connection works. The pong can wait behind megabytes of
+			// a wide upload window when the link slows down, and waiting for it alone dropped the tunnel.
+			clearTimeout(this.pongTimeout);
+			if (isBinary) {
+				this.receive(data);
+			}
+		});
+		socket.on("error", () => {
+			// A close event always follows.
+		});
+		socket.on("close", (code, reason) => {
+			clearInterval(this.heartbeat);
+			clearTimeout(this.pongTimeout);
+			for (const stream of this.streams.values()) {
+				stream.abort();
+			}
+			this.streams.clear();
+			resolveClosed({ code, reason: reason.toString() || closeDescription(code) });
+		});
+
+		// A connection that silently died (sleep, network change) never emits close; when nothing, not
+		// even the pong, arrives after a ping, it is gone.
+		const { intervalMs, timeoutMs } = options.heartbeat ?? {
+			intervalMs: HEARTBEAT_INTERVAL_MS,
+			timeoutMs: HEARTBEAT_TIMEOUT_MS,
+		};
+		this.heartbeat = setInterval(() => {
+			socket.send(PING);
+			clearTimeout(this.pongTimeout);
+			this.pongTimeout = setTimeout(() => socket.terminate(), timeoutMs);
+		}, intervalMs);
+	}
+
+	close(code: number, reason: string): void {
+		if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING) {
+			this.socket.close(code, reason);
+			setTimeout(() => this.socket.terminate(), 1000).unref();
+		}
+	}
+
+	private receive(data: RawData): void {
+		let frame: Frame;
+		try {
+			frame = decodeFrame(
+				Array.isArray(data) ? Buffer.concat(data) : data instanceof ArrayBuffer ? new Uint8Array(data) : data,
+			);
+		} catch (error) {
+			this.close(CLOSE_PROTOCOL_ERROR, (error as Error).message);
+			return;
+		}
+		try {
+			this.dispatch(frame);
+		} catch (error) {
+			if (error instanceof ProtocolError) {
+				this.close(CLOSE_PROTOCOL_ERROR, error.message);
+				return;
+			}
+			// Whatever went wrong with one stream (bad input from the public side, a local socket error)
+			// must not take down the CLI or the other streams.
+			this.streams.get(frame.stream)?.abort();
+			this.streams.delete(frame.stream);
+			this.send(Frames.Reset, frame.stream, encodeText("Host could not forward the request"));
+		}
+	}
+
+	private dispatch(frame: Frame): void {
+		if (frame.type !== Frames.Open) {
+			// Frames for streams that already ended are expected and ignored.
+			this.streams.get(frame.stream)?.receive(frame);
+			return;
+		}
+		if (this.streams.has(frame.stream)) {
+			throw new ProtocolError(`stream ${frame.stream} is already open`);
+		}
+		const request = this.options.authorize(decodeOpen(frame.payload));
+		if (request === undefined) {
+			this.send(Frames.Head, frame.stream, encodeHead({ status: 403, headers: [], body: false }));
+			return;
+		}
+		const stream = createStream(
+			{
+				target: this.options.target,
+				stripResponseHeaders: this.options.stripResponseHeaders,
+				publicOrigin: new URL(this.options.tunnel.url).origin,
+				send: (type, id, payload, flushed) => this.send(type, id, payload, flushed),
+				log: this.options.onRequest,
+				remove: (id) => this.streams.delete(id),
+				windowBudget: this.windowBudget,
+			},
+			frame.stream,
+			request,
+		);
+		this.streams.set(frame.stream, stream);
+		stream.start();
+	}
+
+	private send(type: FrameType, stream: number, payload?: Uint8Array, flushed?: () => void): void {
+		if (this.socket.readyState === WebSocket.OPEN) {
+			this.socket.send(encodeFrame(type, stream, payload), flushed);
+		}
+	}
+}
+
+function closeDescription(code: number): string {
+	return code === 1006 ? "connection lost" : `closed with code ${code}`;
+}

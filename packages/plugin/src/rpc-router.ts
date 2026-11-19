@@ -1,3 +1,5 @@
+import { DSH_WEB_CAPABILITY } from '@dsh-remote/protocol'
+import type { DshWebPeer } from './dsh-web-host.js'
 import type { LanUploadHost } from './lan-upload.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
 import {
@@ -45,6 +47,8 @@ const compactionOperationSchema = z.object({
 const apiMethods = new Set([
   ...sessionTransferMethods,
   'harness.transport.describe',
+  'dsh.web.open',
+  'dsh.web.close',
   'remote.history.configure',
   'harness.remote.call',
   'harness.remote.transfer.open',
@@ -127,6 +131,7 @@ export class RpcRouter {
     private readonly lanUpload?: LanUploadHost,
     private readonly transportUpgrade?: TransportUpgradeHost,
     private readonly sessionTransfer?: SessionTransferPeer,
+    private readonly dshWeb?: DshWebPeer,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -139,6 +144,7 @@ export class RpcRouter {
       this.workspaceUpload?.closeAll(),
       this.lanUpload?.closeAll(),
       this.transportUpgrade?.closeAll(),
+      this.dshWeb?.dispose(),
     ])
   }
 
@@ -192,6 +198,14 @@ export class RpcRouter {
 
   private async invoke(method: string, params: unknown): Promise<unknown> {
     switch (method) {
+      case 'dsh.web.open':
+        emptyParamsSchema.parse(params)
+        if (!this.dshWeb) throw new RpcError('FEATURE_NOT_SUPPORTED', 'DSH Web is unavailable.')
+        return this.dshWeb.open()
+      case 'dsh.web.close':
+        emptyParamsSchema.parse(params)
+        await this.dshWeb?.close()
+        return { closed: true }
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
         const hostCapabilities = (await this.capabilities()).filter(capability => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY)
@@ -201,6 +215,7 @@ export class RpcRouter {
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
           ...(this.sessionTransfer?.capabilities() ?? []),
+          ...(this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : []),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
         ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined

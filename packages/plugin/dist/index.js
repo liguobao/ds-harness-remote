@@ -2274,8 +2274,8 @@ var require_websocket = __commonJS({
   "node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter3 = __require("events");
-    var https = __require("https");
-    var http = __require("http");
+    var https2 = __require("https");
+    var http2 = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
     var { randomBytes: randomBytes15, createHash: createHash9 } = __require("crypto");
@@ -2817,7 +2817,7 @@ var require_websocket = __commonJS({
       }
       const defaultPort2 = isSecure ? 443 : 80;
       const key = randomBytes15(16).toString("base64");
-      const request = isSecure ? https.request : http.request;
+      const request = isSecure ? https2.request : http2.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
       opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
@@ -3313,7 +3313,7 @@ var require_websocket_server = __commonJS({
   "node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter3 = __require("events");
-    var http = __require("http");
+    var http2 = __require("http");
     var { Duplex } = __require("stream");
     var { createHash: createHash9 } = __require("crypto");
     var extension2 = require_extension();
@@ -3394,8 +3394,8 @@ var require_websocket_server = __commonJS({
           );
         }
         if (options.port != null) {
-          this._server = http.createServer((req, res) => {
-            const body = http.STATUS_CODES[426];
+          this._server = http2.createServer((req, res) => {
+            const body = http2.STATUS_CODES[426];
             res.writeHead(426, {
               "Content-Length": body.length,
               "Content-Type": "text/plain"
@@ -3684,7 +3684,7 @@ var require_websocket_server = __commonJS({
       this.destroy();
     }
     function abortHandshake(socket, code, message, headers) {
-      message = message || http.STATUS_CODES[code];
+      message = message || http2.STATUS_CODES[code];
       headers = {
         Connection: "close",
         "Content-Type": "text/html",
@@ -3693,7 +3693,7 @@ var require_websocket_server = __commonJS({
       };
       socket.once("finish", socket.destroy);
       socket.end(
-        `HTTP/1.1 ${code} ${http.STATUS_CODES[code]}\r
+        `HTTP/1.1 ${code} ${http2.STATUS_CODES[code]}\r
 ` + Object.keys(headers).map((h) => `${h}: ${headers[h]}`).join("\r\n") + "\r\n\r\n" + message
       );
     }
@@ -64805,6 +64805,17 @@ function classifyControlClose(code, reason) {
   };
 }
 
+// packages/protocol/dist/dsh-web.js
+var DSH_WEB_CAPABILITY = "dsh.web.v1";
+var dshWebGrantSchema = external_exports.object({
+  url: external_exports.url().refine((value) => {
+    const url2 = new URL(value);
+    return url2.protocol === "https:" && url2.href === url2.origin + "/";
+  }),
+  browserGrant: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  expiresAt: external_exports.number().int().positive()
+}).strict();
+
 // packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
 var RELAY_RESUME_CAPABILITY = "transport.relay.resume.v1";
@@ -64901,6 +64912,8 @@ var rpcMethods = [
   "workspace.upload.commit",
   "workspace.upload.abort",
   "harness.transport.describe",
+  "dsh.web.open",
+  "dsh.web.close",
   "remote.history.configure",
   "harness.api.call",
   "harness.api.transfer.open",
@@ -87040,6 +87053,16 @@ var HostServerApi = class {
     }
     return { online: result.online, ...typeof result.lastSeenAt === "number" ? { lastSeenAt: result.lastSeenAt } : {} };
   }
+  async dshWebRequest(action, input4, signal, sessionId) {
+    const path = this.dshWebPath() + (action === "allocate" ? "" : `/${action}`);
+    return this.request(path, { method: "POST", body: JSON.stringify({ ...input4, sessionId }), signal });
+  }
+  async closeDshWeb(sessionId) {
+    await this.request(this.dshWebPath() + "/" + encodeURIComponent(sessionId), { method: "DELETE", signal: AbortSignal.timeout(3e3) });
+  }
+  dshWebPath() {
+    return `/api/v1/hosts/${encodeURIComponent(this.requireIdentity().deviceId)}/dsh-web/sessions`;
+  }
   async loadOrIssue(identity3) {
     return this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity3.deviceId);
@@ -101573,8 +101596,968 @@ function redact(value, key = "") {
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
 
+// packages/plugin/src/dsh-web-host.ts
+import { randomUUID as randomUUID16 } from "node:crypto";
+
+// packages/plugin/src/hostc/protocol/constants.ts
+var PROTOCOL_VERSION2 = 5;
+var PROTOCOL_HEADER = "hostc-protocol";
+var PING = "hostc:ping";
+var HEARTBEAT_INTERVAL_MS = 15e3;
+var HEARTBEAT_TIMEOUT_MS = 1e4;
+var MAX_CHUNK_BYTES = 64 * 1024;
+var STREAM_WINDOW_BYTES = 256 * 1024;
+var MAX_WEBSOCKET_MESSAGE_BYTES = 1024 * 1024 - 64;
+var CONNECT_GRACE_MS = 2 * 6e4;
+var RECONNECT_GRACE_MS = 10 * 6e4;
+var CLOSE_SHUTDOWN = 4e3;
+var CLOSE_REPLACED = 4001;
+var CLOSE_PROTOCOL_ERROR = 1002;
+
+// packages/plugin/src/hostc/protocol/frame.ts
+var FrameType = {
+  /** server → client. JSON `OpenMessage`. Starts a stream. */
+  Open: 1,
+  /** client → server. JSON `HeadMessage`. Response status and headers. */
+  Head: 2,
+  /** both. HTTP body chunk or binary WebSocket message. */
+  Data: 3,
+  /** both. Text WebSocket message (UTF-8). */
+  Text: 4,
+  /** both. End of this direction. Empty for HTTP, close code + reason for WebSockets. */
+  End: 5,
+  /** both. UTF-8 reason. Aborts the stream in both directions. */
+  Reset: 6,
+  /** both. u32. Grants more HTTP body bytes to the peer. */
+  Window: 7
+};
+var FRAME_HEADER_BYTES = 5;
+var MAX_STREAM_ID = 4294967295;
+var ProtocolError = class extends Error {
+  name = "ProtocolError";
+};
+var EMPTY = new Uint8Array(0);
+function encodeFrame(type, stream, payload = EMPTY) {
+  if (!Number.isInteger(stream) || stream < 1 || stream > MAX_STREAM_ID) {
+    throw new ProtocolError(`invalid stream id ${stream}`);
+  }
+  const bytes = new Uint8Array(FRAME_HEADER_BYTES + payload.byteLength);
+  bytes[0] = type;
+  new DataView(bytes.buffer).setUint32(1, stream);
+  bytes.set(payload, FRAME_HEADER_BYTES);
+  return bytes;
+}
+function decodeFrame(bytes) {
+  if (bytes.byteLength < FRAME_HEADER_BYTES) {
+    throw new ProtocolError("frame too short");
+  }
+  const type = bytes[0];
+  if (type < FrameType.Open || type > FrameType.Window) {
+    throw new ProtocolError(`unknown frame type ${type}`);
+  }
+  const stream = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(1);
+  if (stream === 0) {
+    throw new ProtocolError("stream id 0 is reserved");
+  }
+  return { type, stream, payload: bytes.subarray(FRAME_HEADER_BYTES) };
+}
+
+// packages/plugin/src/hostc/protocol/messages.ts
+var encoder = new TextEncoder();
+var decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+function encodeText(value) {
+  return encoder.encode(value);
+}
+function decodeText(bytes) {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    throw new ProtocolError("invalid UTF-8");
+  }
+}
+function decodeOpen(bytes) {
+  const value = parseJson(bytes);
+  if (typeof value.method !== "string" || typeof value.path !== "string" || !value.path.startsWith("/") || !isHeaderList(value.headers) || typeof value.body !== "boolean" || value.websocket !== void 0 && !isStringArray(value.websocket)) {
+    throw new ProtocolError("invalid OPEN payload");
+  }
+  return value;
+}
+function encodeHead(message) {
+  return encodeText(JSON.stringify(message));
+}
+function encodeClose(message) {
+  const reason = encodeText(message.reason);
+  const bytes = new Uint8Array(2 + reason.byteLength);
+  new DataView(bytes.buffer).setUint16(0, message.code);
+  bytes.set(reason, 2);
+  return bytes;
+}
+function decodeClose(bytes) {
+  if (bytes.byteLength < 2) {
+    return { code: 1005, reason: "" };
+  }
+  const code = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0);
+  return { code, reason: decodeText(bytes.subarray(2)) };
+}
+function encodeWindow(bytes) {
+  const payload = new Uint8Array(4);
+  new DataView(payload.buffer).setUint32(0, bytes);
+  return payload;
+}
+function decodeWindow(bytes) {
+  if (bytes.byteLength !== 4) {
+    throw new ProtocolError("invalid WINDOW payload");
+  }
+  const value = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0);
+  if (value === 0) {
+    throw new ProtocolError("empty WINDOW grant");
+  }
+  return value;
+}
+function sendableCloseCode(code) {
+  if (code === void 0) {
+    return 1e3;
+  }
+  if (code >= 1e3 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006) {
+    return code;
+  }
+  if (code >= 3e3 && code <= 4999) {
+    return code;
+  }
+  return 1e3;
+}
+function sendableCloseReason(reason) {
+  if (!reason) {
+    return "";
+  }
+  let result = reason;
+  while (encoder.encode(result).byteLength > 123) {
+    result = result.slice(0, -1);
+  }
+  return result;
+}
+function responseHasBody(method, status2) {
+  return method !== "HEAD" && status2 >= 200 && status2 !== 204 && status2 !== 205 && status2 !== 304;
+}
+function parseJson(bytes) {
+  let value;
+  try {
+    value = JSON.parse(decodeText(bytes));
+  } catch {
+    throw new ProtocolError("invalid JSON payload");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ProtocolError("JSON payload must be an object");
+  }
+  return value;
+}
+function isHeaderList(value) {
+  return Array.isArray(value) && value.every(
+    (entry) => Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string" && typeof entry[1] === "string"
+  );
+}
+function isStringArray(value) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+// packages/plugin/src/hostc/protocol/headers.ts
+var HOP_BY_HOP = /* @__PURE__ */ new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade"
+]);
+var WEBSOCKET_HANDSHAKE = /* @__PURE__ */ new Set([
+  "sec-websocket-accept",
+  "sec-websocket-extensions",
+  "sec-websocket-key",
+  "sec-websocket-protocol",
+  "sec-websocket-version"
+]);
+function stripHopByHop(headers, drop = []) {
+  const dropped = new Set(drop);
+  for (const [name2, value] of headers) {
+    if (name2.toLowerCase() === "connection") {
+      for (const token of value.split(",")) {
+        dropped.add(token.trim().toLowerCase());
+      }
+    }
+  }
+  return headers.filter(([name2]) => {
+    const lower = name2.toLowerCase();
+    return !HOP_BY_HOP.has(lower) && !dropped.has(lower);
+  });
+}
+function stripWebSocketHandshake(headers) {
+  return stripHopByHop(headers, WEBSOCKET_HANDSHAKE);
+}
+
+// packages/plugin/src/hostc/protocol/window.ts
+var MAX_STREAM_WINDOW_BYTES = 4 * 1024 * 1024;
+var WINDOW_BUDGET_BYTES = 16 * 1024 * 1024;
+var WINDOW_GROWTH_MS = 1e3;
+var WINDOW_JITTER_MS = 5;
+var WindowBudget = class {
+  available = WINDOW_BUDGET_BYTES;
+};
+var GrowingWindow = class {
+  size = STREAM_WINDOW_BYTES;
+  budget;
+  /** Start of the current window (0 until the first full window) and its bytes the next hop took. */
+  startedAt = 0;
+  bytes = 0;
+  /** Shortest time a full window has taken: about one round trip. 0 until measured. */
+  fastestMs = 0;
+  /** The next hop had taken everything at some point during the current window. */
+  caughtUp = false;
+  constructor(budget) {
+    this.budget = budget;
+  }
+  /**
+   * Counts bytes the next hop took. `caughtUp` says nothing else is queued for it now. Returns the
+   * bytes to grant on top of the ones taken.
+   */
+  delivered(bytes, caughtUp, now = Date.now()) {
+    this.bytes += bytes;
+    this.caughtUp ||= caughtUp;
+    if (this.bytes < this.size) {
+      return 0;
+    }
+    const elapsed = now - this.startedAt;
+    const timed = this.startedAt > 0;
+    const keptUp = this.caughtUp;
+    this.startedAt = now;
+    this.bytes = 0;
+    this.caughtUp = false;
+    if (!timed) {
+      return 0;
+    }
+    this.fastestMs = this.fastestMs === 0 ? elapsed : Math.min(this.fastestMs, elapsed);
+    const limitedByWindow = elapsed < WINDOW_GROWTH_MS && elapsed <= this.fastestMs * 1.5 + WINDOW_JITTER_MS && keptUp;
+    if (!limitedByWindow) {
+      return 0;
+    }
+    const extra2 = Math.min(this.size, MAX_STREAM_WINDOW_BYTES - this.size, this.budget.available);
+    this.size += extra2;
+    this.budget.available -= extra2;
+    return extra2;
+  }
+  /** Gives the extra window back once the stream has ended. Safe to call more than once. */
+  release() {
+    this.budget.available += this.size - STREAM_WINDOW_BYTES;
+    this.size = STREAM_WINDOW_BYTES;
+  }
+};
+
+// packages/plugin/src/hostc/api.ts
+var TunnelError = class extends Error {
+  name = "TunnelError";
+  code;
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+  }
+};
+var PROTOCOL_HEADERS = { [PROTOCOL_HEADER]: String(PROTOCOL_VERSION2) };
+function errorFromResponse(status2, text) {
+  let message = text;
+  try {
+    const body = JSON.parse(text);
+    if (typeof body.error === "string") {
+      message = body.error;
+    }
+  } catch {
+  }
+  switch (status2) {
+    case 426:
+      return new TunnelError("upgrade_required", message);
+    case 429:
+      return new TunnelError("rate_limited", message);
+    case 401:
+      return new TunnelError("unauthorized", message);
+    case 404:
+    case 410:
+      return new TunnelError("tunnel_gone", message);
+    default:
+      return new TunnelError("server_error", `Server responded ${status2}: ${message}`);
+  }
+}
+
+// packages/plugin/src/hostc/streams.ts
+import http from "node:http";
+import https from "node:https";
+
+// packages/plugin/src/hostc/rewrite.ts
+function toLocalRequestHeaders(headers, publicOrigin, target3) {
+  const result = [["host", target3.host]];
+  for (const [name2, value] of headers) {
+    const lower = name2.toLowerCase();
+    if (lower === "host") {
+      continue;
+    }
+    if ((lower === "origin" || lower === "referer") && (value === publicOrigin || value.startsWith(publicOrigin + "/"))) {
+      result.push([name2, target3.origin + value.slice(publicOrigin.length)]);
+      continue;
+    }
+    result.push([name2, value]);
+  }
+  return result;
+}
+function toPublicResponseHeaders(headers, publicOrigin, target3) {
+  const localOrigins = localOriginsFor(target3);
+  return headers.map(([name2, value]) => {
+    if (name2.toLowerCase() !== "location") {
+      return [name2, value];
+    }
+    const authority = LOCATION_AUTHORITY.exec(value)?.[0];
+    const origin = authority && URL.parse(value, target3.href)?.origin;
+    if (authority && origin && localOrigins.includes(origin)) {
+      return [name2, publicOrigin + value.slice(authority.length)];
+    }
+    return [name2, value];
+  });
+}
+var LOCATION_AUTHORITY = /^(?:[a-z][a-z0-9+.-]*:)?[\\/]{2,}[^\\/?#]*/i;
+function localOriginsFor(target3) {
+  const origins = /* @__PURE__ */ new Set([target3.origin]);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"];
+  if (loopback.includes(target3.hostname)) {
+    for (const host of loopback) {
+      origins.add(`${target3.protocol}//${host}${target3.port ? `:${target3.port}` : ""}`);
+    }
+  }
+  return [...origins];
+}
+function fromRawHeaders(raw) {
+  const result = [];
+  for (let index = 0; index + 1 < raw.length; index += 2) {
+    result.push([raw[index], raw[index + 1]]);
+  }
+  return result;
+}
+function toRawHeaders(headers) {
+  return headers.flat();
+}
+
+// packages/plugin/src/hostc/streams.ts
+var MAX_LOCAL_QUEUE_BYTES = 4 * 1024 * 1024;
+function createStream(context, id7, open7) {
+  return open7.websocket ? new WebSocketStream(context, id7, open7) : new HttpStream(context, id7, open7);
+}
+var HttpStream = class {
+  context;
+  id;
+  open;
+  startedAt = Date.now();
+  request = null;
+  response = null;
+  sendCredit = STREAM_WINDOW_BYTES;
+  wakeSender = null;
+  /** Request body window granted to the server, widened while it holds the upload back. */
+  window;
+  requestEnded = false;
+  finished = false;
+  constructor(context, id7, open7) {
+    this.context = context;
+    this.id = id7;
+    this.open = open7;
+    this.window = new GrowingWindow(context.windowBudget);
+  }
+  start() {
+    const { target: target3, publicOrigin } = this.context;
+    const secure = target3.protocol === "https:";
+    const request = (secure ? https : http).request({
+      protocol: target3.protocol,
+      hostname: target3.hostname.replace(/^\[|\]$/g, ""),
+      port: target3.port || (secure ? 443 : 80),
+      method: this.open.method,
+      path: this.open.path,
+      headers: toRawHeaders(toLocalRequestHeaders(this.open.headers, publicOrigin, target3))
+    });
+    this.request = request;
+    request.on("response", (response) => void this.respond(response));
+    request.on("error", () => {
+      if (!this.finished) {
+        this.context.send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
+        this.finish(502);
+      }
+    });
+    if (!this.open.body) {
+      this.requestEnded = true;
+      request.end();
+    }
+  }
+  receive(frame) {
+    switch (frame.type) {
+      case FrameType.Data: {
+        const request = this.request;
+        const bytes = frame.payload.byteLength;
+        request?.write(frame.payload, () => {
+          if (!this.finished) {
+            const extra2 = this.window.delivered(bytes, request.writableLength === 0);
+            this.context.send(FrameType.Window, this.id, encodeWindow(bytes + extra2));
+          }
+        });
+        return;
+      }
+      case FrameType.End:
+        this.requestEnded = true;
+        this.request?.end();
+        return;
+      case FrameType.Reset:
+        this.abort();
+        this.finish(499);
+        return;
+      case FrameType.Window:
+        this.sendCredit += decodeWindow(frame.payload);
+        this.wakeSender?.();
+        return;
+      default:
+        throw new ProtocolError(`unexpected frame type ${frame.type} for an HTTP stream`);
+    }
+  }
+  abort() {
+    this.finished = true;
+    this.window.release();
+    this.request?.destroy();
+    this.response?.destroy();
+    this.wakeSender?.();
+  }
+  async respond(response) {
+    this.response = response;
+    const status2 = response.statusCode ?? 0;
+    if (status2 < 100 || status2 > 599) {
+      this.context.send(FrameType.Reset, this.id, encodeText(`local server sent invalid status ${status2}`));
+      this.abort();
+      this.finish(502);
+      return;
+    }
+    const body = responseHasBody(this.open.method, status2);
+    const headers = toPublicResponseHeaders(
+      this.context.stripResponseHeaders(stripHopByHop(fromRawHeaders(response.rawHeaders))),
+      this.context.publicOrigin,
+      this.context.target
+    );
+    this.context.send(FrameType.Head, this.id, encodeHead({ status: status2, headers, body }));
+    if (!body) {
+      response.resume();
+      this.finish(status2);
+      return;
+    }
+    try {
+      for await (const chunk of response) {
+        for (let offset2 = 0; offset2 < chunk.byteLength; offset2 += MAX_CHUNK_BYTES) {
+          const part = chunk.subarray(offset2, offset2 + MAX_CHUNK_BYTES);
+          while (!this.finished && this.sendCredit < part.byteLength) {
+            await new Promise((resolve10) => {
+              this.wakeSender = resolve10;
+            });
+          }
+          if (this.finished) {
+            return;
+          }
+          this.sendCredit -= part.byteLength;
+          this.context.send(FrameType.Data, this.id, part);
+        }
+      }
+      if (!this.finished) {
+        this.context.send(FrameType.End, this.id);
+        this.finish(status2);
+      }
+    } catch (error62) {
+      if (!this.finished) {
+        this.context.send(FrameType.Reset, this.id, encodeText(`local response failed: ${String(error62)}`));
+        this.finish(status2);
+      }
+    }
+  }
+  finish(status2) {
+    this.finished = true;
+    this.window.release();
+    this.wakeSender?.();
+    if (!this.requestEnded) {
+      this.request?.destroy();
+    }
+    this.context.remove(this.id);
+    this.context.log({
+      method: this.open.method,
+      path: this.open.path,
+      status: status2,
+      durationMs: Date.now() - this.startedAt,
+      websocket: false
+    });
+  }
+};
+var WebSocketStream = class {
+  context;
+  id;
+  open;
+  startedAt = Date.now();
+  socket = null;
+  settled = false;
+  ended = false;
+  /** Messages from the local server not yet written to the tunnel. */
+  unflushed = 0;
+  constructor(context, id7, open7) {
+    this.context = context;
+    this.id = id7;
+    this.open = open7;
+  }
+  start() {
+    const { target: target3, publicOrigin, send } = this.context;
+    const url2 = new URL(`${target3.protocol === "https:" ? "wss:" : "ws:"}//${target3.host}${this.open.path}`);
+    if (url2.host !== target3.host) {
+      throw new Error("request path escapes the target");
+    }
+    const requestHeaders = {};
+    for (const [name2, value] of toLocalRequestHeaders(this.open.headers, publicOrigin, target3)) {
+      const lower = name2.toLowerCase();
+      if (lower !== "host") {
+        const previous = requestHeaders[lower];
+        requestHeaders[lower] = previous === void 0 ? value : `${previous}, ${value}`;
+      }
+    }
+    const socket = new import_websocket.default(url2, this.open.websocket ?? [], {
+      headers: requestHeaders,
+      rejectUnauthorized: true,
+      maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES
+    });
+    this.socket = socket;
+    let responseHeaders = [];
+    socket.on("upgrade", (response) => {
+      responseHeaders = this.context.stripResponseHeaders(stripWebSocketHandshake(fromRawHeaders(response.rawHeaders)));
+    });
+    socket.on("open", () => {
+      const protocol = socket.protocol || void 0;
+      send(FrameType.Head, this.id, encodeHead({ status: 101, headers: responseHeaders, body: false, protocol }));
+      this.settle(101);
+    });
+    socket.on("unexpected-response", (_request, response) => {
+      const status2 = response.statusCode ?? 502;
+      const headers = stripHopByHop(fromRawHeaders(response.rawHeaders), ["content-length"]);
+      send(FrameType.Head, this.id, encodeHead({ status: status2, headers, body: false }));
+      response.resume();
+      this.settle(status2);
+      this.end();
+      socket.terminate();
+    });
+    socket.on("message", (data2, isBinary2) => {
+      if (this.ended) {
+        return;
+      }
+      socket.pause();
+      this.unflushed++;
+      send(isBinary2 ? FrameType.Data : FrameType.Text, this.id, toBytes2(data2), () => {
+        this.unflushed--;
+        if (this.unflushed === 0) {
+          socket.resume();
+        }
+      });
+    });
+    socket.on("close", (code, reason) => {
+      if (!this.ended) {
+        send(FrameType.End, this.id, encodeClose({ code, reason: reason.toString() }));
+        this.end();
+      }
+    });
+    socket.on("error", (error62) => {
+      if (this.ended) {
+        return;
+      }
+      if (this.settled) {
+        send(FrameType.End, this.id, encodeClose({ code: 1011, reason: error62.message }));
+      } else {
+        send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
+        this.settle(502);
+      }
+      this.end();
+      socket.terminate();
+    });
+  }
+  receive(frame) {
+    switch (frame.type) {
+      case FrameType.Data:
+      case FrameType.Text:
+        if (this.socket?.readyState === import_websocket.default.OPEN) {
+          this.socket.send(frame.payload, { binary: frame.type === FrameType.Data });
+          if (this.socket.bufferedAmount > MAX_LOCAL_QUEUE_BYTES) {
+            this.context.send(
+              FrameType.End,
+              this.id,
+              encodeClose({ code: 1013, reason: "local server is not reading" })
+            );
+            this.end();
+            this.socket.terminate();
+          }
+        }
+        return;
+      case FrameType.End: {
+        const { code, reason } = decodeClose(frame.payload);
+        this.end();
+        this.socket?.close(sendableCloseCode(code), sendableCloseReason(reason));
+        this.socket?.resume();
+        return;
+      }
+      case FrameType.Reset:
+        this.settle(499);
+        this.end();
+        this.socket?.terminate();
+        return;
+      default:
+        throw new ProtocolError(`unexpected frame type ${frame.type} for a WebSocket stream`);
+    }
+  }
+  abort() {
+    this.ended = true;
+    this.socket?.terminate();
+  }
+  settle(status2) {
+    if (this.settled) {
+      return;
+    }
+    this.settled = true;
+    this.context.log({
+      method: "GET",
+      path: this.open.path,
+      status: status2,
+      durationMs: Date.now() - this.startedAt,
+      websocket: true
+    });
+  }
+  end() {
+    if (!this.ended) {
+      this.ended = true;
+      this.context.remove(this.id);
+    }
+  }
+};
+function toBytes2(data2) {
+  if (Array.isArray(data2)) {
+    return Buffer.concat(data2);
+  }
+  return data2 instanceof ArrayBuffer ? new Uint8Array(data2) : data2;
+}
+
+// packages/plugin/src/hostc/connection.ts
+var Connection2 = class _Connection {
+  closed;
+  socket;
+  options;
+  streams = /* @__PURE__ */ new Map();
+  windowBudget = new WindowBudget();
+  heartbeat;
+  pongTimeout;
+  static open(options) {
+    return new Promise((resolve10, reject) => {
+      const socket = new import_websocket.default(options.tunnel.connectUrl, {
+        headers: { authorization: `Bearer ${options.tunnel.token}`, ...PROTOCOL_HEADERS },
+        perMessageDeflate: false,
+        handshakeTimeout: 6e3
+      });
+      socket.once("unexpected-response", (_request, response) => {
+        reject(errorFromResponse(response.statusCode ?? 0, "Tunnel rejected the connection"));
+        response.destroy();
+        socket.terminate();
+      });
+      socket.once("error", (error62) => {
+        reject(new TunnelError("network_error", `Could not connect: ${error62.message}`, { cause: error62 }));
+      });
+      socket.once("open", () => {
+        socket.removeAllListeners("error");
+        resolve10(new _Connection(socket, options));
+      });
+    });
+  }
+  constructor(socket, options) {
+    this.socket = socket;
+    this.options = options;
+    let resolveClosed;
+    this.closed = new Promise((resolve10) => {
+      resolveClosed = resolve10;
+    });
+    socket.on("message", (data2, isBinary2) => {
+      clearTimeout(this.pongTimeout);
+      if (isBinary2) {
+        this.receive(data2);
+      }
+    });
+    socket.on("error", () => {
+    });
+    socket.on("close", (code, reason) => {
+      clearInterval(this.heartbeat);
+      clearTimeout(this.pongTimeout);
+      for (const stream of this.streams.values()) {
+        stream.abort();
+      }
+      this.streams.clear();
+      resolveClosed({ code, reason: reason.toString() || closeDescription(code) });
+    });
+    const { intervalMs, timeoutMs } = options.heartbeat ?? {
+      intervalMs: HEARTBEAT_INTERVAL_MS,
+      timeoutMs: HEARTBEAT_TIMEOUT_MS
+    };
+    this.heartbeat = setInterval(() => {
+      socket.send(PING);
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = setTimeout(() => socket.terminate(), timeoutMs);
+    }, intervalMs);
+  }
+  close(code, reason) {
+    if (this.socket.readyState === import_websocket.default.OPEN || this.socket.readyState === import_websocket.default.CONNECTING) {
+      this.socket.close(code, reason);
+      setTimeout(() => this.socket.terminate(), 1e3).unref();
+    }
+  }
+  receive(data2) {
+    let frame;
+    try {
+      frame = decodeFrame(
+        Array.isArray(data2) ? Buffer.concat(data2) : data2 instanceof ArrayBuffer ? new Uint8Array(data2) : data2
+      );
+    } catch (error62) {
+      this.close(CLOSE_PROTOCOL_ERROR, error62.message);
+      return;
+    }
+    try {
+      this.dispatch(frame);
+    } catch (error62) {
+      if (error62 instanceof ProtocolError) {
+        this.close(CLOSE_PROTOCOL_ERROR, error62.message);
+        return;
+      }
+      this.streams.get(frame.stream)?.abort();
+      this.streams.delete(frame.stream);
+      this.send(FrameType.Reset, frame.stream, encodeText("Host could not forward the request"));
+    }
+  }
+  dispatch(frame) {
+    if (frame.type !== FrameType.Open) {
+      this.streams.get(frame.stream)?.receive(frame);
+      return;
+    }
+    if (this.streams.has(frame.stream)) {
+      throw new ProtocolError(`stream ${frame.stream} is already open`);
+    }
+    const request = this.options.authorize(decodeOpen(frame.payload));
+    if (request === void 0) {
+      this.send(FrameType.Head, frame.stream, encodeHead({ status: 403, headers: [], body: false }));
+      return;
+    }
+    const stream = createStream(
+      {
+        target: this.options.target,
+        stripResponseHeaders: this.options.stripResponseHeaders,
+        publicOrigin: new URL(this.options.tunnel.url).origin,
+        send: (type, id7, payload, flushed) => this.send(type, id7, payload, flushed),
+        log: this.options.onRequest,
+        remove: (id7) => this.streams.delete(id7),
+        windowBudget: this.windowBudget
+      },
+      frame.stream,
+      request
+    );
+    this.streams.set(frame.stream, stream);
+    stream.start();
+  }
+  send(type, stream, payload, flushed) {
+    if (this.socket.readyState === import_websocket.default.OPEN) {
+      this.socket.send(encodeFrame(type, stream, payload), flushed);
+    }
+  }
+};
+function closeDescription(code) {
+  return code === 1006 ? "connection lost" : `closed with code ${code}`;
+}
+
+// packages/plugin/src/dsh-web-host.ts
+var allocationSchema = external_exports.object({
+  sessionId: external_exports.string().regex(/^[pt][abcdefghijkmnpqrstuvwxyz23456789]{11}$/),
+  url: external_exports.url(),
+  connectUrl: external_exports.url(),
+  connectToken: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  leaseExpiresAt: external_exports.number().int().positive()
+}).strict();
+var DshWebPeer = class {
+  constructor(api, peer, resolveRuntime) {
+    this.api = api;
+    this.peer = peer;
+    this.resolveRuntime = resolveRuntime;
+  }
+  active;
+  opening;
+  openingStop;
+  lifetime = new AbortController();
+  available() {
+    try {
+      return this.resolveRuntime() !== void 0;
+    } catch {
+      return false;
+    }
+  }
+  open() {
+    if (this.opening) return this.opening;
+    this.openingStop = new AbortController();
+    this.opening = this.start(this.openingStop.signal).finally(() => {
+      this.opening = void 0;
+      this.openingStop = void 0;
+    });
+    return this.opening;
+  }
+  async close() {
+    this.openingStop?.abort();
+    await this.closeActive();
+  }
+  async closeActive() {
+    const active2 = this.active;
+    this.active = void 0;
+    if (active2 === void 0) return;
+    active2.stop.abort();
+    active2.connector?.close(CLOSE_SHUTDOWN, "session closed");
+    await this.api.closeDshWeb(active2.id).catch(() => void 0);
+  }
+  async dispose() {
+    this.lifetime.abort();
+    await this.close();
+    await this.opening?.catch(() => void 0);
+  }
+  async start(openingSignal) {
+    await this.closeActive();
+    const signal = AbortSignal.any([this.lifetime.signal, openingSignal, AbortSignal.timeout(21e3)]);
+    const input4 = { ...this.peer, requestId: randomUUID16(), leaseExpiresAt: Date.now() + 9 * 6e4 };
+    try {
+      signal.throwIfAborted();
+      const runtime = this.resolveRuntime();
+      if (runtime === void 0) throw new RpcError("DSH_WEB_NOT_READY", "The DSH Web GUI is unavailable.", void 0, true);
+      const cookie = browserCookie(runtime);
+      const local = await fetch(runtime.origin, { headers: { cookie }, redirect: "manual", signal });
+      await local.body?.cancel();
+      if (!local.ok || !local.headers.get("content-type")?.startsWith("text/html"))
+        throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI did not respond.", void 0, true);
+      const allocation = allocationSchema.parse(await this.api.dshWebRequest("allocate", input4, signal));
+      const publicUrl = new URL(allocation.url);
+      const dial = new URL(allocation.connectUrl);
+      const lease = { id: allocation.sessionId, stop: new AbortController(), request: { ...input4, leaseExpiresAt: allocation.leaseExpiresAt } };
+      this.active = lease;
+      if (dial.protocol !== "wss:" || dial.port || dial.href !== `wss://${dial.hostname}/api/tunnels/${lease.id}/connect` || publicUrl.href !== `https://${lease.id}.${dial.hostname}/` || lease.request.leaseExpiresAt <= Date.now() || lease.request.leaseExpiresAt > input4.leaseExpiresAt) {
+        throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid tunnel.");
+      }
+      const listenSignal = AbortSignal.any([signal, lease.stop.signal]);
+      const connect4 = () => Connection2.open({
+        tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
+        target: runtime.origin,
+        authorize: (request) => {
+          if (lease.stop.signal.aborted || Date.now() >= lease.request.leaseExpiresAt) return;
+          const current = this.resolveRuntime();
+          if (current?.origin.href !== runtime.origin.href || current.auth !== runtime.auth) return;
+          return authorizeUpstream(request, publicUrl, cookie);
+        },
+        stripResponseHeaders,
+        onRequest: () => void 0
+      });
+      await attachConnector(lease, connect4, listenSignal);
+      const result = dshWebGrantSchema.parse(await this.api.dshWebRequest("grant", lease.request, listenSignal));
+      if (result.url !== publicUrl.href || result.expiresAt <= Date.now() || result.expiresAt > lease.request.leaseExpiresAt)
+        throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid browser grant.");
+      void this.monitor(lease, connect4);
+      return result;
+    } catch (error62) {
+      await this.closeActive();
+      if (error62 instanceof RpcError) throw error62;
+      if (error62 instanceof ServerApiError && ["WEB_ENTITLEMENT_REQUIRED", "MEMBERSHIP_REQUIRED", "CONNECTION_NOT_FOUND"].includes(error62.code))
+        throw new RpcError(error62.code, "The Server did not authorize DSH Web access.");
+      throw new RpcError("TUNNEL_UNAVAILABLE", "The DSH Web tunnel could not be opened.", void 0, true);
+    }
+  }
+  async monitor(lease, connect4) {
+    const timer2 = setTimeout(() => {
+      if (this.active === lease) void this.close();
+    }, Math.max(0, lease.request.leaseExpiresAt - Date.now()));
+    timer2.unref();
+    try {
+      while (this.active === lease && lease.connector) {
+        const closed = await waitForCheck(lease.connector, lease.stop.signal);
+        if (this.active !== lease) return;
+        if (closed?.code === CLOSE_REPLACED || closed?.code === CLOSE_SHUTDOWN) break;
+        await this.api.dshWebRequest("check", lease.request, lease.stop.signal, lease.id);
+        if (closed) {
+          await attachConnector(lease, connect4, lease.stop.signal);
+        }
+      }
+    } catch {
+    } finally {
+      clearTimeout(timer2);
+      if (this.active === lease) await this.close();
+    }
+  }
+};
+async function attachConnector(lease, dial, signal) {
+  signal.throwIfAborted();
+  const connector = await dial();
+  if (signal.aborted) {
+    connector.close(CLOSE_SHUTDOWN, "session closed");
+    signal.throwIfAborted();
+  }
+  lease.connector = connector;
+}
+async function waitForCheck(connector, signal) {
+  let timer2;
+  let onAbort;
+  try {
+    return await Promise.race([connector.closed, new Promise((resolve10) => {
+      onAbort = () => resolve10(void 0);
+      signal.addEventListener("abort", onAbort, { once: true });
+      timer2 = setTimeout(onAbort, 15e3);
+      timer2.unref();
+    })]);
+  } finally {
+    clearTimeout(timer2);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+function browserCookie({ origin, auth }) {
+  const bootstrap = new URL(auth.authenticatedUrl(origin.href));
+  let cookie;
+  auth.authorizeIndex({ method: "GET", url: "/" + bootstrap.search, headers: { host: origin.host } }, {
+    writeHead(status2, headers) {
+      if (status2 === 303) cookie = headers?.["set-cookie"]?.split(";")[0];
+    },
+    end() {
+    }
+  });
+  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== void 0)
+    throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI authentication is unavailable.", void 0, true);
+  return cookie;
+}
+function authorizeUpstream(request, publicUrl, cookie) {
+  let path;
+  try {
+    path = decodeURIComponent(request.path.split("?")[0] ?? "");
+  } catch {
+    return;
+  }
+  if (!path.startsWith("/") || path.startsWith("//") || /[%\\\u0000-\u0020\u007f?#]/.test(path) || path.split("/").some((segment) => segment === "." || segment === "..") || /^\/(ds-harness-remote|__remote|connect)(\/|$)/i.test(path) || new URL(request.path, publicUrl).searchParams.has("token") || !/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(request.method)) return;
+  const headers = [];
+  for (const [name2, value] of request.headers) {
+    const lower = name2.toLowerCase();
+    if (lower === "origin" && value !== publicUrl.origin) return;
+    if (lower === "sec-fetch-site" && value === "cross-site") return;
+    if (lower === "cookie" || lower === "authorization" || lower === "forwarded" || lower.startsWith("x-forwarded-")) continue;
+    headers.push([name2, value]);
+  }
+  headers.push(["cookie", cookie]);
+  return { ...request, headers };
+}
+function stripResponseHeaders(headers) {
+  return headers.filter(([name2, value]) => name2.toLowerCase() !== "set-cookie" && !(name2.toLowerCase() === "location" && /[?&]token=/i.test(value)));
+}
+
 // packages/plugin/src/session-transfer.ts
-import { createHash as createHash7, randomUUID as randomUUID16 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID17 } from "node:crypto";
 import { stat as stat7 } from "node:fs/promises";
 import { promisify as promisify6 } from "node:util";
 import { gunzip, gzip } from "node:zlib";
@@ -101689,7 +102672,7 @@ var SessionTransferPeer = class {
           }
           sessions.set(sessionId, { throughSeq, inheritedEventCount: snapshot2.inheritedEventCount });
         }
-        const handle = randomUUID16();
+        const handle = randomUUID17();
         this.outgoing = { handle, sessions };
         return { handle, sessions: [...sessions].map(([sessionId, { throughSeq }]) => ({ sessionId, throughSeq })), chunkBytes };
       }
@@ -101740,7 +102723,7 @@ var SessionTransferPeer = class {
         if (!this.capabilities().includes("session.transfer.import.v1")) fail6("FEATURE_NOT_SUPPORTED", "Session import is unavailable.");
         if (this.incoming) fail6("RATE_LIMITED", "An import is already open.");
         this.workspace(input4.workspaceId);
-        const handle = randomUUID16();
+        const handle = randomUUID17();
         this.incoming = { ...input4, handle, received: 0, chunks: [] };
         return { handle, chunkBytes, maxBytes };
       }
@@ -101833,7 +102816,7 @@ var SessionTransferPeer = class {
     if (!(await stat7(cwd2).catch(() => void 0))?.isDirectory() || this.workspace(workspaceId).path !== cwd2) {
       fail6("SESSION_TRANSFER_WORKSPACE_UNAVAILABLE", "The target workspace directory is unavailable.");
     }
-    const sessionId = `session-${randomUUID16()}`;
+    const sessionId = `session-${randomUUID17()}`;
     const { inheritedEventCount } = source;
     const events = source.events.map((item) => {
       if (item.type === "working-directory/change") return { ...item, data: { cwd: cwd2 } };
@@ -102295,7 +103278,7 @@ var HostPairing = class {
 };
 
 // packages/plugin/src/workspace-upload.ts
-import { randomUUID as randomUUID17 } from "node:crypto";
+import { randomUUID as randomUUID18 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat8, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
@@ -102446,7 +103429,7 @@ var WorkspaceUploadHost = class {
     const directory = await stat8(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join17(root2, `.dsh-upload-${randomUUID17()}.part`);
+    const temp = join17(root2, `.dsh-upload-${randomUUID18()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -103077,6 +104060,8 @@ var compactionOperationSchema = external_exports.object({
 var apiMethods = /* @__PURE__ */ new Set([
   ...sessionTransferMethods,
   "harness.transport.describe",
+  "dsh.web.open",
+  "dsh.web.close",
   "remote.history.configure",
   "harness.remote.call",
   "harness.remote.transfer.open",
@@ -103133,7 +104118,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -103149,6 +104134,7 @@ var RpcRouter = class {
     this.lanUpload = lanUpload;
     this.transportUpgrade = transportUpgrade;
     this.sessionTransfer = sessionTransfer;
+    this.dshWeb = dshWeb;
   }
   active = 0;
   async closePeerStreams() {
@@ -103160,7 +104146,8 @@ var RpcRouter = class {
       this.acp?.closeAll(),
       this.workspaceUpload?.closeAll(),
       this.lanUpload?.closeAll(),
-      this.transportUpgrade?.closeAll()
+      this.transportUpgrade?.closeAll(),
+      this.dshWeb?.dispose()
     ]);
   }
   async handle(message) {
@@ -103206,6 +104193,14 @@ var RpcRouter = class {
   }
   async invoke(method, params) {
     switch (method) {
+      case "dsh.web.open":
+        emptyParamsSchema.parse(params);
+        if (!this.dshWeb) throw new RpcError("FEATURE_NOT_SUPPORTED", "DSH Web is unavailable.");
+        return this.dshWeb.open();
+      case "dsh.web.close":
+        emptyParamsSchema.parse(params);
+        await this.dshWeb?.close();
+        return { closed: true };
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
         const hostCapabilities = (await this.capabilities()).filter((capability) => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY);
@@ -103217,6 +104212,7 @@ var RpcRouter = class {
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
           ...this.sessionTransfer?.capabilities() ?? [],
+          ...this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : [],
           ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
         ])];
         let workspaceTypes;
@@ -104991,7 +105987,7 @@ function closeCode(code) {
 }
 
 // packages/plugin/src/harness-remote-bridge.ts
-import { randomUUID as randomUUID18 } from "node:crypto";
+import { randomUUID as randomUUID19 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
 import { lstat as lstat6, realpath as realpath7, stat as stat10 } from "node:fs/promises";
 import { dirname as dirname9, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
@@ -105550,7 +106546,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID18(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID19(), host: { home: homedir10() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -105689,7 +106685,7 @@ var HarnessRemoteBridge = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
-    const transferId = randomUUID18();
+    const transferId = randomUUID19();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
     const completed = new Promise((resolve10, reject) => {
@@ -106275,7 +107271,7 @@ function remoteOwnedBundleRow(row, plugin) {
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { randomUUID as randomUUID20 } from "node:crypto";
 var MIN_BUDGET_MS = 6e4;
 var MAX_BUDGET_MS = 72e5;
 var DEFAULT_BUDGET_MS = 18e5;
@@ -106375,7 +107371,7 @@ var RemoteCompactionOperations = class {
       resolveCommandSettled = resolve10;
     });
     return {
-      operationId: randomUUID19(),
+      operationId: randomUUID20(),
       requestId: params.requestId,
       sessionId: params.sessionId,
       ownerDeviceId: owner.deviceId,
@@ -106637,7 +107633,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // packages/plugin/src/service.ts
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -106761,7 +107757,11 @@ var HostPluginRuntime = class {
         },
         lanUpload,
         context.createTransportUpgradeHost?.(send),
-        sessionTransfer?.peer(context.peerDeviceId)
+        sessionTransfer?.peer(context.peerDeviceId),
+        this.serverApi && resolveDshWeb ? new DshWebPeer(this.serverApi, {
+          clientDeviceId: context.peerDeviceId,
+          connectionId: context.connectionId
+        }, resolveDshWeb) : void 0
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -107070,10 +108070,10 @@ var HostPluginRuntime = class {
     if (this.closed) return;
     this.closed = true;
     this.pairing?.close();
-    this.serverApi?.close();
     await this.serverConnection?.stop();
     this.compactionOperations.closeAll();
     await this.connections.close();
+    this.serverApi?.close();
     await this.localCodexPeer?.closeAll();
     this.localCodexPeer = void 0;
     await this.localAcpPeer?.closeAll();
@@ -107628,7 +108628,7 @@ var PluginUpdateChecker = class {
 };
 
 // packages/plugin/src/plugin-self-update.ts
-import { randomUUID as randomUUID20 } from "node:crypto";
+import { randomUUID as randomUUID21 } from "node:crypto";
 
 // packages/plugin/src/version-compare.ts
 var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -107674,7 +108674,7 @@ function compareVersions(left, right) {
 // packages/plugin/src/plugin-self-update.ts
 var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
 var LocalPluginUpgrade = class {
-  constructor(checker, manager, subscribe, requestId2 = randomUUID20) {
+  constructor(checker, manager, subscribe, requestId2 = randomUUID21) {
     this.checker = checker;
     this.manager = manager;
     this.subscribe = subscribe;
@@ -108445,7 +109445,18 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         sessions: ctx.get("sessions", false),
         persistence: ctx.get("sessionPersistence", false),
         workspaces: ctx.get("workspaceRegistry", false)
-      })
+      }),
+      () => {
+        if (!ctx.get("webApp", false)) return;
+        const listener = ctx.get("webServer", false);
+        const auth = ctx.get("connection", false);
+        if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
+        try {
+          const origin = new URL(listener.getOrigin());
+          if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
+        } catch {
+        }
+      }
     );
     let clientRuntime2;
     if (config3.serverUrl !== void 0 && connection !== void 0) {

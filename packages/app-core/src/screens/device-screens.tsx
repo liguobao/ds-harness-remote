@@ -3,7 +3,8 @@ import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
-import { useAppStore } from '../state/store'
+import { requireConnectionRpc, useAppStore } from '../state/store'
+import { DshWebScreen } from './dsh-web-screen'
 import { shouldPollSessionStatus } from '../state/session-catalog-commands'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice } from '../types'
 import {
@@ -273,8 +274,15 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const forgetBusy = useAppStore(state => state.busyAction === `forget:${device.deviceId}`)
   const reconnect = useAppStore(state => state.reconnect)
   const [renaming, setRenaming] = useState(false)
+  const language = useAppStore(state => state.language)
+  const dshWebLabel = language?.startsWith('zh') ? '打开 DSH Web' : 'Open DSH Web'
+  const [webRpc, setWebRpc] = useState<ReturnType<typeof requireConnectionRpc>>()
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
+  const webAvailable = isConnected && requireConnectionRpc().supportsDshWeb
+  useEffect(() => {
+    if (!isConnected) setWebRpc(undefined)
+  }, [isConnected])
 
   const trustAndContinue = async () => {
     if (await trust(device) && device.online) onConnect()
@@ -290,6 +298,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
   return (
     <View style={styles.flex}>
+      {webRpc && isConnected && <DshWebScreen rpc={webRpc} onClose={() => setWebRpc(undefined)} />}
       <BlurHeaderFrame header={<TopBar title={zhCN.devices.title} onBack={onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
@@ -341,6 +350,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                       </View>
                     </View>
 
+                    {webAvailable && <Button label={dshWebLabel} onPress={() => setWebRpc((current: ReturnType<typeof requireConnectionRpc> | undefined) => current ?? requireConnectionRpc())} />}
                     <DeviceConnectionInfo deviceId={device.deviceId} />
 
                     {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}

@@ -68,6 +68,13 @@ export interface AuthorizedPeerDevice extends ServerHostDevice {
   identityKey: string
 }
 
+export interface DshWebRequest {
+  clientDeviceId: string
+  connectionId: string
+  requestId: string
+  leaseExpiresAt: number
+}
+
 export class HostServerApi {
   readonly baseUrl: string
   private hostOnly = false
@@ -487,6 +494,19 @@ export class HostServerApi {
       throw new ServerApiError('INVALID_MESSAGE', 'The Server returned invalid device presence.', false)
     }
     return { online: result.online, ...(typeof result.lastSeenAt === 'number' ? { lastSeenAt: result.lastSeenAt } : {}) }
+  }
+
+  async dshWebRequest(action: 'allocate' | 'grant' | 'check', input: DshWebRequest, signal: AbortSignal, sessionId?: string): Promise<unknown> {
+    const path = this.dshWebPath() + (action === 'allocate' ? '' : `/${action}`)
+    return this.request(path, { method: 'POST', body: JSON.stringify({ ...input, sessionId }), signal })
+  }
+
+  async closeDshWeb(sessionId: string): Promise<void> {
+    await this.request(this.dshWebPath() + '/' + encodeURIComponent(sessionId), { method: 'DELETE', signal: AbortSignal.timeout(3_000) })
+  }
+
+  private dshWebPath(): string {
+    return `/api/v1/hosts/${encodeURIComponent(this.requireIdentity().deviceId)}/dsh-web/sessions`
   }
 
   private async loadOrIssue(identity: HostIdentity): Promise<ServerCredentials> {

@@ -223,6 +223,8 @@ export const rpcMethods = [
   'workspace.upload.commit',
   'workspace.upload.abort',
   'harness.transport.describe',
+  'dsh.web.open',
+  'dsh.web.close',
   'remote.history.configure',
   'harness.api.call',
   'harness.api.transfer.open',
@@ -1623,3 +1625,5 @@ function cryptoRandomId(): string {
   if (g?.randomUUID) return g.randomUUID()
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`
 }
+
+export * from './dsh-web.js'

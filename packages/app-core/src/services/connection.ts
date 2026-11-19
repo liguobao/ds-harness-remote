@@ -1,3 +1,4 @@
+import { DSH_WEB_CAPABILITY } from '@dsh-remote/protocol'
 import { LanUploadRoutes } from './lan-upload'
 import { nativeWebSocketSender } from './native-websocket-binary'
 import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
@@ -35,6 +36,7 @@ export interface AndroidConnectionOptions {
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
   private binaryUploads = false
+  private dshWeb = false
   private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
   private pluginRouteSupported = false
@@ -288,6 +290,7 @@ export class AndroidRemoteConnection {
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
     this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
+    this.dshWeb = features.capabilities.includes(DSH_WEB_CAPABILITY)
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
@@ -359,6 +362,8 @@ export class AndroidRemoteConnection {
       current,
     )
   }
+
+  supportsDshWeb(): boolean { return this.core !== undefined && this.dshWeb }
 
   supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
 
