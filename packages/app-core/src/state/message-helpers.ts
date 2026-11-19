@@ -96,6 +96,87 @@ export function inboxRpcIds(inbox: unknown): Set<string> {
   return ids
 }
 
+/** Return an updated `inbox` projection with the specified `next-turn` queue item removed. */
+export function removeInboxQueueItem(inbox: unknown, itemId: string, rpcId?: string): unknown {
+  if (typeof inbox !== 'object' || inbox === null || Array.isArray(inbox)) return inbox
+  const record = inbox as Record<string, unknown>
+  if (!Array.isArray(record['next-turn'])) return inbox
+  const filtered = record['next-turn'].filter(row => {
+    if (typeof row !== 'object' || row === null) return true
+    const entry = row as Record<string, unknown>
+    if (typeof entry.id === 'string' && entry.id === itemId) return false
+    if (rpcId !== undefined) {
+      const source = entry.source
+      if (typeof source === 'object' && source !== null && (source as Record<string, unknown>).rpcId === rpcId) {
+        return false
+      }
+    }
+    return true
+  })
+  if (filtered.length === record['next-turn'].length) return inbox
+  return { ...record, 'next-turn': filtered }
+}
+
+/** True for local optimistic rows in a terminal/settled state without native ordering. */
+export function isTerminalLocalMessage(item: ChatItem): boolean {
+  return item.kind === 'message'
+    && item.id.startsWith('local:')
+    && item.nativeOrderSeq === undefined
+    && item.nativeSeq === undefined
+    && (item.sendState === 'failed' || item.sendState === 'unconfirmed' || item.sendState === 'canceled')
+}
+
+function authoritativeTimestamp(item: ChatItem): number | undefined {
+  if (item.nativeTime !== undefined && Number.isFinite(item.nativeTime) && item.nativeTime > 0) return item.nativeTime
+  if (item.nativeSeq === undefined && item.nativeOrderSeq === undefined && Number.isFinite(item.createdAt) && item.createdAt > 0) {
+    return item.createdAt
+  }
+  return undefined
+}
+
+function isInFlightLocalMessage(item: ChatItem): boolean {
+  return item.kind === 'message'
+    && item.id.startsWith('local:')
+    && item.nativeOrderSeq === undefined
+    && item.nativeSeq === undefined
+    && (item.sendState === undefined || item.sendState === 'queued')
+}
+
+/**
+ * Re-insert settled/failed local messages near their original timestamp among
+ * merged history items, keeping still-in-flight (`sending`/`queued`) optimistic
+ * rows at the tail and preserving relative order when timestamps tie or are absent.
+ */
+export function insertTerminalLocalMessages(base: ChatItem[], terminalLocals: ChatItem[]): ChatItem[] {
+  if (terminalLocals.length === 0) return base
+  const orderedLocals = [...terminalLocals].sort((a, b) => {
+    const left = Number.isFinite(a.createdAt) && a.createdAt > 0 ? a.createdAt : undefined
+    const right = Number.isFinite(b.createdAt) && b.createdAt > 0 ? b.createdAt : undefined
+    if (left === undefined && right === undefined) return 0
+    if (left === undefined) return 1
+    if (right === undefined) return -1
+    return left - right
+  })
+  const output = [...base]
+  for (const local of orderedLocals) {
+    const localTime = Number.isFinite(local.createdAt) && local.createdAt > 0 ? local.createdAt : undefined
+    const inFlightIndex = output.findIndex(isInFlightLocalMessage)
+    const searchLimit = inFlightIndex === -1 ? output.length : inFlightIndex
+    let insertAt = searchLimit
+    if (localTime !== undefined) {
+      for (let index = 0; index < searchLimit; index += 1) {
+        const candidateTime = authoritativeTimestamp(output[index]!)
+        if (candidateTime !== undefined && candidateTime > localTime) {
+          insertAt = index
+          break
+        }
+      }
+    }
+    output.splice(insertAt, 0, local)
+  }
+  return output
+}
+
 /**
  * Delivery-state reconciliation against Host truth (no timers, no deletions):
  * after a fresh history load plus an `inbox` snapshot, an optimistic row whose
@@ -183,7 +264,13 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
       return turn === item.turn ? item : { ...item, ...(turn === undefined ? {} : { turn }) }
     }),
   ]
-  return result.sort((a, b) => {
+  const ordered: ChatItem[] = []
+  const terminalLocals: ChatItem[] = []
+  for (const item of result) {
+    if (isTerminalLocalMessage(item)) terminalLocals.push(item)
+    else ordered.push(item)
+  }
+  ordered.sort((a, b) => {
     const left = a.nativeOrderSeq ?? a.nativeSeq
     const right = b.nativeOrderSeq ?? b.nativeSeq
     if (left === undefined && right === undefined) return 0
@@ -191,6 +278,7 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
     if (right === undefined) return -1
     return left - right
   })
+  return insertTerminalLocalMessages(ordered, terminalLocals)
 }
 
 /** Reconcile durable `userQuestions` projection rows into the session's chat items. */

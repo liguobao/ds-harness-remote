@@ -15,6 +15,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import { foldHistory } from '../state/event-reducer'
+import { insertTerminalLocalMessages, isTerminalLocalMessage } from '../state/message-helpers'
 
 export function acpWorkspaceId(backend: AcpManagedBackend, path: string): string {
   return `${backend}:cwd:${encodeURIComponent(path)}`
@@ -550,6 +551,16 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
  * globally dedupe identical answers (which may belong to separate turns).
  */
 export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): ChatItem[] {
+  const historyIds = new Set(history.map(item => item.id))
+  const terminalLocals: ChatItem[] = []
+  const nonTerminalLive: ChatItem[] = []
+  for (const item of live) {
+    if (isTerminalLocalMessage(item)) {
+      if (!historyIds.has(item.id)) terminalLocals.push(item)
+    } else {
+      nonTerminalLive.push(item)
+    }
+  }
   const same = (a: ChatItem, b: ChatItem): boolean => {
     if (a.kind !== b.kind) return false
     if (a.kind === 'message' && b.kind === 'message') {
@@ -562,18 +573,18 @@ export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): C
     }
     return a.id === b.id
   }
-  for (let count = Math.min(history.length, live.length); count > 0; count--) {
+  for (let count = Math.min(history.length, nonTerminalLive.length); count > 0; count--) {
     const suffix = history.slice(history.length - count)
     // Text alone is not identity: two independent turns can say the same thing.
     // Require a shared ID or a tool call anchor before collapsing an overlap.
-    const anchored = live.slice(0, count).some((item, index) => {
+    const anchored = nonTerminalLive.slice(0, count).some((item, index) => {
       const previous = suffix[index]!
       return previous.id === item.id || (previous.kind === 'tool' && item.kind === 'tool' && same(previous, item))
     })
-    if (anchored && live.slice(0, count).every((item, index) => same(suffix[index]!, item))) {
+    if (anchored && nonTerminalLive.slice(0, count).every((item, index) => same(suffix[index]!, item))) {
       // Prefer live rows at the boundary: preserve completion/stream state and
       // keep their IDs so subsequent chunks update rather than duplicate them.
-      const overlap = live.slice(0, count).map((item, index) => {
+      const overlap = nonTerminalLive.slice(0, count).map((item, index) => {
         const previous = suffix[index]!
         const nativeTime = item.nativeTime ?? previous.nativeTime
         return item.kind === 'tool' && previous.kind === 'tool'
@@ -583,10 +594,11 @@ export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): C
               callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
           : nativeTime === undefined ? item : { ...item, nativeTime }
       })
-      return [...history.slice(0, history.length - count), ...overlap, ...live.slice(count)]
+      const merged = [...history.slice(0, history.length - count), ...overlap, ...nonTerminalLive.slice(count)]
+      return insertTerminalLocalMessages(merged, terminalLocals)
     }
   }
-  return [...history, ...live]
+  return insertTerminalLocalMessages([...history, ...nonTerminalLive], terminalLocals)
 }
 
 /** Fold Host ACP transcript events into the Android chat projection. */

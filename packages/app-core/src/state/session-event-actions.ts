@@ -10,7 +10,7 @@ import {
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { applyCursorFrame, cursorNativeId, normalizeAcpTodos } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
-import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
+import { applyMuxFrameToMessages, sessionRunningForMuxFrame, settleOrphanedQueuedItems } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
@@ -148,7 +148,8 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ...(key === 'title' && typeof value === 'string' && value !== '' ? { title: value } : {}),
             projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
           }
-          const currentSession = state.sessions.find(item => item.sessionId === sessionId) ?? state.selectedSession
+          const currentSession = state.sessions.find(item => item.sessionId === sessionId)
+            ?? (state.selectedSession?.sessionId === sessionId ? state.selectedSession : undefined)
           const nextValues = {
             ...currentSession?.projections?.values,
             [key]: value,
@@ -160,13 +161,15 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           // settles it. No second projection or timer is needed for visibility.
           const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
             const queued = inboxRpcIds(value)
+            const isIdle = currentSession?.running === false
             const next = items.map(item => {
               if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
                 || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
               if (queued.has(item.requestRpcId)) {
                 return { ...item, sendState: 'queued' as const, queuedAdopted: true, sendError: undefined }
               }
-              if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
+              if ((item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined))
+                || (isIdle && item.sendState === 'queued')) {
                 return { ...item, sendState: 'unconfirmed' as const, sendError: undefined }
               }
               return item
@@ -205,9 +208,11 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         // Row status marks mirror the official session dots: a finished turn
         // leaves a "done" reminder (green) until the session is opened; a failed
         // turn leaves the red mark instead.
-        const turnReason = running === false && frame.payload.event?.type === 'turn/end'
-          ? frame.payload.event.data.reason
-          : undefined
+        const isTurnEnd = running === false && frame.payload.event?.type === 'turn/end'
+        const turnReason = isTurnEnd ? frame.payload.event?.data.reason : undefined
+        const isStoppedTurn = isTurnEnd && (isRecord(turnReason)
+          ? turnReason.kind === 'aborted' || turnReason.kind === 'interrupted'
+          : turnReason === 'aborted' || turnReason === 'interrupted')
         const finishedMark = running === undefined ? undefined
           : running ? undefined
             : isRecord(turnReason) && (turnReason.kind === 'failed' || turnReason.kind === 'error') ? 'failed' as const
@@ -217,8 +222,24 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ? { ...session, running }
             : session
         )
+        let nextMessages = applyMuxFrameToMessages(state.messages, frame)
+        if (isTurnEnd && sessionId !== undefined) {
+          const currentSession = state.sessions.find(item => item.sessionId === sessionId)
+            ?? (state.selectedSession?.sessionId === sessionId ? state.selectedSession : undefined)
+          const inboxSnapshot = currentSession?.projections?.values?.inbox
+          if (isStoppedTurn || finishedMark === 'failed') {
+            const sessionItems = nextMessages[sessionId] ?? []
+            const settled = settleOrphanedQueuedItems(
+              sessionItems,
+              inboxSnapshot === undefined ? undefined : inboxRpcIds(inboxSnapshot),
+            )
+            if (settled !== sessionItems) {
+              nextMessages = { ...nextMessages, [sessionId]: settled }
+            }
+          }
+        }
         return {
-          messages: applyMuxFrameToMessages(state.messages, frame),
+          messages: nextMessages,
           ...(sessionId === undefined || running === undefined ? {} : {
             sessions: state.sessions.map(updateRunning),
             selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),

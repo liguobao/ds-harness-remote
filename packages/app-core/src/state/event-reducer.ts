@@ -225,6 +225,30 @@ export function settleTurnItems(current: ChatItem[], turn?: string, exceptTurn?:
   })
 }
 
+/**
+ * Settle local optimistic `queued` rows that are no longer backed by the Host
+ * `inbox` after a turn ends or the session goes idle. Prompts still present in
+ * `queuedRpcIds` remain `'queued'` for the next turn.
+ */
+export function settleOrphanedQueuedItems(
+  current: ChatItem[],
+  queuedRpcIds?: ReadonlySet<string>,
+): ChatItem[] {
+  let changed = false
+  const next = current.map(item => {
+    if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
+      || item.nativeSeq !== undefined || item.sendState !== 'queued') {
+      return item
+    }
+    if (item.requestRpcId !== undefined && queuedRpcIds?.has(item.requestRpcId)) {
+      return item
+    }
+    changed = true
+    return { ...item, sendState: 'unconfirmed' as const, sendError: undefined }
+  })
+  return changed ? next : current
+}
+
 function addUserMessage(current: ChatItem[], data: UnknownRecord, sessionId: string): ChatItem[] {
   // Harness also records model-facing plugin context (instructions, snapshots,
   // notices, and similar injected material) as `user/message`. Only the
