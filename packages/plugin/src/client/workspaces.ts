@@ -49,19 +49,12 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
    */
   function useFooterLane(wide: boolean): [(node: HTMLElement | null) => void, FooterForm] {
     const [form, setForm] = React.useState<FooterForm>(wide ? 'label' : 'icon')
-    const nodeRef = React.useRef<HTMLElement | null>(null)
-    const [seat, setSeat] = React.useState(0)
-    const attach = React.useCallback((node: HTMLElement | null) => {
-      if (nodeRef.current === node) return
-      nodeRef.current = node
-      setSeat(previous => previous + 1)
-    }, [])
+    const [node, setNode] = React.useState<HTMLElement | null>(null)
     React.useEffect(() => {
-      const node = nodeRef.current
       if (node === null) return undefined
       return watchFooterLane(node, () => wide, next => setForm(previous => (previous === next ? previous : next)))
-    }, [wide, seat])
-    return [attach, wide ? form : 'icon']
+    }, [wide, node])
+    return [setNode, wide ? form : 'icon']
   }
 
   /**
@@ -1256,37 +1249,49 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
     // Wide entry: the button stretches full width and carries the update suffix
     // in the host's own update-indicator look. Rail/Compact entries are
     // icon-only, so they get the official 6px brand dot instead.
-    const updateSuffix = localUpdateAvailable && labelled
-      ? React.createElement('span', {
-        className: 'dshRemoteUpdateSuffix',
-        title: updateNotice, 'aria-hidden': true,
-      }, t('updateShort', { version: updateInfo?.latestVersion ?? '' }))
-      : null
     const updateDot = localUpdateAvailable
       ? React.createElement('span', { className: 'dshRemoteUpdateDot', title: t('updateBadge'), 'aria-hidden': true })
       : null
-    const entry = React.createElement('div', { ref: attachEntry, className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${labelled ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}` },
-      React.createElement(remoteActive && labelled && !reauth ? 'div' : 'button', {
-        ...(remoteActive && labelled && !reauth ? {} : {
+    const renderEntry = (entryLabelled: boolean, options: {
+      ref?: (node: HTMLElement | null) => void
+      inAccountRow?: boolean
+    } = {}) => {
+      const updateSuffix = localUpdateAvailable && entryLabelled
+        ? React.createElement('span', {
+          className: 'dshRemoteUpdateSuffix',
+          title: updateNotice, 'aria-hidden': true,
+        }, t('updateShort', { version: updateInfo?.latestVersion ?? '' }))
+        : null
+      return React.createElement('div', {
+        ...(options.ref === undefined ? {} : { ref: options.ref }),
+        className: `dshRemoteSidebarEntry${remoteActive ? ' isActive' : ''}${entryLabelled ? ' isWide' : ' isRail'}${localUpdateAvailable ? ' hasUpdate' : ''}${options.inAccountRow ? ' isAccountRow' : ''}`,
+      },
+        React.createElement(remoteActive && entryLabelled && !reauth ? 'div' : 'button', {
+          ...(remoteActive && entryLabelled && !reauth ? {} : {
+            type: 'button',
+            disabled: remoteActive && busy,
+            onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show()),
+          }),
+          className: 'dshRemoteModeButton',
+          title: entryLabelled ? remoteLabel : remoteActionLabel,
+          'aria-label': entryLabelled ? remoteLabel : remoteActionLabel,
+        }, computerIcon, entryLabelled
+          ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
+          : null, entryLabelled ? updateSuffix : updateDot),
+        remoteActive && entryLabelled ? React.createElement('button', {
           type: 'button',
-          disabled: remoteActive && busy,
-          onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show()),
-        }),
-        className: 'dshRemoteModeButton',
-        title: labelled ? remoteLabel : remoteActionLabel,
-        'aria-label': labelled ? remoteLabel : remoteActionLabel,
-      }, computerIcon, labelled
-        ? React.createElement('span', { className: 'dshRemoteSidebarLabel' }, remoteLabel)
-        : null, labelled ? updateSuffix : updateDot),
-      remoteActive && labelled ? React.createElement('button', {
-        type: 'button',
-        className: 'dshRemoteExitLink',
-        disabled: busy,
-        onClick: () => void openLocalWorkspaces(),
-      }, t('exitRemote')) : null)
+          className: 'dshRemoteExitLink',
+          disabled: busy,
+          onClick: () => void openLocalWorkspaces(),
+        }, t('exitRemote')) : null)
+    }
+    const entry = renderEntry(labelled, { ref: attachEntry })
     // Compact stays in the account row, but remote mode must expose the Host
-    // identity and the same explicit exit action as the standard entry.
-    const accountEntry = remoteActive ? entry : React.createElement('div', { className: `dshRemoteAccountEntry${remoteActive ? ' isActive' : ''}` },
+    // identity and the same explicit exit action as the standard entry. That
+    // portalled entry sits in the host account row rather than the shared
+    // footer lane, so it keeps `props.wide` instead of measuring account-row
+    // siblings as footer occupants.
+    const accountEntry = remoteActive ? renderEntry(props.wide, { inAccountRow: true }) : React.createElement('div', { className: `dshRemoteAccountEntry${remoteActive ? ' isActive' : ''}` },
       React.createElement('button', {
         type: 'button',
         className: 'dshRemoteAccountEntryButton',

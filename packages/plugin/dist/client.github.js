@@ -5075,7 +5075,7 @@ If a code was sent, recover the original submission without changing it.`,
       ".dshRemoteEntryStyleChoices{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3)}.dshRemoteEntryStyleChoices>button{box-sizing:border-box;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;padding:3px 10px;border-radius:6px;white-space:nowrap;cursor:pointer}.dshRemoteEntryStyleChoices>button:hover:not(:disabled):not(.isSelected){color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button.isSelected{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}.dshRemoteEntryStyleChoices>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}.dshRemoteEntryStyleChoices>button:disabled{opacity:.45;cursor:default}",
       // Keep Exit in flow: an absolute action and reserved padding can overlap
       // the icon or adjacent plugins when the host shrinks this flex item.
-      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:8px}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
+      ".dshRemoteSidebarEntry.isWide.isActive{display:flex;align-items:center}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{flex:1 1 auto;width:auto;overflow:hidden;padding:0}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteComputerIcon{margin-inline-start:calc(var(--dsh-sidebar-row-padding,12px) - var(--dsh-sidebar-paint-inset,3px))}.dshRemoteSidebarEntry.isAccountRow{margin:0}.dshRemoteExitLink{margin-inline-start:auto;flex:0 0 36px;min-width:36px;height:42px;border:0;border-radius:var(--dsw-radius-md,12px);background:transparent;color:var(--dsw-alias-label-secondary);padding:0;font:inherit;font-size:12px;line-height:22px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
       // The strip sits inside the 40px Windows caption row, which the shell declares as the
       // window drag region. Without an explicit opt-out every press starts a window drag and
       // never reaches these buttons; the shell's own caption controls (sidebar toggle, new
@@ -5277,21 +5277,13 @@ If a code was sent, recover the original submission without changing it.`,
     return wide ? facts.row === null || !facts.lane || facts.wrapped ? "label" : resolveFooterForm(facts.count, facts.rowWidth) : "icon";
   }
   function watchFooterLane(entry, wide, onForm, view = globalThis) {
-    let reported, row = null, resize, mutation, resolve = () => {
-      let next = footerFormFor(measureFooterSeat(entry, view), wide());
-      next !== reported && (reported = next, onForm(next));
-    }, bind = () => {
-      let next = measureFooterSeat(entry, view).row;
-      next !== row && (resize?.disconnect(), mutation?.disconnect(), resize = void 0, mutation = void 0, row = next, row !== null && (typeof ResizeObserver == "function" && (resize = new ResizeObserver(() => {
-        resolve(), bind();
-      }), resize.observe(row), resize.observe(entry)), typeof MutationObserver == "function" && (mutation = new MutationObserver(() => {
-        resolve(), bind();
-      }), mutation.observe(row, { childList: !0, subtree: !0, attributes: !0, attributeFilter: ["style", "class", "hidden"] }))));
-    }, onViewportResize = () => {
-      resolve(), bind();
+    let reported, row = null, resize, mutation, disposed = !1, sync = () => {
+      if (disposed) return;
+      let facts = measureFooterSeat(entry, view), nextForm = footerFormFor(facts, wide());
+      nextForm !== reported && (reported = nextForm, onForm(nextForm)), facts.row !== row && (resize?.disconnect(), mutation?.disconnect(), resize = void 0, mutation = void 0, row = facts.row, row !== null && (typeof ResizeObserver == "function" && (resize = new ResizeObserver(sync), resize.observe(row), resize.observe(entry)), typeof MutationObserver == "function" && (mutation = new MutationObserver(sync), mutation.observe(row, { childList: !0, subtree: !0, attributes: !0, attributeFilter: ["style", "class", "hidden"] }))));
     };
-    return resolve(), bind(), typeof window < "u" && window.addEventListener("resize", onViewportResize), () => {
-      resize?.disconnect(), mutation?.disconnect(), typeof window < "u" && window.removeEventListener("resize", onViewportResize);
+    return sync(), typeof window < "u" && window.addEventListener("resize", sync), () => {
+      disposed = !0, resize?.disconnect(), mutation?.disconnect(), typeof window < "u" && window.removeEventListener("resize", sync);
     };
   }
 
@@ -5365,14 +5357,11 @@ If a code was sent, recover the original submission without changing it.`,
   function createRemoteWorkspaceAction(React, portal) {
     let ServerNotice = createServerNotice(React), HostPairingPanel = createHostPairingPanel(React), RemoteProgressView = createRemoteProgressView(React);
     function useFooterLane(wide) {
-      let [form, setForm] = React.useState(wide ? "label" : "icon"), nodeRef = React.useRef(null), [seat, setSeat] = React.useState(0), attach = React.useCallback((node) => {
-        nodeRef.current !== node && (nodeRef.current = node, setSeat((previous) => previous + 1));
-      }, []);
+      let [form, setForm] = React.useState(wide ? "label" : "icon"), [node, setNode] = React.useState(null);
       return React.useEffect(() => {
-        let node = nodeRef.current;
         if (node !== null)
           return watchFooterLane(node, () => wide, (next) => setForm((previous) => previous === next ? previous : next));
-      }, [wide, seat]), [attach, wide ? form : "icon"];
+      }, [wide, node]), [setNode, wide ? form : "icon"];
     }
     function RemoteAccountEntry(props) {
       let [container, setContainer] = React.useState(null), { portal: portal2 } = props;
@@ -5862,30 +5851,36 @@ If a code was sent, recover the original submission without changing it.`,
         },
         React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
         React.createElement("path", { d: "M8 21h8M12 17v4" })
-      ), remoteActive = status?.mode === "remote", labelled = props.wide && entryForm === "label", updateSuffix = localUpdateAvailable && labelled ? React.createElement("span", {
-        className: "dshRemoteUpdateSuffix",
-        title: updateNotice,
-        "aria-hidden": !0
-      }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null, updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, entry = React.createElement(
-        "div",
-        { ref: attachEntry, className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${labelled ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}` },
-        React.createElement(remoteActive && labelled && !reauth ? "div" : "button", {
-          ...remoteActive && labelled && !reauth ? {} : {
-            type: "button",
-            disabled: remoteActive && busy,
-            onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+      ), remoteActive = status?.mode === "remote", labelled = props.wide && entryForm === "label", updateDot = localUpdateAvailable ? React.createElement("span", { className: "dshRemoteUpdateDot", title: t("updateBadge"), "aria-hidden": !0 }) : null, renderEntry = (entryLabelled, options = {}) => {
+        let updateSuffix = localUpdateAvailable && entryLabelled ? React.createElement("span", {
+          className: "dshRemoteUpdateSuffix",
+          title: updateNotice,
+          "aria-hidden": !0
+        }, t("updateShort", { version: updateInfo?.latestVersion ?? "" })) : null;
+        return React.createElement(
+          "div",
+          {
+            ...options.ref === void 0 ? {} : { ref: options.ref },
+            className: `dshRemoteSidebarEntry${remoteActive ? " isActive" : ""}${entryLabelled ? " isWide" : " isRail"}${localUpdateAvailable ? " hasUpdate" : ""}${options.inAccountRow ? " isAccountRow" : ""}`
           },
-          className: "dshRemoteModeButton",
-          title: labelled ? remoteLabel : remoteActionLabel,
-          "aria-label": labelled ? remoteLabel : remoteActionLabel
-        }, computerIcon, labelled ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, labelled ? updateSuffix : updateDot),
-        remoteActive && labelled ? React.createElement("button", {
-          type: "button",
-          className: "dshRemoteExitLink",
-          disabled: busy,
-          onClick: () => void openLocalWorkspaces()
-        }, t("exitRemote")) : null
-      ), accountEntry = remoteActive ? entry : React.createElement(
+          React.createElement(remoteActive && entryLabelled && !reauth ? "div" : "button", {
+            ...remoteActive && entryLabelled && !reauth ? {} : {
+              type: "button",
+              disabled: remoteActive && busy,
+              onClick: () => void (remoteActive && !reauth ? openLocalWorkspaces() : show())
+            },
+            className: "dshRemoteModeButton",
+            title: entryLabelled ? remoteLabel : remoteActionLabel,
+            "aria-label": entryLabelled ? remoteLabel : remoteActionLabel
+          }, computerIcon, entryLabelled ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null, entryLabelled ? updateSuffix : updateDot),
+          remoteActive && entryLabelled ? React.createElement("button", {
+            type: "button",
+            className: "dshRemoteExitLink",
+            disabled: busy,
+            onClick: () => void openLocalWorkspaces()
+          }, t("exitRemote")) : null
+        );
+      }, entry = renderEntry(labelled, { ref: attachEntry }), accountEntry = remoteActive ? renderEntry(props.wide, { inAccountRow: !0 }) : React.createElement(
         "div",
         { className: `dshRemoteAccountEntry${remoteActive ? " isActive" : ""}` },
         React.createElement("button", {

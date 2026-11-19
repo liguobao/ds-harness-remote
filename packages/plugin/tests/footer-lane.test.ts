@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FOOTER_COUNT_LIMIT,
   FOOTER_ICON_WIDTH,
@@ -230,4 +230,64 @@ describe('watchFooterLane', () => {
     stopSecond()
     stopCollapsed()
   })
+
+  it('reacts to neighbour mutations and row resizes once per transition and stops after cleanup', () => {
+    const resizeCallbacks: Array<() => void> = []
+    const mutationCallbacks: Array<() => void> = []
+    class FakeResizeObserver {
+      disconnected = false
+      constructor(callback: () => void) {
+        resizeCallbacks.push(() => { if (!this.disconnected) callback() })
+      }
+      observe() {}
+      disconnect() { this.disconnected = true }
+    }
+    class FakeMutationObserver {
+      disconnected = false
+      constructor(callback: () => void) {
+        mutationCallbacks.push(() => { if (!this.disconnected) callback() })
+      }
+      observe() {}
+      disconnect() { this.disconnected = true }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    vi.stubGlobal('MutationObserver', FakeMutationObserver)
+    try {
+      const peerA = new FakeNode()
+      const peerB = new FakeNode()
+      const { container, anchor } = hostRow([peerA], { row: row({}, 268) })
+      const forms: string[] = []
+      const stop = watchFooterLane(anchor as unknown as Element, () => true, form => forms.push(form), view)
+      expect(forms).toEqual(['label'])
+
+      // Third occupant mounts -> collapses to icon.
+      container.append(peerB)
+      for (const fire of mutationCallbacks) fire()
+      expect(forms).toEqual(['label', 'icon'])
+
+      // Unrelated duplicate mutation does not re-emit.
+      for (const fire of mutationCallbacks) fire()
+      expect(forms).toEqual(['label', 'icon'])
+
+      // Third occupant leaves -> restores label; narrowing the row collapses again.
+      container.children.pop()
+      for (const fire of mutationCallbacks) fire()
+      expect(forms).toEqual(['label', 'icon', 'label'])
+
+      container.clientWidth = 200
+      for (const fire of resizeCallbacks) fire()
+      expect(forms).toEqual(['label', 'icon', 'label', 'icon'])
+
+      stop()
+      container.clientWidth = 320
+      for (const fire of resizeCallbacks) fire()
+      expect(forms).toEqual(['label', 'icon', 'label', 'icon'])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })

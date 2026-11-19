@@ -159,38 +159,38 @@ export function watchFooterLane(entry: Element, wide: () => boolean, onForm: (fo
   let row: Element | null = null
   let resize: ResizeObserver | undefined
   let mutation: MutationObserver | undefined
-  const resolve = (): void => {
-    const next = footerFormFor(measureFooterSeat(entry, view), wide())
-    if (next === reported) return
-    reported = next
-    onForm(next)
-  }
-  const bind = (): void => {
-    const next = measureFooterSeat(entry, view).row
-    if (next === row) return
+  let disposed = false
+  const sync = (): void => {
+    if (disposed) return
+    const facts = measureFooterSeat(entry, view)
+    const nextForm = footerFormFor(facts, wide())
+    if (nextForm !== reported) {
+      reported = nextForm
+      onForm(nextForm)
+    }
+    if (facts.row === row) return
     resize?.disconnect()
     mutation?.disconnect()
     resize = undefined
     mutation = undefined
-    row = next
+    row = facts.row
     if (row === null) return
     if (typeof ResizeObserver === 'function') {
-      resize = new ResizeObserver(() => { resolve(); bind() })
+      resize = new ResizeObserver(sync)
       resize.observe(row)
       resize.observe(entry)
     }
     if (typeof MutationObserver === 'function') {
-      mutation = new MutationObserver(() => { resolve(); bind() })
+      mutation = new MutationObserver(sync)
       mutation.observe(row, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'hidden'] })
     }
   }
-  const onViewportResize = (): void => { resolve(); bind() }
-  resolve()
-  bind()
-  if (typeof window !== 'undefined') window.addEventListener('resize', onViewportResize)
+  sync()
+  if (typeof window !== 'undefined') window.addEventListener('resize', sync)
   return () => {
+    disposed = true
     resize?.disconnect()
     mutation?.disconnect()
-    if (typeof window !== 'undefined') window.removeEventListener('resize', onViewportResize)
+    if (typeof window !== 'undefined') window.removeEventListener('resize', sync)
   }
 }
