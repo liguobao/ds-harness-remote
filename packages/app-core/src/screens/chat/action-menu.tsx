@@ -1,4 +1,4 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X, Zap } from 'lucide-react-native'
+import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import { IconButton } from '../../ui/components'
@@ -32,7 +32,6 @@ type Props = {
   permissionDisabled: boolean
   permissionLabel: string | undefined
   onReferenceChat?: () => void
-  onOpenPrompts?: () => void
   onOpenWorkspace: () => void
   onOpenMode: () => void
   onOpenTools: () => void
@@ -42,7 +41,7 @@ type Props = {
 export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
   takePhoto, pickImages, pickFiles, workspaceLabel, modeLabel, supportsModeSelection,
   agentPresetSelecting, toolsAvailable, permissionsAvailable, permissionSelecting,
-  permissionDisabled, permissionLabel, onReferenceChat, onOpenPrompts, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions,
+  permissionDisabled, permissionLabel, onReferenceChat, onOpenWorkspace, onOpenMode, onOpenTools, onOpenPermissions,
   onDismiss, runAfterClose }: Props) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -106,18 +105,6 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
             >
               <MessageSquare size={20} color={colors.primary} />
               <Text style={styles.plusMenuOptionText}>{strings.chat.referenceChat}</Text>
-              <ChevronRight size={16} color={colors.muted} />
-            </Pressable>
-          )}
-          {onOpenPrompts !== undefined && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.quickPrompts}
-              onPress={() => runAction(onOpenPrompts)}
-              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
-            >
-              <Zap size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>{strings.chat.quickPrompts}</Text>
               <ChevronRight size={16} color={colors.muted} />
             </Pressable>
           )}
