@@ -496,7 +496,7 @@ export class HostServerApi {
     return { online: result.online, ...(typeof result.lastSeenAt === 'number' ? { lastSeenAt: result.lastSeenAt } : {}) }
   }
 
-  async dshWebRequest(action: 'allocate' | 'grant' | 'check', input: DshWebRequest, signal: AbortSignal, sessionId?: string): Promise<unknown> {
+  async dshWebRequest(action: 'allocate' | 'grant' | 'check', input: DshWebRequest & { useServerLease?: true }, signal: AbortSignal, sessionId?: string): Promise<unknown> {
     const path = this.dshWebPath() + (action === 'allocate' ? '' : `/${action}`)
     return this.request(path, { method: 'POST', body: JSON.stringify({ ...input, sessionId }), signal })
   }

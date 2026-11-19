@@ -104533,7 +104533,9 @@ var DshWebPeer = class {
   async start(openingSignal) {
     await this.closeActive();
     const signal = AbortSignal.any([this.lifetime.signal, openingSignal, AbortSignal.timeout(21e3)]);
-    const input4 = { ...this.peer, requestId: randomUUID16(), leaseExpiresAt: Date.now() + 9 * 6e4 };
+    const startedAt = Date.now();
+    const input4 = { ...this.peer, requestId: randomUUID16(), leaseExpiresAt: startedAt + 9 * 6e4 };
+    const maxLeaseExpiresAt = startedAt + 120 * 6e4;
     try {
       signal.throwIfAborted();
       const runtime = this.resolveRuntime();
@@ -104544,12 +104546,12 @@ var DshWebPeer = class {
       await local.body?.cancel();
       if (!local.ok || !local.headers.get("content-type")?.startsWith("text/html"))
         throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI did not respond.", void 0, true);
-      const allocation = allocationSchema.parse(await this.api.dshWebRequest("allocate", input4, signal));
+      const allocation = allocationSchema.parse(await this.api.dshWebRequest("allocate", { ...input4, useServerLease: true }, signal));
       const publicUrl = new URL(allocation.url);
       const dial = new URL(allocation.connectUrl);
       const lease = { id: allocation.sessionId, stop: new AbortController(), request: { ...input4, leaseExpiresAt: allocation.leaseExpiresAt } };
       this.active = lease;
-      if (dial.protocol !== "wss:" || dial.port || dial.href !== `wss://${dial.hostname}/api/tunnels/${lease.id}/connect` || publicUrl.href !== `https://${lease.id}.${dial.hostname}/` || lease.request.leaseExpiresAt <= Date.now() || lease.request.leaseExpiresAt > input4.leaseExpiresAt) {
+      if (dial.protocol !== "wss:" || dial.port || dial.href !== `wss://${dial.hostname}/api/tunnels/${lease.id}/connect` || publicUrl.href !== `https://${lease.id}.${dial.hostname}/` || lease.request.leaseExpiresAt <= Date.now() || lease.request.leaseExpiresAt > maxLeaseExpiresAt) {
         throw new RpcError("TUNNEL_UNAVAILABLE", "The Server returned an invalid tunnel.");
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal]);

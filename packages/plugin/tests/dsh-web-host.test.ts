@@ -684,10 +684,10 @@ describe('DSH Web connector establishment', () => {
   it.each(['network_error', 'unauthorized'] as const)('handles initial %s without reallocating', async code => {
     const id = 'tbcdefghijkm'
     const url = `https://${id}.hostc.4ba.io/`
-    const leaseExpiresAt = Date.now() + 60_000
+    const leaseExpiresAt = Date.now() + 30 * 60_000
     const grant = { url, browserGrant: 'b'.repeat(43), expiresAt: Date.now() + 30_000 }
     const api = {
-      dshWebRequest: vi.fn(async (action: string) => action === 'allocate' ? {
+      dshWebRequest: vi.fn(async (action: string, _input: unknown) => action === 'allocate' ? {
         sessionId: id, url, connectUrl: `wss://hostc.4ba.io/api/tunnels/${id}/connect`,
         connectToken: 't'.repeat(43), leaseExpiresAt,
       } : grant),
@@ -720,6 +720,8 @@ describe('DSH Web connector establishment', () => {
         expect(dial).toHaveBeenCalledTimes(2)
         expect(dial.mock.calls[0]?.[0].tunnel).toEqual(dial.mock.calls[1]?.[0].tunnel)
         expect(api.dshWebRequest.mock.calls.map(([action]) => action)).toEqual(['allocate', 'grant'])
+        expect(api.dshWebRequest.mock.calls[0]?.[1]).toMatchObject({ useServerLease: true })
+        expect(api.dshWebRequest.mock.calls[1]?.[1]).toMatchObject({ leaseExpiresAt })
         const authorize = dial.mock.calls[1]![0].authorize
         const index: OpenMessage = { method: 'GET', path: '/', headers: [], body: false }
         expect(authorize(index)?.headers).toEqual([['cookie', 'local=session']])

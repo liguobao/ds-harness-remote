@@ -114,7 +114,10 @@ export class DshWebPeer {
   private async start(openingSignal: AbortSignal): Promise<DshWebGrant> {
     await this.closeActive()
     const signal = AbortSignal.any([this.lifetime.signal, openingSignal, AbortSignal.timeout(21_000)])
-    const input = { ...this.peer, requestId: randomUUID(), leaseExpiresAt: Date.now() + 9 * 60_000 }
+    const startedAt = Date.now()
+    const input = { ...this.peer, requestId: randomUUID(), leaseExpiresAt: startedAt + 9 * 60_000 }
+    // Old Servers ignore the opt-in and honor the legacy nine-minute request.
+    const maxLeaseExpiresAt = startedAt + 120 * 60_000
     try {
       signal.throwIfAborted()
       const runtime = this.resolveRuntime()
@@ -125,14 +128,14 @@ export class DshWebPeer {
       await local.body?.cancel()
       if (!local.ok || !local.headers.get('content-type')?.startsWith('text/html'))
         throw new RpcError('DSH_WEB_NOT_READY', 'The local Web GUI did not respond.', undefined, true)
-      const allocation = allocationSchema.parse(await this.api.dshWebRequest('allocate', input, signal))
+      const allocation = allocationSchema.parse(await this.api.dshWebRequest('allocate', { ...input, useServerLease: true }, signal))
       const publicUrl = new URL(allocation.url)
       const dial = new URL(allocation.connectUrl)
       const lease: Lease = { id: allocation.sessionId, stop: new AbortController(), request: { ...input, leaseExpiresAt: allocation.leaseExpiresAt } }
       this.active = lease
       if (dial.protocol !== 'wss:' || dial.port || dial.href !== `wss://${dial.hostname}/api/tunnels/${lease.id}/connect`
         || publicUrl.href !== `https://${lease.id}.${dial.hostname}/`
-        || lease.request.leaseExpiresAt <= Date.now() || lease.request.leaseExpiresAt > input.leaseExpiresAt) {
+        || lease.request.leaseExpiresAt <= Date.now() || lease.request.leaseExpiresAt > maxLeaseExpiresAt) {
         throw new RpcError('TUNNEL_UNAVAILABLE', 'The Server returned an invalid tunnel.')
       }
       const listenSignal = AbortSignal.any([signal, lease.stop.signal])
