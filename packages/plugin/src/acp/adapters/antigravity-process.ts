@@ -1,7 +1,8 @@
 import { readAgyModels, cachedAgyModels, agySelectionArgs, type AgyCatalog, type AgySelection } from './antigravity/models.js'
 import { prepareAgyImageDirectory, stageAgyImages, agyImagePrompt } from './antigravity/image-store.js'
 import { parseAcpImage } from '../image-content.js'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawnCommand } from '../windows-spawn.js'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import type { SafeLogger } from '../../logging.js'
@@ -89,7 +90,7 @@ export class AntigravityAcpClient implements CursorAcpLike {
   constructor(
     private readonly binary: string = 'agy',
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args, cwd) => spawn(bin, args, {
+    private readonly spawnAcp: SpawnAntigravityAcp = (bin, args, cwd) => spawnCommand(bin, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -384,7 +385,20 @@ export class AntigravityAcpClient implements CursorAcpLike {
     if (this.skipPermissions) {
       args.push('--dangerously-skip-permissions')
     }
-    const child = this.spawnAcp(bin, args, this.cwd)
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = this.spawnAcp(bin, args, this.cwd)
+    } catch (error) {
+      this.ready = false
+      const cause = error instanceof Error ? error : new Error(String(error))
+      if (!this.closed) {
+        this.logger?.warn('Antigravity binary error', {
+          code: (cause as NodeJS.ErrnoException).code ?? 'ANTIGRAVITY_BINARY_UNAVAILABLE',
+        })
+        this.notifyUnavailable('ANTIGRAVITY_BINARY_UNAVAILABLE')
+      }
+      throw new AntigravityAcpError('ANTIGRAVITY_BINARY_UNAVAILABLE', 'Failed to start the Antigravity CLI.', { cause })
+    }
     this.process = child
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0

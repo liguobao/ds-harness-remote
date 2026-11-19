@@ -185,7 +185,7 @@ async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params:
       const val = typeof p === 'number' ? String(p) : `'${String(p).replace(/'/g, "''")}'`
       formattedSql = formattedSql.replace('?', val)
     }
-    const { stdout } = await execFileAsync('sqlite3', [dbPath, '-json', formattedSql])
+    const { stdout } = await execFileAsync('sqlite3', [dbPath, '-json', formattedSql], { windowsHide: true })
     return JSON.parse(stdout || '[]') as T[]
   } catch {
     return []

@@ -90097,7 +90097,7 @@ function remoteAcpCapabilities(features) {
 
 // packages/plugin/src/control-runtime.ts
 import { hostname as hostname4 } from "node:os";
-import { execFileSync as execFileSync2 } from "node:child_process";
+import { execFileSync as execFileSync3 } from "node:child_process";
 
 // packages/plugin/src/pairing-contract.ts
 var pairingDeviceSchema = external_exports.object({
@@ -93996,8 +93996,178 @@ function record8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// packages/plugin/src/acp/windows-spawn.ts
+import {
+  execFile,
+  execFileSync,
+  spawn as spawn3
+} from "node:child_process";
+import { readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
+import { win32 as win322 } from "node:path";
+import { promisify as promisify2 } from "node:util";
+var execFileAsync = promisify2(execFile);
+var WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
+var EXTENSION_PRIORITY = Object.freeze({
+  ".exe": 0,
+  ".cmd": 1,
+  ".bat": 2,
+  ".com": 3
+});
+var MAX_SHIM_BYTES = 64 * 1024;
+var ALLOWED_SHIM_SET_VARS = /* @__PURE__ */ new Set(["dp0", "_prog", "pathext"]);
+var NPM_SHIM_INVOCATION_PATTERN = /(?:^|[&\s])(?:"(?:%_prog%|%~dp0\\+node\.exe|%dp0%\\+node\.exe)"|node)\s+"((?:%~dp0|%dp0%)[^"]+\.(?:[cm]?js))"\s+%\*\s*$/im;
+function isWindowsExecutablePath(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(EXTENSION_PRIORITY, ext);
+}
+function windowsExecutableRank(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return EXTENSION_PRIORITY[ext] ?? Number.POSITIVE_INFINITY;
+}
+function isWindowsBatchFile(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return ext === ".cmd" || ext === ".bat";
+}
+function selectWindowsExecutable(lines, checkExecutable = defaultIsFile) {
+  const matches = [];
+  for (const rawLine of lines) {
+    const candidate = rawLine.trim();
+    if (!candidate || !isWindowsExecutablePath(candidate)) continue;
+    if (!checkExecutable(candidate)) continue;
+    matches.push(win322.resolve(candidate));
+  }
+  if (matches.length === 0) return void 0;
+  matches.sort((left, right) => windowsExecutableRank(left) - windowsExecutableRank(right));
+  return matches[0];
+}
+function lookupWindowsPathExecutable(command, checkExecutable) {
+  try {
+    const output2 = execFileSync("where", [command], {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 5e3,
+      windowsHide: true
+    });
+    return selectWindowsExecutable(output2.split(/\r?\n/), checkExecutable);
+  } catch {
+    return void 0;
+  }
+}
+function assertSafeCommandArgument(value) {
+  if (/[\r\n\0]/.test(value)) {
+    throw new Error("Command arguments must not contain CR, LF, or NUL characters.");
+  }
+}
+function escapeCmdBatchArgument(arg) {
+  assertSafeCommandArgument(arg);
+  let quoted = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
+  quoted = `"${quoted}"`;
+  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
+  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
+  return quoted;
+}
+function resolveNpmCmdShim(cmdPath, hooks = {}) {
+  if (!isWindowsBatchFile(cmdPath)) return void 0;
+  const read = hooks.readFileSync ?? ((path, encoding) => readFileSync2(path, encoding));
+  const isFile = hooks.isFile ?? defaultIsFile;
+  let content;
+  try {
+    content = read(cmdPath, "utf8");
+  } catch {
+    return void 0;
+  }
+  if (!content || Buffer.byteLength(content, "utf8") > MAX_SHIM_BYTES) return void 0;
+  if (hasUnexpectedSetStatement(content)) return void 0;
+  const match = NPM_SHIM_INVOCATION_PATTERN.exec(content);
+  if (!match?.[1]) return void 0;
+  const relativeTarget = match[1].replace(/^%~?dp0%?[\\/]?/i, "");
+  if (relativeTarget.includes("%")) return void 0;
+  const resolvedScript = win322.resolve(win322.dirname(cmdPath), relativeTarget);
+  if (!isFile(resolvedScript)) return void 0;
+  const isElectron = hooks.isElectron ?? Boolean(process.versions.electron);
+  return {
+    file: hooks.nodeExecPath ?? process.execPath,
+    argsPrefix: [resolvedScript],
+    ...isElectron ? { envPatch: { ELECTRON_RUN_AS_NODE: "1" } } : {}
+  };
+}
+function resolveSpawnTarget(command, args, options, hooks = {}) {
+  assertSafeCommandArgument(command);
+  for (const arg of args) assertSafeCommandArgument(arg);
+  const platform3 = hooks.platform ?? process.platform;
+  const baseOptions = { ...options, windowsHide: true };
+  if (platform3 !== "win32") {
+    return { file: command, args: [...args], options: baseOptions };
+  }
+  const isFile = hooks.isFile ?? defaultIsFile;
+  const resolvedCommand = resolveWindowsCommand(command, isFile, hooks.lookupPath);
+  if (!isWindowsBatchFile(resolvedCommand)) {
+    return { file: resolvedCommand, args: [...args], options: baseOptions };
+  }
+  const shim = resolveNpmCmdShim(resolvedCommand, hooks);
+  if (shim) {
+    const env = shim.envPatch ? { ...options.env ?? process.env, ...shim.envPatch } : options.env;
+    return {
+      file: shim.file,
+      args: [...shim.argsPrefix, ...args],
+      options: env ? { ...baseOptions, env } : baseOptions
+    };
+  }
+  if (resolvedCommand.includes('"') || resolvedCommand.includes("%")) {
+    throw new Error("Batch executable path contains unsafe characters.");
+  }
+  const quotedCommand = `"${resolvedCommand}"`;
+  const escapedArgs = args.map(escapeCmdBatchArgument);
+  const innerCommand = escapedArgs.length > 0 ? `${quotedCommand} ${escapedArgs.join(" ")}` : quotedCommand;
+  const comspec = hooks.comspec ?? options.env?.ComSpec ?? process.env.ComSpec ?? "cmd.exe";
+  return {
+    file: comspec,
+    args: ["/d", "/s", "/c", `"${innerCommand}"`],
+    options: { ...baseOptions, windowsVerbatimArguments: true }
+  };
+}
+function spawnCommand(command, args, options = {}) {
+  const target3 = resolveSpawnTarget(command, args, options);
+  return spawn3(target3.file, target3.args, target3.options);
+}
+async function execFileCommand(command, args, options = {}) {
+  const target3 = resolveSpawnTarget(command, args, options);
+  const result = await execFileAsync(target3.file, target3.args, target3.options);
+  return {
+    stdout: String(result.stdout ?? ""),
+    stderr: String(result.stderr ?? "")
+  };
+}
+function resolveWindowsCommand(command, isFile, lookupPath) {
+  if (isWindowsExecutablePath(command)) return command;
+  const hasPathSeparator = command.includes("\\") || command.includes("/");
+  if (!hasPathSeparator) {
+    const resolved = lookupPath ? lookupPath(command) : lookupWindowsPathExecutable(command, (candidate) => isFile(candidate));
+    return resolved ?? command;
+  }
+  for (const ext of WINDOWS_EXECUTABLE_EXTENSIONS) {
+    const candidate = `${command}${ext}`;
+    if (isFile(candidate)) return candidate;
+  }
+  return command;
+}
+function hasUnexpectedSetStatement(content) {
+  for (const rawLine of content.split(/\r?\n/)) {
+    const match = /^\s*@?SET\s+"?([A-Za-z_][A-Za-z0-9_]*)=/i.exec(rawLine);
+    if (!match) continue;
+    if (!ALLOWED_SHIM_SET_VARS.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+}
+function defaultIsFile(candidate) {
+  try {
+    return statSync3(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
 // packages/plugin/src/acp/adapters/cursor-process.ts
-import { spawn as spawn3 } from "node:child_process";
 import { Buffer as Buffer4 } from "node:buffer";
 var ACP_REQUEST_TIMEOUT_MS = 6e4;
 var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
@@ -94021,7 +94191,7 @@ var CursorAcpError = class extends Error {
   authDiagnostic;
 };
 var CursorAcpClient = class {
-  constructor(binary, logger2, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
+  constructor(binary, logger2, spawnAcp = (binary2) => spawnCommand(binary2, options.args ?? ["acp"], {
     cwd: options.cwd,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -94210,9 +94380,16 @@ var CursorAcpClient = class {
     if (this.process !== void 0) {
       throw new CursorAcpError(this.code("STARTING"), `${this.adapterLabel} ACP is already starting.`);
     }
-    const child = this.spawnAcp(this.binary);
-    this.process = child;
     this.failureNotified = false;
+    let child;
+    try {
+      child = this.spawnAcp(this.binary);
+    } catch (error62) {
+      const cause = error62 instanceof Error ? error62 : new Error(String(error62));
+      this.handleProcessFailure(this.code("BINARY_UNAVAILABLE"), cause);
+      throw new CursorAcpError(this.code("BINARY_UNAVAILABLE"), `${this.adapterLabel} ACP communication failed.`, { cause });
+    }
+    this.process = child;
     this.stdoutBuffer = Buffer4.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
@@ -95298,9 +95475,9 @@ var RemoteTerminalState = class {
   }
 };
 var RemoteTerminalController = class {
-  constructor(shared, spawn7, enabled, scopeError) {
+  constructor(shared, spawn5, enabled, scopeError) {
     this.shared = shared;
-    this.spawn = spawn7;
+    this.spawn = spawn5;
     this.enabled = enabled;
     this.scopeError = scopeError;
   }
@@ -96044,9 +96221,9 @@ var PiAcpClient = class extends IsolatedAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/antigravity/models.ts
-import { execFile } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
-var exec = promisify2(execFile);
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+var exec = promisify3(execFile2);
 function cachedAgyModels(load) {
   let catalog;
   let pending;
@@ -96204,7 +96381,6 @@ async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity-process.ts
-import { spawn as spawn5 } from "node:child_process";
 import { Buffer as Buffer6 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
@@ -96385,7 +96561,7 @@ function resolveAntigravityBinary(preferred) {
   return "agy";
 }
 var AntigravityAcpClient = class _AntigravityAcpClient {
-  constructor(binary = "agy", logger2, spawnAcp = (bin, args, cwd2) => spawn5(bin, args, {
+  constructor(binary = "agy", logger2, spawnAcp = (bin, args, cwd2) => spawnCommand(bin, args, {
     cwd: cwd2,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -96695,7 +96871,20 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.skipPermissions) {
       args.push("--dangerously-skip-permissions");
     }
-    const child = this.spawnAcp(bin, args, this.cwd);
+    let child;
+    try {
+      child = this.spawnAcp(bin, args, this.cwd);
+    } catch (error62) {
+      this.ready = false;
+      const cause = error62 instanceof Error ? error62 : new Error(String(error62));
+      if (!this.closed) {
+        this.logger?.warn("Antigravity binary error", {
+          code: cause.code ?? "ANTIGRAVITY_BINARY_UNAVAILABLE"
+        });
+        this.notifyUnavailable("ANTIGRAVITY_BINARY_UNAVAILABLE");
+      }
+      throw new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause });
+    }
     this.process = child;
     this.stdoutBuffer = Buffer6.alloc(0);
     this.stderrBytes = 0;
@@ -96983,9 +97172,9 @@ function withoutSelectionArgs(args) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity-acp.ts
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify3 } from "node:util";
-var execFileAsync = promisify3(execFile2);
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify4 } from "node:util";
+var execFileAsync2 = promisify4(execFile3);
 var NEGATIVE_CACHE_TTL_MS = 3e4;
 var nativeAcpSupportCache = /* @__PURE__ */ new Map();
 function supportsAntigravityNativeAcp(binary = "agy") {
@@ -96995,7 +97184,7 @@ function supportsAntigravityNativeAcp(binary = "agy") {
     return cached2.promise;
   }
   const entry = {
-    promise: execFileAsync(key, ["acp", "--help"], {
+    promise: execFileAsync2(key, ["acp", "--help"], {
       timeout: 3e3,
       windowsHide: true,
       shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(key)
@@ -97024,7 +97213,6 @@ var AntigravityNativeAcpClient = class extends ClaudeAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/opencode-process.ts
-import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
 import { realpath as realpath4 } from "node:fs/promises";
 
@@ -97032,13 +97220,11 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes12 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify4, stripVTControlCharacters } from "node:util";
+import { stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
-var execFileAsync2 = promisify4(execFile3);
 async function opencodeHasNativeApi(binary, args, cwd2, signal) {
   try {
-    const { stdout, stderr } = await execFileAsync2(binary, [...opencodePrivateArgs(args), "--help"], {
+    const { stdout, stderr } = await execFileCommand(binary, [...opencodePrivateArgs(args), "--help"], {
       cwd: cwd2,
       signal,
       timeout: 2e4,
@@ -97431,23 +97617,36 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.process !== void 0) {
       throw new OpencodeAcpError("OPENCODE_STARTING", "OpenCode ACP is already starting.");
     }
+    this.failureNotified = false;
     let child;
-    if (this.spawnAcp) child = this.spawnAcp(this.binary);
-    else {
+    if (this.spawnAcp) {
+      try {
+        child = this.spawnAcp(this.binary);
+      } catch (error62) {
+        const cause = error62 instanceof Error ? error62 : new Error(String(error62));
+        this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", cause);
+        throw new OpencodeAcpError("OPENCODE_BINARY_UNAVAILABLE", "OpenCode ACP communication failed.", { cause });
+      }
+    } else {
       const args = this.options.args ?? ["acp"];
       const nativeApiSupported = await opencodeHasNativeApi(this.binary, args, this.options.cwd, this.startupAbort.signal);
       const port = nativeApiSupported ? await opencodeLoopbackPort() : void 0;
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       if (port !== void 0) this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`);
-      child = spawn6(this.binary, opencodePrivateArgs(args, port), {
-        cwd: this.options.cwd,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-        env: { ...process.env, ...this.nativeApi ? { OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {} }
-      });
+      try {
+        child = spawnCommand(this.binary, opencodePrivateArgs(args, port), {
+          cwd: this.options.cwd,
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+          env: { ...process.env, ...this.nativeApi ? { OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {} }
+        });
+      } catch (error62) {
+        const cause = error62 instanceof Error ? error62 : new Error(String(error62));
+        this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", cause);
+        throw new OpencodeAcpError("OPENCODE_BINARY_UNAVAILABLE", "OpenCode ACP communication failed.", { cause });
+      }
     }
     this.process = child;
-    this.failureNotified = false;
     this.stdoutBuffer = Buffer7.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
@@ -97937,7 +98136,7 @@ async function querySqliteJson(dbPath, sql, params = []) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync4("sqlite3", [dbPath, "-json", formattedSql]);
+    const { stdout } = await execFileAsync4("sqlite3", [dbPath, "-json", formattedSql], { windowsHide: true });
     return JSON.parse(stdout || "[]");
   } catch {
     return [];
@@ -100504,10 +100703,10 @@ function isRecord21(value) {
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile4, execFileSync } from "node:child_process";
-import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync3 } from "node:fs";
+import { execFile as execFile4, execFileSync as execFileSync2 } from "node:child_process";
+import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync4 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
-import { dirname as dirname6, join as join14, posix as posix2, win32 as win322 } from "node:path";
+import { dirname as dirname6, join as join14, posix as posix2, win32 as win323 } from "node:path";
 import { promisify as promisify5 } from "node:util";
 var execFileAsync3 = promisify5(execFile4);
 var BUILTIN_ACP_SPECS = Object.freeze({
@@ -100564,9 +100763,9 @@ function isBuiltinAcpBackend(id7) {
 function defaultCheckExecutable(candidate, platform3 = process.platform) {
   try {
     if (!existsSync4(candidate)) return false;
-    const stat12 = statSync3(candidate);
+    const stat12 = statSync4(candidate);
     if (!stat12.isFile()) return false;
-    if (platform3 === "win32") return true;
+    if (platform3 === "win32") return isWindowsExecutablePath(candidate);
     accessSync2(candidate, constants5.X_OK);
     return true;
   } catch {
@@ -100581,7 +100780,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
   const npmCli = findNodeNpmCli();
   if (!npmCli) return void 0;
   try {
-    const out = execFileSync(process.execPath, [npmCli, "config", "get", "prefix"], {
+    const out = execFileSync2(process.execPath, [npmCli, "config", "get", "prefix"], {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
       timeout: 3e3,
@@ -100599,7 +100798,7 @@ function discoverSystemNpmPrefix(platform3 = process.platform) {
 }
 function candidateBinaryPaths(id7, options = {}) {
   const platform3 = options.platform ?? process.platform;
-  const pJoin = platform3 === "win32" ? win322.join : posix2.join;
+  const pJoin = platform3 === "win32" ? win323.join : posix2.join;
   const env = options.env ?? process.env;
   const home = options.homedir ?? homedir7();
   const localAppData = env.LOCALAPPDATA ?? (platform3 === "win32" ? pJoin(home, "AppData", "Local") : "");
@@ -100640,8 +100839,8 @@ function candidateBinaryPaths(id7, options = {}) {
           pJoin(programFilesX86, "Cursor", "resources", "app", "bin", "agent.cmd"),
           "D:\\Program Files\\Cursor\\resources\\app\\bin\\agent.cmd",
           "D:\\Cursor\\resources\\app\\bin\\agent.cmd",
-          pJoin(home, ".local", "bin", "agent.cmd"),
-          pJoin(home, ".local", "bin", "agent.exe")
+          pJoin(home, ".local", "bin", "agent.exe"),
+          pJoin(home, ".local", "bin", "agent.cmd")
         );
         break;
       case "antigravity":
@@ -100654,17 +100853,17 @@ function candidateBinaryPaths(id7, options = {}) {
         break;
       case "codex":
         for (const dir of npmBinDirs) {
-          candidates.push(pJoin(dir, "codex.cmd"), pJoin(dir, "codex.exe"));
+          candidates.push(pJoin(dir, "codex.exe"), pJoin(dir, "codex.cmd"));
         }
         break;
       case "claude":
         for (const dir of npmBinDirs) {
-          candidates.push(pJoin(dir, "claude-agent-acp.cmd"), pJoin(dir, "claude-agent-acp.exe"));
+          candidates.push(pJoin(dir, "claude-agent-acp.exe"), pJoin(dir, "claude-agent-acp.cmd"));
         }
         break;
       case "pi":
         for (const dir of npmBinDirs) {
-          candidates.push(pJoin(dir, "pi-acp.cmd"), pJoin(dir, "pi-acp.exe"));
+          candidates.push(pJoin(dir, "pi-acp.exe"), pJoin(dir, "pi-acp.cmd"));
         }
         break;
       case "opencode":
@@ -100673,7 +100872,7 @@ function candidateBinaryPaths(id7, options = {}) {
           pJoin(localAppData, "opencode", "bin", "opencode.exe")
         );
         for (const dir of npmBinDirs) {
-          candidates.push(pJoin(dir, "opencode.cmd"), pJoin(dir, "opencode.exe"));
+          candidates.push(pJoin(dir, "opencode.exe"), pJoin(dir, "opencode.cmd"));
         }
         break;
     }
@@ -100737,18 +100936,22 @@ function candidateBinaryPaths(id7, options = {}) {
   }
   return [...new Set(candidates.filter((p) => typeof p === "string" && p.trim().length > 0))];
 }
-function lookupSystemPath(command, platform3 = process.platform) {
+function lookupSystemPath(command, platform3 = process.platform, checkExecutable = (candidate) => defaultCheckExecutable(candidate, platform3)) {
   try {
     const probe = platform3 === "win32" ? "where" : "which";
-    const output2 = execFileSync(probe, [command], {
+    const output2 = execFileSync2(probe, [command], {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
       timeout: 5e3,
       windowsHide: true
     });
-    const firstLine = output2.split(/\r?\n/).find((line) => line.trim().length > 0);
-    if (firstLine && defaultCheckExecutable(firstLine.trim(), platform3)) {
-      return platform3 === "win32" ? win322.resolve(firstLine.trim()) : posix2.resolve(firstLine.trim());
+    const lines = output2.split(/\r?\n/);
+    if (platform3 === "win32") {
+      return selectWindowsExecutable(lines, checkExecutable);
+    }
+    const firstLine = lines.find((line) => line.trim().length > 0);
+    if (firstLine && checkExecutable(firstLine.trim())) {
+      return posix2.resolve(firstLine.trim());
     }
     return void 0;
   } catch {
@@ -100761,7 +100964,7 @@ function findExistingBinary(id7, options = {}) {
   const candidates = candidateBinaryPaths(id7, options);
   for (const candidate of candidates) {
     if (check2(candidate)) {
-      return platform3 === "win32" ? win322.resolve(candidate) : posix2.resolve(candidate);
+      return platform3 === "win32" ? win323.resolve(candidate) : posix2.resolve(candidate);
     }
   }
   const defaultCommands = {
@@ -100774,7 +100977,7 @@ function findExistingBinary(id7, options = {}) {
     hermes: "hermes"
   };
   const defaultCmd = defaultCommands[id7] ?? id7;
-  const fromPath = lookupSystemPath(defaultCmd, platform3);
+  const fromPath = lookupSystemPath(defaultCmd, platform3, check2);
   if (fromPath && check2(fromPath)) {
     return fromPath;
   }
@@ -100827,6 +101030,7 @@ async function installOrConfigureBackend(backendId2, options = {}) {
     await runner(fileToExec, argsToExec, {
       timeout: timeoutMs,
       encoding: "utf8",
+      windowsHide: true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
     });
   } catch {
@@ -101504,7 +101708,7 @@ function backendCommandAvailable(backend, command) {
 }
 function commandAvailable(command) {
   try {
-    execFileSync2(process.platform === "win32" ? "where" : "which", [command], {
+    execFileSync3(process.platform === "win32" ? "where" : "which", [command], {
       stdio: "ignore",
       timeout: 5e3,
       windowsHide: true
@@ -108137,7 +108341,7 @@ function errorText(error62) {
 }
 
 // packages/plugin/src/service.ts
-import { execFileSync as execFileSync3 } from "node:child_process";
+import { execFileSync as execFileSync4 } from "node:child_process";
 import { existsSync as existsSync5 } from "node:fs";
 
 // packages/plugin/src/codex-workspace-bridge.ts
@@ -108747,7 +108951,7 @@ var HostPluginRuntime = class {
       }
     }
     try {
-      execFileSync3(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore", windowsHide: true });
+      execFileSync4(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore", windowsHide: true });
       return true;
     } catch {
       return false;
