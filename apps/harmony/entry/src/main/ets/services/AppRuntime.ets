@@ -19,7 +19,7 @@ import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../pr
 import { randomId } from '../crypto/Bytes';
 import { logInfo, logWarn, logError } from '../util/Log';
 import { isVisibleSession } from '../util/SessionVisibility';
-import { setEnglish, resolveEnglish, systemEnglish } from './I18n';
+import { setEnglish, resolveEnglish, systemEnglish, english, t } from './I18n';
 import { RtcBridge } from './RtcBridge';
 import { NetworkMonitor, networkTypeLabel } from './NetworkMonitor';
 import { NetTrace, TraceSample } from '../util/NetTrace';
@@ -4262,11 +4262,35 @@ export class AppRuntime {
     this.notify();
   }
 
+  relayDetailLines(): string[] {
+    const relay: RelayTransport | undefined = this.activeRelay;
+    const rows: string[] = [];
+    if (relay === undefined || this.transportLabel !== 'relay') {
+      return rows;
+    }
+    const separator: string = english() ? ': ' : '：';
+    if (relay.hasActiveRelayNode()) {
+      rows.push(t('中继路径') + separator + t('已连接独立中继'));
+      const nodeHost: string = relay.relayNodeHost();
+      const nodeId: string = relay.relayNodeId();
+      if (nodeHost.length > 0) {
+        rows.push(t('节点地址') + separator + nodeHost);
+      }
+      if (nodeId.length > 0) {
+        rows.push(t('节点 ID') + separator + nodeId);
+      }
+    } else if (relay.usesControlRelay()) {
+      rows.push(t('中继路径') + separator + t('控制通道转发'));
+    }
+    return rows;
+  }
+
   /** 「连接详情」的行内容：传输、路径、耗时、延迟、回落原因。 */
   connectionDetailLines(): string[] {
     const relay: RelayTransport | undefined = this.activeRelay;
     const rows: string[] = [];
     rows.push('传输：' + (this.transportLabel.length > 0 ? this.transportLabel : '—'));
+    rows.push(...this.relayDetailLines());
     if (relay !== undefined) {
       const path: string = relay.rtcPathText();
       if (path.length > 0) {

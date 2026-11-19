@@ -227,7 +227,7 @@ describe('AdaptiveTransport capability negotiation', () => {
     await Promise.resolve()
     control.receive(createControlFrame('connect.accepted', {
       connectionId: 'connection-1',
-      relayEndpoint: 'wss://relay.example/ws',
+      relayEndpoint: 'wss://relay.example/ws?opaque=value',
       relayTicket: 'dshrt.payload.signature',
       relayNodeId: 'relay-1',
       relayEpoch: 4,
@@ -235,9 +235,11 @@ describe('AdaptiveTransport capability negotiation', () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
     const data = FakeWebSocket.instances[1]!
     data.open()
+    expect((await transport.connectionDetails()).relay).toBeUndefined()
     expect(JSON.parse(data.sent[0]!)).toMatchObject({ type: 'relay.attach', payload: { connectionId: 'connection-1' } })
     data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
     await connecting
+    expect((await transport.connectionDetails()).relay).toEqual({ path: 'node', host: 'relay.example', id: 'relay-1' })
     await transport.sendHandshake(1, new Uint8Array([7]))
     await transport.send(new Uint8Array([8, 9]))
     expect(lastSentPayload(control, 'secure.handshake')).toMatchObject({ connectionId: 'connection-1' })
@@ -780,6 +782,7 @@ describe('AdaptiveTransport capability negotiation', () => {
     })
     socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
     await connecting
+    expect((await transport.connectionDetails()).relay).toEqual({ path: 'control' })
   })
 
   it('rejects selected transports outside negotiated capabilities', async () => {

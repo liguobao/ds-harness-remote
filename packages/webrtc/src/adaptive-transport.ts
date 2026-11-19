@@ -90,6 +90,7 @@ export interface AdaptiveConnectionDetails {
   preferredTransports: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   negotiatedCapabilities: string[]
   webRtcEnabled: boolean
+  relay?: { path: 'control' } | { path: 'node'; host?: string; id?: string }
   webRtc?: RtcConnectionDetails
 }
 
@@ -232,6 +233,17 @@ export class AdaptiveTransport extends BaseTransport {
 
   async connectionDetails(): Promise<AdaptiveConnectionDetails> {
     const remainingMs = this.lease?.remainingMs()
+    const assignment = this.relayAssignment
+    let relay: AdaptiveConnectionDetails['relay']
+    if (this.selected === 'relay') {
+      if (assignment?.relayEndpoint === undefined) {
+        if (this.socket?.readyState === WebSocket.OPEN) relay = { path: 'control' }
+      } else if (this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN) {
+        // React Native's URL.host does not support WebSocket URLs.
+        const host = assignment.relayEndpoint.match(/^wss?:\/\/(?:[^/?#]*@)?([^@/?#]+)/i)?.[1]
+        relay = { path: 'node', host, id: assignment.relayNodeId }
+      }
+    }
     return {
       ...(this.connectionId === undefined ? {} : { connectionId: this.connectionId }),
       ...(this.connectedAt === undefined ? {} : { connectedAt: this.connectedAt }),
@@ -246,6 +258,7 @@ export class AdaptiveTransport extends BaseTransport {
         : [...(this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS)],
       negotiatedCapabilities: [...this.negotiatedCapabilities],
       webRtcEnabled: this.webrtcEnabled,
+      ...(relay === undefined ? {} : { relay }),
       ...(this.rtc === undefined ? {} : { webRtc: await this.rtc.connectionDetails() }),
     }
   }

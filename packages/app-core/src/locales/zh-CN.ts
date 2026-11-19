@@ -715,7 +715,7 @@ const zhCN = {
       loading: { title: '读取工作区', body: '同步工作区和对话列表' },
     },
     info: '设备信息', harness: 'DeepSeek Harness', harnessShort: 'DSH', pluginShort: 'Plugin', plugin: 'Remote 插件', provider: '模型服务', directory: '当前目录', model: '当前模型', workspaces: '工作区', conversations: '对话', secureConnection: '连接信息', path: '连接方式', probeOrder: '探测顺序', encryption: '安全保护', viewWorkspaces: '查看工作区和对话', unknownVersion: '版本信息不可用',
-    networkDetails: '网络详情', phoneEndpoint: '手机端点', computerEndpoint: '电脑端点', relayEndpointUnavailable: '服务器转发未公开', connectionServer: '连接服务器', networkProtocol: '网络协议', candidatePath: '候选路径', roundTripTime: '往返延迟', availableBitrate: '可用上行带宽', traffic: '本次流量', connectedAt: '连接时间', sent: '发送', received: '接收',
+    networkDetails: '网络详情', phoneEndpoint: '手机端点', computerEndpoint: '电脑端点', relayPath: "中继路径", relayControl: "控制通道转发", relayAttached: "已连接独立中继", relayNodeAddress: "节点地址", relayNodeId: "节点 ID", connectionServer: '连接服务器', networkProtocol: '网络协议', candidatePath: '候选路径', roundTripTime: '往返延迟', availableBitrate: '可用上行带宽', traffic: '本次流量', connectedAt: '连接时间', sent: '发送', received: '接收',
     forgetTitle: (name: string) => `解除“${name}”的绑定？`, forgetBody: '这会从账号中移除这台设备并断开远程连接。再次使用前，需要在电脑端重新绑定。', forget: '解除绑定',
     identityChangedError: '检测到设备安全身份已变更，已停止自动信任以保护你的数据。请在设置中清除本地数据或重新绑定设备。',
     loadFailed: '无法读取设备详情，请检查网络连接后刷新重试。',

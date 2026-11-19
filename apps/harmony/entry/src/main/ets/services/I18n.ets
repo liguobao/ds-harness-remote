@@ -312,6 +312,11 @@ function buildEnglish(): Map<string, string> {
   map.set('停止重连', 'Stop reconnecting');
   map.set('先填一个主机上的绝对路径', 'Enter an absolute path on the host first');
   map.set('全屏编辑', 'Full-screen editor');
+  map.set('中继路径', 'Relay path');
+  map.set('已连接独立中继', 'Connected to relay node');
+  map.set('控制通道转发', 'Control channel relay');
+  map.set('节点地址', 'Node address');
+  map.set('节点 ID', 'Node ID');
   map.set('公钥指纹', 'Key fingerprint');
   map.set('关 · 传完整历史', 'Off · send full history');
   map.set('关 · 原文显示', 'Off · show plain text');

@@ -1112,6 +1112,9 @@ struct Index {
       'lastSeen: ' + this.deviceDetailLastSeen(),
       'identityKey: ' + device.identityKey
     ];
+    if (device.deviceId === this.connectedDeviceId && this.connectedTransport === 'relay') {
+      lines.push(...this.runtime.relayDetailLines());
+    }
     const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, lines.join('\n'));
     pasteboard.getSystemPasteboard().setData(data).then(() => {
       promptAction.showToast({ message: this.tr('已复制主机信息') });
@@ -7453,6 +7456,16 @@ struct Index {
         this.DetailRow(this.tr('最后在线'), this.deviceDetailLastSeen())
         this.DetailRow(this.tr('设备 ID'), this.deviceDetailId)
         this.DetailRow(this.tr('公钥指纹'), this.deviceDetailFingerprint())
+
+        if (this.deviceDetailId === this.connectedDeviceId && this.connectedTransport === 'relay') {
+          ForEach(this.runtime.relayDetailLines(), (line: string) => {
+            Text(line)
+              .fontSize(this.fs(12))
+              .fontColor(this.pal().text2)
+              .width('100%')
+              .textAlign(TextAlign.Start)
+          }, (line: string) => line)
+        }
 
         Text(this.tr('复制全部'))
           .fontSize(this.fs(13))

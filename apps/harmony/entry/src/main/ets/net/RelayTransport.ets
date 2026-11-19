@@ -297,6 +297,8 @@ export class RelayTransport {
   private rtcPathValue: string = '';
   /** connect.accepted 里的中继端点/票据：直连失败回落时要用，也可能压根没给。 */
   private relayEndpointValue: string = '';
+  private relayNodeIdValue: string = '';
+  private activeRelayHost: string = '';
   private relayTicketValue: string = '';
   private relayEpochValue: number = -1;
 
@@ -437,6 +439,22 @@ export class RelayTransport {
       return this.rtcTransport.length > 0 ? this.rtcTransport : 'lan';
     }
     return this.dataMode;
+  }
+
+  hasActiveRelayNode(): boolean {
+    return this.dataMode === 'relay' && this.dataReady && this.dataSocket !== undefined;
+  }
+
+  relayNodeHost(): string {
+    return this.hasActiveRelayNode() ? this.activeRelayHost : '';
+  }
+
+  relayNodeId(): string {
+    return this.hasActiveRelayNode() ? this.relayNodeIdValue : '';
+  }
+
+  usesControlRelay(): boolean {
+    return this.dataMode === 'relay' && (this.relayEndpointValue.length === 0 || this.relayTicketValue.length === 0);
   }
 
   connectionInfo(): RelayConnectionInfo {
@@ -629,6 +647,7 @@ export class RelayTransport {
     const relayEpoch = jsonNum(frame.payload, 'relayEpoch', -1);
     logInfo('connect.accepted');
     this.relayEndpointValue = relayEndpoint;
+    this.relayNodeIdValue = jsonStr(frame.payload, 'relayNodeId', '');
     this.relayTicketValue = relayTicket;
     this.relayEpochValue = relayEpoch;
     if (relayEndpoint.length > 0 && relayTicket.length > 0 && this.relayCandidates.length === 0) {
@@ -1039,6 +1058,9 @@ export class RelayTransport {
             this.dataAttachResolve = undefined;
             this.dataAttachReject = undefined;
             this.dataReady = true;
+            // Diagnostics expose only the authority, excluding credentials, path and query.
+            const authority: RegExpMatchArray | null = relayEndpoint.match(/^wss?:\/\/(?:[^/?#]*@)?([^@/?#]+)/i);
+            this.activeRelayHost = authority === null ? '' : authority[1];
             lastGoodRelayEndpoint = relayEndpoint;
             logInfo('relay.ready epoch=' + relayEpoch + ' conn=' + this.connectionId
               + ' host=' + hostOfRelay(relayEndpoint));

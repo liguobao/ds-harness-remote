@@ -385,6 +385,7 @@ export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
   const networkDetails = useAppStore(state => state.connectionNetworkDetails)
   const refreshNetworkDetails = useAppStore(state => state.refreshConnectionNetworkDetails)
   const styles = useThemedStyles(createStyles)
+  const relay = networkDetails?.relay
   const isConnected = deviceId !== undefined && selectedId === deviceId && connection.phase === 'connected'
 
   useEffect(() => {
@@ -410,8 +411,14 @@ export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
     <View style={styles.networkDetails}>
       <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
       <View style={styles.group}>
-        <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
-        <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
+        {connection.stats.mode === 'Relay' ? (relay !== undefined && <>
+          <KeyValue label={zhCN.devices.relayPath} value={relay.path === 'control' ? zhCN.devices.relayControl : zhCN.devices.relayAttached} />
+          {relay.path === 'node' && relay.host !== undefined && <KeyValue label={zhCN.devices.relayNodeAddress} value={relay.host} mono />}
+          {relay.path === 'node' && relay.id !== undefined && <KeyValue label={zhCN.devices.relayNodeId} value={relay.id} mono />}
+        </>) : <>
+          <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.common.unavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
+          <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.common.unavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
+        </>}
         {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(networkDetails.controlChannelUrl)} mono />}
         {networkDetails?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(networkDetails.webRtc.protocol, networkDetails.webRtc.relayProtocol)} />}
         {networkDetails?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(networkDetails.webRtc.localCandidateType, networkDetails.webRtc.localAddressScope, networkDetails.webRtc.remoteCandidateType, networkDetails.webRtc.remoteAddressScope)} />}

@@ -67954,6 +67954,17 @@ var AdaptiveTransport = class extends BaseTransport {
   }
   async connectionDetails() {
     const remainingMs = this.lease?.remainingMs();
+    const assignment = this.relayAssignment;
+    let relay;
+    if (this.selected === "relay") {
+      if (assignment?.relayEndpoint === void 0) {
+        if (this.socket?.readyState === WebSocket.OPEN)
+          relay = { path: "control" };
+      } else if (this.dataReady && this.dataSocket?.readyState === WebSocket.OPEN) {
+        const host = assignment.relayEndpoint.match(/^wss?:\/\/(?:[^/?#]*@)?([^@/?#]+)/i)?.[1];
+        relay = { path: "node", host, id: assignment.relayNodeId };
+      }
+    }
     return {
       ...this.connectionId === void 0 ? {} : { connectionId: this.connectionId },
       ...this.connectedAt === void 0 ? {} : { connectedAt: this.connectedAt },
@@ -67966,6 +67977,7 @@ var AdaptiveTransport = class extends BaseTransport {
       preferredTransports: this.options.forceRelay === true ? ["relay"] : [...this.options.preferredTransports ?? DEFAULT_PREFERRED_TRANSPORTS],
       negotiatedCapabilities: [...this.negotiatedCapabilities],
       webRtcEnabled: this.webrtcEnabled,
+      ...relay === void 0 ? {} : { relay },
       ...this.rtc === void 0 ? {} : { webRtc: await this.rtc.connectionDetails() }
     };
   }
