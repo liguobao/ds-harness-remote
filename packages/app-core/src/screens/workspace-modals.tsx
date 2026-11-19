@@ -41,6 +41,7 @@ import { strings } from '../locales/i18n'
 
 const DIRECTORY_SHEET_COMPACT_RATIO = 0.92
 const DIRECTORY_SHEET_RATIO = 0.75
+const EMPTY_STRINGS: readonly string[] = []
 
 export function WorkspaceActionsModal({
   target,
@@ -168,7 +169,7 @@ export function CreateWorkspaceModal({
   opencodeAvailable,
   claudeAvailable,
   hermesAvailable,
-  customAcpBackends = [],
+  customAcpBackends = EMPTY_STRINGS,
   initialBackend,
   busy,
   onClose,
