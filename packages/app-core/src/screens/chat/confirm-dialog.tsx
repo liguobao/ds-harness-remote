@@ -1,6 +1,6 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Modal } from 'react-native'
+import { Animated, Easing, Modal } from 'react-native'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 
@@ -45,11 +45,45 @@ export function ConfirmDialog({
     pendingRef.current = undefined
     pending?.()
   }
+  // Android's native Modal fade animates the whole window in a few coarse
+  // steps, which reads as a hard white→gray jump on light themes. Drive the
+  // fade from JS instead: the (transparent) Modal window appears instantly and
+  // the scrim+card ease in/out over a controlled curve.
+  const [mounted, setMounted] = useState(visible)
+  // Android elevation shadows render at full strength regardless of the view's
+  // animated opacity, so the card's square shadow would pop in before the card
+  // fades in and linger after it fades out. Only draw it while fully shown.
+  const [shadowShown, setShadowShown] = useState(visible)
+  const fade = useRef(new Animated.Value(visible ? 1 : 0)).current
+  useEffect(() => {
+    if (visible) {
+      setMounted(true)
+      setShadowShown(false)
+      Animated.timing(fade, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setShadowShown(true)
+      })
+    } else {
+      setShadowShown(false)
+      Animated.timing(fade, {
+        toValue: 0,
+        duration: 180,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setMounted(false)
+      })
+    }
+  }, [visible, fade])
   return (
     <Modal
       transparent
-      visible={visible}
-      animationType="fade"
+      visible={mounted}
+      animationType="none"
       onRequestClose={() => {
         pendingRef.current = undefined
         onClose('dismiss')
@@ -57,9 +91,10 @@ export function ConfirmDialog({
       onDismiss={runPending}
       statusBarTranslucent
     >
-      <View style={styles.backdrop}>
+      <Animated.View style={[styles.backdrop, { opacity: fade }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => onClose('dismiss')} accessibilityLabel={title} />
-        <View style={styles.card} accessibilityViewIsModal>
+        {/* Elevation shadow only while fully visible; see shadowShown above. */}
+        <View style={[styles.card, shadowShown ? null : styles.cardShadowless]} accessibilityViewIsModal>
           <Text style={styles.title}>{title}</Text>
           {message ? <Text style={styles.message}>{message}</Text> : null}
           <View style={styles.buttons}>
@@ -89,7 +124,7 @@ export function ConfirmDialog({
             ))}
           </View>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   )
 }
@@ -160,5 +195,8 @@ const createStyles = (colors: ThemeColors) =>
     },
     buttonLabelDanger: {
       color: colors.danger,
+    },
+    cardShadowless: {
+      elevation: 0,
     },
   })
