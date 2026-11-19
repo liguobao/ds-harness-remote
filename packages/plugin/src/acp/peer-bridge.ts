@@ -15,6 +15,8 @@ import {
   AGENT_ACP_TRANSFER_CHUNK_BYTES,
   MAX_AGENT_ACP_TRANSFER_BYTES,
   MAX_SECURE_MESSAGE_BYTES,
+  createEvent,
+  encodeMessage,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import type { PeerConnectionContext } from '../connection-controller.js'
@@ -315,7 +317,7 @@ export class AcpPeerBridge {
     // tracked for interest/backpressure, but Clients match session-scoped
     // delivery after reconnects when stream ids diverge.
     const data: AgentAcpFrameData = { streamId: `session:${sessionId}`, frame }
-    if (new TextEncoder().encode(JSON.stringify(data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+    if (encodeMessage(createEvent('agent.acp.frame', data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
       for (const streamId of streamIds) {
         this.streams.delete(streamId)
         await this.publish('agent.acp.stream.closed', { streamId, reason: 'failed' }).catch(() => undefined)
