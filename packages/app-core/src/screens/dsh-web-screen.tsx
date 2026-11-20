@@ -9,7 +9,10 @@ import { useTheme } from '../ui/theme-context'
 
 type LanWebSession = DshWebGrant & { close(): Promise<void> }
 
-type Rpc = ((method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>) & { openLanWeb?: (onFailure: () => void) => Promise<LanWebSession> | undefined }
+type Rpc = ((method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>) & {
+  openLanWeb?: (onFailure: () => void) => Promise<LanWebSession> | undefined
+  supportsDshWebTunnel?: boolean
+}
 
 const FATAL_SAME_ORIGIN_HTTP_STATUSES = new Set([401, 502, 503, 504])
 export const DSH_WEB_GRANT_CLOCK_SKEW_MS = 60_000
@@ -55,17 +58,8 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
     setLoaded(false)
     setGrant(undefined)
 
-    const startOpen = () => {
+    const openTunnel = () => {
       if (abort.signal.aborted) return
-      try {
-        local = rpc.openLanWeb?.(() => { if (!abort.signal.aborted) setFailed(true) })
-      } catch { setFailed(true); return }
-      if (local) {
-        void local.then(session => {
-          if (!abort.signal.aborted) setGrant(session)
-        }, () => { if (!abort.signal.aborted) setFailed(true) })
-        return
-      }
       shouldClose = true
       void rpc('dsh.web.open', {}, abort.signal).then(
         result => {
@@ -87,6 +81,30 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
           setFailed(true)
         },
       )
+    }
+
+    const startOpen = () => {
+      if (abort.signal.aborted) return
+      try {
+        local = rpc.openLanWeb?.(() => { if (!abort.signal.aborted) setFailed(true) })
+      } catch { setFailed(true); return }
+      if (!local) {
+        if (rpc.supportsDshWebTunnel === false) setFailed(true)
+        else openTunnel()
+        return
+      }
+      void local.then(session => {
+        if (!abort.signal.aborted) setGrant(session)
+      }, (error: unknown) => {
+        if (abort.signal.aborted) return
+        if (rpc.supportsDshWebTunnel && error instanceof Error &&
+            'code' in error && error.code === 'FEATURE_NOT_SUPPORTED') {
+          local = undefined
+          openTunnel()
+        } else {
+          setFailed(true)
+        }
+      })
     }
 
     const pendingClose = pendingCloseRef.current
@@ -145,13 +163,16 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
     }
   }, [grant, grantUrl])
   const openTitle = chinese ? '打开 DSH Web' : 'Open DSH Web'
+  const title = loaded && !failed && grant
+    ? `${hostName} · ${'close' in grant ? 'LAN' : 'CF Worker'}`
+    : openTitle
   const loadingMessage = grant
     ? (chinese ? '正在验证访问并加载页面…' : 'Verifying access and loading the page…')
     : (chinese ? '正在建立 DSH Web 连接…' : 'Establishing the DSH Web connection…')
   return (
     <Modal visible onRequestClose={onClose} animationType="slide">
       <SafeAreaView style={[styles.fill, { backgroundColor: colors.background }]}>
-        <TopBar title={loaded && !failed ? hostName : openTitle} onBack={onClose} />
+        <TopBar title={title} onBack={onClose} />
         {failed ? <ErrorBanner
           message={chinese ? '无法打开 DSH Web，请重试。' : 'Could not open DSH Web. Please try again.'}
           onRetry={retry}

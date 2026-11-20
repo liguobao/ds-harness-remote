@@ -10,6 +10,7 @@ const { client, service } = vi.hoisted(() => ({
     rpc: vi.fn(),
     supportsBinaryUpload: vi.fn(),
     supportsDshWeb: vi.fn(),
+    supportsDshWebTunnel: vi.fn(() => false),
   },
   service: { start: vi.fn(), stop: vi.fn(), setStatus: vi.fn() },
 }))
@@ -19,6 +20,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   rpc = client.rpc
   supportsBinaryUpload = client.supportsBinaryUpload
   supportsDshWeb = client.supportsDshWeb
+  supportsDshWebTunnel = client.supportsDshWebTunnel
 } }))
 vi.mock('../src/services/foreground-service', () => ({ foregroundService: service }))
 import { AndroidRemoteRuntime } from '../src/services/remote-runtime'

@@ -239,7 +239,7 @@ export class RpcRouter {
         }
         return {
           capabilities,
-          ...(capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: this.lanWeb?.onLan() === true } : {}),
+          ...(capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {}),
           ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
         }
       }

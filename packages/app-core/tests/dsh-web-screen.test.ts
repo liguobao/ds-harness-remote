@@ -151,6 +151,24 @@ afterEach(() => {
 })
 
 describe('DshWebScreen helpers and lifecycle', () => {
+  it('opens the advertised tunnel only after an explicit LAN capability rejection', async () => {
+    for (const [code, supportsDshWebTunnel, expectedCalls] of [
+      ['FEATURE_NOT_SUPPORTED', true, ['dsh.web.open', 'dsh.web.close']],
+      ['FEATURE_NOT_SUPPORTED', false, []],
+      ['RPC_TIMEOUT', true, []],
+    ] as const) {
+      const rpc = Object.assign(vi.fn(async (_method: string) => validGrant()), {
+        openLanWeb: vi.fn(async () => { throw Object.assign(new Error(code), { code }) }),
+        supportsDshWebTunnel,
+      })
+      renderScreen(rpc)
+      await flushMicrotasks()
+      reactHarness.unmount()
+      expect(rpc.openLanWeb).toHaveBeenCalledTimes(1)
+      expect(rpc.mock.calls.map(([method]) => method)).toEqual(expectedCalls)
+    }
+  })
+
   it('classifies clock-skew grant validity, and fatal HTTP errors', async () => {
     const grantUrl = 'https://p2a3b4c5d6e7.tunnel.example.com/'
     const sessionUri = 'https://p2a3b4c5d6e7.tunnel.example.com/__remote/session'

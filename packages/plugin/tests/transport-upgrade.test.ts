@@ -124,11 +124,35 @@ describe('LAN Web address selection', () => {
     ['LAN', 'unknown', undefined, undefined],
     ['P2P', 'loopback', '::1:53718', undefined],
   ] as const)('uses the verified %s %s endpoint %s', async (mode, localAddressScope, localAddress, expected) => {
-    const rtc = { connectionDetails: async () => ({ mode, localAddressScope, localAddress }) }
+    const rtc = { connectionDetails: async () => ({
+      transport: mode === 'LAN' ? 'lan' : 'p2p', dataChannelState: 'open', localAddressScope, localAddress,
+    }) }
     const channel = new ServerNoiseChannel({
       connectionId: 'c', membershipId: 'm', peer: { deviceId: 'p', publicKey: 'k' }, rtc,
     } as never, async () => {}, async () => {}, mode)
     expect(await channel.lanWebAddress()).toBe(expected)
+  })
+
+  it('uses the current Host ICE pair after switching from public IPv6 to private IPv4', async () => {
+    let transport: 'lan' | 'p2p' | undefined = 'p2p'
+    const rtc = { connectionDetails: async () => ({
+      transport, dataChannelState: 'open',
+      localAddressScope: transport === 'lan' ? 'private' : 'public',
+      localAddress: transport === 'lan' ? '192.168.1.10:53718' : '[2001:db8::1]:53718',
+    }) }
+    const channel = new ServerNoiseChannel({
+      connectionId: 'c', membershipId: 'm', peer: { deviceId: 'p', publicKey: 'k' }, rtc,
+    } as never, async () => {}, async () => {}, 'P2P')
+
+    expect(await channel.lanWebAddress()).toBeUndefined()
+    transport = 'lan'
+    expect(await channel.lanWebAddress()).toBe('192.168.1.10')
+    expect(channel.mode).toBe('LAN')
+    transport = undefined
+    expect(await channel.lanWebAddress()).toBeUndefined()
+    transport = 'p2p'
+    expect(await channel.lanWebAddress()).toBeUndefined()
+    expect(channel.mode).toBe('P2P')
   })
 })
 

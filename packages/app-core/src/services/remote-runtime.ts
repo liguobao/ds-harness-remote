@@ -67,7 +67,9 @@ export class AndroidRemoteRuntime {
     }, { openLanWeb: (onFailure: () => void) => {
       if (generation !== this.generation || !this.connected) throw new Error('Connection replaced.')
       return this.client.openLanWeb(onFailure)
-    }, supportsBinaryUpload: this.supportsBinaryUpload(), supportsDshWeb: this.connected && this.client.supportsDshWeb() })
+    }, supportsBinaryUpload: this.supportsBinaryUpload(),
+    supportsDshWeb: this.connected && this.client.supportsDshWeb(),
+    supportsDshWebTunnel: this.connected && this.client.supportsDshWebTunnel() })
   }
 
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }

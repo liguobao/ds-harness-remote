@@ -31,17 +31,18 @@ export class DshWebLanPeer {
 
   available() { return !this.disposed && !!this.runtime() }
 
-  onLan() { return this.mode() === 'LAN' }
+  async onLan() { return this.available() && await this.address() !== undefined && this.mode() === 'LAN' }
 
   async open(params: unknown) {
     dshWebLanOpenSchema.parse(params)
-    if (!this.onLan() || !this.available()) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
+    if (!this.available()) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
     this.lease?.abort.abort()
     const lease = { id: randomUUID(), abort: new AbortController() }
     this.lease = lease
     const signal = lease.abort.signal
     try {
       const address = await this.address()
+      if (this.mode() !== 'LAN') throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
       if (!address || !isDshWebLanAddress(address) || !Object.values(networkInterfaces()).flat()
         .some(iface => iface?.address === address && (!iface.internal || address === '127.0.0.1'))) throw new Error('LAN interface unavailable')
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5000)]))
@@ -176,8 +177,9 @@ export class DshWebLanPeer {
       if (!live() || !bound || typeof bound === 'string') throw new Error('LAN Web unavailable')
       origin = new URL('http://' + address + ':' + bound.port)
       return { sessionId: lease.id, url: origin.href, browserGrant: ticket, expiresAt }
-    } catch {
+    } catch (error) {
       lease.abort.abort()
+      if (error instanceof RpcError && error.code === 'FEATURE_NOT_SUPPORTED') throw error
       throw new RpcError('DSH_WEB_NOT_READY', 'LAN Web is unavailable.')
     }
   }

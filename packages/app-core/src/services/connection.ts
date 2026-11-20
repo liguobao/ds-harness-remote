@@ -384,6 +384,8 @@ export class AndroidRemoteConnection {
 
   supportsDshWeb(): boolean { return this.core !== undefined && (this.dshWeb || (this.lanWeb && this.getStats()?.mode === 'LAN')) }
 
+  supportsDshWebTunnel(): boolean { return this.core !== undefined && this.dshWeb }
+
   supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
 
   async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {

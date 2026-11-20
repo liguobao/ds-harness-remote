@@ -850,11 +850,11 @@ describe('LAN Web connection ownership', () => {
     const peer = new DshWebLanPeer(() => ({ origin: upstream.origin, auth }), () => mode, async () => address)
     try {
       for (mode of ['P2P', 'TURN', 'Relay']) {
-        expect(peer.onLan()).toBe(false)
+        expect(await peer.onLan()).toBe(false)
         await expect(peer.open({})).rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
       }
       mode = 'LAN'
-      expect(peer.onLan()).toBe(true)
+      expect(await peer.onLan()).toBe(true)
       const stale = await peer.open({})
       const current = dshWebLanGrantSchema.parse(await peer.open({}))
       expect(new URL(current.url).hostname).toBe(address)

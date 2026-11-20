@@ -104534,12 +104534,12 @@ var DshWebLanPeer = class {
   available() {
     return !this.disposed && !!this.runtime();
   }
-  onLan() {
-    return this.mode() === "LAN";
+  async onLan() {
+    return this.available() && await this.address() !== void 0 && this.mode() === "LAN";
   }
   async open(params) {
     dshWebLanOpenSchema.parse(params);
-    if (!this.onLan() || !this.available()) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
+    if (!this.available()) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
     this.lease?.abort.abort();
     const lease = { id: randomUUID16(), abort: new AbortController() };
     this.lease = lease;
@@ -104612,6 +104612,7 @@ var DshWebLanPeer = class {
       };
       var track = track2, proxy = proxy2;
       const address2 = await this.address();
+      if (this.mode() !== "LAN") throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
       if (!address2 || !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
       signal.throwIfAborted();
@@ -104724,8 +104725,9 @@ var DshWebLanPeer = class {
       if (!live() || !bound || typeof bound === "string") throw new Error("LAN Web unavailable");
       origin = new URL("http://" + address2 + ":" + bound.port);
       return { sessionId: lease.id, url: origin.href, browserGrant: ticket, expiresAt };
-    } catch {
+    } catch (error62) {
       lease.abort.abort();
+      if (error62 instanceof RpcError && error62.code === "FEATURE_NOT_SUPPORTED") throw error62;
       throw new RpcError("DSH_WEB_NOT_READY", "LAN Web is unavailable.");
     }
   }
@@ -107091,7 +107093,7 @@ var RpcRouter = class {
         }
         return {
           capabilities,
-          ...capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: this.lanWeb?.onLan() === true } : {},
+          ...capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {},
           ...workspaceTypes === void 0 ? {} : { workspaceTypes }
         };
       }
@@ -108713,8 +108715,13 @@ var ServerNoiseChannel = class {
   sendTail = Promise.resolve();
   async lanWebAddress() {
     const rtc = this.tunnel.rtc;
-    const path = await rtc?.connectionDetails();
-    if (this.mode === "LAN" && rtc === this.tunnel.rtc && path?.mode === "LAN") {
+    const mode2 = this.mode;
+    if (this.closed || !rtc || mode2 !== "LAN" && mode2 !== "P2P") return void 0;
+    const path = await rtc.connectionDetails();
+    if (this.closed || rtc !== this.tunnel.rtc || this.mode !== mode2 || path.dataChannelState !== "open") return void 0;
+    if (path.transport === "p2p") this.mode = "P2P";
+    if (path.transport === "lan") {
+      this.mode = "LAN";
       if (path.localAddressScope === "loopback") return "127.0.0.1";
       return /^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$/.exec(path.localAddress ?? "")?.[1];
     }

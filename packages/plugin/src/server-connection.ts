@@ -1601,8 +1601,15 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
 
   async lanWebAddress() {
     const rtc = this.tunnel.rtc
-    const path = await rtc?.connectionDetails()
-    if (this.mode === 'LAN' && rtc === this.tunnel.rtc && path?.mode === 'LAN') {
+    const mode = this.mode
+    if (this.closed || !rtc || (mode !== 'LAN' && mode !== 'P2P')) return undefined
+    const path = await rtc.connectionDetails()
+    if (this.closed || rtc !== this.tunnel.rtc || this.mode !== mode || path.dataChannelState !== 'open') return undefined
+    // ICE can switch from an early IPv6 pair to IPv4 after Noise has connected.
+    // Use fresh local stats before granting access to the LAN listener.
+    if (path.transport === 'p2p') this.mode = 'P2P'
+    if (path.transport === 'lan') {
+      this.mode = 'LAN'
       // A selected loopback interface reaches this machine in either IP family.
       // The browser handoff consistently uses the IPv4 loopback listener.
       if (path.localAddressScope === 'loopback') return '127.0.0.1'
