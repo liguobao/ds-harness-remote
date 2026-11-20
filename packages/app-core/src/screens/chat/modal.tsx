@@ -3,7 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings as zhCN } from '../../locales/i18n'
 import { easingCurve, resolveMotion } from '../../ui/motion'
-import { useResponsiveLayout } from '../../ui/responsive'
+import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from '../../ui/responsive'
 import { spacing } from '../../ui/theme'
 import { useReduceMotion } from '../../ui/use-reduce-motion'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -25,7 +25,7 @@ import { createStyles } from './styles'
 export function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const { sheetMaxHeight } = useResponsiveLayout()
+  const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const reduceMotion = useReduceMotion()
   const progress = useRef(new Animated.Value(0)).current
 
@@ -41,13 +41,33 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
     return () => animation.stop()
   }, [progress, reduceMotion])
 
-  const translateY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [resolveMotion('sheet', reduceMotion).translate, 0],
-  })
+  // Wide windows promote the bottom sheet to a centered dialog card. The card
+  // stays opaque (only the backdrop fades) so Android never flashes its
+  // elevation shadow in from nothing; reduced motion drops the scale.
+  const asDialog = sheetAsDialog
+  const sheetTransform = asDialog
+    ? { transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.96, 1] }) }] }
+    : {
+        transform: [{
+          translateY: progress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [resolveMotion('sheet', reduceMotion).translate, 0],
+          }),
+        }],
+      }
 
   return (
-    <View style={styles.modalBackdrop} pointerEvents="box-none">
+    <View
+      style={[
+        asDialog ? styles.modalDialogBackdrop : styles.modalBackdrop,
+        asDialog && {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingHorizontal: spacing.md,
+        },
+      ]}
+      pointerEvents="box-none"
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.common.close}
@@ -56,18 +76,31 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
         style={StyleSheet.absoluteFill}
       />
       <Animated.View
-        style={[styles.modalSheet, {
-          maxHeight: sheetMaxHeight,
-          // Landscapes on cutout phones put the display edge on a side; keep
-          // the sheet content inside the safe area there. Portrait keeps the
-          // original horizontal padding because both insets are 0.
-          paddingLeft: spacing.lg + insets.left,
-          paddingRight: spacing.lg + insets.right,
-          // 3-button landscape navigation can be taller than the original
-          // bottom padding; grow only when needed.
-          paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
-          transform: [{ translateY }],
-        }]}
+        style={[
+          asDialog ? styles.modalDialogSheet : styles.modalSheet,
+          {
+            maxHeight: asDialog
+              ? Math.max(200, sheetMaxHeight - insets.top - insets.bottom)
+              : sheetMaxHeight,
+            ...(asDialog ? {
+              width: '100%',
+              maxWidth: DIALOG_SHEET_MAX_WIDTH,
+              paddingLeft: spacing.lg,
+              paddingRight: spacing.lg,
+              paddingBottom: spacing.lg,
+            } : {
+              // Landscapes on cutout phones put the display edge on a side; keep
+              // the sheet content inside the safe area there. Portrait keeps the
+              // original horizontal padding because both insets are 0.
+              paddingLeft: spacing.lg + insets.left,
+              paddingRight: spacing.lg + insets.right,
+              // 3-button landscape navigation can be taller than the original
+              // bottom padding; grow only when needed.
+              paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
+            }),
+            ...sheetTransform,
+          },
+        ]}
         pointerEvents="box-none"
       >
         {children}

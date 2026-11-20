@@ -24,7 +24,7 @@ import {
   type Rect,
   type SheetPhase,
 } from './motion'
-import { useResponsiveLayout } from './responsive'
+import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from './responsive'
 import { radius, spacing, type ThemeColors } from './theme'
 import { useReduceMotion } from './use-reduce-motion'
 import { useThemedStyles } from './use-themed-styles'
@@ -72,6 +72,13 @@ export function SheetModal({
   sheetStyle,
   avoidKeyboard = false,
   dismissLabel,
+  /**
+   * `adaptive` (default) promotes anchor-less sheets to centered dialog cards
+   * on wide windows; `sheet` always keeps the bottom-sheet form. Menus whose
+   * anchor can disappear (e.g. the composer "+" menu while the IME toggles)
+   * must pass `sheet` so their form does not jump between shapes.
+   */
+  presentation = 'adaptive',
 }: {
   visible: boolean
   onClose: () => void
@@ -86,10 +93,12 @@ export function SheetModal({
   /** Keep input sheets and their actions above the soft keyboard. */
   avoidKeyboard?: boolean
   dismissLabel?: string
+  /** `sheet` disables the wide-window centered-dialog promotion. */
+  presentation?: 'adaptive' | 'sheet'
 }) {
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const { sheetMaxHeight } = useResponsiveLayout()
+  const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const { height: windowHeight } = useWindowDimensions()
   const reduceMotion = useReduceMotion()
   const sheetId = useId()
@@ -208,10 +217,24 @@ export function SheetModal({
   const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [rise, 0] })
   const requestClose = onRequestClose ?? onClose
   const content = visible ? children : retainedChildren.current
+  // Wide windows promote anchor-less sheets to centered dialog cards; menus
+  // marked `presentation="sheet"` keep the bottom form regardless.
+  const asDialog = sheetAsDialog && presentation === 'adaptive'
+  // Reduced motion drops the scale per motion.ts conventions; the card itself
+  // stays opaque (only the backdrop fades) so Android never flashes the
+  // card's elevation shadow in from nothing (see #512).
+  const dialogScale = progress.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.96, 1] })
 
   const body = phase === 'dismissing' ? null : (
     <View
-      style={styles.container}
+      style={[
+        asDialog ? styles.dialogContainer : styles.container,
+        asDialog && {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingHorizontal: spacing.md,
+        },
+      ]}
       pointerEvents={visible ? 'box-none' : 'none'}
       onLayout={event => setAvailableHeight(event.nativeEvent.layout.height)}
     >
@@ -231,17 +254,36 @@ export function SheetModal({
         accessibilityViewIsModal
         pointerEvents="box-none"
         style={[
-          styles.sheet,
+          asDialog ? styles.dialogSheet : styles.sheet,
           {
             // A resized Modal may be shorter than the normal sheet cap. Leave
-            // the status-bar inset above tall, scrollable input forms too.
-            maxHeight: Math.min(sheetMaxHeight, Math.max(0, (availableHeight ?? windowHeight) - insets.top)),
-            paddingLeft: spacing.lg + insets.left,
-            paddingRight: spacing.lg + insets.right,
-            paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
-            transform: [{ translateY }],
+            // the status-bar inset above and the gesture bar below tall,
+            // scrollable input forms too.
+            maxHeight: Math.min(sheetMaxHeight, Math.max(0, (availableHeight ?? windowHeight) - insets.top - (asDialog ? insets.bottom : 0))),
           },
-          sheetStyle,
+          // Caller styles first in dialog form so bottom-sheet-only overrides
+          // (top-corner radius, bottom inset padding, grabber spacing) cannot
+          // clobber the centered card's rounded shape.
+          ...(asDialog ? [sheetStyle] : []),
+          asDialog
+            ? {
+                width: '100%' as const,
+                maxWidth: DIALOG_SHEET_MAX_WIDTH,
+                borderRadius: radius.xl,
+                borderTopLeftRadius: radius.xl,
+                borderTopRightRadius: radius.xl,
+                paddingLeft: spacing.lg,
+                paddingRight: spacing.lg,
+                paddingBottom: spacing.lg,
+                transform: [{ scale: dialogScale }],
+              }
+            : {
+                paddingLeft: spacing.lg + insets.left,
+                paddingRight: spacing.lg + insets.right,
+                paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
+                transform: [{ translateY }],
+              },
+          ...(asDialog ? [] : [sheetStyle]),
         ]}
       >
         {content}
@@ -276,6 +318,7 @@ export function SheetModal({
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, justifyContent: 'flex-end' },
+  dialogContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   sheet: {
     zIndex: 1,
@@ -285,5 +328,13 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderTopRightRadius: radius.xxl,
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
+  },
+  dialogSheet: {
+    zIndex: 1,
+    elevation: 1,
+    backgroundColor: colors.background,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.lg,
   },
 })
