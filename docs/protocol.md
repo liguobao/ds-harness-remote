@@ -1295,6 +1295,11 @@ realpath 后的规范根目录计算，避免符号链接父目录或大小写�
 `rpc.error.details.reason` 中携带稳定的安全分类（`scope-missing`、`authority-unavailable`、`root-invalid`、
 `outside-root`、`symlink`、`not-regular-file`、`not-found`、`too-large`、`io`），不得包含路径、文件名、
 文件正文或原始文件系统错误。旧 `fileviewer.read.v1` 仍使用 provider 授权。
+桌面端点击已提交用户消息中的上传附件时，侧栏以会话 ID、附件摘要 ID 和文件名定位原件。
+Host 仅接受同一加密连接上通过官方 `session/follow` 或 `session/page` 交付给该会话的结构化附件引用，
+再通过 Host 附件服务定位原件并复用只读文件预览。浏览器提交的本机路径和消息正文中的路径均不能授予附件访问权限。
+附件引用索引随连接回收。该预览沿用现有 Typert 请求与文件大小限制。
+
 对 `codex:<threadId>` scope，Host 使用 CodeX thread 当前 `cwd` 作为独立根目录，并额外拒绝根目录之外的路径；
 该映射不改变 Harness Session 的既有工作区权限。CodeX 终端同样按 thread 建立独立 context。
 

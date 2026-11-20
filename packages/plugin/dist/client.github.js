@@ -3678,9 +3678,9 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     };
     inspect(document.body);
     let observer = new MutationObserver((records) => {
-      for (let record of records) {
-        record.type === "attributes" && inspect(record.target);
-        for (let node of Array.from(record.addedNodes))
+      for (let record2 of records) {
+        record2.type === "attributes" && inspect(record2.target);
+        for (let node of Array.from(record2.addedNodes))
           node instanceof Element && inspect(node);
       }
     });
@@ -5232,6 +5232,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
       ".dshRemoteServerNotice{font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}.dshRemoteServerNotice.isWarning{color:var(--dsw-alias-state-warning-primary,#946200)}.dshRemoteServerNotice.isError{color:var(--dsw-alias-state-error-primary)}.dshRemoteServerNotice.isRestored{color:var(--dsw-alias-state-success-primary)}",
       // Browser navigation still targets the Desktop machine until Harness exposes
       // a Remote URL resolver. Hide the native guide entry in Remote mode only.
+      "[data-dsh-remote-message-file]{cursor:pointer}",
       'html.dshRemoteBrowserUnavailable [data-sidebar-right-guide-entry="browser"]{display:none!important}',
       'html.dshRemoteTargetActive button[aria-label="\u6DFB\u52A0\u5DE5\u4F5C\u533A"],html.dshRemoteTargetActive button[aria-label="Add workspace"]{display:none!important}',
       'html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="\u6307\u4EE4"],html.dshRemoteCodexTargetActive [data-composer-card] button[aria-haspopup="listbox"][aria-label="Commands"]{display:none!important}',
@@ -7490,6 +7491,63 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     };
   }
 
+  // packages/plugin/src/message-file-attachment.ts
+  var PREFIX = ".dsh-remote-message-file/", attachmentIdPattern = /^sha256:[a-f0-9]{64}$/;
+  function record(value) {
+    return typeof value == "object" && value !== null ? value : void 0;
+  }
+  function messageFileAttachment(block) {
+    let value = record(block), ref = value?.type === "file" ? record(value.attachment) : void 0;
+    if (!(typeof ref?.attachmentId != "string" || !attachmentIdPattern.test(ref.attachmentId) || typeof ref.name != "string" || ref.name.length === 0 || ref.name.length > 255 || ref.name === "." || ref.name === ".." || /[\\/\x00-\x1f]/u.test(ref.name) || typeof ref.bytes != "number" || !Number.isSafeInteger(ref.bytes) || ref.bytes < 0))
+      return { attachmentId: ref.attachmentId, name: ref.name, bytes: ref.bytes };
+  }
+  function messageFilePath(ref) {
+    return `${PREFIX}${ref.attachmentId}/${ref.name}`;
+  }
+
+  // packages/plugin/src/client/message-file-preview.ts
+  var cardSelector = "[data-message-attachments] > span[title]", actionable = "data-dsh-remote-message-file";
+  function fileAddress(card, conversation) {
+    let sessionId = card.closest("[data-conversation-session]")?.getAttribute("data-conversation-session"), nodeKey = card.closest("[data-chat-node-key]")?.getAttribute("data-chat-node-key");
+    if (!sessionId || !nodeKey || !card.parentElement) return;
+    let node;
+    try {
+      node = conversation.binding(sessionId).target("chat").getSnapshot()?.nodes.get(nodeKey);
+    } catch {
+      return;
+    }
+    if (node?.kind !== "user" && node?.kind !== "steering" || !Array.isArray(node.data.content)) return;
+    let attachments = node.data.content.map(messageFileAttachment).filter((ref2) => ref2 !== void 0), cards = Array.from(card.parentElement.querySelectorAll(":scope > span[title]"));
+    if (cards.length !== attachments.length) return;
+    let ref = attachments[cards.indexOf(card)];
+    if (ref === void 0 || ref.name !== card.getAttribute("title")) return;
+    let path = messageFilePath(ref).split("/").map(encodeURIComponent).join("/");
+    return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${path}`;
+  }
+  function installMessageFilePreview(feed, conversation, sidebar) {
+    let active = !1, refresh = () => {
+      for (let card of Array.from(document.querySelectorAll(`${cardSelector}, [${actionable}]`))) {
+        let enabled = active && card.matches(cardSelector) && fileAddress(card, conversation) !== void 0;
+        enabled && !card.hasAttribute(actionable) ? (card.setAttribute(actionable, ""), card.setAttribute("role", "button"), card.setAttribute("tabindex", "0")) : !enabled && card.hasAttribute(actionable) && (card.removeAttribute(actionable), card.removeAttribute("role"), card.removeAttribute("tabindex"));
+      }
+    }, observer = new MutationObserver(refresh), unsubscribe = feed.subscribe((status) => {
+      let enabled = status.mode === "remote" && status.connected === !0 && status.backend === "harness";
+      enabled !== active && (active = enabled, active ? observer.observe(document.body, {
+        childList: !0,
+        subtree: !0,
+        attributes: !0,
+        attributeFilter: ["data-chat-node-key", "data-conversation-session", "title"]
+      }) : observer.disconnect(), refresh());
+    }), open = (event) => {
+      if (!active || !(event.target instanceof Element) || event instanceof KeyboardEvent && (event.repeat || event.key !== "Enter" && event.key !== " ")) return;
+      let card = event.target.closest(cardSelector), address = card === null ? void 0 : fileAddress(card, conversation);
+      address !== void 0 && (event.preventDefault(), sidebar.openResource(address));
+    };
+    return document.addEventListener("click", open), document.addEventListener("keydown", open), () => {
+      unsubscribe(), observer.disconnect(), active = !1, refresh(), document.removeEventListener("click", open), document.removeEventListener("keydown", open);
+    };
+  }
+
   // packages/plugin/src/client-recovery.ts
   function subscribeRemoteRecovery(feed, reconnect) {
     let previous;
@@ -7787,7 +7845,10 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
           return () => {
             unsubscribe(), document.documentElement.classList.remove("dshRemoteBrowserUnavailable");
           };
-        }, "ds-harness-remote: hide local browser entry in remote mode"), ctx.effect(() => subscribeRemoteRecovery(statusFeed, () => ctx.connection.reconnect?.()), "ds-harness-remote: carrier recovery"), ctx.effect(() => {
+        }, "ds-harness-remote: hide local browser entry in remote mode"), ctx.effect(() => subscribeRemoteRecovery(statusFeed, () => ctx.connection.reconnect?.()), "ds-harness-remote: carrier recovery"), ctx.inject(["uiConversation", "sidebarRight"], (previewContext) => {
+          let conversation = previewContext.get("uiConversation"), sidebar = previewContext.get("sidebarRight");
+          typeof conversation?.binding != "function" || typeof sidebar?.openResource != "function" || previewContext.effect(() => installMessageFilePreview(statusFeed, conversation, sidebar), "ds-harness-remote: message file preview");
+        }), ctx.effect(() => {
           let disposed = !1, unsubscribeWorkspaces, unsubscribeSessions, selection, opening = !1, reconcile = () => {
             if (disposed || opening || selection === void 0) return;
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();

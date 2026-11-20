@@ -5305,14 +5305,14 @@ var require_dns_packet = __commonJS({
       return len;
     };
     var rnsec = exports.nsec = {};
-    rnsec.encode = function(record11, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec.encodingLength(record11));
+    rnsec.encode = function(record12, buf, offset2) {
+      if (!buf) buf = Buffer9.alloc(rnsec.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
-      name2.encode(record11.nextDomain, buf, offset2);
+      name2.encode(record12.nextDomain, buf, offset2);
       offset2 += name2.encode.bytes;
-      typebitmap.encode(record11.rrtypes, buf, offset2);
+      typebitmap.encode(record12.rrtypes, buf, offset2);
       offset2 += typebitmap.encode.bytes;
       rnsec.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rnsec.encode.bytes - 2, oldOffset);
@@ -5322,39 +5322,39 @@ var require_dns_packet = __commonJS({
     rnsec.decode = function(buf, offset2) {
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
-      var record11 = {};
+      var record12 = {};
       var length = buf.readUInt16BE(offset2);
       offset2 += 2;
-      record11.nextDomain = name2.decode(buf, offset2);
+      record12.nextDomain = name2.decode(buf, offset2);
       offset2 += name2.decode.bytes;
-      record11.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
+      record12.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
       offset2 += typebitmap.decode.bytes;
       rnsec.decode.bytes = offset2 - oldOffset;
-      return record11;
+      return record12;
     };
     rnsec.decode.bytes = 0;
-    rnsec.encodingLength = function(record11) {
-      return 2 + name2.encodingLength(record11.nextDomain) + typebitmap.encodingLength(record11.rrtypes);
+    rnsec.encodingLength = function(record12) {
+      return 2 + name2.encodingLength(record12.nextDomain) + typebitmap.encodingLength(record12.rrtypes);
     };
     var rnsec3 = exports.nsec3 = {};
-    rnsec3.encode = function(record11, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec3.encodingLength(record11));
+    rnsec3.encode = function(record12, buf, offset2) {
+      if (!buf) buf = Buffer9.alloc(rnsec3.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
-      const salt = record11.salt;
+      const salt = record12.salt;
       if (!Buffer9.isBuffer(salt)) {
         throw new Error("salt must be a Buffer");
       }
-      const nextDomain = record11.nextDomain;
+      const nextDomain = record12.nextDomain;
       if (!Buffer9.isBuffer(nextDomain)) {
         throw new Error("nextDomain must be a Buffer");
       }
       offset2 += 2;
-      buf.writeUInt8(record11.algorithm, offset2);
+      buf.writeUInt8(record12.algorithm, offset2);
       offset2 += 1;
-      buf.writeUInt8(record11.flags, offset2);
+      buf.writeUInt8(record12.flags, offset2);
       offset2 += 1;
-      buf.writeUInt16BE(record11.iterations, offset2);
+      buf.writeUInt16BE(record12.iterations, offset2);
       offset2 += 2;
       buf.writeUInt8(salt.length, offset2);
       offset2 += 1;
@@ -5364,7 +5364,7 @@ var require_dns_packet = __commonJS({
       offset2 += 1;
       nextDomain.copy(buf, offset2, 0, nextDomain.length);
       offset2 += nextDomain.length;
-      typebitmap.encode(record11.rrtypes, buf, offset2);
+      typebitmap.encode(record12.rrtypes, buf, offset2);
       offset2 += typebitmap.encode.bytes;
       rnsec3.encode.bytes = offset2 - oldOffset;
       buf.writeUInt16BE(rnsec3.encode.bytes - 2, oldOffset);
@@ -5374,31 +5374,31 @@ var require_dns_packet = __commonJS({
     rnsec3.decode = function(buf, offset2) {
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
-      var record11 = {};
+      var record12 = {};
       var length = buf.readUInt16BE(offset2);
       offset2 += 2;
-      record11.algorithm = buf.readUInt8(offset2);
+      record12.algorithm = buf.readUInt8(offset2);
       offset2 += 1;
-      record11.flags = buf.readUInt8(offset2);
+      record12.flags = buf.readUInt8(offset2);
       offset2 += 1;
-      record11.iterations = buf.readUInt16BE(offset2);
+      record12.iterations = buf.readUInt16BE(offset2);
       offset2 += 2;
       const saltLength2 = buf.readUInt8(offset2);
       offset2 += 1;
-      record11.salt = buf.slice(offset2, offset2 + saltLength2);
+      record12.salt = buf.slice(offset2, offset2 + saltLength2);
       offset2 += saltLength2;
       const hashLength = buf.readUInt8(offset2);
       offset2 += 1;
-      record11.nextDomain = buf.slice(offset2, offset2 + hashLength);
+      record12.nextDomain = buf.slice(offset2, offset2 + hashLength);
       offset2 += hashLength;
-      record11.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
+      record12.rrtypes = typebitmap.decode(buf, offset2, length - (offset2 - oldOffset));
       offset2 += typebitmap.decode.bytes;
       rnsec3.decode.bytes = offset2 - oldOffset;
-      return record11;
+      return record12;
     };
     rnsec3.decode.bytes = 0;
-    rnsec3.encodingLength = function(record11) {
-      return 8 + record11.salt.length + record11.nextDomain.length + typebitmap.encodingLength(record11.rrtypes);
+    rnsec3.encodingLength = function(record12) {
+      return 8 + record12.salt.length + record12.nextDomain.length + typebitmap.encodingLength(record12.rrtypes);
     };
     var rds = exports.ds = {};
     rds.encode = function(digest, buf, offset2) {
@@ -5453,17 +5453,17 @@ var require_dns_packet = __commonJS({
           return 32;
       }
     };
-    rsshfp.encode = function encode21(record11, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsshfp.encodingLength(record11));
+    rsshfp.encode = function encode21(record12, buf, offset2) {
+      if (!buf) buf = Buffer9.alloc(rsshfp.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
-      buf[offset2] = record11.algorithm;
+      buf[offset2] = record12.algorithm;
       offset2 += 1;
-      buf[offset2] = record11.hash;
+      buf[offset2] = record12.hash;
       offset2 += 1;
-      const fingerprintBuf = Buffer9.from(record11.fingerprint.toUpperCase(), "hex");
-      if (fingerprintBuf.length !== rsshfp.getFingerprintLengthForHashType(record11.hash)) {
+      const fingerprintBuf = Buffer9.from(record12.fingerprint.toUpperCase(), "hex");
+      if (fingerprintBuf.length !== rsshfp.getFingerprintLengthForHashType(record12.hash)) {
         throw new Error("Invalid fingerprint length");
       }
       fingerprintBuf.copy(buf, offset2);
@@ -5476,21 +5476,21 @@ var require_dns_packet = __commonJS({
     rsshfp.decode = function decode21(buf, offset2) {
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
-      const record11 = {};
+      const record12 = {};
       offset2 += 2;
-      record11.algorithm = buf[offset2];
+      record12.algorithm = buf[offset2];
       offset2 += 1;
-      record11.hash = buf[offset2];
+      record12.hash = buf[offset2];
       offset2 += 1;
-      const fingerprintLength = rsshfp.getFingerprintLengthForHashType(record11.hash);
-      record11.fingerprint = buf.slice(offset2, offset2 + fingerprintLength).toString("hex").toUpperCase();
+      const fingerprintLength = rsshfp.getFingerprintLengthForHashType(record12.hash);
+      record12.fingerprint = buf.slice(offset2, offset2 + fingerprintLength).toString("hex").toUpperCase();
       offset2 += fingerprintLength;
       rsshfp.decode.bytes = offset2 - oldOffset;
-      return record11;
+      return record12;
     };
     rsshfp.decode.bytes = 0;
-    rsshfp.encodingLength = function(record11) {
-      return 4 + Buffer9.from(record11.fingerprint, "hex").byteLength;
+    rsshfp.encodingLength = function(record12) {
+      return 4 + Buffer9.from(record12.fingerprint, "hex").byteLength;
     };
     var rnaptr = exports.naptr = {};
     rnaptr.encode = function(data2, buf, offset2) {
@@ -7725,36 +7725,36 @@ function buildH264StapA(nalus) {
   return Buffer.concat(parts);
 }
 function parseAvcDecoderConfigurationRecord(description) {
-  const record11 = ArrayBuffer.isView(description) ? Buffer.from(
+  const record12 = ArrayBuffer.isView(description) ? Buffer.from(
     description.buffer,
     description.byteOffset,
     description.byteLength
   ) : Buffer.from(description);
-  if (record11.length < 7) {
+  if (record12.length < 7) {
     throw new Error(
-      `invalid H.264 avcC: expected at least 7 bytes, got ${record11.length}`
+      `invalid H.264 avcC: expected at least 7 bytes, got ${record12.length}`
     );
   }
-  const naluLengthSize = (record11[4] & 3) + 1;
+  const naluLengthSize = (record12[4] & 3) + 1;
   let offset2 = 5;
   const readSets = (count) => {
     const sets = [];
     for (let i = 0; i < count; i++) {
-      if (offset2 + 2 > record11.length) {
+      if (offset2 + 2 > record12.length) {
         throw new Error("invalid H.264 avcC: truncated parameter set length");
       }
-      const length = record11.readUInt16BE(offset2);
+      const length = record12.readUInt16BE(offset2);
       offset2 += 2;
-      if (offset2 + length > record11.length) {
+      if (offset2 + length > record12.length) {
         throw new Error("invalid H.264 avcC: truncated parameter set");
       }
-      sets.push(record11.subarray(offset2, offset2 + length));
+      sets.push(record12.subarray(offset2, offset2 + length));
       offset2 += length;
     }
     return sets;
   };
-  const sps = readSets(record11[offset2++] & 31);
-  const pps = offset2 < record11.length ? readSets(record11[offset2++]) : [];
+  const sps = readSets(record12[offset2++] & 31);
+  const pps = offset2 < record12.length ? readSets(record12[offset2++]) : [];
   return { naluLengthSize, sps, pps, parameterSets: [...sps, ...pps] };
 }
 function packFragment(expectedSize, data2) {
@@ -33769,14 +33769,14 @@ var init_lib = __esm({
        */
       planOfferAssignments(description, sdp) {
         const transceivers = this.transceiverManager.getTransceivers();
-        const record11 = this.createdOffer?.sdp === sdp ? this.createdOffer : void 0;
+        const record12 = this.createdOffer?.sdp === sdp ? this.createdOffer : void 0;
         const assignments = [];
         for (const [index, media] of description.media.entries()) {
           const mid = media.rtp.muxId;
           if (!mid || !["audio", "video"].includes(media.kind)) continue;
           let transceiver = transceivers.find((t) => t.mid === mid);
           if (!transceiver) {
-            const created = record11?.transceiverByMid.get(mid);
+            const created = record12?.transceiverByMid.get(mid);
             if (created && created.mid == void 0 && !created.stopped && transceivers.includes(created)) {
               transceiver = created;
             }
@@ -61354,8 +61354,8 @@ function rewriteKeyNames(ctx) {
       bySchema.set(entry.schema, entry);
   }
   const rewrites = /* @__PURE__ */ new Map();
-  for (const record11 of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record11);
+  for (const record12 of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record12);
     const names = (seen?.def ?? seen?.schema)?.propertyNames;
     if (!names || names === true || rewrites.has(names))
       continue;
@@ -84878,14 +84878,14 @@ function requestSignal(req) {
 }
 function clientRequest(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
-  const record11 = value;
-  if (record11.type !== "client-request" || typeof record11.rpcId !== "string" || typeof record11.method !== "string") return void 0;
-  return { type: "client-request", rpcId: record11.rpcId, method: record11.method, payload: record11.payload };
+  const record12 = value;
+  if (record12.type !== "client-request" || typeof record12.rpcId !== "string" || typeof record12.method !== "string") return void 0;
+  return { type: "client-request", rpcId: record12.rpcId, method: record12.method, payload: record12.payload };
 }
 function rpcId(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return INVALID_REQUEST_RPC_ID;
-  const record11 = value;
-  return typeof record11.rpcId === "string" ? record11.rpcId : INVALID_REQUEST_RPC_ID;
+  const record12 = value;
+  return typeof record12.rpcId === "string" ? record12.rpcId : INVALID_REQUEST_RPC_ID;
 }
 function errorResponse(rpcId2, error62) {
   return fullResponse(rpcId2, { ok: false, error: error62 });
@@ -85076,15 +85076,15 @@ function normalizeRecords(value) {
   if (!Array.isArray(value)) return value;
   const records = [];
   let previousSeq;
-  for (const record11 of value) {
-    if (!isEventEntry(record11)) continue;
-    const seq = entrySeq(record11);
+  for (const record12 of value) {
+    if (!isEventEntry(record12)) continue;
+    const seq = entrySeq(record12);
     if (previousSeq !== void 0 && seq !== void 0 && seq > previousSeq + 1) {
       for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
-        records.push(createLegacyGapRecord(fillerSeq, record11));
+        records.push(createLegacyGapRecord(fillerSeq, record12));
       }
     }
-    records.push(normalizeEntry(record11));
+    records.push(normalizeEntry(record12));
     if (seq !== void 0) previousSeq = seq;
   }
   return records;
@@ -85423,7 +85423,7 @@ var RemoteTypertGateway2 = class {
         return void 0;
       }
       const records = backfilled.value.records.filter(
-        (record11) => isRecord9(record11) && isRecord9(record11.event) && typeof record11.event.seq === "number" && record11.event.seq > fromExclusive && record11.event.seq <= toInclusive
+        (record12) => isRecord9(record12) && isRecord9(record12.event) && typeof record12.event.seq === "number" && record12.event.seq > fromExclusive && record12.event.seq <= toInclusive
       );
       if (records.length !== missingCount) return void 0;
       for (let index = 0; index < records.length; index += 1) {
@@ -85449,12 +85449,12 @@ var RemoteTypertGateway2 = class {
           }
           if (Array.isArray(item.records)) {
             const newerRecords = item.records.filter(
-              (record11) => isRecord9(record11) && isRecord9(record11.event) && typeof record11.event.seq === "number" && record11.event.seq > lastCursor
+              (record12) => isRecord9(record12) && isRecord9(record12.event) && typeof record12.event.seq === "number" && record12.event.seq > lastCursor
             );
-            for (const record11 of newerRecords) {
-              if (record11.event.seq <= lastCursor) continue;
-              if (record11.event.seq > lastCursor + 1) {
-                const recovered = await backfillRange(lastCursor, record11.event.seq - 1);
+            for (const record12 of newerRecords) {
+              if (record12.event.seq <= lastCursor) continue;
+              if (record12.event.seq > lastCursor + 1) {
+                const recovered = await backfillRange(lastCursor, record12.event.seq - 1);
                 if (recovered === void 0) {
                   this.historyCache.recordFollowSnapshot(this.client, sessionId, item);
                   resyncRequired = true;
@@ -85466,8 +85466,8 @@ var RemoteTypertGateway2 = class {
                   yield missing;
                 }
               }
-              lastCursor = record11.event.seq;
-              yield record11;
+              lastCursor = record12.event.seq;
+              yield record12;
             }
           }
           if (upstreamCursor > lastCursor) {
@@ -86536,10 +86536,10 @@ var ServerCredentialStore = class {
     return parsed.serverUrl === serverUrl && parsed.deviceId === deviceId ? parsed : void 0;
   }
   async save(credentials) {
-    const record11 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
-    await atomicWritePrivate(this.path, `${JSON.stringify(record11, null, 2)}
+    const record12 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
+    await atomicWritePrivate(this.path, `${JSON.stringify(record12, null, 2)}
 `);
-    return record11;
+    return record12;
   }
   async clear() {
     await rm2(this.path, { force: true });
@@ -86648,9 +86648,9 @@ async function participants(lock) {
     const id7 = name2.slice(prefix.length);
     if (!/^\d+-[0-9a-f-]{36}$/.test(id7)) throw new ServerCredentialsBusyError();
     const path = join3(dirname2(lock), name2);
-    const record11 = await readLockRecord(path);
-    if (record11 === void 0) continue;
-    const match = new RegExp(`^${id7} (choosing|[1-9]\\d*)\\n$`).exec(record11);
+    const record12 = await readLockRecord(path);
+    if (record12 === void 0) continue;
+    const match = new RegExp(`^${id7} (choosing|[1-9]\\d*)\\n$`).exec(record12);
     if (match === null) throw new ServerCredentialsBusyError();
     const pid = Number(id7.slice(0, id7.indexOf("-")));
     if (await ownerExited(pid)) {
@@ -86663,9 +86663,9 @@ async function participants(lock) {
   }
   return result;
 }
-async function publishExclusive(path, record11) {
+async function publishExclusive(path, record12) {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`;
-  await writeFile(temporary, record11, { mode: 384, flag: "wx" });
+  await writeFile(temporary, record12, { mode: 384, flag: "wx" });
   try {
     try {
       await link(temporary, path);
@@ -91484,13 +91484,13 @@ var IdentityStore = class {
     }
     await assertPrivateMode2(keyPath);
     try {
-      const record11 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
+      const record12 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
       const privateKey = (await readFile4(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
-      if (regenerated.publicKey !== record11.publicKey) {
+      if (regenerated.publicKey !== record12.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
-      return { ...record11, privateKey, fingerprint: fingerprint2(record11.publicKey) };
+      return { ...record12, privateKey, fingerprint: fingerprint2(record12.publicKey) };
     } catch (error62) {
       if (error62 instanceof IdentityInvalidError) throw error62;
       throw new IdentityInvalidError(`device identity is invalid: ${safeErrorMessage(error62)}`);
@@ -91528,10 +91528,10 @@ var IdentityStore = class {
   }
   async createAndReadIdentityLocked(devicePath, keyPath, deviceName) {
     const keys = generateKeyPair();
-    const record11 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+    const record12 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
     await atomicTextWrite(keyPath, `${keys.privateKey}
 `, 384);
-    await atomicJsonWrite(devicePath, record11, 384);
+    await atomicJsonWrite(devicePath, record12, 384);
     const identity3 = await this.readIdentity(devicePath, keyPath, deviceName);
     await removeStaleTemporaries(this.directory);
     return identity3;
@@ -91539,17 +91539,17 @@ var IdentityStore = class {
   async readIdentity(devicePath, keyPath, deviceName) {
     await assertPrivateMode2(keyPath);
     try {
-      let record11 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
+      let record12 = identitySchema.parse(JSON.parse(await readFile4(devicePath, "utf8")));
       const privateKey = (await readFile4(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
-      if (regenerated.publicKey !== record11.publicKey) {
+      if (regenerated.publicKey !== record12.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
-      if (record11.name !== deviceName) {
-        record11 = { ...record11, name: deviceName };
-        await atomicJsonWrite(devicePath, record11, 384);
+      if (record12.name !== deviceName) {
+        record12 = { ...record12, name: deviceName };
+        await atomicJsonWrite(devicePath, record12, 384);
       }
-      this.identity = { ...record11, privateKey, fingerprint: fingerprint2(record11.publicKey) };
+      this.identity = { ...record12, privateKey, fingerprint: fingerprint2(record12.publicKey) };
       await this.loadPeers();
       return this.identity;
     } catch (error62) {
@@ -91824,11 +91824,11 @@ async function assertOwnedRemoteStorage(root2) {
       throw rejected("IDENTITY_INVALID");
     }
     await assertPrivateMode2(join5(directory, "device.key"));
-    let record11;
+    let record12;
     try {
-      record11 = identitySchema.parse(JSON.parse(await readFile4(join5(directory, "device.json"), "utf8")));
+      record12 = identitySchema.parse(JSON.parse(await readFile4(join5(directory, "device.json"), "utf8")));
       const key = (await readFile4(join5(directory, "device.key"), "utf8")).trim();
-      if (generateKeyPair(fromBase64Url2(key)).publicKey !== record11.publicKey) {
+      if (generateKeyPair(fromBase64Url2(key)).publicKey !== record12.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
     } catch {
@@ -91849,7 +91849,7 @@ async function assertOwnedRemoteStorage(root2) {
     if (names.has("server-credentials.json")) {
       const raw = JSON.parse(await readFile4(join5(directory, "server-credentials.json"), "utf8"));
       if (typeof raw.serverUrl !== "string") throw rejected("IDENTITY_INVALID");
-      const expectedDeviceId = role2 === "client" && typeof raw.deviceId === "string" && external_exports.string().uuid().safeParse(raw.deviceId).success ? raw.deviceId : record11.deviceId;
+      const expectedDeviceId = role2 === "client" && typeof raw.deviceId === "string" && external_exports.string().uuid().safeParse(raw.deviceId).success ? raw.deviceId : record12.deviceId;
       const credentials = await new ServerCredentialStore(directory).load(raw.serverUrl, expectedDeviceId);
       if (credentials === void 0) throw rejected("IDENTITY_INVALID");
       const origin = new URL(credentials.serverUrl);
@@ -91865,7 +91865,7 @@ async function assertOwnedRemoteStorage(root2) {
     if (names.has("host-pairing.json")) {
       await assertPrivateMode2(join5(directory, "host-pairing.json"));
       const pairing = savedPairingSchema.parse(JSON.parse(await readFile4(join5(directory, "host-pairing.json"), "utf8")));
-      if (pairing.deviceId !== record11.deviceId || pairing.session.host.deviceId !== record11.deviceId || pairing.session.host.identityKey !== record11.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
+      if (pairing.deviceId !== record12.deviceId || pairing.session.host.deviceId !== record12.deviceId || pairing.session.host.identityKey !== record12.publicKey || pairing.session.host.role !== "host") throw rejected("IDENTITY_INVALID");
       const origin = new URL(pairing.serverUrl);
       if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== pairing.serverUrl) throw rejected("IDENTITY_INVALID");
       if (scope3 !== void 0 && createHash5("sha256").update(origin.origin).digest("hex").slice(0, 24) !== scope3) {
@@ -92122,11 +92122,11 @@ async function isLockContention2(error62, lockPath) {
 var MAX_LOCK_TAKEOVER_DEPTH = 8;
 async function takeOverLockOfExitedOwner(lockPath, depth = 0, reclaimed) {
   if (depth >= MAX_LOCK_TAKEOVER_DEPTH) return false;
-  const record11 = await readLockRecord2(lockPath);
-  if (record11 === void 0 || !ownerExited2(record11)) return false;
+  const record12 = await readLockRecord2(lockPath);
+  if (record12 === void 0 || !ownerExited2(record12)) return false;
   const lockName = basename4(lockPath);
-  const claimInput = lockName === LOCK_FILE_NAME ? record11 : `${lockName}
-${record11}`;
+  const claimInput = lockName === LOCK_FILE_NAME ? record12 : `${lockName}
+${record12}`;
   const claimPath = join5(
     dirname4(lockPath),
     `${LOCK_FILE_NAME}.takeover-${createHash5("sha256").update(claimInput).digest("hex").slice(0, 16)}`
@@ -92134,7 +92134,7 @@ ${record11}`;
   if (claimPath === lockPath) return false;
   if (!await acquireTakeoverClaim(claimPath, depth, reclaimed)) return false;
   try {
-    if (await readLockRecord2(lockPath) !== record11 || !ownerExited2(record11)) return false;
+    if (await readLockRecord2(lockPath) !== record12 || !ownerExited2(record12)) return false;
     await rm3(lockPath, { force: true });
     reclaimed?.add(lockPath);
     return true;
@@ -92162,9 +92162,9 @@ async function readLockRecord2(lockPath) {
     return void 0;
   }
 }
-function ownerExited2(record11) {
-  if (!/^\d+\n$/.test(record11)) return false;
-  const pid = Number(record11.trim());
+function ownerExited2(record12) {
+  if (!/^\d+\n$/.test(record12)) return false;
+  const pid = Number(record12.trim());
   if (pid === 0 || pid > 2147483647) return false;
   if (pid === process.pid) return false;
   try {
@@ -92195,9 +92195,9 @@ async function hasVerifiedScopedIdentity(directory) {
             }
           }
           await assertPrivateMode2(join5(roleDir, "device.key"));
-          const record11 = identitySchema.parse(JSON.parse(await readFile4(join5(roleDir, "device.json"), "utf8")));
+          const record12 = identitySchema.parse(JSON.parse(await readFile4(join5(roleDir, "device.json"), "utf8")));
           const key = (await readFile4(join5(roleDir, "device.key"), "utf8")).trim();
-          if (generateKeyPair(fromBase64Url2(key)).publicKey === record11.publicKey) return true;
+          if (generateKeyPair(fromBase64Url2(key)).publicKey === record12.publicKey) return true;
         } catch {
           continue;
         }
@@ -92276,8 +92276,8 @@ async function readStorageEntries(directory) {
   return result;
 }
 async function isExitedLockArtifact(path) {
-  const record11 = await readLockRecord2(path);
-  return record11 !== void 0 && ownerExited2(record11);
+  const record12 = await readLockRecord2(path);
+  return record12 !== void 0 && ownerExited2(record12);
 }
 function isPeerTempArtifact(name2) {
   return /^trusted-peers\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name2);
@@ -93338,9 +93338,9 @@ async function previewCall(peer, input4, invoke) {
   const pending = /* @__PURE__ */ new Map();
   let pendingBytes = 0;
   const records = result.records.map((raw) => {
-    const record11 = object4(raw), event2 = object4(record11.event), data2 = object4(event2.data);
-    if (event2.type !== "tool/result" || size(record11) < 4096) return raw;
-    const bytes = size(record11);
+    const record12 = object4(raw), event2 = object4(record12.event), data2 = object4(event2.data);
+    if (event2.type !== "tool/result" || size(record12) < 4096) return raw;
+    const bytes = size(record12);
     if (bytes > MAX_CACHE) return raw;
     if (pending.size >= 64 || pendingBytes + bytes > MAX_CACHE) {
       throw new RpcError("RESPONSE_TOO_LARGE", "History requires chunked transfer.");
@@ -93349,7 +93349,7 @@ async function previewCall(peer, input4, invoke) {
     pending.set(id7, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
     pendingBytes += bytes;
     const message = object4(data2.message);
-    return { ...record11, view: void 0, event: { ...event2, data: {
+    return { ...record12, view: void 0, event: { ...event2, data: {
       id: data2.id,
       callId: data2.callId,
       name: data2.name,
@@ -95561,7 +95561,7 @@ function filterThreadListByWorkspaceAuthority(result, authority) {
   }
   return {
     ...result,
-    data: result.data.map((record11) => isRecord14(record11) ? record11 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record12) => isRecord14(record12) ? record12 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
@@ -98489,50 +98489,50 @@ var TranscriptWatcher = class extends EventEmitter2 {
     }
   }
   async parseAndDispatch(rawLine) {
-    let record11;
+    let record12;
     try {
-      record11 = JSON.parse(rawLine);
+      record12 = JSON.parse(rawLine);
     } catch {
       return;
     }
-    if (Array.isArray(record11.truncated_fields) && record11.truncated_fields.length > 0) {
-      record11 = await this.enrichFromFullTranscript(record11);
+    if (Array.isArray(record12.truncated_fields) && record12.truncated_fields.length > 0) {
+      record12 = await this.enrichFromFullTranscript(record12);
     }
-    this.emit("step", record11);
-    if (record11.type === "PLANNER_RESPONSE") {
-      if (record11.thinking && record11.thinking.trim() !== "") {
+    this.emit("step", record12);
+    if (record12.type === "PLANNER_RESPONSE") {
+      if (record12.thinking && record12.thinking.trim() !== "") {
         this.emit("thinking", {
-          stepIndex: record11.step_index,
-          thinking: record11.thinking,
-          createdAt: record11.created_at
+          stepIndex: record12.step_index,
+          thinking: record12.thinking,
+          createdAt: record12.created_at
         });
       }
-      if (Array.isArray(record11.tool_calls) && record11.tool_calls.length > 0) {
+      if (Array.isArray(record12.tool_calls) && record12.tool_calls.length > 0) {
         this.emit("toolCall", {
-          stepIndex: record11.step_index,
-          toolCalls: record11.tool_calls,
-          createdAt: record11.created_at
+          stepIndex: record12.step_index,
+          toolCalls: record12.tool_calls,
+          createdAt: record12.created_at
         });
       }
-      if (record11.content && record11.content.trim() !== "") {
+      if (record12.content && record12.content.trim() !== "") {
         this.emit("message", {
-          stepIndex: record11.step_index,
-          text: record11.content,
-          createdAt: record11.created_at
+          stepIndex: record12.step_index,
+          text: record12.content,
+          createdAt: record12.created_at
         });
       }
-    } else if (record11.type === "USER_INPUT" && record11.content) {
+    } else if (record12.type === "USER_INPUT" && record12.content) {
       this.emit("message", {
-        stepIndex: record11.step_index,
-        text: record11.content,
-        createdAt: record11.created_at
+        stepIndex: record12.step_index,
+        text: record12.content,
+        createdAt: record12.created_at
       });
     }
-    if (record11.status === "DONE" && record11.type === "PLANNER_RESPONSE") {
+    if (record12.status === "DONE" && record12.type === "PLANNER_RESPONSE") {
       this.emit("complete", this.conversationId);
     }
   }
-  async enrichFromFullTranscript(record11) {
+  async enrichFromFullTranscript(record12) {
     try {
       const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
@@ -98540,13 +98540,13 @@ var TranscriptWatcher = class extends EventEmitter2 {
         const trimmed = line.trim();
         if (!trimmed) continue;
         const full = JSON.parse(trimmed);
-        if (full.step_index === record11.step_index) {
+        if (full.step_index === record12.step_index) {
           return full;
         }
       }
     } catch {
     }
-    return record11;
+    return record12;
   }
 };
 
@@ -100145,14 +100145,14 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let record11;
+    let record12;
     try {
-      record11 = JSON.parse(trimmed);
+      record12 = JSON.parse(trimmed);
     } catch {
       continue;
     }
-    const time3 = record11.created_at ? new Date(record11.created_at).getTime() : Date.now();
-    if (record11.type === "USER_INPUT") {
+    const time3 = record12.created_at ? new Date(record12.created_at).getTime() : Date.now();
+    if (record12.type === "USER_INPUT") {
       if (turnOpen) {
         push2("step/end", { turn: currentTurn, step: 1 }, time3);
         push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time3);
@@ -100162,25 +100162,25 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       turnOpen = true;
       push2("turn/start", { turn: currentTurn }, time3);
       push2("step/start", { turn: currentTurn, step: 1 }, time3);
-      const text = cleanUserPrompt(record11.content);
-      const images = (await Promise.all(agyImageReferences(record11.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
+      const text = cleanUserPrompt(record12.content);
+      const images = (await Promise.all(agyImageReferences(record12.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
       push2("user/message", {
-        id: `user:${record11.step_index}`,
+        id: `user:${record12.step_index}`,
         role: "user",
         content: [...text ? [{ type: "text", text }] : [], ...images],
         source: { kind: "user" }
       }, time3, true);
-    } else if (record11.type === "PLANNER_RESPONSE") {
+    } else if (record12.type === "PLANNER_RESPONSE") {
       if (!turnOpen) {
         currentTurn += 1;
         turnOpen = true;
         push2("turn/start", { turn: currentTurn }, time3);
         push2("step/start", { turn: currentTurn, step: 1 }, time3);
       }
-      if (Array.isArray(record11.tool_calls)) {
-        for (const call of record11.tool_calls) {
+      if (Array.isArray(record12.tool_calls)) {
+        for (const call of record12.tool_calls) {
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record11.step_index}:${toolName}`;
+          const callId = `${record12.step_index}:${toolName}`;
           push2("tool/call", {
             turn: currentTurn,
             step: 1,
@@ -100193,17 +100193,17 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
           }, time3, false);
         }
       }
-      if (record11.content && record11.content.trim() !== "") {
+      if (record12.content && record12.content.trim() !== "") {
         const contentBlocks2 = [];
-        if (record11.thinking && record11.thinking.trim() !== "") {
-          contentBlocks2.push({ type: "reasoning", text: record11.thinking.trim() });
+        if (record12.thinking && record12.thinking.trim() !== "") {
+          contentBlocks2.push({ type: "reasoning", text: record12.thinking.trim() });
         }
-        contentBlocks2.push({ type: "text", text: record11.content.trim() });
+        contentBlocks2.push({ type: "text", text: record12.content.trim() });
         push2("assistant/message", {
           turn: currentTurn,
           step: 1,
           message: {
-            id: `${sessionId}:${record11.step_index}`,
+            id: `${sessionId}:${record12.step_index}`,
             role: "assistant",
             content: contentBlocks2
           },
@@ -100298,11 +100298,11 @@ async function readTranscriptSummary(baseDir, conversationId) {
     try {
       const firstLine = await readFirstLine(handle);
       if (!firstLine) return void 0;
-      const record11 = JSON.parse(firstLine);
-      if (record11.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record11.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record11.content ?? "").length > 0 ? "Image" : void 0);
+      const record12 = JSON.parse(firstLine);
+      if (record12.type !== "USER_INPUT") return void 0;
+      const title = cleanUserPrompt(record12.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record12.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record11.created_at ? new Date(record11.created_at).getTime() : stat12.mtimeMs, updatedAt: stat12.mtimeMs };
+      return { conversationId, title, createdAt: record12.created_at ? new Date(record12.created_at).getTime() : stat12.mtimeMs, updatedAt: stat12.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -109203,6 +109203,54 @@ function crumbs(path) {
   return result;
 }
 
+// packages/plugin/src/message-file-attachment.ts
+var PREFIX = ".dsh-remote-message-file/";
+var attachmentIdPattern = /^sha256:[a-f0-9]{64}$/;
+function record10(value) {
+  return typeof value === "object" && value !== null ? value : void 0;
+}
+function messageFileAttachment(block) {
+  const value = record10(block);
+  const ref = value?.type === "file" ? record10(value.attachment) : void 0;
+  if (typeof ref?.attachmentId !== "string" || !attachmentIdPattern.test(ref.attachmentId) || typeof ref.name !== "string" || ref.name.length === 0 || ref.name.length > 255 || ref.name === "." || ref.name === ".." || /[\\/\x00-\x1f]/u.test(ref.name) || typeof ref.bytes !== "number" || !Number.isSafeInteger(ref.bytes) || ref.bytes < 0) return;
+  return { attachmentId: ref.attachmentId, name: ref.name, bytes: ref.bytes };
+}
+function messageFilePath(ref) {
+  return `${PREFIX}${ref.attachmentId}/${ref.name}`;
+}
+function isMessageFilePath(path) {
+  return typeof path === "string" && path.startsWith(PREFIX);
+}
+var MessageFileAttachments = class {
+  references = /* @__PURE__ */ new Map();
+  observe(sessionId, value) {
+    const frame = record10(value);
+    const entries = Array.isArray(frame?.records) ? frame.records : [value];
+    for (const entry of entries) {
+      const event2 = record10(record10(entry)?.event);
+      const data2 = record10(event2?.data);
+      if (event2?.type !== "user/message" || data2?.role !== "user" || !Array.isArray(data2.content)) continue;
+      for (const block of data2.content) {
+        const ref = messageFileAttachment(block);
+        if (ref === void 0) continue;
+        const key = this.key(sessionId, messageFilePath(ref));
+        this.references.delete(key);
+        this.references.set(key, ref);
+        if (this.references.size > 4096) this.references.delete(this.references.keys().next().value);
+      }
+    }
+  }
+  get(sessionId, path) {
+    return this.references.get(this.key(sessionId, path));
+  }
+  clear() {
+    this.references.clear();
+  }
+  key(sessionId, path) {
+    return JSON.stringify([sessionId, path]);
+  }
+};
+
 // packages/plugin/src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
@@ -109413,7 +109461,7 @@ var PUBLIC_SCHEDULE_ERRORS = {
 };
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadAttachment) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadAttachment, attachmentHostPath) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -109423,12 +109471,14 @@ var HarnessRemoteBridge = class {
     this.resolveWorkspaceRoot = resolveWorkspaceRoot;
     this.schedule = schedule;
     this.uploadAttachment = uploadAttachment;
+    this.attachmentHostPath = attachmentHostPath;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
+  messageFiles = new MessageFileAttachments();
   warnedMissingRemoteEvents = false;
   terminalCarrier;
   async call(input4) {
@@ -109481,10 +109531,16 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
         }
         nativePayload = search;
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === "officeToPdf/render") && isMessageFilePath(requestArgs(nativePayload).path)) {
+        nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal);
       } else if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
       const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      if (params.endpoint === "session/page" && nativeResult.ok) {
+        const sessionId = journalSessionId(nativePayload);
+        if (sessionId !== void 0) this.messageFiles.observe(sessionId, nativeResult.value);
+      }
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -109547,8 +109603,8 @@ var HarnessRemoteBridge = class {
     }
     const { sessionId, ...request2 } = parsed.data;
     try {
-      const record11 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
-      return { ok: true, value: record11 };
+      const record12 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
+      return { ok: true, value: record12 };
     } catch (error62) {
       const published = isRecord25(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
@@ -109687,7 +109743,8 @@ var HarnessRemoteBridge = class {
     this.streams.set(params.streamId, { controller });
     let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await (params.endpoint === "terminal/follow" && this.terminalCarrier !== void 0 ? this.terminalCarrier.open(params.payload, controller.signal) : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal));
+      const payload = params.endpoint === "workspaceFiles/changes" && isMessageFilePath(requestArgs(params.payload).path) ? await this.resolveMessageFilePayload(params.payload, params.endpoint, controller.signal) : normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion);
+      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await (params.endpoint === "terminal/follow" && this.terminalCarrier !== void 0 ? this.terminalCarrier.open(params.payload, controller.signal) : this.gateway.open(params.endpoint, payload, controller.signal));
       controller.signal.throwIfAborted();
     } catch (error62) {
       this.streams.delete(params.streamId);
@@ -109696,7 +109753,9 @@ var HarnessRemoteBridge = class {
     }
     if (params.endpoint === "$events") source = this.remoteEventsWithFallback(source, controller.signal);
     if (params.endpoint === "terminal/watch") source = this.terminal.watch(params.payload, source);
-    void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow", params.transferFrames);
+    const historyFollow = params.endpoint === "session/follow";
+    const sessionId = historyFollow ? journalSessionId(params.payload) : void 0;
+    void this.pump(params.streamId, source, controller.signal, historyFollow, params.transferFrames, sessionId);
     return { opened: true, streamId: params.streamId };
   }
   async *remoteEventsWithFallback(source, signal) {
@@ -109751,6 +109810,7 @@ var HarnessRemoteBridge = class {
     this.streams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
+    this.messageFiles.clear();
     for (const [, stream] of streams) stream.controller.abort(reason);
     await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()]);
   }
@@ -109807,12 +109867,13 @@ var HarnessRemoteBridge = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not support Remote event transport.");
     }
   }
-  async pump(streamId, source, signal, historyFollow = false, transferFrames = false) {
+  async pump(streamId, source, signal, historyFollow = false, transferFrames = false, sessionId) {
     let reason = "completed";
     let failure5;
     try {
       for await (const value of source) {
         if (signal.aborted) break;
+        if (sessionId !== void 0) this.messageFiles.observe(sessionId, value);
         const frame = {
           streamId,
           hasValue: true,
@@ -109880,6 +109941,49 @@ var HarnessRemoteBridge = class {
       this.outgoingTransfers.delete(id7);
       transfer.finish?.(new Error("Harness Remote stream transfer timed out"));
     }
+  }
+  async resolveMessageFilePayload(payload, endpoint, signal) {
+    const deny = () => workspaceFileFailure("WORKSPACE_PATH_DENIED", "The message attachment is unavailable.", "outside-root");
+    if (!isRecord25(payload) || !isRecord25(payload.args)) throw deny();
+    const args = payload.args;
+    const sessionId = args.workspaceFileScopeId;
+    if (typeof sessionId !== "string" || !isMessageFilePath(args.path)) throw deny();
+    const reference = this.messageFiles.get(sessionId, args.path);
+    if (reference === void 0 || this.attachmentHostPath === void 0) throw deny();
+    signal.throwIfAborted();
+    let path;
+    try {
+      path = this.attachmentHostPath(reference);
+      if (path !== void 0 && isAbsolute10(path)) {
+        const info = await lstat6(path);
+        if (!info.isSymbolicLink() && info.isFile() && info.size === reference.bytes) {
+          path = await realpath7(path);
+        } else {
+          path = void 0;
+        }
+      }
+    } catch {
+      throw deny();
+    }
+    if (path === void 0 || !isAbsolute10(path)) throw deny();
+    if (endpoint === "workspaceFiles/readAll" && reference.bytes > MAX_READ_BYTES2) {
+      throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
+    }
+    if (endpoint === "workspaceFiles/readBytes") {
+      const options = isRecord25(args.options) ? args.options : {};
+      if ("baseFile" in args || "baseFile" in options) throw deny();
+      if (!isRecord25(options.range) && !isRecord25(args.range)) {
+        if (reference.bytes > MAX_READ_BYTES2) {
+          throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
+        }
+        return { ...payload, args: { ...args, path } };
+      }
+      const range = byteOrLineRange2(args);
+      const offset2 = typeof range.offset === "number" && Number.isSafeInteger(range.offset) && range.offset >= 0 ? range.offset : 0;
+      const length = typeof range.length === "number" && Number.isSafeInteger(range.length) && range.length > 0 ? Math.min(range.length, MAX_READ_BYTES2) : MAX_READ_BYTES2;
+      return { ...payload, args: { ...args, path, options: { ...options, range: { offset: offset2, length } } } };
+    }
+    return { ...payload, args: { ...args, path } };
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
     const rootPayload = isRecord25(payload) ? payload : {};
@@ -110054,6 +110158,10 @@ var HarnessRemoteBridge = class {
     }
   }
 };
+function journalSessionId(payload) {
+  const address2 = requestArgs(payload).address;
+  return isRecord25(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
+}
 function isPathOutside(rel) {
   if (rel === ".." || isAbsolute10(rel)) return true;
   if (process.platform === "win32") {
@@ -110150,8 +110258,8 @@ function extractAttachmentReference(result, attachmentId) {
     else if (Array.isArray(value.events)) records = value.events;
   }
   if (records === void 0) return void 0;
-  for (const record11 of records) {
-    const found = findImageReference(record11, attachmentId, 0);
+  for (const record12 of records) {
+    const found = findImageReference(record12, attachmentId, 0);
     if (found !== void 0) return found;
   }
   return void 0;
@@ -110411,11 +110519,11 @@ function filterRemotePluginInventory(endpoint, result) {
   return result;
 }
 function requestArgs(payload) {
-  const root2 = record10(payload);
+  const root2 = record11(payload);
   const args = isRecord25(root2.args) ? root2.args : root2;
-  return record10(args.request ?? args._request ?? args);
+  return record11(args.request ?? args._request ?? args);
 }
-function record10(value) {
+function record11(value) {
   return isRecord25(value) ? value : {};
 }
 function isRecord25(value) {
@@ -110886,8 +110994,8 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
-  for (const record11 of [...records, ...legacy]) {
-    const event2 = isRecord26(record11) && isRecord26(record11.event) ? record11.event : record11;
+  for (const record12 of [...records, ...legacy]) {
+    const event2 = isRecord26(record12) && isRecord26(record12.event) ? record12.event : record12;
     if (isRecord26(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
@@ -110969,7 +111077,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 // packages/plugin/src/service.ts
 var CODEX_STARTUP_GRACE_MS = 1500;
 var HostPluginRuntime = class {
-  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS) {
+  constructor(config2, identities, logger2, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, schedule, transferServices, resolveDshWeb, codexStartupGraceMs = CODEX_STARTUP_GRACE_MS, attachmentHostPath) {
     this.config = config2;
     this.identities = identities;
     this.logger = logger2;
@@ -111047,7 +111155,8 @@ var HostPluginRuntime = class {
           (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
         ),
         this.schedule,
-        uploadBridge === void 0 ? void 0 : (body) => uploadBridge.call({ route: "api/session/uploadFileBinary", body }, true)
+        uploadBridge === void 0 ? void 0 : (body) => uploadBridge.call({ route: "api/session/uploadFileBinary", body }, true),
+        attachmentHostPath
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -112849,6 +112958,11 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
           if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
         } catch {
         }
+      },
+      void 0,
+      (ref) => {
+        const attachments = ctx.get("attachments", false) ?? ctx.root?.get("attachments", false);
+        return attachments?.fileHostPath?.(ref);
       }
     );
     let clientRuntime2;

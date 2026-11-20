@@ -33,6 +33,7 @@ import {
 } from './server-api.js'
 import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
+import type { MessageFileAttachment } from './message-file-attachment.js'
 import { dispatchCommandForHost, HarnessRemoteBridge, type ScheduleCreateService } from './harness-remote-bridge.js'
 import { readCompactionConfirmation, RemoteCompactionOperations } from './remote-compaction-operations.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
@@ -116,6 +117,7 @@ export class HostPluginRuntime {
     transferServices?: () => TransferServices,
     resolveDshWeb?: () => DshWebRuntime | undefined,
     private readonly codexStartupGraceMs: number = CODEX_STARTUP_GRACE_MS,
+    attachmentHostPath?: (ref: MessageFileAttachment) => string | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -189,6 +191,7 @@ export class HostPluginRuntime {
             ),
             this.schedule,
             uploadBridge === undefined ? undefined : body => uploadBridge.call({ route: 'api/session/uploadFileBinary', body }, true),
+            attachmentHostPath,
           )
         : undefined
       const fileViewer = new RemoteFileViewerBridge(

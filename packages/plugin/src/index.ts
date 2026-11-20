@@ -1,3 +1,4 @@
+import type { MessageFileAttachment } from './message-file-attachment.js'
 import type { DshWebBrowserAuth } from './dsh-web-host.js'
 import type { TransferServices } from './session-transfer.js'
 import * as DshConnection from '@deepseek-ai/dsh-client-connection'
@@ -365,6 +366,12 @@ async function activate(
           const origin = new URL(listener.getOrigin())
           if (['http:', 'https:'].includes(origin.protocol) && origin.href === origin.origin + '/') return { origin, auth }
         } catch { /* The listener has not bound, or cannot provide a URL. */ }
+      },
+      undefined,
+      ref => {
+        const attachments = (ctx.get('attachments', false) ?? ctx.root?.get('attachments', false)) as
+          { fileHostPath?(ref: MessageFileAttachment): string | undefined } | undefined
+        return attachments?.fileHostPath?.(ref)
       },
     )
 

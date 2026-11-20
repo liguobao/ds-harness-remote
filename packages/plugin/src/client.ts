@@ -37,6 +37,7 @@ import {
 } from './remote-file-content-provider.js'
 import type { StatusFeed } from './status-stream.js'
 import { createStatusFeed } from './status-stream.js'
+import { installMessageFilePreview, type MessageFileConversation, type MessageFileSidebar } from './client/message-file-preview.js'
 import { subscribeRemoteRecovery } from './client-recovery.js'
 
 declare global {
@@ -459,6 +460,12 @@ window.__ModuleLoader__.load({
         }
       }, 'ds-harness-remote: hide local browser entry in remote mode')
       ctx.effect(() => subscribeRemoteRecovery(statusFeed, () => ctx.connection.reconnect?.()), 'ds-harness-remote: carrier recovery')
+      ctx.inject(['uiConversation', 'sidebarRight'], previewContext => {
+        const conversation = previewContext.get<MessageFileConversation>('uiConversation')
+        const sidebar = previewContext.get<MessageFileSidebar>('sidebarRight')
+        if (typeof conversation?.binding !== 'function' || typeof sidebar?.openResource !== 'function') return
+        previewContext.effect(() => installMessageFilePreview(statusFeed, conversation, sidebar), 'ds-harness-remote: message file preview')
+      })
       ctx.effect(() => {
         let disposed = false
         let unsubscribeWorkspaces: (() => void) | undefined
