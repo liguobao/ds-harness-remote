@@ -51,9 +51,10 @@
     "vitest": "^2.1.8"
   },
   "scripts": {
-    "prepare:workspace": "pnpm --filter '@dsh-remote/android^...' -r build && pnpm run build:renderers && pnpm run verify:workspace",
+    "prepare:workspace": "pnpm --filter '@dsh-remote/android^...' -r build && pnpm run build:renderers && pnpm run verify:workspace && pnpm run clean:js-bundle",
     "build:renderers": "pnpm --filter @dsh-remote/app-core run build:renderers",
     "verify:workspace": "node ../../packages/app-core/scripts/verify-workspace-data-planes.mjs \"$PWD\"",
+    "clean:js-bundle": "node -e \"const fs=require('fs');for(const p of ['android/app/build/generated/assets/react','android/app/build/intermediates/assets','android/app/build/intermediates/merged_assets'])fs.rmSync(p,{recursive:true,force:true})\"",
     "prestart": "pnpm run prepare:workspace",
     "start": "expo start",
     "preandroid": "pnpm run prepare:workspace",
