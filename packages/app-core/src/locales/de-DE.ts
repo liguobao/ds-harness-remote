@@ -1124,6 +1124,17 @@ const deDE = {
     notifyQuestion: 'Wartet auf Ihre Antwort',
     notifyCompleted: 'Aufgabe abgeschlossen',
     notifyFailed: 'Aufgabe fehlgeschlagen',
+    filterAll: 'Alle',
+    hostCurrent: 'Aktiv',
+    hostOnlineDigest: 'Online · Live-Zähler',
+    hostOffline: 'Host offline',
+    hostUntrusted: 'Auf diesem Gerät nicht gekoppelt',
+    hostSwitch: 'Zu diesem Host wechseln',
+    hostManage: 'Hosts verwalten',
+    hostBlindHint: 'Ende-zu-Ende-verschlüsselt: Zum Entschlüsseln und Reagieren zu diesem Host wechseln.',
+    hostSnapshotRecent: 'Letzter Stand (antippen zum Wechseln und Öffnen)',
+    hostSnapshotStale: 'Älterer Stand (Host meldet neue Aktivität)',
+    hostSnapshotCleared: 'Der Server meldet keine offenen oder laufenden Einträge auf diesem Host.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Aufgaben-Posteingang, ${urgent} dringend, ${total} gesamt`
       : total > 0

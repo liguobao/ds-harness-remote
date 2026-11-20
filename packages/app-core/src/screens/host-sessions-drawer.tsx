@@ -234,6 +234,7 @@ export function HostSessionsDrawer({
   const deviceName = useAppStore(state => state.selectedDevice?.name)
   const platform = useAppStore(state => state.selectedDevice?.platform)
   const connectionPhase = useAppStore(state => state.connection.phase)
+  const hasTrustedHost = useAppStore(state => state.devices.some(d => d.trusted))
   const sessions = useAppStore(state => state.sessions)
   const recentIds = useAppStore(state => state.currentWorkSessionIds)
   const codexAvailable = useAppStore(state => state.codexAvailable)
@@ -1722,9 +1723,9 @@ export function HostSessionsDrawer({
       {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧收件箱入口与设置按钮 */}
       <View style={styles.hostFooterBar}>
         <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        {((connected && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
+        {(((connected || hasTrustedHost) && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
           <View style={styles.hostFooterRight}>
-            {connected && onOpenAttentionInbox !== undefined && (
+            {(connected || hasTrustedHost) && onOpenAttentionInbox !== undefined && (
               <AttentionInboxPill
                 onPress={() => {
                   Keyboard.dismiss()

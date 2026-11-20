@@ -22,7 +22,7 @@ import {
 } from '@dsh-remote/client-core'
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import type { BotObject, BotState } from '../services/bot-catalog'
-import type { ChatItem, RemoteSession, WorkspaceView } from '../types'
+import type { ChatItem, RemoteDevice, RemoteSession, WorkspaceView } from '../types'
 
 export interface AttentionGroups {
   /** `waiting_question`, `waiting_approval`, `failed_unread` */
@@ -55,6 +55,45 @@ export interface LegacyAttentionSources {
   now?: number
 }
 
+export interface HostAttentionSnapshot {
+  hostId: string
+  items: AttentionItem[]
+  digest: AttentionDigest | null
+  revision: number
+  supported: boolean
+  syncedAt: number
+}
+
+export type HostAttentionFreshness =
+  | 'live'
+  | 'digest-match'
+  | 'digest-stale'
+  | 'digest-cleared'
+  | 'digest-only'
+  | 'offline-cache'
+  | 'none'
+
+export interface HostAttentionOverview {
+  deviceId: string
+  isConnectedHost: boolean
+  pendingApprovals: number
+  pendingQuestions: number
+  runningSessions: number
+  completedUnread: number
+  failedUnread: number
+  totalUrgent: number
+  totalActive: number
+  hasFailedSignal: boolean
+  freshness: HostAttentionFreshness
+  syncedAt?: number
+  items: readonly AttentionItem[]
+}
+
+export interface CrossHostAttentionCounts extends AttentionCounts {
+  otherHostsUrgent: number
+  otherHostsActive: number
+}
+
 export interface AttachAttentionConnectionParams {
   hostId: string
   generation: number
@@ -78,6 +117,7 @@ export interface AttentionStoreState {
   loading: boolean
   inboxOpen: boolean
   localAckedIds: string[]
+  cachedByHost: Readonly<Record<string, HostAttentionSnapshot>>
   setInboxOpen: (open: boolean) => void
   attachConnection: (params: AttachAttentionConnectionParams) => Promise<void>
   detachConnection: (generation?: number) => Promise<void>
@@ -85,10 +125,12 @@ export interface AttentionStoreState {
   ackUnread: (itemIds: readonly string[]) => Promise<void>
   ackAllUnread: () => Promise<void>
   resolveToken: (token: string) => Promise<AttentionTarget>
+  evictHost: (hostId: string) => void
   reset: () => void
 }
 
 const PROBE_FOLLOW_TIMEOUT_MS = 5_000
+const MAX_CACHED_HOSTS = 16
 const UNREAD_STATUSES: ReadonlySet<AttentionStatus> = new Set(['completed_unread', 'failed_unread'])
 
 let activeGeneration = 0
@@ -209,6 +251,150 @@ export function selectAttentionCounts(items: readonly AttentionItem[]): Attentio
     failedUnread,
     totalUrgent,
     totalActive: items.length,
+  }
+}
+
+/** Total non-negative count reported by a blind Server AttentionDigest. */
+export function totalAttentionDigestCount(digest?: AttentionDigest | null): number {
+  if (digest === undefined || digest === null) return 0
+  return Math.max(0, digest.pendingApprovals)
+    + Math.max(0, digest.pendingQuestions)
+    + Math.max(0, digest.runningSessions)
+    + Math.max(0, digest.completedUnread)
+}
+
+/**
+ * Resolves display counts, freshness, and previewable E2EE items (live or
+ * cached) for a given Host inside the multi-host Attention Inbox.
+ */
+export function resolveHostAttentionOverview(params: {
+  device: Pick<RemoteDevice, 'deviceId' | 'online' | 'trusted' | 'attentionDigest'>
+  connectedHostId?: string
+  activeItems: readonly AttentionItem[]
+  cachedSnapshot?: HostAttentionSnapshot
+}): HostAttentionOverview {
+  const { device, connectedHostId, activeItems, cachedSnapshot } = params
+  const isConnectedHost = connectedHostId === device.deviceId
+  if (isConnectedHost) {
+    const counts = selectAttentionCounts(activeItems)
+    return {
+      deviceId: device.deviceId,
+      isConnectedHost: true,
+      ...counts,
+      hasFailedSignal: counts.failedUnread > 0,
+      freshness: 'live',
+      syncedAt: cachedSnapshot?.syncedAt,
+      items: activeItems,
+    }
+  }
+
+  const cachedItems = cachedSnapshot?.items ?? []
+  const digest = device.online ? device.attentionDigest : undefined
+  if (device.online && digest !== undefined) {
+    const pendingApprovals = Math.max(0, digest.pendingApprovals)
+    const pendingQuestions = Math.max(0, digest.pendingQuestions)
+    const runningSessions = Math.max(0, digest.runningSessions)
+    const completedUnread = Math.max(0, digest.completedUnread)
+    const totalUrgent = pendingApprovals + pendingQuestions
+    const totalActive = totalAttentionDigestCount(digest)
+
+    let freshness: HostAttentionFreshness = 'digest-only'
+    let previewItems: readonly AttentionItem[] = []
+    if (totalActive === 0) {
+      freshness = 'digest-cleared'
+      previewItems = []
+    } else if (cachedItems.length > 0 && cachedSnapshot?.digest?.revision === digest.revision) {
+      freshness = 'digest-match'
+      previewItems = cachedItems
+    } else if (cachedItems.length > 0) {
+      freshness = 'digest-stale'
+      previewItems = cachedItems
+    }
+
+    return {
+      deviceId: device.deviceId,
+      isConnectedHost: false,
+      pendingApprovals,
+      pendingQuestions,
+      runningSessions,
+      completedUnread,
+      failedUnread: 0,
+      totalUrgent,
+      totalActive,
+      hasFailedSignal: digest.urgentKind === 'turn_failed',
+      freshness,
+      syncedAt: cachedSnapshot?.syncedAt,
+      items: previewItems,
+    }
+  }
+
+  if (cachedItems.length > 0) {
+    const cachedCounts = selectAttentionCounts(cachedItems)
+    return {
+      deviceId: device.deviceId,
+      isConnectedHost: false,
+      ...cachedCounts,
+      hasFailedSignal: cachedCounts.failedUnread > 0,
+      freshness: device.online ? 'digest-stale' : 'offline-cache',
+      syncedAt: cachedSnapshot?.syncedAt,
+      items: cachedItems,
+    }
+  }
+
+  return {
+    deviceId: device.deviceId,
+    isConnectedHost: false,
+    pendingApprovals: 0,
+    pendingQuestions: 0,
+    runningSessions: 0,
+    completedUnread: 0,
+    failedUnread: 0,
+    totalUrgent: 0,
+    totalActive: 0,
+    hasFailedSignal: false,
+    freshness: 'none',
+    syncedAt: cachedSnapshot?.syncedAt,
+    items: [],
+  }
+}
+
+/**
+ * Aggregates connected-host live counts with other online trusted hosts'
+ * blind `attentionDigest` counts (avoiding double-counting the connected host).
+ */
+export function selectCrossHostAttentionCounts(params: {
+  devices: readonly Pick<RemoteDevice, 'deviceId' | 'online' | 'trusted' | 'attentionDigest'>[]
+  connectedHostId?: string
+  activeItems: readonly AttentionItem[]
+}): CrossHostAttentionCounts {
+  const base = selectAttentionCounts(params.activeItems)
+  let otherApprovals = 0
+  let otherQuestions = 0
+  let otherRunning = 0
+  let otherCompleted = 0
+
+  for (const device of params.devices) {
+    if (device.deviceId === params.connectedHostId || !device.trusted || !device.online) continue
+    const digest = device.attentionDigest
+    if (digest === undefined) continue
+    otherApprovals += Math.max(0, digest.pendingApprovals)
+    otherQuestions += Math.max(0, digest.pendingQuestions)
+    otherRunning += Math.max(0, digest.runningSessions)
+    otherCompleted += Math.max(0, digest.completedUnread)
+  }
+
+  const otherHostsUrgent = otherApprovals + otherQuestions
+  const otherHostsActive = otherHostsUrgent + otherRunning + otherCompleted
+  return {
+    pendingApprovals: base.pendingApprovals + otherApprovals,
+    pendingQuestions: base.pendingQuestions + otherQuestions,
+    runningSessions: base.runningSessions + otherRunning,
+    completedUnread: base.completedUnread + otherCompleted,
+    failedUnread: base.failedUnread,
+    totalUrgent: base.totalUrgent + otherHostsUrgent,
+    totalActive: base.totalActive + otherHostsActive,
+    otherHostsUrgent,
+    otherHostsActive,
   }
 }
 
@@ -553,6 +739,20 @@ function stopActiveSubscription(notifyRemote: boolean): Promise<void> {
   return sub.stop().catch(() => undefined)
 }
 
+function withHostCache(
+  current: Readonly<Record<string, HostAttentionSnapshot>>,
+  snapshot: HostAttentionSnapshot,
+): Record<string, HostAttentionSnapshot> {
+  const next: Record<string, HostAttentionSnapshot> = {
+    ...current,
+    [snapshot.hostId]: snapshot,
+  }
+  const entries = Object.entries(next)
+  if (entries.length <= MAX_CACHED_HOSTS) return next
+  entries.sort((a, b) => b[1].syncedAt - a[1].syncedAt)
+  return Object.fromEntries(entries.slice(0, MAX_CACHED_HOSTS))
+}
+
 export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
   hostId: undefined,
   connectionGeneration: 0,
@@ -563,6 +763,7 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
   loading: false,
   inboxOpen: false,
   localAckedIds: [],
+  cachedByHost: {},
 
   setInboxOpen(open: boolean) {
     set({ inboxOpen: open })
@@ -623,6 +824,14 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
                   items: next.items,
                   supported: true,
                   loading: false,
+                  cachedByHost: withHostCache(current.cachedByHost, {
+                    hostId,
+                    items: next.items,
+                    digest: next.digest,
+                    revision: next.revision,
+                    supported: true,
+                    syncedAt: Date.now(),
+                  }),
                 }
               })
             },
@@ -649,7 +858,7 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
           items: subscription.initial.items,
         })
 
-        set({
+        set(current => ({
           hostId,
           connectionGeneration: generation,
           revision: initialState.revision,
@@ -657,7 +866,15 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
           items: initialState.items,
           supported: true,
           loading: false,
-        })
+          cachedByHost: withHostCache(current.cachedByHost, {
+            hostId,
+            items: initialState.items,
+            digest: initialState.digest,
+            revision: initialState.revision,
+            supported: true,
+            syncedAt: Date.now(),
+          }),
+        }))
       } catch {
         if (generation !== activeGeneration) return
         if (activeAbort === abort) activeAbort = undefined
@@ -708,11 +925,23 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
     if (itemsEqual(state.items, nextItems) && state.digest !== null) return
     const nextRevision = state.revision + 1
     const nextDigest = deriveAttentionDigest(nextItems, nextRevision, sources.now)
-    set({
+    set(current => ({
       items: nextItems,
       digest: nextDigest,
       revision: nextRevision,
-    })
+      ...(current.hostId !== undefined
+        ? {
+            cachedByHost: withHostCache(current.cachedByHost, {
+              hostId: current.hostId,
+              items: nextItems,
+              digest: nextDigest,
+              revision: nextRevision,
+              supported: false,
+              syncedAt: sources.now ?? Date.now(),
+            }),
+          }
+        : {}),
+    }))
   },
 
   async ackUnread(itemIds: readonly string[]) {
@@ -742,6 +971,18 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
         localAckedIds: nextAcked,
         items: nextItems,
         digest: nextDigest,
+        ...(current.hostId !== undefined
+          ? {
+              cachedByHost: withHostCache(current.cachedByHost, {
+                hostId: current.hostId,
+                items: nextItems,
+                digest: nextDigest,
+                revision: nextRevision,
+                supported: current.supported,
+                syncedAt: Date.now(),
+              }),
+            }
+          : {}),
       }
     })
 
@@ -787,6 +1028,15 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
     }
   },
 
+  evictHost(hostId: string) {
+    set(current => {
+      if (!(hostId in current.cachedByHost)) return current
+      const next = { ...current.cachedByHost }
+      delete next[hostId]
+      return { cachedByHost: next }
+    })
+  },
+
   reset() {
     activeGeneration += 1
     activeClient = undefined
@@ -802,6 +1052,7 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
       loading: false,
       inboxOpen: false,
       localAckedIds: [],
+      cachedByHost: {},
     })
   },
 }))

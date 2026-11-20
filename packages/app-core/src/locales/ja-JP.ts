@@ -1124,6 +1124,17 @@ const jaJP = {
     notifyQuestion: '回答を待っています',
     notifyCompleted: 'タスクが完了しました',
     notifyFailed: 'タスクが失敗しました',
+    filterAll: 'すべて',
+    hostCurrent: '現在',
+    hostOnlineDigest: 'オンライン · 件数のみ',
+    hostOffline: 'オフライン',
+    hostUntrusted: 'この端末で未ペアリング',
+    hostSwitch: 'このホストに切り替え',
+    hostManage: 'ホストを管理',
+    hostBlindHint: 'エンドツーエンド暗号化のため、このホストに切り替えると詳細と操作を表示できます。',
+    hostSnapshotRecent: '前回の同期スナップショット（タップで切り替えて開く）',
+    hostSnapshotStale: '以前のスナップショット（ホストに新しい更新があります）',
+    hostSnapshotCleared: 'このホストには保留中・実行中の項目はありません。',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `要対応インボックス、緊急 ${urgent} 件、合計 ${total} 件`
       : total > 0

@@ -1131,6 +1131,17 @@ const zhCN = {
     notifyQuestion: '等待你的回答',
     notifyCompleted: '任务已完成',
     notifyFailed: '任务执行失败',
+    filterAll: '全部',
+    hostCurrent: '当前',
+    hostOnlineDigest: '实时脱敏汇总',
+    hostOffline: '主机当前离线',
+    hostUntrusted: '尚未在此设备配对信任',
+    hostSwitch: '切换到此主机',
+    hostManage: '管理远程主机',
+    hostBlindHint: '受端到端加密保护，切换并连接该主机后可解密查看任务详情与操作。',
+    hostSnapshotRecent: '最近连接同步快照（点击可切换并打开）',
+    hostSnapshotStale: '历史缓存快照（该主机有新动态，切换后同步最新）',
+    hostSnapshotCleared: '服务端显示该主机当前无待处理或运行中任务。',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `待处理收件箱，${urgent} 项紧急，共 ${total} 项`
       : total > 0

@@ -1145,6 +1145,17 @@ const ukUA = {
     notifyQuestion: 'Очікує вашої відповіді',
     notifyCompleted: 'Завдання завершено',
     notifyFailed: 'Збій виконання завдання',
+    filterAll: 'Усі',
+    hostCurrent: 'Поточний',
+    hostOnlineDigest: 'У мережі · лише лічильники',
+    hostOffline: 'Хост офлайн',
+    hostUntrusted: 'Не привʼязано на цьому пристрої',
+    hostSwitch: 'Перемкнутися на хост',
+    hostManage: 'Керувати хостами',
+    hostBlindHint: 'Наскрізне шифрування: перемкніться на цей хост, щоб розшифрувати деталі та відповісти.',
+    hostSnapshotRecent: 'Останній знімок (натисніть для переходу)',
+    hostSnapshotStale: 'Попередній знімок (на хості є нові дії)',
+    hostSnapshotCleared: 'На сервері немає активних або непрочитаних завдань на цьому хості.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Вхідні завдання: термінових ${urgent}, усього ${total}`
       : total > 0

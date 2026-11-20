@@ -17,6 +17,7 @@ import {
   buildAttentionDeepLinkUrl,
   buildConversationDeepLinkUrl,
 } from '../lib/attention-deeplink'
+import { resolveAttentionBackendIdentity } from '../lib/attention-backend'
 import { strings } from '../locales/i18n'
 import { selectAttentionCounts } from '../state/attention-store'
 import { foregroundService } from './foreground-service'
@@ -131,19 +132,7 @@ function getIosLiveActivityModule(
 
 /** Compact single-character badge matching Android notification and iOS Live Activity badges. */
 export function attentionItemBadge(item: Pick<AttentionItem, 'backend' | 'acpAdapter'>): string {
-  if (item.backend === 'ds-bot') return 'B'
-  if (item.backend === 'codex') return 'X'
-  const key = (item.backend === 'acp' ? item.acpAdapter : item.backend) ?? ''
-  switch (key.trim().toLowerCase()) {
-    case 'hermes': return 'H'
-    case 'claude': return 'C'
-    case 'codex': return 'X'
-    case 'opencode': return 'O'
-    case 'pi': return 'P'
-    case 'cursor': return 'U'
-    case 'antigravity': return 'A'
-    default: return 'D'
-  }
+  return resolveAttentionBackendIdentity(item).shortBadge
 }
 
 /**
@@ -182,18 +171,27 @@ function statusTextForLiveItem(status: AttentionStatus): string {
 }
 
 function notificationBodyForItem(item: AttentionItem): string {
+  const platform = resolveAttentionBackendIdentity(item).label
+  let action: string
   switch (item.status) {
     case 'waiting_approval':
-      return item.summary ? `${strings.attention.notifyApproval} · ${item.summary}` : strings.attention.notifyApproval
+      action = strings.attention.notifyApproval
+      break
     case 'waiting_question':
-      return item.summary ? `${strings.attention.notifyQuestion} · ${item.summary}` : strings.attention.notifyQuestion
+      action = strings.attention.notifyQuestion
+      break
     case 'failed_unread':
-      return item.summary ? `${strings.attention.notifyFailed} · ${item.summary}` : strings.attention.notifyFailed
+      action = strings.attention.notifyFailed
+      break
     case 'completed_unread':
-      return item.summary ? `${strings.attention.notifyCompleted} · ${item.summary}` : strings.attention.notifyCompleted
+      action = strings.attention.notifyCompleted
+      break
     case 'running':
-      return strings.comfort.liveTaskRunning
+      action = strings.comfort.liveTaskRunning
+      break
   }
+  const base = `${platform} · ${action}`
+  return item.summary ? `${base} · ${item.summary}` : base
 }
 
 export interface LiveSurfaceController {
@@ -337,7 +335,7 @@ export function createLiveSurfaceController(
       const title = topActive.sessionTitle.trim().length > 0
         ? topActive.sessionTitle.trim()
         : strings.comfort.liveTaskDefaultTitle
-      const statusText = statusTextForLiveItem(topActive.status)
+      const statusText = `${resolveAttentionBackendIdentity(topActive).label} · ${statusTextForLiveItem(topActive.status)}`
       const summary = topActive.summary ?? ''
       const updatedAtMs = topActive.updatedAt > 0 ? topActive.updatedAt : 0
       const deepLinkUrl = selectAttentionDeepLink(hostId, topActive, digest)

@@ -1142,6 +1142,17 @@ const ruRU = {
     notifyQuestion: 'Ожидает вашего ответа',
     notifyCompleted: 'Задача завершена',
     notifyFailed: 'Ошибка выполнения задачи',
+    filterAll: 'Все',
+    hostCurrent: 'Текущий',
+    hostOnlineDigest: 'В сети · только счётчики',
+    hostOffline: 'Хост не в сети',
+    hostUntrusted: 'Не привязан на этом устройстве',
+    hostSwitch: 'Переключиться на хост',
+    hostManage: 'Управление хостами',
+    hostBlindHint: 'Сквозное шифрование: переключитесь на этот хост, чтобы расшифровать детали и ответить.',
+    hostSnapshotRecent: 'Последний снимок (нажмите для перехода)',
+    hostSnapshotStale: 'Устаревший снимок (на хосте есть новые события)',
+    hostSnapshotCleared: 'На сервере нет активных или непрочитанных задач на этом хосте.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Входящие задачи: срочных ${urgent}, всего ${total}`
       : total > 0

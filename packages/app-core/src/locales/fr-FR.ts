@@ -1124,6 +1124,17 @@ const frFR = {
     notifyQuestion: 'En attente de votre réponse',
     notifyCompleted: 'Tâche terminée',
     notifyFailed: 'Échec de la tâche',
+    filterAll: 'Tout',
+    hostCurrent: 'Actuel',
+    hostOnlineDigest: 'En ligne · compteurs en direct',
+    hostOffline: 'Hôte hors ligne',
+    hostUntrusted: 'Non associé sur cet appareil',
+    hostSwitch: 'Basculer vers cet hôte',
+    hostManage: 'Gérer les hôtes',
+    hostBlindHint: 'Chiffrement de bout en bout : basculez vers cet hôte pour déchiffrer les détails et agir.',
+    hostSnapshotRecent: 'Dernière capture (touchez pour basculer et ouvrir)',
+    hostSnapshotStale: 'Ancienne capture (nouvelle activité signalée sur l’hôte)',
+    hostSnapshotCleared: 'Le serveur ne signale aucune tâche active ou non lue sur cet hôte.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Boîte d’actions, ${urgent} ${urgent > 1 ? 'urgentes' : 'urgente'}, ${total} au total`
       : total > 0

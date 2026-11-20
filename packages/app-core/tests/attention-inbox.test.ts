@@ -14,6 +14,11 @@ import {
   buildConversationDeepLinkUrl,
   parseAttentionDeepLink,
 } from '../src/lib/attention-deeplink'
+import {
+  filterAttentionItemsByBackend,
+  resolveAttentionBackendIdentity,
+  selectAttentionBackendFilters,
+} from '../src/lib/attention-backend'
 import { RemoteServerApi } from '../src/services/api'
 import { reconcileTrustedDevices, type DeviceDirectoryApi } from '../src/services/device-directory'
 import {
@@ -23,8 +28,10 @@ import {
 } from '../src/services/live-surface'
 import {
   deriveLegacyAttentionItems,
+  resolveHostAttentionOverview,
   selectAttentionCounts,
   selectAttentionGroups,
+  selectCrossHostAttentionCounts,
   useAttentionStore,
 } from '../src/state/attention-store'
 import type { BotState } from '../src/services/bot-catalog'
@@ -544,7 +551,7 @@ describe('live-surface unified bridge', () => {
       `dshremote://attention?host=host-1&token=${VALID_TOKEN}`,
       'attention:host-1:s1',
       'PR Review',
-      expect.stringContaining('Run git push'),
+      expect.stringMatching(/^Codex · .*Run git push/),
     )
 
     // 2. Identical sync -> deduplicated (no duplicate alert or redundant LiveTaskV2 update)
@@ -694,5 +701,248 @@ describe('live-surface unified bridge', () => {
     expect(synced.pushTarget).toEqual({ ok: true })
     expect(synced.liveActivity).toEqual({ ok: true })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('attention platform differentiation and cross-host switching state', () => {
+  it('resolves distinct labels, glyphs, filters, and notification prefixes for every agent backend', async () => {
+    const samples: Array<{
+      item: AttentionItem
+      expectedKey: string
+      expectedLabel: string
+      expectedBadge: string
+    }> = [
+      { item: makeItem({ id: '1', sessionId: 's1', backend: 'harness', status: 'running' }), expectedKey: 'harness', expectedLabel: 'DeepSeek Harness', expectedBadge: 'D' },
+      { item: makeItem({ id: '2', sessionId: 's2', backend: 'codex', status: 'waiting_approval' }), expectedKey: 'codex', expectedLabel: 'Codex', expectedBadge: 'X' },
+      { item: makeItem({ id: '3', sessionId: 's3', backend: 'acp', acpAdapter: 'antigravity', status: 'waiting_question' }), expectedKey: 'antigravity', expectedLabel: 'Antigravity', expectedBadge: 'A' },
+      { item: makeItem({ id: '4', sessionId: 's4', backend: 'acp', acpAdapter: 'hermes', status: 'running' }), expectedKey: 'hermes', expectedLabel: 'Hermes', expectedBadge: 'H' },
+      { item: makeItem({ id: '5', sessionId: 's5', backend: 'acp', acpAdapter: 'cursor', status: 'completed_unread' }), expectedKey: 'cursor', expectedLabel: 'Cursor', expectedBadge: 'U' },
+      { item: makeItem({ id: '6', sessionId: 's6', backend: 'acp', acpAdapter: 'claude', status: 'running' }), expectedKey: 'claude', expectedLabel: 'Claude', expectedBadge: 'C' },
+      { item: makeItem({ id: '7', sessionId: 's7', backend: 'acp', acpAdapter: 'opencode', status: 'running' }), expectedKey: 'opencode', expectedLabel: 'OpenCode', expectedBadge: 'O' },
+      { item: makeItem({ id: '8', sessionId: 's8', backend: 'acp', acpAdapter: 'pi', status: 'running' }), expectedKey: 'pi', expectedLabel: 'Pi', expectedBadge: 'P' },
+      { item: makeItem({ id: '9', sessionId: 's9', backend: 'ds-bot', mode: 'bot', status: 'running' }), expectedKey: 'ds-bot', expectedLabel: 'DS-Bot', expectedBadge: 'B' },
+      { item: makeItem({ id: '10', sessionId: 's10', backend: 'acp', acpAdapter: 'my-custom-agent', status: 'running' }), expectedKey: 'acp:my-custom-agent', expectedLabel: 'My Custom Agent', expectedBadge: 'M' },
+    ]
+
+    for (const sample of samples) {
+      const resolved = resolveAttentionBackendIdentity(sample.item)
+      expect(resolved.key).toBe(sample.expectedKey)
+      expect(resolved.label).toBe(sample.expectedLabel)
+      expect(resolved.shortBadge).toBe(sample.expectedBadge)
+    }
+
+    const filters = selectAttentionBackendFilters(samples.map(s => s.item))
+    expect(filters.map(f => f.label)).toEqual([
+      'DeepSeek Harness',
+      'Codex',
+      'Antigravity',
+      'Hermes',
+      'Cursor',
+      'Claude',
+      'OpenCode',
+      'Pi',
+      'DS-Bot',
+      'My Custom Agent',
+    ])
+    expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'hermes').map(i => i.id)).toEqual(['4'])
+    expect(filterAttentionItemsByBackend(samples.map(s => s.item), 'all')).toHaveLength(10)
+
+    const foreground: LiveSurfaceForegroundBridge = {
+      notifyTask: vi.fn(),
+      notifyAttention: vi.fn(),
+      updateLiveTask: vi.fn(async () => undefined),
+      updateLiveTaskV2: vi.fn(async () => undefined),
+      clearLiveTask: vi.fn(async () => undefined),
+    }
+    const controller = createLiveSurfaceController({
+      foreground,
+      getReactNative: () => ({ Platform: { OS: 'android' }, NativeModules: {} }),
+    })
+    await controller.sync({
+      hostId: 'host-1',
+      connected: true,
+      appState: 'background',
+      notificationsEnabled: true,
+      items: [makeItem({ id: 'ag1', sessionId: 'agy:1', backend: 'acp', acpAdapter: 'antigravity', status: 'waiting_approval', summary: 'Run build' })],
+      digest: makeDigest({ pendingApprovals: 1 }),
+    })
+    expect(foreground.notifyAttention).toHaveBeenCalledWith(
+      'host-1',
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.stringMatching(/^Antigravity · .*Run build/),
+    )
+    expect(foreground.updateLiveTaskV2).toHaveBeenCalledWith(
+      'host-1',
+      expect.any(String),
+      'A',
+      expect.any(String),
+      expect.stringMatching(/^Antigravity · /),
+      true,
+      expect.any(Number),
+      'Run build',
+      0,
+    )
+    await controller.dispose()
+  })
+
+  it('retains per-host snapshots across host switches while respecting Server digest freshness and sign-out eviction', async () => {
+    const fakeA = createFakeAttentionTransport()
+    const itemA = makeItem({
+      id: 'hermes-approval',
+      backend: 'acp',
+      acpAdapter: 'hermes',
+      sessionId: 'hermes:s1',
+      sessionTitle: 'Hermes task on Host A',
+      status: 'waiting_approval',
+      updatedAt: 500,
+    })
+    fakeA.setHandler(async method => {
+      if (method === 'attention.follow') {
+        return {
+          revision: 4,
+          digest: makeDigest({ revision: 4, pendingApprovals: 1, urgentKind: 'approval_needed', urgency: 'critical' }),
+          items: [itemA],
+        }
+      }
+      return {}
+    })
+    await useAttentionStore.getState().attachConnection({
+      hostId: 'host-a',
+      generation: 1,
+      advertisedSupported: true,
+      client: createRemoteAttentionClient(fakeA.transport),
+    })
+
+    // Switching away detaches host-a active items while keeping cachedByHost['host-a']
+    await useAttentionStore.getState().detachConnection()
+    expect(useAttentionStore.getState().items).toEqual([])
+    expect(useAttentionStore.getState().cachedByHost['host-a']?.items.map(i => i.id)).toEqual(['hermes-approval'])
+
+    const fakeB = createFakeAttentionTransport()
+    const itemB = makeItem({
+      id: 'cursor-run',
+      backend: 'acp',
+      acpAdapter: 'cursor',
+      sessionId: 'cursor:s2',
+      sessionTitle: 'Cursor task on Host B',
+      status: 'running',
+      updatedAt: 600,
+    })
+    fakeB.setHandler(async method => {
+      if (method === 'attention.follow') {
+        return {
+          revision: 2,
+          digest: makeDigest({ revision: 2, runningSessions: 1 }),
+          items: [itemB],
+        }
+      }
+      return {}
+    })
+    await useAttentionStore.getState().attachConnection({
+      hostId: 'host-b',
+      generation: 2,
+      advertisedSupported: true,
+      client: createRemoteAttentionClient(fakeB.transport),
+    })
+
+    const cachedA = useAttentionStore.getState().cachedByHost['host-a']
+    const deviceA: RemoteDevice = {
+      deviceId: 'host-a',
+      name: 'Workstation-A',
+      platform: 'darwin',
+      identityKey: 'key-a',
+      membershipId: 'm-a',
+      online: true,
+      trusted: true,
+      attentionDigest: makeDigest({ revision: 4, pendingApprovals: 1, urgentKind: 'approval_needed', urgency: 'critical' }),
+    }
+    const deviceB: RemoteDevice = {
+      deviceId: 'host-b',
+      name: 'Lab-Linux',
+      platform: 'linux',
+      identityKey: 'key-b',
+      membershipId: 'm-b',
+      online: true,
+      trusted: true,
+      attentionDigest: makeDigest({ revision: 99, pendingQuestions: 9, runningSessions: 9 }),
+    }
+    const deviceC: RemoteDevice = {
+      deviceId: 'host-c',
+      name: 'Cloud-Worker',
+      platform: 'linux',
+      identityKey: 'key-c',
+      membershipId: 'm-c',
+      online: true,
+      trusted: true,
+      attentionDigest: makeDigest({ revision: 1, pendingQuestions: 1, urgentKind: 'question_needed', urgency: 'critical' }),
+    }
+    const deviceUntrusted: RemoteDevice = {
+      deviceId: 'host-d',
+      name: 'Untrusted',
+      platform: 'linux',
+      identityKey: 'key-d',
+      membershipId: 'm-d',
+      online: true,
+      trusted: false,
+      attentionDigest: makeDigest({ revision: 1, pendingApprovals: 5 }),
+    }
+
+    // Connected host B ignores spoofed/stale REST digest and uses live E2EE items
+    expect(resolveHostAttentionOverview({
+      device: deviceB,
+      connectedHostId: 'host-b',
+      activeItems: [itemB],
+      cachedSnapshot: useAttentionStore.getState().cachedByHost['host-b'],
+    })).toMatchObject({ freshness: 'live', totalActive: 1, runningSessions: 1 })
+
+    // Other host A matches digest rev 4 -> digest-match with cached Hermes preview item
+    expect(resolveHostAttentionOverview({
+      device: deviceA,
+      connectedHostId: 'host-b',
+      activeItems: [itemB],
+      cachedSnapshot: cachedA,
+    })).toMatchObject({ freshness: 'digest-match', pendingApprovals: 1, items: [itemA] })
+
+    // Newer server revision marks cached snapshot stale
+    expect(resolveHostAttentionOverview({
+      device: { ...deviceA, attentionDigest: makeDigest({ revision: 5, pendingApprovals: 2 }) },
+      connectedHostId: 'host-b',
+      activeItems: [itemB],
+      cachedSnapshot: cachedA,
+    })).toMatchObject({ freshness: 'digest-stale', pendingApprovals: 2, items: [itemA] })
+
+    // Server cleared (0 active) suppresses stale cached preview cards
+    expect(resolveHostAttentionOverview({
+      device: { ...deviceA, attentionDigest: makeDigest({ revision: 6, urgentKind: 'clear' }) },
+      connectedHostId: 'host-b',
+      activeItems: [itemB],
+      cachedSnapshot: cachedA,
+    })).toMatchObject({ freshness: 'digest-cleared', totalActive: 0, items: [] })
+
+    // Cross-host pill counts combine connected host-b + trusted online host-a + host-c (excluding untrusted host-d)
+    expect(selectCrossHostAttentionCounts({
+      devices: [deviceB, deviceA, deviceC, deviceUntrusted],
+      connectedHostId: 'host-b',
+      activeItems: [itemB],
+    })).toEqual({
+      pendingApprovals: 1,
+      pendingQuestions: 1,
+      runningSessions: 1,
+      completedUnread: 0,
+      failedUnread: 0,
+      totalUrgent: 2,
+      totalActive: 3,
+      otherHostsUrgent: 2,
+      otherHostsActive: 2,
+    })
+
+    // evictHost drops only that host; reset drops everything
+    useAttentionStore.getState().evictHost('host-a')
+    expect(useAttentionStore.getState().cachedByHost['host-a']).toBeUndefined()
+    expect(useAttentionStore.getState().cachedByHost['host-b']).toBeDefined()
+    useAttentionStore.getState().reset()
+    expect(useAttentionStore.getState().cachedByHost).toEqual({})
   })
 })

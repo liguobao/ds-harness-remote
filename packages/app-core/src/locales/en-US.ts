@@ -1133,6 +1133,17 @@ const enUS = {
     notifyQuestion: 'Waiting for your answer',
     notifyCompleted: 'Task completed',
     notifyFailed: 'Task failed',
+    filterAll: 'All',
+    hostCurrent: 'Current',
+    hostOnlineDigest: 'Online · live counts',
+    hostOffline: 'Host offline',
+    hostUntrusted: 'Not paired on this device',
+    hostSwitch: 'Switch to host',
+    hostManage: 'Manage hosts',
+    hostBlindHint: 'End-to-end encrypted: switch to this host to decrypt item details and respond.',
+    hostSnapshotRecent: 'Last synced snapshot (tap to switch and open)',
+    hostSnapshotStale: 'Earlier snapshot (newer activity reported on host)',
+    hostSnapshotCleared: 'Server reports no active or unread items on this host.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Attention inbox, ${urgent} urgent, ${total} total`
       : total > 0

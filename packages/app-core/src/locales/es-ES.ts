@@ -1124,6 +1124,17 @@ const esES = {
     notifyQuestion: 'Esperando tu respuesta',
     notifyCompleted: 'Tarea completada',
     notifyFailed: 'La tarea falló',
+    filterAll: 'Todo',
+    hostCurrent: 'Actual',
+    hostOnlineDigest: 'En línea · conteo en vivo',
+    hostOffline: 'Host sin conexión',
+    hostUntrusted: 'Sin vincular en este dispositivo',
+    hostSwitch: 'Cambiar a este host',
+    hostManage: 'Administrar hosts',
+    hostBlindHint: 'Cifrado de extremo a extremo: cambia a este host para descifrar los detalles y responder.',
+    hostSnapshotRecent: 'Última instantánea (toca para cambiar y abrir)',
+    hostSnapshotStale: 'Instantánea anterior (hay actividad nueva en el host)',
+    hostSnapshotCleared: 'El servidor no reporta elementos activos ni sin leer en este host.',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `Bandeja de atención, ${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}, ${total} en total`
       : total > 0

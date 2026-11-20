@@ -1131,6 +1131,17 @@ const zhTW = {
     notifyQuestion: '等待你的回答',
     notifyCompleted: '任務已完成',
     notifyFailed: '任務失敗',
+    filterAll: '全部',
+    hostCurrent: '目前',
+    hostOnlineDigest: '即時脫敏彙總',
+    hostOffline: '主機目前離線',
+    hostUntrusted: '尚未在此裝置配對信任',
+    hostSwitch: '切換到此主機',
+    hostManage: '管理遠端主機',
+    hostBlindHint: '受端對端加密保護，切換並連線該主機後可解密檢視詳細內容與操作。',
+    hostSnapshotRecent: '上次連線同步快照（點擊可切換並開啟）',
+    hostSnapshotStale: '歷史快取快照（該主機有新動態，切換後同步最新）',
+    hostSnapshotCleared: '伺服器顯示該主機目前無待處理或執行中任務。',
     pillA11y: (urgent: number, total: number) => urgent > 0
       ? `待處理收件匣，${urgent} 項緊急，共 ${total} 項`
       : total > 0

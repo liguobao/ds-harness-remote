@@ -247,8 +247,13 @@ function AppNavigator() {
       }
 
       const backend = sessionBackendFromId(id)
-      await useAppStore.getState().refreshWorkspaces(backend)
-      if (!isCurrent()) return
+      const beforeRefresh = useAppStore.getState()
+      if (!beforeRefresh.sessions.some(item => item.sessionId === id)) {
+        await beforeRefresh.refreshWorkspaces(backend)
+        if (!isCurrent()) return
+      } else if (beforeRefresh.workspaceCatalog?.backend !== backend) {
+        void beforeRefresh.refreshWorkspaces(backend)
+      }
       const state = useAppStore.getState(), target = state.sessions.find(item => item.sessionId === id)
       if (target === undefined) {
         setHostSwitcherOpen(false)
@@ -256,14 +261,23 @@ function AppNavigator() {
         useAppStore.setState({ error: zhCN.comfort.conversationMissing })
         return
       }
+      const alreadyVisible = state.selectedSession?.sessionId === id
+        && useBrowseMemory.getState().hostModes[expectedScope] !== 'bot'
+      if (alreadyVisible) {
+        saveHostMode(expectedScope, 'agent')
+        setAttentionInboxOpen(false)
+        setHostSwitcherOpen(false)
+        setResolvingKnownSession(false)
+        reset({ name: 'chat', externalOpenRevision: revision })
+      }
       const ok = await openSession(target)
       if (!isCurrent()) return
-      if (ok && useAppStore.getState().selectedSession?.sessionId === id) {
+      if (!alreadyVisible && ok && useAppStore.getState().selectedSession?.sessionId === id) {
         saveHostMode(expectedScope, 'agent')
         setAttentionInboxOpen(false)
         setHostSwitcherOpen(false)
         reset({ name: 'chat', externalOpenRevision: revision })
-      } else if (routeRef.current.name === 'connecting') {
+      } else if (!ok && routeRef.current.name === 'connecting') {
         setHostSwitcherOpen(false)
         goHomeChat()
       }
@@ -311,6 +325,35 @@ function AppNavigator() {
       void useAttentionStore.getState().ackUnread([item.id])
     }
     void openKnownSession(item.sessionId, item.mode)
+  }
+
+  const handleSwitchAttentionHost = (device: (typeof devices)[number], targetItem?: AttentionItem) => {
+    setAttentionInboxOpen(false)
+    const alreadyConnected = selectedDevice?.deviceId === device.deviceId
+      && useAppStore.getState().connection.phase === 'connected'
+    if (alreadyConnected) {
+      if (targetItem !== undefined) {
+        if (targetItem.status === 'completed_unread' || targetItem.status === 'failed_unread') {
+          void useAttentionStore.getState().ackUnread([targetItem.id])
+        }
+        void openKnownSession(targetItem.sessionId, targetItem.mode)
+      } else {
+        setAttentionInboxOpen(true)
+      }
+      return
+    }
+    if (!device.trusted || !device.online) {
+      openDevice(device)
+      return
+    }
+    push({
+      name: 'connecting',
+      deviceId: device.deviceId,
+      sheet: true,
+      ...(targetItem !== undefined
+        ? { sessionId: targetItem.sessionId, sessionMode: targetItem.mode }
+        : { openAttentionInbox: true }),
+    })
   }
 
   useEffect(() => {
@@ -745,6 +788,11 @@ function AppNavigator() {
         visible={attentionInboxOpen}
         onClose={() => setAttentionInboxOpen(false)}
         onSelectItem={handleSelectAttentionItem}
+        onSwitchHost={handleSwitchAttentionHost}
+        onOpenRemoteHosts={() => {
+          setAttentionInboxOpen(false)
+          push({ name: 'remote-hosts' })
+        }}
       />
       <HomeActionsMenu
         visible={homeMenuVisible}

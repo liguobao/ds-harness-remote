@@ -10,6 +10,7 @@ import {
 import {
   Activity,
   AlertCircle,
+  ArrowRightLeft,
   Bell,
   CheckCheck,
   CheckCircle2,
@@ -22,13 +23,21 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { AttentionItem, AttentionStatus } from '@dsh-remote/protocol'
+import {
+  filterAttentionItemsByBackend,
+  resolveAttentionBackendIdentity,
+  selectAttentionBackendFilters,
+} from '../lib/attention-backend'
 import { strings } from '../locales/i18n'
 import {
-  selectAttentionCounts,
+  resolveHostAttentionOverview,
   selectAttentionGroups,
+  selectCrossHostAttentionCounts,
   useAttentionStore,
+  type HostAttentionOverview,
 } from '../state/attention-store'
 import { useAppStore } from '../state/store'
+import type { RemoteDevice } from '../types'
 import { IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
@@ -40,36 +49,25 @@ export interface AttentionInboxSheetProps {
   visible: boolean
   onClose: () => void
   onSelectItem: (item: AttentionItem) => void
+  onSwitchHost?: (device: RemoteDevice, targetItem?: AttentionItem) => void
+  onOpenRemoteHosts?: () => void
 }
 
 export function formatBackendLabel(item: Pick<AttentionItem, 'backend' | 'acpAdapter'>): string {
-  if (item.backend === 'ds-bot') return 'DS-Bot'
-  if (item.backend === 'codex') return 'Codex'
-  if (item.backend === 'harness') return 'Harness'
-  const adapter = (item.acpAdapter ?? 'acp').trim().toLowerCase()
-  switch (adapter) {
-    case 'antigravity': return 'AGY'
-    case 'claude': return 'Claude'
-    case 'cursor': return 'Cursor'
-    case 'opencode': return 'OpenCode'
-    case 'pi': return 'Pi'
-    case 'hermes': return 'Hermes'
-    default: return adapter.length > 0 ? adapter.slice(0, 12) : 'ACP'
-  }
+  return resolveAttentionBackendIdentity(item).label
 }
 
 export function formatDetachedCountdown(expiresAt: number, now: number): string | undefined {
   const remainingSec = Math.max(0, Math.ceil((expiresAt - now) / 1000))
   if (remainingSec <= 0) return '0s'
-  const mins = Math.floor(remainingSec / 60)
-  const secs = remainingSec % 60
+  if (remainingSec < 60) return `${remainingSec}s`
+  const mins = Math.ceil(remainingSec / 60)
   if (mins >= 60) {
     const hrs = Math.floor(mins / 60)
     const remMins = mins % 60
     return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`
   }
-  if (mins > 0) return `${mins}m ${secs.toString().padStart(2, '0')}s`
-  return `${secs}s`
+  return `${mins}m`
 }
 
 export interface AttentionToneTokens {
@@ -207,15 +205,75 @@ export function attentionStatusVisual(
   }
 }
 
+function hostToneFromOverview(
+  overview: HostAttentionOverview,
+  online: boolean,
+  colors: ThemeColors,
+  palette: AttentionSurfacePalette,
+): { dotColor: string; pillBg: string; pillBorder: string; pillText: string } {
+  if (overview.pendingApprovals > 0) {
+    return {
+      dotColor: palette.approval.dot,
+      pillBg: palette.approval.bg,
+      pillBorder: palette.approval.border,
+      pillText: palette.approval.fg,
+    }
+  }
+  if (overview.pendingQuestions > 0) {
+    return {
+      dotColor: palette.question.dot,
+      pillBg: palette.question.bg,
+      pillBorder: palette.question.border,
+      pillText: palette.question.fg,
+    }
+  }
+  if (overview.hasFailedSignal || overview.failedUnread > 0) {
+    return {
+      dotColor: palette.failed.dot,
+      pillBg: palette.failed.bg,
+      pillBorder: palette.failed.border,
+      pillText: palette.failed.fg,
+    }
+  }
+  if (overview.runningSessions > 0) {
+    return {
+      dotColor: palette.running.dot,
+      pillBg: palette.running.bg,
+      pillBorder: palette.running.border,
+      pillText: palette.running.fg,
+    }
+  }
+  if (overview.completedUnread > 0) {
+    return {
+      dotColor: palette.completed.dot,
+      pillBg: palette.completed.bg,
+      pillBorder: palette.completed.border,
+      pillText: palette.completed.fg,
+    }
+  }
+  return {
+    dotColor: online ? colors.success : colors.subtle,
+    pillBg: colors.surfaceStrong,
+    pillBorder: colors.border,
+    pillText: colors.muted,
+  }
+}
+
 export function AttentionInboxSheet({
   visible,
   onClose,
   onSelectItem,
+  onSwitchHost,
+  onOpenRemoteHosts,
 }: AttentionInboxSheetProps) {
   useAppStore(state => state.language)
-  const hostName = useAppStore(state => state.selectedDevice?.name)
+  const devices = useAppStore(state => state.devices)
+  const selectedDevice = useAppStore(state => state.selectedDevice)
+  const connectionPhase = useAppStore(state => state.connection.phase)
+  const refreshDevices = useAppStore(state => state.refreshDevices)
   const items = useAttentionStore(state => state.items)
   const loading = useAttentionStore(state => state.loading)
+  const cachedByHost = useAttentionStore(state => state.cachedByHost)
   const ackAllUnread = useAttentionStore(state => state.ackAllUnread)
   const { colors, scheme } = useTheme()
   const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
@@ -223,18 +281,89 @@ export function AttentionInboxSheet({
   const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
 
-  const groups = useMemo(() => selectAttentionGroups(items), [items])
-  const counts = useMemo(() => selectAttentionCounts(items), [items])
-  const hasUnread = counts.completedUnread + counts.failedUnread > 0
-  const hasDetachedTimer = items.some(item => item.detachedExpiresAt !== undefined)
-  const [now, setNow] = useState(() => Date.now())
+  const connectedHostId = connectionPhase === 'connected' ? selectedDevice?.deviceId : undefined
+
+  const hostEntries = useMemo(() => {
+    const candidateDevices = devices.length > 0
+      ? devices
+      : selectedDevice !== undefined
+        ? [selectedDevice]
+        : []
+    const seen = new Set<string>()
+    const entries: Array<{ device: RemoteDevice; overview: HostAttentionOverview }> = []
+    for (const device of candidateDevices) {
+      if (seen.has(device.deviceId)) continue
+      seen.add(device.deviceId)
+      const overview = resolveHostAttentionOverview({
+        device,
+        connectedHostId,
+        activeItems: items,
+        cachedSnapshot: cachedByHost[device.deviceId],
+      })
+      entries.push({ device, overview })
+    }
+    return entries.sort((left, right) => {
+      if (left.overview.isConnectedHost !== right.overview.isConnectedHost) {
+        return left.overview.isConnectedHost ? -1 : 1
+      }
+      if ((left.overview.totalUrgent > 0) !== (right.overview.totalUrgent > 0)) {
+        return left.overview.totalUrgent > 0 ? -1 : 1
+      }
+      if (left.device.online !== right.device.online) {
+        return left.device.online ? -1 : 1
+      }
+      if (left.overview.totalActive !== right.overview.totalActive) {
+        return right.overview.totalActive - left.overview.totalActive
+      }
+      return left.device.name.localeCompare(right.device.name)
+    })
+  }, [devices, selectedDevice, connectedHostId, items, cachedByHost])
+
+  const defaultHostId = connectedHostId ?? selectedDevice?.deviceId ?? hostEntries[0]?.device.deviceId
+  const [inspectedHostId, setInspectedHostId] = useState<string | undefined>(defaultHostId)
+  const [backendFilter, setBackendFilter] = useState<string>('all')
 
   useEffect(() => {
-    if (!visible || !hasDetachedTimer) return
-    setNow(Date.now())
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [visible, hasDetachedTimer])
+    if (!visible) return
+    setInspectedHostId(connectedHostId ?? selectedDevice?.deviceId ?? hostEntries[0]?.device.deviceId)
+    setBackendFilter('all')
+    if (!useAppStore.getState().refreshing) {
+      void refreshDevices()
+    }
+  }, [visible])
+
+  const activeHostEntry = useMemo(
+    () => hostEntries.find(entry => entry.device.deviceId === inspectedHostId) ?? hostEntries[0],
+    [hostEntries, inspectedHostId],
+  )
+  const inspectedHost = activeHostEntry?.device
+  const activeOverview = activeHostEntry?.overview
+  const isConnectedHostView = activeOverview?.isConnectedHost === true
+
+  const displayItems = useMemo(
+    () => (activeOverview ? [...activeOverview.items] : isConnectedHostView || hostEntries.length === 0 ? items : []),
+    [activeOverview, isConnectedHostView, hostEntries.length, items],
+  )
+
+  const backendFilters = useMemo(
+    () => selectAttentionBackendFilters(displayItems),
+    [displayItems],
+  )
+
+  useEffect(() => {
+    if (backendFilter === 'all') return
+    if (!backendFilters.some(option => option.key === backendFilter)) {
+      setBackendFilter('all')
+    }
+  }, [backendFilter, backendFilters])
+
+  const filteredItems = useMemo(
+    () => filterAttentionItemsByBackend(displayItems, backendFilter),
+    [displayItems, backendFilter],
+  )
+  const groups = useMemo(() => selectAttentionGroups(filteredItems), [filteredItems])
+
+  const hasUnread = isConnectedHostView && ((activeOverview?.completedUnread ?? 0) + (activeOverview?.failedUnread ?? 0) > 0)
 
   const sections = useMemo(
     () => [
@@ -245,6 +374,49 @@ export function AttentionInboxSheet({
     [groups],
   )
 
+  const canSwitchToInspected = Boolean(
+    inspectedHost && !isConnectedHostView && inspectedHost.trusted && inspectedHost.online && onSwitchHost,
+  )
+
+  const digestBreakdown = useMemo(() => {
+    if (!activeOverview || isConnectedHostView) return []
+    const chips: Array<{ key: string; label: string; count: number; tone: AttentionToneTokens }> = []
+    if (activeOverview.pendingApprovals > 0) {
+      chips.push({ key: 'approval', label: strings.attention.statusApproval, count: activeOverview.pendingApprovals, tone: palette.approval })
+    }
+    if (activeOverview.pendingQuestions > 0) {
+      chips.push({ key: 'question', label: strings.attention.statusQuestion, count: activeOverview.pendingQuestions, tone: palette.question })
+    }
+    if (activeOverview.runningSessions > 0) {
+      chips.push({ key: 'running', label: strings.attention.statusRunning, count: activeOverview.runningSessions, tone: palette.running })
+    }
+    if (activeOverview.completedUnread > 0) {
+      chips.push({
+        key: 'completed',
+        label: activeOverview.hasFailedSignal ? strings.attention.statusFailed : strings.attention.statusCompleted,
+        count: activeOverview.completedUnread,
+        tone: activeOverview.hasFailedSignal ? palette.failed : palette.completed,
+      })
+    }
+    return chips
+  }, [activeOverview, isConnectedHostView, palette])
+
+  const remoteHintText = useMemo(() => {
+    if (!activeOverview || !inspectedHost || isConnectedHostView) return ''
+    if (!inspectedHost.trusted) return strings.attention.hostUntrusted
+    if (!inspectedHost.online) return strings.attention.hostOffline
+    if (activeOverview.freshness === 'digest-cleared') return strings.attention.hostSnapshotCleared
+    if (activeOverview.freshness === 'digest-match' && activeOverview.items.length > 0) {
+      return strings.attention.hostSnapshotRecent
+    }
+    if (activeOverview.freshness === 'digest-stale' && activeOverview.items.length > 0) {
+      return strings.attention.hostSnapshotStale
+    }
+    return strings.attention.hostBlindHint
+  }, [activeOverview, inspectedHost, isConnectedHostView])
+
+  const steadySheetHeight = sheetAsDialog ? Math.min(sheetMaxHeight, 560) : sheetMaxHeight
+
   return (
     <SheetModal
       visible={visible}
@@ -253,15 +425,17 @@ export function AttentionInboxSheet({
       sheetStyle={[
         styles.sheet,
         sheetAsDialog
-          ? { paddingTop: spacing.lg, paddingBottom: spacing.lg }
-          : { maxHeight: sheetMaxHeight, paddingBottom: spacing.xl + insets.bottom },
+          ? { height: steadySheetHeight, maxHeight: sheetMaxHeight, paddingTop: spacing.lg, paddingBottom: spacing.lg }
+          : { height: steadySheetHeight, maxHeight: sheetMaxHeight, paddingBottom: spacing.xl + insets.bottom },
       ]}
     >
       {!sheetAsDialog && <View style={styles.grabber} />}
       <View style={styles.sheetHeader}>
         <View style={styles.titleColumn}>
           <Text style={styles.title} numberOfLines={1}>{strings.attention.title}</Text>
-          {hostName ? <Text style={styles.subtitle} numberOfLines={1}>{hostName}</Text> : null}
+          {hostEntries.length === 0 && selectedDevice?.name ? (
+            <Text style={styles.subtitle} numberOfLines={1}>{selectedDevice.name}</Text>
+          ) : null}
         </View>
         <View style={styles.headerActions}>
           {hasUnread && (
@@ -280,10 +454,233 @@ export function AttentionInboxSheet({
         </View>
       </View>
 
-      {loading && items.length === 0 ? (
+      {hostEntries.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterStrip}
+          contentContainerStyle={styles.filterStripContent}
+        >
+          {hostEntries.map(entry => {
+            const selected = entry.device.deviceId === inspectedHost?.deviceId
+            const tone = hostToneFromOverview(entry.overview, entry.device.online, colors, palette)
+            const total = entry.overview.totalActive
+            return (
+              <Pressable
+                key={entry.device.deviceId}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                accessibilityLabel={total > 0 ? `${entry.device.name}, ${total}` : entry.device.name}
+                onPress={() => {
+                  setInspectedHostId(entry.device.deviceId)
+                  setBackendFilter('all')
+                }}
+                style={({ pressed }) => [
+                  styles.hostTab,
+                  selected && styles.hostTabSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <View style={[styles.hostTabDot, { backgroundColor: tone.dotColor }]} />
+                <Text
+                  style={[styles.hostTabName, selected && styles.hostTabNameSelected]}
+                  numberOfLines={1}
+                >
+                  {entry.device.name}
+                </Text>
+                {entry.overview.isConnectedHost && (
+                  <Text style={styles.hostCurrentTag} numberOfLines={1}>
+                    {strings.attention.hostCurrent}
+                  </Text>
+                )}
+                {total > 0 && (
+                  <View
+                    style={[
+                      styles.hostTabCountBadge,
+                      { backgroundColor: tone.pillBg, borderColor: tone.pillBorder },
+                    ]}
+                  >
+                    <Text style={[styles.hostTabCountText, { color: tone.pillText }]}>
+                      {total > 99 ? '99+' : total}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+      )}
+
+      {backendFilters.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterStrip}
+          contentContainerStyle={styles.filterStripContent}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: backendFilter === 'all' }}
+            onPress={() => setBackendFilter('all')}
+            style={({ pressed }) => [
+              styles.backendFilterChip,
+              backendFilter === 'all' && styles.backendFilterChipSelected,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.backendFilterText,
+                backendFilter === 'all' && styles.backendFilterTextSelected,
+              ]}
+              numberOfLines={1}
+            >
+              {strings.attention.filterAll}
+            </Text>
+            <Text
+              style={[
+                styles.backendFilterCount,
+                backendFilter === 'all' && styles.backendFilterTextSelected,
+              ]}
+            >
+              {displayItems.length}
+            </Text>
+          </Pressable>
+          {backendFilters.map(option => {
+            const selected = backendFilter === option.key
+            const accent = scheme === 'dark' ? option.accentDark : option.accentLight
+            return (
+              <Pressable
+                key={option.key}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => setBackendFilter(option.key)}
+                style={({ pressed }) => [
+                  styles.backendFilterChip,
+                  selected && styles.backendFilterChipSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <View style={[styles.backendGlyphMini, { borderColor: `${accent}55` }]}>
+                  <Text style={[styles.backendGlyphMiniText, { color: accent }]}>
+                    {option.shortBadge}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.backendFilterText,
+                    selected && styles.backendFilterTextSelected,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {option.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.backendFilterCount,
+                    selected && styles.backendFilterTextSelected,
+                  ]}
+                >
+                  {option.count}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+      )}
+
+      {isConnectedHostView && loading && displayItems.length === 0 ? (
         <View style={styles.emptyState}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
+      ) : !isConnectedHostView && inspectedHost !== undefined ? (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.hostBridgeCard}>
+            <View style={styles.hostBridgeTop}>
+              <View style={styles.hostBridgeMeta}>
+                <Text style={styles.hostBridgeName} numberOfLines={1}>{inspectedHost.name}</Text>
+                <Text style={styles.hostBridgeStatus} numberOfLines={1}>
+                  {!inspectedHost.trusted
+                    ? strings.attention.hostUntrusted
+                    : inspectedHost.online
+                      ? strings.attention.hostOnlineDigest
+                      : strings.attention.hostOffline}
+                </Text>
+              </View>
+              {canSwitchToInspected && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={strings.attention.hostSwitch}
+                  onPress={() => onSwitchHost?.(inspectedHost)}
+                  style={({ pressed }) => [styles.switchHostBtn, pressed && styles.pressed]}
+                >
+                  <ArrowRightLeft size={13} color={colors.onInverse} strokeWidth={2.2} />
+                  <Text style={styles.switchHostBtnText} numberOfLines={1}>
+                    {strings.attention.hostSwitch}
+                  </Text>
+                </Pressable>
+              )}
+              {!inspectedHost.trusted && onOpenRemoteHosts !== undefined && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={strings.attention.hostManage}
+                  onPress={onOpenRemoteHosts}
+                  style={({ pressed }) => [styles.switchHostSecondaryBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.switchHostSecondaryText} numberOfLines={1}>
+                    {strings.attention.hostManage}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+
+            {digestBreakdown.length > 0 && (
+              <View style={styles.digestChipsRow}>
+                {digestBreakdown.map(chip => (
+                  <View
+                    key={chip.key}
+                    style={[
+                      styles.digestChip,
+                      { backgroundColor: chip.tone.bg, borderColor: chip.tone.border },
+                    ]}
+                  >
+                    <View style={[styles.digestChipDot, { backgroundColor: chip.tone.dot }]} />
+                    <Text style={[styles.digestChipText, { color: chip.tone.fg }]}>
+                      {`${chip.label} ${chip.count}`}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <Text style={styles.hostBridgeHint}>{remoteHintText}</Text>
+          </View>
+
+          {sections.map(section => (
+            <View key={section.key} style={styles.sectionBlock}>
+              <Text style={styles.sectionHeader}>{section.title}</Text>
+              <View style={[styles.sectionCard, !canSwitchToInspected && styles.sectionCardMuted]}>
+                {section.data.map((item, idx) => (
+                  <AttentionInboxItemRow
+                    key={item.id}
+                    item={item}
+                    first={idx === 0}
+                    disabled={!canSwitchToInspected}
+                    onPress={() => onSwitchHost?.(inspectedHost, item)}
+                    colors={colors}
+                    scheme={scheme}
+                    palette={palette}
+                    styles={styles}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
       ) : sections.length === 0 ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconWrap}>
@@ -302,74 +699,18 @@ export function AttentionInboxSheet({
             <View key={section.key} style={styles.sectionBlock}>
               <Text style={styles.sectionHeader}>{section.title}</Text>
               <View style={styles.sectionCard}>
-                {section.data.map((item, idx) => {
-                  const visual = attentionStatusVisual(item.status, colors, scheme)
-                  const StatusIcon = visual.Icon
-                  const backendLabel = formatBackendLabel(item)
-                  const countdown = item.detachedExpiresAt !== undefined
-                    ? formatDetachedCountdown(item.detachedExpiresAt, now)
-                    : undefined
-                  const titleText = item.sessionTitle.trim().length > 0
-                    ? item.sessionTitle.trim()
-                    : strings.sessions.untitled
-                  const a11yLabel = [
-                    visual.label,
-                    backendLabel,
-                    titleText,
-                    item.workspaceLabel,
-                    countdown ? strings.attention.expiresIn(countdown) : undefined,
-                  ].filter(Boolean).join(', ')
-
-                  return (
-                    <Pressable
-                      key={item.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={a11yLabel}
-                      onPress={() => onSelectItem(item)}
-                      style={({ pressed }) => [
-                        styles.row,
-                        idx > 0 && styles.rowBorder,
-                        pressed && styles.rowPressed,
-                      ]}
-                    >
-                      <View style={styles.rowBody}>
-                        <View style={styles.badgeRow}>
-                          <View
-                            style={[
-                              styles.statusPill,
-                              { backgroundColor: visual.bg, borderColor: visual.border },
-                            ]}
-                          >
-                            <StatusIcon size={12} color={visual.fg} strokeWidth={2.1} />
-                            <Text style={[styles.statusPillText, { color: visual.fg }]}>{visual.label}</Text>
-                          </View>
-                          <Text style={styles.backendText} numberOfLines={1}>{backendLabel}</Text>
-                          {countdown !== undefined && (
-                            <View
-                              style={[
-                                styles.countdownPill,
-                                { backgroundColor: palette.approval.bg, borderColor: palette.approval.border },
-                              ]}
-                            >
-                              <Clock size={11} color={palette.approval.fg} strokeWidth={2.0} />
-                              <Text style={[styles.countdownText, { color: palette.approval.fg }]}>
-                                {strings.attention.expiresIn(countdown)}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={styles.rowTitle} numberOfLines={1}>{titleText}</Text>
-                        {item.workspaceLabel ? (
-                          <Text style={styles.rowWorkspace} numberOfLines={1}>{item.workspaceLabel}</Text>
-                        ) : null}
-                        {item.summary ? (
-                          <Text style={styles.rowSummary} numberOfLines={2}>{item.summary}</Text>
-                        ) : null}
-                      </View>
-                      <ChevronRight size={16} color={colors.subtle} />
-                    </Pressable>
-                  )
-                })}
+                {section.data.map((item, idx) => (
+                  <AttentionInboxItemRow
+                    key={item.id}
+                    item={item}
+                    first={idx === 0}
+                    onPress={() => onSelectItem(item)}
+                    colors={colors}
+                    scheme={scheme}
+                    palette={palette}
+                    styles={styles}
+                  />
+                ))}
               </View>
             </View>
           ))}
@@ -379,9 +720,150 @@ export function AttentionInboxSheet({
   )
 }
 
+function DetachedCountdownChip({
+  expiresAt,
+  tone,
+  styles,
+}: {
+  expiresAt: number
+  tone: AttentionToneTokens
+  styles: ReturnType<typeof createStyles>
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const scheduleTick = () => {
+      const current = Date.now()
+      const remainingMs = expiresAt - current
+      if (remainingMs <= 0) return
+      const delayMs = remainingMs <= 60_000
+        ? Math.max(250, (remainingMs % 1000) || 1000)
+        : Math.max(1000, ((remainingMs - 60_000) % 60_000) || 60_000)
+      timer = setTimeout(() => {
+        if (!active) return
+        setNow(Date.now())
+        scheduleTick()
+      }, delayMs)
+    }
+    setNow(Date.now())
+    scheduleTick()
+    return () => {
+      active = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [expiresAt])
+
+  const countdown = formatDetachedCountdown(expiresAt, now)
+  if (countdown === undefined) return null
+
+  return (
+    <View
+      style={[
+        styles.countdownPill,
+        { backgroundColor: tone.bg, borderColor: tone.border },
+      ]}
+    >
+      <Clock size={11} color={tone.fg} strokeWidth={2.0} />
+      <Text style={[styles.countdownText, { color: tone.fg }]}>
+        {strings.attention.expiresIn(countdown)}
+      </Text>
+    </View>
+  )
+}
+
+function AttentionInboxItemRow({
+  item,
+  first,
+  disabled = false,
+  onPress,
+  colors,
+  scheme,
+  palette,
+  styles,
+}: {
+  item: AttentionItem
+  first: boolean
+  disabled?: boolean
+  onPress: () => void
+  colors: ThemeColors
+  scheme: ColorScheme
+  palette: AttentionSurfacePalette
+  styles: ReturnType<typeof createStyles>
+}) {
+  const visual = attentionStatusVisual(item.status, colors, scheme)
+  const StatusIcon = visual.Icon
+  const backendMeta = resolveAttentionBackendIdentity(item)
+  const backendAccent = scheme === 'dark' ? backendMeta.accentDark : backendMeta.accentLight
+  const titleText = item.sessionTitle.trim().length > 0
+    ? item.sessionTitle.trim()
+    : strings.sessions.untitled
+  const initialCountdown = item.detachedExpiresAt !== undefined
+    ? formatDetachedCountdown(item.detachedExpiresAt, Date.now())
+    : undefined
+  const a11yLabel = [
+    visual.label,
+    backendMeta.label,
+    titleText,
+    item.workspaceLabel,
+    initialCountdown ? strings.attention.expiresIn(initialCountdown) : undefined,
+  ].filter(Boolean).join(', ')
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        !first && styles.rowBorder,
+        pressed && !disabled && styles.rowPressed,
+      ]}
+    >
+      <View style={styles.rowBody}>
+        <View style={styles.badgeRow}>
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: visual.bg, borderColor: visual.border },
+            ]}
+          >
+            <StatusIcon size={12} color={visual.fg} strokeWidth={2.1} />
+            <Text style={[styles.statusPillText, { color: visual.fg }]}>{visual.label}</Text>
+          </View>
+          <View style={styles.backendPill}>
+            <View style={[styles.backendGlyphMini, { borderColor: `${backendAccent}55` }]}>
+              <Text style={[styles.backendGlyphMiniText, { color: backendAccent }]}>
+                {backendMeta.shortBadge}
+              </Text>
+            </View>
+            <Text style={styles.backendText} numberOfLines={1}>{backendMeta.label}</Text>
+          </View>
+          {item.detachedExpiresAt !== undefined && (
+            <DetachedCountdownChip
+              expiresAt={item.detachedExpiresAt}
+              tone={palette.approval}
+              styles={styles}
+            />
+          )}
+        </View>
+        <Text style={styles.rowTitle} numberOfLines={1}>{titleText}</Text>
+        {item.workspaceLabel ? (
+          <Text style={styles.rowWorkspace} numberOfLines={1}>{item.workspaceLabel}</Text>
+        ) : null}
+        {item.summary ? (
+          <Text style={styles.rowSummary} numberOfLines={2}>{item.summary}</Text>
+        ) : null}
+      </View>
+      {!disabled && <ChevronRight size={16} color={colors.subtle} />}
+    </Pressable>
+  )
+}
+
 /**
  * Compact pill placed in the HostSessionsDrawer footer to the left of Settings,
- * showing urgent/active count and opening the Attention Inbox sheet.
+ * showing urgent/active counts across connected + online hosts and opening Attention Inbox.
  */
 export function AttentionInboxPill({
   onPress,
@@ -389,11 +871,19 @@ export function AttentionInboxPill({
   onPress: () => void
 }) {
   useAppStore(state => state.language)
+  const devices = useAppStore(state => state.devices)
+  const selectedDeviceId = useAppStore(state => state.selectedDevice?.deviceId)
+  const connectionPhase = useAppStore(state => state.connection.phase)
   const items = useAttentionStore(state => state.items)
   const { colors, scheme } = useTheme()
   const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
-  const counts = useMemo(() => selectAttentionCounts(items), [items])
+
+  const connectedHostId = connectionPhase === 'connected' ? selectedDeviceId : undefined
+  const counts = useMemo(
+    () => selectCrossHostAttentionCounts({ devices, connectedHostId, activeItems: items }),
+    [devices, connectedHostId, items],
+  )
 
   const hasApproval = counts.pendingApprovals > 0
   const hasQuestion = counts.pendingQuestions > 0
@@ -461,7 +951,7 @@ function createStyles(colors: ThemeColors) {
       borderTopRightRadius: radius.xxl,
       paddingHorizontal: 0,
       paddingTop: spacing.sm,
-      gap: spacing.sm,
+      gap: spacing.xs,
     },
     grabber: {
       width: 36,
@@ -494,9 +984,176 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
     },
     markReadText: { ...type.caption, color: colors.ink, fontWeight: '600' },
-    scroll: { flexGrow: 0, flexShrink: 1 },
+    filterStrip: { flexGrow: 0, flexShrink: 0 },
+    filterStripContent: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: 2,
+      gap: spacing.xs,
+      alignItems: 'center',
+    },
+    hostTab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: 32,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    hostTabSelected: {
+      backgroundColor: colors.elevated,
+      borderColor: colors.ink,
+    },
+    hostTabDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+    },
+    hostTabName: {
+      ...type.caption,
+      fontSize: 12,
+      fontWeight: '500',
+      color: colors.muted,
+      maxWidth: 140,
+    },
+    hostTabNameSelected: {
+      color: colors.ink,
+      fontWeight: '700',
+    },
+    hostCurrentTag: {
+      ...type.caption,
+      fontSize: 10,
+      color: colors.subtle,
+      fontWeight: '600',
+    },
+    hostTabCountBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    hostTabCountText: {
+      ...type.caption,
+      fontSize: 10,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    backendFilterChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      minHeight: 28,
+      paddingHorizontal: 9,
+      paddingVertical: 3.5,
+      borderRadius: radius.pill,
+      backgroundColor: colors.grouped,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    backendFilterChipSelected: {
+      backgroundColor: colors.surfaceStrong,
+      borderColor: colors.muted,
+    },
+    backendFilterText: {
+      ...type.caption,
+      fontSize: 11.5,
+      fontWeight: '500',
+      color: colors.muted,
+    },
+    backendFilterTextSelected: {
+      color: colors.ink,
+      fontWeight: '700',
+    },
+    backendFilterCount: {
+      ...type.caption,
+      fontSize: 11,
+      color: colors.subtle,
+      fontVariant: ['tabular-nums'],
+    },
+    hostBridgeCard: {
+      backgroundColor: colors.grouped,
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    hostBridgeTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    hostBridgeMeta: { flex: 1, minWidth: 0, gap: 2 },
+    hostBridgeName: { ...type.bodyStrong, fontSize: 15, color: colors.ink },
+    hostBridgeStatus: { ...type.caption, color: colors.muted },
+    switchHostBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 11,
+      paddingVertical: 7,
+      borderRadius: radius.pill,
+      backgroundColor: colors.inverse,
+    },
+    switchHostBtnText: {
+      ...type.caption,
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.onInverse,
+    },
+    switchHostSecondaryBtn: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    switchHostSecondaryText: {
+      ...type.caption,
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.ink,
+    },
+    digestChipsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    digestChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    digestChipDot: {
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+    },
+    digestChipText: {
+      ...type.caption,
+      fontSize: 11,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    hostBridgeHint: {
+      ...type.caption,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.muted,
+    },
+    scroll: { flexGrow: 1, flexShrink: 1 },
     scrollContent: {
       paddingHorizontal: spacing.lg,
+      paddingTop: spacing.xs,
       paddingBottom: spacing.md,
       gap: spacing.md,
     },
@@ -513,6 +1170,9 @@ function createStyles(colors: ThemeColors) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       overflow: 'hidden',
+    },
+    sectionCardMuted: {
+      opacity: 0.78,
     },
     row: {
       flexDirection: 'row',
@@ -547,11 +1207,36 @@ function createStyles(colors: ThemeColors) {
       fontSize: 11,
       fontWeight: '600',
     },
+    backendPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4.5,
+      paddingHorizontal: 6.5,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    backendGlyphMini: {
+      width: 14,
+      height: 14,
+      borderRadius: 4,
+      backgroundColor: colors.cardOpaque,
+      borderWidth: StyleSheet.hairlineWidth,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    backendGlyphMiniText: {
+      fontSize: 9,
+      lineHeight: 11,
+      fontWeight: '800',
+    },
     backendText: {
       ...type.caption,
       fontSize: 11,
-      color: colors.subtle,
-      fontWeight: '500',
+      color: colors.ink,
+      fontWeight: '600',
     },
     countdownPill: {
       flexDirection: 'row',
