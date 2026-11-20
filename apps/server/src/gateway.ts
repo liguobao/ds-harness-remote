@@ -664,6 +664,10 @@ export class Gateway {
     this.closed = true
     clearInterval(this.heartbeat)
     this.logger.info('ws_gateway_closing', { clientCount: this.wss.clients.size })
+    // A planned shutdown must not report each closing peer as CONNECTION_FAILED.
+    this.peers.clear()
+    this.links.clear()
+    this.droppedLinks.clear()
     for (const ws of this.wss.clients) {
       // Give resumable clients an explicit, unambiguous shutdown signal. A
       // process restart is different from heartbeat failure (4001) and from
