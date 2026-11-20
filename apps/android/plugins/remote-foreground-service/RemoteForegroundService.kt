@@ -93,6 +93,13 @@ class RemoteForegroundService : Service() {
 
   override fun onBind(intent: Intent?): IBinder? = null
 
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    if (liveTask != null) {
+      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification())
+    }
+  }
+
   @SuppressLint("WakelockTimeout")
   private fun startRuntime() {
     if (taskId != null) return
@@ -220,9 +227,14 @@ class RemoteForegroundService : Service() {
       val safeExtraCount = task.extraCount.coerceAtLeast(0)
       val displayStatus = if (safeExtraCount > 0) "$baseStatus · +$safeExtraCount" else baseStatus
       val safeTitle = task.title.ifBlank { getString(R.string.app_name) }
-      val statusColor = if (task.isWaitingInput) Color.parseColor("#FFAA00") else Color.parseColor("#00C2FF")
-      val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
       val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+      val statusColor = if (task.isWaitingInput) {
+        Color.parseColor(if (night) "#F5C45E" else "#B45309")
+      } else {
+        Color.parseColor(if (night) "#6F89FF" else "#3A56E6")
+      }
+      val dotRes = if (task.isWaitingInput) R.drawable.dot_live_task_waiting else R.drawable.dot_live_task_running
+      val badgeColor = Color.parseColor(if (night) "#6F89FF" else "#4D6BFE")
       val titleColor = if (night) Color.WHITE else Color.parseColor("#1F1F1F")
       val timeColor = if (night) Color.parseColor("#99FFFFFF") else Color.parseColor("#99000000")
 
@@ -234,6 +246,7 @@ class RemoteForegroundService : Service() {
           setTextViewText(R.id.live_task_time, formatRelativeTime(task.updatedAtMs))
           setTextColor(R.id.live_task_time, timeColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+          setTextColor(R.id.live_task_badge, badgeColor)
           setTextViewText(R.id.live_task_title, safeTitle)
           setTextColor(R.id.live_task_title, titleColor)
           setTextViewText(R.id.live_task_summary, task.summary)
@@ -247,6 +260,7 @@ class RemoteForegroundService : Service() {
           setTextViewText(R.id.live_task_status_text, displayStatus)
           setTextColor(R.id.live_task_status_text, statusColor)
           setTextViewText(R.id.live_task_badge, task.badge.ifBlank { "D" })
+          setTextColor(R.id.live_task_badge, badgeColor)
           setTextViewText(R.id.live_task_title, safeTitle)
           setTextColor(R.id.live_task_title, titleColor)
           setOnClickPendingIntent(R.id.live_task_card_collapsed, pendingIntent)

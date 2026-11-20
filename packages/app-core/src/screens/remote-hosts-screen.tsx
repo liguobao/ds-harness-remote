@@ -87,14 +87,14 @@ export function RemoteHostsScreen({
                       ? formatDigestSegments(digest).map(seg => seg.label).join(' · ')
                       : undefined
                     const versionSubtitle = deviceVersionSubtitle(device)
-                    const detail = [versionSubtitle, digestSummary].filter(Boolean).join(' · ') || undefined
                     return (
                       <GroupRow
                         key={device.deviceId}
                         first={index === 0}
                         icon={Icon}
                         label={device.name}
-                        detail={detail}
+                        detail={versionSubtitle}
+                        accessibilityLabel={[device.name, status.label, digestSummary, versionSubtitle].filter(Boolean).join(', ')}
                         selected={isConnected}
                         chevron
                         onPress={() => handlePressDevice(device)}

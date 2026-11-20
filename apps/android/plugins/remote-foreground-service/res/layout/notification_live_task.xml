@@ -83,7 +83,7 @@
             android:layout_marginStart="4dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#00C2FF"
+            android:textColor="#4D6BFE"
             android:textSize="12sp"
             android:textStyle="bold" />
     </LinearLayout>

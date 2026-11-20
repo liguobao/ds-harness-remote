@@ -144,14 +144,13 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onSelectHo
                         ? formatDigestSegments(digest).map(seg => seg.label).join(' · ')
                         : undefined
                       const baseDetail = `${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`
-                      const detail = digestSummary ? `${baseDetail} · ${digestSummary}` : baseDetail
                       return (
                         <GroupRow
                           key={device.deviceId}
                           first={index === 0}
                           icon={Icon}
                           label={device.name}
-                          detail={detail}
+                          detail={baseDetail}
                           selected={isConnected}
                           chevron={false}
                           accessibilityLabel={[device.name, status.label, digestSummary, device.harnessVersion].filter(Boolean).join(', ')}

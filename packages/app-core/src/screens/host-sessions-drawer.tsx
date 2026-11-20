@@ -22,12 +22,9 @@ import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
 import {
-  Activity,
-  AlertCircle,
   ArrowLeft,
   Bot,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
@@ -35,7 +32,6 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  HelpCircle,
   Laptop,
   LayoutGrid,
   Monitor,
@@ -46,7 +42,6 @@ import {
   Search,
   Server,
   Settings,
-  ShieldAlert,
   Sliders,
   Star,
   Users,
@@ -54,6 +49,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
+import { attentionStatusVisual } from './attention-inbox-sheet'
 import { useAttentionStore } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends } from '../state/store-state'
@@ -1550,17 +1546,12 @@ export function HostSessionsDrawer({
           const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
           const attentionStatus: AttentionStatus | undefined = attentionStatusBySession.get(item.sessionId)
             ?? (isRunning ? 'running' : undefined)
-          const statusBadge = attentionStatus === 'waiting_approval'
-            ? { Icon: ShieldAlert, color: colors.warning, label: strings.attention.statusApproval }
-            : attentionStatus === 'waiting_question'
-              ? { Icon: HelpCircle, color: colors.warning, label: strings.attention.statusQuestion }
-              : attentionStatus === 'failed_unread'
-                ? { Icon: AlertCircle, color: colors.danger, label: strings.attention.statusFailed }
-                : attentionStatus === 'running'
-                  ? { Icon: Activity, color: colors.success, label: strings.attention.statusRunning }
-                  : attentionStatus === 'completed_unread'
-                    ? { Icon: CheckCircle2, color: colors.success, label: strings.attention.statusCompleted }
-                    : undefined
+          const statusVisual = attentionStatus === undefined
+            ? undefined
+            : attentionStatusVisual(attentionStatus, colors, scheme)
+          const statusBadge = statusVisual === undefined
+            ? undefined
+            : { Icon: statusVisual.Icon, color: statusVisual.fg, label: statusVisual.label }
           const isHarness = (item.backend ?? 'harness') === 'harness'
           const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
           const isPinned = canPin && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)

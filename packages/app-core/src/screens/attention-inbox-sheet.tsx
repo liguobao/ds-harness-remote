@@ -33,7 +33,7 @@ import type { RemoteDevice } from '../types'
 import { IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
-import { radius, spacing, type, type ThemeColors } from '../ui/theme'
+import { radius, spacing, type, type ColorScheme, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 
@@ -73,49 +73,141 @@ export function formatDetachedCountdown(expiresAt: number, now: number): string 
   return `${secs}s`
 }
 
+export interface AttentionToneTokens {
+  fg: string
+  bg: string
+  border: string
+  dot: string
+}
+
+export interface AttentionSurfacePalette {
+  approval: AttentionToneTokens
+  question: AttentionToneTokens
+  running: AttentionToneTokens
+  completed: AttentionToneTokens
+  failed: AttentionToneTokens
+}
+
+/**
+ * Refined light/dark semantic accents scoped to Attention Inbox surfaces.
+ * In dark mode, surfaces stay cool obsidian-neutral (never flooding cards or
+ * pills with opaque muddy brown fills) while high-luminance accents live on
+ * crisp icons, hairline borders, and small semantic chips.
+ */
+export function attentionSurfacePalette(
+  colors: ThemeColors,
+  scheme: ColorScheme = 'light',
+): AttentionSurfacePalette {
+  if (scheme === 'dark') {
+    return {
+      approval: {
+        fg: '#F5C45E',
+        bg: 'rgba(255, 255, 255, 0.055)',
+        border: 'rgba(245, 196, 94, 0.28)',
+        dot: '#F5B942',
+      },
+      question: {
+        fg: '#67C6F5',
+        bg: 'rgba(255, 255, 255, 0.055)',
+        border: 'rgba(103, 198, 245, 0.28)',
+        dot: '#4BB8F0',
+      },
+      running: {
+        fg: colors.primary,
+        bg: 'rgba(255, 255, 255, 0.055)',
+        border: 'rgba(111, 137, 255, 0.28)',
+        dot: colors.primary,
+      },
+      completed: {
+        fg: '#52D18C',
+        bg: 'rgba(255, 255, 255, 0.055)',
+        border: 'rgba(82, 209, 140, 0.26)',
+        dot: '#4CC07D',
+      },
+      failed: {
+        fg: '#F47B74',
+        bg: 'rgba(255, 255, 255, 0.055)',
+        border: 'rgba(244, 123, 116, 0.28)',
+        dot: '#F2736C',
+      },
+    }
+  }
+  return {
+    approval: {
+      fg: '#A16207',
+      bg: '#FFF8EB',
+      border: '#F2DDA8',
+      dot: '#D97706',
+    },
+    question: {
+      fg: '#0369A1',
+      bg: '#F0F9FF',
+      border: '#BAE6FD',
+      dot: '#0284C7',
+    },
+    running: {
+      fg: colors.primary,
+      bg: colors.primarySoft,
+      border: '#D4DFFF',
+      dot: colors.primary,
+    },
+    completed: {
+      fg: '#15803D',
+      bg: '#ECFDF3',
+      border: '#BBEAD0',
+      dot: '#1E8449',
+    },
+    failed: {
+      fg: '#B91C1C',
+      bg: '#FEF2F2',
+      border: '#F9CBC8',
+      dot: '#C2362F',
+    },
+  }
+}
+
 export function attentionStatusVisual(
   status: AttentionStatus,
   colors: ThemeColors,
+  scheme: ColorScheme = 'light',
 ): {
   label: string
   fg: string
   bg: string
+  border: string
+  dot: string
   Icon: typeof ShieldAlert
 } {
+  const palette = attentionSurfacePalette(colors, scheme)
   switch (status) {
     case 'waiting_approval':
       return {
         label: strings.attention.statusApproval,
-        fg: colors.warning,
-        bg: colors.warningSoft,
+        ...palette.approval,
         Icon: ShieldAlert,
       }
     case 'waiting_question':
       return {
         label: strings.attention.statusQuestion,
-        fg: colors.warning,
-        bg: colors.warningSoft,
+        ...palette.question,
         Icon: HelpCircle,
       }
     case 'failed_unread':
       return {
         label: strings.attention.statusFailed,
-        fg: colors.danger,
-        bg: colors.dangerSoft,
+        ...palette.failed,
         Icon: AlertCircle,
       }
     case 'completed_unread':
       return {
         label: strings.attention.statusCompleted,
-        fg: colors.success,
-        bg: colors.successSoft,
+        ...palette.completed,
         Icon: CheckCircle2,
       }
     case 'running':
       return {
         label: strings.attention.statusRunning,
-        fg: colors.primary,
-        bg: colors.primarySoft,
+        ...palette.running,
         Icon: Activity,
       }
   }
@@ -131,7 +223,8 @@ export function AttentionInboxSheet({
   const items = useAttentionStore(state => state.items)
   const loading = useAttentionStore(state => state.loading)
   const ackAllUnread = useAttentionStore(state => state.ackAllUnread)
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
+  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
   const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
@@ -185,7 +278,7 @@ export function AttentionInboxSheet({
               hitSlop={6}
               style={({ pressed }) => [styles.markReadBtn, pressed && styles.pressed]}
             >
-              <CheckCheck size={14} color={colors.primary} strokeWidth={2.2} />
+              <CheckCheck size={14} color={colors.muted} strokeWidth={2.1} />
               <Text style={styles.markReadText} numberOfLines={1}>{strings.attention.markAllRead}</Text>
             </Pressable>
           )}
@@ -216,7 +309,7 @@ export function AttentionInboxSheet({
               <Text style={styles.sectionHeader}>{section.title}</Text>
               <View style={styles.sectionCard}>
                 {section.data.map((item, idx) => {
-                  const visual = attentionStatusVisual(item.status, colors)
+                  const visual = attentionStatusVisual(item.status, colors, scheme)
                   const StatusIcon = visual.Icon
                   const backendLabel = formatBackendLabel(item)
                   const countdown = item.detachedExpiresAt !== undefined
@@ -247,17 +340,27 @@ export function AttentionInboxSheet({
                     >
                       <View style={styles.rowBody}>
                         <View style={styles.badgeRow}>
-                          <View style={[styles.statusPill, { backgroundColor: visual.bg }]}>
-                            <StatusIcon size={12} color={visual.fg} strokeWidth={2.2} />
+                          <View
+                            style={[
+                              styles.statusPill,
+                              { backgroundColor: visual.bg, borderColor: visual.border },
+                            ]}
+                          >
+                            <StatusIcon size={12} color={visual.fg} strokeWidth={2.1} />
                             <Text style={[styles.statusPillText, { color: visual.fg }]}>{visual.label}</Text>
                           </View>
-                          <View style={styles.backendPill}>
-                            <Text style={styles.backendPillText}>{backendLabel}</Text>
-                          </View>
+                          <Text style={styles.backendText} numberOfLines={1}>{backendLabel}</Text>
                           {countdown !== undefined && (
-                            <View style={styles.countdownPill}>
-                              <Clock size={11} color={colors.warning} strokeWidth={2.1} />
-                              <Text style={styles.countdownText}>{strings.attention.expiresIn(countdown)}</Text>
+                            <View
+                              style={[
+                                styles.countdownPill,
+                                { backgroundColor: palette.approval.bg, borderColor: palette.approval.border },
+                              ]}
+                            >
+                              <Clock size={11} color={palette.approval.fg} strokeWidth={2.0} />
+                              <Text style={[styles.countdownText, { color: palette.approval.fg }]}>
+                                {strings.attention.expiresIn(countdown)}
+                              </Text>
                             </View>
                           )}
                         </View>
@@ -294,10 +397,13 @@ export function AttentionHeaderPill({
 }) {
   useAppStore(state => state.language)
   const items = useAttentionStore(state => state.items)
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
+  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
   const counts = useMemo(() => selectAttentionCounts(items), [items])
 
+  const hasApproval = counts.pendingApprovals > 0
+  const hasQuestion = counts.pendingQuestions > 0
   const hasUrgent = counts.totalUrgent > 0
   const hasFailed = !hasUrgent && counts.failedUnread > 0
   const hasAny = counts.totalActive > 0
@@ -307,22 +413,24 @@ export function AttentionHeaderPill({
       ? counts.failedUnread
       : counts.totalActive
 
-  const tint = hasUrgent
-    ? colors.warning
-    : hasFailed
-      ? colors.danger
-      : hasAny
-        ? colors.primary
-        : colors.muted
-  const background = hasUrgent
-    ? colors.warningSoft
-    : hasFailed
-      ? colors.dangerSoft
-      : hasAny
-        ? colors.primarySoft
-        : 'transparent'
+  const iconTint = hasApproval
+    ? palette.approval.fg
+    : hasQuestion
+      ? palette.question.fg
+      : hasFailed
+        ? palette.failed.fg
+        : hasAny
+          ? palette.running.fg
+          : colors.muted
+  const borderTint = hasApproval
+    ? palette.approval.border
+    : hasQuestion
+      ? palette.question.border
+      : hasFailed
+        ? palette.failed.border
+        : colors.border
 
-  const Icon = hasUrgent ? ShieldAlert : Bell
+  const Icon = hasApproval ? ShieldAlert : hasQuestion ? HelpCircle : Bell
 
   return (
     <Pressable
@@ -332,13 +440,16 @@ export function AttentionHeaderPill({
       hitSlop={6}
       style={({ pressed }) => [
         styles.headerPill,
-        hasAny && { backgroundColor: background },
+        hasAny && [
+          styles.headerPillActive,
+          { backgroundColor: colors.elevated, borderColor: borderTint },
+        ],
         pressed && styles.pressed,
       ]}
     >
-      <Icon size={16} color={tint} strokeWidth={2.1} />
+      <Icon size={15} color={iconTint} strokeWidth={2.1} />
       {hasAny && (
-        <Text style={[styles.headerPillCount, { color: tint }]} numberOfLines={1}>
+        <Text style={[styles.headerPillCount, { color: colors.ink }]} numberOfLines={1}>
           {displayCount > 99 ? '99+' : displayCount}
         </Text>
       )}
@@ -358,37 +469,62 @@ export function formatDigestSegments(digest: AttentionDigest): Array<{
   key: string
   label: string
   urgent: boolean
+  tone: 'approval' | 'question' | 'running' | 'completed'
 }> {
-  const segments: Array<{ key: string; label: string; urgent: boolean }> = []
+  const segments: Array<{
+    key: string
+    label: string
+    urgent: boolean
+    tone: 'approval' | 'question' | 'running' | 'completed'
+  }> = []
   if (digest.pendingApprovals > 0) {
-    segments.push({ key: 'approvals', label: strings.attention.approvalsCount(digest.pendingApprovals), urgent: true })
+    segments.push({ key: 'approvals', label: strings.attention.approvalsCount(digest.pendingApprovals), urgent: true, tone: 'approval' })
   }
   if (digest.pendingQuestions > 0) {
-    segments.push({ key: 'questions', label: strings.attention.questionsCount(digest.pendingQuestions), urgent: true })
+    segments.push({ key: 'questions', label: strings.attention.questionsCount(digest.pendingQuestions), urgent: true, tone: 'question' })
   }
   if (digest.runningSessions > 0) {
-    segments.push({ key: 'running', label: strings.attention.runningCount(digest.runningSessions), urgent: false })
+    segments.push({ key: 'running', label: strings.attention.runningCount(digest.runningSessions), urgent: false, tone: 'running' })
   }
   if (digest.completedUnread > 0) {
-    segments.push({ key: 'completed', label: strings.attention.completedCount(digest.completedUnread), urgent: false })
+    segments.push({ key: 'completed', label: strings.attention.completedCount(digest.completedUnread), urgent: false, tone: 'completed' })
   }
   return segments
 }
 
 /** Inline attention summary pills rendered under an online host row. */
 export function HostDigestPills({ digest }: { digest?: AttentionDigest }) {
+  const { colors, scheme } = useTheme()
+  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
   if (!digest || digestTotalCount(digest) === 0) return null
   const segments = formatDigestSegments(digest)
-  const hasUrgent = digest.pendingApprovals + digest.pendingQuestions > 0
+  const urgentSegments = segments.filter(seg => seg.urgent)
+  const secondaryText = segments.filter(seg => !seg.urgent).map(seg => seg.label).join(' · ')
   return (
     <View style={styles.inlineDigestRow}>
-      <Text
-        numberOfLines={1}
-        style={[styles.inlineDigestText, hasUrgent && styles.inlineDigestTextUrgent]}
-      >
-        {segments.map(seg => seg.label).join(' · ')}
-      </Text>
+      {urgentSegments.map(seg => {
+        const tone = seg.tone === 'question' ? palette.question : palette.approval
+        return (
+          <View
+            key={seg.key}
+            style={[
+              styles.digestChip,
+              { backgroundColor: tone.bg, borderColor: tone.border },
+            ]}
+          >
+            <View style={[styles.digestDot, { backgroundColor: tone.dot }]} />
+            <Text style={[styles.digestChipText, { color: tone.fg }]} numberOfLines={1}>
+              {seg.label}
+            </Text>
+          </View>
+        )
+      })}
+      {secondaryText.length > 0 && (
+        <Text style={styles.inlineDigestSecondary} numberOfLines={1}>
+          {secondaryText}
+        </Text>
+      )}
     </View>
   )
 }
@@ -406,7 +542,8 @@ export function CrossHostAttentionBanner({
   onSelectHost: (device: RemoteDevice, token?: string) => void
 }) {
   useAppStore(state => state.language)
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
+  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
 
   const activeHosts = useMemo(() => {
@@ -422,24 +559,27 @@ export function CrossHostAttentionBanner({
 
   if (activeHosts.length === 0) return null
 
-  const anyUrgent = activeHosts.some(
-    d => (d.attentionDigest?.pendingApprovals ?? 0) + (d.attentionDigest?.pendingQuestions ?? 0) > 0,
-  )
+  const anyApprovals = activeHosts.some(d => (d.attentionDigest?.pendingApprovals ?? 0) > 0)
+  const anyQuestions = activeHosts.some(d => (d.attentionDigest?.pendingQuestions ?? 0) > 0)
+  const headerDotColor = anyApprovals
+    ? palette.approval.dot
+    : anyQuestions
+      ? palette.question.dot
+      : palette.running.dot
 
   return (
-    <View style={[styles.bannerCard, anyUrgent && styles.bannerCardUrgent]}>
+    <View style={styles.bannerCard}>
       <View style={styles.bannerHeader}>
-        {anyUrgent
-          ? <ShieldAlert size={15} color={colors.warning} strokeWidth={2.2} />
-          : <Bell size={15} color={colors.primary} strokeWidth={2.1} />}
-        <Text style={[styles.bannerTitle, anyUrgent && { color: colors.warning }]}>
+        <View style={[styles.bannerDot, { backgroundColor: headerDotColor }]} />
+        <Text style={styles.bannerTitle}>
           {strings.attention.crossHostTitle}
         </Text>
       </View>
-      {activeHosts.map((device, index) => {
+      {activeHosts.map(device => {
         const digest = device.attentionDigest!
         const segments = formatDigestSegments(digest)
-        const urgent = digest.pendingApprovals + digest.pendingQuestions > 0
+        const urgentSegments = segments.filter(seg => seg.urgent)
+        const secondaryText = segments.filter(seg => !seg.urgent).map(seg => seg.label).join(' · ')
         const summary = segments.map(seg => seg.label).join(' · ')
         return (
           <Pressable
@@ -449,20 +589,38 @@ export function CrossHostAttentionBanner({
             onPress={() => onSelectHost(device, digest.attentionToken)}
             style={({ pressed }) => [
               styles.bannerRow,
-              index > 0 && styles.bannerRowBorder,
+              styles.bannerRowBorder,
               pressed && styles.rowPressed,
             ]}
           >
             <View style={styles.bannerRowText}>
               <Text style={styles.bannerHostName} numberOfLines={1}>{device.name}</Text>
-              <Text
-                style={[styles.bannerSummary, urgent && styles.inlineDigestTextUrgent]}
-                numberOfLines={1}
-              >
-                {summary}
-              </Text>
+              <View style={styles.bannerSummaryRow}>
+                {urgentSegments.map(seg => {
+                  const tone = seg.tone === 'question' ? palette.question : palette.approval
+                  return (
+                    <View
+                      key={seg.key}
+                      style={[
+                        styles.digestChip,
+                        { backgroundColor: tone.bg, borderColor: tone.border },
+                      ]}
+                    >
+                      <View style={[styles.digestDot, { backgroundColor: tone.dot }]} />
+                      <Text style={[styles.digestChipText, { color: tone.fg }]} numberOfLines={1}>
+                        {seg.label}
+                      </Text>
+                    </View>
+                  )
+                })}
+                {secondaryText.length > 0 && (
+                  <Text style={styles.bannerSummary} numberOfLines={1}>
+                    {secondaryText}
+                  </Text>
+                )}
+              </View>
             </View>
-            <ChevronRight size={15} color={urgent ? colors.warning : colors.muted} />
+            <ChevronRight size={16} color={colors.subtle} />
           </Pressable>
         )
       })}
@@ -505,13 +663,15 @@ function createStyles(colors: ThemeColors) {
     markReadBtn: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: spacing.sm,
+      gap: 5,
+      paddingHorizontal: 10,
       paddingVertical: 6,
       borderRadius: radius.pill,
-      backgroundColor: colors.primarySoft,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
     },
-    markReadText: { ...type.caption, color: colors.primary, fontWeight: '600' },
+    markReadText: { ...type.caption, color: colors.ink, fontWeight: '600' },
     scroll: { flexGrow: 0, flexShrink: 1 },
     scrollContent: {
       paddingHorizontal: spacing.lg,
@@ -555,39 +715,35 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      paddingHorizontal: 7,
-      paddingVertical: 2,
+      paddingHorizontal: 8,
+      paddingVertical: 2.5,
       borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
     },
     statusPillText: {
       ...type.caption,
       fontSize: 11,
       fontWeight: '600',
     },
-    backendPill: {
-      paddingHorizontal: 7,
-      paddingVertical: 2,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
-    },
-    backendPillText: {
+    backendText: {
       ...type.caption,
       fontSize: 11,
-      color: colors.muted,
+      color: colors.subtle,
+      fontWeight: '500',
     },
     countdownPill: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 3,
-      paddingHorizontal: 6,
+      paddingHorizontal: 7,
       paddingVertical: 2,
       borderRadius: radius.pill,
-      backgroundColor: colors.warningSoft,
+      borderWidth: StyleSheet.hairlineWidth,
     },
     countdownText: {
       ...type.caption,
       fontSize: 11,
-      color: colors.warning,
+      fontWeight: '600',
       fontVariant: ['tabular-nums'],
     },
     rowTitle: { ...type.bodyStrong, fontSize: 15, color: colors.ink },
@@ -615,11 +771,14 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 4,
+      gap: 5,
       minHeight: 32,
       minWidth: 32,
-      paddingHorizontal: 8,
+      paddingHorizontal: 9,
       borderRadius: radius.pill,
+    },
+    headerPillActive: {
+      borderWidth: StyleSheet.hairlineWidth,
     },
     headerPillCount: {
       ...type.caption,
@@ -627,9 +786,38 @@ function createStyles(colors: ThemeColors) {
       fontVariant: ['tabular-nums'],
     },
     pressed: { opacity: 0.72 },
-    inlineDigestRow: { marginTop: 2 },
-    inlineDigestText: { ...type.caption, color: colors.primary, fontWeight: '600' },
-    inlineDigestTextUrgent: { color: colors.warning },
+    inlineDigestRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 3,
+    },
+    inlineDigestSecondary: {
+      ...type.caption,
+      color: colors.muted,
+      fontWeight: '500',
+    },
+    digestChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    digestDot: {
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+    },
+    digestChipText: {
+      ...type.caption,
+      fontSize: 11,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
     bannerCard: {
       backgroundColor: colors.grouped,
       borderRadius: radius.xl,
@@ -638,36 +826,42 @@ function createStyles(colors: ThemeColors) {
       overflow: 'hidden',
       marginBottom: spacing.sm,
     },
-    bannerCardUrgent: {
-      borderColor: colors.warning,
-      backgroundColor: colors.warningSoft,
-    },
     bannerHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: 7,
       paddingHorizontal: spacing.md,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.xs,
+      paddingVertical: spacing.xs + 3,
+    },
+    bannerDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
     },
     bannerTitle: {
       ...type.caption,
-      fontWeight: '700',
-      color: colors.primary,
+      fontWeight: '600',
+      color: colors.muted,
     },
     bannerRow: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs + 2,
+      paddingVertical: spacing.sm,
       gap: spacing.sm,
     },
     bannerRowBorder: {
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.separator,
     },
-    bannerRowText: { flex: 1, minWidth: 0, gap: 2 },
+    bannerRowText: { flex: 1, minWidth: 0, gap: 5 },
     bannerHostName: { ...type.smallStrong, color: colors.ink },
-    bannerSummary: { ...type.caption, color: colors.muted, fontWeight: '600' },
+    bannerSummaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    bannerSummary: { ...type.caption, color: colors.muted, fontWeight: '500' },
   })
 }
