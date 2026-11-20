@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { HistoryEntry, RemoteSession } from '../src/types'
 import { backendGroups, browseStatus } from '../src/lib/backend-groups'
+import { strings as zhCN } from '../src/locales/i18n'
 import { foldHistory } from '../src/state/event-reducer'
 
 const { client, proxy } = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ vi.mock('../src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
 import { SessionRuntime } from '../src/state/session-runtime'
 import { createSessionActions } from '../src/state/session-actions'
 import { createPromptActions } from '../src/state/prompt-actions'
+import { createSessionEventActions } from '../src/state/session-event-actions'
 import { saveCodexPermissionPreset } from '../src/services/storage'
 
 describe('Tracked /compact', () => {
@@ -97,19 +99,25 @@ function prepareScenario() {
   vi.resetAllMocks()
   state = { connection: { phase: 'connected' }, selectedDevice: { deviceId: 'host' }, sessions: [], messages: {},
     sessionLifecycles: {}, feedbackBySession: {}, currentWorkSessionIds: [], historyHasMore: false, historyLoadingOlder: false,
-    handleCodexFrame: vi.fn(), reconnect: vi.fn(async () => false) } as unknown as AppState
+    reconnect: vi.fn(async () => false) } as unknown as AppState
   access = { get: () => state, set: change => { state = { ...state, ...(typeof change === 'function' ? change(state) : change) } } }
   runtime = new SessionRuntime(access)
   runtime.rememberRecentWorkspace = vi.fn(async () => undefined)
   runtime.refreshCodexModels = vi.fn(async () => undefined)
   runtime.refreshSessionModels = vi.fn(async () => undefined)
-  Object.assign(state, createSessionActions({ ...access, runtime }), createPromptActions({ ...access, runtime }))
+  Object.assign(
+    state,
+    createSessionActions({ ...access, runtime }),
+    createPromptActions({ ...access, runtime }),
+    createSessionEventActions({ ...access, runtime }),
+  )
   client.request.mockImplementation(async (method, args) => method === 'thread/read' ? { thread: thread(args.threadId) } : page(args.threadId))
   client.subscribe.mockImplementation(async () => ({ close: vi.fn(async () => undefined) }))
   proxy.messageFeedbackList.mockResolvedValue([])
   proxy.sessionHistory.mockResolvedValue({ events: [event(20)], hasMore: false })
 }
 beforeEach(prepareScenario)
+afterEach(() => { runtime?.clearCodexRecoveryTimer?.() })
 
 describe('Codex permission inheritance', () => {
   const policy = (preset: string) => ({approvalPolicy: preset === 'danger-full-access' ? 'never' : 'on-request', sandbox: preset})
@@ -493,5 +501,382 @@ describe('session pin, unpin, rename, unarchive, and fork actions', () => {
     const renameOk = await state.renameSession('codex-1', 'New Title')
     expect(renameOk).toBe(false)
     expect(proxy.sessionRename).not.toHaveBeenCalled()
+  })
+})
+
+describe('Codex stream recovery and turn lifecycle', () => {
+  it('recovers failed Codex streams with backoff and stops retries on non-retryable errors or navigation', async () => {
+    vi.useFakeTimers()
+    try {
+      await runScenarios([
+        {
+          name: 'clears running synchronously on failed close, retries with backoff, and restores readiness',
+          run: async () => {
+            const a = session('a')
+            state.sessions = [a]
+            client.request.mockImplementation(async (method, args) => {
+              if (method === 'thread/read') return { thread: thread(args.threadId) }
+              return { ...page(args.threadId, [20]), activeTurnId: 'turn-1' }
+            })
+            expect(await state.openSession(a)).toBe(true)
+            expect(state.selectedSession?.running).toBe(true)
+            expect(state.sessions[0]?.running).toBe(true)
+            expect(state.codexReadySessionId).toBe(a.sessionId)
+
+            const onClose = client.subscribe.mock.calls[0]![3] as (reason: string) => void
+            onClose('failed')
+            expect(state.selectedSession?.running).toBe(false)
+            expect(state.sessions[0]?.running).toBe(false)
+            expect(state.codexReadySessionId).toBeUndefined()
+            expect(state.error).toBe(zhCN.runtime.codexUnavailable)
+            expect(runtime.activeCodexStream).toBeUndefined()
+
+            const recoveredStream = { streamId: 'recovered', close: vi.fn(async () => undefined) }
+            client.subscribe
+              .mockRejectedValueOnce(Object.assign(new Error('Transient rate limit'), { code: 'RATE_LIMITED' }))
+              .mockResolvedValueOnce(recoveredStream)
+            client.request.mockImplementation(async (method, args) => {
+              if (method === 'thread/read') return { thread: thread(args.threadId) }
+              return page(args.threadId, [20, 21])
+            })
+
+            await vi.advanceTimersByTimeAsync(1_499)
+            expect(client.subscribe).toHaveBeenCalledTimes(1)
+            await vi.advanceTimersByTimeAsync(1)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(2)
+            expect(state.codexReadySessionId).toBeUndefined()
+            expect(state.error).toBe(zhCN.runtime.codexUnavailable)
+
+            await vi.advanceTimersByTimeAsync(2_999)
+            expect(client.subscribe).toHaveBeenCalledTimes(2)
+            await vi.advanceTimersByTimeAsync(1)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(3)
+            expect(state.codexReadySessionId).toBe(a.sessionId)
+            expect(state.error).toBeUndefined()
+            expect(runtime.activeCodexStream).toBe(recoveredStream)
+            expect(state.messages[a.sessionId]?.map(item => item.id)).toEqual(['m20', 'm21'])
+          },
+        },
+        {
+          name: 'stops retrying immediately on CODEX_THREAD_NOT_ALLOWED',
+          run: async () => {
+            const a = session('a')
+            state.sessions = [a]
+            expect(await state.openSession(a)).toBe(true)
+            const onClose = client.subscribe.mock.calls[0]![3] as (reason: string) => void
+            client.subscribe.mockRejectedValueOnce(
+              Object.assign(new Error('Not allowed'), { code: 'CODEX_THREAD_NOT_ALLOWED' }),
+            )
+
+            onClose('failed')
+            await vi.advanceTimersByTimeAsync(1_500)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(2)
+            const requestsAfterStop = client.request.mock.calls.length
+
+            await vi.advanceTimersByTimeAsync(60_000)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(2)
+            expect(client.request).toHaveBeenCalledTimes(requestsAfterStop)
+          },
+        },
+        {
+          name: 'cancels scheduled Codex stream recovery when switching to another session',
+          run: async () => {
+            const a = session('a')
+            const b = session('b')
+            state.sessions = [a, b]
+            expect(await state.openSession(a)).toBe(true)
+            const onClose = client.subscribe.mock.calls[0]![3] as (reason: string) => void
+
+            onClose('failed')
+            expect(await state.openSession(b)).toBe(true)
+
+            await vi.advanceTimersByTimeAsync(60_000)
+            await tick()
+            expect(client.subscribe.mock.calls.map(call => call[0])).toEqual(['a', 'b'])
+          },
+        },
+        {
+          name: 'stops after 4 backoff attempts if onClose(failed) fires again before attempt 4 becomes ready',
+          run: async () => {
+            const a = session('a')
+            state.sessions = [a]
+            expect(await state.openSession(a)).toBe(true)
+
+            const onInitialClose = client.subscribe.mock.calls[0]![3] as (reason: string) => void
+            const rateLimited = () => Object.assign(new Error('Transient rate limit'), { code: 'RATE_LIMITED' })
+            const attempt4 = deferred<{ streamId: string; close: () => Promise<void> }>()
+            const attempt4Close = vi.fn(async () => undefined)
+            client.subscribe
+              .mockRejectedValueOnce(rateLimited())
+              .mockRejectedValueOnce(rateLimited())
+              .mockRejectedValueOnce(rateLimited())
+              .mockReturnValueOnce(attempt4.promise)
+
+            onInitialClose('failed')
+
+            for (const delayMs of [1_500, 3_000, 6_000]) {
+              const callsBefore = client.subscribe.mock.calls.length
+              await vi.advanceTimersByTimeAsync(delayMs - 1)
+              expect(client.subscribe).toHaveBeenCalledTimes(callsBefore)
+              await vi.advanceTimersByTimeAsync(1)
+              await tick()
+              expect(client.subscribe).toHaveBeenCalledTimes(callsBefore + 1)
+            }
+
+            await vi.advanceTimersByTimeAsync(11_999)
+            expect(client.subscribe).toHaveBeenCalledTimes(4)
+            await vi.advanceTimersByTimeAsync(1)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(5)
+
+            const onAttempt4Close = client.subscribe.mock.calls[4]![3] as (reason: string) => void
+            onAttempt4Close('failed')
+            attempt4.resolve({ streamId: 'attempt-4', close: attempt4Close })
+            await tick()
+
+            expect(attempt4Close).toHaveBeenCalledOnce()
+            expect(runtime.activeCodexStream).toBeUndefined()
+            expect(state.codexReadySessionId).toBeUndefined()
+            expect(state.error).toBe(zhCN.runtime.codexUnavailable)
+            const requestsAfterCap = client.request.mock.calls.length
+
+            await vi.advanceTimersByTimeAsync(60_000)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(5)
+            expect(client.request).toHaveBeenCalledTimes(requestsAfterCap)
+          },
+        },
+      ], () => {
+        runtime?.clearCodexRecoveryTimer?.()
+        prepareScenario()
+      })
+    } finally {
+      runtime?.clearCodexRecoveryTimer?.()
+      vi.useRealTimers()
+    }
+  })
+
+  it('reloads history once when subscribe reports replayTruncated without closing the new stream', async () => {
+    await runScenarios([false, true].map(replayTruncated => ({
+      name: `replayTruncated=${replayTruncated}`,
+      run: async () => {
+        const a = session('a')
+        state.sessions = [a]
+        const streamClose = vi.fn(async () => undefined)
+        const stream = {
+          streamId: 'stream-1',
+          ...(replayTruncated ? { replayTruncated: true as const } : {}),
+          close: streamClose,
+        }
+        client.subscribe.mockResolvedValueOnce(stream)
+        let historyCalls = 0
+        client.request.mockImplementation(async (method, args) => {
+          if (method === 'thread/read') return { thread: thread(args.threadId) }
+          historyCalls += 1
+          return historyCalls === 1 ? page(args.threadId, [20]) : page(args.threadId, [20, 21])
+        })
+
+        expect(await state.openSession(a)).toBe(true)
+
+        const historyRequests = client.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory')
+        expect(historyRequests).toHaveLength(replayTruncated ? 2 : 1)
+        expect(streamClose).not.toHaveBeenCalled()
+        expect(runtime.activeCodexStream).toBe(stream)
+        expect(state.codexReadySessionId).toBe(a.sessionId)
+        expect(state.messages[a.sessionId]?.map(item => item.id)).toEqual(replayTruncated ? ['m20', 'm21'] : ['m20'])
+      },
+    })), prepareScenario)
+  })
+
+  it('cleans up active stream, busyAction, and recovery timer when replayTruncated reload fails or closes mid-flight', async () => {
+    vi.useFakeTimers()
+    try {
+      await runScenarios([
+        {
+          name: 'closes stream and clears busyAction when replayTruncated history reload throws without blocking recovery',
+          run: async () => {
+            const a = session('a')
+            state.sessions = [a]
+            const streamClose = vi.fn(async () => undefined)
+            client.subscribe.mockResolvedValueOnce({
+              streamId: 'stream-1',
+              replayTruncated: true as const,
+              close: streamClose,
+            })
+            let historyCalls = 0
+            client.request.mockImplementation(async (method, args) => {
+              if (method === 'thread/read') return { thread: thread(args.threadId) }
+              historyCalls += 1
+              if (historyCalls === 1) return page(args.threadId, [20])
+              throw new Error('history reload failed')
+            })
+
+            expect(await state.openSession(a)).toBe(false)
+            expect(streamClose).toHaveBeenCalledOnce()
+            expect(runtime.activeCodexStream).toBeUndefined()
+            expect(state.busyAction).toBeUndefined()
+            expect(state.codexReadySessionId).toBeUndefined()
+            expect(state.error).toBe('history reload failed')
+
+            const recoveredStream = { streamId: 'stream-2', close: vi.fn(async () => undefined) }
+            client.subscribe.mockResolvedValueOnce(recoveredStream)
+            client.request.mockImplementation(async (method, args) => {
+              if (method === 'thread/read' || method === 'thread/resume') return { thread: thread(args.threadId) }
+              if (method === 'turn/start') return { turn: { id: 'turn-recovered', status: 'inProgress' } }
+              return page(args.threadId, [20, 21])
+            })
+
+            expect(await state.openSession(a)).toBe(true)
+            expect(runtime.activeCodexStream).toBe(recoveredStream)
+            expect(state.busyAction).toBeUndefined()
+            expect(state.codexReadySessionId).toBe(a.sessionId)
+            expect(state.error).toBeUndefined()
+            expect(await state.sendMessage('after reload error')).toBe('sent')
+          },
+        },
+        {
+          name: 'closes stream and returns false without leaving a 1.5s recovery timer when onClose(failed) fires during reload',
+          run: async () => {
+            const a = session('a')
+            state.sessions = [a]
+            const streamClose = vi.fn(async () => undefined)
+            const reload = deferred<ReturnType<typeof page>>()
+            client.subscribe.mockResolvedValueOnce({
+              streamId: 'stream-1',
+              replayTruncated: true as const,
+              close: streamClose,
+            })
+            let historyCalls = 0
+            client.request.mockImplementation(async (method, args) => {
+              if (method === 'thread/read') return { thread: thread(args.threadId) }
+              historyCalls += 1
+              if (historyCalls === 1) return page(args.threadId, [20])
+              return reload.promise
+            })
+
+            const opening = state.openSession(a)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(1)
+            expect(historyCalls).toBe(2)
+
+            const onClose = client.subscribe.mock.calls[0]![3] as (reason: string) => void
+            onClose('failed')
+            reload.resolve(page('a', [20, 21]))
+
+            expect(await opening).toBe(false)
+            expect(streamClose).toHaveBeenCalledOnce()
+            expect(runtime.activeCodexStream).toBeUndefined()
+            expect(state.busyAction).toBeUndefined()
+            expect(state.codexReadySessionId).toBeUndefined()
+            expect(state.error).toBe(zhCN.runtime.codexUnavailable)
+            expect(state.messages[a.sessionId]?.map(item => item.id)).toEqual(['m20'])
+
+            await vi.advanceTimersByTimeAsync(10_000)
+            await tick()
+            expect(client.subscribe).toHaveBeenCalledTimes(1)
+          },
+        },
+      ], () => {
+        runtime?.clearCodexRecoveryTimer?.()
+        prepareScenario()
+      })
+    } finally {
+      runtime?.clearCodexRecoveryTimer?.()
+      vi.useRealTimers()
+    }
+  })
+
+  it('aborts turn/start on session switch during thread/resume and ignores stale turn/start ACK after turn/completed', async () => {
+    await runScenarios([
+      {
+        name: 'does not dispatch turn/start when switching sessions while thread/resume is pending',
+        run: async () => {
+          const a = session('a')
+          const b = session('b')
+          state.sessions = [a, b]
+          expect(await state.openSession(a)).toBe(true)
+
+          const resume = deferred<{ thread: ReturnType<typeof thread> }>()
+          client.request.mockImplementation(async (method, args) => {
+            if (method === 'thread/resume') return resume.promise
+            if (method === 'thread/read') return { thread: thread(args.threadId) }
+            return page(args.threadId)
+          })
+          client.request.mockClear()
+
+          const sending = state.sendMessage('hello a')
+          await tick()
+          expect(client.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume'])
+
+          expect(await state.openSession(b)).toBe(true)
+          resume.resolve({ thread: thread('a') })
+          expect(await sending).toBe('rejected')
+
+          expect(client.request.mock.calls.map(([method]) => method)).not.toContain('turn/start')
+          expect(state.selectedSession?.sessionId).toBe(b.sessionId)
+          expect(state.messages[a.sessionId]?.at(-1)).toMatchObject({
+            kind: 'message',
+            text: 'hello a',
+            sendState: 'failed',
+          })
+          expect(state.busyAction).toBeUndefined()
+        },
+      },
+      {
+        name: 'does not restore running or activeTurnId when turn/completed settles via handleCodexFrames before turn/start ACK',
+        run: async () => {
+          const a = session('a')
+          state.sessions = [a]
+          expect(await state.openSession(a)).toBe(true)
+          const onFrame = client.subscribe.mock.calls[0]![1] as (frame: { method: string; params: unknown }) => void
+
+          const turnStart = deferred<{ turn: { id: string; status: string } }>()
+          client.request.mockImplementation(async method => {
+            if (method === 'thread/resume') return { thread: thread('a') }
+            if (method === 'turn/start') return turnStart.promise
+            throw new Error(`Unexpected method: ${method}`)
+          })
+          client.request.mockClear()
+
+          const sending = state.sendMessage('fast turn')
+          await tick()
+          expect(client.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume', 'turn/start'])
+
+          onFrame({
+            method: 'turn/started',
+            params: { threadId: 'a', turn: { id: 'turn-fast', status: 'inProgress', items: [] } },
+          })
+          onFrame({
+            method: 'item/completed',
+            params: {
+              threadId: 'a',
+              turnId: 'turn-fast',
+              item: { id: 'agent-1', type: 'agentMessage', text: 'Done already', status: 'completed' },
+            },
+          })
+          onFrame({
+            method: 'turn/completed',
+            params: { threadId: 'a', turn: { id: 'turn-fast', status: 'completed', items: [] } },
+          })
+
+          expect(state.selectedSession?.running).toBe(false)
+          expect(state.sessions[0]?.running).toBe(false)
+          expect(runtime.activeCodexTimeline?.activeTurnId).toBeUndefined()
+
+          turnStart.resolve({ turn: { id: 'turn-fast', status: 'inProgress' } })
+          expect(await sending).toBe('sent')
+
+          expect(state.selectedSession?.running).toBe(false)
+          expect(state.sessions[0]?.running).toBe(false)
+          expect(runtime.activeCodexTimeline?.activeTurnId).toBeUndefined()
+          expect(runtime.activeCodexTimeline?.session.status).toBe('idle')
+          expect(state.busyAction).toBeUndefined()
+        },
+      },
+    ], prepareScenario)
   })
 })

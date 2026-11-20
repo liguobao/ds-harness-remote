@@ -13,7 +13,7 @@ import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame, settleOrphanedQueuedItems } from './event-reducer'
 import { inboxRpcIds, reconcileUserQuestionsProjection } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
-import { isHarnessPromptStarted, isRecord } from './session-state'
+import { isHarnessPromptStarted, isRecord, record, stringValue } from './session-state'
 import type { AppState } from './store-state'
 
 /** SessionEvent actions use the store's single connection/session runtime. */
@@ -274,6 +274,15 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
       let framePermission: ReturnType<typeof codexPermissionPresetFromResponse>
       for (const frame of frames) {
         framePermission = codexPermissionPresetFromResponse(frame.params) ?? framePermission
+        if (frame.method === 'turn/completed') {
+          const turnId = stringValue(record(record(frame.params).turn).id)
+          if (turnId !== undefined) runtime.markCodexTurnCompleted(next.session.nativeId, turnId)
+        } else if (frame.method === 'thread/status/changed') {
+          const status = record(record(frame.params).status)
+          if ((status.type === 'idle' || status.type === 'systemError') && next.activeTurnId !== undefined) {
+            runtime.markCodexTurnCompleted(next.session.nativeId, next.activeTurnId)
+          }
+        }
         next = reduceCodexTimelineFrame(next, frame)
       }
       // Unknown notifications (usage, heartbeats, etc.) do not invalidate the

@@ -1,3 +1,4 @@
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CodexRemoteClient,
@@ -7,6 +8,41 @@ import {
   projectCodexThread,
   reduceCodexTimelineFrame,
 } from '../src/codex-client.js'
+
+function createStreamCore(
+  openImpl: (params: { streamId: string; threadId: string }, signal?: AbortSignal) => Promise<unknown>,
+) {
+  const eventHandlers = new Set<(event: { event: string; data: unknown }) => void>()
+  const closeHandlers = new Set<() => void>()
+  const rpcCalls: Array<{ method: string; params: unknown }> = []
+  const rpc = vi.fn(async (method: string, params: unknown, signal?: AbortSignal) => {
+    rpcCalls.push({ method, params })
+    if (method === 'codex.app.stream.open') {
+      return openImpl(params as { streamId: string; threadId: string }, signal)
+    }
+    return {}
+  })
+  return {
+    rpc,
+    rpcCalls,
+    eventHandlers,
+    closeHandlers,
+    onEvent(handler: (event: { event: string; data: unknown }) => void) {
+      eventHandlers.add(handler)
+      return () => { eventHandlers.delete(handler) }
+    },
+    onClose(handler: () => void) {
+      closeHandlers.add(handler)
+      return () => { closeHandlers.delete(handler) }
+    },
+    emitEvent(event: string, data: unknown) {
+      for (const handler of [...eventHandlers]) handler({ event, data })
+    },
+    emitClose() {
+      for (const handler of [...closeHandlers]) handler()
+    },
+  }
+}
 
 describe('Codex display projection', () => {
   it('keeps the first user message as an untitled thread preview across live updates and history reads', () => {
@@ -338,6 +374,211 @@ describe('Codex display projection', () => {
       { nativeRef: { itemId: 'cmd_1' }, text: 'pnpm test\n1 passed', status: 'running' },
       { nativeRef: { itemId: 'files_1' }, text: '[add] new.ts', status: 'running' },
       { nativeRef: { requestHandle: 'approval_1' }, status: 'completed' },
+    ])
+  })
+
+  it('only clears pending approval on serverRequest/resolved when requestHandle matches or is omitted by legacy Hosts', async () => {
+    const base = [
+      { method: 'turn/started', params: { turn: { id: 'turn_1', status: 'inProgress', items: [] } } },
+      { method: 'item/commandExecution/requestApproval', params: { turnId: 'turn_1', requestHandle: 'approval_1', command: ['pnpm', 'test'] } },
+    ].reduce(
+      (acc, frame) => reduceCodexTimelineFrame(acc, frame),
+      createCodexTimelineState({ id: 'thr_123', cwd: '/workspace/repo', createdAt: 1, updatedAt: 2, turns: [] })!,
+    )
+
+    await runScenarios([
+      { name: 'mismatched requestHandle keeps approval', params: { turnId: 'turn_1', requestHandle: 'approval_other' }, cleared: false },
+      { name: 'exact requestHandle clears approval', params: { turnId: 'turn_1', requestHandle: 'approval_1' }, cleared: true },
+      { name: 'legacy omitted requestHandle clears approval', params: { turnId: 'turn_1', requestId: 1 }, cleared: true },
+    ].map(({ name, params, cleared }) => ({
+      name,
+      run: () => {
+        const next = reduceCodexTimelineFrame(base, { method: 'serverRequest/resolved', params })
+        if (cleared) {
+          expect(next.approval).toBeUndefined()
+          expect(next.session.status).toBe('running')
+          expect(next.items[0]).toMatchObject({ nativeRef: { requestHandle: 'approval_1' }, status: 'completed' })
+        } else {
+          expect(next).toBe(base)
+          expect(next.approval).toMatchObject({ requestHandle: 'approval_1' })
+          expect(next.session.status).toBe('waiting')
+          expect(next.items[0]).toMatchObject({ nativeRef: { requestHandle: 'approval_1' }, status: 'running' })
+        }
+      },
+    })))
+  })
+})
+
+describe('CodexRemoteClient.subscribe', () => {
+  it('propagates replayTruncated only when codex.app.stream.open confirms true', async () => {
+    await runScenarios([
+      { name: 'replayTruncated: true', openResult: { opened: true, replayTruncated: true }, expected: true },
+      { name: 'replayTruncated omitted', openResult: { opened: true }, expected: false },
+      { name: 'replayTruncated: false', openResult: { opened: true, replayTruncated: false }, expected: false },
+    ].map(({ name, openResult, expected }) => ({
+      name,
+      run: async () => {
+        const core = createStreamCore(async () => openResult)
+        const client = new CodexRemoteClient(core as never)
+        const stream = await client.subscribe('thr_1', () => undefined)
+        if (expected) {
+          expect(stream.replayTruncated).toBe(true)
+          expect('replayTruncated' in stream).toBe(true)
+        } else {
+          expect(stream.replayTruncated).toBeUndefined()
+          expect('replayTruncated' in stream).toBe(false)
+        }
+        await stream.close()
+      },
+    })))
+  })
+
+  it('handles core.onClose safely before and after open without duplicate stream-closed notifications', async () => {
+    await runScenarios([
+      {
+        name: 'emits peer-disconnected once after open, removes listeners, and suppresses later stream.closed',
+        run: async () => {
+          const core = createStreamCore(async () => ({ opened: true }))
+          const client = new CodexRemoteClient(core as never)
+          const frames: unknown[] = []
+          const closed: string[] = []
+
+          const stream = await client.subscribe('thr_1', frame => frames.push(frame), undefined, reason => closed.push(reason))
+          expect(core.eventHandlers.size).toBe(1)
+          expect(core.closeHandlers.size).toBe(1)
+
+          core.emitClose()
+          expect(closed).toEqual(['peer-disconnected'])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+
+          core.emitEvent('codex.app.stream.closed', { streamId: stream.streamId, reason: 'failed' })
+          core.emitEvent('codex.app.frame', { streamId: stream.streamId, frame: { method: 'turn/started', params: {} } })
+          core.emitClose()
+          await stream.close()
+
+          expect(closed).toEqual(['peer-disconnected'])
+          expect(frames).toEqual([])
+          expect(core.rpcCalls.map(call => call.method)).toEqual(['codex.app.stream.open'])
+        },
+      },
+      {
+        name: 'cleans up listeners without calling onClose if core closes before open finishes',
+        run: async () => {
+          let rejectOpen!: (error: Error) => void
+          const core = createStreamCore(() => new Promise((_resolve, reject) => { rejectOpen = reject }))
+          const client = new CodexRemoteClient(core as never)
+          const closed: string[] = []
+
+          const opening = client.subscribe('thr_1', () => undefined, undefined, reason => closed.push(reason))
+          expect(core.eventHandlers.size).toBe(1)
+          expect(core.closeHandlers.size).toBe(1)
+
+          core.emitClose()
+          expect(closed).toEqual([])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+
+          rejectOpen(Object.assign(new Error('Transport closed'), { code: 'TRANSPORT_CLOSED' }))
+          await expect(opening).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+          expect(closed).toEqual([])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+        },
+      },
+      {
+        name: 'rejects with TRANSPORT_CLOSED if core closes synchronously before open resolves to a result',
+        run: async () => {
+          let triggerClose!: () => void
+          const core = createStreamCore(async () => {
+            triggerClose()
+            return { opened: true }
+          })
+          triggerClose = () => core.emitClose()
+          const client = new CodexRemoteClient(core as never)
+          const closed: string[] = []
+
+          await expect(
+            client.subscribe('thr_1', () => undefined, undefined, reason => closed.push(reason)),
+          ).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+          expect(closed).toEqual([])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+          expect(core.rpcCalls.map(call => call.method)).toEqual(['codex.app.stream.open'])
+        },
+      },
+      {
+        name: 'rejects with TRANSPORT_CLOSED if core closes in the same tick right after open resolves before opened is marked',
+        run: async () => {
+          let resolveOpen!: (value: unknown) => void
+          const core = createStreamCore(() => new Promise(resolve => { resolveOpen = resolve }))
+          const client = new CodexRemoteClient(core as never)
+          const closed: string[] = []
+
+          const opening = client.subscribe('thr_1', () => undefined, undefined, reason => closed.push(reason))
+          resolveOpen({ opened: true })
+          core.emitClose()
+
+          await expect(opening).rejects.toMatchObject({ code: 'TRANSPORT_CLOSED' })
+          expect(closed).toEqual([])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+          expect(core.rpcCalls.map(call => call.method)).toEqual(['codex.app.stream.open'])
+        },
+      },
+    ])
+  })
+
+  it('closes the Host stream when AbortSignal fires after open or races with an open RPC', async () => {
+    await runScenarios([
+      {
+        name: 'abort after open completes',
+        run: async () => {
+          const controller = new AbortController()
+          const core = createStreamCore(async () => ({ opened: true }))
+          const client = new CodexRemoteClient(core as never)
+
+          const stream = await client.subscribe('thr_1', () => undefined, controller.signal)
+          controller.abort(new Error('navigation'))
+          await Promise.resolve()
+
+          expect(core.rpcCalls).toEqual([
+            { method: 'codex.app.stream.open', params: { streamId: stream.streamId, threadId: 'thr_1' } },
+            { method: 'codex.app.stream.close', params: { streamId: stream.streamId } },
+          ])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+
+          await stream.close()
+          expect(core.rpcCalls).toHaveLength(2)
+        },
+      },
+      {
+        name: 'abort racing while open RPC still resolves',
+        run: async () => {
+          const controller = new AbortController()
+          let resolveOpen!: (value: unknown) => void
+          let capturedStreamId = ''
+          const core = createStreamCore(params => {
+            capturedStreamId = params.streamId
+            return new Promise(resolve => { resolveOpen = resolve })
+          })
+          const client = new CodexRemoteClient(core as never)
+          const abortReason = new Error('superseded')
+
+          const opening = client.subscribe('thr_1', () => undefined, controller.signal)
+          controller.abort(abortReason)
+          resolveOpen({ opened: true })
+
+          await expect(opening).rejects.toBe(abortReason)
+          expect(core.rpcCalls).toEqual([
+            { method: 'codex.app.stream.open', params: { streamId: capturedStreamId, threadId: 'thr_1' } },
+            { method: 'codex.app.stream.close', params: { streamId: capturedStreamId } },
+          ])
+          expect(core.eventHandlers.size).toBe(0)
+          expect(core.closeHandlers.size).toBe(0)
+        },
+      },
     ])
   })
 })
