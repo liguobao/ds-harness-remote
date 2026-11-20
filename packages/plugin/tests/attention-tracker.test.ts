@@ -409,6 +409,7 @@ describe('HostAttentionTracker', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       tracker.createHarnessBridgeObserver(),
     )
 
@@ -555,6 +556,7 @@ describe('HostAttentionTracker', () => {
       async () => undefined,
       silentLogger(),
       '0.2.2',
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -951,6 +953,7 @@ describe('HostAttentionTracker', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       tracker.createPeerRoute('conn-a', async event => { sentA.push(event) }),
     )
 
@@ -1178,6 +1181,7 @@ describe('HostAttentionTracker', () => {
       undefined,
       undefined,
       () => ['harness.remote.v3'],
+      undefined,
       undefined,
       undefined,
       undefined,
