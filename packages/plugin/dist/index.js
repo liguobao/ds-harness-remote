@@ -84696,7 +84696,7 @@ var STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 var ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
 var INVALID_REQUEST_RPC_ID = "invalid-request";
 function registerControlRoute(connection, handler, webServer, statusStream) {
-  if (webServer !== void 0 && connection.requestRejection !== void 0) {
+  if (webServer !== void 0) {
     const dispose = webServer.register({
       kind: "prefix",
       path: CONTROL_RPC_PREFIX,
@@ -112150,11 +112150,18 @@ function apply(ctx, entry = void 0) {
     if (isLegacySettingsProvider(settings)) return;
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
   });
+  let disposePendingControl;
+  let activationStarted = false;
+  let attachWebServer;
   const activateWhenCarrierReady = async (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
     const webServer = runtimeContext.get("webServer");
-    let disposePendingControl;
+    if (activationStarted) {
+      if (webServer !== void 0) await attachWebServer?.(webServer);
+      return;
+    }
+    activationStarted = true;
     const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
       let identityDirectory = new IdentityStore().directory;
@@ -112190,7 +112197,9 @@ function apply(ctx, entry = void 0) {
     const startActiveRuntime = async (activeContext) => {
       await disposePendingControl?.();
       disposePendingControl = void 0;
-      await activate(activeContext, readConfig, entryId);
+      await activate(activeContext, readConfig, entryId, false, (attach) => {
+        attachWebServer = attach;
+      });
     };
     if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext);
@@ -112198,6 +112207,7 @@ function apply(ctx, entry = void 0) {
     await installPendingControl();
   };
   ctx.inject(["settings", "connection", "typertGateway"], activateWhenCarrierReady);
+  ctx.inject(["settings", "connection", "typertGateway", "webServer"], activateWhenCarrierReady);
 }
 function applyTuiHost(ctx, entry) {
   const readConfig = () => readEntryConfig(entry);
@@ -112210,7 +112220,7 @@ function applyTuiHost(ctx, entry) {
     await activate(runtimeContext, readConfig, entryId, true);
   });
 }
-async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
+async function activate(ctx, readConfig, entryId, requireRemoteEvents = false, onControlRoute) {
   const settings = ctx.get("settings");
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
   const connection = ctx.get("connection");
@@ -112286,7 +112296,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     updateChecker,
     () => readPluginManager(ctx),
     (listener) => {
-      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events];
+      const root2 = rootContext(ctx);
+      const buses = ctx.events === root2.events ? [root2.events] : [root2.events, ctx.events];
       const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
       return () => {
         for (const stop of dispose) stop();
@@ -112322,7 +112333,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   };
   if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
   const subprocess = ctx.get("subprocess", false);
-  const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
+  const schedule = ctx.get("schedule", false) ?? rootContext(ctx).get("schedule", false);
   const createRuntimes = (config3) => {
     const hostIdentities = new IdentityStore({
       directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
@@ -112463,9 +112474,17 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   if (clientRuntime !== void 0) {
     clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
   }
+  let disposeControl;
+  let httpControlAttached = webServer !== void 0;
+  onControlRoute?.(async (nextWebServer) => {
+    if (httpControlAttached || controlRuntime === void 0 || connection === void 0) return;
+    httpControlAttached = true;
+    await disposeControl?.();
+    disposeControl = controlRuntime.register(connection, nextWebServer);
+  });
   await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection, webServer);
+    disposeControl = controlRuntime?.register(connection, webServer);
     if (initialStorageError !== void 0) {
       logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
     } else {
@@ -112508,7 +112527,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
 function resolveLogProfileName(ctx) {
   const envProfile = process.env.DSH_PROFILE?.trim();
   if (envProfile) return envProfile;
-  const baseDir = ctx.root?.baseDir;
+  const baseDir = rootContext(ctx)?.baseDir;
   if (typeof baseDir === "string" && baseDir.trim().length > 0) {
     const trimmed = baseDir.trim();
     if (basename9(dirname10(trimmed)) === "profiles") {
@@ -112525,8 +112544,12 @@ function readEntryConfig(entry) {
 function isEntryConfig(value) {
   return typeof value.get === "function";
 }
+function rootContext(ctx) {
+  const bySymbol = ctx[Symbol.for("cordis.root")];
+  return bySymbol ?? ctx.root;
+}
 function readPluginManager(ctx) {
-  const candidate = ctx.get("pluginManager", false) ?? ctx.root.get("pluginManager", false);
+  const candidate = ctx.get("pluginManager", false) ?? rootContext(ctx).get("pluginManager", false);
   if (typeof candidate !== "object" || candidate === null || typeof candidate.listBundles !== "function" || typeof candidate.updateBundle !== "function") return void 0;
   return candidate;
 }

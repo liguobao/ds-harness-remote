@@ -130,11 +130,26 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   })
   // The default entry uses the browser/Desktop Host connection service.
   // The separate dsh-TUI entry starts through applyTuiHost.
+  // cordis re-runs an inject callback once per row whose dependencies become
+  // available, and every run gets a fresh callback scope. Activation state
+  // therefore lives on apply's scope: the Host runtime starts exactly once, and a
+  // Web server that shows up later only re-registers the control route on that
+  // same runtime instead of starting a second one.
+  let disposePendingControl: (() => Promise<void>) | undefined
+  let activationStarted = false
+  let attachWebServer: ((webServer: HostWebServerLike) => Promise<void>) | undefined
+
   const activateWhenCarrierReady = async (runtimeContext: Context): Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
     const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
     const webServer = runtimeContext.get('webServer') as HostWebServerLike | undefined
-    let disposePendingControl: (() => Promise<void>) | undefined
+    if (activationStarted) {
+      // dsh 0.2.2 provides `webServer` after the carrier services, so the first
+      // run may have missed it. Only the control route is re-registered here.
+      if (webServer !== undefined) await attachWebServer?.(webServer)
+      return
+    }
+    activationStarted = true
     const installPendingControl = async (): Promise<void> => {
       if (connection === undefined || disposePendingControl !== undefined) return
       let identityDirectory = new IdentityStore().directory
@@ -170,7 +185,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
     const startActiveRuntime = async (activeContext: Context): Promise<void> => {
       await disposePendingControl?.()
       disposePendingControl = undefined
-      await activate(activeContext, readConfig, entryId)
+      await activate(activeContext, readConfig, entryId, false, attach => { attachWebServer = attach })
     }
     if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext)
@@ -179,6 +194,12 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   }
 
   ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
+  // dsh 0.2.2 provides `webServer` after the carrier services. Waiting for it in
+  // the list above would block activation on every host that never exposes a Web
+  // server (dsh-TUI, unit tests), so it gets its own inject row: activation starts
+  // on the carrier alone and this row only attaches the HTTP control route once
+  // the service exists — the Host runtime is never started twice.
+  ctx.inject(['settings', 'connection', 'typertGateway', 'webServer'], activateWhenCarrierReady)
 }
 
 /** Start the shared Host runtime from the separate dsh-TUI package. */
@@ -202,6 +223,7 @@ async function activate(
   readConfig: () => ConfigInput,
   entryId: string,
   requireRemoteEvents = false,
+  onControlRoute?: (attach: (webServer: HostWebServerLike) => Promise<void>) => void,
 ): Promise<void> {
   const settings = ctx.get('settings') as SettingsServiceLike | undefined
   const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
@@ -273,7 +295,8 @@ async function activate(
     listener => {
       // The manager emits on its own context. Desktop puts that service on the
       // profile root; a nested context with its own bus still needs to hear it.
-      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events]
+      const root = rootContext(ctx)
+      const buses = ctx.events === root.events ? [root.events] : [root.events, ctx.events]
       const dispose = buses.map(events => events.on('plugin-manager/update-state', listener, { global: true }))
       return () => { for (const stop of dispose) stop() }
     },
@@ -327,7 +350,7 @@ async function activate(
   // when this plugin's own context cannot see it. Absent service = explicit
   // FEATURE_NOT_SUPPORTED from the bridge, never a fabricated one.
   const schedule = (ctx.get('schedule', false)
-    ?? (ctx.root === undefined ? undefined : ctx.root.get('schedule', false))) as ScheduleCreateService | undefined
+    ?? rootContext(ctx).get('schedule', false)) as ScheduleCreateService | undefined
 
   const createRuntimes = (config: ResolvedConfig) => {
     const hostIdentities = new IdentityStore({
@@ -481,9 +504,21 @@ async function activate(
   if (clientRuntime !== undefined) {
     clientServiceProvided = syncOptionalService('dshRemoteClient', clientRuntime, clientServiceProvided)
   }
+  // dsh 0.2.2 provides `webServer` after the carrier services, so the first
+  // registration below can be RPC-only. Hand the caller a way to re-register just
+  // the control route once the Web server exists, leaving the Host runtime as is.
+  let disposeControl: (() => Promise<void>) | undefined
+  let httpControlAttached = webServer !== undefined
+  onControlRoute?.(async nextWebServer => {
+    if (httpControlAttached || controlRuntime === undefined || connection === undefined) return
+    httpControlAttached = true
+    await disposeControl?.()
+    disposeControl = controlRuntime.register(connection, nextWebServer)
+  })
+
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection!, webServer)
+    disposeControl = controlRuntime?.register(connection!, webServer)
     if (initialStorageError !== undefined) {
       logger.error('Remote plugin startup failed', safeStartupError(initialStorageError))
     } else {
@@ -534,7 +569,7 @@ async function activate(
 function resolveLogProfileName(ctx: Context): string | undefined {
   const envProfile = process.env.DSH_PROFILE?.trim()
   if (envProfile) return envProfile
-  const baseDir = (ctx.root as { baseDir?: unknown } | undefined)?.baseDir
+  const baseDir = (rootContext(ctx) as { baseDir?: unknown } | undefined)?.baseDir
   if (typeof baseDir === 'string' && baseDir.trim().length > 0) {
     const trimmed = baseDir.trim()
     if (basename(dirname(trimmed)) === 'profiles') {
@@ -558,8 +593,20 @@ function isEntryConfig(value: EntryConfig | ConfigShape): value is EntryConfig {
  * The official plugin manager lives on the profile context. A plugin-scoped
  * lookup misses it when the service is isolated to the root.
  */
+/**
+ * Read the application root context in a version-agnostic way.
+ * cordis 4.1 (npm) keeps it on the `root` instance property, while the cordis
+ * vendored by newer dsh builds moved it to the `Symbol.for('cordis.root')` key
+ * and rejects the string `ctx.root` read through the inject gate. Probe the
+ * symbol first, fall back to the property.
+ */
+function rootContext(ctx: Context): Context {
+  const bySymbol = (ctx as unknown as Record<symbol, Context | undefined>)[Symbol.for('cordis.root')]
+  return bySymbol ?? ctx.root
+}
+
 function readPluginManager(ctx: Context): PluginManagerUpdate | undefined {
-  const candidate = ctx.get('pluginManager', false) ?? ctx.root.get('pluginManager', false)
+  const candidate = ctx.get('pluginManager', false) ?? rootContext(ctx).get('pluginManager', false)
   if (
     typeof candidate !== 'object'
     || candidate === null

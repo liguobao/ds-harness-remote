@@ -50,7 +50,10 @@ export function registerControlRoute(
   webServer?: HostWebServerLike,
   statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
-  if (webServer !== undefined && connection.requestRejection !== undefined) {
+  // requestRejection is gone from HostConnectionHandle (dsh 0.2.2-rc.5); requiring
+  // it here silently disabled the HTTP control route on every Host.
+  // handleControlRequest already probes it optionally below.
+  if (webServer !== undefined) {
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
