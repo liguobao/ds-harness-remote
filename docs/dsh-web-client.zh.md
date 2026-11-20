@@ -1,10 +1,19 @@
 # Remote Client 接入「打开 DSH Web」
 
-适用于 Android、iOS 和复用 Remote Noise RPC 的其他 Client。线协议见 [DSH Web browser handoff](protocol.md#dsh-web-browser-handoff)，返回值校验复用 [共享 schema](../packages/protocol/src/dsh-web.ts)。
+适用于 DSH Go、Android、iOS 和复用 Remote Noise RPC 的其他 Client。这里的 DSH Web 指当前远程 Host 提供的 Harness 网页界面。线协议见 [DSH Web browser handoff](protocol.md#dsh-web-browser-handoff)，返回值以 [共享 schema](../packages/protocol/src/dsh-web.ts) 为准。
 
-支持局域网能力的客户端先检查当前传输模式。LAN 本地会话使用独立的 [局域网交接接口](design/dsh-web-lan.md)。以下流程适用于 hostc 公网入口。
+## DSH Go 接入
 
-## 联调前置条件
+在 DSH Go 的 DSHarness Remote 连接模式中，复用 Dart 客户端已建立的认证 Noise 连接，在当前 Host 的操作入口接入「打开 DSH Web」。DSH Go 上游 README 仍将 App 内打开远程网页版列为限制，以下是开发接入流程。[DSH Go 项目说明](https://github.com/ccch1mneyyy/dsh-Go#可以做什么)
+
+1. 连接成功后调用 `harness.transport.describe({})`。支持 hostc 的 Host 声明 `dsh.web.v1`。仅在当前连接有可用路径时显示入口，切换 Host 或重连后重新探测。
+2. 当前连接为 LAN、Host 声明 `dsh.web.lan.direct.v1` 且 `dshWebLanReady` 未明确返回 `false` 时，调用 `dsh.web.lan.direct.open({})`。其他连接走下节的 hostc 流程。LAN 打开返回 `FEATURE_NOT_SUPPORTED` 且 Host 也声明了 `dsh.web.v1` 时，可改走 hostc。IPv6 直连需额外实现 [同链路 ICE 候选对验证所需的请求参数](protocol.md#dsh-web-lan-handoff)。
+3. LAN 响应按 `dshWebLanGrantSchema` 校验，包含 `sessionId`、`url`、`browserGrant` 和 `expiresAt`。IPv4 路径只接受 Host 私网 IPv4 或同机 `127.0.0.1` 上带端口的 HTTP 根地址。用同一 WebView 顶层加载 `GET /__remote/session-bootstrap`，仅在这次请求中通过 `X-DSH-Web-Grant` 传票据。跟随跳转后由 WebView 保存并发送 Cookie。LAN 使用明文 HTTP 和 WebSocket，仅在可信局域网中启用，并将明文加载限制在当前交接地址。
+4. WebView 顶层导航限于本次交接的精确 origin。取消、关闭或切换 Host 时清理当前 WebView，并在原 Noise 连接上尽力调用 `dsh.web.lan.direct.close({ sessionId })`。晚到的 LAN 响应也应按返回的 `sessionId` 关闭。重试时重新申请票据，已进入的页面刷新时直接加载根地址。
+
+上机分别验证同网 LAN 和跨网 hostc，确认换票跳转后的首次 GET 携带 Cookie，页面的 HTTP、SSE 和 WebSocket 可用，切换 Host、关闭页面或断开父连接后会话被回收。Android 和 iOS 的 [WebView 实现](../packages/app-core/src/screens/dsh-web-screen.tsx) 可作为参考。
+
+## hostc 联调前置条件
 
 | 组件 | 需要具备的能力 |
 | --- | --- |
@@ -15,7 +24,7 @@
 
 **Host 插件需要一起升级。** 它负责读取本机监听地址、使用既有设备凭据调用 Server、建立出站 WSS，并保留 DSH Web 自身鉴权。本机地址和 DSH 启动凭据留在 Host。Client 一侧沿用已有配对和连接，用户点击即可打开 WebView。
 
-## 打开和关闭
+## hostc 打开和关闭
 
 1. **探测能力。** 连接完成后从 `harness.transport.describe({})` 读取 `capabilities`。当前 Host 有 `dsh.web.v1` 且连接在线时显示按钮。切换 Host 或重连后按新连接重新探测。
 2. **发起一次打开。** 在当前 Noise 连接上调用 `dsh.web.open({})`。按钮进入等待状态，合并连点。Host 和 Client 身份取自当前连接，RPC 请求体使用空对象。用户切换 Host、关闭打开页或断线时，丢弃晚到的结果。
