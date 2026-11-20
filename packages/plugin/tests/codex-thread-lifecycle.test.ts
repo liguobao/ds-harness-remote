@@ -43,4 +43,59 @@ describe('CodexThreadLifecycle recovery', () => {
     expect(released).toHaveBeenCalledWith('thread')
     await expect(lifecycle.use('thread', async () => 'ready')).resolves.toBe('ready')
   })
+
+  it('ignores a stale notLoaded response after closed() already opened a newer thread generation', async () => {
+    let finishUnsubscribe!: (value: unknown) => void
+    const unsubscribe = vi.fn(() => new Promise(resolve => { finishUnsubscribe = resolve }))
+    const released = vi.fn()
+    const lifecycle = new CodexThreadLifecycle(() => false, unsubscribe, released, () => undefined)
+
+    const closing = lifecycle.release('thread')
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce())
+    lifecycle.closed('thread')
+    expect(released).toHaveBeenCalledTimes(1)
+
+    let releaseAction!: () => void
+    const activeUse = lifecycle.use('thread', () => new Promise<string>(resolve => {
+      releaseAction = () => resolve('done')
+    }))
+    finishUnsubscribe({ status: 'notLoaded' })
+    await closing
+    expect(released).toHaveBeenCalledTimes(1)
+
+    releaseAction()
+    await expect(activeUse).resolves.toBe('done')
+  })
+
+  it('ignores a stale notLoaded response when closed() ran while use() was queued on the same state object', async () => {
+    let finishFirstUnsubscribe!: (value: unknown) => void
+    const unsubscribe = vi.fn(() => new Promise(resolve => { finishFirstUnsubscribe = resolve }))
+    const released = vi.fn()
+    const lifecycle = new CodexThreadLifecycle(() => false, unsubscribe, released, () => undefined)
+
+    const closingOne = lifecycle.release('thread')
+    await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledTimes(1))
+
+    // queuedUse keeps state.uses > 0 across closed(), so the same state object stays in the map.
+    const queuedUse = lifecycle.use('thread', async () => 'queued')
+    lifecycle.closed('thread')
+    expect(released).toHaveBeenCalledTimes(1)
+
+    let releaseSecondUse!: () => void
+    let secondStarted = false
+    const secondUse = lifecycle.use('thread', async () => {
+      secondStarted = true
+      await new Promise<void>(resolve => { releaseSecondUse = resolve })
+      return 'resumed'
+    })
+    await vi.waitFor(() => expect(secondStarted).toBe(true))
+
+    // First unsubscribe resolves late with notLoaded while secondUse is active on the same state object.
+    finishFirstUnsubscribe({ status: 'notLoaded' })
+    await Promise.all([closingOne, queuedUse])
+    expect(released).toHaveBeenCalledTimes(1)
+
+    releaseSecondUse()
+    await expect(secondUse).resolves.toBe('resumed')
+  })
 })

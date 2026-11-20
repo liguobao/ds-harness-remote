@@ -371,7 +371,7 @@ export class CodexPeerBridge {
       const data: CodexAppFrameData = { streamId, frame }
       if (encodeMessage(createEvent('codex.app.frame', data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId)
-        void this.domain.releaseThread(threadId)
+        void this.domain.releaseThread(threadId).catch(() => undefined)
         await this.publish('codex.app.stream.closed', { streamId, reason: 'failed' }).catch(() => undefined)
         this.logger?.warn('Codex stream closed after oversized frame', { streamId })
         continue

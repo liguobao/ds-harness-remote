@@ -92317,14 +92317,186 @@ var ControlStatusStream = class {
 
 // packages/plugin/src/codex/domain.ts
 import { randomUUID as randomUUID13 } from "node:crypto";
-import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync, statSync as statSync2 } from "node:fs";
+import { accessSync, constants as constants2, existsSync as existsSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
 import { readdir as readdir3, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename5, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve3 } from "node:path";
 
 // packages/plugin/src/codex/app-server.ts
-import { spawn as spawn2 } from "node:child_process";
 import { Buffer as Buffer2 } from "node:buffer";
+
+// packages/plugin/src/acp/windows-spawn.ts
+import {
+  execFile,
+  execFileSync,
+  spawn as spawn2
+} from "node:child_process";
+import { readFileSync, statSync as statSync2 } from "node:fs";
+import { win32 as win322 } from "node:path";
+import { promisify as promisify2 } from "node:util";
+var execFileAsync = promisify2(execFile);
+var WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
+var EXTENSION_PRIORITY = Object.freeze({
+  ".exe": 0,
+  ".cmd": 1,
+  ".bat": 2,
+  ".com": 3
+});
+var MAX_SHIM_BYTES = 64 * 1024;
+var ALLOWED_SHIM_SET_VARS = /* @__PURE__ */ new Set(["dp0", "_prog", "pathext"]);
+var NPM_SHIM_INVOCATION_PATTERN = /(?:^|[&\s])(?:"(?:%_prog%|%~dp0\\+node\.exe|%dp0%\\+node\.exe)"|node)\s+"((?:%~dp0|%dp0%)[^"]+\.(?:[cm]?js))"\s+%\*\s*$/im;
+function isWindowsExecutablePath(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(EXTENSION_PRIORITY, ext);
+}
+function windowsExecutableRank(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return EXTENSION_PRIORITY[ext] ?? Number.POSITIVE_INFINITY;
+}
+function isWindowsBatchFile(filePath) {
+  const ext = win322.extname(filePath.trim()).toLowerCase();
+  return ext === ".cmd" || ext === ".bat";
+}
+function selectWindowsExecutable(lines, checkExecutable = defaultIsFile) {
+  const matches = [];
+  for (const rawLine of lines) {
+    const candidate = rawLine.trim();
+    if (!candidate || !isWindowsExecutablePath(candidate)) continue;
+    if (!checkExecutable(candidate)) continue;
+    matches.push(win322.resolve(candidate));
+  }
+  if (matches.length === 0) return void 0;
+  matches.sort((left, right) => windowsExecutableRank(left) - windowsExecutableRank(right));
+  return matches[0];
+}
+function lookupWindowsPathExecutable(command, checkExecutable) {
+  try {
+    const output2 = execFileSync("where", [command], {
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 5e3,
+      windowsHide: true
+    });
+    return selectWindowsExecutable(output2.split(/\r?\n/), checkExecutable);
+  } catch {
+    return void 0;
+  }
+}
+function assertSafeCommandArgument(value) {
+  if (/[\r\n\0]/.test(value)) {
+    throw new Error("Command arguments must not contain CR, LF, or NUL characters.");
+  }
+}
+function escapeCmdBatchArgument(arg) {
+  assertSafeCommandArgument(arg);
+  let quoted = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
+  quoted = `"${quoted}"`;
+  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
+  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
+  return quoted;
+}
+function resolveNpmCmdShim(cmdPath, hooks = {}) {
+  if (!isWindowsBatchFile(cmdPath)) return void 0;
+  const read = hooks.readFileSync ?? ((path, encoding) => readFileSync(path, encoding));
+  const isFile = hooks.isFile ?? defaultIsFile;
+  let content;
+  try {
+    content = read(cmdPath, "utf8");
+  } catch {
+    return void 0;
+  }
+  if (!content || Buffer.byteLength(content, "utf8") > MAX_SHIM_BYTES) return void 0;
+  if (hasUnexpectedSetStatement(content)) return void 0;
+  const match = NPM_SHIM_INVOCATION_PATTERN.exec(content);
+  if (!match?.[1]) return void 0;
+  const relativeTarget = match[1].replace(/^%~?dp0%?[\\/]?/i, "");
+  if (relativeTarget.includes("%")) return void 0;
+  const resolvedScript = win322.resolve(win322.dirname(cmdPath), relativeTarget);
+  if (!isFile(resolvedScript)) return void 0;
+  const isElectron = hooks.isElectron ?? Boolean(process.versions.electron);
+  return {
+    file: hooks.nodeExecPath ?? process.execPath,
+    argsPrefix: [resolvedScript],
+    ...isElectron ? { envPatch: { ELECTRON_RUN_AS_NODE: "1" } } : {}
+  };
+}
+function resolveSpawnTarget(command, args, options, hooks = {}) {
+  assertSafeCommandArgument(command);
+  for (const arg of args) assertSafeCommandArgument(arg);
+  const platform3 = hooks.platform ?? process.platform;
+  const baseOptions = { ...options, windowsHide: true };
+  if (platform3 !== "win32") {
+    return { file: command, args: [...args], options: baseOptions };
+  }
+  const isFile = hooks.isFile ?? defaultIsFile;
+  const resolvedCommand = resolveWindowsCommand(command, isFile, hooks.lookupPath);
+  if (!isWindowsBatchFile(resolvedCommand)) {
+    return { file: resolvedCommand, args: [...args], options: baseOptions };
+  }
+  const shim = resolveNpmCmdShim(resolvedCommand, hooks);
+  if (shim) {
+    const env = shim.envPatch ? { ...options.env ?? process.env, ...shim.envPatch } : options.env;
+    return {
+      file: shim.file,
+      args: [...shim.argsPrefix, ...args],
+      options: env ? { ...baseOptions, env } : baseOptions
+    };
+  }
+  if (resolvedCommand.includes('"') || resolvedCommand.includes("%")) {
+    throw new Error("Batch executable path contains unsafe characters.");
+  }
+  const quotedCommand = `"${resolvedCommand}"`;
+  const escapedArgs = args.map(escapeCmdBatchArgument);
+  const innerCommand = escapedArgs.length > 0 ? `${quotedCommand} ${escapedArgs.join(" ")}` : quotedCommand;
+  const comspec = hooks.comspec ?? options.env?.ComSpec ?? process.env.ComSpec ?? "cmd.exe";
+  return {
+    file: comspec,
+    args: ["/d", "/s", "/c", `"${innerCommand}"`],
+    options: { ...baseOptions, windowsVerbatimArguments: true }
+  };
+}
+function spawnCommand(command, args, options = {}) {
+  const target3 = resolveSpawnTarget(command, args, options);
+  return spawn2(target3.file, target3.args, target3.options);
+}
+async function execFileCommand(command, args, options = {}) {
+  const target3 = resolveSpawnTarget(command, args, options);
+  const result = await execFileAsync(target3.file, target3.args, target3.options);
+  return {
+    stdout: String(result.stdout ?? ""),
+    stderr: String(result.stderr ?? "")
+  };
+}
+function resolveWindowsCommand(command, isFile, lookupPath) {
+  if (isWindowsExecutablePath(command)) return command;
+  const hasPathSeparator2 = command.includes("\\") || command.includes("/");
+  if (!hasPathSeparator2) {
+    const resolved = lookupPath ? lookupPath(command) : lookupWindowsPathExecutable(command, (candidate) => isFile(candidate));
+    return resolved ?? command;
+  }
+  for (const ext of WINDOWS_EXECUTABLE_EXTENSIONS) {
+    const candidate = `${command}${ext}`;
+    if (isFile(candidate)) return candidate;
+  }
+  return command;
+}
+function hasUnexpectedSetStatement(content) {
+  for (const rawLine of content.split(/\r?\n/)) {
+    const match = /^\s*@?SET\s+"?([A-Za-z_][A-Za-z0-9_]*)=/i.exec(rawLine);
+    if (!match) continue;
+    if (!ALLOWED_SHIM_SET_VARS.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+}
+function defaultIsFile(candidate) {
+  try {
+    return statSync2(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// packages/plugin/src/codex/app-server.ts
 var APP_SERVER_REQUEST_TIMEOUT_MS = 6e4;
 var APP_SERVER_START_TIMEOUT_MS = 15e3;
 var MAX_APP_SERVER_LINE_BYTES = 288 * 1024 * 1024;
@@ -92337,7 +92509,7 @@ var CodexAppServerError = class extends Error {
   }
 };
 var CodexAppServerClient = class {
-  constructor(binary, logger2, spawnAppServer = (binary2) => spawn2(binary2, ["app-server", "-c", "thread_unload_delay_secs=0"], {
+  constructor(binary, logger2, spawnAppServer = (binary2) => spawnCommand(binary2, ["app-server", "-c", "thread_unload_delay_secs=0"], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
   })) {
@@ -92350,12 +92522,17 @@ var CodexAppServerClient = class {
   pending = /* @__PURE__ */ new Map();
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer2.alloc(0);
+  stdoutChunks = [];
+  stdoutBytes = 0;
   stderrBytes = 0;
   ready = false;
   closed = false;
   failureNotified = false;
   startPromise;
+  exitedChildren = /* @__PURE__ */ new WeakSet();
+  childExitPromises = /* @__PURE__ */ new WeakMap();
+  terminatingChildren = /* @__PURE__ */ new WeakMap();
+  pendingTermination;
   start() {
     if (this.closed) return Promise.reject(new CodexAppServerError("CODEX_CLOSED", "The Codex domain is closed."));
     if (this.ready) return Promise.resolve();
@@ -92386,44 +92563,62 @@ var CodexAppServerClient = class {
     return () => this.unavailableHandlers.delete(handler);
   }
   async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
-    this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve10) => {
-      const timer2 = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve10();
-      }, 2e3);
-      timer2.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer2);
-        resolve10();
-      });
-      child.kill("SIGTERM");
-    });
+    if (!this.closed) {
+      this.closed = true;
+      this.ready = false;
+      this.resetStdoutBuffer();
+      this.failPending(new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed."));
+      const child = this.process;
+      this.process = void 0;
+      await this.terminateChild(child);
+    }
+    await this.pendingTermination;
   }
   async startOnce() {
     if (this.process !== void 0) {
       throw new CodexAppServerError("CODEX_STARTING", "Codex App Server is already starting.");
     }
-    const child = this.spawnAppServer(this.binary);
-    this.process = child;
     this.failureNotified = false;
-    this.stdoutBuffer = Buffer2.alloc(0);
+    let child;
+    try {
+      child = this.spawnAppServer(this.binary);
+    } catch (error62) {
+      const cause = error62 instanceof Error ? error62 : new Error(String(error62));
+      this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", cause);
+      throw new CodexAppServerError("CODEX_BINARY_UNAVAILABLE", "Codex App Server binary is unavailable.", { cause });
+    }
+    let resolveExit;
+    const exitPromise = new Promise((resolve10) => {
+      resolveExit = resolve10;
+    });
+    this.childExitPromises.set(child, exitPromise);
+    this.process = child;
+    this.resetStdoutBuffer();
     this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer2.from(chunk)));
+    child.stdin.on("error", (error62) => {
+      if (this.process === child) this.handleProcessFailure("CODEX_APP_SERVER_EXITED", error62);
+    });
+    child.stdout.on("data", (chunk) => {
+      if (this.process === child) this.consumeStdout(child, Buffer2.from(chunk));
+    });
     child.stderr.on("data", (chunk) => {
+      if (this.process !== child) return;
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer2.byteLength(chunk));
     });
-    child.on("error", (error62) => this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error62));
+    child.on("error", (error62) => {
+      if (child.pid === void 0) {
+        this.exitedChildren.add(child);
+        resolveExit();
+      }
+      if (this.process === child) this.handleProcessFailure("CODEX_BINARY_UNAVAILABLE", error62);
+    });
     child.on("exit", (code, signal) => {
+      this.exitedChildren.add(child);
+      resolveExit();
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
+      this.resetStdoutBuffer();
       this.failPending(new CodexAppServerError("CODEX_APP_SERVER_EXITED", "Codex App Server exited unexpectedly."));
       if (!this.closed) {
         this.logger?.warn("Codex App Server exited", {
@@ -92446,11 +92641,20 @@ var CodexAppServerClient = class {
           mcpServerOpenaiFormElicitation: false
         }
       }, APP_SERVER_START_TIMEOUT_MS);
+      if (this.closed || this.process !== child) {
+        throw new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed during initialization.");
+      }
       this.write({ method: "initialized", params: {} });
+      if (this.closed || this.process !== child) {
+        throw new CodexAppServerError("CODEX_CLOSED", "Codex App Server was closed during initialization.");
+      }
       this.ready = true;
       this.logger?.info("Codex App Server ready");
     } catch (error62) {
-      child.kill("SIGTERM");
+      this.ready = false;
+      this.resetStdoutBuffer();
+      if (this.process === child) this.process = void 0;
+      void this.terminateChild(child);
       if (error62 instanceof CodexAppServerError) throw error62;
       throw new CodexAppServerError("CODEX_INITIALIZE_FAILED", "Codex App Server initialization failed.", { cause: error62 });
     }
@@ -92481,21 +92685,37 @@ var CodexAppServerClient = class {
     child.stdin.write(`${JSON.stringify(message)}
 `);
   }
-  consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer2.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
-      this.handleProcessFailure(
-        "CODEX_RESPONSE_TOO_LARGE",
-        new Error("Codex App Server emitted an oversized JSONL message.")
-      );
-      return;
-    }
-    let newline = this.stdoutBuffer.indexOf(10);
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline);
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
-      if (line.length > 0) this.handleLine(line);
-      newline = this.stdoutBuffer.indexOf(10);
+  consumeStdout(child, chunk) {
+    let offset2 = 0;
+    while (offset2 < chunk.length) {
+      if (this.process !== child || this.closed) return;
+      const newline = chunk.indexOf(10, offset2);
+      if (newline < 0) {
+        const tail2 = offset2 === 0 ? chunk : chunk.subarray(offset2);
+        if (this.stdoutBytes + tail2.length > MAX_APP_SERVER_LINE_BYTES) {
+          this.handleProcessFailure(
+            "CODEX_RESPONSE_TOO_LARGE",
+            new Error("Codex App Server emitted an oversized JSONL message.")
+          );
+          return;
+        }
+        this.stdoutChunks.push(tail2);
+        this.stdoutBytes += tail2.length;
+        return;
+      }
+      const tail = chunk.subarray(offset2, newline);
+      const lineBytes = this.stdoutBytes + tail.length;
+      if (lineBytes > MAX_APP_SERVER_LINE_BYTES) {
+        this.handleProcessFailure(
+          "CODEX_RESPONSE_TOO_LARGE",
+          new Error("Codex App Server emitted an oversized JSONL message.")
+        );
+        return;
+      }
+      const line = this.stdoutChunks.length === 0 ? tail : Buffer2.concat([...this.stdoutChunks, tail], lineBytes);
+      this.resetStdoutBuffer();
+      offset2 = newline + 1;
+      if (line.length > 0 && !this.handleLine(line)) return;
     }
   }
   handleLine(line) {
@@ -92504,35 +92724,79 @@ var CodexAppServerClient = class {
       value = JSON.parse(line.toString("utf8"));
     } catch {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
-      return;
+      return false;
     }
     if (!isRecord12(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
-      return;
+      return false;
     }
     if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
       const pending = this.takePending(value.id);
-      if (pending === void 0) return;
+      if (pending === void 0) return true;
       if ("error" in value && value.error !== void 0) {
         pending.reject(safeUpstreamError(value.error, pending.method));
       } else {
         pending.resolve(value.result);
       }
-      return;
+      return true;
     }
-    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
+    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return true;
     const params = value.params ?? {};
     const inbound = typeof value.id === "string" || typeof value.id === "number" ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
     for (const handler of this.inboundHandlers) handler(inbound);
+    return true;
   }
   handleProcessFailure(code, cause) {
     this.ready = false;
+    this.resetStdoutBuffer();
     this.failPending(new CodexAppServerError(code, "Codex App Server communication failed.", { cause }));
     const child = this.process;
     this.process = void 0;
-    child?.kill("SIGTERM");
+    void this.terminateChild(child);
     this.logger?.warn("Codex App Server communication failed", { code });
     if (!this.closed) this.notifyUnavailable(code);
+  }
+  terminateChild(child) {
+    if (child === void 0 || this.hasChildExited(child)) return Promise.resolve();
+    const existing = this.terminatingChildren.get(child);
+    if (existing !== void 0) return existing;
+    const exitPromise = this.childExitPromises.get(child);
+    const termination = new Promise((resolve10) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer2);
+        resolve10();
+      };
+      const timer2 = setTimeout(() => {
+        if (!this.hasChildExited(child)) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+          }
+        }
+        finish();
+      }, 2e3);
+      timer2.unref?.();
+      if (exitPromise !== void 0) void exitPromise.then(finish);
+      else child.once("exit", finish);
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        finish();
+      }
+    });
+    this.terminatingChildren.set(child, termination);
+    this.pendingTermination = termination;
+    return termination;
+  }
+  hasChildExited(child) {
+    return this.exitedChildren.has(child) || child.exitCode != null || child.signalCode != null;
+  }
+  resetStdoutBuffer() {
+    this.stdoutChunks = [];
+    this.stdoutBytes = 0;
   }
   notifyUnavailable(code) {
     if (this.failureNotified) return;
@@ -93264,7 +93528,7 @@ var CodexPeerBridge = class {
       const data2 = { streamId, frame };
       if (encodeMessage(createEvent("codex.app.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
         this.streams.delete(streamId);
-        void this.domain.releaseThread(threadId);
+        void this.domain.releaseThread(threadId).catch(() => void 0);
         await this.publish("codex.app.stream.closed", { streamId, reason: "failed" }).catch(() => void 0);
         this.logger?.warn("Codex stream closed after oversized frame", { streamId });
         continue;
@@ -93429,14 +93693,16 @@ var CodexThreadLifecycle = class {
     }
     state2.releasing = true;
     const release = this.unload(threadId, state2).finally(() => {
-      state2.releasing = false;
+      if (state2.release === release) state2.releasing = false;
     });
     state2.release = release;
     await release.catch((error62) => this.failed(error62));
   }
   async unload(threadId, state2) {
     let timer2;
+    let onClosed;
     const closed = new Promise((resolve10, reject) => {
+      onClosed = resolve10;
       state2.closed = resolve10;
       timer2 = setTimeout(() => reject(new RpcError("CODEX_THREAD_CLOSING", "The CodeX thread is still closing. Please retry shortly.")), this.closeTimeoutMs);
       timer2.unref?.();
@@ -93445,8 +93711,8 @@ var CodexThreadLifecycle = class {
     try {
       const result = await this.unsubscribe(threadId);
       if (typeof result === "object" && result !== null && "status" in result && result.status === "notLoaded") {
-        this.closed(threadId);
-      } else {
+        if (this.threads.get(threadId) === state2 && state2.closed === onClosed) this.closed(threadId);
+      } else if (this.threads.get(threadId) === state2 && state2.closed === onClosed) {
         await closed;
       }
     } finally {
@@ -93644,7 +93910,7 @@ var CodexRemoteDomain = class {
   }
   rememberThread(connectionId, threadId, releaseDetached = false) {
     if (!this.peers.has(connectionId)) {
-      if (releaseDetached) void this.releaseThread(threadId);
+      if (releaseDetached) void this.releaseThread(threadId).catch(() => void 0);
       return;
     }
     let threads = this.peerThreads.get(connectionId);
@@ -93897,7 +94163,7 @@ var CodexRemoteDomain = class {
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
     }
     this.scheduleApprovalExpiry();
-    await Promise.all([...threadIds].map((threadId) => this.releaseThread(threadId)));
+    await Promise.allSettled([...threadIds].map((threadId) => this.releaseThread(threadId)));
   }
   async reconfigure(config2) {
     if (this.closed) throw new RpcError("CODEX_CLOSED", "The Codex Remote domain is closed.");
@@ -94916,7 +95182,7 @@ function macOSCodexBinaryCandidates(userHome) {
   ].flatMap((chatGptApp) => {
     const codexCli = join6(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
-      const manifest = JSON.parse(readFileSync(join6(codexCli, "codex-package.json"), "utf8"));
+      const manifest = JSON.parse(readFileSync2(join6(codexCli, "codex-package.json"), "utf8"));
       if (!isRecord14(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
@@ -94941,7 +95207,7 @@ function windowsBundledCodexCandidates(userHome) {
   try {
     return readdirSync2(binRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => join6(binRoot, entry.name, "codex.exe")).filter((candidate) => existsSync2(candidate)).map((candidate) => {
       try {
-        return { candidate, mtime: statSync2(candidate).mtimeMs };
+        return { candidate, mtime: statSync3(candidate).mtimeMs };
       } catch {
         return { candidate, mtime: 0 };
       }
@@ -95504,177 +95770,6 @@ function readOption(value) {
 }
 function record8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// packages/plugin/src/acp/windows-spawn.ts
-import {
-  execFile,
-  execFileSync,
-  spawn as spawn3
-} from "node:child_process";
-import { readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
-import { win32 as win322 } from "node:path";
-import { promisify as promisify2 } from "node:util";
-var execFileAsync = promisify2(execFile);
-var WINDOWS_EXECUTABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
-var EXTENSION_PRIORITY = Object.freeze({
-  ".exe": 0,
-  ".cmd": 1,
-  ".bat": 2,
-  ".com": 3
-});
-var MAX_SHIM_BYTES = 64 * 1024;
-var ALLOWED_SHIM_SET_VARS = /* @__PURE__ */ new Set(["dp0", "_prog", "pathext"]);
-var NPM_SHIM_INVOCATION_PATTERN = /(?:^|[&\s])(?:"(?:%_prog%|%~dp0\\+node\.exe|%dp0%\\+node\.exe)"|node)\s+"((?:%~dp0|%dp0%)[^"]+\.(?:[cm]?js))"\s+%\*\s*$/im;
-function isWindowsExecutablePath(filePath) {
-  const ext = win322.extname(filePath.trim()).toLowerCase();
-  return Object.prototype.hasOwnProperty.call(EXTENSION_PRIORITY, ext);
-}
-function windowsExecutableRank(filePath) {
-  const ext = win322.extname(filePath.trim()).toLowerCase();
-  return EXTENSION_PRIORITY[ext] ?? Number.POSITIVE_INFINITY;
-}
-function isWindowsBatchFile(filePath) {
-  const ext = win322.extname(filePath.trim()).toLowerCase();
-  return ext === ".cmd" || ext === ".bat";
-}
-function selectWindowsExecutable(lines, checkExecutable = defaultIsFile) {
-  const matches = [];
-  for (const rawLine of lines) {
-    const candidate = rawLine.trim();
-    if (!candidate || !isWindowsExecutablePath(candidate)) continue;
-    if (!checkExecutable(candidate)) continue;
-    matches.push(win322.resolve(candidate));
-  }
-  if (matches.length === 0) return void 0;
-  matches.sort((left, right) => windowsExecutableRank(left) - windowsExecutableRank(right));
-  return matches[0];
-}
-function lookupWindowsPathExecutable(command, checkExecutable) {
-  try {
-    const output2 = execFileSync("where", [command], {
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8",
-      timeout: 5e3,
-      windowsHide: true
-    });
-    return selectWindowsExecutable(output2.split(/\r?\n/), checkExecutable);
-  } catch {
-    return void 0;
-  }
-}
-function assertSafeCommandArgument(value) {
-  if (/[\r\n\0]/.test(value)) {
-    throw new Error("Command arguments must not contain CR, LF, or NUL characters.");
-  }
-}
-function escapeCmdBatchArgument(arg) {
-  assertSafeCommandArgument(arg);
-  let quoted = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
-  quoted = `"${quoted}"`;
-  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
-  quoted = quoted.replace(/([()%!^"<>&|])/g, "^$1");
-  return quoted;
-}
-function resolveNpmCmdShim(cmdPath, hooks = {}) {
-  if (!isWindowsBatchFile(cmdPath)) return void 0;
-  const read = hooks.readFileSync ?? ((path, encoding) => readFileSync2(path, encoding));
-  const isFile = hooks.isFile ?? defaultIsFile;
-  let content;
-  try {
-    content = read(cmdPath, "utf8");
-  } catch {
-    return void 0;
-  }
-  if (!content || Buffer.byteLength(content, "utf8") > MAX_SHIM_BYTES) return void 0;
-  if (hasUnexpectedSetStatement(content)) return void 0;
-  const match = NPM_SHIM_INVOCATION_PATTERN.exec(content);
-  if (!match?.[1]) return void 0;
-  const relativeTarget = match[1].replace(/^%~?dp0%?[\\/]?/i, "");
-  if (relativeTarget.includes("%")) return void 0;
-  const resolvedScript = win322.resolve(win322.dirname(cmdPath), relativeTarget);
-  if (!isFile(resolvedScript)) return void 0;
-  const isElectron = hooks.isElectron ?? Boolean(process.versions.electron);
-  return {
-    file: hooks.nodeExecPath ?? process.execPath,
-    argsPrefix: [resolvedScript],
-    ...isElectron ? { envPatch: { ELECTRON_RUN_AS_NODE: "1" } } : {}
-  };
-}
-function resolveSpawnTarget(command, args, options, hooks = {}) {
-  assertSafeCommandArgument(command);
-  for (const arg of args) assertSafeCommandArgument(arg);
-  const platform3 = hooks.platform ?? process.platform;
-  const baseOptions = { ...options, windowsHide: true };
-  if (platform3 !== "win32") {
-    return { file: command, args: [...args], options: baseOptions };
-  }
-  const isFile = hooks.isFile ?? defaultIsFile;
-  const resolvedCommand = resolveWindowsCommand(command, isFile, hooks.lookupPath);
-  if (!isWindowsBatchFile(resolvedCommand)) {
-    return { file: resolvedCommand, args: [...args], options: baseOptions };
-  }
-  const shim = resolveNpmCmdShim(resolvedCommand, hooks);
-  if (shim) {
-    const env = shim.envPatch ? { ...options.env ?? process.env, ...shim.envPatch } : options.env;
-    return {
-      file: shim.file,
-      args: [...shim.argsPrefix, ...args],
-      options: env ? { ...baseOptions, env } : baseOptions
-    };
-  }
-  if (resolvedCommand.includes('"') || resolvedCommand.includes("%")) {
-    throw new Error("Batch executable path contains unsafe characters.");
-  }
-  const quotedCommand = `"${resolvedCommand}"`;
-  const escapedArgs = args.map(escapeCmdBatchArgument);
-  const innerCommand = escapedArgs.length > 0 ? `${quotedCommand} ${escapedArgs.join(" ")}` : quotedCommand;
-  const comspec = hooks.comspec ?? options.env?.ComSpec ?? process.env.ComSpec ?? "cmd.exe";
-  return {
-    file: comspec,
-    args: ["/d", "/s", "/c", `"${innerCommand}"`],
-    options: { ...baseOptions, windowsVerbatimArguments: true }
-  };
-}
-function spawnCommand(command, args, options = {}) {
-  const target3 = resolveSpawnTarget(command, args, options);
-  return spawn3(target3.file, target3.args, target3.options);
-}
-async function execFileCommand(command, args, options = {}) {
-  const target3 = resolveSpawnTarget(command, args, options);
-  const result = await execFileAsync(target3.file, target3.args, target3.options);
-  return {
-    stdout: String(result.stdout ?? ""),
-    stderr: String(result.stderr ?? "")
-  };
-}
-function resolveWindowsCommand(command, isFile, lookupPath) {
-  if (isWindowsExecutablePath(command)) return command;
-  const hasPathSeparator = command.includes("\\") || command.includes("/");
-  if (!hasPathSeparator) {
-    const resolved = lookupPath ? lookupPath(command) : lookupWindowsPathExecutable(command, (candidate) => isFile(candidate));
-    return resolved ?? command;
-  }
-  for (const ext of WINDOWS_EXECUTABLE_EXTENSIONS) {
-    const candidate = `${command}${ext}`;
-    if (isFile(candidate)) return candidate;
-  }
-  return command;
-}
-function hasUnexpectedSetStatement(content) {
-  for (const rawLine of content.split(/\r?\n/)) {
-    const match = /^\s*@?SET\s+"?([A-Za-z_][A-Za-z0-9_]*)=/i.exec(rawLine);
-    if (!match) continue;
-    if (!ALLOWED_SHIM_SET_VARS.has(match[1].toLowerCase())) return true;
-  }
-  return false;
-}
-function defaultIsFile(candidate) {
-  try {
-    return statSync3(candidate).isFile();
-  } catch {
-    return false;
-  }
 }
 
 // packages/plugin/src/acp/adapters/cursor-process.ts
@@ -96580,7 +96675,7 @@ var import_headless = __toESM(require_xterm_headless(), 1);
 var import_addon_serialize = __toESM(require_addon_serialize(), 1);
 
 // packages/plugin/src/remote-terminal-provider.ts
-import { spawn as spawn4 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as constants3 } from "node:fs";
 import { userInfo } from "node:os";
@@ -96637,7 +96732,7 @@ async function discoverTerminalShells(provider, signal = new AbortController().s
 function pipeTerminalSpawner() {
   return Object.assign(async (spec) => {
     spec.signal.throwIfAborted();
-    const child = spawn4(spec.argv[0], spec.argv.slice(1), {
+    const child = spawn3(spec.argv[0], spec.argv.slice(1), {
       cwd: spec.cwd,
       stdio: "pipe",
       windowsHide: true,
@@ -96985,9 +97080,9 @@ var RemoteTerminalState = class {
   }
 };
 var RemoteTerminalController = class {
-  constructor(shared, spawn5, enabled, scopeError) {
+  constructor(shared, spawn4, enabled, scopeError) {
     this.shared = shared;
-    this.spawn = spawn5;
+    this.spawn = spawn4;
     this.enabled = enabled;
     this.scopeError = scopeError;
   }
@@ -103400,11 +103495,17 @@ function backendCommandAvailable(backend, command) {
   const trimmed = command.trim();
   if (defaultCheckExecutable(trimmed)) return true;
   const candidates = backend === "codex" ? codexBinaryCandidates(trimmed) : backend === "cursor" || backend === "antigravity" || backend === "opencode" ? cursorBinaryCandidates(trimmed) : [trimmed];
-  return candidates.some((candidate) => defaultCheckExecutable(candidate) || commandAvailable(candidate));
+  return candidates.some((candidate) => defaultCheckExecutable(candidate) || !hasPathSeparator(candidate) && commandAvailable(candidate));
+}
+function hasPathSeparator(command) {
+  return command.includes("/") || command.includes("\\");
 }
 function commandAvailable(command) {
+  if (process.platform === "win32") {
+    return lookupSystemPath(command, "win32") !== void 0;
+  }
   try {
-    execFileSync3(process.platform === "win32" ? "where" : "which", [command], {
+    execFileSync3("which", [command], {
       stdio: "ignore",
       timeout: 5e3,
       windowsHide: true

@@ -291,7 +291,7 @@ export class CodexRemoteDomain {
 
   private rememberThread(connectionId: string, threadId: string, releaseDetached = false): void {
     if (!this.peers.has(connectionId)) {
-      if (releaseDetached) void this.releaseThread(threadId)
+      if (releaseDetached) void this.releaseThread(threadId).catch(() => undefined)
       return
     }
     let threads = this.peerThreads.get(connectionId)
@@ -576,7 +576,7 @@ export class CodexRemoteDomain {
       await appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
     }
     this.scheduleApprovalExpiry()
-    await Promise.all([...threadIds].map(threadId => this.releaseThread(threadId)))
+    await Promise.allSettled([...threadIds].map(threadId => this.releaseThread(threadId)))
   }
 
   async reconfigure(config: ResolvedCodexConfig): Promise<void> {
