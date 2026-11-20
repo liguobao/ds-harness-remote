@@ -17,6 +17,7 @@ interface ActiveConnection {
 
 export interface PeerConnectionContext {
   peerIdentityKey?: string
+  sameLinkIpv6Endpoints?: AuthenticatedPeerChannel['sameLinkIpv6Endpoints']
   lanWebAddress?: AuthenticatedPeerChannel['lanWebAddress']
   transportMode?: () => AuthenticatedPeerChannel['mode']
   createTransportUpgradeHost?: AuthenticatedPeerChannel['createTransportUpgradeHost']
@@ -92,7 +93,7 @@ export class ConnectionController {
     await Promise.all(replaced.map(connection => this.disconnect(connection, 'CONNECTION_REPLACED')))
 
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, sameLinkIpv6Endpoints: channel.sameLinkIpv6Endpoints?.bind(channel), lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
       message => this.sendTo(connectionId, channel, message),
     )
     const connection: ActiveConnection = {

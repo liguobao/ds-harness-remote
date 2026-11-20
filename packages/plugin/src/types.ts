@@ -13,6 +13,7 @@ export interface AuthenticatedPeerChannel {
   }
   readonly peerDeviceId: string
   readonly peerIdentityKey: string
+  readonly sameLinkIpv6Endpoints?: () => Promise<string[]>
   readonly lanWebAddress?: () => Promise<string | undefined>
   readonly mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
   readonly createTransportUpgradeHost?: (publishEvent: (message: RemoteMessage) => Promise<void>) => import('./transport-upgrade.js').TransportUpgradeHost | undefined

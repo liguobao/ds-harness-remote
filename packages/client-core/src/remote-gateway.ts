@@ -44,6 +44,7 @@ export interface RemoteHostFeatures {
   pluginRoute: boolean
   capabilities: readonly string[]
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
+  sameLinkIpv6Endpoints?: readonly string[]
 }
 
 /** Optional type declarations refine negotiated capabilities; legacy Hosts omit them. */
@@ -138,6 +139,12 @@ export async function probeRemoteHostFeatures(
     throw new RemoteGatewayError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   const workspaceTypes = isRecord(value) && 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
+  const endpoints = value.sameLinkIpv6Endpoints
+  const sameLinkIpv6Endpoints = Array.isArray(endpoints) && endpoints.length <= 8
+    ? endpoints.filter((endpoint): endpoint is string => typeof endpoint === 'string' &&
+      /^[23][0-9a-f]{3}:[0-9a-f:]{1,34}:[1-9][0-9]{0,4}$/i.test(endpoint) &&
+      Number(endpoint.slice(endpoint.lastIndexOf(':') + 1)) <= 65_535)
+    : undefined
   return {
     commandList: remoteGateway || (apiProxy && fallback.commandList),
     fileViewer: capabilities.has('fileviewer.read.v1'),
@@ -149,6 +156,7 @@ export async function probeRemoteHostFeatures(
     sessionEvents: capabilities.has(REMOTE_SESSION_EVENTS_CAPABILITY),
     pluginRoute: capabilities.has('plugin.route.v1'),
     capabilities: description.capabilities,
+    ...(sameLinkIpv6Endpoints?.length ? { sameLinkIpv6Endpoints } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }
 }

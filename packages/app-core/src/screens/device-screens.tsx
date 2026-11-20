@@ -420,7 +420,7 @@ export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
     <View style={styles.group}>
       <KeyValue
         label={zhCN.devices.path}
-        value={connectionPath(connection.stats.mode)}
+        value={connectionPath(connection.stats.mode === 'P2P' && networkDetails?.sameLinkIpv6 ? 'LAN' : connection.stats.mode)}
       />
       {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
       <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />

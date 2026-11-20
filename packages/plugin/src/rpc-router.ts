@@ -136,6 +136,7 @@ export class RpcRouter {
     private readonly sessionTransfer?: SessionTransferPeer,
     private readonly dshWeb?: DshWebPeer,
     private readonly lanWeb?: DshWebLanPeer,
+    private readonly sameLinkIpv6Endpoints?: () => Promise<string[]>,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -237,8 +238,11 @@ export class RpcRouter {
             workspaceTypes = []
           }
         }
+        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.() ?? []
+        if (sameLinkIpv6Endpoints.length > 0) this.logger?.info('nominated IPv6 WebRTC endpoints verified on-link', { mode: 'LAN' })
         return {
           capabilities,
+          ...(sameLinkIpv6Endpoints.length > 0 ? { sameLinkIpv6Endpoints } : {}),
           ...(capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {}),
           ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
         }

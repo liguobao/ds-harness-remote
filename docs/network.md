@@ -128,6 +128,8 @@ Control frame 不得包含 Harness 业务明文。Server 需要读取路由信�
 
 LAN 不是另一套业务协议，而是 WebRTC 最终选中的 candidate pair 被识别为物理本地路径。RFC 1918、链路本地、回环地址和 mDNS/prflx 组合会参与判断。Tailscale 等 overlay/CGNAT 地址即使表现为 host candidate，也按 P2P 记录，避免把虚拟广域网络误标为物理 LAN。
 
+对于选中的全局 IPv6 直连，Linux Host 可以用无下一跳网关的内核路由及对应网卡的 IPv6 邻居记录确认同链路，并通过加密连接向客户端报告。支持此信息的客户端会显示 LAN。经网关的全局 IPv6 仍显示 P2P。如果原生 WebRTC 实现隐藏所选候选地址，可在 Host 进程设置 `DSH_REMOTE_WEBRTC_BACKEND=werift`，由内置 werift 提供所选候选对。
+
 ### P2P
 
 P2P 使用 ICE/STUN 尝试让 Client 与 Host 直接交换 DataChannel 流量。它通常延迟更低，也减少 Server 带宽，但能否成功取决于 NAT 类型、防火墙、IPv4/IPv6、企业网络策略和运行时 WebRTC 支持。

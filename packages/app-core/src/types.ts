@@ -487,7 +487,7 @@ export interface ConnectionSnapshot {
 }
 
 /** Diagnostics for the currently selected network path. Kept in memory only. */
-export type ConnectionNetworkDetails = AdaptiveConnectionDetails
+export type ConnectionNetworkDetails = AdaptiveConnectionDetails & { sameLinkIpv6?: true }
 
 export interface PairLink {
   server?: string

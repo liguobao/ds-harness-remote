@@ -3,12 +3,12 @@ import { LanUploadRoutes } from './lan-upload'
 import { nativeWebSocketSender } from './native-websocket-binary'
 import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
 import { LAN_UPLOAD_CAPABILITY, TRANSPORT_UPGRADE_CAPABILITY, classifyControlClose, wireFromTransportTier } from '@dsh-remote/protocol'
-import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
+import { AdaptiveTransport, type RtcIceServer } from '@dsh-remote/webrtc'
 import { websocketUrl } from '../lib/server-url'
 import { registerAcpBackendId } from '../lib/session-backend'
 import { connectionFailure, connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
-import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
+import type { ConnectionNetworkDetails, DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
 import { nativeRtcFactory } from './native-rtc-binary'
@@ -37,6 +37,7 @@ export class AndroidRemoteConnection {
   private compactHistorySupported = false
   private binaryUploads = false
   private lanWeb = false
+  private sameLinkIpv6Endpoints: readonly string[] = []
   private dshWeb = false
   private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
@@ -292,6 +293,7 @@ export class AndroidRemoteConnection {
     this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
     this.lanWeb = features.capabilities.includes(DSH_WEB_LAN_CAPABILITY)
+    this.sameLinkIpv6Endpoints = features.sameLinkIpv6Endpoints?.map(endpoint => endpoint.toLowerCase()) ?? []
     this.dshWeb = features.capabilities.includes(DSH_WEB_CAPABILITY)
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -568,17 +570,19 @@ export class AndroidRemoteConnection {
     return this.upgrader?.promote(options) ?? Promise.resolve(false)
   }
 
-  async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
+  async getNetworkDetails(): Promise<ConnectionNetworkDetails | undefined> {
+    const core = this.core
     const base = await this.transport?.connectionDetails()
     const upgraded = await this.upgrader?.connectionDetails()
-    if (upgraded !== undefined && base !== undefined) {
-      return {
-        ...base,
-        webRtcEnabled: true,
-        webRtc: upgraded,
-      }
+    if (base === undefined || this.core !== core) return undefined
+    const details = upgraded === undefined ? base : { ...base, webRtcEnabled: true, webRtc: upgraded }
+    const path = details.webRtc
+    if (core?.getStats().mode === 'P2P' && path?.transport === 'p2p'
+        && path.remoteAddressScope === 'public' && path.remoteAddress !== undefined
+        && this.sameLinkIpv6Endpoints.includes(path.remoteAddress.toLowerCase())) {
+      return { ...details, sameLinkIpv6: true }
     }
-    return base
+    return details
   }
 
   async close(): Promise<void> {
@@ -593,6 +597,7 @@ export class AndroidRemoteConnection {
     this.closeMux = undefined
     const core = this.core
     this.core = undefined
+    this.sameLinkIpv6Endpoints = []
     this.binaryUploads = false
     const upgrader = this.upgrader
     this.upgrader = undefined

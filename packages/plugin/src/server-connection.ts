@@ -56,6 +56,7 @@ import { createNodeWebSocket } from './node-websocket.js'
 import { TransportUpgradeHost, wrapUpgradedTransportFrame } from './transport-upgrade.js'
 import type { AuthenticatedPeerChannel } from './types.js'
 import { PLUGIN_VERSION } from './version.js'
+import { isIpv6OnLink } from './ipv6-on-link.js'
 
 interface WebSocketLike {
   readonly readyState: number
@@ -1597,6 +1598,21 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     }
     this.peerDeviceId = tunnel.peer.deviceId
     this.peerIdentityKey = tunnel.peer.publicKey
+  }
+
+  async sameLinkIpv6Endpoints(): Promise<string[]> {
+    const rtc = this.tunnel.rtc
+    if (rtc === undefined || this.mode === 'TURN' || this.mode === 'Relay') return []
+    const endpoints = await rtc.nominatedGlobalIpv6Endpoints().catch(() => undefined)
+    if (endpoints === undefined || endpoints.size > 8) return []
+    const verified = await Promise.all([...endpoints].map(async ([address, { local, remotes }]) => {
+      if (remotes.has(undefined) || remotes.size > 2) return undefined
+      for (const remote of remotes) {
+        if (remote === undefined || !await isIpv6OnLink(local, remote)) return undefined
+      }
+      return address
+    }))
+    return this.closed || rtc !== this.tunnel.rtc ? [] : verified.filter(address => address !== undefined)
   }
 
   async lanWebAddress() {

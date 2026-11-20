@@ -887,6 +887,7 @@ export interface RemoteHistoryConfigureParams {
 export interface HarnessTransportDescription {
   capabilities: string[]
   workspaceTypes?: RemoteWorkspaceTypeDescription[]
+  sameLinkIpv6Endpoints?: string[]
 }
 
 export type CodexPermissionPreset = 'workspace-write' | 'danger-full-access'

@@ -1803,7 +1803,7 @@ describe('HarnessAlphaClient file attachments', () => {
 })
 
 describe('HarnessAlphaClient live session events and control changes', () => {
-  it('recognizes remote.session.events.v1 capability in probeRemoteHostFeatures', async () => {
+  it('recognizes session events and valid IPv6 endpoint hints in transport discovery', async () => {
     const transport = new LoopbackTransport()
     const client = new RemoteClientCore(transport)
     await client.connect()
@@ -1814,6 +1814,7 @@ describe('HarnessAlphaClient live session events and control changes', () => {
       encodeMessage(
         createRpcResponse(request.id, {
           capabilities: ['harness.remote.v3', 'remote.session.events.v1'],
+          sameLinkIpv6Endpoints: ['2001:db8::1:443', '2001:db8::1:65536', '192.168.1.1:443'],
         }),
       ),
     )
@@ -1822,6 +1823,7 @@ describe('HarnessAlphaClient live session events and control changes', () => {
       remoteGateway: true,
       sessionFormat: 3,
       sessionEvents: true,
+      sameLinkIpv6Endpoints: ['2001:db8::1:443'],
     })
     await cleanupContract1()
   })

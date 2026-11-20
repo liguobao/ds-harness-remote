@@ -244,6 +244,7 @@ export class HostPluginRuntime {
         }, resolveDshWeb) : undefined,
         resolveDshWeb && context.transportMode && context.lanWebAddress
           ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : undefined,
+        context.sameLinkIpv6Endpoints,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

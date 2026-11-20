@@ -140,9 +140,11 @@ interface NativeDataChannel {
  * werift remains the no-native fallback for environments that cannot load it.
  */
 export async function loadNodeRtcFactory(options: WeriftFactoryOptions = {}): Promise<RtcPeerConnectionFactory | undefined> {
-  const nativeFactory = isElectronRuntime()
-    ? await loadExternalNativeRtcFactory().catch(() => undefined)
-    : await loadNativeRtcFactory().catch(() => undefined)
+  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === 'werift'
+    ? undefined
+    : isElectronRuntime()
+      ? await loadExternalNativeRtcFactory().catch(() => undefined)
+      : await loadNativeRtcFactory().catch(() => undefined)
   const factory = nativeFactory ?? await loadWeriftFactory(options)
   return factory === undefined ? undefined : wrapLocalCandidateFilterFactory(factory, options)
 }

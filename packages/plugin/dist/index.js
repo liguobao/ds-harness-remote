@@ -5827,12 +5827,12 @@ var require_thunky = __commonJS({
     process.nextTick(upgrade, 42);
     module.exports = thunky;
     function thunky(fn) {
-      var state2 = run;
+      var state2 = run2;
       return thunk;
       function thunk(callback) {
         state2(callback || noop);
       }
-      function run(callback) {
+      function run2(callback) {
         var stack = [callback];
         state2 = wait;
         fn(done);
@@ -5841,7 +5841,7 @@ var require_thunky = __commonJS({
         }
         function done(err5) {
           var args = arguments;
-          state2 = isError(err5) ? run : finished;
+          state2 = isError(err5) ? run2 : finished;
           while (stack.length) finished(stack.shift());
           function finished(callback2) {
             nextTick(apply2, callback2, args);
@@ -64204,7 +64204,7 @@ function visit(schema, fnOrHandlers) {
     return h ? h(node2, rewritten) : node2;
   };
   const cache = /* @__PURE__ */ new Map();
-  function run(s) {
+  function run2(s) {
     const cached2 = cache.get(s);
     if (cached2 === RESOLVING) {
       return new $ZodLazy({
@@ -64230,21 +64230,21 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newShape = {};
         for (const k of keys) {
-          const mapped = run(oldShape[k]);
+          const mapped = run2(oldShape[k]);
           if (mapped !== oldShape[k])
             changed = true;
           newShape[k] = mapped;
         }
         let newCatchall = def.catchall;
         if (def.catchall) {
-          newCatchall = run(def.catchall);
+          newCatchall = run2(def.catchall);
           if (newCatchall !== def.catchall)
             changed = true;
         }
         return changed ? clone(s, { ...def, shape: newShape, catchall: newCatchall }) : s;
       }
       case "array": {
-        const mapped = run(def.element);
+        const mapped = run2(def.element);
         return mapped === def.element ? s : clone(s, { ...def, element: mapped });
       }
       case "tuple": {
@@ -64252,14 +64252,14 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newItems = [];
         for (const item of oldItems) {
-          const mapped = run(item);
+          const mapped = run2(item);
           if (mapped !== item)
             changed = true;
           newItems.push(mapped);
         }
         let newRest = def.rest;
         if (def.rest) {
-          newRest = run(def.rest);
+          newRest = run2(def.rest);
           if (newRest !== def.rest)
             changed = true;
         }
@@ -64267,12 +64267,12 @@ function visit(schema, fnOrHandlers) {
       }
       case "record":
       case "map": {
-        const newKey = run(def.keyType);
-        const newVal = run(def.valueType);
+        const newKey = run2(def.keyType);
+        const newVal = run2(def.valueType);
         return newKey === def.keyType && newVal === def.valueType ? s : clone(s, { ...def, keyType: newKey, valueType: newVal });
       }
       case "set": {
-        const newVal = run(def.valueType);
+        const newVal = run2(def.valueType);
         return newVal === def.valueType ? s : clone(s, { ...def, valueType: newVal });
       }
       case "union": {
@@ -64280,7 +64280,7 @@ function visit(schema, fnOrHandlers) {
         let changed = false;
         const newOptions = [];
         for (const opt of oldOptions) {
-          const mapped = run(opt);
+          const mapped = run2(opt);
           if (mapped !== opt)
             changed = true;
           newOptions.push(mapped);
@@ -64288,8 +64288,8 @@ function visit(schema, fnOrHandlers) {
         return changed ? clone(s, { ...def, options: newOptions }) : s;
       }
       case "intersection": {
-        const newLeft = run(def.left);
-        const newRight = run(def.right);
+        const newLeft = run2(def.left);
+        const newRight = run2(def.right);
         return newLeft === def.left && newRight === def.right ? s : clone(s, { ...def, left: newLeft, right: newRight });
       }
       case "optional":
@@ -64301,23 +64301,23 @@ function visit(schema, fnOrHandlers) {
       case "nonoptional":
       case "promise":
       case "success": {
-        const newInner = run(def.innerType);
+        const newInner = run2(def.innerType);
         return newInner === def.innerType ? s : clone(s, { ...def, innerType: newInner });
       }
       case "pipe": {
-        const newIn = run(def.in);
-        const newOut = run(def.out);
+        const newIn = run2(def.in);
+        const newOut = run2(def.out);
         return newIn === def.in && newOut === def.out ? s : clone(s, { ...def, in: newIn, out: newOut });
       }
       case "function": {
-        const newInput = run(def.input);
-        const newOutput = run(def.output);
+        const newInput = run2(def.input);
+        const newOutput = run2(def.output);
         return newInput === def.input && newOutput === def.output ? s : clone(s, { ...def, input: newInput, output: newOutput });
       }
       case "lazy": {
         const original = def.getter;
         const { _cachedInner, ...rest } = def;
-        return clone(s, { ...rest, getter: () => run(original()) });
+        return clone(s, { ...rest, getter: () => run2(original()) });
       }
       // A leaf by choice: `parts` are regex fragments, not data positions.
       case "template_literal":
@@ -64348,7 +64348,7 @@ function visit(schema, fnOrHandlers) {
       }
     }
   }
-  return run(schema);
+  return run2(schema);
 }
 
 // node_modules/zod/v4/classic/deep-partial.js
@@ -67412,6 +67412,18 @@ var RtcDataChannelTransport = class {
       ...this.selectedPathTelemetry === void 0 ? {} : { selectedPath: { ...this.selectedPathTelemetry } }
     };
   }
+  async nominatedGlobalIpv6Endpoints() {
+    const endpoints = /* @__PURE__ */ new Map();
+    if (this.channel?.readyState !== "open")
+      return endpoints;
+    await this.refreshStatsDiagnostics((local, port, remote) => {
+      const key = `${local}:${port}`;
+      const endpoint = endpoints.get(key) ?? { local, remotes: /* @__PURE__ */ new Set() };
+      endpoint.remotes.add(remote);
+      endpoints.set(key, endpoint);
+    });
+    return endpoints;
+  }
   async connectionDetails() {
     let statsDetails = {};
     try {
@@ -67709,7 +67721,7 @@ var RtcDataChannelTransport = class {
     this.watchdogTimer = void 0;
     this.lastBufferedAmount = 0;
   }
-  async refreshStatsDiagnostics() {
+  async refreshStatsDiagnostics(onGlobalIpv6Pair) {
     const stats = [...await new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
       Promise.resolve().then(() => this.pc.getStats()).then(resolve10, reject).finally(() => clearTimeout(timer2));
@@ -67717,7 +67729,7 @@ var RtcDataChannelTransport = class {
     if (this.closed)
       return {};
     this.candidatePairTelemetry = inspectCandidatePairs(stats);
-    return inspectSelectedPath(stats);
+    return inspectSelectedPath(stats, onGlobalIpv6Pair);
   }
   handlePeerDiagnostic(event2) {
     if (event2.type === "local-candidate-filtered") {
@@ -67762,7 +67774,7 @@ var RtcConnectError = class extends Error {
     this.code = code;
   }
 };
-function inspectSelectedPath(stats) {
+function inspectSelectedPath(stats, onGlobalIpv6Pair) {
   const candidates = /* @__PURE__ */ new Map();
   const candidatePairs = /* @__PURE__ */ new Map();
   const selectedPairs = [];
@@ -67774,11 +67786,12 @@ function inspectSelectedPath(stats) {
         candidates.set(String(entry.id), entry);
       }
     } else if (entry.type === "candidate-pair") {
-      candidatePairs.set(String(entry.id ?? reportId), entry);
+      const pair = { ...entry, id: entry.id ?? reportId };
+      candidatePairs.set(String(pair.id), pair);
       if (entry.selected === true)
-        selectedPairs.push(entry);
+        selectedPairs.push(pair);
       else if (entry.nominated === true && entry.state === "succeeded")
-        nominatedPairs.push(entry);
+        nominatedPairs.push(pair);
     } else if (entry.type === "transport" && typeof entry.selectedCandidatePairId === "string") {
       selectedPairIds.add(entry.selectedCandidatePairId);
     }
@@ -67788,6 +67801,18 @@ function inspectSelectedPath(stats) {
     ...selectedPairs,
     ...nominatedPairs
   ];
+  if (onGlobalIpv6Pair !== void 0) {
+    for (const pair of new Set(pairs)) {
+      const local = candidates.get(String(pair.localCandidateId));
+      const remote = candidates.get(String(pair.remoteCandidateId));
+      const address2 = candidateAddressValue(local);
+      const port = numberStat(local, "port");
+      if (local?.candidateType !== "host" || !address2 || !isGlobalIpv6(address2) || port === void 0 || !Number.isInteger(port) || port < 1 || port > 65535)
+        continue;
+      const remoteAddress = candidateAddressValue(remote);
+      onGlobalIpv6Pair(address2, port, (remote?.candidateType === "host" || remote?.candidateType === "prflx") && remoteAddress && isGlobalIpv6(remoteAddress) ? remoteAddress : void 0);
+    }
+  }
   for (const pair of pairs) {
     const local = candidates.get(String(pair.localCandidateId));
     const remote = candidates.get(String(pair.remoteCandidateId));
@@ -67934,6 +67959,9 @@ function candidateTypeStat(candidate) {
 }
 function candidateAddressValue(candidate) {
   return stringStat(candidate, "address") ?? stringStat(candidate, "ip");
+}
+function isGlobalIpv6(address2) {
+  return /^[23][0-9a-f]{3}:/i.test(address2);
 }
 function isLanCandidatePair(localType, remoteType, localScope, remoteScope) {
   if (localType === "host" && remoteType === "host") {
@@ -86464,8 +86492,8 @@ var ServerCredentialStore = class {
   /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock(operation) {
     const gate = defaultMigrationGate(dirname2(this.path));
-    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation);
-    return gate === void 0 ? run() : withQueueLock(gate, run);
+    const run2 = () => withQueueLock(`${this.path}.refresh-lock`, operation);
+    return gate === void 0 ? run2() : withQueueLock(gate, run2);
   }
   async pairingHostOnly() {
     const policy = await readPrivateJson(join3(dirname2(this.path), "pairing-host-only.json"));
@@ -89481,7 +89509,7 @@ var cachedFactory;
 var cachedWerift;
 var cachedNativeFactory;
 async function loadNodeRtcFactory(options = {}) {
-  const nativeFactory = isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
+  const nativeFactory = process.env.DSH_REMOTE_WEBRTC_BACKEND === "werift" ? void 0 : isElectronRuntime() ? await loadExternalNativeRtcFactory().catch(() => void 0) : await loadNativeRtcFactory().catch(() => void 0);
   const factory = nativeFactory ?? await loadWeriftFactory(options);
   return factory === void 0 ? void 0 : wrapLocalCandidateFilterFactory(factory, options);
 }
@@ -100158,9 +100186,9 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile5 } = await import("node:child_process");
-    const { promisify: promisify7 } = await import("node:util");
-    const execFileAsync4 = promisify7(execFile5);
+    const { execFile: execFile6 } = await import("node:child_process");
+    const { promisify: promisify8 } = await import("node:util");
+    const execFileAsync4 = promisify8(execFile6);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
@@ -105285,16 +105313,16 @@ var DshWebPeer = class {
     this.openingStop?.abort();
     const priorClose = this.closing;
     const opening = this.opening;
-    const run = (async () => {
+    const run2 = (async () => {
       await priorClose;
       await this.closeActive();
       await opening?.catch(() => void 0);
       await this.closeActive();
     })().finally(() => {
-      if (this.closing === run) this.closing = void 0;
+      if (this.closing === run2) this.closing = void 0;
     });
-    this.closing = run;
-    return run;
+    this.closing = run2;
+    return run2;
   }
   async closeActive() {
     const active2 = this.active;
@@ -106509,7 +106537,7 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, sameLinkIpv6Endpoints: channel.sameLinkIpv6Endpoints?.bind(channel), lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -106978,7 +107006,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -106996,6 +107024,7 @@ var RpcRouter = class {
     this.sessionTransfer = sessionTransfer;
     this.dshWeb = dshWeb;
     this.lanWeb = lanWeb;
+    this.sameLinkIpv6Endpoints = sameLinkIpv6Endpoints;
   }
   active = 0;
   async closePeerStreams() {
@@ -107091,8 +107120,11 @@ var RpcRouter = class {
             workspaceTypes = [];
           }
         }
+        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.() ?? [];
+        if (sameLinkIpv6Endpoints.length > 0) this.logger?.info("nominated IPv6 WebRTC endpoints verified on-link", { mode: "LAN" });
         return {
           capabilities,
+          ...sameLinkIpv6Endpoints.length > 0 ? { sameLinkIpv6Endpoints } : {},
           ...capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {},
           ...workspaceTypes === void 0 ? {} : { workspaceTypes }
         };
@@ -107380,6 +107412,34 @@ function isOversizedListing(value) {
 // packages/plugin/src/node-websocket.ts
 function createNodeWebSocket(url2) {
   return new wrapper_default(url2, { perMessageDeflate: false });
+}
+
+// packages/plugin/src/ipv6-on-link.ts
+import { execFile as execFile5 } from "node:child_process";
+import { isIP as isIP4 } from "node:net";
+import { networkInterfaces as networkInterfaces5 } from "node:os";
+import { promisify as promisify7 } from "node:util";
+var run = promisify7(execFile5);
+var reachableNeighborStates = /* @__PURE__ */ new Set(["REACHABLE", "STALE", "DELAY", "PROBE"]);
+async function isIpv6OnLink(local, remote) {
+  if (process.platform !== "linux" || isIP4(local) !== 6 || isIP4(remote) !== 6) return false;
+  try {
+    const address2 = (value) => new URL(`http://[${value}]`).hostname;
+    const localAddress = address2(local);
+    const remoteAddress = address2(remote);
+    if (localAddress === remoteAddress) return false;
+    const [route] = await ipJson("route", "get", remote, "from", local);
+    if (typeof route?.dev !== "string" || route.gateway !== void 0 || route.via !== void 0 || route.type !== void 0 && route.type !== "unicast") return false;
+    if (!networkInterfaces5()[route.dev]?.some((entry) => entry.family === "IPv6" && !entry.internal && address2(entry.address) === localAddress)) return false;
+    const neighbors = await ipJson("neigh", "show", "to", remote, "dev", route.dev);
+    return neighbors.some((neighbor) => typeof neighbor.dst === "string" && isIP4(neighbor.dst) === 6 && address2(neighbor.dst) === remoteAddress && typeof neighbor.lladdr === "string" && Array.isArray(neighbor.state) && neighbor.state.some((state2) => reachableNeighborStates.has(state2)));
+  } catch {
+    return false;
+  }
+}
+async function ipJson(...args) {
+  const { stdout } = await run("/usr/sbin/ip", ["-j", "-6", ...args], { timeout: 250, maxBuffer: 16384 });
+  return JSON.parse(stdout);
 }
 
 // packages/plugin/src/server-connection.ts
@@ -108713,6 +108773,20 @@ var ServerNoiseChannel = class {
   closed = false;
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
+  async sameLinkIpv6Endpoints() {
+    const rtc = this.tunnel.rtc;
+    if (rtc === void 0 || this.mode === "TURN" || this.mode === "Relay") return [];
+    const endpoints = await rtc.nominatedGlobalIpv6Endpoints().catch(() => void 0);
+    if (endpoints === void 0 || endpoints.size > 8) return [];
+    const verified = await Promise.all([...endpoints].map(async ([address2, { local, remotes }]) => {
+      if (remotes.has(void 0) || remotes.size > 2) return void 0;
+      for (const remote of remotes) {
+        if (remote === void 0 || !await isIpv6OnLink(local, remote)) return void 0;
+      }
+      return address2;
+    }));
+    return this.closed || rtc !== this.tunnel.rtc ? [] : verified.filter((address2) => address2 !== void 0);
+  }
   async lanWebAddress() {
     const rtc = this.tunnel.rtc;
     const mode2 = this.mode;
@@ -108768,9 +108842,9 @@ var ServerNoiseChannel = class {
     }
   }
   async send(message) {
-    const run = this.sendTail.then(() => this.sendNow(message));
-    this.sendTail = run.catch(() => void 0);
-    return run;
+    const run2 = this.sendTail.then(() => this.sendNow(message));
+    this.sendTail = run2.catch(() => void 0);
+    return run2;
   }
   async sendNow(message) {
     if (this.tunnel.lease && !this.tunnel.lease.valid()) throw new Error("Control lease expired");
@@ -110941,7 +111015,8 @@ var HostPluginRuntime = class {
           clientDeviceId: context.peerDeviceId,
           connectionId: context.connectionId
         }, resolveDshWeb) : void 0,
-        resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0
+        resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0,
+        context.sameLinkIpv6Endpoints
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -111565,7 +111640,7 @@ function remoteDiscoveryTools(resolve10) {
     schema,
     render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }]
   });
-  const run = async (signal, query) => {
+  const run2 = async (signal, query) => {
     const lifetime2 = AbortSignal.any([signal, AbortSignal.timeout(12e4)]);
     lifetime2.throwIfAborted();
     const client = resolve10();
@@ -111588,7 +111663,7 @@ function remoteDiscoveryTools(resolve10) {
       output: output2(object5({ hosts: array5(hostSchema) }, ["hosts"])),
       execute: (args, exec2) => {
         emptyInput.parse(args);
-        return run(exec2.signal, async (client, signal) => ({
+        return run2(exec2.signal, async (client, signal) => ({
           hosts: (await client.devices(signal)).filter((host) => host.online).map((host) => ({
             hostId: host.deviceId,
             name: host.name,
@@ -111608,7 +111683,7 @@ function remoteDiscoveryTools(resolve10) {
       }, ["hostId", "workspaces", "unavailable"])),
       execute: (args, exec2) => {
         const { hostId } = workspaceInput.parse(args);
-        return run(exec2.signal, async (client, signal) => ({ hostId, ...await client.discoverToolWorkspaces(hostId, signal) }));
+        return run2(exec2.signal, async (client, signal) => ({ hostId, ...await client.discoverToolWorkspaces(hostId, signal) }));
       }
     }
   ];
@@ -111742,9 +111817,9 @@ function createPump() {
     }
   })();
   return {
-    enqueue(run) {
+    enqueue(run2) {
       return new Promise((resolve10, reject) => {
-        queue.push({ run, resolve: resolve10, reject });
+        queue.push({ run: run2, resolve: resolve10, reject });
         wake();
       });
     }
@@ -111752,10 +111827,10 @@ function createPump() {
 }
 var globalState = globalThis;
 var pump = globalState[PUMP_KEY] ?? (globalState[PUMP_KEY] = createPump());
-function runHmrSafe(run, hmr) {
+function runHmrSafe(run2, hmr) {
   return pump.enqueue(() => {
     const executing = hmr?.executing;
-    return typeof executing?.exit === "function" ? executing.exit(run) : run();
+    return typeof executing?.exit === "function" ? executing.exit(run2) : run2();
   });
 }
 
