@@ -281,6 +281,7 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 - [Codex Remote 技术说明](docs/codex-remote.md)
 - [ACP Remote / Agent adapter 技术说明](docs/acp-remote.md)
 - [文档索引](docs/README.md)
+- [贡献指南](CONTRIBUTING.zh.md)（[English](CONTRIBUTING.md)）
 - [端到端加密](docs/end-to-end-encryption.md)
 - [网络与传输](docs/network.md)
 - [远程协议](docs/protocol.md)
@@ -318,6 +319,8 @@ DS Bot 是一个基于 DeepSeek Harness（简称 dsh）的 bot 插件，插件�
 - **文档与多语言**：完善使用指南、修正表述细节，或协助保持中文、英文与日文文档同步。
 - **测试与多端体验**：在你的实际环境中（Desktop / Web / Android）体验运行，反馈真实场景下的表现。
 - **代码与代码审查**：认领待办事项、修复缺陷、实现新特性，或是协助 Review 社区的 Pull Request。
+
+准备开始参与？请先阅读[贡献指南](CONTRIBUTING.zh.md)（[English](CONTRIBUTING.md)），了解开发环境、验证命令与 PR 提交规范。
 
 <p align="center">
   <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
