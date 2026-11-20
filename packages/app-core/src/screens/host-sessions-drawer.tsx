@@ -49,7 +49,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
-import { AttentionHeaderPill, attentionStatusVisual } from './attention-inbox-sheet'
+import { AttentionInboxPill, attentionStatusVisual } from './attention-inbox-sheet'
 import { useAttentionStore } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends } from '../state/store-state'
@@ -1725,7 +1725,7 @@ export function HostSessionsDrawer({
         {((connected && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
           <View style={styles.hostFooterRight}>
             {connected && onOpenAttentionInbox !== undefined && (
-              <AttentionHeaderPill
+              <AttentionInboxPill
                 onPress={() => {
                   Keyboard.dismiss()
                   onOpenAttentionInbox()
@@ -2531,7 +2531,6 @@ const createStyles = (colors: ThemeColors) =>
       borderBottomColor: colors.primary,
     },
     statusIndicatorSlot: { width: 18, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
-    runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
     sessionText: { ...type.body, fontSize: 15, color: colors.ink, flex: 1, marginRight: spacing.xs },
     sessionTextSelected: { fontWeight: '600', color: colors.primary },
     timeText: { ...type.caption, color: colors.subtle },

@@ -383,7 +383,7 @@ export function AttentionInboxSheet({
  * Compact pill placed in the HostSessionsDrawer footer to the left of Settings,
  * showing urgent/active count and opening the Attention Inbox sheet.
  */
-export function AttentionHeaderPill({
+export function AttentionInboxPill({
   onPress,
 }: {
   onPress: () => void
@@ -432,9 +432,9 @@ export function AttentionHeaderPill({
       onPress={onPress}
       hitSlop={6}
       style={({ pressed }) => [
-        styles.headerPill,
+        styles.inboxPill,
         hasAny && [
-          styles.headerPillActive,
+          styles.inboxPillActive,
           { backgroundColor: colors.elevated, borderColor: borderTint },
         ],
         pressed && styles.pressed,
@@ -442,7 +442,7 @@ export function AttentionHeaderPill({
     >
       <Icon size={15} color={iconTint} strokeWidth={2.1} />
       {hasAny && (
-        <Text style={[styles.headerPillCount, { color: colors.ink }]} numberOfLines={1}>
+        <Text style={[styles.inboxPillCount, { color: colors.ink }]} numberOfLines={1}>
           {displayCount > 99 ? '99+' : displayCount}
         </Text>
       )}
@@ -589,7 +589,7 @@ function createStyles(colors: ThemeColors) {
     },
     emptyTitle: { ...type.bodyStrong, color: colors.ink, textAlign: 'center' },
     emptyBody: { ...type.small, color: colors.muted, textAlign: 'center' },
-    headerPill: {
+    inboxPill: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -600,10 +600,10 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 9,
       borderRadius: radius.pill,
     },
-    headerPillActive: {
+    inboxPillActive: {
       borderWidth: StyleSheet.hairlineWidth,
     },
-    headerPillCount: {
+    inboxPillCount: {
       ...type.caption,
       fontWeight: '700',
       fontVariant: ['tabular-nums'],
