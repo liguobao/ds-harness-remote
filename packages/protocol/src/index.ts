@@ -24,6 +24,15 @@ export { BINARY_UPLOAD_CAPABILITY, BINARY_UPLOAD_CHUNK_BYTES } from './binary-up
 export * from './loopback.js'
 import { parseWireJson } from './wire-json.js'
 export { parseWireJson } from './wire-json.js'
+import {
+  ATTENTION_SIGNAL_CAPABILITY,
+  PUSH_WAKE_CAPABILITY,
+  attentionDigestSchema,
+  attentionRpcMethods,
+  hostAttentionSignalPayloadSchema,
+  type AttentionDigest,
+} from './attention.js'
+export * from './attention.js'
 import { z } from 'zod'
 
 export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
@@ -198,6 +207,7 @@ export const controlFrameTypes = [
   'connection.lease.request',
   'connection.lease.ack',
   'connection.lease.close',
+  'host.attention.signal',
   'ping',
   'pong',
   'error',
@@ -216,6 +226,7 @@ export const sessionTransferMethods = [
 
 export const rpcMethods = [
   ...sessionTransferMethods,
+  ...attentionRpcMethods,
   'workspace.upload.lan.open',
   'workspace.upload.open',
   'workspace.upload.chunk',
@@ -292,6 +303,7 @@ export const remoteEvents = [
   'acp.session.request_permission',
   'acp.session.closed',
   'remote.transport.upgrade.ice',
+  'attention.follow.event',
 ] as const
 
 export const errorCodes = [
@@ -564,6 +576,15 @@ export const transportCapabilities = [
   'transport.relay',
 ] as const
 
+/** Known control-channel capabilities negotiated in ``hello`` / ``hello.ack``. */
+export const controlCapabilities = [
+  ...transportCapabilities,
+  WEBRTC_RESUME_CAPABILITY,
+  RELAY_RESUME_CAPABILITY,
+  ATTENTION_SIGNAL_CAPABILITY,
+  PUSH_WAKE_CAPABILITY,
+] as const
+
 /**
  * Universe of known harness/transfer/file-viewer/codex capability values (§17).
  *
@@ -593,6 +614,7 @@ export const harnessCapabilityValues = [
 ] as const
 
 export type TransportCapability = typeof transportCapabilities[number]
+export type ControlCapability = typeof controlCapabilities[number]
 export type HarnessCapabilityValue = typeof harnessCapabilityValues[number]
 
 export function selectProtocolVersion(
@@ -676,6 +698,14 @@ export interface DeviceDescriptor {
   identityKey: string
   clientVersion: string
   harnessVersion?: string
+  attentionDigest?: AttentionDigest
+}
+
+export interface DevicePresenceResponse {
+  deviceId: string
+  online: boolean
+  lastSeenAt?: number | null
+  attentionDigest?: AttentionDigest
 }
 
 export interface TransportStats {
@@ -1082,6 +1112,24 @@ export const accountDeviceDescriptorSchema: z.ZodType<AccountDeviceDescriptor> =
   clientDeviceDescriptorSchema,
 ])
 
+export const deviceDescriptorSchema: z.ZodType<DeviceDescriptor> = z.object({
+  deviceId: deviceIdSchema,
+  name: deviceNameSchema,
+  role: z.enum(['host', 'client']),
+  platform: devicePlatformSchema,
+  identityKey: identityKeySchema,
+  clientVersion: deviceVersionSchema,
+  harnessVersion: deviceVersionSchema.optional(),
+  attentionDigest: attentionDigestSchema.optional(),
+})
+
+export const devicePresenceResponseSchema: z.ZodType<DevicePresenceResponse> = z.object({
+  deviceId: z.string().min(1),
+  online: z.boolean(),
+  lastSeenAt: z.number().int().min(0).safe().nullable().optional(),
+  attentionDigest: attentionDigestSchema.optional(),
+})
+
 export const deviceRegistrationRequestSchema: z.ZodType<DeviceRegistrationRequest> = z.object({
   v: z.literal(PROTOCOL_VERSION),
   device: accountDeviceDescriptorSchema,
@@ -1347,6 +1395,7 @@ const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'connection.lease.request': connectionLeaseRequestSchema,
   'connection.lease.ack': connectionLeaseAckSchema,
   'connection.lease.close': z.object({ connectionId: z.string().min(1).max(128) }),
+  'host.attention.signal': hostAttentionSignalPayloadSchema,
   'ping': pingPongPayloadSchema,
   'pong': pingPongPayloadSchema,
   'error': controlErrorPayloadSchema,

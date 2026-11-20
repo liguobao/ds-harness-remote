@@ -181,6 +181,13 @@ export class CodexPeerBridge {
             throw new RpcError('CODEX_CONNECTION_CLOSED', 'The Codex stream was closed while opening.')
           }
           if (opening.truncated) replayTruncated = true
+          if (typeof this.domain.deliverPendingApprovals === 'function') {
+            await this.domain.deliverPendingApprovals(this.context.connectionId, params.streamId, params.threadId)
+          }
+          this.requireOpen()
+          if (this.openingStreams.get(params.streamId) !== opening) {
+            throw new RpcError('CODEX_CONNECTION_CLOSED', 'The Codex stream was closed while opening.')
+          }
           this.openingStreams.delete(params.streamId)
           this.streams.set(params.streamId, params.threadId)
         } catch (error) {

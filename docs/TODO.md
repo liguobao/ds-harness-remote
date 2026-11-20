@@ -23,6 +23,7 @@
 - [ ] Windows Host 双实例、异常退出锁恢复、身份迁移与权限错误；锁支持范围仍限[接入指南](plugin-integration.md)。
 - [ ] 完善账号过期、`DEVICE_OWNERSHIP_REQUIRED` 和 legacy owner 的显式恢复体验。
 - [ ] 跨平台验证 native picker 的只读目录兜底、symlink、权限错误与大目录截断。
+- [ ] Attention Inbox 在 0-client 后台态下观察 Harness 瞬时 `$events` 审批与 DS-Bot 事件（需官方网关提供不注册 `interactions: 'answer'` 的被动订阅能力，当前仅 CodeX、ACP 与 Harness `session/control` 问答支持 0-client 后台观察）。
 
 ## 网络与恢复
 
@@ -44,6 +45,7 @@
 - [ ] 自动化任务的修改/删除/历史分页、跨 Client 刷新；新会话防抖与文件选择器的目标平台回归。
 - [ ] 修复 Metro 对 `@noble/hashes/crypto.js` 的 package exports fallback 警告。
 - [ ] iOS 原生真机与跨设备回归；Expo export 或 Android APK 不作为 iOS 验收。
+- [ ] iOS ActivityKit / WidgetKit Live Activity 原生 Xcode Extension target（需 macOS Xcode / Xcode Cloud 签名与真机 APNs `liveactivity` 实测；当前已交付协议、`push.wake.v1` 客户端桥接与 Swift 蓝图，详见[Attention Inbox 设计](design/attention-inbox.md)）。
 
 ## DS-Bot
 

@@ -38,6 +38,11 @@ export function ownerPeerConstructor(
   return typeof candidate === 'function' ? candidate as OwnerPeerConstructor : undefined
 }
 
+/** Options passed when minting an owner Peer. */
+export interface OwnerPeerOptions {
+  interactions?: 'answer' | 'none'
+}
+
 /**
  * Create a factory that mints owner Peers for the calling plugin.
  *
@@ -53,11 +58,12 @@ export function createOwnerPeerFactory(
   ctx: unknown,
   constructor: OwnerPeerConstructor | undefined,
   connection: OwnerPeerServiceLike | undefined,
-): () => OwnerPeerLike | undefined {
-  return () => {
+): (options?: OwnerPeerOptions) => OwnerPeerLike | undefined {
+  return (options) => {
+    const interactions = options?.interactions ?? 'answer'
     if (constructor !== undefined) {
       try {
-        return new constructor(ctx, { principal: { kind: 'owner' }, interactions: 'answer' })
+        return new constructor(ctx, { principal: { kind: 'owner' }, interactions })
       } catch {
         // Fall through to the Connection Host service below.
       }
@@ -65,7 +71,7 @@ export function createOwnerPeerFactory(
     const createPeer = connection?.createPeer
     if (typeof createPeer !== 'function') return undefined
     try {
-      return createPeer.call(connection, { principal: { kind: 'owner' }, interactions: 'answer' })
+      return createPeer.call(connection, { principal: { kind: 'owner' }, interactions })
     } catch {
       return undefined
     }

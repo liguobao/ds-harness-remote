@@ -90,10 +90,17 @@ const PLUGIN_ROUTE_TIMEOUT_MS = 30_000
  * `api/bot`) through the shared fetch handler of the Host connection service.
  * The route allowlist and both size bounds keep the tunnel fail-closed.
  */
+export type PluginRouteObserver = (
+  route: string,
+  body: { endpoint: string; payload?: Record<string, unknown> | null },
+  result: PluginRouteCallResult,
+) => void
+
 export class PluginRouteBridge {
   constructor(
     private readonly dispatch: PluginRouteDispatcher,
     private readonly logger?: SafeLogger,
+    private readonly observer?: PluginRouteObserver,
   ) {}
 
   async call(input: unknown, transferred = false): Promise<PluginRouteCallResult> {
@@ -130,7 +137,15 @@ export class PluginRouteBridge {
       status: result.status,
       durationMs: Math.round(performance.now() - startedAt),
     })
-    return { status: result.status, json: result.json }
+    const output: PluginRouteCallResult = { status: result.status, json: result.json }
+    if (this.observer !== undefined) {
+      try {
+        this.observer(params.route, params.body, output)
+      } catch {
+        // Live observation must never fail a plugin route call.
+      }
+    }
+    return output
   }
 }
 

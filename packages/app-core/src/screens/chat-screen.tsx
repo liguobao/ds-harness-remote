@@ -30,6 +30,7 @@ import type { CustomPrompt } from '../services/storage'
 import { BUILT_IN_PROMPTS } from '../services/storage'
 import type { ChatSection } from '../state/message-helpers'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
+import { useAttentionStore } from '../state/attention-store'
 import { chatImageConnectionGeneration, requireConnectionRpc, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
 import { type UiArtifact } from '../state/ui-artifacts'
 import type {
@@ -107,6 +108,7 @@ import { useChatPrompts } from './chat/use-chat-prompts'
 import { useChatScroll } from './chat/use-chat-scroll'
 import { useChatTranscript } from './chat/use-chat-transcript'
 import { BotModeScreen } from './bot-mode-screen'
+import { AttentionHeaderPill } from './attention-inbox-sheet'
 import { useLiveSessionStatus } from './device-screens'
 import { HostSessionsDrawer } from './host-sessions-drawer'
 import { PluginsModal } from './plugins-modal'
@@ -135,6 +137,7 @@ export function ChatScreen({
   onOpenHostSwitcher,
   onOpenSettings,
   onOpenAbout,
+  onOpenAttentionInbox,
   botMode = false,
   externalOpenRevision,
   botConversationId,
@@ -151,6 +154,7 @@ export function ChatScreen({
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
+  onOpenAttentionInbox?: () => void
   botMode?: boolean
   externalOpenRevision?: number
   botConversationId?: string
@@ -724,6 +728,12 @@ export function ChatScreen({
     </ChatImageProvider>
   )
 
+  const openAttentionInbox = () => {
+    Keyboard.dismiss()
+    if (onOpenAttentionInbox) onOpenAttentionInbox()
+    else useAttentionStore.getState().setInboxOpen(true)
+  }
+
   if (botMode) {
     return wrapChatShell(
       <View style={styles.splitMain} {...swipeRightTouchProps}>
@@ -734,6 +744,7 @@ export function ChatScreen({
           onOpenDrawer={openSessionsDrawer}
           onDeviceInfo={() => onOpenDeviceInfo?.()}
           onMore={() => onOpenSettings?.()}
+          onOpenAttentionInbox={openAttentionInbox}
           splitView={splitNav}
           drawerOpen={sessionsOpen || splitNav}
           screenActive={active && (!sessionsOpen || splitNav)}
@@ -754,6 +765,7 @@ export function ChatScreen({
         backLabel={strings.chat.openHostSessions}
         action={
           <>
+            {connected && <AttentionHeaderPill onPress={openAttentionInbox} />}
             <IconButton
               label={strings.chat.newChat}
               icon={OfficialMenuIcons.newChat}
@@ -1208,6 +1220,7 @@ export function ChatScreen({
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
         action={<>
+          {connected && <AttentionHeaderPill onPress={openAttentionInbox} />}
           <IconButton label={trajectory ? strings.trajectory.close : strings.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />

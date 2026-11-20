@@ -10,6 +10,7 @@
 | 持久化 | JSON 文件 | 由独立仓库维护 |
 | 设备 | 注册、自有角色、刷新、发现和撤销等已实现 API | 完整账号/设备管理与关系授权 |
 | 连接 | Control、Noise 握手转发、可配置 WebRTC signaling/TURN credential、加密 Relay | 同一协议及部署实际启用的可选扩展 |
+| 注意力盲信号 / 唤醒推送 | 仅内存态 `attention.signal.v1` 聚合与可选盲 Webhook（无持久化与 APNs/FCM） | `attention.signal.v1` + `push.wake.v1`（APNs / FCM / iOS Live Activity） |
 | Web | 登录和设备状态页 | Remote Web 会话 UI 与 Admin |
 | 可选配对/Relay 恢复 | 不声明未实现能力 | 按 capability 协商，不能由版本号推断 |
 
@@ -42,6 +43,12 @@ TURN credential 仅向有权限且正在建立连接的双方签发；TURN secre
 - [设备配对](device-pairing-v1.md)：手机确认、单次验证码与电脑本机最终提交；不等同普通 OAuth 登录。
 - 独立 Relay attach：短期 ticket 绑定节点、epoch、connection 与设备对；不能复用到另一条连接。
 - [控制面恢复](design/control-recovery.md)：共用双端授权租约；WebRTC 需健康 DataChannel，独立 Relay 需原 data socket 存活。不恢复主 Server Relay、丢失的 socket 或端点重启。
+- 注意力盲信号与盲唤醒推送（`attention.signal.v1` / `push.wake.v1`，设计见 [attention-inbox.md](design/attention-inbox.md)）：
+  - 本仓库 `apps/server` 仅实现内存态 `attention.signal.v1`（接收 Host `host.attention.signal`、在 `/api/v1/devices` 与 `/presence` 附带可选 `attentionDigest`，并支持可选盲 Webhook），不实现 APNs/FCM 推送、Live Activity 或推送令牌持久化，也不宣告 `push.wake.v1`。
+  - 独立完整 Server 实现 `push.wake.v1` 时，向已认证 `role=client` 设备提供下列 REST 端点（Schema 见 `@dsh-remote/protocol`）：
+    - `PUT /api/v1/devices/self/push-target` / `DELETE /api/v1/devices/self/push-target`：登记或注销 APNs/FCM 设备令牌（`platform`、`pushToken`、可选 `environment`、`appId`、`locale`）。
+    - `PUT /api/v1/devices/self/live-activities/:hostId` / `DELETE /api/v1/devices/self/live-activities/:hostId`：校验调用方与 `:hostId` 的有效 membership 后，登记或注销 iOS ActivityKit `activityPushToken`（及可选 `pushToStartToken`、`environment`、`activityId`）。
+  - 无论 Webhook 还是 APNs/FCM/Live Activity，Server 只能转发严格校验通过的零明文 `AttentionDigest` 计数、类型、`urgency`、128-bit 随机 `attentionToken` 及服务端通用本地化模板文案；严禁保存或发送任何会话标题、摘要、Prompt、`sessionId`、路径或命令明文，并在设备撤销或 membership 失效时立即注销对应推送与 Live Activity 令牌。
 
 控制面中断时，已协商租约可能延迟撤销传播；不能宣称 Server 能物理保证断网 P2P 的瞬时断流。恢复不重放业务请求，也不重置 Noise counter。
 

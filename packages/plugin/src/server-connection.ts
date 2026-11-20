@@ -6,6 +6,7 @@ import {
   toBase64Url,
 } from '@dsh-remote/crypto'
 import {
+  ATTENTION_SIGNAL_CAPABILITY,
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   DEFAULT_PREVIOUS_LEG_DRAIN_MS,
   PROTOCOL_VERSION,
@@ -13,7 +14,9 @@ import {
   wireFromTransportTier,
   WEBRTC_RESUME_CAPABILITY,
   RELAY_RESUME_CAPABILITY,
+  attentionDigestSchema,
   classifyControlClose,
+  type AttentionDigest,
   type ConnectionLeaseAck,
   SecureMessageCodec,
   acceptNegotiatedCapabilities,
@@ -139,6 +142,7 @@ export class HostServerConnection {
     private readonly rtcFactoryProvider?: () => Promise<RtcPeerConnectionFactory | undefined>,
     private readonly hostCapabilities: () => readonly string[] = () => [],
     private readonly harnessVersion?: string,
+    private readonly onOnline?: () => void,
   ) {}
 
   start(): void {
@@ -176,6 +180,21 @@ export class HostServerConnection {
   }
 
   isOnline(): boolean { return this.online }
+
+  /**
+   * Publish a zero-plaintext `AttentionDigest` on the Control WebSocket.
+   * Strictly gated on an online control channel that negotiated `attention.signal.v1`.
+   */
+  publishAttentionDigest(digest: AttentionDigest): void {
+    if (!this.online || this.socket === undefined || this.socket.readyState !== 1) return
+    if (!this.negotiatedCapabilities.includes(ATTENTION_SIGNAL_CAPABILITY)) return
+    const validated = attentionDigestSchema.parse(digest)
+    try {
+      this.sendControl('host.attention.signal', { digest: validated })
+    } catch (error) {
+      this.logger.debug('host attention signal skipped', { code: errorCode(error) })
+    }
+  }
 
   recoveryExpiresAt(): number | undefined {
     const remaining = [...this.tunnels.values()].flatMap(tunnel => {
@@ -268,8 +287,8 @@ export class HostServerConnection {
     const credentials = await this.api.authenticate(this.identity)
     if (this.stopped) return
     const offeredCapabilities = this.rtcFactoryProvider === undefined || this.config.forceRelay
-      ? [RELAY_RESUME_CAPABILITY, 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
-      : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+      ? [RELAY_RESUME_CAPABILITY, ATTENTION_SIGNAL_CAPABILITY, 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
+      : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, ATTENTION_SIGNAL_CAPABILITY, 'transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
     const recoveryTickets = [...this.tunnels.values()].flatMap(tunnel => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64)
     const socket = this.createWebSocket(websocketUrl(this.api.baseUrl))
     this.socket = socket
@@ -553,6 +572,7 @@ export class HostServerConnection {
               connectionSessionId: shortId(payload.connectionSessionId),
             })
             for (const tunnel of this.tunnels.values()) tunnel.lease?.tick(true)
+            this.onOnline?.()
             return
           }
           // WHY: Connection-level `error` frames legitimately arrive before

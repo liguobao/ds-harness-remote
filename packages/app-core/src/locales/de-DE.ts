@@ -1106,6 +1106,37 @@ const deDE = {
     autoConnectDetail: "Deaktiviert: Beim Start in der Geräteliste bleiben",
     currentHost: "Aktueller Host",
   },
+  attention: {
+    title: 'Aufgaben-Posteingang',
+    openInbox: 'Aufgaben-Posteingang öffnen',
+    markAllRead: 'Alle als gelesen markieren',
+    sectionAttention: 'Handlungsbedarf',
+    sectionFinished: 'Abgeschlossen',
+    sectionRunning: 'Laufend',
+    emptyTitle: 'Alles erledigt',
+    emptyBody: 'Keine ausstehenden Freigaben, Fragen oder ungelesenen Abschlüsse auf diesem Host.',
+    statusApproval: 'Freigabe',
+    statusQuestion: 'Frage',
+    statusRunning: 'Läuft',
+    statusCompleted: 'Fertig',
+    statusFailed: 'Fehlgeschlagen',
+    crossHostTitle: 'Auf allen Online-Hosts',
+    approvalsCount: (n: number) => `${n} ${n === 1 ? 'Freigabe' : 'Freigaben'}`,
+    questionsCount: (n: number) => `${n} ${n === 1 ? 'Frage' : 'Fragen'}`,
+    runningCount: (n: number) => `${n} laufend`,
+    completedCount: (n: number) => `${n} fertig`,
+    extraTasks: (n: number) => `+${n} mehr aktiv`,
+    expiresIn: (remaining: string) => `Noch ${remaining}`,
+    notifyApproval: 'Wartet auf Ihre Freigabe',
+    notifyQuestion: 'Wartet auf Ihre Antwort',
+    notifyCompleted: 'Aufgabe abgeschlossen',
+    notifyFailed: 'Aufgabe fehlgeschlagen',
+    pillA11y: (urgent: number, total: number) => urgent > 0
+      ? `Aufgaben-Posteingang, ${urgent} dringend, ${total} gesamt`
+      : total > 0
+        ? `Aufgaben-Posteingang, ${total} aktiv`
+        : 'Aufgaben-Posteingang',
+  },
   errors: {
     'session/writer-held': "Dieses Gespräch wird von einem anderen Kunden geführt. Beenden Sie DeepSeek Harness auf diesem Client vollständig und versuchen Sie es dann hier erneut. Das Wechseln von Gesprächen oder das Schließen des Fensters wird möglicherweise nicht freigegeben. Ihre Nachricht wurde nicht gesendet.",
     ACCOUNT_AUTH_REQUIRED: "Melden Sie sich an, bevor Sie dieses Telefon anschließen.", AUTH_INVALID: "Ihre Anmeldung ist nicht mehr gültig. Melden Sie sich erneut an.", AUTH_REQUIRED: "Melden Sie sich erneut an, um fortzufahren.", TOKEN_EXPIRED: "Ihre Anmeldung ist abgelaufen. Melden Sie sich erneut an.", TOKEN_REUSED: "Dieses Telefon wurde zum Schutz Ihres Kontos abgemeldet. Melden Sie sich erneut an.", DEVICE_NOT_FOUND: "Dieses Gerät konnte nicht gefunden werden. Aktualisieren Sie die Geräteliste.", DEVICE_REVOKED: "Dieses Telefon wurde aus dem Konto entfernt. Melden Sie sich erneut an.", DEVICE_OWNERSHIP_REQUIRED: "Die Anmeldeinformationen auf diesem Telefon sind nicht mehr gültig. Melden Sie sich erneut an.", MEMBERSHIP_REQUIRED: "Sie haben keinen Zugriff mehr auf dieses Gerät. Stellen Sie sicher, dass beide Geräte dasselbe Konto verwenden.", HOST_OFFLINE: "Dieses Gerät ist offline. Stellen Sie sicher, dass DeepSeek Harness und das DSH Remote-Plugin ausgeführt werden.", DEVICE_OFFLINE: "Dieses Gerät ist offline. Stellen Sie sicher, dass DeepSeek Harness und das DSH Remote-Plugin ausgeführt werden.", PEER_IDENTITY_MISMATCH: "Die sichere Identität dieses Geräts hat sich geändert. Überprüfen Sie das Gerät und vertrauen Sie ihm dann erneut.", RATE_LIMITED: "Zu viele Operationen. Versuchen Sie es später noch einmal.", CONNECTION_FAILED: "Es konnte keine Verbindung zu diesem Gerät hergestellt werden. Überprüfen Sie Ihr Netzwerk und versuchen Sie es erneut.", P2P_FAILED: "Die direkte Verbindung ist fehlgeschlagen. Wechsel zum Server-Relay.", RELAY_UNAVAILABLE: "Das Server-Relay ist vorübergehend nicht verfügbar. Versuchen Sie es später noch einmal.", TURN_UNAVAILABLE: "Es konnte keine stabile Verbindung hergestellt werden. Versuchen Sie es mit einer anderen Methode.", SECURE_CHANNEL_FAILED: "Es konnte keine sichere Verbindung hergestellt werden. Versuchen Sie es erneut.", STREAM_TIMEOUT: "Zeitüberschreitung bei der Sitzungsverbindung. Bitte versuchen Sie es erneut.", RPC_TIMEOUT: "Es dauerte zu lange, bis das Gerät reagierte. Versuchen Sie es erneut.", UNSUPPORTED_VERSION: "Diese DSH Remote-Version ist nicht kompatibel. Aktualisieren Sie die App und versuchen Sie es erneut.", METHOD_NOT_ALLOWED: "Die aktuellen Einstellungen erlauben diesen Vorgang von Ihrem Telefon aus nicht.", PERMISSION_NOT_PENDING: "Diese Anfrage wurde bereits bearbeitet oder ist abgelaufen.", SESSION_NOT_FOUND: "Dieses Gespräch konnte nicht gefunden werden. Kehren Sie zur Konversationsliste zurück und aktualisieren Sie sie.", HARNESS_UNAVAILABLE: "DeepSeek Harness ist auf diesem Gerät vorübergehend nicht verfügbar. Stellen Sie sicher, dass es läuft.", AGENT_BUSY: "DeepSeek Harness verarbeitet einen weiteren Vorgang. Versuchen Sie es in Kürze noch einmal.", FULL_RESYNC_REQUIRED: "Die Konversation auf Ihrem Computer hat sich geändert. Öffnen Sie es erneut, um fortzufahren.",

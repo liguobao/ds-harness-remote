@@ -1,0 +1,281 @@
+{
+  "name": "control-attention-signal",
+  "cases": [
+    {
+      "name": "accept-valid-host-attention-signal",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-1",
+        "timestamp": 1786000000000,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 7,
+            "pendingApprovals": 1,
+            "pendingQuestions": 2,
+            "runningSessions": 3,
+            "completedUnread": 4,
+            "urgentKind": "question_needed",
+            "urgency": "critical",
+            "attentionToken": "0123456789abcdef0123456789abcdef",
+            "updatedAt": 1786000000000
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-valid-host-attention-signal-clear-without-token",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-2",
+        "timestamp": 1786000000001,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 8,
+            "pendingApprovals": 0,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": null,
+            "urgency": "silent",
+            "updatedAt": 1786000000001
+          }
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "accept-hello-offering-attention-signal-capability",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-hello-1",
+        "timestamp": 1786000000002,
+        "type": "hello",
+        "payload": {
+          "role": "host",
+          "deviceId": "fixture-host-1",
+          "accessToken": "fixture-access-token",
+          "protocols": [1],
+          "capabilities": ["transport.relay", "attention.signal.v1"]
+        }
+      },
+      "expect": {
+        "accepted": true
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-plaintext-title",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-3",
+        "timestamp": 1786000000003,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 1,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "approval_needed",
+            "urgency": "critical",
+            "updatedAt": 1786000000003,
+            "title": "Deploy production"
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-session-id",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-4",
+        "timestamp": 1786000000004,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 1,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "approval_needed",
+            "urgency": "critical",
+            "updatedAt": 1786000000004,
+            "sessionId": "session-123"
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-prompt-field",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-5",
+        "timestamp": 1786000000005,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 1,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "approval_needed",
+            "urgency": "critical",
+            "updatedAt": 1786000000005,
+            "prompt": "run database migration"
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-connection-id-on-payload",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-6",
+        "timestamp": 1786000000006,
+        "type": "host.attention.signal",
+        "payload": {
+          "connectionId": "0198abc7-1001-7abc-8123-123456789abc",
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 0,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "clear",
+            "urgency": "silent",
+            "updatedAt": 1786000000006
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-invalid-token",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-7",
+        "timestamp": 1786000000007,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 1,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "approval_needed",
+            "urgency": "critical",
+            "attentionToken": "not-a-valid-32-hex-token",
+            "updatedAt": 1786000000007
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-count-over-99",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-8",
+        "timestamp": 1786000000008,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 100,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "approval_needed",
+            "urgency": "critical",
+            "updatedAt": 1786000000008
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-negative-count",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-9",
+        "timestamp": 1786000000009,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 0,
+            "pendingQuestions": 0,
+            "runningSessions": -1,
+            "completedUnread": 0,
+            "urgentKind": null,
+            "urgency": "silent",
+            "updatedAt": 1786000000009
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-host-attention-signal-with-unknown-urgent-kind",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "fixture-attention-10",
+        "timestamp": 1786000000010,
+        "type": "host.attention.signal",
+        "payload": {
+          "digest": {
+            "revision": 1,
+            "pendingApprovals": 0,
+            "pendingQuestions": 0,
+            "runningSessions": 0,
+            "completedUnread": 0,
+            "urgentKind": "arbitrary_text",
+            "urgency": "normal",
+            "updatedAt": 1786000000010
+          }
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
+    }
+  ]
+}

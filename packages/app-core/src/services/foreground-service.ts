@@ -1,5 +1,7 @@
 interface ForegroundServiceModule {
   notifyTask(hostId: string, sessionId: string, title: string, body: string): void
+  notifyAttention?(hostId: string, deepLinkUrl: string, tag: string, title: string, body: string): void
+  clearAttentionAlerts?(hostId: string): Promise<void> | void
   start(): Promise<void>
   stop(): Promise<void>
   setStatus(status: string): Promise<void>
@@ -7,7 +9,27 @@ interface ForegroundServiceModule {
   isIgnoringBatteryOptimizations?(): Promise<boolean>
   requestIgnoreBatteryOptimizations?(): Promise<boolean>
   updateLiveTask?(hostId: string, sessionId: string, badge: string, title: string, statusText: string, isWaitingInput: boolean, updatedAtMs: number, summary: string): Promise<void>
+  updateLiveTaskV2?(
+    hostId: string,
+    deepLinkUrl: string,
+    badge: string,
+    title: string,
+    statusText: string,
+    isWaitingInput: boolean,
+    updatedAtMs: number,
+    summary: string,
+    extraCount: number,
+  ): Promise<void>
   clearLiveTask?(): Promise<void>
+}
+
+function legacySessionIdFromDeepLink(deepLinkUrl: string): string {
+  try {
+    const parsed = new URL(deepLinkUrl)
+    return parsed.searchParams.get('session') ?? ''
+  } catch {
+    return ''
+  }
 }
 
 function reactNative(): typeof import('react-native') | undefined {
@@ -32,6 +54,28 @@ export const foregroundService = {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
     nativeModule(rn).notifyTask(hostId, sessionId, title.slice(0, 100), body)
+  },
+  notifyAttention(hostId: string, deepLinkUrl: string, tag: string, title: string, body: string): void {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return
+    const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
+    if (native === undefined) return
+    const safeTitle = title.slice(0, 100)
+    if (typeof native.notifyAttention === 'function') {
+      native.notifyAttention(hostId, deepLinkUrl, tag, safeTitle, body)
+      return
+    }
+    native.notifyTask(hostId, legacySessionIdFromDeepLink(deepLinkUrl), safeTitle, body)
+  },
+  async clearAttentionAlerts(hostId: string): Promise<void> {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return
+    try {
+      const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
+      await native?.clearAttentionAlerts?.(hostId)
+    } catch {
+      // Best-effort clear; older APKs without clearAttentionAlerts safely no-op.
+    }
   },
   async start(): Promise<void> {
     const rn = reactNative()
@@ -93,6 +137,50 @@ export const foregroundService = {
     try {
       const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
       await native?.updateLiveTask?.(hostId, sessionId, badge, title, statusText, isWaitingInput, updatedAtMs, summary)
+    } catch {
+      // Best-effort live task update.
+    }
+  },
+  async updateLiveTaskV2(
+    hostId: string,
+    deepLinkUrl: string,
+    badge: string,
+    title: string,
+    statusText: string,
+    isWaitingInput: boolean,
+    updatedAtMs: number,
+    summary: string,
+    extraCount: number,
+  ): Promise<void> {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return
+    try {
+      const native = rn.NativeModules.DshRemoteForegroundService as ForegroundServiceModule | undefined
+      if (native === undefined) return
+      if (typeof native.updateLiveTaskV2 === 'function') {
+        await native.updateLiveTaskV2(
+          hostId,
+          deepLinkUrl,
+          badge,
+          title,
+          statusText,
+          isWaitingInput,
+          updatedAtMs,
+          summary,
+          Math.max(0, Math.floor(extraCount)),
+        )
+        return
+      }
+      await native.updateLiveTask?.(
+        hostId,
+        legacySessionIdFromDeepLink(deepLinkUrl),
+        badge,
+        title,
+        statusText,
+        isWaitingInput,
+        updatedAtMs,
+        summary,
+      )
     } catch {
       // Best-effort live task update.
     }

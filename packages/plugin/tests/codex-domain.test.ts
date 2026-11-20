@@ -1323,7 +1323,15 @@ describe('CodexRemoteDomain', () => {
       run: async () => {
         const { root } = await directories()
         const app = new FakeAppServer(root)
-        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        const domain = new CodexRemoteDomain(
+          { enabled: true, binary: 'codex' },
+          logger(),
+          () => app,
+          undefined,
+          undefined,
+          undefined,
+          action === 'disconnect' ? 0 : undefined,
+        )
         await domain.start()
         const frames: unknown[] = []
         const peer = domain.createPeer({ connectionId: 'first', peerDeviceId: 'one' }, async (_, data) => { frames.push(data) })!
@@ -2780,7 +2788,7 @@ describe('CodexRemoteDomain', () => {
     }
   })
 
-  it('re-arms the turn silence watchdog when an approval request arrives mid-turn', async () => {
+  it('pauses the turn silence watchdog while an approval is pending and resumes it after settlement', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
     const domain = new CodexRemoteDomain(
@@ -2821,24 +2829,30 @@ describe('CodexRemoteDomain', () => {
         },
       })
       await vi.advanceTimersByTimeAsync(0)
-      expect(frames.some(entry => entry.event === 'codex.app.frame'
+      const approvalEntry = frames.find(entry => entry.event === 'codex.app.frame'
         && isRecord(entry.data)
         && isRecord(entry.data.frame)
-        && entry.data.frame.method === 'item/commandExecution/requestApproval')).toBe(true)
+        && entry.data.frame.method === 'item/commandExecution/requestApproval')
+      expect(approvalEntry).toBeDefined()
 
-      // Total elapsed since turn/start is 120ms (> 100ms), but only 60ms since approval.
-      await vi.advanceTimersByTimeAsync(60)
+      // Watchdog stays paused for the entire approval wait (well past the 100ms silence timeout).
+      await vi.advanceTimersByTimeAsync(250)
       expect(frames.some(entry => entry.event === 'codex.app.frame'
         && isRecord(entry.data)
         && isRecord(entry.data.frame)
         && entry.data.frame.method === 'turn/completed')).toBe(false)
+      expect(app.responses).toEqual([])
       await expect(rival.call({
         method: 'turn/start',
         params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Compete' }] },
       })).rejects.toMatchObject({ code: 'CODEX_TURN_OWNED' })
 
-      // Remaining silence past 100ms from the approval request expires the turn.
-      await vi.advanceTimersByTimeAsync(50)
+      // Once the approval settles, the silence watchdog resumes and fires after 100ms of silence.
+      const requestHandle = extractRequestHandle(approvalEntry!.data)
+      await owner.respond({ requestHandle, decision: 'accept' })
+      expect(app.responses).toContainEqual({ id: 55, result: { decision: 'accept' } })
+
+      await vi.advanceTimersByTimeAsync(110)
       const completed = frames.find(entry => entry.event === 'codex.app.frame'
         && isRecord(entry.data)
         && isRecord(entry.data.frame)
@@ -2854,7 +2868,6 @@ describe('CodexRemoteDomain', () => {
           },
         },
       })
-      expect(app.responses).toContainEqual({ id: 55, result: { decision: 'decline' } })
       await expect(rival.call({
         method: 'turn/start',
         params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'Retry' }] },

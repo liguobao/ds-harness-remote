@@ -2278,7 +2278,7 @@ var require_websocket = __commonJS({
     var http2 = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
-    var { randomBytes: randomBytes16, createHash: createHash9 } = __require("crypto");
+    var { randomBytes: randomBytes17, createHash: createHash9 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2816,7 +2816,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort2 = isSecure ? 443 : 80;
-      const key = randomBytes16(16).toString("base64");
+      const key = randomBytes17(16).toString("base64");
       const request2 = isSecure ? https2.request : http2.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -64961,6 +64961,159 @@ function parseWireJson(input4) {
   }
 }
 
+// packages/protocol/dist/attention.js
+var ATTENTION_SIGNAL_CAPABILITY = "attention.signal.v1";
+var ATTENTION_INBOX_CAPABILITY = "attention.inbox.v1";
+var PUSH_WAKE_CAPABILITY = "push.wake.v1";
+var ATTENTION_TOKEN_PATTERN = /^[a-f0-9]{32}$/;
+var MAX_ATTENTION_COUNT = 99;
+var MAX_ATTENTION_ITEMS = 64;
+var MAX_ATTENTION_SUMMARY_CHARS = 120;
+var MAX_ATTENTION_TITLE_CHARS = 160;
+var attentionRpcMethods = [
+  "attention.list",
+  "attention.follow",
+  "attention.unfollow",
+  "attention.resolveToken",
+  "attention.ackUnread"
+];
+var attentionUrgentKinds = [
+  "approval_needed",
+  "question_needed",
+  "turn_completed",
+  "turn_failed",
+  "clear"
+];
+var attentionUrgencies = ["critical", "normal", "silent"];
+var attentionCountSchema = external_exports.number().int().min(0).max(MAX_ATTENTION_COUNT);
+var nonNegativeSafeIntSchema = external_exports.number().int().min(0).safe();
+var attentionTokenSchema = external_exports.string().regex(ATTENTION_TOKEN_PATTERN);
+var attentionDigestSchema = external_exports.object({
+  revision: nonNegativeSafeIntSchema,
+  pendingApprovals: attentionCountSchema,
+  pendingQuestions: attentionCountSchema,
+  runningSessions: attentionCountSchema,
+  completedUnread: attentionCountSchema,
+  urgentKind: external_exports.enum(attentionUrgentKinds).nullable(),
+  urgency: external_exports.enum(attentionUrgencies),
+  attentionToken: attentionTokenSchema.optional(),
+  updatedAt: nonNegativeSafeIntSchema
+}).strict();
+var hostAttentionSignalPayloadSchema = external_exports.object({
+  digest: attentionDigestSchema
+}).strict();
+var attentionBackends = ["harness", "codex", "acp", "ds-bot"];
+var attentionStatuses = [
+  "waiting_approval",
+  "waiting_question",
+  "running",
+  "failed_unread",
+  "completed_unread"
+];
+var attentionModes = ["agent", "bot"];
+var attentionItemSchema = external_exports.object({
+  id: external_exports.string().min(1).max(256),
+  backend: external_exports.enum(attentionBackends),
+  acpAdapter: external_exports.string().min(1).max(64).optional(),
+  mode: external_exports.enum(attentionModes),
+  workspaceId: external_exports.string().min(1).max(256).optional(),
+  workspaceLabel: external_exports.string().max(MAX_ATTENTION_TITLE_CHARS).optional(),
+  sessionId: external_exports.string().min(1).max(256),
+  sessionTitle: external_exports.string().max(MAX_ATTENTION_TITLE_CHARS),
+  status: external_exports.enum(attentionStatuses),
+  summary: external_exports.string().max(MAX_ATTENTION_SUMMARY_CHARS).optional(),
+  detachedExpiresAt: nonNegativeSafeIntSchema.optional(),
+  updatedAt: nonNegativeSafeIntSchema
+}).strict();
+var attentionItemListSchema = external_exports.array(attentionItemSchema).max(MAX_ATTENTION_ITEMS);
+var attentionListResultSchema = external_exports.object({
+  revision: nonNegativeSafeIntSchema,
+  digest: attentionDigestSchema,
+  items: attentionItemListSchema
+}).strict();
+var attentionFollowEventSchema = external_exports.discriminatedUnion("type", [
+  external_exports.object({
+    type: external_exports.literal("snapshot"),
+    revision: nonNegativeSafeIntSchema,
+    digest: attentionDigestSchema,
+    items: attentionItemListSchema
+  }).strict(),
+  external_exports.object({
+    type: external_exports.literal("upsert"),
+    revision: nonNegativeSafeIntSchema,
+    digest: attentionDigestSchema,
+    item: attentionItemSchema
+  }).strict(),
+  external_exports.object({
+    type: external_exports.literal("remove"),
+    revision: nonNegativeSafeIntSchema,
+    digest: attentionDigestSchema,
+    itemId: external_exports.string().min(1).max(256)
+  }).strict()
+]);
+var attentionTargetSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("session"),
+    backend: external_exports.enum(attentionBackends),
+    acpAdapter: external_exports.string().min(1).max(64).optional(),
+    mode: external_exports.enum(attentionModes),
+    workspaceId: external_exports.string().min(1).max(256).optional(),
+    sessionId: external_exports.string().min(1).max(256),
+    itemId: external_exports.string().min(1).max(256).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("inbox")
+  }).strict()
+]);
+var attentionFollowRequestSchema = external_exports.object({
+  enabled: external_exports.boolean().optional()
+}).strict();
+var attentionResolveTokenRequestSchema = external_exports.object({
+  token: attentionTokenSchema
+}).strict();
+var attentionAckUnreadRequestSchema = external_exports.object({
+  itemIds: external_exports.array(external_exports.string().min(1).max(256)).max(MAX_ATTENTION_ITEMS)
+}).strict();
+var attentionAckUnreadResultSchema = external_exports.object({
+  ok: external_exports.literal(true),
+  revision: nonNegativeSafeIntSchema
+}).strict();
+var ATTENTION_STATUS_PRIORITY = {
+  waiting_question: 0,
+  waiting_approval: 1,
+  running: 2,
+  failed_unread: 3,
+  completed_unread: 4
+};
+function compareAttentionItems(a, b) {
+  const priorityDiff = ATTENTION_STATUS_PRIORITY[a.status] - ATTENTION_STATUS_PRIORITY[b.status];
+  if (priorityDiff !== 0)
+    return priorityDiff;
+  const updatedDiff = b.updatedAt - a.updatedAt;
+  if (updatedDiff !== 0)
+    return updatedDiff;
+  if (a.id < b.id)
+    return -1;
+  if (a.id > b.id)
+    return 1;
+  return 0;
+}
+var pushTargetPlatforms = ["ios", "android"];
+var pushEnvironments = ["production", "sandbox"];
+var pushTargetRegistrationRequestSchema = external_exports.object({
+  platform: external_exports.enum(pushTargetPlatforms),
+  pushToken: external_exports.string().min(1).max(4096),
+  environment: external_exports.enum(pushEnvironments).optional(),
+  appId: external_exports.string().min(1).max(128).optional(),
+  locale: external_exports.string().min(2).max(32).regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/).optional()
+}).strict();
+var liveActivityTokenRegistrationRequestSchema = external_exports.object({
+  activityPushToken: external_exports.string().min(1).max(4096),
+  pushToStartToken: external_exports.string().min(1).max(4096).optional(),
+  environment: external_exports.enum(pushEnvironments).optional(),
+  activityId: external_exports.string().min(1).max(128).optional()
+}).strict();
+
 // packages/protocol/dist/close-semantics.js
 var SERVER_SHUTDOWN_REASON = "server shutdown";
 var SERVER_SHUTDOWN_CLOSE_CODES = [4009, 4001, 1013];
@@ -65096,6 +65249,7 @@ var controlFrameTypes = [
   "connection.lease.request",
   "connection.lease.ack",
   "connection.lease.close",
+  "host.attention.signal",
   "ping",
   "pong",
   "error"
@@ -65112,6 +65266,7 @@ var sessionTransferMethods = [
 ];
 var rpcMethods = [
   ...sessionTransferMethods,
+  ...attentionRpcMethods,
   "workspace.upload.lan.open",
   "workspace.upload.open",
   "workspace.upload.chunk",
@@ -65229,6 +65384,19 @@ function normalizeSdpMLineIndex(value) {
     return null;
   return value;
 }
+var transportCapabilities = [
+  "transport.lan",
+  "transport.p2p",
+  "transport.turn",
+  "transport.relay"
+];
+var controlCapabilities = [
+  ...transportCapabilities,
+  WEBRTC_RESUME_CAPABILITY,
+  RELAY_RESUME_CAPABILITY,
+  ATTENTION_SIGNAL_CAPABILITY,
+  PUSH_WAKE_CAPABILITY
+];
 function selectCapabilities(offered, supported) {
   const offeredCapabilities = new Set(offered);
   return [...new Set(supported)].filter((capability) => offeredCapabilities.has(capability));
@@ -65288,6 +65456,22 @@ var accountDeviceDescriptorSchema = external_exports.union([
   hostDeviceDescriptorSchema,
   clientDeviceDescriptorSchema
 ]);
+var deviceDescriptorSchema = external_exports.object({
+  deviceId: deviceIdSchema,
+  name: deviceNameSchema,
+  role: external_exports.enum(["host", "client"]),
+  platform: devicePlatformSchema,
+  identityKey: identityKeySchema,
+  clientVersion: deviceVersionSchema,
+  harnessVersion: deviceVersionSchema.optional(),
+  attentionDigest: attentionDigestSchema.optional()
+});
+var devicePresenceResponseSchema = external_exports.object({
+  deviceId: external_exports.string().min(1),
+  online: external_exports.boolean(),
+  lastSeenAt: external_exports.number().int().min(0).safe().nullable().optional(),
+  attentionDigest: attentionDigestSchema.optional()
+});
 var deviceRegistrationRequestSchema = external_exports.object({
   v: external_exports.literal(PROTOCOL_VERSION),
   device: accountDeviceDescriptorSchema
@@ -65502,6 +65686,7 @@ var controlFramePayloadSchemas = {
   "connection.lease.request": connectionLeaseRequestSchema,
   "connection.lease.ack": connectionLeaseAckSchema,
   "connection.lease.close": external_exports.object({ connectionId: external_exports.string().min(1).max(128) }),
+  "host.attention.signal": hostAttentionSignalPayloadSchema,
   "ping": pingPongPayloadSchema,
   "pong": pingPongPayloadSchema,
   "error": controlErrorPayloadSchema
@@ -65717,6 +65902,16 @@ function cryptoRandomId() {
     return g.randomUUID();
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
+
+// packages/client-core/dist/errors.js
+var RemoteClientError = class extends Error {
+  code;
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "RemoteClientError";
+  }
+};
 
 // packages/client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
@@ -69030,14 +69225,6 @@ var SerialSend = class {
 };
 
 // packages/client-core/dist/index.js
-var RemoteClientError = class extends Error {
-  code;
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "RemoteClientError";
-  }
-};
 var RemoteClientCore = class {
   transport;
   timeoutMs;
@@ -74915,7 +75102,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes16 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes17 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain2 = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -74997,7 +75184,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes16(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes17(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -77321,18 +77508,18 @@ function validateTableBytes(numPoints, fpBytes) {
   if (bytes > TABLE_BYTES_MAX)
     throw new Error("invalid window size: table would need ~" + Math.ceil(bytes / 2 ** 20) + " MiB, max " + TABLE_BYTES_MAX / 2 ** 20 + " MiB");
 }
-function probeRandomBytes(randomBytes16, length) {
-  if (randomBytes16 === void 0)
+function probeRandomBytes(randomBytes17, length) {
+  if (randomBytes17 === void 0)
     return void 0;
-  afunction(randomBytes16, "randomBytes");
+  afunction(randomBytes17, "randomBytes");
   try {
-    const probe = randomBytes16(length);
+    const probe = randomBytes17(length);
     if (!isBytes3(probe) || probe.length !== length)
       return void 0;
   } catch {
     return void 0;
   }
-  return randomBytes16;
+  return randomBytes17;
 }
 function validateMSMPoints2(points, c) {
   aarray(points, "points");
@@ -77425,9 +77612,9 @@ var ScalarMultiplier = class {
   baseCanBeBlinded;
   bits;
   // Parametrized with a given Point class (not individual point)
-  constructor(Point, randomBytes16) {
+  constructor(Point, randomBytes17) {
     validatePointCons(Point);
-    this.randomBytes = probeRandomBytes(randomBytes16, BLIND_BYTES);
+    this.randomBytes = probeRandomBytes(randomBytes17, BLIND_BYTES);
     this.Point = Point;
     this.BASE = Point.BASE;
     this.ZERO = Point.ZERO;
@@ -77698,7 +77885,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes16 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
+  const randomBytes17 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -77959,7 +78146,7 @@ function edwards2(params, extraOpts = {}) {
     }
   }
   const normalize = (points) => normalizeZ2(Point, points);
-  const wnaf = new ScalarMultiplier(Point, randomBytes16);
+  const wnaf = new ScalarMultiplier(Point, randomBytes17);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
   Object.freeze(Point.prototype);
@@ -81468,9 +81655,10 @@ var imageUploadCallSchema = external_exports.object({
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
 var PluginRouteBridge = class {
-  constructor(dispatch, logger2) {
+  constructor(dispatch, logger2, observer) {
     this.dispatch = dispatch;
     this.logger = logger2;
+    this.observer = observer;
   }
   async call(input4, transferred = false) {
     let params;
@@ -81504,7 +81692,14 @@ var PluginRouteBridge = class {
       status: result.status,
       durationMs: Math.round(performance.now() - startedAt)
     });
-    return { status: result.status, json: result.json };
+    const output2 = { status: result.status, json: result.json };
+    if (this.observer !== void 0) {
+      try {
+        this.observer(params.route, params.body, output2);
+      } catch {
+      }
+    }
+    return output2;
   }
 };
 function serializedBytes(value) {
@@ -87620,6 +87815,12 @@ defineMethod("transform", [
 
 // packages/plugin/src/config.ts
 var DEFAULT_REMOTE_SERVER_URL = "https://dsh.r2049.cn";
+var DEFAULT_DETACHED_APPROVAL_GRACE_SEC = 300;
+var MAX_DETACHED_APPROVAL_GRACE_SEC = 600;
+function clampDetachedApprovalGraceSec(value) {
+  if (value === void 0 || !Number.isFinite(value)) return DEFAULT_DETACHED_APPROVAL_GRACE_SEC;
+  return Math.min(MAX_DETACHED_APPROVAL_GRACE_SEC, Math.max(0, Math.floor(value)));
+}
 var entryConfigSchema = Schema.object({
   enabled: Schema.boolean(),
   role: Schema.union(["host", "client", "both"]),
@@ -87632,6 +87833,7 @@ var entryConfigSchema = Schema.object({
   hostControl: Schema.object({ enabled: Schema.boolean() }),
   loopback: Schema.object({ ports: Schema.array(Schema.number()) }),
   forceRelay: Schema.boolean(),
+  detachedApprovalGraceSec: Schema.number(),
   rotatePinnedPeerKey: Schema.boolean(),
   logLevel: Schema.union(["debug", "info", "warn", "error"]),
   reconnect: Schema.union([
@@ -87677,6 +87879,7 @@ var configSchema = external_exports.object({
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: external_exports.boolean().optional(),
+  detachedApprovalGraceSec: external_exports.number().finite().optional(),
   rotatePinnedPeerKey: external_exports.boolean().optional(),
   logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
   reconnect: reconnectSchema.optional(),
@@ -87721,6 +87924,7 @@ function resolveConfig(input4 = {}, env = process.env) {
     sidebar: { entry: parsed.sidebar?.entry === "compact" ? "compact" : "standard" },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
+    detachedApprovalGraceSec: clampDetachedApprovalGraceSec(parsed.detachedApprovalGraceSec),
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? "info",
     reconnect: {
@@ -92468,6 +92672,1234 @@ import { readdir as readdir3, realpath, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { basename as basename5, isAbsolute as isAbsolute3, join as join6, relative, resolve as resolve3 } from "node:path";
 
+// packages/plugin/src/attention-tracker.ts
+import { randomBytes as randomBytes12 } from "node:crypto";
+var DEFAULT_ATTENTION_TOKEN_TTL_MS = 15 * 6e4;
+var MAX_ATTENTION_TOKENS = 128;
+var DEFAULT_DIGEST_DEBOUNCE_MS = 1500;
+var NORMAL_TURN_COMPLETED_MIN_MS = 15e3;
+var DEFAULT_OBSERVER_BACKOFF_MS = [2e3, 5e3, 1e4, 3e4, 6e4];
+var TERMINAL_OBSERVER_ERROR_CODES = /* @__PURE__ */ new Set([
+  "gateway/interactions-forbidden",
+  "gateway/not-found",
+  "gateway/invocation-unavailable"
+]);
+var MAX_SESSION_METADATA_ENTRIES = 512;
+var HostAttentionTracker = class {
+  constructor(options = {}) {
+    this.options = options;
+    this.now = options.now ?? (() => Date.now());
+    this.tokenTtlMs = options.tokenTtlMs ?? DEFAULT_ATTENTION_TOKEN_TTL_MS;
+    this.maxTokens = options.maxTokens ?? MAX_ATTENTION_TOKENS;
+    this.debounceMs = options.debounceMs ?? DEFAULT_DIGEST_DEBOUNCE_MS;
+    this.normalTurnMinMs = options.normalTurnMinMs ?? NORMAL_TURN_COMPLETED_MIN_MS;
+    this.observerBackoffMs = options.observerBackoffMs ?? DEFAULT_OBSERVER_BACKOFF_MS;
+    this.lastDigest = this.buildDigest(null, "silent");
+  }
+  items = /* @__PURE__ */ new Map();
+  tokens = /* @__PURE__ */ new Map();
+  followers = /* @__PURE__ */ new Map();
+  sessionMeta = /* @__PURE__ */ new Map();
+  turnStartedAt = /* @__PURE__ */ new Map();
+  harnessTurnFailed = /* @__PURE__ */ new Set();
+  projectedHarnessQuestionIds = /* @__PURE__ */ new Map();
+  harnessQuestionProjectionSeqs = /* @__PURE__ */ new Map();
+  harnessQuestionEventToItemId = /* @__PURE__ */ new Map();
+  criticalNotifiedIds = /* @__PURE__ */ new Set();
+  now;
+  tokenTtlMs;
+  maxTokens;
+  debounceMs;
+  normalTurnMinMs;
+  observerBackoffMs;
+  revision = 0;
+  previousBlockingCount = 0;
+  activeHarnessEventStreams = 0;
+  lastDigest;
+  debounceTimer;
+  pendingSilentHint;
+  closed = false;
+  started = false;
+  observerGateway;
+  observerController;
+  observerIterator;
+  observerTask;
+  observerRetryTimer;
+  observerRetryWake;
+  /** Start passive read-only `session/control` observation when the Host Harness supports it. */
+  start(harnessVersion) {
+    if (this.closed || this.started) return;
+    const gateway = this.options.localGateway;
+    if (gateway?.supportsCarrier !== true || !isLiveSessionEventsHarnessVersion(harnessVersion)) return;
+    const observerGateway = gateway.createPeer?.({ interactions: "none" });
+    if (observerGateway === void 0 || observerGateway === gateway) return;
+    this.started = true;
+    this.observerGateway = observerGateway;
+    this.observerTask = this.runHarnessObserver(observerGateway).finally(() => {
+      if (this.observerTask !== void 0) this.observerTask = void 0;
+    });
+  }
+  /** Observe live Harness `$events` frames forwarded through an authenticated client bridge. */
+  observeHarnessEventFrame(frame) {
+    if (this.closed) return;
+    this.handleHarnessEventFrame(frame);
+  }
+  /**
+   * Observe a settled `$events/result` RPC forwarded by an authenticated client bridge.
+   * The official Gateway removes the answering client from `deliveries` before
+   * sending `cancel` frames, so a sole answering client never receives `cancel`
+   * back on its own `$events` stream.
+   */
+  observeHarnessEventResult(eventId, outcomeKind) {
+    if (this.closed || eventId.length === 0) return;
+    const settles = outcomeKind === void 0 || outcomeKind === "result" || outcomeKind === "rejected" || outcomeKind === "next" && this.activeHarnessEventStreams <= 1;
+    if (!settles) return;
+    this.resolveHarnessEventId(eventId);
+  }
+  /** Track active forwarded `$events` streams across all authenticated bridges. */
+  onHarnessEventStreamOpened() {
+    if (this.closed) return;
+    this.activeHarnessEventStreams += 1;
+  }
+  /**
+   * When the last forwarded `$events` stream closes, purge `$events`-sourced
+   * transient waterfall items and `running` projections so they cannot linger as
+   * zombies if resolved while zero clients are attached. Still-pending waterfalls
+   * are re-delivered by the Gateway with the same `eventId` on reconnect, while
+   * durable `session/control` projected `userQuestions` remain tracked.
+   */
+  onHarnessEventStreamClosed() {
+    if (this.closed) return;
+    this.activeHarnessEventStreams = Math.max(0, this.activeHarnessEventStreams - 1);
+    if (this.activeHarnessEventStreams > 0) return;
+    this.harnessQuestionEventToItemId.clear();
+    this.harnessTurnFailed.clear();
+    for (const key of [...this.turnStartedAt.keys()]) {
+      if (key.startsWith("harness:")) this.turnStartedAt.delete(key);
+    }
+    const staleIds = [];
+    for (const item of this.items.values()) {
+      if (item.backend !== "harness") continue;
+      if (item.status === "waiting_approval" || item.status === "running") {
+        staleIds.push(item.id);
+      } else if (item.status === "waiting_question" && !this.isProjectedHarnessQuestion(item.id)) {
+        staleIds.push(item.id);
+      }
+    }
+    for (const id7 of staleIds) {
+      this.removeItem(id7);
+    }
+  }
+  /** Create the read-only lifecycle observer passed to each `HarnessRemoteBridge`. */
+  createHarnessBridgeObserver() {
+    return {
+      onStreamOpened: () => this.onHarnessEventStreamOpened(),
+      onFrame: (frame) => this.observeHarnessEventFrame(frame),
+      onEventResult: (eventId, outcomeKind) => this.observeHarnessEventResult(eventId, outcomeKind),
+      onStreamClosed: () => this.onHarnessEventStreamClosed()
+    };
+  }
+  /** Publish the current digest when Control WS connects/reconnects with `attention.signal.v1`. */
+  publishCurrentDigestIfActive() {
+    if (this.closed) return;
+    if (this.revision === 0 && this.items.size === 0) return;
+    const digest = this.buildDigest(null, "silent");
+    this.emitDigest(digest);
+  }
+  /** Create a connection-scoped RPC route for Noise tunnel `attention.*` calls. */
+  createPeerRoute(connectionId, sendEvent) {
+    return {
+      list: () => this.list(),
+      follow: (enabled = true) => this.follow(connectionId, sendEvent, enabled),
+      unfollow: () => this.unfollow(connectionId),
+      resolveToken: (token) => this.resolveToken(token),
+      ackUnread: (itemIds) => this.ackUnread(itemIds),
+      close: () => {
+        this.unfollow(connectionId);
+      }
+    };
+  }
+  list() {
+    const items = this.sortedItems();
+    return {
+      revision: this.revision,
+      digest: this.currentDigest(),
+      items
+    };
+  }
+  currentDigest() {
+    return { ...this.lastDigest };
+  }
+  follow(connectionId, send, enabled = true) {
+    if (this.closed || !enabled) {
+      this.unfollow(connectionId);
+      return this.list();
+    }
+    const follower = { send, chain: Promise.resolve() };
+    this.followers.set(connectionId, follower);
+    const initial = this.list();
+    const snapshot2 = {
+      type: "snapshot",
+      revision: initial.revision,
+      digest: initial.digest,
+      items: initial.items
+    };
+    this.enqueueFollowerEvent(connectionId, follower, snapshot2);
+    return initial;
+  }
+  unfollow(connectionId) {
+    this.followers.delete(connectionId);
+    return { following: false, revision: this.revision };
+  }
+  resolveToken(token) {
+    this.pruneExpiredTokens();
+    const entry = this.tokens.get(token);
+    if (entry === void 0 || entry.expiresAt <= this.now()) {
+      this.tokens.delete(token);
+      return { kind: "inbox" };
+    }
+    if (entry.target.itemId !== void 0 && !this.items.has(entry.target.itemId)) {
+      this.tokens.delete(token);
+      return { kind: "inbox" };
+    }
+    return { ...entry.target };
+  }
+  ackUnread(itemIds) {
+    const removedIds = [];
+    for (const itemId of new Set(itemIds)) {
+      const existing = this.items.get(itemId);
+      if (existing === void 0) continue;
+      if (existing.status !== "completed_unread" && existing.status !== "failed_unread") continue;
+      this.items.delete(itemId);
+      this.invalidateTokensForItem(itemId);
+      removedIds.push(itemId);
+    }
+    if (removedIds.length > 0) {
+      this.revision += 1;
+      const digest = this.buildDigest(null, "silent");
+      for (const itemId of removedIds) {
+        this.broadcastFollowEvent({ type: "remove", revision: this.revision, digest, itemId });
+      }
+      this.scheduleDebouncedDigest(null);
+    }
+    return { ok: true, revision: this.revision };
+  }
+  // ── Backend push hooks (Codex / ACP / Harness) ────────────────────────────
+  onSessionRunning(info) {
+    if (this.closed) return;
+    const key = sessionItemId(info.backend, info.sessionId, info.acpAdapter);
+    this.rememberMeta(key, info);
+    if (!this.turnStartedAt.has(key)) this.turnStartedAt.set(key, this.now());
+    this.harnessTurnFailed.delete(info.sessionId);
+    const item = this.buildItem(key, { ...info, status: "running" });
+    this.upsertItem(item, { mode: "debounced", silentKind: null });
+  }
+  onSessionCompleted(info) {
+    if (this.closed) return;
+    const key = sessionItemId(info.backend, info.sessionId, info.acpAdapter);
+    this.rememberMeta(key, info);
+    const startedAt = this.turnStartedAt.get(key);
+    this.turnStartedAt.delete(key);
+    const durationMs = info.durationMs ?? (startedAt === void 0 ? 0 : Math.max(0, this.now() - startedAt));
+    const status2 = info.failed === true ? "failed_unread" : "completed_unread";
+    const item = this.buildItem(key, { ...info, status: status2 });
+    if (info.failed === true) {
+      this.upsertItem(item, { mode: "immediate", urgentKind: "turn_failed", urgency: "normal" });
+    } else if (durationMs >= this.normalTurnMinMs) {
+      this.upsertItem(item, { mode: "immediate", urgentKind: "turn_completed", urgency: "normal" });
+    } else {
+      this.upsertItem(item, { mode: "debounced", silentKind: "turn_completed", silentItemId: item.id });
+    }
+  }
+  onSessionCancelled(backend, sessionId, acpAdapter) {
+    if (this.closed) return;
+    const key = sessionItemId(backend, sessionId, acpAdapter);
+    this.turnStartedAt.delete(key);
+    this.harnessTurnFailed.delete(sessionId);
+    const existing = this.items.get(key);
+    if (existing !== void 0 && existing.status === "running") {
+      this.removeItem(key);
+    }
+  }
+  onSessionRemoved(backend, sessionId, acpAdapter) {
+    if (this.closed) return;
+    const sessionKey = sessionItemId(backend, sessionId, acpAdapter);
+    this.turnStartedAt.delete(sessionKey);
+    this.sessionMeta.delete(sessionKey);
+    if (backend === "harness") {
+      this.harnessTurnFailed.delete(sessionId);
+      this.projectedHarnessQuestionIds.delete(sessionId);
+      this.harnessQuestionProjectionSeqs.delete(sessionId);
+    }
+    this.invalidateTokensForSession(backend, sessionId, acpAdapter);
+    const matching = [...this.items.values()].filter((item) => item.backend === backend && item.sessionId === sessionId && (acpAdapter === void 0 || item.acpAdapter === acpAdapter));
+    for (const item of matching) {
+      this.removeItem(item.id);
+    }
+  }
+  onInteractionPending(info) {
+    if (this.closed) return;
+    const sessionKey = sessionItemId(info.backend, info.sessionId, info.acpAdapter);
+    this.rememberMeta(sessionKey, info);
+    const item = this.buildItem(info.id, info, sessionKey);
+    const alreadyNotified = this.criticalNotifiedIds.has(item.id);
+    if (!alreadyNotified) {
+      this.criticalNotifiedIds.add(item.id);
+      const urgentKind = item.status === "waiting_question" ? "question_needed" : "approval_needed";
+      this.upsertItem(item, { mode: "immediate", urgentKind, urgency: "critical" });
+    } else {
+      this.upsertItem(item, { mode: "debounced", silentKind: null });
+    }
+  }
+  onInteractionDetached(itemId, detachedExpiresAt) {
+    if (this.closed) return;
+    const existing = this.items.get(itemId);
+    if (existing === void 0) return;
+    if (existing.detachedExpiresAt === detachedExpiresAt) return;
+    const updated = attentionItemSchema.parse({
+      ...existing,
+      detachedExpiresAt: Math.max(0, Math.floor(detachedExpiresAt)),
+      updatedAt: this.now()
+    });
+    this.upsertItem(updated, { mode: "debounced", silentKind: null });
+  }
+  onInteractionResolved(itemId) {
+    if (this.closed) return;
+    for (const [eventId, mappedId] of this.harnessQuestionEventToItemId) {
+      if (mappedId === itemId) this.harnessQuestionEventToItemId.delete(eventId);
+    }
+    this.removeItem(itemId);
+  }
+  onBackendCleared(backend, acpAdapter) {
+    if (this.closed) return;
+    const matching = [...this.items.values()].filter((item) => item.backend === backend && (acpAdapter === void 0 || item.acpAdapter === acpAdapter));
+    for (const item of matching) {
+      this.removeItem(item.id);
+    }
+    const prefix = acpAdapter === void 0 ? `${backend}:` : `${backend}:${acpAdapter}:`;
+    for (const key of [...this.turnStartedAt.keys()]) {
+      if (key.startsWith(prefix)) this.turnStartedAt.delete(key);
+    }
+  }
+  // ── DS-Bot live PluginRouteBridge observation (zero idle polling) ─────────
+  observeBotResponse(route, body, result) {
+    if (this.closed || route !== "api/bot" || result.status !== 200) return;
+    if (!isRecord12(result.json) || result.json.ok !== true) return;
+    const value = result.json.value;
+    if (body.endpoint === "approval-answer") {
+      const approvalId = isRecord12(body.payload) && typeof body.payload.id === "string" ? body.payload.id : void 0;
+      if (approvalId !== void 0) this.onInteractionResolved(botApprovalItemId(approvalId));
+      return;
+    }
+    if (body.endpoint === "answer-question" || body.endpoint === "dismiss-question") {
+      const sessionId = isRecord12(body.payload) && typeof body.payload.sessionId === "string" ? body.payload.sessionId : void 0;
+      const questionId = isRecord12(body.payload) && typeof body.payload.questionId === "string" ? body.payload.questionId : void 0;
+      if (sessionId !== void 0 && questionId !== void 0) {
+        this.onInteractionResolved(botQuestionItemId(sessionId, questionId));
+      } else if (sessionId !== void 0) {
+        const prefix = `ds-bot:question:${sessionId}:`;
+        for (const id7 of [...this.items.keys()]) {
+          if (id7.startsWith(prefix)) this.onInteractionResolved(id7);
+        }
+      }
+      return;
+    }
+    if (body.endpoint === "state" && isRecord12(value)) {
+      this.observeBotState(value);
+      return;
+    }
+    if (body.endpoint === "notices") {
+      this.observeBotNotices(value);
+    }
+  }
+  observeBotState(state2) {
+    const botNamesById = /* @__PURE__ */ new Map();
+    const roomNamesById = /* @__PURE__ */ new Map();
+    const titleBySessionId = /* @__PURE__ */ new Map();
+    const workspaceId = typeof state2.workspaceId === "string" && state2.workspaceId.length > 0 ? state2.workspaceId : void 0;
+    if (Array.isArray(state2.bots)) {
+      for (const entry of state2.bots) {
+        if (!isRecord12(entry) || typeof entry.id !== "string" || typeof entry.sessionId !== "string") continue;
+        const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
+        botNamesById.set(entry.id, { name: name2, sessionId: entry.sessionId });
+        titleBySessionId.set(entry.sessionId, name2);
+        this.rememberMeta(sessionItemId("ds-bot", entry.sessionId), {
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId: entry.sessionId,
+          sessionTitle: name2,
+          ...workspaceId === void 0 ? {} : { workspaceId }
+        });
+      }
+    }
+    if (Array.isArray(state2.rooms)) {
+      for (const entry of state2.rooms) {
+        if (!isRecord12(entry) || typeof entry.id !== "string") continue;
+        const sessionId = typeof entry.sessionId === "string" && entry.sessionId.length > 0 ? entry.sessionId : entry.id;
+        const name2 = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : entry.id;
+        roomNamesById.set(entry.id, { name: name2, sessionId });
+        titleBySessionId.set(sessionId, name2);
+        this.rememberMeta(sessionItemId("ds-bot", sessionId), {
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId,
+          sessionTitle: name2,
+          ...workspaceId === void 0 ? {} : { workspaceId }
+        });
+      }
+    }
+    const work = isRecord12(state2.work) ? state2.work : void 0;
+    const rawApprovals = Array.isArray(work?.approvals) ? work.approvals : Array.isArray(state2.approvals) ? state2.approvals : void 0;
+    if (rawApprovals !== void 0) {
+      const activeApprovalIds = /* @__PURE__ */ new Set();
+      for (const approval of rawApprovals) {
+        if (!isRecord12(approval) || typeof approval.id !== "string" || approval.id.length === 0) continue;
+        const bot = typeof approval.botId === "string" ? botNamesById.get(approval.botId) : void 0;
+        const sessionId = (typeof approval.sessionId === "string" && approval.sessionId.length > 0 ? approval.sessionId : void 0) ?? bot?.sessionId ?? (typeof approval.botId === "string" && approval.botId.length > 0 ? approval.botId : approval.id);
+        const itemId = botApprovalItemId(approval.id);
+        activeApprovalIds.add(itemId);
+        const tool = typeof approval.tool === "string" ? approval.tool.trim() : "";
+        const reason = typeof approval.reason === "string" ? approval.reason.trim() : "";
+        const summary3 = [tool, reason].filter(Boolean).join(": ") || void 0;
+        this.onInteractionPending({
+          id: itemId,
+          backend: "ds-bot",
+          mode: "bot",
+          ...workspaceId === void 0 ? {} : { workspaceId },
+          sessionId,
+          sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? "DS-Bot",
+          status: "waiting_approval",
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      }
+      for (const id7 of [...this.items.keys()]) {
+        if (id7.startsWith("ds-bot:approval:") && !activeApprovalIds.has(id7)) {
+          this.onInteractionResolved(id7);
+        }
+      }
+    }
+    if (isRecord12(state2.questions)) {
+      const activeQuestionIds = /* @__PURE__ */ new Set();
+      for (const [sessionId, rawQuestion] of Object.entries(state2.questions)) {
+        if (!isRecord12(rawQuestion) || typeof rawQuestion.id !== "string" || rawQuestion.id.length === 0) continue;
+        const itemId = botQuestionItemId(sessionId, rawQuestion.id);
+        activeQuestionIds.add(itemId);
+        const summary3 = firstNonEmptyString(rawQuestion.question, rawQuestion.title, rawQuestion.prompt, rawQuestion.text);
+        this.onInteractionPending({
+          id: itemId,
+          backend: "ds-bot",
+          mode: "bot",
+          ...workspaceId === void 0 ? {} : { workspaceId },
+          sessionId,
+          sessionTitle: titleBySessionId.get(sessionId) ?? "DS-Bot",
+          status: "waiting_question",
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      }
+      for (const id7 of [...this.items.keys()]) {
+        if (id7.startsWith("ds-bot:question:") && !activeQuestionIds.has(id7)) {
+          this.onInteractionResolved(id7);
+        }
+      }
+    }
+    if (work !== void 0 && (isRecord12(work.bots) || isRecord12(work.rooms))) {
+      const activeSessionIds = /* @__PURE__ */ new Set();
+      if (isRecord12(work.bots)) {
+        for (const [botId, workEntry] of Object.entries(work.bots)) {
+          if (!isBotWorkActive(workEntry)) continue;
+          const bot = botNamesById.get(botId);
+          const sessionId = bot?.sessionId ?? botId;
+          activeSessionIds.add(sessionId);
+          this.onSessionRunning({
+            backend: "ds-bot",
+            mode: "bot",
+            ...workspaceId === void 0 ? {} : { workspaceId },
+            sessionId,
+            sessionTitle: bot?.name ?? titleBySessionId.get(sessionId) ?? botId
+          });
+        }
+      }
+      if (isRecord12(work.rooms)) {
+        for (const [roomId, workEntry] of Object.entries(work.rooms)) {
+          if (!isBotWorkActive(workEntry)) continue;
+          const room = roomNamesById.get(roomId);
+          const sessionId = room?.sessionId ?? roomId;
+          activeSessionIds.add(sessionId);
+          this.onSessionRunning({
+            backend: "ds-bot",
+            mode: "bot",
+            ...workspaceId === void 0 ? {} : { workspaceId },
+            sessionId,
+            sessionTitle: room?.name ?? titleBySessionId.get(sessionId) ?? roomId
+          });
+        }
+      }
+      for (const item of [...this.items.values()]) {
+        if (item.backend === "ds-bot" && item.status === "running" && !activeSessionIds.has(item.sessionId)) {
+          this.onSessionCompleted({
+            backend: "ds-bot",
+            mode: "bot",
+            ...item.workspaceId === void 0 ? {} : { workspaceId: item.workspaceId },
+            sessionId: item.sessionId,
+            sessionTitle: item.sessionTitle
+          });
+        }
+      }
+    }
+  }
+  observeBotNotices(value) {
+    const entries = Array.isArray(value) ? value : isRecord12(value) && Array.isArray(value.notices) ? value.notices : isRecord12(value) && Array.isArray(value.items) ? value.items : [];
+    for (const entry of entries) {
+      if (!isRecord12(entry)) continue;
+      const sessionId = firstNonEmptyString(entry.sessionId, entry.botId, entry.roomId, entry.id);
+      if (sessionId === void 0) continue;
+      const title = firstNonEmptyString(entry.title, entry.botName, entry.roomName) ?? "DS-Bot";
+      const summary3 = firstNonEmptyString(entry.summary, entry.message, entry.reason, entry.text);
+      const kind = typeof entry.kind === "string" ? entry.kind : typeof entry.type === "string" ? entry.type : "";
+      if (kind === "approval" || kind === "waiting_approval") {
+        const noticeId = firstNonEmptyString(entry.approvalId, entry.id) ?? sessionId;
+        this.onInteractionPending({
+          id: botApprovalItemId(noticeId),
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId,
+          sessionTitle: title,
+          status: "waiting_approval",
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      } else if (kind === "question" || kind === "waiting_question") {
+        const questionId = firstNonEmptyString(entry.questionId, entry.id) ?? "notice";
+        this.onInteractionPending({
+          id: botQuestionItemId(sessionId, questionId),
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId,
+          sessionTitle: title,
+          status: "waiting_question",
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      } else if (kind === "error" || kind === "failed" || kind === "turn_failed") {
+        this.onSessionCompleted({
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId,
+          sessionTitle: title,
+          failed: true,
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      } else if (kind === "completed" || kind === "turn_completed") {
+        this.onSessionCompleted({
+          backend: "ds-bot",
+          mode: "bot",
+          sessionId,
+          sessionTitle: title,
+          ...summary3 === void 0 ? {} : { summary: summary3 }
+        });
+      }
+    }
+  }
+  // ── Lifecycle cleanup ─────────────────────────────────────────────────────
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.debounceTimer !== void 0) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = void 0;
+    }
+    if (this.observerRetryTimer !== void 0) {
+      clearTimeout(this.observerRetryTimer);
+      this.observerRetryTimer = void 0;
+    }
+    this.observerRetryWake?.();
+    this.observerRetryWake = void 0;
+    const controller = this.observerController;
+    const iterator = this.observerIterator;
+    const task = this.observerTask;
+    const gateway = this.observerGateway;
+    this.observerController = void 0;
+    this.observerIterator = void 0;
+    this.observerTask = void 0;
+    this.observerGateway = void 0;
+    controller?.abort("attention-tracker-closed");
+    await iterator?.return?.().catch(() => void 0);
+    await task?.catch(() => void 0);
+    await gateway?.dispose?.().catch(() => void 0);
+    this.followers.clear();
+    this.tokens.clear();
+    this.items.clear();
+    this.sessionMeta.clear();
+    this.turnStartedAt.clear();
+    this.harnessTurnFailed.clear();
+    this.projectedHarnessQuestionIds.clear();
+    this.harnessQuestionProjectionSeqs.clear();
+    this.harnessQuestionEventToItemId.clear();
+    this.criticalNotifiedIds.clear();
+    this.activeHarnessEventStreams = 0;
+  }
+  // ── Harness passive read-only `session/control` observer ──────────────────
+  async runHarnessObserver(gateway) {
+    let attempt = 0;
+    try {
+      while (!this.closed) {
+        const controller = new AbortController();
+        this.observerController = controller;
+        let iterator;
+        let terminal = false;
+        try {
+          const stream = await gateway.open("session/control", { args: {} }, controller.signal);
+          if (this.closed || controller.signal.aborted) break;
+          iterator = stream[Symbol.asyncIterator]();
+          this.observerIterator = iterator;
+          while (!this.closed && !controller.signal.aborted) {
+            const next = await iterator.next();
+            if (next.done || this.closed || controller.signal.aborted) break;
+            if (isRecord12(next.value) && (next.value.type === "baseline" || next.value.type === "projection")) {
+              attempt = 0;
+            }
+            this.handleHarnessControlFrame(next.value);
+          }
+        } catch (error62) {
+          if (this.closed || controller.signal.aborted) break;
+          const failure5 = gateway.failure(error62);
+          this.options.logger?.debug("harness attention observer degraded", {
+            code: failure5.code,
+            attempt
+          });
+          if (TERMINAL_OBSERVER_ERROR_CODES.has(failure5.code)) {
+            terminal = true;
+          } else if (failure5.code === "gateway/service-unavailable" && attempt >= this.observerBackoffMs.length) {
+            terminal = true;
+          }
+        } finally {
+          if (this.observerIterator === iterator) this.observerIterator = void 0;
+          if (this.observerController === controller) this.observerController = void 0;
+          controller.abort();
+          await iterator?.return?.().catch(() => void 0);
+        }
+        if (this.closed || terminal) break;
+        const delayMs = this.observerBackoffMs[Math.min(attempt, this.observerBackoffMs.length - 1)] ?? 6e4;
+        attempt += 1;
+        await this.waitBackoff(delayMs);
+      }
+    } finally {
+      if (this.observerGateway === gateway) {
+        this.observerGateway = void 0;
+        await gateway.dispose?.().catch(() => void 0);
+      }
+    }
+  }
+  handleHarnessControlFrame(frame) {
+    if (!isRecord12(frame) || typeof frame.type !== "string") return;
+    if (frame.type === "baseline" && isRecord12(frame.value) && isRecord12(frame.value.projections)) {
+      const sessionsWithUserQuestions = /* @__PURE__ */ new Set();
+      for (const [sessionId, block] of Object.entries(frame.value.projections)) {
+        if (sessionId.length === 0 || !isRecord12(block) || !isRecord12(block.values)) continue;
+        const seq = typeof block.asOfSeq === "number" ? block.asOfSeq : void 0;
+        if (Object.hasOwn(block.values, "title")) {
+          this.applyHarnessControlProjection(sessionId, "title", block.values.title, seq);
+        }
+        if (Object.hasOwn(block.values, "userQuestions")) {
+          sessionsWithUserQuestions.add(sessionId);
+          this.applyHarnessControlProjection(sessionId, "userQuestions", block.values.userQuestions, seq);
+        }
+      }
+      for (const [sessionId, ids] of [...this.projectedHarnessQuestionIds.entries()]) {
+        if (sessionsWithUserQuestions.has(sessionId)) continue;
+        this.projectedHarnessQuestionIds.delete(sessionId);
+        for (const id7 of ids) this.onInteractionResolved(id7);
+      }
+      return;
+    }
+    if (frame.type === "projection" && typeof frame.sessionId === "string" && frame.sessionId.length > 0) {
+      const seq = typeof frame.seq === "number" ? frame.seq : void 0;
+      if (Array.isArray(frame.changes)) {
+        for (const change of frame.changes) {
+          if (isRecord12(change) && change.key === "title") {
+            this.applyHarnessControlProjection(frame.sessionId, "title", change.val, seq);
+          }
+        }
+        for (const change of frame.changes) {
+          if (isRecord12(change) && change.key === "userQuestions") {
+            this.applyHarnessControlProjection(frame.sessionId, "userQuestions", change.val, seq);
+          }
+        }
+        return;
+      }
+      if (typeof frame.key === "string") {
+        this.applyHarnessControlProjection(frame.sessionId, frame.key, frame.value, seq);
+      }
+    }
+  }
+  applyHarnessControlProjection(sessionId, key, value, seq) {
+    if (key === "title") {
+      const sessionTitle = firstNonEmptyString(value);
+      if (sessionTitle === void 0) return;
+      this.rememberMeta(sessionItemId("harness", sessionId), {
+        backend: "harness",
+        mode: "agent",
+        sessionId,
+        sessionTitle
+      });
+      return;
+    }
+    if (key !== "userQuestions") return;
+    const previousSeq = this.harnessQuestionProjectionSeqs.get(sessionId);
+    if (seq !== void 0 && previousSeq !== void 0 && seq < previousSeq) return;
+    if (value === null || value === void 0) {
+      if (seq !== void 0) this.rememberHarnessQuestionSeq(sessionId, seq);
+      const previous2 = this.projectedHarnessQuestionIds.get(sessionId);
+      if (previous2 !== void 0) {
+        this.projectedHarnessQuestionIds.delete(sessionId);
+        for (const id7 of previous2) this.onInteractionResolved(id7);
+      }
+      return;
+    }
+    if (!isRecord12(value) || !Array.isArray(value.active)) return;
+    if ("settled" in value && value.settled !== void 0 && !Array.isArray(value.settled)) return;
+    if (seq !== void 0) this.rememberHarnessQuestionSeq(sessionId, seq);
+    const nextActiveIds = /* @__PURE__ */ new Set();
+    for (const row of value.active) {
+      if (!isRecord12(row) || typeof row.callId !== "string" || row.callId.length === 0) continue;
+      if (row.state !== "open" && row.state !== "continued") continue;
+      if (row.questions !== void 0 && !Array.isArray(row.questions)) continue;
+      const itemId = harnessProjectedQuestionItemId(sessionId, row.callId);
+      nextActiveIds.add(itemId);
+      const summary3 = extractHarnessQuestionSummary(row);
+      this.onInteractionPending({
+        id: itemId,
+        backend: "harness",
+        mode: "agent",
+        sessionId,
+        status: "waiting_question",
+        ...summary3 === void 0 ? {} : { summary: summary3 }
+      });
+    }
+    const previous = this.projectedHarnessQuestionIds.get(sessionId);
+    if (previous !== void 0) {
+      for (const prevId of previous) {
+        if (!nextActiveIds.has(prevId)) this.onInteractionResolved(prevId);
+      }
+    }
+    if (Array.isArray(value.settled)) {
+      for (const row of value.settled) {
+        if (!isRecord12(row) || typeof row.callId !== "string" || row.callId.length === 0) continue;
+        const settledId = harnessProjectedQuestionItemId(sessionId, row.callId);
+        if (!nextActiveIds.has(settledId)) this.onInteractionResolved(settledId);
+      }
+    }
+    if (nextActiveIds.size === 0) this.projectedHarnessQuestionIds.delete(sessionId);
+    else this.projectedHarnessQuestionIds.set(sessionId, nextActiveIds);
+  }
+  waitBackoff(delayMs) {
+    if (this.closed) return Promise.resolve();
+    return new Promise((resolve10) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (this.observerRetryTimer !== void 0) {
+          clearTimeout(this.observerRetryTimer);
+          this.observerRetryTimer = void 0;
+        }
+        this.observerRetryWake = void 0;
+        resolve10();
+      };
+      this.observerRetryWake = done;
+      this.observerRetryTimer = setTimeout(done, Math.max(0, delayMs));
+      this.observerRetryTimer.unref?.();
+    });
+  }
+  handleHarnessEventFrame(frame) {
+    if (!isRecord12(frame) || typeof frame.type !== "string") return;
+    if (frame.type === "emit" && typeof frame.event === "string" && Array.isArray(frame.args)) {
+      this.handleHarnessEmit(frame.event, frame.args);
+      return;
+    }
+    if (frame.type === "waterfall" && typeof frame.eventId === "string" && typeof frame.agentId === "string" && isRecord12(frame.request)) {
+      this.handleHarnessWaterfall(frame.event, frame.eventId, frame.agentId, frame.request);
+      return;
+    }
+    if (frame.type === "cancel" && typeof frame.eventId === "string") {
+      this.resolveHarnessEventId(frame.eventId);
+    }
+  }
+  resolveHarnessEventId(eventId) {
+    this.onInteractionResolved(harnessApprovalItemId(eventId));
+    this.onInteractionResolved(harnessQuestionItemId(eventId));
+    const mappedQuestionId = this.harnessQuestionEventToItemId.get(eventId);
+    if (mappedQuestionId !== void 0) {
+      this.harnessQuestionEventToItemId.delete(eventId);
+      if (!this.isProjectedHarnessQuestion(mappedQuestionId)) {
+        this.onInteractionResolved(mappedQuestionId);
+      }
+    }
+  }
+  isProjectedHarnessQuestion(itemId) {
+    for (const ids of this.projectedHarnessQuestionIds.values()) {
+      if (ids.has(itemId)) return true;
+    }
+    return false;
+  }
+  handleHarnessEmit(event2, args) {
+    switch (event2) {
+      case "api-session/added":
+      case "api-session/updated": {
+        const raw = args[0];
+        if (!isRecord12(raw) || typeof raw.sessionId !== "string" || raw.sessionId.length === 0) return;
+        const sessionId = raw.sessionId;
+        const projections = isRecord12(raw.projections) && isRecord12(raw.projections.values) ? raw.projections.values : void 0;
+        const sessionTitle = firstNonEmptyString(projections?.title, raw.title, raw.name);
+        const workspaceId = firstNonEmptyString(raw.workspaceId);
+        const workspaceLabel = firstNonEmptyString(raw.workspaceLabel, raw.workspaceName);
+        const key = sessionItemId("harness", sessionId);
+        this.rememberMeta(key, {
+          backend: "harness",
+          mode: "agent",
+          sessionId,
+          ...sessionTitle === void 0 ? {} : { sessionTitle },
+          ...workspaceId === void 0 ? {} : { workspaceId },
+          ...workspaceLabel === void 0 ? {} : { workspaceLabel }
+        });
+        if (raw.running === true) {
+          this.onSessionRunning({
+            backend: "harness",
+            mode: "agent",
+            sessionId,
+            ...sessionTitle === void 0 ? {} : { sessionTitle },
+            ...workspaceId === void 0 ? {} : { workspaceId },
+            ...workspaceLabel === void 0 ? {} : { workspaceLabel }
+          });
+        }
+        return;
+      }
+      case "api-session/removed": {
+        const sessionId = args[0];
+        if (typeof sessionId !== "string" || sessionId.length === 0) return;
+        this.onSessionRemoved("harness", sessionId);
+        return;
+      }
+      case "api-session/status": {
+        const sessionId = args[0];
+        const running = args[1];
+        if (typeof sessionId !== "string" || sessionId.length === 0 || typeof running !== "boolean") return;
+        const key = sessionItemId("harness", sessionId);
+        if (running) {
+          this.onSessionRunning({ backend: "harness", mode: "agent", sessionId });
+        } else {
+          const wasRunning = this.turnStartedAt.has(key) || this.items.get(key)?.status === "running";
+          const failed = this.harnessTurnFailed.delete(sessionId);
+          if (!wasRunning && !failed) return;
+          if (failed && this.items.get(key)?.status === "failed_unread") {
+            this.turnStartedAt.delete(key);
+            return;
+          }
+          this.onSessionCompleted({ backend: "harness", mode: "agent", sessionId, failed });
+        }
+        return;
+      }
+      case "api-session/activity": {
+        const sessionId = args[0];
+        const updatedAt = args[1];
+        if (typeof sessionId !== "string" || sessionId.length === 0 || typeof updatedAt !== "number" || !Number.isFinite(updatedAt) || updatedAt < 0) return;
+        const key = sessionItemId("harness", sessionId);
+        const existing = this.items.get(key);
+        if (existing === void 0 || existing.status !== "running" || updatedAt <= existing.updatedAt) return;
+        this.items.set(key, { ...existing, updatedAt: Math.floor(updatedAt) });
+        return;
+      }
+      case "api-session/error": {
+        const sessionId = args[0];
+        const message = typeof args[1] === "string" ? args[1] : void 0;
+        if (typeof sessionId !== "string" || sessionId.length === 0) return;
+        this.harnessTurnFailed.add(sessionId);
+        this.onSessionCompleted({
+          backend: "harness",
+          mode: "agent",
+          sessionId,
+          failed: true,
+          ...message === void 0 ? {} : { summary: message }
+        });
+      }
+    }
+  }
+  handleHarnessWaterfall(event2, eventId, sessionId, request2) {
+    if (event2 === "approval/request") {
+      const toolName = firstNonEmptyString(request2.toolName);
+      const reason = firstNonEmptyString(request2.reason);
+      const summary3 = [toolName, reason].filter(Boolean).join(": ") || void 0;
+      this.onInteractionPending({
+        id: harnessApprovalItemId(eventId),
+        backend: "harness",
+        mode: "agent",
+        sessionId,
+        status: "waiting_approval",
+        ...summary3 === void 0 ? {} : { summary: summary3 }
+      });
+      return;
+    }
+    if (event2 === "user-questions/request") {
+      const summary3 = extractHarnessQuestionSummary(request2);
+      const wait = isRecord12(request2.wait) ? request2.wait : void 0;
+      const callId = typeof wait?.callId === "string" && wait.callId.length > 0 ? wait.callId : void 0;
+      const itemId = callId === void 0 ? harnessQuestionItemId(eventId) : harnessProjectedQuestionItemId(sessionId, callId);
+      if (callId !== void 0) {
+        this.harnessQuestionEventToItemId.delete(eventId);
+        this.harnessQuestionEventToItemId.set(eventId, itemId);
+        while (this.harnessQuestionEventToItemId.size > MAX_SESSION_METADATA_ENTRIES) {
+          const oldest = this.harnessQuestionEventToItemId.keys().next().value;
+          if (oldest === void 0) break;
+          this.harnessQuestionEventToItemId.delete(oldest);
+        }
+      }
+      this.onInteractionPending({
+        id: itemId,
+        backend: "harness",
+        mode: "agent",
+        sessionId,
+        status: "waiting_question",
+        ...summary3 === void 0 ? {} : { summary: summary3 }
+      });
+    }
+  }
+  // ── Internal item/digest/token mechanics ──────────────────────────────────
+  rememberHarnessQuestionSeq(sessionId, seq) {
+    this.harnessQuestionProjectionSeqs.delete(sessionId);
+    this.harnessQuestionProjectionSeqs.set(sessionId, seq);
+    while (this.harnessQuestionProjectionSeqs.size > MAX_SESSION_METADATA_ENTRIES) {
+      const oldest = this.harnessQuestionProjectionSeqs.keys().next().value;
+      if (oldest === void 0) break;
+      this.harnessQuestionProjectionSeqs.delete(oldest);
+    }
+  }
+  rememberMeta(key, info) {
+    const prev = this.sessionMeta.get(key);
+    const next = {
+      sessionTitle: info.sessionTitle ?? prev?.sessionTitle,
+      workspaceId: info.workspaceId ?? prev?.workspaceId,
+      workspaceLabel: info.workspaceLabel ?? prev?.workspaceLabel
+    };
+    if (next.sessionTitle === void 0 && next.workspaceId === void 0 && next.workspaceLabel === void 0) return;
+    this.sessionMeta.delete(key);
+    this.sessionMeta.set(key, next);
+    while (this.sessionMeta.size > MAX_SESSION_METADATA_ENTRIES) {
+      const oldest = this.sessionMeta.keys().next().value;
+      if (oldest === void 0) break;
+      this.sessionMeta.delete(oldest);
+    }
+  }
+  buildItem(id7, info, metaKey = id7) {
+    const meta3 = this.sessionMeta.get(metaKey);
+    const workspaceId = info.workspaceId ?? meta3?.workspaceId;
+    const workspaceLabel = info.workspaceLabel ?? meta3?.workspaceLabel;
+    const sessionTitle = truncateText(info.sessionTitle ?? meta3?.sessionTitle ?? info.sessionId, MAX_ATTENTION_TITLE_CHARS);
+    const summary3 = info.summary === void 0 ? void 0 : truncateText(info.summary, MAX_ATTENTION_SUMMARY_CHARS);
+    const candidate = {
+      id: truncateId(id7, 256),
+      backend: info.backend,
+      ...info.acpAdapter === void 0 ? {} : { acpAdapter: truncateId(info.acpAdapter, 64) },
+      mode: info.mode,
+      ...workspaceId === void 0 || workspaceId.length === 0 ? {} : { workspaceId: truncateId(workspaceId, 256) },
+      ...workspaceLabel === void 0 || workspaceLabel.length === 0 ? {} : { workspaceLabel: truncateText(workspaceLabel, MAX_ATTENTION_TITLE_CHARS) },
+      sessionId: truncateId(info.sessionId, 256),
+      sessionTitle,
+      status: info.status,
+      ...summary3 === void 0 || summary3.length === 0 ? {} : { summary: summary3 },
+      ...info.detachedExpiresAt === void 0 ? {} : { detachedExpiresAt: Math.max(0, Math.floor(info.detachedExpiresAt)) },
+      updatedAt: Math.max(0, Math.floor(this.now()))
+    };
+    return attentionItemSchema.parse(candidate);
+  }
+  upsertItem(item, signal) {
+    const existing = this.items.get(item.id);
+    if (existing !== void 0 && itemsEquivalent(existing, item)) return;
+    this.items.set(item.id, item);
+    const evictedIds = this.enforceItemCap();
+    const itemRetained = this.items.has(item.id);
+    this.revision += 1;
+    const blockingNow = this.countBlocking();
+    const droppedToZero = this.previousBlockingCount > 0 && blockingNow === 0;
+    this.previousBlockingCount = blockingNow;
+    let immediateDigest;
+    if (signal.mode === "immediate" && itemRetained) {
+      const token = this.mintToken(item);
+      immediateDigest = this.buildDigest(signal.urgentKind, signal.urgency, token);
+    } else if (droppedToZero) {
+      immediateDigest = this.buildDigest("clear", "silent");
+    }
+    const followDigest = immediateDigest ?? this.buildDigest(null, "silent");
+    for (const evictedId of evictedIds) {
+      if (evictedId !== item.id) {
+        this.broadcastFollowEvent({ type: "remove", revision: this.revision, digest: followDigest, itemId: evictedId });
+      }
+    }
+    if (itemRetained) {
+      this.broadcastFollowEvent({ type: "upsert", revision: this.revision, digest: followDigest, item });
+    }
+    if (immediateDigest !== void 0) {
+      this.cancelDebounceTimer();
+      this.emitDigest(immediateDigest);
+    } else {
+      this.scheduleDebouncedDigest(
+        signal.mode === "debounced" ? signal.silentKind : null,
+        signal.mode === "debounced" ? signal.silentItemId : void 0
+      );
+    }
+  }
+  removeItem(itemId) {
+    const existing = this.items.get(itemId);
+    if (existing === void 0) return;
+    this.items.delete(itemId);
+    this.criticalNotifiedIds.delete(itemId);
+    this.invalidateTokensForItem(itemId);
+    this.revision += 1;
+    const blockingNow = this.countBlocking();
+    const droppedToZero = this.previousBlockingCount > 0 && blockingNow === 0;
+    this.previousBlockingCount = blockingNow;
+    const digest = droppedToZero ? this.buildDigest("clear", "silent") : this.buildDigest(null, "silent");
+    this.broadcastFollowEvent({ type: "remove", revision: this.revision, digest, itemId });
+    if (droppedToZero) {
+      this.cancelDebounceTimer();
+      this.emitDigest(digest);
+    } else {
+      this.scheduleDebouncedDigest(null);
+    }
+  }
+  enforceItemCap() {
+    if (this.items.size <= MAX_ATTENTION_ITEMS) return [];
+    const sorted = this.sortedItems();
+    const evicted = [];
+    for (let index = MAX_ATTENTION_ITEMS; index < sorted.length; index += 1) {
+      const removed = sorted[index];
+      this.items.delete(removed.id);
+      this.criticalNotifiedIds.delete(removed.id);
+      this.invalidateTokensForItem(removed.id);
+      evicted.push(removed.id);
+    }
+    return evicted;
+  }
+  sortedItems() {
+    return [...this.items.values()].sort(compareAttentionItems);
+  }
+  countBlocking() {
+    let count = 0;
+    for (const item of this.items.values()) {
+      if (item.status === "waiting_approval" || item.status === "waiting_question") count += 1;
+    }
+    return count;
+  }
+  buildDigest(urgentKind, urgency, attentionToken) {
+    let pendingApprovals = 0;
+    let pendingQuestions = 0;
+    let runningSessions = 0;
+    let completedUnread = 0;
+    for (const item of this.items.values()) {
+      if (item.status === "waiting_approval") pendingApprovals += 1;
+      else if (item.status === "waiting_question") pendingQuestions += 1;
+      else if (item.status === "running") runningSessions += 1;
+      else if (item.status === "completed_unread" || item.status === "failed_unread") completedUnread += 1;
+    }
+    const digest = attentionDigestSchema.parse({
+      revision: this.revision,
+      pendingApprovals: Math.min(MAX_ATTENTION_COUNT, pendingApprovals),
+      pendingQuestions: Math.min(MAX_ATTENTION_COUNT, pendingQuestions),
+      runningSessions: Math.min(MAX_ATTENTION_COUNT, runningSessions),
+      completedUnread: Math.min(MAX_ATTENTION_COUNT, completedUnread),
+      urgentKind,
+      urgency,
+      ...attentionToken === void 0 ? {} : { attentionToken },
+      updatedAt: Math.max(0, Math.floor(this.now()))
+    });
+    this.lastDigest = digest;
+    return digest;
+  }
+  scheduleDebouncedDigest(urgentKind, itemId) {
+    if (this.closed) return;
+    if (urgentKind !== null || this.pendingSilentHint === void 0) {
+      this.pendingSilentHint = { urgentKind, ...itemId === void 0 ? {} : { itemId } };
+    }
+    if (this.debounceTimer !== void 0) return;
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = void 0;
+      if (this.closed) return;
+      const hint = this.pendingSilentHint;
+      this.pendingSilentHint = void 0;
+      const item = hint?.itemId === void 0 ? void 0 : this.items.get(hint.itemId);
+      const token = item === void 0 ? void 0 : this.mintToken(item);
+      const digest = this.buildDigest(hint?.urgentKind ?? null, "silent", token);
+      this.emitDigest(digest);
+    }, this.debounceMs);
+    this.debounceTimer.unref?.();
+  }
+  cancelDebounceTimer() {
+    if (this.debounceTimer !== void 0) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = void 0;
+    }
+    this.pendingSilentHint = void 0;
+  }
+  emitDigest(digest) {
+    if (this.closed) return;
+    try {
+      this.options.onDigest?.(attentionDigestSchema.parse(digest));
+    } catch {
+    }
+  }
+  mintToken(item) {
+    this.pruneExpiredTokens();
+    while (this.tokens.size >= this.maxTokens) {
+      const oldest = this.tokens.keys().next().value;
+      if (oldest === void 0) break;
+      this.tokens.delete(oldest);
+    }
+    const token = randomBytes12(16).toString("hex");
+    this.tokens.set(token, {
+      target: {
+        kind: "session",
+        backend: item.backend,
+        ...item.acpAdapter === void 0 ? {} : { acpAdapter: item.acpAdapter },
+        mode: item.mode,
+        ...item.workspaceId === void 0 ? {} : { workspaceId: item.workspaceId },
+        sessionId: item.sessionId,
+        itemId: item.id
+      },
+      expiresAt: this.now() + this.tokenTtlMs
+    });
+    return token;
+  }
+  pruneExpiredTokens() {
+    const now = this.now();
+    for (const [token, entry] of this.tokens) {
+      if (entry.expiresAt <= now) this.tokens.delete(token);
+    }
+  }
+  invalidateTokensForItem(itemId) {
+    for (const [token, entry] of this.tokens) {
+      if (entry.target.itemId === itemId) this.tokens.delete(token);
+    }
+  }
+  invalidateTokensForSession(backend, sessionId, acpAdapter) {
+    for (const [token, entry] of this.tokens) {
+      if (entry.target.backend === backend && entry.target.sessionId === sessionId && (acpAdapter === void 0 || entry.target.acpAdapter === acpAdapter)) {
+        this.tokens.delete(token);
+      }
+    }
+  }
+  broadcastFollowEvent(event2) {
+    for (const [connectionId, follower] of this.followers) {
+      this.enqueueFollowerEvent(connectionId, follower, event2);
+    }
+  }
+  enqueueFollowerEvent(connectionId, follower, event2) {
+    const next = follower.chain.then(async () => {
+      if (this.closed || this.followers.get(connectionId) !== follower) return;
+      try {
+        await follower.send(event2);
+      } catch {
+        if (this.followers.get(connectionId) === follower) {
+          this.followers.delete(connectionId);
+        }
+      }
+    });
+    follower.chain = next.catch(() => void 0);
+  }
+};
+function sessionItemId(backend, sessionId, acpAdapter) {
+  return acpAdapter === void 0 ? truncateId(`${backend}:session:${sessionId}`, 256) : truncateId(`${backend}:${acpAdapter}:session:${sessionId}`, 256);
+}
+function codexApprovalItemId(requestHandle) {
+  return truncateId(`codex:approval:${requestHandle}`, 256);
+}
+function acpApprovalItemId(backend, requestHandle) {
+  return truncateId(`acp:${backend}:approval:${requestHandle}`, 256);
+}
+function harnessApprovalItemId(eventId) {
+  return truncateId(`harness:approval:${eventId}`, 256);
+}
+function harnessQuestionItemId(eventId) {
+  return truncateId(`harness:question:${eventId}`, 256);
+}
+function harnessProjectedQuestionItemId(sessionId, callId) {
+  return truncateId(`harness:question:${sessionId}:${callId}`, 256);
+}
+function botApprovalItemId(approvalId) {
+  return truncateId(`ds-bot:approval:${approvalId}`, 256);
+}
+function botQuestionItemId(sessionId, questionId) {
+  return truncateId(`ds-bot:question:${sessionId}:${questionId}`, 256);
+}
+function truncateText(value, maxChars) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxChars ? normalized : normalized.slice(0, maxChars);
+}
+function truncateId(value, maxChars) {
+  return value.length <= maxChars ? value : value.slice(0, maxChars);
+}
+function itemsEquivalent(left, right) {
+  return left.id === right.id && left.backend === right.backend && left.acpAdapter === right.acpAdapter && left.mode === right.mode && left.workspaceId === right.workspaceId && left.workspaceLabel === right.workspaceLabel && left.sessionId === right.sessionId && left.sessionTitle === right.sessionTitle && left.status === right.status && left.summary === right.summary && left.detachedExpiresAt === right.detachedExpiresAt;
+}
+function isBotWorkActive(value) {
+  if (value === true) return true;
+  if (typeof value === "number") return value > 0;
+  if (typeof value === "string") return value.trim().length > 0 && value !== "idle";
+  if (Array.isArray(value)) return value.length > 0;
+  if (isRecord12(value)) {
+    if (value.active === false || value.running === false || value.status === "idle") return false;
+    return Object.keys(value).length > 0;
+  }
+  return false;
+}
+function extractHarnessQuestionSummary(request2) {
+  if (Array.isArray(request2.questions)) {
+    for (const entry of request2.questions) {
+      if (isRecord12(entry)) {
+        const text = firstNonEmptyString(entry.question, entry.header, entry.prompt, entry.title);
+        if (text !== void 0) return text;
+      } else if (typeof entry === "string" && entry.trim().length > 0) {
+        return entry.trim();
+      }
+    }
+  }
+  return firstNonEmptyString(request2.question, request2.prompt, request2.title);
+}
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return void 0;
+}
+function isRecord12(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/plugin/src/detached-approval-budget.ts
+var MAX_DETACHED_APPROVALS = 16;
+var DetachedApprovalBudget = class {
+  constructor(max = MAX_DETACHED_APPROVALS) {
+    this.max = max;
+  }
+  held = /* @__PURE__ */ new Set();
+  count() {
+    return this.held.size;
+  }
+  hasCapacity() {
+    return this.held.size < this.max;
+  }
+  tryAcquire(token) {
+    if (this.held.has(token)) return true;
+    if (this.held.size >= this.max) return false;
+    this.held.add(token);
+    return true;
+  }
+  release(token) {
+    this.held.delete(token);
+  }
+  releasePrefix(prefix) {
+    for (const token of [...this.held]) {
+      if (token.startsWith(prefix)) this.held.delete(token);
+    }
+  }
+};
+
 // packages/plugin/src/codex/app-server.ts
 import { Buffer as Buffer2 } from "node:buffer";
 
@@ -92872,7 +94304,7 @@ var CodexAppServerClient = class {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
       return false;
     }
-    if (!isRecord12(value)) {
+    if (!isRecord13(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
       return false;
     }
@@ -92963,7 +94395,7 @@ var CodexAppServerClient = class {
 var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
 var CODEX_UNMATERIALIZED_THREAD_MESSAGE = "Codex thread has no turns yet.";
 function safeUpstreamError(value, method) {
-  if (!isRecord12(value) || typeof value.message !== "string") {
+  if (!isRecord13(value) || typeof value.message !== "string") {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex App Server rejected the request.");
   }
   const message = value.message.toLowerCase();
@@ -92984,7 +94416,7 @@ function safeUpstreamError(value, method) {
     message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request."
   );
 }
-function isRecord12(value) {
+function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -93496,6 +94928,13 @@ var CodexPeerBridge = class {
             throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex stream was closed while opening.");
           }
           if (opening.truncated) replayTruncated = true;
+          if (typeof this.domain.deliverPendingApprovals === "function") {
+            await this.domain.deliverPendingApprovals(this.context.connectionId, params.streamId, params.threadId);
+          }
+          this.requireOpen();
+          if (this.openingStreams.get(params.streamId) !== opening) {
+            throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex stream was closed while opening.");
+          }
           this.openingStreams.delete(params.streamId);
           this.streams.set(params.streamId, params.threadId);
         } catch (error62) {
@@ -93756,18 +95195,18 @@ function decodeCanonicalBase64(value) {
   }
   return decoded;
 }
-function isRecord13(value) {
+function isRecord14(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode2(error62) {
-  if (isRecord13(error62) && typeof error62.code === "string") return error62.code;
+  if (isRecord14(error62) && typeof error62.code === "string") return error62.code;
   return "UNKNOWN";
 }
 function isResponseTooLargeError(error62) {
-  return isRecord13(error62) && error62.code === "RESPONSE_TOO_LARGE";
+  return isRecord14(error62) && error62.code === "RESPONSE_TOO_LARGE";
 }
 function safeMethod(input4) {
-  return isRecord13(input4) && typeof input4.method === "string" ? input4.method : "invalid";
+  return isRecord14(input4) && typeof input4.method === "string" ? input4.method : "invalid";
 }
 function concatChunks(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
@@ -93827,6 +95266,9 @@ var CodexThreadLifecycle = class {
   }
   isReleasing(threadId) {
     return this.threads.get(threadId)?.releasing === true;
+  }
+  isActive(threadId) {
+    return this.threads.get(threadId)?.active === true;
   }
   closed(threadId) {
     const state2 = this.threads.get(threadId);
@@ -93894,6 +95336,7 @@ var CodexThreadLifecycle = class {
 
 // packages/plugin/src/codex/domain.ts
 var APPROVAL_TTL_MS = 5 * 6e4;
+var MAX_THREAD_META_ENTRIES = 256;
 var DEFAULT_RESTART_DELAYS_MS = [1e3, 2e3, 4e3, 8e3, 15e3];
 var DEFAULT_TURN_SILENCE_TIMEOUT_MS = 10 * 6e4;
 var CODEX_PAGE_LIMIT2 = 100;
@@ -93932,13 +95375,16 @@ var BUFFERABLE_CODEX_METHODS = /* @__PURE__ */ new Set([
 ]);
 var TURN_SILENCE_MESSAGE = "CodeX turn timed out waiting for the App Server. The model provider may be unavailable or rate-limited. Please try again later.";
 var CodexRemoteDomain = class {
-  constructor(config2, logger2, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS, turnSilenceTimeoutMs = DEFAULT_TURN_SILENCE_TIMEOUT_MS, onDemandCooldownMs = 3e4) {
+  constructor(config2, logger2, createAppServer = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger), restartDelaysMs = DEFAULT_RESTART_DELAYS_MS, turnSilenceTimeoutMs = DEFAULT_TURN_SILENCE_TIMEOUT_MS, onDemandCooldownMs = 3e4, detachedApprovalGraceSec = DEFAULT_DETACHED_APPROVAL_GRACE_SEC, attention, detachedApprovalBudget = new DetachedApprovalBudget()) {
     this.config = config2;
     this.logger = logger2;
     this.createAppServer = createAppServer;
     this.restartDelaysMs = restartDelaysMs;
     this.turnSilenceTimeoutMs = turnSilenceTimeoutMs;
     this.onDemandCooldownMs = onDemandCooldownMs;
+    this.attention = attention;
+    this.detachedApprovalBudget = detachedApprovalBudget;
+    this.detachedApprovalGraceMs = clampDetachedApprovalGraceSec(detachedApprovalGraceSec) * 1e3;
   }
   appServer;
   unsubscribeInbound;
@@ -93961,6 +95407,8 @@ var CodexRemoteDomain = class {
   approvals = /* @__PURE__ */ new Map();
   permissionPresets = /* @__PURE__ */ new Map();
   recentFrames = /* @__PURE__ */ new Map();
+  threadMeta = /* @__PURE__ */ new Map();
+  detachedApprovalGraceMs;
   nextBufferSeq = 1;
   inboundChains = /* @__PURE__ */ new Map();
   pendingRequestThreads = /* @__PURE__ */ new Map();
@@ -94091,7 +95539,7 @@ var CodexRemoteDomain = class {
     let active2 = true;
     try {
       const result = await this.callUpstream("thread/goal/get", { threadId }, 5e3);
-      if (!isRecord14(result) || !("goal" in result)) {
+      if (!isRecord15(result) || !("goal" in result)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Goal.");
       }
       active2 = result.goal === null ? false : goalRetainsThread(result.goal, threadId);
@@ -94164,7 +95612,10 @@ var CodexRemoteDomain = class {
         serviceName: "deepseek_harness_remote"
       });
       const createdId = extractThread(result)?.id;
-      if (typeof createdId === "string") this.rememberThread(connectionId, createdId, attached);
+      if (typeof createdId === "string") {
+        this.rememberThread(connectionId, createdId, attached);
+        this.rememberThreadMeta(createdId, extractThread(result));
+      }
       assertCurrent();
       if (extractThread(result)?.id === void 0) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
@@ -94223,11 +95674,17 @@ var CodexRemoteDomain = class {
     }
     const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
     assertCurrent();
-    if (threadId !== void 0) this.rememberThread(connectionId, threadId);
+    if (threadId !== void 0) {
+      this.rememberThread(connectionId, threadId);
+      if (allowedThread !== void 0) this.rememberThreadMeta(threadId, allowedThread.thread, allowedThread.cwd);
+    }
     if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
       const owner = this.turnOwners.get(threadId);
       if (owner !== void 0 && owner.connectionId !== connectionId) {
         throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
+      }
+      if (this.hasPendingApprovalForThread(threadId)) {
+        throw new RpcError("CODEX_THREAD_BUSY", "Resolve pending CodeX approvals before changing permissions.");
       }
       return this.changeThreadPermission(threadId, call.params, allowedThread, assertCurrent);
     }
@@ -94254,6 +95711,14 @@ var CodexRemoteDomain = class {
     let previousOwner;
     let claimedOwner;
     if (isThreadMutation(call.method) && threadId !== void 0) {
+      if (call.method === "turn/start" && this.hasPendingApprovalForThread(threadId)) {
+        const currentOwner = this.turnOwners.get(threadId);
+        const peerDeviceId = this.peerDeviceIds.get(connectionId) ?? connectionId;
+        if (currentOwner !== void 0 && currentOwner.connectionId !== connectionId && currentOwner.peerDeviceId !== peerDeviceId) {
+          throw new RpcError("CODEX_TURN_OWNED", "Another Remote connection owns the active Codex turn.");
+        }
+        throw new RpcError("CODEX_THREAD_BUSY", "Resolve pending CodeX approvals before starting a new turn.");
+      }
       const claim2 = this.claimTurn(
         threadId,
         connectionId,
@@ -94263,6 +95728,9 @@ var CodexRemoteDomain = class {
       claimed = claim2.claimed;
       previousOwner = claim2.previous;
       claimedOwner = this.turnOwners.get(threadId);
+      if (call.method === "turn/interrupt") {
+        this.declineApprovalsForThreadSync(threadId);
+      }
     }
     const finishStart = call.method === "turn/start" && threadId !== void 0 ? this.threadLifecycle.starting(threadId) : void 0;
     try {
@@ -94311,6 +95779,7 @@ var CodexRemoteDomain = class {
       if (call.method === "turn/start" && threadId !== void 0) {
         this.rememberTurnId(threadId, connectionId, extractTurnId(result));
         this.armTurnWatchdog(threadId);
+        this.attention?.onSessionRunning(this.attentionSessionInfo(threadId));
         if (call.params.permissionPreset !== void 0) {
           await this.publishPermission(threadId, codexTurnPermissionParams(permission, allowedThread?.cwd));
         }
@@ -94327,16 +95796,50 @@ var CodexRemoteDomain = class {
     }
   }
   async respond(connectionId, input4) {
-    await this.expireApprovals();
+    if (!this.peers.has(connectionId)) {
+      throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
+    }
     const params = parseRespond(input4);
     const approval = this.approvals.get(params.requestHandle);
-    if (approval === void 0 || approval.connectionId !== connectionId) {
+    if (approval === void 0) {
       throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
     }
-    this.approvals.delete(params.requestHandle);
+    if (approval.expiresAt <= Date.now()) {
+      this.deleteApproval(params.requestHandle);
+      this.scheduleApprovalExpiry();
+      this.attention?.onInteractionResolved(codexApprovalItemId(params.requestHandle));
+      const staleAppServer = this.appServer;
+      void staleAppServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+      void this.threadLifecycle.retry(approval.threadId);
+      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
+    }
+    if (approval.ownerConnectionId !== null && approval.ownerConnectionId !== connectionId) {
+      throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
+    }
+    if (approval.ownerConnectionId === null) {
+      const turnOwner = this.turnOwners.get(approval.threadId);
+      if (turnOwner !== void 0 && turnOwner.connectionId !== connectionId && this.peers.has(turnOwner.connectionId)) {
+        throw new RpcError("CODEX_THREAD_BUSY", "Another Remote connection owns the active Codex turn.");
+      }
+    }
+    const appServer = this.requireAppServer();
+    this.deleteApproval(params.requestHandle);
     this.scheduleApprovalExpiry();
-    await this.requireAppServer().respond(approval.upstreamId, { decision: params.decision });
-    await this.threadLifecycle.retry(approval.threadId);
+    this.attention?.onInteractionResolved(codexApprovalItemId(params.requestHandle));
+    if (approval.ownerConnectionId === null && !this.turnOwners.has(approval.threadId)) {
+      this.turnOwners.set(approval.threadId, {
+        connectionId,
+        peerDeviceId: this.peerDeviceIds.get(connectionId) ?? connectionId
+      });
+    }
+    if (!this.hasPendingApprovalForThread(approval.threadId) && this.turnOwners.has(approval.threadId)) {
+      this.armTurnWatchdog(approval.threadId);
+    }
+    try {
+      await appServer.respond(approval.upstreamId, { decision: params.decision });
+    } finally {
+      await this.threadLifecycle.retry(approval.threadId);
+    }
     return { resolved: true };
   }
   async detachPeer(connectionId) {
@@ -94351,12 +95854,26 @@ var CodexRemoteDomain = class {
       this.clearTurnWatchdog(threadId);
     }
     const appServer = this.appServer;
-    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.connectionId === connectionId);
+    const pending = [...this.approvals.entries()].filter(([, approval]) => approval.ownerConnectionId === connectionId);
+    const toDecline = [];
     for (const [handle, approval] of pending) {
-      this.approvals.delete(handle);
-      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+      if (this.detachedApprovalGraceMs > 0 && this.detachedApprovalBudget.tryAcquire(codexDetachedBudgetKey(handle))) {
+        const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs;
+        approval.ownerConnectionId = null;
+        approval.detachedExpiresAt = detachedExpiresAt;
+        approval.expiresAt = detachedExpiresAt;
+        this.attention?.onInteractionDetached(codexApprovalItemId(handle), detachedExpiresAt);
+      } else {
+        this.deleteApproval(handle);
+        this.attention?.onInteractionResolved(codexApprovalItemId(handle));
+        toDecline.push(approval);
+      }
     }
     this.scheduleApprovalExpiry();
+    for (const approval of toDecline) {
+      await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+      if (!threadIds.has(approval.threadId)) void this.threadLifecycle.retry(approval.threadId);
+    }
     await Promise.allSettled([...threadIds].map((threadId) => this.releaseThread(threadId)));
   }
   async reconfigure(config2) {
@@ -94384,9 +95901,16 @@ var CodexRemoteDomain = class {
       this.permissionPresets.clear();
       this.recentFrames.clear();
       this.knownThreadPromises.clear();
+      const pendingOnReconfigure = [...this.approvals.values()];
       this.approvals.clear();
+      this.detachedApprovalBudget.releasePrefix("codex:");
       if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
       this.approvalExpiryTimer = void 0;
+      this.attention?.onBackendCleared("codex");
+      const reconfigureServer = this.appServer;
+      if (pendingOnReconfigure.length > 0 && reconfigureServer !== void 0) {
+        await Promise.allSettled(pendingOnReconfigure.map((approval) => reconfigureServer.respond(approval.upstreamId, { decision: "decline" })));
+      }
       await this.disposeAppServer(this.appServer);
       this.inboundChains.clear();
       this.pendingRequestThreads.clear();
@@ -94411,6 +95935,16 @@ var CodexRemoteDomain = class {
     this.state = this.config.enabled ? "unavailable" : "disabled";
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
+    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    this.approvalExpiryTimer = void 0;
+    const pendingOnClose = [...this.approvals.values()];
+    this.approvals.clear();
+    this.detachedApprovalBudget.releasePrefix("codex:");
+    this.attention?.onBackendCleared("codex");
+    const closingServer = this.appServer;
+    if (pendingOnClose.length > 0 && closingServer !== void 0) {
+      await Promise.allSettled(pendingOnClose.map((approval) => closingServer.respond(approval.upstreamId, { decision: "decline" })));
+    }
     for (const bridge of [...this.peers.values()]) await bridge.closeAll();
     this.peers.clear();
     this.peerDeviceIds.clear();
@@ -94418,9 +95952,7 @@ var CodexRemoteDomain = class {
     this.turnOwners.clear();
     this.permissionPresets.clear();
     this.recentFrames.clear();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
-    this.approvalExpiryTimer = void 0;
-    this.approvals.clear();
+    this.threadMeta.clear();
     this.inboundChains.clear();
     this.pendingRequestThreads.clear();
     this.unsubscribeInbound?.();
@@ -94497,8 +96029,10 @@ var CodexRemoteDomain = class {
     this.permissionPresets.clear();
     this.recentFrames.clear();
     this.approvals.clear();
+    this.detachedApprovalBudget.releasePrefix("codex:");
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
     this.approvalExpiryTimer = void 0;
+    this.attention?.onBackendCleared("codex");
     await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed")));
     if (this.closed || generation !== this.lifecycleGeneration) return;
     await this.disposeAppServer(appServer);
@@ -94561,9 +96095,13 @@ var CodexRemoteDomain = class {
     }
     const threadId = extractThreadId(message.params);
     if (threadId !== void 0 && (message.method === "thread/goal/updated" || message.method === "thread/goal/cleared")) {
-      const active2 = message.method !== "thread/goal/cleared" && (!isRecord14(message.params) || goalRetainsThread(message.params.goal, threadId));
+      const active2 = message.method !== "thread/goal/cleared" && (!isRecord15(message.params) || goalRetainsThread(message.params.goal, threadId));
       this.threadGoals.set(threadId, { active: active2 });
       void this.threadLifecycle.retry(threadId);
+    }
+    if (message.method === "thread/name/updated" && threadId !== void 0 && isRecord15(message.params)) {
+      const name2 = typeof message.params.name === "string" ? message.params.name : void 0;
+      if (name2 !== void 0 && name2.trim().length > 0) this.rememberThreadMeta(threadId, { name: name2 });
     }
     if (message.method === "thread/settings/updated" && threadId !== void 0) {
       this.rememberPermission(threadId, message.params);
@@ -94573,24 +96111,41 @@ var CodexRemoteDomain = class {
       this.permissionPresets.delete(threadId);
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
+      this.declineApprovalsForThreadSync(threadId);
       this.threadLifecycle.closed(threadId);
+      this.attention?.onSessionRemoved("codex", `codex:${threadId}`);
       if (!releasing) this.recentFrames.delete(threadId);
     }
     if (message.method === "turn/completed" && threadId !== void 0) {
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
       this.threadLifecycle.active(threadId, false);
+      const turn = isRecord15(message.params) && isRecord15(message.params.turn) ? message.params.turn : void 0;
+      const turnStatus = typeof turn?.status === "string" ? turn.status : void 0;
+      if (turnStatus === "interrupted" || turnStatus === "cancelled") {
+        this.attention?.onSessionCancelled("codex", `codex:${threadId}`);
+      } else {
+        const failed = turnStatus === "failed";
+        const errorMessage = failed && isRecord15(turn?.error) && typeof turn.error.message === "string" ? turn.error.message : void 0;
+        this.attention?.onSessionCompleted({
+          ...this.attentionSessionInfo(threadId),
+          failed,
+          ...errorMessage === void 0 ? {} : { summary: errorMessage }
+        });
+      }
     }
     if (message.method === "thread/status/changed" && threadId !== void 0 && isTerminalThreadStatus(message.params)) {
+      const wasActive = this.turnOwners.has(threadId) || this.threadLifecycle.isActive(threadId);
       this.turnOwners.delete(threadId);
       this.clearTurnWatchdog(threadId);
-      for (const [handle, approval] of this.approvals) {
-        if (approval.threadId !== threadId) continue;
-        this.approvals.delete(handle);
-        void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-      }
-      this.scheduleApprovalExpiry();
+      this.declineApprovalsForThreadSync(threadId);
       this.threadLifecycle.active(threadId, false);
+      if (wasActive) {
+        const statusType = isRecord15(message.params) && isRecord15(message.params.status) && typeof message.params.status.type === "string" ? message.params.status.type : void 0;
+        if (statusType === "systemError" || statusType === "failed") {
+          this.attention?.onSessionCompleted({ ...this.attentionSessionInfo(threadId), failed: true });
+        }
+      }
     }
     if (message.method === "turn/started" && threadId !== void 0) {
       this.threadLifecycle.active(threadId, true);
@@ -94600,8 +96155,9 @@ var CodexRemoteDomain = class {
         this.turnOwners.set(threadId, { ...owner, ...turnId === void 0 ? {} : { turnId } });
       }
       this.armTurnWatchdog(threadId);
+      this.attention?.onSessionRunning(this.attentionSessionInfo(threadId));
     }
-    if (message.method === "thread/status/changed" && threadId !== void 0 && isRecord14(message.params) && isRecord14(message.params.status) && message.params.status.type === "active") {
+    if (message.method === "thread/status/changed" && threadId !== void 0 && isRecord15(message.params) && isRecord15(message.params.status) && message.params.status.type === "active") {
       this.threadLifecycle.active(threadId, true);
     }
     if (message.method === "serverRequest/resolved") {
@@ -94610,7 +96166,7 @@ var CodexRemoteDomain = class {
         for (const entry of resolved) {
           const targetThreadId = threadId ?? entry.threadId;
           if (this.turnOwners.has(targetThreadId)) this.armTurnWatchdog(targetThreadId);
-          const params = isRecord14(message.params) ? { ...message.params, threadId: targetThreadId, requestHandle: entry.handle } : { threadId: targetThreadId, requestHandle: entry.handle };
+          const params = isRecord15(message.params) ? { ...message.params, threadId: targetThreadId, requestHandle: entry.handle } : { threadId: targetThreadId, requestHandle: entry.handle };
           await this.publishToThread(targetThreadId, {
             method: message.method,
             params
@@ -94625,6 +96181,28 @@ var CodexRemoteDomain = class {
       method: message.method,
       params: message.params
     }, receivedAt);
+  }
+  /** Synthesize live pending approvals for a newly attached stream without polluting `recentFrames`. */
+  async deliverPendingApprovals(connectionId, streamId, threadId) {
+    const peer = this.peers.get(connectionId);
+    if (peer === void 0) return;
+    const expired = this.expireApprovalsSync();
+    if (expired.length > 0) {
+      const appServer = this.appServer;
+      for (const approval of expired) {
+        void appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+        void this.threadLifecycle.retry(approval.threadId);
+      }
+    }
+    const turnOwner = this.turnOwners.get(threadId);
+    const ownedByOtherLivePeer = turnOwner !== void 0 && turnOwner.connectionId !== connectionId && this.peers.has(turnOwner.connectionId);
+    const liveApprovals = [...this.approvals.values()].filter((approval) => approval.threadId === threadId && (approval.ownerConnectionId === connectionId || approval.ownerConnectionId === null && !ownedByOtherLivePeer));
+    for (const approval of liveApprovals) {
+      await peer.publishReplayFrame(streamId, {
+        method: approval.method,
+        params: approval.params
+      });
+    }
   }
   /** Replay buffered real-time frames missed while no stream was subscribed. */
   async replayBufferedFrames(connectionId, streamId, threadId) {
@@ -94759,7 +96337,7 @@ var CodexRemoteDomain = class {
     this.pruneFrameBuffer(threadId);
     const entry = this.recentFrames.get(threadId);
     if (entry === void 0) return;
-    const turns = Array.isArray(thread.turns) ? thread.turns.filter(isRecord14) : [];
+    const turns = Array.isArray(thread.turns) ? thread.turns.filter(isRecord15) : [];
     if (turns.length === 0) return;
     let activeTurn;
     for (let index = turns.length - 1; index >= 0; index -= 1) {
@@ -94790,7 +96368,7 @@ var CodexRemoteDomain = class {
       }
       if (Array.isArray(turn.items)) {
         for (const item of turn.items) {
-          if (isRecord14(item) && typeof item.id === "string" && item.id.length > 0) {
+          if (isRecord15(item) && typeof item.id === "string" && item.id.length > 0) {
             persistedItemIds.add(item.id);
           }
         }
@@ -94859,7 +96437,7 @@ var CodexRemoteDomain = class {
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
         assertCurrent();
-        result = { ...isRecord14(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+        result = { ...isRecord15(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
     await this.publishPermission(threadId, result);
@@ -94867,7 +96445,7 @@ var CodexRemoteDomain = class {
   }
   async publishPermission(threadId, value) {
     if (!this.available) return;
-    const source = isRecord14(value) ? value : {};
+    const source = isRecord15(value) ? value : {};
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
     const params = { threadId, threadSettings };
     this.rememberPermission(threadId, params);
@@ -94884,29 +96462,71 @@ var CodexRemoteDomain = class {
     const threadId = extractThreadId(message.params);
     const owner = threadId === void 0 ? void 0 : this.turnOwners.get(threadId);
     const peer = owner === void 0 ? void 0 : this.peers.get(owner.connectionId);
-    if (threadId === void 0 || owner === void 0 || peer === void 0 || !peer.hasThreadSubscription(threadId)) {
-      await appServer.respond(message.id, { decision: "decline" });
+    const hasLiveOwner = threadId !== void 0 && owner !== void 0 && peer !== void 0 && peer.hasThreadSubscription(threadId);
+    if (!hasLiveOwner) {
+      const requestHandle2 = randomUUID13();
+      const canDetach = threadId !== void 0 && this.threadLifecycle.isActive(threadId) && this.detachedApprovalGraceMs > 0 && this.detachedApprovalBudget.tryAcquire(codexDetachedBudgetKey(requestHandle2));
+      if (!canDetach) {
+        await appServer.respond(message.id, { decision: "decline" });
+        return;
+      }
+      const sanitizedParams2 = sanitizeApprovalParams(message.params, requestHandle2);
+      const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs;
+      this.approvals.set(requestHandle2, {
+        upstreamId: message.id,
+        ownerConnectionId: null,
+        threadId,
+        method: message.method,
+        params: sanitizedParams2,
+        expiresAt: detachedExpiresAt,
+        detachedExpiresAt
+      });
+      this.clearTurnWatchdog(threadId);
+      this.scheduleApprovalExpiry();
+      this.attention?.onInteractionPending({
+        ...this.attentionSessionInfo(threadId),
+        id: codexApprovalItemId(requestHandle2),
+        status: "waiting_approval",
+        detachedExpiresAt,
+        ...codexApprovalSummary(message.method, message.params) === void 0 ? {} : { summary: codexApprovalSummary(message.method, message.params) }
+      });
       return;
     }
     const requestHandle = randomUUID13();
+    const sanitizedParams = sanitizeApprovalParams(message.params, requestHandle);
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
-      connectionId: owner.connectionId,
+      ownerConnectionId: owner.connectionId,
       threadId,
       method: message.method,
+      params: sanitizedParams,
       expiresAt: Date.now() + APPROVAL_TTL_MS
     });
+    this.clearTurnWatchdog(threadId);
     this.scheduleApprovalExpiry();
-    this.armTurnWatchdog(threadId);
+    this.attention?.onInteractionPending({
+      ...this.attentionSessionInfo(threadId),
+      id: codexApprovalItemId(requestHandle),
+      status: "waiting_approval",
+      ...codexApprovalSummary(message.method, message.params) === void 0 ? {} : { summary: codexApprovalSummary(message.method, message.params) }
+    });
     try {
       await peer.publishInbound(threadId, {
         method: message.method,
-        params: sanitizeApprovalParams(message.params, requestHandle)
+        params: sanitizedParams
       });
     } catch (error62) {
-      this.approvals.delete(requestHandle);
-      this.scheduleApprovalExpiry();
-      await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
+      const current = this.approvals.get(requestHandle);
+      if (current !== void 0 && current.ownerConnectionId === owner.connectionId) {
+        this.deleteApproval(requestHandle);
+        this.scheduleApprovalExpiry();
+        this.attention?.onInteractionResolved(codexApprovalItemId(requestHandle));
+        if (!this.hasPendingApprovalForThread(threadId) && this.turnOwners.has(threadId)) {
+          this.armTurnWatchdog(threadId);
+        }
+        await appServer.respond(message.id, { decision: "decline" }).catch(() => void 0);
+        await this.threadLifecycle.retry(threadId);
+      }
       throw error62;
     }
   }
@@ -94959,7 +96579,7 @@ var CodexRemoteDomain = class {
       if (legacyThread === void 0 || legacyThread.id !== threadId || !Array.isArray(legacyThread.turns)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
       }
-      if (legacyThread.turns.some((turn) => !isRecord14(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord14(item)))) {
+      if (legacyThread.turns.some((turn) => !isRecord15(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord15(item)))) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid Thread history content.");
       }
       return legacyThread;
@@ -94993,17 +96613,17 @@ var CodexRemoteDomain = class {
         }
         throw error62;
       }
-      if (!isRecord14(result) || !Array.isArray(result.data)) {
+      if (!isRecord15(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Turn page.");
       }
       const pageResult = result;
       const pageTurns = await Promise.all(result.data.map(async (rawTurn) => {
-        if (!isRecord14(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
+        if (!isRecord15(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Turn.");
         }
         const inlineFull = rawTurn.itemsView === "full" || rawTurn.itemsView === void 0 && itemsView === "full" && Array.isArray(rawTurn.items);
         const items = inlineFull ? rawTurn.items : await this.readThreadItems(threadId, rawTurn.id);
-        if (items.some((item) => !isRecord14(item))) {
+        if (items.some((item) => !isRecord15(item))) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         return { ...rawTurn, items };
@@ -95025,11 +96645,11 @@ var CodexRemoteDomain = class {
         sortDirection: "asc",
         ...cursor3 === void 0 ? {} : { cursor: cursor3 }
       });
-      if (!isRecord14(result) || !Array.isArray(result.data)) {
+      if (!isRecord15(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Item page.");
       }
       for (const entry of result.data) {
-        if (!isRecord14(entry) || !isRecord14(entry.item)) {
+        if (!isRecord15(entry) || !isRecord15(entry.item)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         items.push(entry.item);
@@ -95125,11 +96745,11 @@ var CodexRemoteDomain = class {
     });
   }
   findInboundThreadForResolved(params) {
-    if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return void 0;
+    if (!isRecord15(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return void 0;
     return this.pendingRequestThreads.get(params.requestId)?.threadId ?? this.findMatchingApprovals(params)[0]?.threadId;
   }
   findMatchingApprovals(params) {
-    if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return [];
+    if (!isRecord15(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return [];
     const matches = [];
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) {
@@ -95142,22 +96762,95 @@ var CodexRemoteDomain = class {
     const matches = this.findMatchingApprovals(params);
     if (matches.length === 0) return matches;
     for (const match of matches) {
-      this.approvals.delete(match.handle);
+      this.deleteApproval(match.handle);
+      this.attention?.onInteractionResolved(codexApprovalItemId(match.handle));
       void this.threadLifecycle.retry(match.threadId);
     }
     this.scheduleApprovalExpiry();
     return matches;
   }
-  async expireApprovals() {
+  expireApprovalsSync() {
     const now = Date.now();
-    const appServer = this.appServer;
-    for (const [handle, approval] of this.approvals) {
+    const expired = [];
+    for (const [handle, approval] of [...this.approvals.entries()]) {
       if (approval.expiresAt > now) continue;
-      this.approvals.delete(handle);
+      this.deleteApproval(handle);
+      this.attention?.onInteractionResolved(codexApprovalItemId(handle));
+      expired.push(approval);
+    }
+    if (expired.length > 0) {
+      this.scheduleApprovalExpiry();
+      for (const approval of expired) {
+        if (!this.hasPendingApprovalForThread(approval.threadId) && this.turnOwners.has(approval.threadId)) {
+          this.armTurnWatchdog(approval.threadId);
+        }
+      }
+    }
+    return expired;
+  }
+  async expireApprovals() {
+    const appServer = this.appServer;
+    const expired = this.expireApprovalsSync();
+    for (const approval of expired) {
       await appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
       void this.threadLifecycle.retry(approval.threadId);
     }
+  }
+  declineApprovalsForThreadSync(threadId) {
+    const removed = [];
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.threadId !== threadId) continue;
+      this.deleteApproval(handle);
+      this.attention?.onInteractionResolved(codexApprovalItemId(handle));
+      removed.push(approval);
+    }
+    if (removed.length === 0) return;
     this.scheduleApprovalExpiry();
+    const appServer = this.appServer;
+    for (const approval of removed) {
+      void appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
+    }
+    void this.threadLifecycle.retry(threadId);
+  }
+  deleteApproval(handle) {
+    const removed = this.approvals.delete(handle);
+    this.detachedApprovalBudget.release(codexDetachedBudgetKey(handle));
+    return removed;
+  }
+  hasPendingApprovalForThread(threadId) {
+    for (const approval of this.approvals.values()) {
+      if (approval.threadId === threadId) return true;
+    }
+    return false;
+  }
+  rememberThreadMeta(threadId, thread, cwd2) {
+    const prev = this.threadMeta.get(threadId);
+    const rawTitle = typeof thread?.name === "string" && thread.name.trim().length > 0 ? thread.name.trim() : typeof thread?.preview === "string" && thread.preview.trim().length > 0 ? thread.preview.trim() : void 0;
+    const resolvedCwd = cwd2 ?? (typeof thread?.cwd === "string" && thread.cwd.length > 0 ? thread.cwd : void 0);
+    const next = {
+      title: rawTitle ?? prev?.title,
+      cwd: resolvedCwd ?? prev?.cwd
+    };
+    if (next.title === void 0 && next.cwd === void 0) return;
+    this.threadMeta.delete(threadId);
+    this.threadMeta.set(threadId, next);
+    while (this.threadMeta.size > MAX_THREAD_META_ENTRIES) {
+      const oldest = this.threadMeta.keys().next().value;
+      if (oldest === void 0) break;
+      this.threadMeta.delete(oldest);
+    }
+  }
+  attentionSessionInfo(threadId) {
+    const meta3 = this.threadMeta.get(threadId);
+    const workspaceLabel = meta3?.cwd === void 0 ? void 0 : basename5(meta3.cwd) || meta3.cwd;
+    return {
+      backend: "codex",
+      mode: "agent",
+      sessionId: `codex:${threadId}`,
+      ...meta3?.title === void 0 ? {} : { sessionTitle: meta3.title },
+      ...meta3?.cwd === void 0 ? {} : { workspaceId: `codex:cwd:${meta3.cwd}` },
+      ...workspaceLabel === void 0 ? {} : { workspaceLabel }
+    };
   }
   scheduleApprovalExpiry() {
     if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
@@ -95174,6 +96867,10 @@ var CodexRemoteDomain = class {
   }
   armTurnWatchdog(threadId) {
     if (this.closed || this.turnSilenceTimeoutMs <= 0 || !this.turnOwners.has(threadId)) return;
+    if (this.hasPendingApprovalForThread(threadId)) {
+      this.clearTurnWatchdog(threadId);
+      return;
+    }
     this.clearTurnWatchdog(threadId);
     const timer2 = setTimeout(() => {
       this.turnWatchdogs.delete(threadId);
@@ -95200,16 +96897,17 @@ var CodexRemoteDomain = class {
    * leave the forever-"thinking" state.
    */
   async failSilentTurn(threadId) {
+    if (this.hasPendingApprovalForThread(threadId)) return;
     const owner = this.turnOwners.get(threadId);
     this.clearTurnWatchdog(threadId);
     if (owner === void 0 || this.closed) return;
     this.turnOwners.delete(threadId);
-    for (const [handle, approval] of this.approvals) {
-      if (approval.threadId !== threadId) continue;
-      this.approvals.delete(handle);
-      void this.appServer?.respond(approval.upstreamId, { decision: "decline" }).catch(() => void 0);
-    }
-    this.scheduleApprovalExpiry();
+    this.declineApprovalsForThreadSync(threadId);
+    this.attention?.onSessionCompleted({
+      ...this.attentionSessionInfo(threadId),
+      failed: true,
+      summary: TURN_SILENCE_MESSAGE
+    });
     const turn = {
       id: owner.turnId ?? `silence:${threadId}`,
       status: "failed",
@@ -95440,8 +97138,8 @@ function findImageBlock(value, attachmentId) {
     }
     return void 0;
   }
-  if (!isRecord14(value)) return void 0;
-  if (value.type === "image" && isRecord14(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
+  if (!isRecord15(value)) return void 0;
+  if (value.type === "image" && isRecord15(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
     return { attachment: value.attachment, data: value.data };
   }
   for (const child of Object.values(value)) {
@@ -95466,7 +97164,7 @@ function macOSCodexBinaryCandidates(userHome) {
     const codexCli = join6(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
       const manifest = JSON.parse(readFileSync2(join6(codexCli, "codex-package.json"), "utf8"));
-      if (!isRecord14(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+      if (!isRecord15(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
       const candidate = join6(codexCli, manifest.entrypoint);
@@ -95500,24 +97198,24 @@ function windowsBundledCodexCandidates(userHome) {
   }
 }
 function parseCallEnvelope(input4) {
-  if (!isRecord14(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
+  if (!isRecord15(input4) || typeof input4.method !== "string" || !("params" in input4) || Object.keys(input4).some((key) => key !== "method" && key !== "params")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
   }
   return { method: input4.method, params: input4.params };
 }
 function parseRespond(input4) {
-  if (!isRecord14(input4) || typeof input4.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input4.decision)) || Object.keys(input4).some((key) => key !== "requestHandle" && key !== "decision")) {
+  if (!isRecord15(input4) || typeof input4.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input4.decision)) || Object.keys(input4).some((key) => key !== "requestHandle" && key !== "decision")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
   }
   return input4;
 }
 function accountCanRun(result) {
-  if (!isRecord14(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord14(result.account);
+  if (!isRecord15(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord15(result.account);
 }
 function sanitizeAccount(result) {
-  if (!isRecord14(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord14(result.account) ? result.account : void 0;
+  if (!isRecord15(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord15(result.account) ? result.account : void 0;
   return {
     authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
     requiresOpenaiAuth: result.requiresOpenaiAuth === true,
@@ -95530,11 +97228,11 @@ function sanitizeAccount(result) {
   };
 }
 function sanitizeThreadList(result) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord15(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   const data2 = result.data.flatMap((value) => {
-    if (!isRecord14(value) || typeof value.id !== "string") return [];
+    if (!isRecord15(value) || typeof value.id !== "string") return [];
     return [{
       id: value.id,
       ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
@@ -95546,7 +97244,7 @@ function sanitizeThreadList(result) {
       ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
       ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
       ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord14(value.status) ? { status: value.status } : {}
+      ...isRecord15(value.status) ? { status: value.status } : {}
     }];
   });
   return {
@@ -95556,18 +97254,18 @@ function sanitizeThreadList(result) {
   };
 }
 function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord15(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record12) => isRecord14(record12) ? record12 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record12) => isRecord15(record12) ? record12 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
-  if (!isRecord14(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  if (!isRecord15(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root2) => {
-    const path = isRecord14(root2) && typeof root2.path === "string" && root2.path.length > 0 ? root2.path : void 0;
+    const path = isRecord15(root2) && typeof root2.path === "string" && root2.path.length > 0 ? root2.path : void 0;
     return path === void 0 || !isAbsolute3(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -95581,7 +97279,7 @@ function sanitizeProject(value) {
   };
 }
 function sanitizeProjectList(result) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord15(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
   }
   const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
@@ -95591,7 +97289,7 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project2 = isRecord14(result) ? sanitizeProject(result.project) : void 0;
+  const project2 = isRecord15(result) ? sanitizeProject(result.project) : void 0;
   if (project2 === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
@@ -95623,27 +97321,27 @@ function codexDirectoryCrumbs(root2, path) {
   return crumbs2;
 }
 function extractThread(result) {
-  return isRecord14(result) && isRecord14(result.thread) ? result.thread : void 0;
+  return isRecord15(result) && isRecord15(result.thread) ? result.thread : void 0;
 }
 function extractTurnId(result) {
-  if (!isRecord14(result)) return void 0;
+  if (!isRecord15(result)) return void 0;
   if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord14(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  if (isRecord15(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
   return void 0;
 }
 function extractThreadId(params) {
-  if (!isRecord14(params)) return void 0;
+  if (!isRecord15(params)) return void 0;
   if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  if (isRecord15(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord15(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
 }
 function goalRetainsThread(goal, threadId) {
-  if (!isRecord14(goal) || goal.threadId !== threadId || typeof goal.status !== "string") return true;
+  if (!isRecord15(goal) || goal.threadId !== threadId || typeof goal.status !== "string") return true;
   return !["complete", "paused", "blocked", "usageLimited", "budgetLimited"].includes(goal.status);
 }
 function isTerminalThreadStatus(params) {
-  if (!isRecord14(params) || !isRecord14(params.status) || typeof params.status.type !== "string") return false;
+  if (!isRecord15(params) || !isRecord15(params.status) || typeof params.status.type !== "string") return false;
   return params.status.type !== "active";
 }
 function optionalInteger3(value) {
@@ -95685,19 +97383,27 @@ function mapCodexImageInputs(params) {
   return {
     ...params,
     input: params.input.map((value) => {
-      if (!isRecord14(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      if (!isRecord15(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
       return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
     })
   };
 }
 function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord14(params)) return { requestHandle };
+  if (!isRecord15(params)) return { requestHandle };
   const safe = { ...params };
   delete safe.proposedExecpolicyAmendment;
   delete safe.additionalPermissions;
   safe.availableDecisions = ["accept", "decline", "cancel"];
   safe.requestHandle = requestHandle;
   return safe;
+}
+function codexApprovalSummary(method, params) {
+  if (isRecord15(params)) {
+    if (typeof params.command === "string" && params.command.trim().length > 0) return params.command.trim();
+    if (typeof params.reason === "string" && params.reason.trim().length > 0) return params.reason.trim();
+    if (typeof params.path === "string" && params.path.trim().length > 0) return params.path.trim();
+  }
+  return method === "item/fileChange/requestApproval" ? "File change approval" : "Command execution approval";
 }
 function mapAppServerError(error62) {
   if (error62 instanceof RpcError) return error62;
@@ -95732,7 +97438,7 @@ function isProjectListFallbackError(error62) {
 function canTryNextBinary(error62) {
   return !(error62 instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error62.code);
 }
-function isRecord14(value) {
+function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function maskId(value) {
@@ -95745,28 +97451,31 @@ function isUnpersistedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === "CODEX_UPSTREAM_ERROR" && error62.message.toLowerCase().includes("not persisted yet");
 }
 function extractFrameTurnId(params) {
-  if (!isRecord14(params)) return void 0;
+  if (!isRecord15(params)) return void 0;
   if (typeof params.turnId === "string" && params.turnId.length > 0) return params.turnId;
-  if (isRecord14(params.turn) && typeof params.turn.id === "string" && params.turn.id.length > 0) return params.turn.id;
+  if (isRecord15(params.turn) && typeof params.turn.id === "string" && params.turn.id.length > 0) return params.turn.id;
   return void 0;
 }
 function extractFrameItemId(params) {
-  if (!isRecord14(params)) return void 0;
+  if (!isRecord15(params)) return void 0;
   if (typeof params.itemId === "string" && params.itemId.length > 0) return params.itemId;
-  if (isRecord14(params.item) && typeof params.item.id === "string" && params.item.id.length > 0) return params.item.id;
+  if (isRecord15(params.item) && typeof params.item.id === "string" && params.item.id.length > 0) return params.item.id;
   return void 0;
 }
 function isOversizedCodexFrame(frame) {
   return encodeMessage(createEvent("codex.app.frame", { streamId: MAX_STREAM_ID_PROBE, frame })).byteLength > MAX_SECURE_MESSAGE_BYTES;
 }
 function isResponseTooLargeError2(error62) {
-  return isRecord14(error62) && error62.code === "RESPONSE_TOO_LARGE";
+  return isRecord15(error62) && error62.code === "RESPONSE_TOO_LARGE";
 }
 function isUnmaterializedThreadError(error62) {
   return error62 instanceof RpcError && error62.code === CODEX_THREAD_UNMATERIALIZED;
 }
 function isRetryableCodexStartError(error62) {
   return !["CODEX_BINARY_UNAVAILABLE", "CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(errorCode2(error62));
+}
+function codexDetachedBudgetKey(handle) {
+  return `codex:${handle}`;
 }
 
 // packages/plugin/src/acp/adapters/auth-diagnostics.ts
@@ -95779,17 +97488,17 @@ var DEFAULT_LOGIN_COMMANDS = {
   hermes: "hermes setup"
 };
 function parseInitializeMetadata(result) {
-  if (!isRecord15(result)) {
+  if (!isRecord16(result)) {
     return { agentCapabilities: {}, authMethods: [] };
   }
-  const caps = isRecord15(result.agentCapabilities) ? result.agentCapabilities : {};
-  const promptCaps = isRecord15(caps.promptCapabilities) ? caps.promptCapabilities : void 0;
-  const sessionCaps = isRecord15(caps.sessionCapabilities) ? caps.sessionCapabilities : isRecord15(caps.session_capabilities) ? caps.session_capabilities : void 0;
-  const rawMeta = isRecord15(result._meta) ? result._meta : isRecord15(caps._meta) ? caps._meta : void 0;
-  const steering = isRecord15(rawMeta?.steering) && rawMeta.steering.supported === true;
-  const rawInfo = isRecord15(result.agentInfo) ? result.agentInfo : void 0;
+  const caps = isRecord16(result.agentCapabilities) ? result.agentCapabilities : {};
+  const promptCaps = isRecord16(caps.promptCapabilities) ? caps.promptCapabilities : void 0;
+  const sessionCaps = isRecord16(caps.sessionCapabilities) ? caps.sessionCapabilities : isRecord16(caps.session_capabilities) ? caps.session_capabilities : void 0;
+  const rawMeta = isRecord16(result._meta) ? result._meta : isRecord16(caps._meta) ? caps._meta : void 0;
+  const steering = isRecord16(rawMeta?.steering) && rawMeta.steering.supported === true;
+  const rawInfo = isRecord16(result.agentInfo) ? result.agentInfo : void 0;
   const authMethods = Array.isArray(result.authMethods) ? result.authMethods.flatMap((item) => {
-    if (!isRecord15(item) || typeof item.id !== "string" || typeof item.name !== "string") return [];
+    if (!isRecord16(item) || typeof item.id !== "string" || typeof item.name !== "string") return [];
     return [{
       id: item.id,
       name: item.name,
@@ -95816,12 +97525,12 @@ function parseInitializeMetadata(result) {
       } : {},
       ...sessionCaps ? {
         sessionCapabilities: {
-          ...isRecord15(sessionCaps.list) || sessionCaps.list === true ? { list: true } : {},
-          ...isRecord15(sessionCaps.fork) || sessionCaps.fork === true ? { fork: true } : {},
-          ...isRecord15(sessionCaps.delete) || sessionCaps.delete === true ? { delete: true } : {},
-          ...isRecord15(sessionCaps.resume) || sessionCaps.resume === true ? { resume: true } : {},
-          ...isRecord15(sessionCaps.close) || sessionCaps.close === true ? { close: true } : {},
-          ...isRecord15(sessionCaps.additionalDirectories) || sessionCaps.additionalDirectories === true ? { additionalDirectories: true } : {}
+          ...isRecord16(sessionCaps.list) || sessionCaps.list === true ? { list: true } : {},
+          ...isRecord16(sessionCaps.fork) || sessionCaps.fork === true ? { fork: true } : {},
+          ...isRecord16(sessionCaps.delete) || sessionCaps.delete === true ? { delete: true } : {},
+          ...isRecord16(sessionCaps.resume) || sessionCaps.resume === true ? { resume: true } : {},
+          ...isRecord16(sessionCaps.close) || sessionCaps.close === true ? { close: true } : {},
+          ...isRecord16(sessionCaps.additionalDirectories) || sessionCaps.additionalDirectories === true ? { additionalDirectories: true } : {}
         }
       } : {},
       ...steering ? { steering: true } : {}
@@ -95830,10 +97539,10 @@ function parseInitializeMetadata(result) {
   };
 }
 function detectUpstreamAuthFailure(backend, errorValue, authMethods = []) {
-  if (!isRecord15(errorValue)) return void 0;
+  if (!isRecord16(errorValue)) return void 0;
   const rpcCode = typeof errorValue.code === "number" ? errorValue.code : void 0;
   const messageText = typeof errorValue.message === "string" ? errorValue.message : "";
-  const dataMessage = isRecord15(errorValue.data) && typeof errorValue.data.message === "string" ? errorValue.data.message : "";
+  const dataMessage = isRecord16(errorValue.data) && typeof errorValue.data.message === "string" ? errorValue.data.message : "";
   const combined = `${messageText} ${dataMessage}`.trim();
   const lower = combined.toLowerCase();
   const browserOpenFailed = (rpcCode === -32602 || lower.includes("browser")) && lower.includes("open browser");
@@ -95881,10 +97590,10 @@ function buildAuthDiagnosticFromMetadata(backend, metadata, lastDiagnostic, read
   };
 }
 function parseAvailableCommands(update) {
-  if (!isRecord15(update) || !Array.isArray(update.availableCommands)) return [];
+  if (!isRecord16(update) || !Array.isArray(update.availableCommands)) return [];
   return update.availableCommands.flatMap((item) => {
-    if (!isRecord15(item) || typeof item.name !== "string" || item.name.trim().length === 0) return [];
-    const input4 = isRecord15(item.input) && typeof item.input.hint === "string" ? { hint: item.input.hint } : void 0;
+    if (!isRecord16(item) || typeof item.name !== "string" || item.name.trim().length === 0) return [];
+    const input4 = isRecord16(item.input) && typeof item.input.hint === "string" ? { hint: item.input.hint } : void 0;
     return [{
       name: item.name.trim(),
       ...typeof item.description === "string" ? { description: item.description } : {},
@@ -95905,7 +97614,7 @@ function extractSafeHttpsUrl(text) {
 function redactPaths(text) {
   return text.replace(/(["'])[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\\\r\n"']+?(?:\\[^\\\r\n"']+)*\1/gi, (quote) => `${quote[0]}<host-path>${quote[0]}`).replace(/[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\\\r\n:*?"<>|]+(?:\\[^\s\\/:*?"<>|'`]+)+/gi, "<host-path>").replace(/[A-Za-z]:\\(?:Users|Documents and Settings)\\[^\s\\/:*?"<>|'`]+/gi, "<host-path>").replace(/(["'])\/(?:Users|home)\/[^/\r\n"']+?(?:\/[^/\r\n"']+)*\1/g, (quote) => `${quote[0]}<host-path>${quote[0]}`).replace(/\/(?:Users|home)\/[^/\r\n:*?"<>|]+(?:\/[^\s/:*?"<>|'`]+)+/g, "<host-path>").replace(/\/(?:Users|home)\/[^\s/:*?"<>|'`]+/g, "<host-path>");
 }
-function isRecord15(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -96142,7 +97851,7 @@ var CursorAcpClient = class {
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError(this.code("UNAVAILABLE"), `${this.adapterLabel} ACP is not ready.`);
     const backend = this.options.modelBackend ?? this.backend;
-    const id7 = isRecord16(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    const id7 = isRecord17(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
     if (method === "dsh/sessionCommands") {
       return { commands: id7 ? [...this.sessionCommands.get(id7) ?? []] : [] };
     }
@@ -96175,7 +97884,7 @@ var CursorAcpClient = class {
       if (!state2 || !id7) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before changing its mode.");
       if (method === "dsh/sessionModes") return state2.modesCatalog();
       if (this.modelBusy.has(id7)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its mode.");
-      const modeId = isRecord16(params) ? params.modeId : void 0;
+      const modeId = isRecord17(params) ? params.modeId : void 0;
       this.modelBusy.add(id7);
       try {
         const result2 = await state2.setMode(
@@ -96219,7 +97928,7 @@ var CursorAcpClient = class {
       throw error62;
     }
     if (backend && (method === "session/new" || method === "session/load" || method === "session/fork")) {
-      const returnedId = isRecord16(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+      const returnedId = isRecord17(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
       const sessionId = method === "session/load" ? id7 : returnedId;
       if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) {
         if (provisionalLoad && id7) this.modelStates.delete(id7);
@@ -96395,7 +98104,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted invalid JSON.`));
       return;
     }
-    if (!isRecord16(value)) {
+    if (!isRecord17(value)) {
       this.handleProcessFailure(this.code("INVALID_RESPONSE"), new Error(`${this.adapterLabel} ACP emitted an invalid message.`));
       return;
     }
@@ -96418,9 +98127,9 @@ var CursorAcpClient = class {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord16(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord17(params) && typeof params.sessionId === "string") {
       this.modelStates.get(params.sessionId)?.update(params.update);
-      if (isRecord16(params.update) && params.update.sessionUpdate === "available_commands_update") {
+      if (isRecord17(params.update) && params.update.sessionUpdate === "available_commands_update") {
         this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update));
       }
     }
@@ -96453,7 +98162,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value, label = "Cursor") {
-  if (!isRecord16(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
+  if (!isRecord17(value) || typeof value.message !== "string") return `${label} ACP rejected the request.`;
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return `${label} ACP authentication failed.`;
@@ -96461,7 +98170,7 @@ function safeUpstreamError2(value, label = "Cursor") {
   if (message.includes("not initialized")) return `${label} ACP is not initialized.`;
   return `${label} ACP rejected the request.`;
 }
-function isRecord16(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -97805,8 +99514,8 @@ var WorkspaceBridge = class {
   }
 };
 function argsOf(payload) {
-  const value = isRecord17(payload) ? payload : {};
-  return isRecord17(value.args) ? value.args : value;
+  const value = isRecord18(payload) ? payload : {};
+  return isRecord18(value.args) ? value.args : value;
 }
 function toolScope(endpoint, args) {
   const session2 = args.agentId ?? args.sessionId;
@@ -97816,13 +99525,13 @@ function toolScope(endpoint, args) {
   }
   return session2;
 }
-function isRecord17(value) {
+function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function byteOrLineRange(args) {
-  const options = isRecord17(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord17(options.range)) return options.range;
-  return isRecord17(args.range) ? args.range : args;
+  const options = isRecord18(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord18(options.range)) return options.range;
+  return isRecord18(args.range) ? args.range : args;
 }
 function readOffset(args) {
   const range = byteOrLineRange(args);
@@ -98004,7 +99713,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       this.clearAllLoadSuppressions();
     });
     super.onInbound((message) => {
-      const id7 = isRecord18(message.params) && typeof message.params.sessionId === "string" ? message.params.sessionId : void 0;
+      const id7 = isRecord19(message.params) && typeof message.params.sessionId === "string" ? message.params.sessionId : void 0;
       if (id7 && this.loadSuppressions.has(id7)) {
         if (message.kind === "request") {
           void (message.method === "session/request_permission" ? this.respond(message.id, { outcome: { outcome: "cancelled" } }) : this.respondError(message.id, -32600, `${this.label} session is not loaded.`)).catch(() => void 0);
@@ -98166,8 +99875,8 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
       ]);
-      const modes = isRecord18(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0 ? modesRaw : void 0;
-      const commands = isRecord18(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
+      const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0 ? modesRaw : void 0;
+      const commands = isRecord19(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
       if (modes !== void 0 || commands !== void 0) {
         this.historyMetadata.delete(sessionId);
         this.historyMetadata.set(sessionId, { ...modes ? { modes } : {}, ...commands ? { commands } : {} });
@@ -98198,7 +99907,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     this.live.clear();
   }
 };
-function isRecord18(value) {
+function isRecord19(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -99277,7 +100986,7 @@ import { Buffer as Buffer7 } from "node:buffer";
 import { realpath as realpath4 } from "node:fs/promises";
 
 // packages/plugin/src/acp/adapters/opencode-native-api.ts
-import { randomBytes as randomBytes12 } from "node:crypto";
+import { randomBytes as randomBytes13 } from "node:crypto";
 import { createServer as createServer3 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
 import { stripVTControlCharacters } from "node:util";
@@ -99310,7 +101019,7 @@ var OpencodeNativeApi = class {
     this.request = request2;
     if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(origin) || Number(new URL(origin).port) > 65535) throw unavailable();
   }
-  password = randomBytes12(32).toString("hex");
+  password = randomBytes13(32).toString("hex");
   shutdown = new AbortController();
   async isArchived(sessionId, cwd2) {
     const session2 = await this.session("GET", sessionId, cwd2);
@@ -99523,7 +101232,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   busy = /* @__PURE__ */ new Set();
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
-    const p = isRecord19(params) ? params : {};
+    const p = isRecord20(params) ? params : {};
     const id7 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id7 && this.archivingSessions.has(id7)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id7 && this.archivedSessions.has(id7) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
@@ -99593,11 +101302,11 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     }
     const result = await this.request(method, params, budget);
     const nativeApi = this.nativeApi;
-    if (method === "session/list" && nativeApi && isRecord19(result) && Array.isArray(result.sessions)) {
+    if (method === "session/list" && nativeApi && isRecord20(result) && Array.isArray(result.sessions)) {
       const rawItems = result.sessions;
       const items = rawItems.length > MAX_OPENCODE_SESSION_LIST ? [...rawItems].sort((a, b) => {
-        const ta = isRecord19(a) && typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) || 0 : 0;
-        const tb = isRecord19(b) && typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) || 0 : 0;
+        const ta = isRecord20(a) && typeof a.updatedAt === "string" ? Date.parse(a.updatedAt) || 0 : 0;
+        const tb = isRecord20(b) && typeof b.updatedAt === "string" ? Date.parse(b.updatedAt) || 0 : 0;
         return tb - ta;
       }).slice(0, MAX_OPENCODE_SESSION_LIST) : rawItems;
       const realpathCache = /* @__PURE__ */ new Map();
@@ -99616,7 +101325,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           const index = next++;
           if (index >= items.length) return;
           const item = items[index];
-          if (!isRecord19(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+          if (!isRecord20(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
           let cwd2;
           try {
             cwd2 = await resolveCwd(item.cwd);
@@ -99642,7 +101351,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
-    const returnedId = isRecord19(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const returnedId = isRecord20(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
     const id7 = sessionId ?? returnedId;
     if (!this.ready || !id7 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
@@ -99835,7 +101544,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord19(value)) {
+    if (!isRecord20(value)) {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted an invalid message."));
       return;
     }
@@ -99857,13 +101566,13 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "request" && isRecord19(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
+    if (inbound.kind === "request" && isRecord20(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
       void this.respondError(inbound.id, -32600, "OpenCode session is not loaded.").catch(() => void 0);
       return;
     }
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord19(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord20(params) && typeof params.sessionId === "string") {
       this.models.get(params.sessionId)?.update(params.update);
-      if (isRecord19(params.update) && params.update.sessionUpdate === "available_commands_update") {
+      if (isRecord20(params.update) && params.update.sessionUpdate === "available_commands_update") {
         this.sessionCommands.set(params.sessionId, parseAvailableCommands(params.update));
       }
       if (this.loads.has(params.sessionId) && !this.options.historyReader) return;
@@ -99900,7 +101609,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
 };
 function safeUpstreamError3(value) {
-  if (!isRecord19(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
+  if (!isRecord20(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "OpenCode ACP authentication failed.";
@@ -99908,7 +101617,7 @@ function safeUpstreamError3(value) {
   if (message.includes("not initialized")) return "OpenCode ACP is not initialized.";
   return "OpenCode ACP rejected the request.";
 }
-function isRecord19(value) {
+function isRecord20(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -100500,6 +102209,9 @@ var AcpPeerBridge = class {
       }
     } else {
       await this.domain.replayBufferedFrames(this.context.connectionId, params.sessionId);
+      if (typeof this.domain.deliverPendingApprovals === "function") {
+        await this.domain.deliverPendingApprovals(this.context.connectionId, params.sessionId);
+      }
       if (!this.domain.isSessionBackendReady(params.sessionId) && !this.domain.hasTurnInFlight(params.sessionId)) {
         this.streams.delete(params.streamId);
         await this.publish("agent.acp.stream.closed", { streamId: params.streamId, reason: "failed" }).catch(() => void 0);
@@ -100739,15 +102451,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord20(value) {
+function isRecord21(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error62) {
-  if (isRecord20(error62) && typeof error62.code === "string") return error62.code;
+  if (isRecord21(error62) && typeof error62.code === "string") return error62.code;
   return "UNKNOWN";
 }
 function safeMethod2(input4) {
-  return isRecord20(input4) && typeof input4.method === "string" ? input4.method : "invalid";
+  return isRecord21(input4) && typeof input4.method === "string" ? input4.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output2 = new Uint8Array(totalBytes);
@@ -100949,12 +102661,12 @@ var AcpWorkspaceStore = class _AcpWorkspaceStore {
   }
 };
 function normalizeStore(value) {
-  if (!isRecord21(value) || value.version !== 1) return createEmptyStore();
+  if (!isRecord22(value) || value.version !== 1) return createEmptyStore();
   const backends = emptyBackends();
-  if (isRecord21(value.backends)) {
+  if (isRecord22(value.backends)) {
     for (const [key, raw] of Object.entries(value.backends)) {
-      if (PROTOTYPE_KEYS.has(key) || !isRecord21(raw)) continue;
-      const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.flatMap((item) => isRecord21(item) && typeof item.path === "string" && item.path.length > 0 ? [{
+      if (PROTOTYPE_KEYS.has(key) || !isRecord22(raw)) continue;
+      const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.flatMap((item) => isRecord22(item) && typeof item.path === "string" && item.path.length > 0 ? [{
         path: item.path,
         ...typeof item.title === "string" && item.title.trim() ? { title: item.title.trim() } : {},
         updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : (/* @__PURE__ */ new Date(0)).toISOString()
@@ -100965,7 +102677,7 @@ function normalizeStore(value) {
     }
   }
   const sessionPermissions = emptyPermissions();
-  if (isRecord21(value.sessionPermissions)) {
+  if (isRecord22(value.sessionPermissions)) {
     for (const [key, preset] of Object.entries(value.sessionPermissions)) {
       if (!PROTOTYPE_KEYS.has(key) && (preset === "workspace-write" || preset === "danger-full-access")) {
         sessionPermissions[key] = preset;
@@ -100974,12 +102686,17 @@ function normalizeStore(value) {
   }
   return { version: 1, backends, sessionPermissions };
 }
-function isRecord21(value) {
+function isRecord22(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/plugin/src/acp/gateway.ts
 var APPROVAL_TTL_MS2 = 5 * 6e4;
+var MAX_SESSION_TITLE_ENTRIES = 256;
+var DETACHED_ACP_APPROVAL_METHODS = /* @__PURE__ */ new Set([
+  "session/request_permission",
+  "cursor/ask_question"
+]);
 var BACKEND_STABLE_MS = 3e4;
 var DEFAULT_RESTART_DELAYS_MS2 = [1e3, 2e3, 4e3, 8e3, 15e3];
 var STRICT_CATALOG_BACKENDS = /* @__PURE__ */ new Set(["pi", "claude", "opencode", "hermes"]);
@@ -100997,13 +102714,16 @@ var CATCH_UP_SESSION_UPDATES = /* @__PURE__ */ new Set([
   "tool_call_update"
 ]);
 var AcpRemoteGateway = class {
-  constructor(config2, logger2, createAcp, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner, workspaceStore = new AcpWorkspaceStore()) {
+  constructor(config2, logger2, createAcp, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner, workspaceStore = new AcpWorkspaceStore(), detachedApprovalGraceSec = DEFAULT_DETACHED_APPROVAL_GRACE_SEC, attention, detachedApprovalBudget = new DetachedApprovalBudget()) {
     this.config = config2;
     this.logger = logger2;
     this.restartDelaysMs = restartDelaysMs;
     this.terminalEnabled = terminalEnabled;
     this.terminalSpawner = terminalSpawner;
     this.workspaceStore = workspaceStore;
+    this.attention = attention;
+    this.detachedApprovalBudget = detachedApprovalBudget;
+    this.detachedApprovalGraceMs = clampDetachedApprovalGraceSec(detachedApprovalGraceSec) * 1e3;
     this.customCreateAcp = createAcp !== void 0;
     this.createAcp = createAcp ?? ((binary, targetLogger, backend) => {
       if (backend.id === "antigravity") {
@@ -101065,6 +102785,8 @@ var AcpRemoteGateway = class {
   backendHistoryChains = /* @__PURE__ */ new Map();
   backendDiagnostics = /* @__PURE__ */ new Map();
   backendErrors = /* @__PURE__ */ new Map();
+  sessionTitles = /* @__PURE__ */ new Map();
+  detachedApprovalGraceMs;
   customCreateAcp;
   createAcp;
   /** Allow all valid enabled ACP adapters, including custom `settings.acp.add` backends. */
@@ -101499,7 +103221,7 @@ var AcpRemoteGateway = class {
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       const client = this.requireAcp(requested);
       const supportsImages = requested === "antigravity" || requested === "hermes" || client.capabilities?.()?.promptCapabilities?.image === true;
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord22(part) && part.type === "image") && !supportsImages) {
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord23(part) && part.type === "image") && !supportsImages) {
         throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       }
       if (sessionId !== void 0 && !this.sessionPermissions.has(sessionId)) {
@@ -101685,23 +103407,31 @@ var AcpRemoteGateway = class {
         });
       }
       this.turnCatchUp.set(sessionId, []);
+      this.attention?.onSessionRunning(this.attentionSessionInfo(backend, sessionId));
       void this.runPromptInBackground(sessionId, call.params, task);
       return { accepted: true, stopReason: "in_progress" };
     }
     if (call.method === "session/cancel" && sessionId !== void 0) {
       this.invalidateSessionHistory(sessionId);
       this.cancelledSessions.add(sessionId);
+      const cancelBackend = this.sessionBackends.get(sessionId);
       const preparation = this.preparingPrompts.get(sessionId);
       if (preparation) {
         preparation.cancelled = true;
         this.preparingPrompts.delete(sessionId);
         this.promptsInProgress.delete(sessionId);
+        if (cancelBackend !== void 0) this.attention?.onSessionCancelled("acp", `${cancelBackend}:${sessionId}`, cancelBackend);
         return { stopReason: "cancelled" };
       }
-      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === this.sessionBackends.get(sessionId));
-      for (const [handle] of pending) this.approvals.delete(handle);
+      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === cancelBackend);
+      for (const [handle, approval] of pending) {
+        this.deleteApproval(handle);
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle));
+      }
+      if (pending.length > 0) this.scheduleApprovalExpiry();
+      if (cancelBackend !== void 0) this.attention?.onSessionCancelled("acp", `${cancelBackend}:${sessionId}`, cancelBackend);
       try {
-        return sanitizeSessionResult(await this.requireAcp(this.sessionBackends.get(sessionId)).call(call.method, call.params));
+        return sanitizeSessionResult(await this.requireAcp(cancelBackend).call(call.method, call.params));
       } finally {
         await Promise.all(pending.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, "ACP session cancelled.").catch(() => void 0)));
       }
@@ -101716,8 +103446,8 @@ var AcpRemoteGateway = class {
       const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
       if (!current()) return;
-      const stopReason = isRecord22(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
-      const usage = isRecord22(result) ? sanitizeUsage(result.usage) : void 0;
+      const stopReason = isRecord23(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const usage = isRecord23(result) ? sanitizeUsage(result.usage) : void 0;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -101729,6 +103459,14 @@ var AcpRemoteGateway = class {
         stopReason,
         ...usage ? { usage } : {}
       }, catchUp));
+      if (stopReason === "cancelled" || this.cancelledSessions.has(sessionId)) {
+        this.attention?.onSessionCancelled("acp", `${task.backend}:${sessionId}`, task.backend);
+      } else {
+        this.attention?.onSessionCompleted({
+          ...this.attentionSessionInfo(task.backend, sessionId),
+          failed: false
+        });
+      }
     } catch (error62) {
       if (!accepted()) return;
       this.logger?.warn("ACP session/prompt failed", { code: errorCode3(error62) });
@@ -101739,6 +103477,11 @@ var AcpRemoteGateway = class {
         sessionUpdate: "prompt_failed",
         code: errorCode3(error62)
       }, catchUp)).catch(() => void 0);
+      this.attention?.onSessionCompleted({
+        ...this.attentionSessionInfo(task.backend, sessionId),
+        failed: true,
+        summary: errorCode3(error62)
+      });
     } finally {
       if (this.promptsInProgress.get(sessionId) === task) {
         this.promptsInProgress.delete(sessionId);
@@ -101815,19 +103558,43 @@ var AcpRemoteGateway = class {
   }
   async respond(connectionId, input4) {
     const params = parseRespondEnvelope(input4);
+    if (!this.peers.has(connectionId)) {
+      throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
+    }
     const pending = this.approvals.get(params.requestHandle);
-    if (pending === void 0 || pending.expiresAt <= Date.now()) {
-      this.approvals.delete(params.requestHandle);
+    if (pending === void 0) {
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
-    if (pending.connectionId !== connectionId) {
+    if (pending.expiresAt <= Date.now()) {
+      this.deleteApproval(params.requestHandle);
+      this.scheduleApprovalExpiry();
+      this.attention?.onInteractionResolved(acpApprovalItemId(pending.backend, params.requestHandle));
+      void pending.client.respondError(pending.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
-    if (this.sessionOwners.get(pending.sessionId) !== connectionId || this.sessionBackends.get(pending.sessionId) !== pending.backend || this.requireAcp(pending.backend) !== pending.client) {
+    if (pending.ownerConnectionId !== null) {
+      if (pending.ownerConnectionId !== connectionId) {
+        throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
+      }
+      if (this.sessionOwners.get(pending.sessionId) !== connectionId) {
+        throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The ACP approval scope is no longer active.");
+      }
+    } else {
+      const currentOwner = this.sessionOwners.get(pending.sessionId);
+      if (currentOwner !== void 0 && currentOwner !== connectionId && this.peers.has(currentOwner)) {
+        throw new RpcError("REQUEST_CONFLICT", "Another Remote connection currently owns this ACP session.");
+      }
+    }
+    if (this.sessionBackends.get(pending.sessionId) !== pending.backend || this.requireAcp(pending.backend) !== pending.client) {
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The ACP approval scope is no longer active.");
     }
     const result = mapPermissionDecision(params, pending);
-    this.approvals.delete(params.requestHandle);
+    this.deleteApproval(params.requestHandle);
+    if (pending.ownerConnectionId === null) {
+      this.sessionOwners.set(pending.sessionId, connectionId);
+    }
+    this.scheduleApprovalExpiry();
+    this.attention?.onInteractionResolved(acpApprovalItemId(pending.backend, params.requestHandle));
     const acp = pending.client;
     if (params.decision === "cancel") {
       await acp.respondError(pending.upstreamId, -32800, "Cancelled by Remote client.");
@@ -101843,11 +103610,49 @@ var AcpRemoteGateway = class {
     for (const [sessionId, owner] of this.sessionOwners) {
       if (owner === connectionId) this.sessionOwners.delete(sessionId);
     }
-    for (const [handle, approval] of this.approvals) {
-      if (approval.connectionId === connectionId) {
-        this.approvals.delete(handle);
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.ownerConnectionId !== connectionId) continue;
+      if (this.detachedApprovalGraceMs > 0 && DETACHED_ACP_APPROVAL_METHODS.has(approval.method) && this.detachedApprovalBudget.tryAcquire(acpDetachedBudgetKey(approval.backend, handle))) {
+        const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs;
+        approval.ownerConnectionId = null;
+        approval.detachedExpiresAt = detachedExpiresAt;
+        approval.expiresAt = detachedExpiresAt;
+        this.attention?.onInteractionDetached(acpApprovalItemId(approval.backend, handle), detachedExpiresAt);
+      } else {
+        this.deleteApproval(handle);
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle));
         void approval.client.respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
       }
+    }
+    this.scheduleApprovalExpiry();
+  }
+  /** Synthesize live pending approvals on stream re-open without polluting `recentFrames`. */
+  async deliverPendingApprovals(connectionId, sessionId) {
+    const peer = this.peers.get(connectionId);
+    if (peer === void 0) return;
+    const now = Date.now();
+    const expired = [];
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.expiresAt <= now) {
+        this.deleteApproval(handle);
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle));
+        expired.push([handle, approval]);
+      }
+    }
+    if (expired.length > 0) {
+      this.scheduleApprovalExpiry();
+      for (const [, approval] of expired) {
+        void approval.client.respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
+      }
+    }
+    const currentOwner = this.sessionOwners.get(sessionId);
+    if (currentOwner !== void 0 && currentOwner !== connectionId && this.peers.has(currentOwner)) return;
+    const live = [...this.approvals.entries()].filter(([, approval]) => approval.sessionId === sessionId && (approval.ownerConnectionId === null || approval.ownerConnectionId === connectionId));
+    for (const [requestHandle, approval] of live) {
+      await peer.publishInbound(sessionId, {
+        method: approval.method,
+        params: buildAcpApprovalFrameParams(approval.params, requestHandle, sessionId, approval.method)
+      });
     }
   }
   tools(connectionId) {
@@ -101975,7 +103780,20 @@ var AcpRemoteGateway = class {
       this.recentFrames.delete(id7);
       this.turnCatchUp.delete(id7);
     }
-    for (const [id7, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id7);
+    const removedApprovals = [];
+    for (const [id7, approval] of [...this.approvals.entries()]) {
+      if (approval.backend !== void 0 && changed.has(approval.backend)) {
+        this.deleteApproval(id7);
+        this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, id7));
+        removedApprovals.push([id7, approval]);
+      }
+    }
+    for (const id7 of changed) this.detachedApprovalBudget.releasePrefix(`acp:${id7}:`);
+    this.scheduleApprovalExpiry();
+    for (const id7 of changed) this.attention?.onBackendCleared("acp", id7);
+    if (removedApprovals.length > 0) {
+      await Promise.allSettled(removedApprovals.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, "ACP backend reconfigured.")));
+    }
     const processes = await Promise.allSettled([...changed].map(async (id7) => {
       const instance = this.backendInstances.get(id7);
       if (instance === void 0) return;
@@ -101999,10 +103817,21 @@ var AcpRemoteGateway = class {
     if (this.closed) return;
     this.closed = true;
     this.clearBackendRestarts();
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    if (this.approvalExpiryTimer !== void 0) {
+      clearTimeout(this.approvalExpiryTimer);
+      this.approvalExpiryTimer = void 0;
+    }
+    const pendingOnClose = [...this.approvals.entries()];
+    this.approvals.clear();
+    this.detachedApprovalBudget.releasePrefix("acp:");
+    this.attention?.onBackendCleared("acp");
+    if (pendingOnClose.length > 0) {
+      await Promise.allSettled(pendingOnClose.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, "ACP gateway closed.")));
+    }
     for (const peer of this.peers.values()) await peer.closeAll();
     this.peers.clear();
     this.sessionCwds.clear();
+    this.sessionTitles.clear();
     const terminals = this.workspaceState.dispose().then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped."));
     this.sessionOwners.clear();
     this.sessionBackends.clear();
@@ -102011,7 +103840,6 @@ var AcpRemoteGateway = class {
     this.promptsInProgress.clear();
     for (const preparation of this.preparingPrompts.values()) preparation.cancelled = true;
     this.preparingPrompts.clear();
-    this.approvals.clear();
     const processes = await Promise.allSettled([...this.startingClients.keys()].map((client) => client.close()).concat(this.disposeAllInstances()));
     const terminalError = await terminals;
     if (!terminalError) this.terminalOwners.clear();
@@ -102164,7 +103992,10 @@ var AcpRemoteGateway = class {
     const owner = sessionId === void 0 ? void 0 : this.sessionOwners.get(sessionId);
     const peer = owner === void 0 ? void 0 : this.peers.get(owner);
     const client = this.requireAcp(backend);
-    if (sessionId === void 0 || this.cancelledSessions.has(sessionId) || owner === void 0 || peer === void 0 || boundBackend !== backend || !["session/request_permission", "cursor/create_plan", "cursor/ask_question"].includes(message.method) || message.method.startsWith("cursor/") && backend !== "cursor") {
+    const supportedMethod = ["session/request_permission", "cursor/create_plan", "cursor/ask_question"].includes(message.method) && !(message.method.startsWith("cursor/") && backend !== "cursor");
+    const hasLiveOwner = owner !== void 0 && peer !== void 0;
+    const canHoldDetached = owner === void 0 && sessionId !== void 0 && this.promptsInProgress.has(sessionId) && !this.cancelledSessions.has(sessionId) && this.detachedApprovalGraceMs > 0 && DETACHED_ACP_APPROVAL_METHODS.has(message.method) && this.detachedApprovalBudget.hasCapacity();
+    if (sessionId === void 0 || this.cancelledSessions.has(sessionId) || boundBackend !== backend || !supportedMethod || !hasLiveOwner && !canHoldDetached) {
       await client.respondError(message.id, -32602, "The ACP request has no active owner or supported method.");
       return;
     }
@@ -102183,30 +104014,65 @@ var AcpRemoteGateway = class {
       return;
     }
     const requestHandle = randomUUID15();
+    const interactionStatus = message.method === "cursor/ask_question" ? "waiting_question" : "waiting_approval";
+    const summary3 = acpApprovalSummary(message.method, message.params);
+    if (!hasLiveOwner) {
+      if (!this.detachedApprovalBudget.tryAcquire(acpDetachedBudgetKey(backend, requestHandle))) {
+        await client.respondError(message.id, -32602, "The ACP request has no active owner or supported method.");
+        return;
+      }
+      const detachedExpiresAt = Date.now() + this.detachedApprovalGraceMs;
+      this.approvals.set(requestHandle, {
+        upstreamId: message.id,
+        ownerConnectionId: null,
+        sessionId,
+        method: message.method,
+        params: message.params,
+        expiresAt: detachedExpiresAt,
+        detachedExpiresAt,
+        backend,
+        client,
+        options
+      });
+      this.scheduleApprovalExpiry();
+      this.attention?.onInteractionPending({
+        ...this.attentionSessionInfo(backend, sessionId),
+        id: acpApprovalItemId(backend, requestHandle),
+        status: interactionStatus,
+        detachedExpiresAt,
+        ...summary3 === void 0 ? {} : { summary: summary3 }
+      });
+      return;
+    }
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
-      connectionId: owner,
+      ownerConnectionId: owner,
       sessionId,
       method: message.method,
+      params: message.params,
       expiresAt: Date.now() + APPROVAL_TTL_MS2,
       backend,
       client,
       options
     });
     this.scheduleApprovalExpiry();
+    this.attention?.onInteractionPending({
+      ...this.attentionSessionInfo(backend, sessionId),
+      id: acpApprovalItemId(backend, requestHandle),
+      status: interactionStatus,
+      ...summary3 === void 0 ? {} : { summary: summary3 }
+    });
     try {
       await peer.publishInbound(sessionId, {
         method: message.method,
-        params: {
-          ...isRecord22(message.params) ? message.params : {},
-          requestHandle,
-          sessionId,
-          upstreamMethod: message.method
-        }
+        params: buildAcpApprovalFrameParams(message.params, requestHandle, sessionId, message.method)
       });
     } catch {
-      this.approvals.delete(requestHandle);
-      await client.respondError(message.id, -32800, "Remote approval delivery failed.");
+      if (this.deleteApproval(requestHandle)) {
+        this.scheduleApprovalExpiry();
+        this.attention?.onInteractionResolved(acpApprovalItemId(backend, requestHandle));
+        await client.respondError(message.id, -32800, "Remote approval delivery failed.");
+      }
     }
   }
   async publishToSession(sessionId, frame) {
@@ -102276,8 +104142,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list2 = this.turnCatchUp.get(sessionId);
     if (list2 === void 0 || frame.method !== "session/update") return;
-    const params = isRecord22(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord22(params.update) ? params.update : params;
+    const params = isRecord23(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord23(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list2.push({ method: frame.method, params: frame.params });
@@ -102312,6 +104178,19 @@ var AcpRemoteGateway = class {
   }
   async handleUnavailable(backend, code) {
     if (this.closed) return;
+    const failedApprovals = [];
+    for (const [handle, approval] of [...this.approvals.entries()]) {
+      if (approval.backend !== backend) continue;
+      this.deleteApproval(handle);
+      this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle));
+      failedApprovals.push([handle, approval]);
+    }
+    this.detachedApprovalBudget.releasePrefix(`acp:${backend}:`);
+    if (failedApprovals.length > 0) this.scheduleApprovalExpiry();
+    this.attention?.onBackendCleared("acp", backend);
+    for (const [, approval] of failedApprovals) {
+      void approval.client.respondError(approval.upstreamId, -32800, "ACP backend unavailable.").catch(() => void 0);
+    }
     const sessions = /* @__PURE__ */ new Set();
     for (const [sessionId, ownerBackend] of this.sessionBackends) {
       if (ownerBackend === backend && !this.promptsInProgress.has(sessionId)) sessions.add(sessionId);
@@ -102382,23 +104261,63 @@ var AcpRemoteGateway = class {
     this.restartAttempts.clear();
   }
   scheduleApprovalExpiry() {
-    if (this.approvalExpiryTimer !== void 0) clearTimeout(this.approvalExpiryTimer);
+    if (this.approvalExpiryTimer !== void 0) {
+      clearTimeout(this.approvalExpiryTimer);
+      this.approvalExpiryTimer = void 0;
+    }
     const next = [...this.approvals.values()].reduce((min, item) => {
       if (min === void 0 || item.expiresAt < min) return item.expiresAt;
       return min;
     }, void 0);
     if (next === void 0) return;
     this.approvalExpiryTimer = setTimeout(() => {
+      this.approvalExpiryTimer = void 0;
       const now = Date.now();
-      for (const [handle, approval] of this.approvals) {
+      const expired = [];
+      for (const [handle, approval] of [...this.approvals.entries()]) {
         if (approval.expiresAt <= now) {
-          this.approvals.delete(handle);
-          void approval.client.respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
+          this.deleteApproval(handle);
+          this.attention?.onInteractionResolved(acpApprovalItemId(approval.backend, handle));
+          expired.push([handle, approval]);
         }
       }
       this.scheduleApprovalExpiry();
+      for (const [, approval] of expired) {
+        void approval.client.respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
+      }
     }, Math.max(0, next - Date.now()));
     this.approvalExpiryTimer.unref?.();
+  }
+  deleteApproval(handle) {
+    const existing = this.approvals.get(handle);
+    if (existing === void 0) return false;
+    this.approvals.delete(handle);
+    this.detachedApprovalBudget.release(acpDetachedBudgetKey(existing.backend, handle));
+    return true;
+  }
+  rememberSessionTitle(sessionId, title) {
+    if (title === void 0 || title.trim().length === 0) return;
+    this.sessionTitles.delete(sessionId);
+    this.sessionTitles.set(sessionId, title.trim());
+    while (this.sessionTitles.size > MAX_SESSION_TITLE_ENTRIES) {
+      const oldest = this.sessionTitles.keys().next().value;
+      if (oldest === void 0) break;
+      this.sessionTitles.delete(oldest);
+    }
+  }
+  attentionSessionInfo(backend, sessionId) {
+    const cwd2 = this.sessionCwds.get(sessionId)?.cwd;
+    const title = this.sessionTitles.get(sessionId);
+    const workspaceLabel = cwd2 === void 0 ? void 0 : basename7(cwd2) || cwd2;
+    return {
+      backend: "acp",
+      acpAdapter: backend,
+      mode: "agent",
+      sessionId: `${backend}:${sessionId}`,
+      ...title === void 0 ? {} : { sessionTitle: title },
+      ...cwd2 === void 0 ? {} : { workspaceId: `${backend}:cwd:${cwd2}` },
+      ...workspaceLabel === void 0 ? {} : { workspaceLabel }
+    };
   }
   requireAcp(backend) {
     if (!this.config.enabled) {
@@ -102446,11 +104365,11 @@ var AcpRemoteGateway = class {
     const client = this.backendInstances.get(backend)?.client;
     if (!client) return;
     const modes = await client.call("dsh/sessionModes", { sessionId }).catch(() => void 0);
-    if (!isRecord22(modes) || !Array.isArray(modes.availableModes)) return;
+    if (!isRecord23(modes) || !Array.isArray(modes.availableModes)) return;
     const current = typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
     const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk", "yolo", "full-auto"]);
     if (current && !permissionModes.has(current)) return;
-    const ids = modes.availableModes.filter((item) => isRecord22(item) && typeof item.id === "string").map((item) => item.id);
+    const ids = modes.availableModes.filter((item) => isRecord23(item) && typeof item.id === "string").map((item) => item.id);
     const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "yolo", "full-auto", "accept-edits", "acceptEdits"].find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
     if (target3 && target3 !== current) {
       await client.call("session/set_mode", { sessionId, modeId: target3 });
@@ -102526,14 +104445,14 @@ var AcpRemoteGateway = class {
         throw error62;
       }
       assertCurrent();
-      if (backend === "cursor" && isRecord22(result) && result.sessions === void 0 && Object.keys(result).length === 0) {
+      if (backend === "cursor" && isRecord23(result) && result.sessions === void 0 && Object.keys(result).length === 0) {
         return items;
       }
-      if (!isRecord22(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+      if (!isRecord23(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
       for (const item of result.sessions) {
-        if (!isRecord22(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        if (!isRecord23(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
         const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
         assertCurrent();
         if (!canonical || cwd2 && canonical !== cwd2) continue;
@@ -102542,6 +104461,7 @@ var AcpRemoteGateway = class {
         if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue;
         this.sessionCwds.set(item.sessionId, { backend, cwd: canonical });
         this.sessionBackends.set(item.sessionId, backend);
+        if (typeof item.title === "string") this.rememberSessionTitle(item.sessionId, item.title);
         if (backend === "opencode" && item.archived === true) continue;
         items.push({
           sessionId: item.sessionId,
@@ -102630,24 +104550,24 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input4) {
-  if (!isRecord22(input4) || typeof input4.method !== "string") {
+  if (!isRecord23(input4) || typeof input4.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input4.method, params: input4.params ?? {} };
 }
 function parseRespondEnvelope(input4) {
-  if (!isRecord22(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
+  if (!isRecord23(input4) || typeof input4.requestHandle !== "string" || input4.requestHandle.length === 0 || Object.keys(input4).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input4.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input4.decision)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
   return input4;
 }
 function permissionOptions(params) {
-  if (!isRecord22(params) || !Array.isArray(params.options) || params.options.length === 0) {
+  if (!isRecord23(params) || !Array.isArray(params.options) || params.options.length === 0) {
     throw new Error("Missing permission options");
   }
   const ids = /* @__PURE__ */ new Set();
   const options = params.options.map((option) => {
-    if (!isRecord22(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    if (!isRecord23(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
     ids.add(option.optionId);
     return { kind: option.kind, optionId: option.optionId };
   });
@@ -102668,8 +104588,8 @@ function mapPermissionDecision(params, pending) {
   }
   if (pending.method === "cursor/ask_question" && params.decision === "allow-once") {
     if (params.result === void 0) return { outcome: { outcome: "answered" } };
-    if (!isRecord22(params.result)) throw invalid();
-    const outcomeRecord = isRecord22(params.result.outcome) ? params.result.outcome : params.result;
+    if (!isRecord23(params.result)) throw invalid();
+    const outcomeRecord = isRecord23(params.result.outcome) ? params.result.outcome : params.result;
     const outcomeKind = typeof outcomeRecord.outcome === "string" ? outcomeRecord.outcome : "answered";
     if (outcomeKind !== "answered" && outcomeKind !== "selected") throw invalid();
     const allowedKeys = /* @__PURE__ */ new Set(["outcome", "answers", "selectedOptionIds", "response"]);
@@ -102685,21 +104605,21 @@ function mapPermissionDecision(params, pending) {
   }
   const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
   if (params.result !== void 0) {
-    if (!isRecord22(params.result) || Object.keys(params.result).length !== 1 || !isRecord22(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+    if (!isRecord23(params.result) || Object.keys(params.result).length !== 1 || !isRecord23(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
   }
   return { outcome: { outcome } };
 }
 function readSessionId(value) {
-  if (!isRecord22(value)) return void 0;
+  if (!isRecord23(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord22(value)) return void 0;
-  if (isRecord22(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord23(value)) return void 0;
+  if (isRecord23(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord22(value)) return value;
+  if (!isRecord23(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode" || key === "currentModeId" || key === "modes") {
@@ -102709,7 +104629,7 @@ function sanitizeSessionResult(value) {
   return Object.keys(next).length > 0 ? next : value;
 }
 function sanitizeUsage(value) {
-  if (!isRecord22(value)) return void 0;
+  if (!isRecord23(value)) return void 0;
   const fields = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cachedReadTokens", "cachedWriteTokens", "reasoningTokens", "thoughtTokens", "totalTokens"];
   const normalized = {};
   for (const field of fields) {
@@ -102791,14 +104711,14 @@ function isResponseTooLarge(error62) {
   let current = error62;
   while (current !== void 0 && current !== null && !seen.has(current) && seen.size < 8) {
     seen.add(current);
-    if (isRecord22(current) && typeof current.code === "string" && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
+    if (isRecord23(current) && typeof current.code === "string" && OVERSIZED_FRAME_ERROR_CODES.has(current.code)) {
       return true;
     }
-    const message = current instanceof Error ? current.message : isRecord22(current) && typeof current.message === "string" ? current.message : void 0;
+    const message = current instanceof Error ? current.message : isRecord23(current) && typeof current.message === "string" ? current.message : void 0;
     if (message !== void 0 && /secure message exceeds the reassembly limit|exceeds the secure channel limit/i.test(message)) {
       return true;
     }
-    current = current instanceof Error ? current.cause : isRecord22(current) ? current.cause : void 0;
+    current = current instanceof Error ? current.cause : isRecord23(current) ? current.cause : void 0;
   }
   return false;
 }
@@ -102810,8 +104730,32 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list2;
 }
-function isRecord22(value) {
+function isRecord23(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function buildAcpApprovalFrameParams(rawParams, requestHandle, sessionId, method) {
+  return {
+    ...isRecord23(rawParams) ? rawParams : {},
+    requestHandle,
+    sessionId,
+    upstreamMethod: method
+  };
+}
+function acpApprovalSummary(method, params) {
+  if (isRecord23(params)) {
+    if (isRecord23(params.toolCall)) {
+      const title = typeof params.toolCall.title === "string" && params.toolCall.title.trim().length > 0 ? params.toolCall.title.trim() : void 0;
+      if (title !== void 0) return title;
+    }
+    for (const key of ["question", "title", "reason", "command", "prompt", "message"]) {
+      const candidate = params[key];
+      if (typeof candidate === "string" && candidate.trim().length > 0) return candidate.trim();
+    }
+  }
+  return method === "cursor/ask_question" ? "Question requires input" : "Permission required";
+}
+function acpDetachedBudgetKey(backend, handle) {
+  return `acp:${backend}:${handle}`;
 }
 
 // packages/plugin/src/acp/backend-installer.ts
@@ -103848,6 +105792,7 @@ function editableConfig(config2) {
     hostControl: config2.hostControl ?? { enabled: true },
     loopback: config2.loopback,
     forceRelay: config2.forceRelay,
+    detachedApprovalGraceSec: config2.detachedApprovalGraceSec,
     logLevel: config2.logLevel,
     reconnect: config2.reconnect.enabled ? {
       initialDelayMs: config2.reconnect.initialDelayMs,
@@ -103865,18 +105810,18 @@ function editableConfig(config2) {
     ...config2.acp === void 0 ? {} : { acp: { enabled: config2.acp.enabled, backends: config2.acp.backends } }
   };
 }
-function isRecord23(value) {
+function isRecord24(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record9(value) {
-  if (!isRecord23(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord24(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
   return { ok: true, value };
 }
 function withUpdate(result, update) {
-  if (update === void 0 || !result.ok || !isRecord23(result.value)) return result;
+  if (update === void 0 || !result.ok || !isRecord24(result.value)) return result;
   return ok3({ ...result.value, update });
 }
 function fail5(error62) {
@@ -104210,7 +106155,7 @@ function redact(value, key = "") {
 }
 
 // packages/plugin/src/dsh-web-lan.ts
-import { randomBytes as randomBytes13, randomUUID as randomUUID16 } from "node:crypto";
+import { randomBytes as randomBytes14, randomUUID as randomUUID16 } from "node:crypto";
 import { createServer as createServer4, request } from "node:http";
 import { request as secureRequest } from "node:https";
 import { networkInterfaces as networkInterfaces3 } from "node:os";
@@ -104703,9 +106648,9 @@ var DshWebLanPeer = class {
       const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname;
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
       signal.throwIfAborted();
-      let ticket = randomBytes13(32).toString("base64url");
+      let ticket = randomBytes14(32).toString("base64url");
       const expiresAt = Date.now() + 3e4;
-      const cookie = "dsh_lan_" + lease.id.replaceAll("-", "") + "=" + randomBytes13(32).toString("base64url");
+      const cookie = "dsh_lan_" + lease.id.replaceAll("-", "") + "=" + randomBytes14(32).toString("base64url");
       let redeemed = false;
       let origin;
       const live = () => {
@@ -105811,7 +107756,7 @@ var SessionTransferPeer = class {
 };
 
 // packages/plugin/src/lan-upload.ts
-import { randomBytes as randomBytes14 } from "node:crypto";
+import { randomBytes as randomBytes15 } from "node:crypto";
 import { createServer as createServer5 } from "node:http";
 import { networkInterfaces as networkInterfaces4 } from "node:os";
 var LanUploadHost = class {
@@ -105852,7 +107797,7 @@ var LanUploadHost = class {
       if (!this.live() || entry.disposed) throw unavailable2();
       const address2 = server.address();
       if (!address2 || typeof address2 === "string") throw unavailable2();
-      const token = randomBytes14(32).toString("base64url");
+      const token = randomBytes15(32).toString("base64url");
       const path = `/ds-harness-remote/upload/${token}`;
       const offer = {
         sessionId: p.sessionId,
@@ -106002,7 +107947,7 @@ function unavailable2() {
 }
 
 // packages/plugin/src/host-pairing.ts
-import { createHash as createHash8, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes15, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { createHash as createHash8, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes16, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
 import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
@@ -106218,7 +108163,7 @@ var HostPairing = class {
     const key = createHash8("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
     try {
       if (encrypt) {
-        const iv = randomBytes15(12);
+        const iv = randomBytes16(12);
         const c2 = createCipheriv5("aes-256-gcm", key, iv);
         c2.setAAD(Buffer.from(id7));
         const data2 = Buffer.concat([c2.update(value, "utf8"), c2.final()]);
@@ -106768,9 +108713,9 @@ function diagnosticReason2(error62) {
   return message.replace(/\s+/g, " ").slice(0, 160) || "Unknown peer connection failure.";
 }
 function extractEndpoint(message) {
-  if (!isRecord24(message) || !isRecord24(message.payload)) return void 0;
+  if (!isRecord25(message) || !isRecord25(message.payload)) return void 0;
   const payload = message.payload;
-  if (isRecord24(payload.params)) {
+  if (isRecord25(payload.params)) {
     if (typeof payload.params.endpoint === "string") return payload.params.endpoint;
     if (typeof payload.params.method === "string") return payload.params.method;
   }
@@ -106778,7 +108723,7 @@ function extractEndpoint(message) {
   if (typeof payload.method === "string") return payload.method;
   return void 0;
 }
-function isRecord24(value) {
+function isRecord25(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function shortId2(value) {
@@ -107017,6 +108962,7 @@ var compactionOperationSchema = external_exports.object({
 }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   ...sessionTransferMethods,
+  ...attentionRpcMethods,
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
@@ -107078,7 +109024,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb, sameLinkIpv6Endpoints, attention) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -107097,10 +109043,12 @@ var RpcRouter = class {
     this.dshWeb = dshWeb;
     this.lanWeb = lanWeb;
     this.sameLinkIpv6Endpoints = sameLinkIpv6Endpoints;
+    this.attention = attention;
   }
   active = 0;
   async closePeerStreams() {
     this.lanWeb?.dispose();
+    this.attention?.close();
     this.loopback?.closeAll();
     this.sessionTransfer?.close();
     await Promise.all([
@@ -107183,7 +109131,8 @@ var RpcRouter = class {
           ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
           ...this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === "linux" ? [DSH_WEB_LAN_IPV6_CAPABILITY] : [],
           ...this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : [],
-          ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
+          ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY],
+          ...this.attention === void 0 ? [] : [ATTENTION_INBOX_CAPABILITY]
         ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
@@ -107308,6 +109257,24 @@ var RpcRouter = class {
         return this.requireTransportUpgrade().drain(params);
       case "remote.transport.upgrade.abort":
         return this.requireTransportUpgrade().abort(params);
+      case "attention.list":
+        emptyParamsSchema.parse(params);
+        return this.requireAttention().list();
+      case "attention.follow": {
+        const parsed = attentionFollowRequestSchema.parse(params);
+        return this.requireAttention().follow(parsed.enabled ?? true);
+      }
+      case "attention.unfollow":
+        emptyParamsSchema.parse(params);
+        return this.requireAttention().unfollow();
+      case "attention.resolveToken": {
+        const { token } = attentionResolveTokenRequestSchema.parse(params);
+        return this.requireAttention().resolveToken(token);
+      }
+      case "attention.ackUnread": {
+        const { itemIds } = attentionAckUnreadRequestSchema.parse(params);
+        return this.requireAttention().ackUnread(itemIds);
+      }
       default:
         if (method.startsWith("session.transfer.")) {
           if (!this.sessionTransfer) throw new RpcError("FEATURE_NOT_SUPPORTED", "Session transfer is unavailable on this Host.");
@@ -107351,6 +109318,12 @@ var RpcRouter = class {
       throw new RpcError("CAPABILITY_NOT_SUPPORTED", "In-band transport upgrade is unavailable on this Host.");
     }
     return this.transportUpgrade;
+  }
+  requireAttention() {
+    if (this.attention === void 0) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "Attention Inbox is unavailable on this Host.");
+    }
+    return this.attention;
   }
 };
 function errorResponse2(requestId2, error62) {
@@ -107527,7 +109500,7 @@ function resolveWebRtcNegotiateTimeoutMs(hint) {
   return Math.min(MAX_WEBRTC_NEGOTIATE_TIMEOUT_MS, Math.max(MIN_WEBRTC_NEGOTIATE_TIMEOUT_MS, hint));
 }
 var HostServerConnection = class {
-  constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
+  constructor(config2, identity3, identities, api, connections, logger2, createWebSocket = (url2) => createNodeWebSocket(url2), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion, onOnline) {
     this.config = config2;
     this.identity = identity3;
     this.identities = identities;
@@ -107538,6 +109511,7 @@ var HostServerConnection = class {
     this.rtcFactoryProvider = rtcFactoryProvider;
     this.hostCapabilities = hostCapabilities;
     this.harnessVersion = harnessVersion;
+    this.onOnline = onOnline;
   }
   socket;
   forceCloseSocket;
@@ -107591,6 +109565,20 @@ var HostServerConnection = class {
   }
   isOnline() {
     return this.online;
+  }
+  /**
+   * Publish a zero-plaintext `AttentionDigest` on the Control WebSocket.
+   * Strictly gated on an online control channel that negotiated `attention.signal.v1`.
+   */
+  publishAttentionDigest(digest) {
+    if (!this.online || this.socket === void 0 || this.socket.readyState !== 1) return;
+    if (!this.negotiatedCapabilities.includes(ATTENTION_SIGNAL_CAPABILITY)) return;
+    const validated = attentionDigestSchema.parse(digest);
+    try {
+      this.sendControl("host.attention.signal", { digest: validated });
+    } catch (error62) {
+      this.logger.debug("host attention signal skipped", { code: errorCode4(error62) });
+    }
   }
   recoveryExpiresAt() {
     const remaining = [...this.tunnels.values()].flatMap((tunnel) => {
@@ -107677,7 +109665,7 @@ var HostServerConnection = class {
   async connectOnce() {
     const credentials = await this.api.authenticate(this.identity);
     if (this.stopped) return;
-    const offeredCapabilities = this.rtcFactoryProvider === void 0 || this.config.forceRelay ? [RELAY_RESUME_CAPABILITY, "transport.relay", "transport.relay.attach", ...this.hostCapabilities()] : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", ...this.hostCapabilities()];
+    const offeredCapabilities = this.rtcFactoryProvider === void 0 || this.config.forceRelay ? [RELAY_RESUME_CAPABILITY, ATTENTION_SIGNAL_CAPABILITY, "transport.relay", "transport.relay.attach", ...this.hostCapabilities()] : [WEBRTC_RESUME_CAPABILITY, RELAY_RESUME_CAPABILITY, ATTENTION_SIGNAL_CAPABILITY, "transport.lan", "transport.p2p", "transport.turn", "transport.relay", "transport.relay.attach", ...this.hostCapabilities()];
     const recoveryTickets = [...this.tunnels.values()].flatMap((tunnel) => tunnel.lease?.recoveryTicket() ?? []).slice(0, 64);
     const socket = this.createWebSocket(websocketUrl2(this.api.baseUrl));
     this.socket = socket;
@@ -107926,6 +109914,7 @@ var HostServerConnection = class {
               connectionSessionId: shortId3(payload.connectionSessionId)
             });
             for (const tunnel of this.tunnels.values()) tunnel.lease?.tick(true);
+            this.onOnline?.();
             return;
           }
           if (!acknowledged && (frame.type !== "error" || requireControlError(frame.payload).connectionId !== void 0)) {
@@ -109461,7 +111450,7 @@ var PUBLIC_SCHEDULE_ERRORS = {
 };
 var allowedEndpoints = new Set(HARNESS_REMOTE_ALLOWLIST);
 var HarnessRemoteBridge = class {
-  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadAttachment, attachmentHostPath) {
+  constructor(gateway, publish, logger2, harnessVersion, terminal = new TerminalPolicy(() => false, "", /* @__PURE__ */ new Map()), codexWorkspace, resolveWorkspaceRoot, schedule, uploadAttachment, attachmentHostPath, forwardedEventsObserver) {
     this.gateway = gateway;
     this.publish = publish;
     this.logger = logger2;
@@ -109472,6 +111461,7 @@ var HarnessRemoteBridge = class {
     this.schedule = schedule;
     this.uploadAttachment = uploadAttachment;
     this.attachmentHostPath = attachmentHostPath;
+    this.forwardedEventsObserver = forwardedEventsObserver;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   compactHistoryEnabled = false;
@@ -109541,6 +111531,17 @@ var HarnessRemoteBridge = class {
         const sessionId = journalSessionId(nativePayload);
         if (sessionId !== void 0) this.messageFiles.observe(sessionId, nativeResult.value);
       }
+      if (params.endpoint === "$events/result" && nativeResult.ok && this.forwardedEventsObserver?.onEventResult !== void 0) {
+        const args = requestArgs(params.payload);
+        const eventId = typeof args.eventId === "string" && args.eventId.length > 0 ? args.eventId : void 0;
+        const outcomeKind = isRecord26(args.outcome) && typeof args.outcome.kind === "string" ? args.outcome.kind : void 0;
+        if (eventId !== void 0) {
+          try {
+            this.forwardedEventsObserver.onEventResult(eventId, outcomeKind);
+          } catch {
+          }
+        }
+      }
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -109606,7 +111607,7 @@ var HarnessRemoteBridge = class {
       const record12 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
       return { ok: true, value: record12 };
     } catch (error62) {
-      const published = isRecord25(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
+      const published = isRecord26(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
       if (published === void 0) {
         return {
           ok: false,
@@ -109755,7 +111756,15 @@ var HarnessRemoteBridge = class {
     if (params.endpoint === "terminal/watch") source = this.terminal.watch(params.payload, source);
     const historyFollow = params.endpoint === "session/follow";
     const sessionId = historyFollow ? journalSessionId(params.payload) : void 0;
-    void this.pump(params.streamId, source, controller.signal, historyFollow, params.transferFrames, sessionId);
+    void this.pump(
+      params.streamId,
+      source,
+      controller.signal,
+      historyFollow,
+      params.transferFrames,
+      params.endpoint === "$events",
+      sessionId
+    );
     return { opened: true, streamId: params.streamId };
   }
   async *remoteEventsWithFallback(source, signal) {
@@ -109830,8 +111839,8 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord25(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord25(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord26(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord26(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     if (remoteOwnedBundleRow(row, plugin)) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
@@ -109851,8 +111860,8 @@ var HarnessRemoteBridge = class {
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin update request.");
     const result = await this.gateway.dispatch("pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord25(value) && value.name === parsed.data.args.name);
-    if (!isRecord25(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
+    const row = result.value.find((value) => isRecord26(value) && value.name === parsed.data.args.name);
+    if (!isRecord26(row) || row.readOnlyReason !== void 0 || row.updatable !== true) {
       throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be updated remotely.");
     }
     if (remoteOwnedBundleRow(row, false)) {
@@ -109867,13 +111876,36 @@ var HarnessRemoteBridge = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not support Remote event transport.");
     }
   }
-  async pump(streamId, source, signal, historyFollow = false, transferFrames = false, sessionId) {
+  async pump(streamId, source, signal, historyFollow = false, transferFrames = false, forwardedEvents = false, sessionId) {
     let reason = "completed";
     let failure5;
+    let closedNotified = false;
+    const notifyClosed = () => {
+      if (!forwardedEvents || closedNotified) return;
+      closedNotified = true;
+      try {
+        this.forwardedEventsObserver?.onStreamClosed?.();
+      } catch {
+      }
+    };
+    if (forwardedEvents) {
+      try {
+        this.forwardedEventsObserver?.onStreamOpened?.();
+      } catch {
+      }
+      if (signal.aborted) notifyClosed();
+      else signal.addEventListener("abort", notifyClosed, { once: true });
+    }
     try {
       for await (const value of source) {
         if (signal.aborted) break;
         if (sessionId !== void 0) this.messageFiles.observe(sessionId, value);
+        if (forwardedEvents && this.forwardedEventsObserver !== void 0) {
+          try {
+            this.forwardedEventsObserver.onFrame(value);
+          } catch {
+          }
+        }
         const frame = {
           streamId,
           hasValue: true,
@@ -109891,6 +111923,10 @@ var HarnessRemoteBridge = class {
       reason = signal.aborted ? "cancelled" : "failed";
       if (!signal.aborted) failure5 = this.gateway.failure(error62);
     } finally {
+      if (forwardedEvents) {
+        signal.removeEventListener("abort", notifyClosed);
+        notifyClosed();
+      }
       this.streams.delete(streamId);
       await this.publish("harness.remote.stream.closed", {
         streamId,
@@ -109944,7 +111980,7 @@ var HarnessRemoteBridge = class {
   }
   async resolveMessageFilePayload(payload, endpoint, signal) {
     const deny = () => workspaceFileFailure("WORKSPACE_PATH_DENIED", "The message attachment is unavailable.", "outside-root");
-    if (!isRecord25(payload) || !isRecord25(payload.args)) throw deny();
+    if (!isRecord26(payload) || !isRecord26(payload.args)) throw deny();
     const args = payload.args;
     const sessionId = args.workspaceFileScopeId;
     if (typeof sessionId !== "string" || !isMessageFilePath(args.path)) throw deny();
@@ -109970,9 +112006,9 @@ var HarnessRemoteBridge = class {
       throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
     }
     if (endpoint === "workspaceFiles/readBytes") {
-      const options = isRecord25(args.options) ? args.options : {};
+      const options = isRecord26(args.options) ? args.options : {};
       if ("baseFile" in args || "baseFile" in options) throw deny();
-      if (!isRecord25(options.range) && !isRecord25(args.range)) {
+      if (!isRecord26(options.range) && !isRecord26(args.range)) {
         if (reference.bytes > MAX_READ_BYTES2) {
           throw workspaceFileFailure("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.", "too-large");
         }
@@ -109986,7 +112022,7 @@ var HarnessRemoteBridge = class {
     return { ...payload, args: { ...args, path } };
   }
   async assertNativeWorkspaceFileCall(endpoint, payload, signal) {
-    const rootPayload = isRecord25(payload) ? payload : {};
+    const rootPayload = isRecord26(payload) ? payload : {};
     const args = requestArgs(payload);
     const sessionId = typeof args.workspaceFileScopeId === "string" ? args.workspaceFileScopeId : typeof args.sessionId === "string" ? args.sessionId : typeof args.agentId === "string" ? args.agentId : void 0;
     if (sessionId === void 0) {
@@ -109996,7 +112032,7 @@ var HarnessRemoteBridge = class {
     if (!sessionWorkspace) {
       throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
     }
-    const options = isRecord25(args.options) ? args.options : void 0;
+    const options = isRecord26(args.options) ? args.options : void 0;
     const rawBaseFile = endpoint === "workspaceFiles/readBytes" ? typeof options?.baseFile === "string" ? options.baseFile : typeof args.baseFile === "string" ? args.baseFile : void 0 : void 0;
     if (endpoint === "workspaceFiles/readBytes") {
       if (options !== void 0 && "baseFile" in options && options.baseFile !== void 0 && typeof options.baseFile !== "string") {
@@ -110030,8 +112066,8 @@ var HarnessRemoteBridge = class {
       }
       safeRel = await this.verifyWorkspacePathContainment(sessionWorkspace.root, path, endpoint, sessionWorkspace.cwd);
     }
-    let finalArgs = isRecord25(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
-    if (isRecord25(finalArgs.options)) {
+    let finalArgs = isRecord26(rootPayload.args) ? { ...rootPayload.args, path: safeRel } : { ...rootPayload, path: safeRel };
+    if (isRecord26(finalArgs.options)) {
       const { baseFile: _baseFile, ...restOptions } = finalArgs.options;
       finalArgs.options = restOptions;
     }
@@ -110043,11 +112079,11 @@ var HarnessRemoteBridge = class {
       const boundedLength = Math.min(rawLength, MAX_READ_BYTES2);
       const normalizedRange = { offset: offset2, length: boundedLength };
       if (requiresWorkspaceChangePath(this.harnessVersion)) {
-        finalArgs.options = { ...isRecord25(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
+        finalArgs.options = { ...isRecord26(finalArgs.options) ? finalArgs.options : {}, range: normalizedRange };
         delete finalArgs.range;
       } else {
         finalArgs.range = normalizedRange;
-        if (isRecord25(finalArgs.options)) {
+        if (isRecord26(finalArgs.options)) {
           finalArgs.options = { ...finalArgs.options, range: normalizedRange };
         }
       }
@@ -110056,7 +112092,7 @@ var HarnessRemoteBridge = class {
         finalArgs.length = boundedLength;
       }
     }
-    return isRecord25(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
+    return isRecord26(rootPayload.args) ? { ...rootPayload, args: finalArgs } : finalArgs;
   }
   async resolveWorkspaceRootForSession(sessionId, signal) {
     signal.throwIfAborted();
@@ -110160,7 +112196,7 @@ var HarnessRemoteBridge = class {
 };
 function journalSessionId(payload) {
   const address2 = requestArgs(payload).address;
-  return isRecord25(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
+  return isRecord26(address2) && address2.kind === "session" && typeof address2.sessionId === "string" ? address2.sessionId : void 0;
 }
 function isPathOutside(rel) {
   if (rel === ".." || isAbsolute10(rel)) return true;
@@ -110170,17 +112206,17 @@ function isPathOutside(rel) {
   return rel.startsWith("../");
 }
 function byteOrLineRange2(args) {
-  const options = isRecord25(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord25(options.range)) return options.range;
-  return isRecord25(args.range) ? args.range : args;
+  const options = isRecord26(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord26(options.range)) return options.range;
+  return isRecord26(args.range) ? args.range : args;
 }
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord25(payload) || !isRecord25(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord26(payload) || !isRecord26(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord25(payload) || !isRecord25(payload.args)) return payload;
+  if (!isRecord26(payload) || !isRecord26(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -110194,10 +112230,10 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
   return payload;
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
-  if (endpoint !== "session/attachment" || !isRecord25(payload) || !isRecord25(payload.args)) return payload;
-  const request2 = isRecord25(payload.args.request) ? payload.args.request : void 0;
+  if (endpoint !== "session/attachment" || !isRecord26(payload) || !isRecord26(payload.args)) return payload;
+  const request2 = isRecord26(payload.args.request) ? payload.args.request : void 0;
   if (request2 === void 0) return payload;
-  const attachment = isRecord25(request2.attachment) ? request2.attachment : void 0;
+  const attachment = isRecord26(request2.attachment) ? request2.attachment : void 0;
   const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request2.attachmentId === "string" ? request2.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
@@ -110229,7 +112265,7 @@ async function findSessionAttachmentReference(gateway, sessionId, attachmentId, 
       const result = await gateway.dispatch("session/page", { args: { request: pageRequest } }, signal);
       const reference = extractAttachmentReference(result, attachmentId);
       if (reference !== void 0) return reference;
-      if (result.ok === true && isRecord25(result.value)) {
+      if (result.ok === true && isRecord26(result.value)) {
         if (result.value.hasMore === true && typeof result.value.beforeSeq === "number") {
           beforeSeq = result.value.beforeSeq;
           continue;
@@ -110253,7 +112289,7 @@ function extractAttachmentReference(result, attachmentId) {
   const value = result.value;
   let records;
   if (Array.isArray(value)) records = value;
-  else if (isRecord25(value)) {
+  else if (isRecord26(value)) {
     if (Array.isArray(value.records)) records = value.records;
     else if (Array.isArray(value.events)) records = value.events;
   }
@@ -110274,7 +112310,7 @@ function findImageReference(value, attachmentId, depth) {
     return void 0;
   }
   const block = value;
-  const candidate = isRecord25(block.attachment) ? block.attachment : block;
+  const candidate = isRecord26(block.attachment) ? block.attachment : block;
   const candidateId = typeof candidate.attachmentId === "string" ? candidate.attachmentId : void 0;
   if (candidateId === attachmentId && isCompleteImageReference(candidate)) {
     return {
@@ -110424,7 +112460,7 @@ var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constru
 var MAX_WHITELIST_PROJECTION_BYTES = 64 * 1024;
 var MAX_UNKNOWN_PROJECTION_BYTES = 4096;
 function filterSessionProjections(session2) {
-  if (!isRecord25(session2) || !isRecord25(session2.projections) || !isRecord25(session2.projections.values)) {
+  if (!isRecord26(session2) || !isRecord26(session2.projections) || !isRecord26(session2.projections.values)) {
     return session2;
   }
   const originalValues = session2.projections.values;
@@ -110465,15 +112501,15 @@ function trimSessionCatalogRows(endpoint, items) {
   return kept.length <= SESSION_LIST_ROW_BUDGET ? kept : kept.slice().sort((left, right) => updatedAtOf(right) - updatedAtOf(left)).slice(0, SESSION_LIST_ROW_BUDGET);
 }
 function isListableRemoteSession(session2) {
-  return isRecord25(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
+  return isRecord26(session2) && session2.parentSessionId === void 0 && session2.origin !== "subagent";
 }
 function updatedAtOf(session2) {
-  return isRecord25(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
+  return isRecord26(session2) && typeof session2.updatedAt === "number" ? session2.updatedAt : 0;
 }
 function withSessionRowTitle(session2) {
-  if (!isRecord25(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
-  const values = isRecord25(session2.projections) ? session2.projections.values : void 0;
-  const title = isRecord25(values) ? values.title : void 0;
+  if (!isRecord26(session2) || typeof session2.title === "string" && session2.title !== "") return session2;
+  const values = isRecord26(session2.projections) ? session2.projections.values : void 0;
+  const title = isRecord26(values) ? values.title : void 0;
   return typeof title === "string" && title !== "" ? { ...session2, title } : session2;
 }
 function filterSessionListProjections(resultOrEndpoint, maybeResult) {
@@ -110482,7 +112518,7 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
   if (endpoint !== void 0 && endpoint !== "session/list" && endpoint !== "session/search") return result;
   if (!result || !result.ok) return result;
   const filterList = (items) => trimSessionCatalogRows(endpoint, items).map(filterSessionProjections).map(withSessionRowTitle);
-  if (isRecord25(result.value)) {
+  if (isRecord26(result.value)) {
     let changed = false;
     const updated = { ...result.value };
     if (Array.isArray(result.value.items)) {
@@ -110506,27 +112542,27 @@ function filterSessionListProjections(resultOrEndpoint, maybeResult) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord25(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord26(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord25(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord25(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord26(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord26(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord25(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord26(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root2 = record11(payload);
-  const args = isRecord25(root2.args) ? root2.args : root2;
+  const args = isRecord26(root2.args) ? root2.args : root2;
   return record11(args.request ?? args._request ?? args);
 }
 function record11(value) {
-  return isRecord25(value) ? value : {};
+  return isRecord26(value) ? value : {};
 }
-function isRecord25(value) {
+function isRecord26(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -110535,7 +112571,7 @@ function isCompactSnapshot(value) {
 function remoteOwnedBundleRow(row, plugin) {
   const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
   if (remoteModule(plugin ? row.moduleName : row.name)) return true;
-  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord25(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
+  return !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord26(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value)));
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
@@ -110554,11 +112590,11 @@ var MAX_CAUSE_DEPTH = 8;
 function requestIndexKey(ownerDeviceId, sessionId, requestId2) {
   return `${ownerDeviceId}\0${sessionId}\0${requestId2}`;
 }
-function isRecord26(value) {
+function isRecord27(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function commandIdOf(result) {
-  if (result?.ok !== true || !isRecord26(result.value)) return void 0;
+  if (result?.ok !== true || !isRecord27(result.value)) return void 0;
   return typeof result.value.commandId === "string" ? result.value.commandId : void 0;
 }
 var RemoteCompactionOperations = class {
@@ -110950,7 +112986,7 @@ function isAbortThrown(thrown, reason) {
       current = "cause" in current ? current.cause : void 0;
       continue;
     }
-    if (isRecord26(current)) {
+    if (isRecord27(current)) {
       if (typeof current.code === "string" && ABORT_CODE_PATTERN.test(current.code)) return true;
       if (typeof current.message === "string" && matchesSignalReason(current.message, reason)) return true;
       current = current.cause;
@@ -110965,13 +113001,13 @@ function matchesSignalReason(message, reason) {
   return reasonMessage !== void 0 && reasonMessage !== "" && message.includes(reasonMessage);
 }
 function isCommandSuccess(result) {
-  if (result.ok !== true || !isRecord26(result.value)) return false;
-  const command = isRecord26(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord27(result.value)) return false;
+  const command = isRecord27(result.value.result) ? result.value.result : void 0;
   return command?.kind === "success";
 }
 function commandText2(result) {
-  if (result.ok !== true || !isRecord26(result.value)) return void 0;
-  const command = isRecord26(result.value.result) ? result.value.result : void 0;
+  if (result.ok !== true || !isRecord27(result.value)) return void 0;
+  const command = isRecord27(result.value.result) ? result.value.result : void 0;
   return typeof command?.text === "string" && command.text.trim() !== "" ? command.text : void 0;
 }
 function sanitizeMessage(message) {
@@ -110990,13 +113026,13 @@ function waitWithTimeout(promise2, ms) {
   });
 }
 function readCompactionConfirmation(result, acceptedAt, commandId) {
-  if (result.ok !== true || !isRecord26(result.value)) return { kind: "unknown" };
+  if (result.ok !== true || !isRecord27(result.value)) return { kind: "unknown" };
   const records = Array.isArray(result.value.records) ? result.value.records : [];
   const legacy = Array.isArray(result.value.events) ? result.value.events : [];
   const events = [];
   for (const record12 of [...records, ...legacy]) {
-    const event2 = isRecord26(record12) && isRecord26(record12.event) ? record12.event : record12;
-    if (isRecord26(event2) && typeof event2.type === "string") events.push(event2);
+    const event2 = isRecord27(record12) && isRecord27(record12.event) ? record12.event : record12;
+    if (isRecord27(event2) && typeof event2.type === "string") events.push(event2);
   }
   if (events.length === 0) return { kind: "unknown" };
   const matchedCommandRun = commandId === void 0 ? latestCompactCommandId(events, acceptedAt) : hasCompactCommandRun(events, commandId) ? commandId : void 0;
@@ -111004,34 +113040,34 @@ function readCompactionConfirmation(result, acceptedAt, commandId) {
   if (resolvedCommandId === void 0) return { kind: "not-yet" };
   const end = [...events].reverse().find((event2) => {
     if (event2.type !== "compaction/end") return false;
-    const data3 = isRecord26(event2.data) ? event2.data : void 0;
+    const data3 = isRecord27(event2.data) ? event2.data : void 0;
     return data3?.sourceCommandId === resolvedCommandId;
   });
   if (end === void 0) {
     const hasCompactionStart = events.some((event2) => {
       if (event2.type !== "compaction/start") return false;
-      const data3 = isRecord26(event2.data) ? event2.data : void 0;
+      const data3 = isRecord27(event2.data) ? event2.data : void 0;
       return data3?.sourceCommandId === resolvedCommandId;
     });
     if (hasCompactionStart) return { kind: "not-yet", started: true };
     if (matchedCommandRun !== void 0) return { kind: "not-yet", commandRecorded: true };
     return { kind: "not-yet" };
   }
-  const data2 = isRecord26(end.data) ? end.data : {};
+  const data2 = isRecord27(end.data) ? end.data : {};
   const error62 = data2.error === void 0 ? void 0 : errorText(data2.error);
   return error62 === void 0 ? { kind: "finished" } : { kind: "finished", error: error62 };
 }
 function hasCompactCommandRun(events, commandId) {
   return events.some((event2) => {
     if (event2.type !== "command/run") return false;
-    const data2 = isRecord26(event2.data) ? event2.data : void 0;
+    const data2 = isRecord27(event2.data) ? event2.data : void 0;
     return data2?.name === "compact" && data2.commandId === commandId;
   });
 }
 function latestCompactCommandId(events, acceptedAt) {
   for (const event2 of [...events].reverse()) {
     if (event2.type !== "command/run") continue;
-    const data2 = isRecord26(event2.data) ? event2.data : void 0;
+    const data2 = isRecord27(event2.data) ? event2.data : void 0;
     if (data2?.name !== "compact" || typeof data2.commandId !== "string") continue;
     const time3 = typeof event2.time === "number" ? event2.time : 0;
     if (time3 !== 0 && time3 < acceptedAt - 5e3) continue;
@@ -111041,7 +113077,7 @@ function latestCompactCommandId(events, acceptedAt) {
 }
 function errorText(error62) {
   if (typeof error62 === "string") return sanitizeMessage(error62);
-  if (isRecord26(error62)) {
+  if (isRecord27(error62)) {
     const message = error62.message ?? error62.error ?? error62.reason;
     if (typeof message === "string" && message.trim() !== "") return sanitizeMessage(message);
     try {
@@ -111089,7 +113125,22 @@ var HostPluginRuntime = class {
     this.codexStartupGraceMs = codexStartupGraceMs;
     this.terminalEnabled = config2.terminal.enabled;
     this.loopbackPorts = [...config2.loopback.ports];
-    this.codex = new CodexRemoteDomain(config2.codex, logger2);
+    this.attention = new HostAttentionTracker({
+      localGateway,
+      onDigest: (digest) => this.serverConnection?.publishAttentionDigest(digest),
+      logger: logger2
+    });
+    this.codex = new CodexRemoteDomain(
+      config2.codex,
+      logger2,
+      void 0,
+      void 0,
+      void 0,
+      void 0,
+      config2.detachedApprovalGraceSec,
+      this.attention,
+      this.detachedApprovalBudget
+    );
     this.acp = new AcpRemoteGateway(
       config2.acp ?? { enabled: false, backends: [] },
       logger2,
@@ -111097,7 +113148,10 @@ var HostPluginRuntime = class {
       void 0,
       () => this.terminalEnabled,
       this.terminalSpawner,
-      AcpWorkspaceStore.inDirectory(identities?.directory)
+      AcpWorkspaceStore.inDirectory(identities?.directory),
+      config2.detachedApprovalGraceSec,
+      this.attention,
+      this.detachedApprovalBudget
     );
     this.compactionOperations = new RemoteCompactionOperations(async (sessionId, signal) => {
       const gateway = this.localGateway?.createPeer?.() ?? this.localGateway;
@@ -111156,7 +113210,8 @@ var HostPluginRuntime = class {
         ),
         this.schedule,
         uploadBridge === void 0 ? void 0 : (body) => uploadBridge.call({ route: "api/session/uploadFileBinary", body }, true),
-        attachmentHostPath
+        attachmentHostPath,
+        this.attention.createHarnessBridgeObserver()
       ) : void 0;
       const fileViewer = new RemoteFileViewerBridge(
         () => this.fileViewerHost?.(),
@@ -111171,7 +113226,11 @@ var HostPluginRuntime = class {
         (event2, data2) => send(createEvent(event2, data2))
       );
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer);
-      const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
+      const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(
+        dispatcher,
+        this.logger,
+        (route, body, result) => this.attention.observeBotResponse(route, body, result)
+      );
       const workspaceUpload = new WorkspaceUploadHost(workspaceUploadRootResolver(
         peerGateway,
         () => harnessSessionGeneration(this.harnessVersion) === "v3",
@@ -111209,7 +113268,11 @@ var HostPluginRuntime = class {
           connectionId: context.connectionId
         }, resolveDshWeb) : void 0,
         resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0,
-        context.sameLinkIpv6Endpoints
+        context.sameLinkIpv6Endpoints,
+        this.attention.createPeerRoute(
+          context.connectionId,
+          (event2) => send(createEvent("attention.follow.event", event2))
+        )
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -111228,6 +113291,8 @@ var HostPluginRuntime = class {
   harnessVersion;
   pairing;
   closed = false;
+  detachedApprovalBudget = new DetachedApprovalBudget();
+  attention;
   codex;
   acp;
   codexWorkspaceState = new WorkspaceBridgeState((key) => TerminalPolicy.releaseOwner(this.terminalOwners, key));
@@ -111281,15 +113346,23 @@ var HostPluginRuntime = class {
     void this.acp.start().catch(() => {
       this.logger.warn("ACP background initialization failed", { code: "ACP_START_FAILED" });
     });
+    let attentionHarnessVersion = this.harnessVersion;
     if (this.serverApi !== void 0) {
       this.harnessVersion = await this.readHarnessVersion();
+      attentionHarnessVersion = this.harnessVersion;
       this.serverApi.setHarnessVersion(this.harnessVersion);
       this.serverApi.bindIdentity(this.identity);
       await this.serverApi.loadStoredPolicy();
       this.initializePairing();
       this.serverConnection = this.createServerConnection(this.identity);
       if (this.config.hostControl?.enabled !== false) this.serverConnection.start();
+    } else if (this.localGateway?.supportsCarrier === true && attentionHarnessVersion === void 0) {
+      attentionHarnessVersion = await readHarnessDistributionVersion();
     }
+    this.attention.start(attentionHarnessVersion);
+  }
+  attentionTracker() {
+    return this.attention;
   }
   currentIdentity() {
     if (this.identity === void 0) throw new Error("remote runtime has not started");
@@ -111523,6 +113596,7 @@ var HostPluginRuntime = class {
     if (this.closed) return;
     this.closed = true;
     this.pairing?.close();
+    await this.attention.close();
     await this.serverConnection?.stop();
     this.compactionOperations.closeAll();
     await this.connections.close();
@@ -111566,7 +113640,8 @@ var HostPluginRuntime = class {
       void 0,
       this.config.forceRelay ? void 0 : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === void 0 ? [] : [this.config.serverUrl] }),
       () => this.hostCapabilities(),
-      this.harnessVersion
+      this.harnessVersion,
+      () => this.attention.publishCurrentDigestIfActive()
     );
   }
   async readHarnessVersion() {
@@ -112260,21 +114335,21 @@ var LocalPluginUpgrade = class {
 };
 function bundleUpdatable(listed, packageName) {
   if (!Array.isArray(listed)) return false;
-  return listed.some((row) => isRecord27(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
+  return listed.some((row) => isRecord28(row) && row.name === packageName && (row.update === "registry" || row.update === void 0 && row.updatable === true));
 }
 function classifyUpdateResult(result) {
-  if (!isRecord27(result) || !isRecord27(result.result)) return { status: "failed", message: "update-failed" };
+  if (!isRecord28(result) || !isRecord28(result.result)) return { status: "failed", message: "update-failed" };
   const application = result.result.application;
   if (application === "applied" || application === "restart-required") return { status: "started" };
   return { status: "failed", message: failureMessage(result.result.error) };
 }
 function failureMessage(error62) {
-  if (!isRecord27(error62)) return "update-failed";
+  if (!isRecord28(error62)) return "update-failed";
   const code = typeof error62.code === "string" && error62.code.length > 0 && error62.code.length <= 80 ? error62.code : "update-failed";
   const diagnostic = typeof error62.diagnostic === "string" ? error62.diagnostic.replace(/\s+/g, " ").trim().slice(0, 180) : "";
   return diagnostic === "" ? code : `${code}: ${diagnostic}`;
 }
-function isRecord27(value) {
+function isRecord28(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -112309,17 +114384,18 @@ function ownerPeerConstructor(connectionExports) {
   return typeof candidate === "function" ? candidate : void 0;
 }
 function createOwnerPeerFactory(ctx, constructor, connection) {
-  return () => {
+  return (options) => {
+    const interactions = options?.interactions ?? "answer";
     if (constructor !== void 0) {
       try {
-        return new constructor(ctx, { principal: { kind: "owner" }, interactions: "answer" });
+        return new constructor(ctx, { principal: { kind: "owner" }, interactions });
       } catch {
       }
     }
     const createPeer = connection?.createPeer;
     if (typeof createPeer !== "function") return void 0;
     try {
-      return createPeer.call(connection, { principal: { kind: "owner" }, interactions: "answer" });
+      return createPeer.call(connection, { principal: { kind: "owner" }, interactions });
     } catch {
       return void 0;
     }
@@ -112911,9 +114987,12 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   }, "ds-harness-remote fallback owner peer");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
   const localTypertGateway = hostGateway.local();
-  localTypertGateway.createPeer = () => {
-    const peer = createOwnerPeer();
-    if (peer === void 0) return localTypertGateway;
+  localTypertGateway.createPeer = (options) => {
+    const peer = createOwnerPeer(options);
+    if (peer === void 0) {
+      if (options?.interactions === "none") return void 0;
+      return localTypertGateway;
+    }
     return {
       ...hostGateway.local(peer),
       dispose: async () => {
@@ -113222,6 +115301,7 @@ export {
   HARNESS_REMOTE_ALLOWLIST,
   HOST_CAPABILITIES,
   HarnessRemoteBridge,
+  HostAttentionTracker,
   HostPluginRuntime,
   HostServerApi,
   HostServerConnection,

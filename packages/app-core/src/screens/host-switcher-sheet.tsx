@@ -7,6 +7,7 @@ import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
 import { ConnectionScreen } from './device-screens'
+import { CrossHostAttentionBanner, digestTotalCount, formatDigestSegments } from './attention-inbox-sheet'
 import { platformIcon, platformName } from '../lib/device-display'
 import { ErrorBanner, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -20,6 +21,7 @@ export interface HostSwitcherSheetProps {
   initialConnectingDevice?: RemoteDevice | undefined
   onClose: () => void
   onSelectDevice: (device: RemoteDevice) => void
+  onSelectHostAttention?: (device: RemoteDevice, token?: string) => void
   onManageHosts: () => void
   onConnected: () => void
 }
@@ -31,7 +33,7 @@ export interface HostSwitcherSheetProps {
  * the label start, the inset separators and the right edge match the cards
  * used elsewhere, and the trailing status text lands on one baseline.
  */
-export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHosts, onConnected, initialConnectingDevice }: HostSwitcherSheetProps) {
+export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onSelectHostAttention, onManageHosts, onConnected, initialConnectingDevice }: HostSwitcherSheetProps) {
   useAppStore(state => state.language)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
@@ -112,6 +114,20 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
             >
+              <CrossHostAttentionBanner
+                devices={devices}
+                onSelectHost={(device, token) => {
+                  if (onSelectHostAttention) {
+                    onSelectHostAttention(device, token)
+                    return
+                  }
+                  const isCurrent = selectedDevice?.deviceId === device.deviceId
+                  const isConnected = isCurrent && connection.phase === 'connected'
+                  if (isConnected) onClose()
+                  else if (device.trusted && device.online) setChosenDevice(device)
+                  else onSelectDevice(device)
+                }}
+              />
               <GroupCard>
                 {devices.length === 0
                   ? <View style={styles.emptyState}>
@@ -123,16 +139,22 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
                       const isConnected = isCurrent && connection.phase === 'connected'
                       const Icon = platformIcon(device.platform)
                       const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
+                      const digest = device.online ? device.attentionDigest : undefined
+                      const digestSummary = digest && digestTotalCount(digest) > 0
+                        ? formatDigestSegments(digest).map(seg => seg.label).join(' · ')
+                        : undefined
+                      const baseDetail = `${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`
+                      const detail = digestSummary ? `${baseDetail} · ${digestSummary}` : baseDetail
                       return (
                         <GroupRow
                           key={device.deviceId}
                           first={index === 0}
                           icon={Icon}
                           label={device.name}
-                          detail={`${strings.remoteHosts.remoteTag} · ${platformName(device.platform)}`}
+                          detail={detail}
                           selected={isConnected}
                           chevron={false}
-                          accessibilityLabel={[device.name, status.label, device.harnessVersion].filter(Boolean).join(', ')}
+                          accessibilityLabel={[device.name, status.label, digestSummary, device.harnessVersion].filter(Boolean).join(', ')}
                           disabled={busy}
                           onPress={() => {
                             if (isConnected) onClose()

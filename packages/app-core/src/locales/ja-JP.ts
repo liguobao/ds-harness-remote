@@ -1106,6 +1106,37 @@ const jaJP = {
     autoConnectDetail: "オフの場合、起動時にデバイス一覧を表示します",
     currentHost: "現在のホスト",
   },
+  attention: {
+    title: '要対応インボックス',
+    openInbox: '要対応インボックスを開く',
+    markAllRead: 'すべて既読にする',
+    sectionAttention: '要対応',
+    sectionFinished: '完了',
+    sectionRunning: '実行中',
+    emptyTitle: 'すべて確認済みです',
+    emptyBody: 'このホストに承認待ち、質問、未読の完了タスクはありません。',
+    statusApproval: '承認待ち',
+    statusQuestion: '質問',
+    statusRunning: '実行中',
+    statusCompleted: '完了',
+    statusFailed: '失敗',
+    crossHostTitle: 'オンラインホスト全体',
+    approvalsCount: (n: number) => `承認待ち ${n} 件`,
+    questionsCount: (n: number) => `質問 ${n} 件`,
+    runningCount: (n: number) => `実行中 ${n} 件`,
+    completedCount: (n: number) => `完了 ${n} 件`,
+    extraTasks: (n: number) => `他 ${n} 件が進行中`,
+    expiresIn: (remaining: string) => `残り ${remaining}`,
+    notifyApproval: '承認を待っています',
+    notifyQuestion: '回答を待っています',
+    notifyCompleted: 'タスクが完了しました',
+    notifyFailed: 'タスクが失敗しました',
+    pillA11y: (urgent: number, total: number) => urgent > 0
+      ? `要対応インボックス、緊急 ${urgent} 件、合計 ${total} 件`
+      : total > 0
+        ? `要対応インボックス、アクティブ ${total} 件`
+        : '要対応インボックス',
+  },
   errors: {
     'session/writer-held': "この会話は別のクライアントによって行われています。そのクライアントで DeepSeek Harness を完全に終了してから、ここで再試行してください。会話を切り替えたり、ウィンドウを閉じたりしても、解放されない場合があります。メッセージは送信されていません。",
     ACCOUNT_AUTH_REQUIRED: "この電話を接続する前にサインインしてください。", AUTH_INVALID: "サインインは無効になりました。再度サインインします。", AUTH_REQUIRED: "続行するには、再度サインインしてください。", TOKEN_EXPIRED: "サインインの有効期限が切れました。再度サインインします。", TOKEN_REUSED: "この電話はアカウントを保護するためにサインアウトされました。再度サインインします。", DEVICE_NOT_FOUND: "このデバイスは見つかりませんでした。デバイスリストを更新します。", DEVICE_REVOKED: "この電話はアカウントから削除されました。再度サインインします。", DEVICE_OWNERSHIP_REQUIRED: "この電話のサインイン情報は無効になりました。再度サインインします。", MEMBERSHIP_REQUIRED: "このデバイスにはもうアクセスできません。両方のデバイスが同じアカウントを使用していることを確認してください。", HOST_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", DEVICE_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", PEER_IDENTITY_MISMATCH: "このデバイスの安全な ID が変更されました。デバイスを確認し、再度信頼します。", RATE_LIMITED: "操作が多すぎます。後でもう一度試してください。", CONNECTION_FAILED: "このデバイスに接続できませんでした。ネットワークを確認して、もう一度試してください。", P2P_FAILED: "直接接続に失敗しました。サーバーリレーに切り替えます。", RELAY_UNAVAILABLE: "サーバーリレーが一時的に利用できなくなりました。後でもう一度試してください。", TURN_UNAVAILABLE: "安定した接続を確立できませんでした。別の方法を試しています。", SECURE_CHANNEL_FAILED: "安全な接続を確立できませんでした。もう一度やり直してください。", STREAM_TIMEOUT: "セッション接続がタイムアウトしました。再試行してください。", RPC_TIMEOUT: "デバイスの応答に時間がかかりすぎました。もう一度やり直してください。", UNSUPPORTED_VERSION: "この DSH リモート バージョンには互換性がありません。アプリを更新して、もう一度お試しください。", METHOD_NOT_ALLOWED: "現在の設定では、携帯電話からこの操作を行うことはできません。", PERMISSION_NOT_PENDING: "このリクエストはすでに処理されているか、期限が切れています。", SESSION_NOT_FOUND: "この会話は見つかりませんでした。会話リストに戻って更新します。", HARNESS_UNAVAILABLE: "DeepSeek Harnessはこのデバイスでは一時的に利用できません。実行されていることを確認してください。", AGENT_BUSY: "DeepSeek Harnessは別の操作を処理しています。しばらくしてからもう一度お試しください。", FULL_RESYNC_REQUIRED: "会話はコンピュータ上で変わりました。続行するには再度開いてください。",

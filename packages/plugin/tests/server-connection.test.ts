@@ -279,7 +279,7 @@ describe('HostServerConnection', () => {
         deviceId: 'host-1',
         clientVersion: PLUGIN_VERSION,
         harnessVersion: '0.1.0-rc.8',
-        capabilities: ['transport.relay.resume.v1', 'transport.relay', 'transport.relay.attach', 'harness.api.v1', 'fileviewer.read.v1'],
+        capabilities: ['transport.relay.resume.v1', 'attention.signal.v1', 'transport.relay', 'transport.relay.attach', 'harness.api.v1', 'fileviewer.read.v1'],
       },
     })
     socket.receive(createControlFrame('hello.ack', {

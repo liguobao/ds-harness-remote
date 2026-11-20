@@ -66,6 +66,10 @@ export class CodexThreadLifecycle {
     return this.threads.get(threadId)?.releasing === true
   }
 
+  isActive(threadId: string): boolean {
+    return this.threads.get(threadId)?.active === true
+  }
+
   closed(threadId: string): void {
     const state = this.threads.get(threadId)
     state?.closed?.()

@@ -8,14 +8,18 @@ import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
+import { AttentionInboxSheet } from './src/screens/attention-inbox-sheet'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
 import { AboutScreen, DiagnosticsScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen, useStartupUpdateCheck } from './src/screens/setup-screens'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
+import { useAttentionStore } from './src/state/attention-store'
 import { useBotTeamStore } from './src/state/bot-store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
+import { AttentionDeepLinkBuffer, type ParsedAttentionDeepLink } from './src/lib/attention-deeplink'
 import { resolveStartupAutoConnect } from './src/lib/auto-connect'
+import type { AttentionItem, AttentionMode } from '@dsh-remote/protocol'
 import {
   isRouteActiveScreen,
   isSheetConnectionRoute,
@@ -91,8 +95,11 @@ function AppNavigator() {
   const bootPhase = useAppStore(state => state.bootPhase)
   const browseReady = useBrowseMemory(state => state.ready)
   const [bootstrapComplete, setBootstrapComplete] = useState(false)
-  const [pendingConversation, setPendingConversation] = useState<{deviceId: string; sessionId: string}>()
+  const deepLinkBufferRef = useRef(new AttentionDeepLinkBuffer())
+  const [pendingDeepLink, setPendingDeepLink] = useState<ParsedAttentionDeepLink>()
   const [linksReady, setLinksReady] = useState(false)
+  const attentionInboxOpen = useAttentionStore(state => state.inboxOpen)
+  const setAttentionInboxOpen = useAttentionStore(state => state.setInboxOpen)
   const autoRestored = useRef(false)
   const config = useAppStore(state => state.config)
   const devices = useAppStore(state => state.devices)
@@ -211,15 +218,35 @@ function AppNavigator() {
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
   const externalOpenRevision = useRef(0)
-  const openKnownSession = async (id: string) => {
+  const openKnownSession = async (id: string, mode: AttentionMode = 'agent') => {
     const revision = ++externalOpenRevision.current
     setResolvingKnownSession(true)
     try {
-      const backend = sessionBackendFromId(id)
       const expectedScope = browseScope(useAppStore.getState())
       const isCurrent = () => revision === externalOpenRevision.current
         && browseScope(useAppStore.getState()) === expectedScope
         && useAppStore.getState().connection.phase === 'connected'
+
+      if (mode === 'bot') {
+        saveHostMode(expectedScope, 'bot')
+        if (useBotTeamStore.getState().state === undefined) {
+          await useBotTeamStore.getState().refresh(true)
+          if (!isCurrent()) return
+        }
+        const botState = useBotTeamStore.getState().state
+        const matchedBot = botState?.bots.find(item => item.sessionId === id || item.parts?.includes(id))
+        const matchedRoom = botState?.rooms.find(
+          item => item.sessionId === id || item.parts?.includes(id) || item.ownParts?.includes(id),
+        )
+        const botConversationId = matchedBot?.id ?? matchedRoom?.id ?? id
+        useBotTeamStore.getState().setSelectedId(botConversationId)
+        setAttentionInboxOpen(false)
+        setHostSwitcherOpen(false)
+        reset({ name: 'chat', botConversationId, externalOpenRevision: revision })
+        return
+      }
+
+      const backend = sessionBackendFromId(id)
       await useAppStore.getState().refreshWorkspaces(backend)
       if (!isCurrent()) return
       const state = useAppStore.getState(), target = state.sessions.find(item => item.sessionId === id)
@@ -233,6 +260,7 @@ function AppNavigator() {
       if (!isCurrent()) return
       if (ok && useAppStore.getState().selectedSession?.sessionId === id) {
         saveHostMode(expectedScope, 'agent')
+        setAttentionInboxOpen(false)
         setHostSwitcherOpen(false)
         reset({ name: 'chat', externalOpenRevision: revision })
       } else if (routeRef.current.name === 'connecting') {
@@ -245,29 +273,95 @@ function AppNavigator() {
       }
     }
   }
+
+  const openAttentionTarget = async (options: { token?: string }) => {
+    const revision = ++externalOpenRevision.current
+    setResolvingKnownSession(true)
+    try {
+      const expectedScope = browseScope(useAppStore.getState())
+      const isCurrent = () => revision === externalOpenRevision.current
+        && browseScope(useAppStore.getState()) === expectedScope
+        && useAppStore.getState().connection.phase === 'connected'
+
+      if (options.token !== undefined) {
+        const resolved = await useAttentionStore.getState().resolveToken(options.token)
+        if (!isCurrent()) return
+        if (resolved.kind === 'session') {
+          if (resolved.itemId !== undefined) {
+            void useAttentionStore.getState().ackUnread([resolved.itemId])
+          }
+          await openKnownSession(resolved.sessionId, resolved.mode)
+          return
+        }
+      }
+
+      setHostSwitcherOpen(false)
+      reset({ name: 'chat' })
+      setAttentionInboxOpen(true)
+    } finally {
+      if (revision === externalOpenRevision.current) {
+        setResolvingKnownSession(false)
+      }
+    }
+  }
+
+  const openHostAttention = (device: (typeof devices)[number], token?: string) => {
+    setHostSwitcherOpen(false)
+    if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') {
+      void openAttentionTarget({ token })
+      return
+    }
+    if (device.trusted && device.online) {
+      push({
+        name: 'connecting',
+        deviceId: device.deviceId,
+        openAttentionInbox: true,
+        ...(token !== undefined ? { attentionToken: token } : {}),
+      })
+      return
+    }
+    openDevice(device)
+  }
+
+  const handleSelectAttentionItem = (item: AttentionItem) => {
+    setAttentionInboxOpen(false)
+    if (item.status === 'completed_unread' || item.status === 'failed_unread') {
+      void useAttentionStore.getState().ackUnread([item.id])
+    }
+    void openKnownSession(item.sessionId, item.mode)
+  }
+
   useEffect(() => {
     const receive = (url: string) => {
-      try {
-        const link = new URL(url)
-        if (link.protocol !== 'dshremote:' || link.hostname !== 'conversation') return
-        const deviceId = link.searchParams.get('host'), sessionId = link.searchParams.get('session')
-        if (deviceId && sessionId) setPendingConversation({deviceId, sessionId})
-      } catch { /* Only known conversation links are accepted. */ }
+      const parsed = deepLinkBufferRef.current.enqueueUrl(url)
+      if (parsed !== null) setPendingDeepLink(parsed)
     }
     const subscription = Linking.addEventListener('url', event => receive(event.url))
-    void Linking.getInitialURL().then(url => {if (url) receive(url)}).finally(() => setLinksReady(true))
+    void Linking.getInitialURL().then(url => { if (url) receive(url) }).finally(() => setLinksReady(true))
     return () => subscription.remove()
   }, [])
   useEffect(() => {
     if (bootPhase !== 'ready' || !bootstrapComplete || !browseReady || !linksReady || !didChooseInitialRoute.current || reauthRequired) return
-    if (pendingConversation !== undefined) {
+    if (pendingDeepLink !== undefined) {
       autoRestored.current = true
-      const target = pendingConversation
-      const device = devices.find(item => item.deviceId === target.deviceId && item.trusted)
-      setPendingConversation(undefined)
-      if (device === undefined) {useAppStore.setState({error: zhCN.comfort.unknownHost}); return}
-      if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') void openKnownSession(target.sessionId)
-      else push({name: 'connecting', deviceId: device.deviceId, sessionId: target.sessionId})
+      const target = deepLinkBufferRef.current.take() ?? pendingDeepLink
+      const device = devices.find(item => item.deviceId === target.hostId && item.trusted)
+      setPendingDeepLink(undefined)
+      if (device === undefined) { useAppStore.setState({ error: zhCN.comfort.unknownHost }); return }
+      const alreadyConnected = selectedDevice?.deviceId === device.deviceId
+        && useAppStore.getState().connection.phase === 'connected'
+      if (target.kind === 'conversation') {
+        if (alreadyConnected) void openKnownSession(target.sessionId, target.mode)
+        else push({ name: 'connecting', deviceId: device.deviceId, sessionId: target.sessionId, sessionMode: target.mode })
+      } else {
+        if (alreadyConnected) void openAttentionTarget({ token: target.token })
+        else push({
+          name: 'connecting',
+          deviceId: device.deviceId,
+          openAttentionInbox: true,
+          ...(target.token !== undefined ? { attentionToken: target.token } : {}),
+        })
+      }
       return
     }
     if (autoRestored.current || !didChooseInitialRoute.current || route.name !== 'chat') return
@@ -302,7 +396,7 @@ function AppNavigator() {
         setHostSwitcherOpen(true)
       }
     }
-  }, [bootPhase, bootstrapComplete, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
+  }, [bootPhase, bootstrapComplete, browseReady, linksReady, devices, pendingDeepLink, reauthRequired, route.name])
 
   // Zhihu OAuth deep link: dshremote://oauth?token=... completes the
   // account authorization started from the server setup screen.
@@ -385,6 +479,7 @@ function AppNavigator() {
   const homeMenuVisible = homeMenuOpen && route.name === 'server'
   const backStateRef = useRef({
     signingOut,
+    attentionInboxOpen,
     hostSwitcherOpen,
     homeMenuOpen: homeMenuVisible,
     route,
@@ -392,6 +487,7 @@ function AppNavigator() {
   })
   backStateRef.current = {
     signingOut,
+    attentionInboxOpen,
     hostSwitcherOpen,
     homeMenuOpen: homeMenuVisible,
     route,
@@ -404,6 +500,9 @@ function AppNavigator() {
       const outcome = resolveTopLevelHardwareBack(state)
       switch (outcome.action) {
         case 'consume':
+          return true
+        case 'close-attention-inbox':
+          setAttentionInboxOpen(false)
           return true
         case 'close-host-switcher':
           setHostSwitcherOpen(false)
@@ -498,12 +597,12 @@ function AppNavigator() {
   if (bootPhase === 'error') return <BootError onRetry={() => void bootstrap()} message={error} />
   if (bootPhase === 'loading' || !browseReady || !initialRouteChosen) return null
 
-  const overlayVisible = hostSwitcherOpen || homeMenuVisible || (startupConnection && deviceForRoute !== undefined)
+  const overlayVisible = attentionInboxOpen || hostSwitcherOpen || homeMenuVisible || (startupConnection && deviceForRoute !== undefined)
   const suppressAutoSelect = shouldSuppressAutoSessionSelect({
     botMode,
     routeName: route.name,
     connectionPhase,
-    resolvingKnownSession: resolvingKnownSession || pendingConversation !== undefined,
+    resolvingKnownSession: resolvingKnownSession || pendingDeepLink !== undefined,
   })
 
   const renderRouteScreen = (entry: Route, index: number) => {
@@ -527,6 +626,7 @@ function AppNavigator() {
           <RemoteHostsScreen
             onBack={backFromRemoteHosts}
             onSelectDevice={openDevice}
+            onSelectHostAttention={openHostAttention}
             onOpenDeviceDetail={device => push({ name: 'device', deviceId: device.deviceId })}
             onSignedOut={() => reset({ name: 'server' })}
             autoConnectHost={autoConnectHost}
@@ -544,9 +644,15 @@ function AppNavigator() {
               else reset({ name: 'chat' })
             }}
             onConnected={() => {
-              if (entry.sessionId !== undefined) void openKnownSession(entry.sessionId)
-              else if (entry.focusWorkspaceKey === undefined) goHomeChat()
-              else void openShortcutSession(entry.focusWorkspaceKey)
+              if (entry.openAttentionInbox || entry.attentionToken !== undefined) {
+                void openAttentionTarget({ token: entry.attentionToken })
+              } else if (entry.sessionId !== undefined) {
+                void openKnownSession(entry.sessionId, entry.sessionMode ?? 'agent')
+              } else if (entry.focusWorkspaceKey === undefined) {
+                goHomeChat()
+              } else {
+                void openShortcutSession(entry.focusWorkspaceKey)
+              }
             }}
           />
         )
@@ -578,6 +684,7 @@ function AppNavigator() {
             onSelectBot={botConversationId => setRoutes(current => current.map(item => item.name === 'chat' ? { ...item, botConversationId } : item))}
             onBack={pop}
             onOpenHostSwitcher={() => setHostSwitcherOpen(true)}
+            onOpenAttentionInbox={() => setAttentionInboxOpen(true)}
             onOpenSettings={() => push({ name: 'settings' })}
             onOpenAbout={() => push({ name: 'about' })}
             onOpenDeviceInfo={() => {
@@ -633,8 +740,12 @@ function AppNavigator() {
           if (startupConnection) pop()
         }}
         onConnected={() => {
+          if (route.name === 'connecting' && (route.openAttentionInbox || route.attentionToken !== undefined)) {
+            void openAttentionTarget({ token: route.attentionToken })
+            return
+          }
           if (route.name === 'connecting' && route.sessionId !== undefined) {
-            void openKnownSession(route.sessionId)
+            void openKnownSession(route.sessionId, route.sessionMode ?? 'agent')
             return
           }
           setHostSwitcherOpen(false)
@@ -644,10 +755,16 @@ function AppNavigator() {
           setHostSwitcherOpen(false)
           openDevice(device)
         }}
+        onSelectHostAttention={openHostAttention}
         onManageHosts={() => {
           setHostSwitcherOpen(false)
           push({ name: 'remote-hosts' })
         }}
+      />
+      <AttentionInboxSheet
+        visible={attentionInboxOpen}
+        onClose={() => setAttentionInboxOpen(false)}
+        onSelectItem={handleSelectAttentionItem}
       />
       <HomeActionsMenu
         visible={homeMenuVisible}

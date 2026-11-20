@@ -120,14 +120,15 @@ describe('HostPluginRuntime multi-Client routing', () => {
                 scenario === 'ready'
                   ? [
                       'workspace.upload.v1',
-                                  'codex.appserver.v1',
+                      'codex.appserver.v1',
                       'codex.appserver.transfer.v1',
                       'remote.history.compact.v1',
                       'remote.compaction.async.v1',
                       'workspace.upload.binary.v1',
                       'workspace.upload.lan.v1',
+                      'attention.inbox.v1',
                     ]
-                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1', 'workspace.upload.binary.v1', 'workspace.upload.lan.v1'],
+                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1', 'workspace.upload.binary.v1', 'workspace.upload.lan.v1', 'attention.inbox.v1'],
               )
               expect(result.workspaceTypes).toEqual(
                 scenario === 'ready'

@@ -34,6 +34,7 @@ import { type BotPerform } from './bot/editor'
 import { BotFloatingPopover, type BotPopoverAction } from './bot/popover-menu'
 import { createBotStyles } from './bot/styles'
 import { ExpandedComposer, type ExpandedComposerProps } from './chat/expanded-composer'
+import { AttentionHeaderPill } from './attention-inbox-sheet'
 import { BotModalsHost, BotSidebarSection, DsBotInstallCard, useBotTeamLoad } from './bot-sidebar-section'
 
 export function BotModeScreen({
@@ -44,6 +45,7 @@ export function BotModeScreen({
   onOpenDrawer,
   onDeviceInfo,
   onMore,
+  onOpenAttentionInbox,
   splitView = false,
   drawerOpen = false,
   screenActive = true,
@@ -55,6 +57,7 @@ export function BotModeScreen({
   onOpenDrawer?: () => void
   onDeviceInfo: () => void
   onMore: () => void
+  onOpenAttentionInbox?: () => void
   splitView?: boolean
   drawerOpen?: boolean
   screenActive?: boolean
@@ -360,7 +363,10 @@ export function BotModeScreen({
         )}
       </Pressable>
 
-      <View style={styles.headerSide}>
+      <View style={[styles.headerSide, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }]}>
+        {connectionPhase === 'connected' && onOpenAttentionInbox !== undefined && (
+          <AttentionHeaderPill onPress={onOpenAttentionInbox} />
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={s.sessions.moreActions}
@@ -383,12 +389,17 @@ export function BotModeScreen({
       onBack={navBack}
       onTitlePress={onDeviceInfo}
       action={
-        <IconButton
-          dense
-          label={s.settings.more}
-          icon={MoreVertical}
-          onPress={onMore}
-        />
+        <>
+          {connectionPhase === 'connected' && onOpenAttentionInbox !== undefined && (
+            <AttentionHeaderPill onPress={onOpenAttentionInbox} />
+          )}
+          <IconButton
+            dense
+            label={s.settings.more}
+            icon={MoreVertical}
+            onPress={onMore}
+          />
+        </>
       }
     />
   )

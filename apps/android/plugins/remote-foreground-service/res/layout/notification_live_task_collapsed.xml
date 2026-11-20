@@ -47,6 +47,7 @@
         android:layout_marginStart="4dp"
         android:ellipsize="end"
         android:maxLines="1"
+        android:maxWidth="156dp"
         android:textColor="#00C2FF"
         android:textSize="11sp"
         android:textStyle="bold" />

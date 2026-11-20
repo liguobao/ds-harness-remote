@@ -1113,6 +1113,37 @@ const zhTW = {
     autoConnectDetail: '關閉後，啟動時停留在裝置清單',
     currentHost: '目前主機',
   },
+  attention: {
+    title: '待處理收件匣',
+    openInbox: '開啟待處理收件匣',
+    markAllRead: '全部標為已讀',
+    sectionAttention: '待處理',
+    sectionFinished: '已完成',
+    sectionRunning: '執行中',
+    emptyTitle: '已全部處理',
+    emptyBody: '目前主機沒有待審批、待回答或未讀的完成項目。',
+    statusApproval: '待審批',
+    statusQuestion: '待回答',
+    statusRunning: '執行中',
+    statusCompleted: '已完成',
+    statusFailed: '失敗',
+    crossHostTitle: '各線上主機',
+    approvalsCount: (n: number) => `${n} 待審批`,
+    questionsCount: (n: number) => `${n} 待回答`,
+    runningCount: (n: number) => `${n} 執行中`,
+    completedCount: (n: number) => `${n} 已完成`,
+    extraTasks: (n: number) => `另有 ${n} 項進行中`,
+    expiresIn: (remaining: string) => `剩餘 ${remaining}`,
+    notifyApproval: '等待你的審批',
+    notifyQuestion: '等待你的回答',
+    notifyCompleted: '任務已完成',
+    notifyFailed: '任務失敗',
+    pillA11y: (urgent: number, total: number) => urgent > 0
+      ? `待處理收件匣，${urgent} 項緊急，共 ${total} 項`
+      : total > 0
+        ? `待處理收件匣，共 ${total} 項進行中`
+        : '待處理收件匣',
+  },
   errors: {
     'session/writer-held': '該會話被另一端佔用。請先在另一端完全退出 DeepSeek Harness，再在這裡重試；僅切換會話或關閉視窗可能不會解除佔用。你的訊息尚未傳送。',
     ACCOUNT_AUTH_REQUIRED: '請先登入，再連線這臺手機。', AUTH_INVALID: '登入狀態已失效，請重新登入。', AUTH_REQUIRED: '需要重新登入才能繼續。', TOKEN_EXPIRED: '登入已過期，請重新登入。', TOKEN_REUSED: '為了保護賬號安全，此手機已退出登入。請重新登入。', DEVICE_NOT_FOUND: '找不到這臺裝置，請重新整理裝置列表。', DEVICE_REVOKED: '此手機已被移出當前賬號，請重新登入。', DEVICE_OWNERSHIP_REQUIRED: '此手機的登入資訊已失效，請重新登入。', MEMBERSHIP_REQUIRED: '你已無權訪問這臺裝置。請確認兩端登入了同一賬號。', HOST_OFFLINE: '這臺裝置已離線。請確認 DeepSeek Harness 和 DSH Remote 外掛正在執行。', DEVICE_OFFLINE: '這臺裝置已離線。請確認 DeepSeek Harness 和 DSH Remote 外掛正在執行。', PEER_IDENTITY_MISMATCH: '這臺裝置的安全身份已變化。請先確認裝置安全，再重新信任。', RATE_LIMITED: '操作太頻繁，請稍後再試。', CONNECTION_FAILED: '無法連線這臺裝置。請檢查網路後重試。', P2P_FAILED: '直接連線失敗，正在改用伺服器轉發。', RELAY_UNAVAILABLE: '暫時無法透過伺服器連線，請稍後重試。', TURN_UNAVAILABLE: '暫時無法建立穩定連線，正在嘗試其他方式。', SECURE_CHANNEL_FAILED: '無法建立安全連線，請重試。', STREAM_TIMEOUT: '會話連線超時，請重試', RPC_TIMEOUT: '裝置響應超時，請重試。', UNSUPPORTED_VERSION: 'DSH Remote 版本不相容，請更新 App 後重試。', METHOD_NOT_ALLOWED: '當前設定不允許從手機執行此操作。', PERMISSION_NOT_PENDING: '這個請求已處理或已過期。', SESSION_NOT_FOUND: '找不到這段對話，請返回對話列表後重新整理。', HARNESS_UNAVAILABLE: '這臺裝置上的 DeepSeek Harness 暫時不可用。請確認它正在執行。', AGENT_BUSY: 'DeepSeek Harness 正在處理其他操作，請稍後再試。', FULL_RESYNC_REQUIRED: '電腦上的對話已更新，請重新開啟此對話。',

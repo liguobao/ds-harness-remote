@@ -5,6 +5,7 @@ import { strings } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import type { ConnectionPhase, RemoteDevice } from '../types'
 import { deviceVersionSubtitle, platformIcon } from '../lib/device-display'
+import { CrossHostAttentionBanner, digestTotalCount, formatDigestSegments } from './attention-inbox-sheet'
 import { BlurHeaderFrame, GroupCard, GroupRow, Screen, SectionTitle, TopBar } from '../ui/components'
 import { Toggle } from '../ui/toggle'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -15,6 +16,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 export interface RemoteHostsScreenProps {
   onBack: () => void
   onSelectDevice: (device: RemoteDevice) => void
+  onSelectHostAttention?: (device: RemoteDevice, token?: string) => void
   onOpenDeviceDetail: (device: RemoteDevice) => void
   onSignedOut: () => void
   autoConnectHost: boolean
@@ -25,6 +27,7 @@ export interface RemoteHostsScreenProps {
 export function RemoteHostsScreen({
   onBack,
   onSelectDevice,
+  onSelectHostAttention,
   onOpenDeviceDetail,
   autoConnectHost,
   onToggleAutoConnectHost,
@@ -60,6 +63,13 @@ export function RemoteHostsScreen({
       >
         <Screen refreshing={refreshing} onRefresh={() => void refreshDevices()}>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <CrossHostAttentionBanner
+              devices={devices}
+              onSelectHost={(device, token) => {
+                if (onSelectHostAttention) onSelectHostAttention(device, token)
+                else onSelectDevice(device)
+              }}
+            />
             <SectionTitle>{strings.remoteHosts.sectionRemote}</SectionTitle>
             <GroupCard>
               {devices.length === 0
@@ -72,13 +82,19 @@ export function RemoteHostsScreen({
                     const isConnected = isCurrent && connection.phase === 'connected'
                     const Icon = platformIcon(device.platform)
                     const status = hostStatus(device, isCurrent, connection.phase, colors, strings)
+                    const digest = device.online ? device.attentionDigest : undefined
+                    const digestSummary = digest && digestTotalCount(digest) > 0
+                      ? formatDigestSegments(digest).map(seg => seg.label).join(' · ')
+                      : undefined
+                    const versionSubtitle = deviceVersionSubtitle(device)
+                    const detail = [versionSubtitle, digestSummary].filter(Boolean).join(' · ') || undefined
                     return (
                       <GroupRow
                         key={device.deviceId}
                         first={index === 0}
                         icon={Icon}
                         label={device.name}
-                        detail={deviceVersionSubtitle(device)}
+                        detail={detail}
                         selected={isConnected}
                         chevron
                         onPress={() => handlePressDevice(device)}

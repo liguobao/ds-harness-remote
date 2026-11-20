@@ -22,9 +22,12 @@ import * as Haptics from 'expo-haptics'
 import * as Clipboard from 'expo-clipboard'
 import Svg, { Path } from 'react-native-svg'
 import {
+  Activity,
+  AlertCircle,
   ArrowLeft,
   Bot,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
@@ -32,6 +35,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  HelpCircle,
   Laptop,
   LayoutGrid,
   Monitor,
@@ -42,12 +46,15 @@ import {
   Search,
   Server,
   Settings,
+  ShieldAlert,
   Sliders,
   Star,
   Users,
   X,
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
+import { useAttentionStore } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends } from '../state/store-state'
 import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
@@ -246,6 +253,17 @@ export function HostSessionsDrawer({
     state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
   ].filter(Boolean).join(','))
   const lifecycles = useAppStore(state => state.sessionLifecycles)
+  const attentionItems = useAttentionStore(state => state.items)
+  const attentionStatusBySession = useMemo(() => {
+    const map = new Map<string, AttentionStatus>()
+    const sorted = [...attentionItems].sort(compareAttentionItems)
+    for (const entry of sorted) {
+      if (!map.has(entry.sessionId)) {
+        map.set(entry.sessionId, entry.status)
+      }
+    }
+    return map
+  }, [attentionItems])
   const selected = useAppStore(state => state.selectedSession)
   const archivedIds = useAppStore(state => state.archivedSessionIds)
   const pinnedSessionIds = useAppStore(state => state.pinnedSessionIds)
@@ -1530,15 +1548,30 @@ export function HostSessionsDrawer({
           const isFirstInList = groupBy === 'list' && index === 0
           const isLastInCard = index === section.data.length - 1 && !hasFooter
           const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
+          const attentionStatus: AttentionStatus | undefined = attentionStatusBySession.get(item.sessionId)
+            ?? (isRunning ? 'running' : undefined)
+          const statusBadge = attentionStatus === 'waiting_approval'
+            ? { Icon: ShieldAlert, color: colors.warning, label: strings.attention.statusApproval }
+            : attentionStatus === 'waiting_question'
+              ? { Icon: HelpCircle, color: colors.warning, label: strings.attention.statusQuestion }
+              : attentionStatus === 'failed_unread'
+                ? { Icon: AlertCircle, color: colors.danger, label: strings.attention.statusFailed }
+                : attentionStatus === 'running'
+                  ? { Icon: Activity, color: colors.success, label: strings.attention.statusRunning }
+                  : attentionStatus === 'completed_unread'
+                    ? { Icon: CheckCircle2, color: colors.success, label: strings.attention.statusCompleted }
+                    : undefined
           const isHarness = (item.backend ?? 'harness') === 'harness'
           const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
           const isPinned = canPin && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)
           const isArchived = isHarness && archivedIds.includes(item.sessionId)
           const timeStr = formatRelativeTime(item.updatedAt)
           const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
-          const accessibilityLabel = isPinned
-            ? `${displayTitle}, ${strings.sessions.pinned}`
-            : displayTitle
+          const accessibilityLabel = [
+            displayTitle,
+            statusBadge?.label,
+            isPinned ? strings.sessions.pinned : undefined,
+          ].filter(Boolean).join(', ')
           const depth = section.depth ?? 0
           const accountKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
           const isDragging = dragState?.sessionId === item.sessionId && dragState.sectionId === section.id
@@ -1649,8 +1682,13 @@ export function HostSessionsDrawer({
                 dropBelow && styles.dropTargetBelow,
               ]}
             >
-              <View style={styles.statusIndicatorSlot}>
-                {isRunning && <View style={styles.runningDot} />}
+              <View
+                style={styles.statusIndicatorSlot}
+                accessibilityLabel={statusBadge?.label}
+              >
+                {statusBadge !== undefined && (
+                  <statusBadge.Icon size={13} color={statusBadge.color} strokeWidth={2.2} />
+                )}
               </View>
               <Text
                 style={[
@@ -2486,7 +2524,7 @@ const createStyles = (colors: ThemeColors) =>
       borderBottomWidth: 2,
       borderBottomColor: colors.primary,
     },
-    statusIndicatorSlot: { width: 14, alignItems: 'flex-start', justifyContent: 'center' },
+    statusIndicatorSlot: { width: 18, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
     runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
     sessionText: { ...type.body, fontSize: 15, color: colors.ink, flex: 1, marginRight: spacing.xs },
     sessionTextSelected: { fontWeight: '600', color: colors.primary },
