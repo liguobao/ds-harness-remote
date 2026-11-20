@@ -1902,6 +1902,142 @@ describe('CodexVirtualHarness', () => {
       },
     ])
   })
+
+  it('runs recoverTerminalTurn before publishing api-session/status false when thread/status/changed becomes idle', async () => {
+    await runScenarios(['completed-turn', 'failed-read-fallback'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const thread = { ...codexThread('thr_recovery', '/workspace/repo', 'Recover'), turns: [] as Record<string, unknown>[] }
+        const client = fakeCodex([thread])
+        const baseRequest = client.request.getMockImplementation()!
+        let markReadCalled!: () => void
+        const readCalled = new Promise<void>(resolve => { markReadCalled = resolve })
+        let releaseRead: (() => void) | undefined
+        let rejectRead: ((error: Error) => void) | undefined
+        client.request.mockImplementation(async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
+          if (method === 'thread/read' && params?.threadId === 'thr_recovery' && params?.includeTurns === true) {
+            await new Promise<void>((resolve, reject) => {
+              releaseRead = resolve
+              rejectRead = reject
+              markReadCalled()
+            })
+          }
+          return baseRequest(method, params, signal)
+        })
+        const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'v3')
+        const controller = new AbortController()
+        const events = (await target.open('$events', { args: {} }, controller.signal))[Symbol.asyncIterator]()
+        const follow = (await target.open('session/follow', {
+          args: { request: { address: { kind: 'session', sessionId: 'codex:thr_recovery' } } },
+        }, controller.signal))[Symbol.asyncIterator]()
+        try {
+          await expect(events.next()).resolves.toMatchObject({ done: false, value: { type: 'ready' } })
+          await expect(follow.next()).resolves.toMatchObject({ done: false, value: { type: 'snapshot' } })
+
+          client.emit('thr_recovery', { method: 'turn/started', params: { turn: { id: 'turn_recovery', items: [] } } })
+          await expect(follow.next()).resolves.toMatchObject({ value: { event: { type: 'turn/start' } } })
+          await expect(follow.next()).resolves.toMatchObject({ value: { event: { type: 'step/start' } } })
+          await expect(events.next()).resolves.toEqual({
+            done: false,
+            value: { type: 'emit', event: 'api-session/status', args: ['codex:thr_recovery', true] },
+          })
+
+          const order: string[] = []
+          const nextFollow = follow.next().then(result => {
+            if (!result.done) order.push(`follow:${(result.value as { event: { type: string } }).event.type}`)
+            return result
+          })
+          const nextStatus = events.next().then(result => {
+            if (!result.done) {
+              const payload = result.value as { event: string; args: unknown[] }
+              order.push(`event:${payload.event}:${String(payload.args[1])}`)
+            }
+            return result
+          })
+
+          client.emit('thr_recovery', { method: 'thread/status/changed', params: { status: { type: 'idle' } } })
+          await readCalled
+          await Promise.resolve()
+          await Promise.resolve()
+          expect(order).toEqual([])
+
+          if (mode === 'completed-turn') {
+            thread.turns.push({ id: 'turn_recovery', status: 'completed', items: [] })
+            releaseRead?.()
+            await Promise.all([nextFollow, nextStatus])
+            expect(order).toEqual(['follow:step/end', 'event:api-session/status:false'])
+            await expect(follow.next()).resolves.toMatchObject({
+              value: { event: { type: 'turn/end', data: { reason: { kind: 'completed' } } } },
+            })
+          } else {
+            rejectRead?.(new Error('transient read error'))
+            await nextStatus
+            expect(order).toEqual(['event:api-session/status:false'])
+          }
+        } finally {
+          releaseRead?.()
+          controller.abort()
+          await follow.return?.()
+          await events.return?.()
+          await target.close()
+        }
+      },
+    })))
+  })
+
+  it('cleans up and rejects sessionFollow when the remote stream closes while subscribe is in flight', async () => {
+    const client = fakeCodex()
+    const streamClose = vi.fn(async () => undefined)
+    let markSubscribeEntered!: () => void
+    const subscribeEntered = new Promise<void>(resolve => { markSubscribeEntered = resolve })
+    let resolveSubscribe!: (stream: { close: () => Promise<void> }) => void
+    let capturedOnClose: ((reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected') => void) | undefined
+    client.subscribe.mockImplementationOnce(async (
+      _threadId: string,
+      _onFrame: (frame: { method: string; params: unknown }) => void,
+      _signal?: AbortSignal,
+      onClose?: (reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected') => void,
+    ) => {
+      capturedOnClose = onClose
+      markSubscribeEntered()
+      return await new Promise<{ close: () => Promise<void> }>(resolve => {
+        resolveSubscribe = resolve
+      })
+    })
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'v3')
+    const controller = new AbortController()
+    const events = (await target.open('$events', { args: {} }, controller.signal))[Symbol.asyncIterator]()
+    try {
+      await expect(events.next()).resolves.toMatchObject({ done: false, value: { type: 'ready' } })
+      const followOpen = target.open('session/follow', {
+        args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } },
+      }, controller.signal)
+      await subscribeEntered
+
+      capturedOnClose?.('failed')
+      await expect(events.next()).resolves.toEqual({
+        done: false,
+        value: { type: 'emit', event: 'api-session/status', args: ['codex:thr_1', false] },
+      })
+
+      resolveSubscribe({ close: streamClose })
+      await expect(followOpen).rejects.toThrow('The CodeX remote stream closed before ready.')
+      expect(streamClose).toHaveBeenCalledOnce()
+      expect((target as unknown as { follows: Set<unknown> }).follows.size).toBe(0)
+
+      // Subsequent follow opens and streams normally without interference from the failed open.
+      const reopened = (await target.open('session/follow', {
+        args: { request: { address: { kind: 'session', sessionId: 'codex:thr_1' } } },
+      }, controller.signal))[Symbol.asyncIterator]()
+      await expect(reopened.next()).resolves.toMatchObject({ done: false, value: { type: 'snapshot' } })
+      await reopened.return?.()
+    } finally {
+      resolveSubscribe?.({ close: streamClose })
+      controller.abort()
+      await events.return?.()
+      await target.close()
+    }
+  })
 })
 
 interface FakeCodexOptions {

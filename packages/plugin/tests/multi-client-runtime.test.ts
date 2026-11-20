@@ -641,6 +641,141 @@ describe('HostPluginRuntime multi-Client routing', () => {
       await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))))
     }
   })
+
+  it('resolves runtime.start() after codexStartupGraceMs without unhandled rejection while fast startup still advertises codex.appserver.v1', async () => {
+    await runScenarios(['slow-resolves-after-grace', 'slow-rejects-after-grace', 'fast-startup'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const settings = { ...config(), codex: { enabled: true, binary: '/test/codex' } }
+        const log = logger()
+        const runtime = new HostPluginRuntime(
+          settings,
+          identities(),
+          log,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          50,
+        )
+        let ready = false
+        let releaseAppStart!: () => void
+        const appStartGate = new Promise<void>(resolve => { releaseAppStart = resolve })
+        const app: CodexAppServerLike = {
+          start: vi.fn(async () => {
+            if (mode === 'slow-resolves-after-grace') await appStartGate
+            ready = true
+          }),
+          isReady: () => ready,
+          call: vi.fn(async method => {
+            if (method === 'account/read') return { requiresOpenaiAuth: true, account: { type: 'chatgpt' } }
+            throw new Error(`Unexpected Codex call: ${method}`)
+          }),
+          respond: vi.fn(async () => undefined),
+          respondError: vi.fn(async () => undefined),
+          onInbound: () => () => undefined,
+          onUnavailable: () => () => undefined,
+          close: vi.fn(async () => { ready = false }),
+        }
+        const codexDomain = new CodexRemoteDomain(settings.codex, log, () => app)
+        ;(runtime as unknown as { codex: CodexRemoteDomain }).codex = codexDomain
+        let rejectCodexStart!: (error: Error) => void
+        if (mode === 'slow-rejects-after-grace') {
+          vi.spyOn(codexDomain, 'start').mockImplementation(
+            () => new Promise<void>((_resolve, reject) => { rejectCodexStart = reject }),
+          )
+        }
+
+        const unhandled: unknown[] = []
+        const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+        process.on('unhandledRejection', onUnhandled)
+        const channel = fakeChannel(`grace-${mode}`, 'client-phone')
+        const describe = async () => {
+          const request = createRpcRequest('harness.transport.describe', {})
+          channel.push(request)
+          for (let i = 0; i < 10; i += 1) {
+            const response = channel.sent().find(message => message.type === 'rpc.response'
+              && (message.payload as RpcResponsePayload).requestId === request.id)
+            if (response !== undefined) {
+              return (response.payload as RpcResponsePayload).result as {
+                capabilities: string[]
+                workspaceTypes: unknown[]
+              }
+            }
+            await Promise.resolve()
+          }
+          throw new Error('harness.transport.describe response not received')
+        }
+
+        vi.useFakeTimers()
+        try {
+          let startSettled = false
+          const startPromise = runtime.start().then(() => { startSettled = true })
+          if (mode === 'fast-startup') {
+            await vi.advanceTimersByTimeAsync(0)
+            await startPromise
+            expect(startSettled).toBe(true)
+            expect(log.info).not.toHaveBeenCalledWith('Codex initialization continuing in background after startup grace')
+            await runtime.acceptAuthenticatedPeer(channel)
+            const initial = await describe()
+            expect(initial.capabilities).toContain('codex.appserver.v1')
+            expect(initial.capabilities).toContain('codex.appserver.transfer.v1')
+          } else {
+            await vi.advanceTimersByTimeAsync(49)
+            expect(startSettled).toBe(false)
+            await vi.advanceTimersByTimeAsync(1)
+            await startPromise
+            expect(startSettled).toBe(true)
+            expect(log.info).toHaveBeenCalledWith('Codex initialization continuing in background after startup grace')
+
+            await runtime.acceptAuthenticatedPeer(channel)
+            const beforeReady = await describe()
+            expect(beforeReady.capabilities).not.toContain('codex.appserver.v1')
+
+            if (mode === 'slow-resolves-after-grace') {
+              releaseAppStart()
+              await vi.advanceTimersByTimeAsync(0)
+              const afterReady = await describe()
+              expect(afterReady.capabilities).toContain('codex.appserver.v1')
+              expect(afterReady.capabilities).toContain('codex.appserver.transfer.v1')
+            } else {
+              rejectCodexStart(new CodexAppServerError('CODEX_START_FAILED', 'background start failed'))
+              await vi.advanceTimersByTimeAsync(0)
+              expect(unhandled).toEqual([])
+            }
+          }
+        } finally {
+          releaseAppStart()
+          await runtime.close()
+          vi.useRealTimers()
+          process.off('unhandledRejection', onUnhandled)
+        }
+      },
+    })))
+  })
+
+  it('triggers codex.tryRecoverOnDemand on reconnectHost only after verifying serverConnection is configured', async () => {
+    const runtime = new HostPluginRuntime({ ...config(), codex: { enabled: true, binary: '/test/codex' } }, identities(), logger())
+    const recoverSpy = vi.spyOn((runtime as unknown as { codex: CodexRemoteDomain }).codex, 'tryRecoverOnDemand')
+    const reconnect = vi.fn()
+    try {
+      expect(() => runtime.reconnectHost()).toThrow('Configure serverUrl before reconnecting.')
+      expect(recoverSpy).not.toHaveBeenCalled()
+
+      ;(runtime as unknown as { serverConnection: { reconnect: () => void; stop: () => Promise<void> } }).serverConnection = {
+        reconnect,
+        stop: async () => undefined,
+      }
+      runtime.reconnectHost()
+      expect(recoverSpy).toHaveBeenCalledTimes(1)
+      expect(reconnect).toHaveBeenCalledTimes(1)
+    } finally {
+      await runtime.close()
+    }
+  })
 })
 
 async function peerRpc<T = unknown>(channel: ReturnType<typeof fakeChannel>, params: unknown): Promise<T> {

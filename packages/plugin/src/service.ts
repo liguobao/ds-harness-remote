@@ -71,6 +71,8 @@ export interface HostRemoteStatus {
   connectedClients: HostConnectedClient[]
 }
 
+const CODEX_STARTUP_GRACE_MS = 1_500
+
 export class HostPluginRuntime {
   readonly connections: ConnectionController
   private readonly terminalOwners = new Map<string, string>()
@@ -111,6 +113,7 @@ export class HostPluginRuntime {
     private readonly schedule?: ScheduleCreateService,
     transferServices?: () => TransferServices,
     resolveDshWeb?: () => DshWebRuntime | undefined,
+    private readonly codexStartupGraceMs: number = CODEX_STARTUP_GRACE_MS,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -282,7 +285,10 @@ export class HostPluginRuntime {
       fingerprint: this.identity.fingerprint,
       server: this.config.serverUrl ?? 'not configured',
     })
-    await this.codex.start()
+    const timedOut = await waitForStartupGrace(this.codex.start(), this.codexStartupGraceMs)
+    if (timedOut) {
+      this.logger.info('Codex initialization continuing in background after startup grace')
+    }
     void this.acp.start().catch(() => {
       this.logger.warn('ACP background initialization failed', { code: 'ACP_START_FAILED' })
     })
@@ -304,6 +310,7 @@ export class HostPluginRuntime {
 
   acceptAuthenticatedPeer(channel: AuthenticatedPeerChannel): Promise<void> {
     this.currentIdentity()
+    this.codex.tryRecoverOnDemand()
     return this.connections.accept(channel)
   }
 
@@ -371,6 +378,7 @@ export class HostPluginRuntime {
     if (this.serverConnection === undefined) {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before reconnecting.', false)
     }
+    this.codex.tryRecoverOnDemand()
     this.serverConnection.reconnect()
   }
 
@@ -757,4 +765,34 @@ function shortId(value: string): string { return value.length <= 12 ? value : `$
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function waitForStartupGrace(promise: Promise<void>, graceMs: number): Promise<boolean> {
+  if (graceMs <= 0) {
+    void promise.catch(() => undefined)
+    return true
+  }
+  let settledByTimer = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const guarded = promise.then(
+    () => false,
+    error => {
+      if (settledByTimer) return true
+      throw error
+    },
+  )
+  try {
+    return await Promise.race([
+      guarded,
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(() => {
+          settledByTimer = true
+          resolve(true)
+        }, graceMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }

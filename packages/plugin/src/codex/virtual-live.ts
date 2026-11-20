@@ -135,17 +135,21 @@ export class CodexLiveProjection {
       },
       ...(this.context.sessionGeneration === 'v3' ? { assistantStream: { revision: 0 } } : {}),
     })
+    let streamClosedBeforeReady = false
     try {
       const stream = await this.context.client.subscribe(
         threadId,
         frame => this.acceptCodexFrame(follow, frame),
         signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow),
+        () => {
+          streamClosedBeforeReady = true
+          this.closeFollowAfterRemoteStreamClosed(follow)
+        },
       )
-      if (this.context.closed || signal.aborted) {
+      if (this.context.closed || signal.aborted || streamClosedBeforeReady) {
         await stream.close().catch(() => undefined)
         signal.throwIfAborted()
-        throw new Error('The CodeX virtual Harness is closed.')
+        throw new Error(streamClosedBeforeReady ? 'The CodeX remote stream closed before ready.' : 'The CodeX virtual Harness is closed.')
       }
       follow.close = () => stream.close()
       void this.context.refreshAndPublishWorkspaces().catch(() => undefined)
@@ -295,9 +299,10 @@ export class CodexLiveProjection {
     if (frame.method === 'thread/status/changed') {
       const status = record(params.status)
       if (status.type === 'idle' || status.type === 'systemError') {
-        this.context.emitRemoteEvent('api-session/status', [follow.sessionId, false])
         if (follow.activeTurnId !== undefined) {
           void this.recoverTerminalTurn(follow, follow.activeTurnId)
+        } else {
+          this.context.emitRemoteEvent('api-session/status', [follow.sessionId, false])
         }
       }
       return
@@ -354,6 +359,9 @@ export class CodexLiveProjection {
       // Idle alone cannot distinguish completion from failure or interruption.
     } finally {
       if (follow.recoveringTurnId === activeTurnId) delete follow.recoveringTurnId
+      if (follow.activeTurnId === activeTurnId && this.context.follows.has(follow)) {
+        this.context.emitRemoteEvent('api-session/status', [follow.sessionId, false])
+      }
     }
   }
 
