@@ -116,6 +116,22 @@ function createPairedRtcFactories(hostTier: () => 'LAN' | 'P2P' | 'TURN' | 'unve
   return { clientFactory, hostFactory, pairs }
 }
 
+describe('LAN Web address selection', () => {
+  it.each([
+    ['LAN', 'loopback', '::1:53718', '127.0.0.1'],
+    ['LAN', 'loopback', '127.0.0.1:53718', '127.0.0.1'],
+    ['LAN', 'private', '192.168.1.10:53718', '192.168.1.10'],
+    ['LAN', 'unknown', undefined, undefined],
+    ['P2P', 'loopback', '::1:53718', undefined],
+  ] as const)('uses the verified %s %s endpoint %s', async (mode, localAddressScope, localAddress, expected) => {
+    const rtc = { connectionDetails: async () => ({ mode, localAddressScope, localAddress }) }
+    const channel = new ServerNoiseChannel({
+      connectionId: 'c', membershipId: 'm', peer: { deviceId: 'p', publicKey: 'k' }, rtc,
+    } as never, async () => {}, async () => {}, mode)
+    expect(await channel.lanWebAddress()).toBe(expected)
+  })
+})
+
 describe('In-band Transport Upgrade & Reorder / Drain Boundaries', () => {
   it('strictly trusts Host ICE stats over inflated Client transport claims and rejects unverified paths', async () => {
     let mode: TransportTier = 'Relay'

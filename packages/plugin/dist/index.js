@@ -108714,6 +108714,7 @@ var ServerNoiseChannel = class {
     const rtc = this.tunnel.rtc;
     const path = await rtc?.connectionDetails();
     if (this.mode === "LAN" && rtc === this.tunnel.rtc && path?.mode === "LAN") {
+      if (path.localAddressScope === "loopback") return "127.0.0.1";
       return /^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$/.exec(path.localAddress ?? "")?.[1];
     }
     return void 0;

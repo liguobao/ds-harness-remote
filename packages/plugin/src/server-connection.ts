@@ -1603,6 +1603,9 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     const rtc = this.tunnel.rtc
     const path = await rtc?.connectionDetails()
     if (this.mode === 'LAN' && rtc === this.tunnel.rtc && path?.mode === 'LAN') {
+      // A selected loopback interface reaches this machine in either IP family.
+      // The browser handoff consistently uses the IPv4 loopback listener.
+      if (path.localAddressScope === 'loopback') return '127.0.0.1'
       // RTC diagnostics include the selected candidate port when available.
       return /^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$/.exec(path.localAddress ?? '')?.[1]
     }
