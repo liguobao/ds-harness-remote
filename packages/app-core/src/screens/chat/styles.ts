@@ -52,7 +52,7 @@ export function createStyles(
     // some RN/Android combinations even though it is rendered first.
     // maxHeight is applied by ModalSurface from the live window size (landscape phones get ~92%).
     modalSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.lg, paddingBottom: spacing.xxl },
-    modalDialogSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderRadius: radius.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
+    modalDialogSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderRadius: radius.xl, padding: spacing.lg, paddingBottom: spacing.lg },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
     modalHeaderCopy: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     modalTitle: { ...t.heading, color: colors.ink, flexShrink: 1 },

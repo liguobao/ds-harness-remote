@@ -152,7 +152,7 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createEditorStyles)
   const { colors } = useTheme()
-  const { compactHeight } = useResponsiveLayout()
+  const { compactHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
   const editing = bot !== undefined || room !== undefined
   const [modelPicker, setModelPicker] = useState(false)
@@ -260,7 +260,9 @@ export function BotEditor({ kind, bot, room, state, client, busy, error, perform
         styles.sheetContent,
         // A landscape IME can leave less room than the fixed header/actions.
         // Let the whole form (including its padding) scroll in that window.
-        compactHeight && {
+        // Centered dialog cards already carry safe padding, so skip the
+        // screen-edge insets there.
+        compactHeight && !sheetAsDialog && {
           paddingTop: spacing.lg,
           paddingLeft: spacing.lg + insets.left,
           paddingRight: spacing.lg + insets.right,

@@ -16,7 +16,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from 'react-native'
 import { Alert } from '../ui/alert'
 import * as Haptics from 'expo-haptics'
@@ -61,7 +60,7 @@ import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
-import { drawerWidthForWindow, modalSheetMaxHeight } from '../ui/responsive'
+import { drawerWidthForWindow, modalSheetMaxHeight, useResponsiveLayout } from '../ui/responsive'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
@@ -357,8 +356,8 @@ export function HostSessionsDrawer({
   }, [backend, connected, deviceId])
 
   const [harnessPickerOpen, setHarnessPickerOpen] = useState(false)
-  const windowDimensions = useWindowDimensions()
-  const sheetMaxHeight = Math.min(modalSheetMaxHeight(windowDimensions.height), 520)
+  const layout = useResponsiveLayout()
+  const sheetMaxHeight = Math.min(modalSheetMaxHeight(layout.height), 520)
 
   const isBackendAvailable = (target: AgentBackend) => {
     switch (target) {
@@ -830,8 +829,10 @@ export function HostSessionsDrawer({
   }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds, orderBy, manualOrders, searchQuery])
 
   // 手势与抽屉动画。宽窗口下抽屉宽度封顶（DRAWER_MAX_WIDTH），手机仍全宽。
-  const { width: screenWidth } = useWindowDimensions()
-  const drawerWidth = Math.round(drawerWidthForWindow(screenWidth))
+  // 不可关闭态（冷启动/切 Host）保持全宽：封顶后右侧露出的大片遮罩点击无
+  // 响应，会显得卡死。
+  const screenWidth = layout.width
+  const drawerWidth = !dismissible ? Math.round(screenWidth) : Math.round(drawerWidthForWindow(screenWidth))
   const immediateMount = entrance === 'immediate'
   const translateX = useRef(new Animated.Value(immediateMount ? 0 : -drawerWidth)).current
   const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
@@ -2150,7 +2151,18 @@ export function HostSessionsDrawer({
         <Animated.View
           accessibilityViewIsModal
           {...drawerTouchProps}
-          style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, maxWidth: drawerWidth, transform: [{ translateX }] }]}
+          style={[
+            styles.drawer,
+            {
+              paddingTop: insets.top,
+              paddingBottom: insets.bottom,
+              maxWidth: drawerWidth,
+              transform: [{ translateX }],
+            },
+            // Capped overlay drawer: mark the right edge like `inlineDrawer`
+            // so dark themes keep a visible boundary against the scrim.
+            drawerWidth < Math.round(screenWidth) && styles.drawerCappedEdge,
+          ]}
         >
           {content}
         </Animated.View>
@@ -2166,6 +2178,7 @@ const createStyles = (colors: ThemeColors) =>
     overlay: { flex: 1, backgroundColor: colors.scrim },
     drawer: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background, overflow: 'hidden' },
     inlineDrawer: { width: '100%', maxWidth: '100%', borderRadius: 0, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
+    drawerCappedEdge: { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
     container: { flex: 1 },
 
     brandHeader: {

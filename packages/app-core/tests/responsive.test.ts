@@ -66,7 +66,7 @@ describe('drawerWidthForWindow', () => {
   })
 
   it('caps overlay drawers on wide windows', () => {
-    expect(drawerWidthForWindow(WINDOW_SIZE_MEDIUM)).toBe(Math.min(WINDOW_SIZE_MEDIUM, DRAWER_MAX_WIDTH))
+    expect(drawerWidthForWindow(WINDOW_SIZE_MEDIUM)).toBe(DRAWER_MAX_WIDTH)
     expect(drawerWidthForWindow(768)).toBe(DRAWER_MAX_WIDTH)
     expect(drawerWidthForWindow(1280)).toBe(DRAWER_MAX_WIDTH)
   })
@@ -74,10 +74,21 @@ describe('drawerWidthForWindow', () => {
 
 describe('sheetDialogForWindow', () => {
   it('promotes sheets to dialogs only from the medium class upward', () => {
-    expect(sheetDialogForWindow(390)).toBe(false)
-    expect(sheetDialogForWindow(WINDOW_SIZE_MEDIUM - 1)).toBe(false)
-    expect(sheetDialogForWindow(WINDOW_SIZE_MEDIUM)).toBe(true)
-    expect(sheetDialogForWindow(1366)).toBe(true)
+    expect(sheetDialogForWindow(390, 844)).toBe(false)
+    expect(sheetDialogForWindow(WINDOW_SIZE_MEDIUM - 1, 844)).toBe(false)
+    expect(sheetDialogForWindow(WINDOW_SIZE_MEDIUM, 844)).toBe(true)
+    expect(sheetDialogForWindow(1366, 1024)).toBe(true)
+  })
+
+  it('keeps the bottom sheet on landscape phones despite the wide window', () => {
+    expect(sheetDialogForWindow(844, 390)).toBe(false)
+    expect(sheetDialogForWindow(915, 412)).toBe(false)
+  })
+
+  it('keeps the dialog card on very wide windows while the IME shrinks the height', () => {
+    expect(sheetDialogForWindow(1024, 400)).toBe(true)
+    // Just below the very-wide escape hatch the height guard still applies.
+    expect(sheetDialogForWindow(999, COMPACT_WINDOW_HEIGHT - 1)).toBe(false)
   })
 })
 

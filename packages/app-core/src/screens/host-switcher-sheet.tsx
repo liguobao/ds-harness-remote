@@ -52,7 +52,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
   }, [visible])
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const { sheetMaxHeight } = useResponsiveLayout()
+  const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
 
   // Opening the sheet quietly refreshes presence so the status dots are current.
@@ -69,7 +69,7 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
       backdropStyle={styles.backdrop}
       sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
     >
-          <View style={styles.grabber} />
+          {!sheetAsDialog && <View style={styles.grabber} />}
           <View style={styles.sheetHeader}>
             <Text style={styles.title} numberOfLines={1}>{strings.remoteHosts.switchTitle}</Text>
             <View style={styles.headerActions}>

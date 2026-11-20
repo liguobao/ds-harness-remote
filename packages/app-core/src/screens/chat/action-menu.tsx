@@ -54,7 +54,10 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
     }
   }
   return (
-    <SheetModal visible={visible} onClose={onClose} onDismiss={onDismiss} anchor={anchor}>
+    // `sheet` keeps one form on wide windows: `anchor` is deliberately cleared
+    // while the IME settles (chat-screen.tsx), and an adaptive promotion would
+    // make this menu jump between a full-width sheet and a centered card.
+    <SheetModal visible={visible} onClose={onClose} onDismiss={onDismiss} anchor={anchor} presentation="sheet">
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
           style={{ maxHeight: plusMenuListMaxHeight }}

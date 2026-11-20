@@ -36,8 +36,8 @@ export function windowSizeClassForWidth(width: number): WindowSizeClass {
 }
 
 /**
- * Whether the window keeps a persistent side pane (conversation split,
- * settings master-detail). Landscape phones are excluded by the height
+ * Whether the window keeps a persistent side pane (conversation split).
+ * Landscape phones are excluded by the height
  * guard; very wide windows keep the pane even while the IME shrinks the
  * window height.
  */
@@ -50,9 +50,14 @@ export function drawerWidthForWindow(width: number): number {
   return width < WINDOW_SIZE_MEDIUM ? width : Math.min(width, DRAWER_MAX_WIDTH)
 }
 
-/** Whether anchor-less bottom sheets render as centered dialog cards. */
-export function sheetDialogForWindow(width: number): boolean {
-  return width >= WINDOW_SIZE_MEDIUM
+/**
+ * Whether bottom sheets render as centered dialog cards. Height-guarded like
+ * `persistentPaneForWindow` so landscape phones keep the full-width bottom
+ * sheet; very wide windows keep the card even while the IME shrinks the
+ * window height.
+ */
+export function sheetDialogForWindow(width: number, height: number): boolean {
+  return width >= WINDOW_SIZE_MEDIUM && (height >= COMPACT_WINDOW_HEIGHT || width >= 1000)
 }
 
 /**
@@ -76,9 +81,9 @@ export interface ResponsiveLayout {
   sheetMaxHeight: number
   /** Material-style window size class driven by width. */
   sizeClass: WindowSizeClass
-  /** Keep a persistent side pane: conversation split, settings master-detail. */
+  /** Keep a persistent side pane: conversation split. */
   splitNav: boolean
-  /** Anchor-less bottom sheets render as centered dialog cards. */
+  /** Bottom sheets render as centered dialog cards. */
   sheetAsDialog: boolean
   /** Travel width of the overlay sessions drawer. */
   drawerWidth: number
@@ -95,7 +100,7 @@ export function useResponsiveLayout(): ResponsiveLayout {
     sheetMaxHeight: modalSheetMaxHeight(height),
     sizeClass: windowSizeClassForWidth(width),
     splitNav: persistentPaneForWindow(width, height),
-    sheetAsDialog: sheetDialogForWindow(width),
+    sheetAsDialog: sheetDialogForWindow(width, height),
     drawerWidth: drawerWidthForWindow(width),
   }
 }

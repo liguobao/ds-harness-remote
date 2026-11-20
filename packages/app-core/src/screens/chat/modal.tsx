@@ -41,11 +41,12 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
     return () => animation.stop()
   }, [progress, reduceMotion])
 
-  // Wide windows promote the bottom sheet to a centered dialog card that
-  // fades/scales in instead of rising from the window edge.
+  // Wide windows promote the bottom sheet to a centered dialog card. The card
+  // stays opaque (only the backdrop fades) so Android never flashes its
+  // elevation shadow in from nothing; reduced motion drops the scale.
   const asDialog = sheetAsDialog
   const sheetTransform = asDialog
-    ? { opacity: progress, transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }
+    ? { transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.96, 1] }) }] }
     : {
         transform: [{
           translateY: progress.interpolate({
@@ -56,7 +57,17 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
       }
 
   return (
-    <View style={asDialog ? styles.modalDialogBackdrop : styles.modalBackdrop} pointerEvents="box-none">
+    <View
+      style={[
+        asDialog ? styles.modalDialogBackdrop : styles.modalBackdrop,
+        asDialog && {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingHorizontal: spacing.md,
+        },
+      ]}
+      pointerEvents="box-none"
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.common.close}
@@ -68,13 +79,15 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
         style={[
           asDialog ? styles.modalDialogSheet : styles.modalSheet,
           {
-            maxHeight: sheetMaxHeight,
+            maxHeight: asDialog
+              ? Math.max(200, sheetMaxHeight - insets.top - insets.bottom)
+              : sheetMaxHeight,
             ...(asDialog ? {
-              width: '100%' as const,
+              width: '100%',
               maxWidth: DIALOG_SHEET_MAX_WIDTH,
               paddingLeft: spacing.lg,
               paddingRight: spacing.lg,
-              paddingBottom: spacing.xxl,
+              paddingBottom: spacing.lg,
             } : {
               // Landscapes on cutout phones put the display edge on a side; keep
               // the sheet content inside the safe area there. Portrait keeps the
