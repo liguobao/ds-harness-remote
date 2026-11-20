@@ -12,7 +12,7 @@ body:
         **Security & Privacy Notice (Important)**:
         - **Do not post security vulnerabilities or sensitive data here.**
         - Please redact credentials, auth tokens, pairing QR codes, session keys, agent prompts/conversations, and private local paths from logs and screenshots.
-        - This issue tracker covers the Android app, Web client, self-hosted relay/signaling server, desktop plugin, core connection protocols, and integration compatibility with companion plugins (such as dsh-go, ds-bot, deepseek-harness-intelligent-ui).
+        - This issue tracker covers the Android, iOS, and HarmonyOS apps, Web client & browser extension, VS Code extension, self-hosted relay/signaling server, DSH desktop/TUI plugins, core connection protocols, and integration compatibility with companion plugins (such as dsh-go, ds-bot, deepseek-harness-intelligent-ui).
 
   - type: dropdown
     id: area
@@ -21,12 +21,16 @@ body:
       description: Which part or component is affected?
       options:
         - "Android App (apps/android)"
-        - "Web Client / Browser (apps/browser)"
+        - "iOS App (apps/ios)"
+        - "HarmonyOS App (apps/harmony)"
+        - "Shared Mobile Core (packages/app-core, Android & iOS)"
+        - "Web Client / Browser Extension (dsh.r2049.cn / apps/browser)"
         - "Server / Relay / Signaling (apps/server)"
         - "VS Code Extension (apps/vscode)"
         - "DSH Desktop Plugin (packages/plugin)"
+        - "DSH TUI Plugin (packages/tui)"
         - "Companion plugins & integrations (dsh-go / ds-bot / intelligent ui)"
-        - "Connection & Core Protocols (client-core / webrtc / protocol)"
+        - "Connection & Core Protocols (client-core / webrtc / crypto / protocol)"
         - "Documentation & Examples (docs / examples)"
         - "Other / Unknown"
     validations:
@@ -38,9 +42,15 @@ body:
       label: Installation / Client method
       options:
         - "Android APK (GitHub Release / Pre-release)"
+        - "iOS App (TestFlight)"
+        - "HarmonyOS HAP (GitHub Release / Pre-release)"
         - "DSH Desktop Plugin (Marketplace)"
+        - "DSH TUI Plugin (ds-harness-remote-tui)"
         - "Hosted Web Client (dsh.r2049.cn/app)"
+        - "Browser Extension (Chrome / Edge MV3)"
+        - "VS Code Extension (apps/vscode)"
         - "Self-hosted Docker Server"
+        - "Linux Service / Install Script (install.sh)"
         - "npm / CLI package (ds-harness-remote)"
         - "Built from source"
         - "Other"
@@ -51,8 +61,8 @@ body:
     id: version
     attributes:
       label: Version or commit SHA
-      description: Client version, plugin version, or source commit hash.
-      placeholder: "Example: 0.6.3 or 0123456"
+      description: Client version (include versionCode / buildNumber on mobile), plugin version, or source commit hash.
+      placeholder: "Example: 0.6.6 (74) or 0123456"
     validations:
       required: true
 
@@ -60,8 +70,8 @@ body:
     id: os
     attributes:
       label: Operating system & environment
-      description: OS version and CPU architecture (include phone model and Android version if applicable).
-      placeholder: "Example: Android 14 (Pixel 8), Windows 11 x64, macOS 15.0 arm64, Ubuntu 24.04 x64"
+      description: OS version and CPU architecture (include device model and Android / iOS / HarmonyOS version if applicable).
+      placeholder: "Example: iOS 18.x (iPhone), Android 14 (Pixel 8), HarmonyOS 7.0, Windows 11 x64, macOS 15.0 arm64, Ubuntu 24.04 x64"
     validations:
       required: true
 
@@ -70,7 +80,7 @@ body:
     attributes:
       label: Agent / Host runtime
       description: Which agent/harness and version is running on your work host?
-      placeholder: "Example: DeepSeek Harness Desktop 0.6.x, Codex CLI, Cursor, Antigravity"
+      placeholder: "Example: DeepSeek Harness Desktop / TUI 0.2.2, Codex CLI, Cursor, Antigravity, OpenCode, Claude Code, Pi, Hermes"
 
   - type: input
     id: companion-plugins
@@ -131,7 +141,7 @@ body:
     id: additional-context
     attributes:
       label: Additional context
-      description: Screenshots, network environment (LAN / P2P / WebRTC relay), or other details. Mask QR codes and personal paths.
+      description: Screenshots, network environment (LAN / P2P / TURN / Relay), or other details. Mask QR codes and personal paths.
 
   - type: checkboxes
     id: validations

@@ -16,12 +16,16 @@ body:
       description: Which part of the project would this feature improve?
       options:
         - "Android App (apps/android)"
-        - "Web Client / Browser (apps/browser)"
+        - "iOS App (apps/ios)"
+        - "HarmonyOS App (apps/harmony)"
+        - "Shared Mobile Core (packages/app-core, Android & iOS)"
+        - "Web Client / Browser Extension (dsh.r2049.cn / apps/browser)"
         - "Server / Relay / Signaling (apps/server)"
         - "VS Code Extension (apps/vscode)"
         - "DSH Desktop Plugin (packages/plugin)"
+        - "DSH TUI Plugin (packages/tui)"
         - "Companion plugins & integrations (dsh-go / ds-bot / intelligent ui)"
-        - "Connection & Core Protocols (client-core / webrtc / protocol)"
+        - "Connection & Core Protocols (client-core / webrtc / crypto / protocol)"
         - "Documentation & DX (docs / dx)"
         - "Other"
     validations:
