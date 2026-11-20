@@ -65,9 +65,49 @@ it('freezes one encrypted submission across response loss/restart and adopts cre
     await resumed.status();
     resumed.close();
     const next = f.create();
-    await next.status();
+    expect(await next.status()).toBeUndefined();
     expect(f.adopt).toHaveBeenCalledTimes(1);
     await next.discard();
+    await expect(readFile(file)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+it('removes host-pairing.json once completed credentials are adopted and stops terminal status polling/writes', async () => {
+    const f = await setup();
+    const pairing = f.create();
+    await pairing.start();
+    await pairing.status();
+    const callsBeforeConfirm = f.fetcher.mock.calls.length;
+    const completed = await pairing.confirm(f.session.sessionId, '00123456');
+    expect(completed).toMatchObject({ state: 'completed', localSaved: true, canRetry: false });
+    expect(f.adopt).toHaveBeenCalledTimes(1);
+    const file = join(f.directory, 'host-pairing.json');
+    await expect(readFile(file)).rejects.toMatchObject({ code: 'ENOENT' });
+    const callsAfterConfirm = f.fetcher.mock.calls.length;
+    expect(callsAfterConfirm).toBe(callsBeforeConfirm + 1);
+    expect(await pairing.status()).toBeUndefined();
+    expect(f.fetcher.mock.calls.length).toBe(callsAfterConfirm);
+
+    // A failed terminal session stays readable once without rewriting disk or polling the server on repeated status checks.
+    const failed = f.create();
+    await failed.start();
+    f.fail();
+    expect(await failed.status()).toMatchObject({ state: 'failed', canRetry: false });
+    const rawFailedBefore = await readFile(file, 'utf8');
+    const callsAtFailed = f.fetcher.mock.calls.length;
+    expect(await failed.status()).toMatchObject({ state: 'failed', canRetry: false });
+    expect(f.fetcher.mock.calls.length).toBe(callsAtFailed);
+    expect(await readFile(file, 'utf8')).toBe(rawFailedBefore);
+
+    // Legacy 0.6.6 completed+localSaved files are cleaned up on load instead of lingering for 5 minutes.
+    await writeFile(file, JSON.stringify({
+        serverUrl: 'http://127.0.0.1:8081',
+        deviceId: f.identity.deviceId,
+        session: f.session,
+        state: 'completed',
+        localSaved: true,
+    }));
+    const callsBeforeLegacy = f.fetcher.mock.calls.length;
+    expect(await f.create().status()).toBeUndefined();
+    expect(f.fetcher.mock.calls.length).toBe(callsBeforeLegacy);
     await expect(readFile(file)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 it('rejects terminal/stale sessions and changed Host keys before any adoption', async () => {
@@ -81,8 +121,9 @@ it('rejects terminal/stale sessions and changed Host keys before any adoption', 
     await expect(p.confirm('019a0000-0000-7000-8000-000000000002', '00123456')).rejects.toMatchObject({ code: 'PAIRING_CLOSED' });
     expect(f.submissions).toHaveLength(0);
     expect(f.adopt).not.toHaveBeenCalled();
+    f.fetcher.mockResolvedValueOnce(Response.json({ capabilities: {} }));
     f.fetcher.mockResolvedValueOnce(Response.json({ ...f.session, host: { ...f.host, identityKey: vectors.devicePublicKey } }));
-    await expect(p.start()).rejects.toThrow();
+    await expect(p.start()).rejects.toMatchObject({ code: 'PAIRING_IDENTITY_INVALID' });
 });
 it('persists Host-only policy and authorization metadata through refresh and legacy ownership validation', async () => {
     const f = await setup();

@@ -1703,13 +1703,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
     saveServerBeforeLogin: "Save the Server address before continuing sign-in or pairing.",
     pairingLoginTab: "DSH Go",
     pairingTitle: "Pair with DSH Go",
-    pairingHint: `Scan in DSH Go and confirm on your phone.
-Then enter the phone code on this computer and confirm binding.`,
+    pairingHint: `Click below to generate a pairing QR code, then scan it in DSH Go.
+This Host accepts connections only; use another sign-in method to control other devices.`,
     pairingHostOnly: "New Hosts accept connections only. Pairing does not enable control of other devices.",
+    pairingHostOnlyDetail: "DSH Go QR pairing supports one device at a time and accepts connections only. To switch devices or control other Hosts, sign out below and pair again or use account sign-in.",
     pairingSaveServer: "Save the Server address before pairing.",
-    pairingScan: "Scan this QR code in DSH Go and confirm on your phone.",
+    pairingScan: `Scan this QR code in DSH Go and confirm on your phone.
+This Host accepts connections only; use another sign-in method to control other devices.`,
     pairingEnter: "Check the requesting phone, then enter its code.",
-    pairingComplete: "Paired. DSH Go can now connect to this Host.",
+    pairingComplete: `Paired. DSH Go can now connect to this Host.
+DSH Go QR pairing supports one device at a time. To switch devices or control other Hosts, sign out and pair again or use account sign-in.`,
     pairingPending: "Recover the original submission without changing the code.",
     pairingClosed: "Pairing ended. Generate a new QR code to start again.",
     pairingQr: "One-time DSH Go pairing QR code",
@@ -1721,6 +1724,7 @@ Then enter the phone code on this computer and confirm binding.`,
     pairingRetry: "Recover original submission",
     pairingCancel: "Cancel pairing",
     pairingStart: "Generate pairing QR code",
+    pairingDone: "Done",
     pairingBusy: "Please wait\u2026",
     pairingUnsupported: "This Server does not support device pairing.",
     pairingError: `Could not finish pairing. Check the connection.
@@ -2097,14 +2101,16 @@ If a code was sent, recover the original submission without changing it.`,
     saveServerBeforeLogin: "\u8BF7\u5148\u4FDD\u5B58\u670D\u52A1\u5668\u5730\u5740\uFF0C\u518D\u7EE7\u7EED\u767B\u5F55\u6216\u914D\u5BF9\u3002",
     pairingLoginTab: "DSH Go",
     pairingTitle: "\u4E0E DSH Go \u914D\u5BF9",
-    pairingHint: `\u8BF7\u4F7F\u7528 DSH Go \u626B\u7801\u5E76\u5728\u624B\u673A\u4E0A\u786E\u8BA4\u3002
-\u5F53\u524D\u4E3B\u673A\u4EC5\u88AB\u63A7\uFF0C\u5982\u9700\u8981\u4E3B\u63A7\u8BF7\u4F7F\u7528\u5176\u4ED6\u767B\u5F55\u65B9\u5F0F\u3002`,
+    pairingHint: `\u70B9\u51FB\u4E0B\u65B9\u751F\u6210\u914D\u5BF9\u4E8C\u7EF4\u7801\uFF0C\u518D\u7528 DSH Go \u626B\u7801\u5E76\u786E\u8BA4\u3002
+\u5F53\u524D\u4E3B\u673A\u4EC5\u88AB\u63A7\uFF0C\u5982\u9700\u63A7\u5236\u5176\u4ED6\u8BBE\u5907\u8BF7\u4F7F\u7528\u5176\u4ED6\u767B\u5F55\u65B9\u5F0F\u3002`,
     pairingHostOnly: "\u6B64\u6388\u6743\u4E3B\u673A\u53EA\u5141\u8BB8\u88AB\u63A7\uFF0C\u65E0\u6CD5\u63A7\u5236\u5176\u4ED6\u8BBE\u5907\u3002",
+    pairingHostOnlyDetail: "DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\uFF0C\u5F53\u524D\u4E3B\u673A\u4EC5\u63A5\u53D7\u5DF2\u914D\u5BF9\u624B\u673A\u63A5\u5165\u3002\u5982\u9700\u66F4\u6362\u8BBE\u5907\u6216\u63A7\u5236\u5176\u4ED6\u4E3B\u673A\uFF0C\u8BF7\u70B9\u51FB\u53F3\u4E0B\u89D2\u300C\u9000\u51FA\u8D26\u53F7\u300D\u540E\u91CD\u65B0\u914D\u5BF9\u6216\u6539\u7528\u6388\u6743\u767B\u5F55\u3002",
     pairingSaveServer: "\u8BF7\u5148\u4FDD\u5B58\u670D\u52A1\u5668\u5730\u5740\uFF0C\u518D\u5F00\u59CB\u914D\u5BF9\u3002",
-    pairingScan: `\u8BF7\u4F7F\u7528 DSH Go \u626B\u7801\u5E76\u5728\u624B\u673A\u4E0A\u786E\u8BA4\u3002
-\u5F53\u524D\u4E3B\u673A\u4EC5\u88AB\u63A7\uFF0C\u5982\u9700\u8981\u4E3B\u63A7\u8BF7\u4F7F\u7528\u5176\u4ED6\u767B\u5F55\u65B9\u5F0F\u3002`,
+    pairingScan: `\u8BF7\u4F7F\u7528 DSH Go \u626B\u63CF\u6B64\u4E8C\u7EF4\u7801\u5E76\u5728\u624B\u673A\u4E0A\u786E\u8BA4\u3002
+\u5F53\u524D\u4E3B\u673A\u4EC5\u88AB\u63A7\uFF0C\u5982\u9700\u63A7\u5236\u5176\u4ED6\u8BBE\u5907\u8BF7\u4F7F\u7528\u5176\u4ED6\u767B\u5F55\u65B9\u5F0F\u3002`,
     pairingEnter: "\u8BF7\u6838\u5B9E\u7533\u8BF7\u624B\u673A",
-    pairingComplete: "\u914D\u5BF9\u5B8C\u6210\uFF0CDSH Go \u73B0\u5728\u53EF\u4EE5\u8FDE\u63A5\u6B64 Host\u3002",
+    pairingComplete: `\u914D\u5BF9\u5B8C\u6210\uFF0CDSH Go \u73B0\u5728\u53EF\u4EE5\u8FDE\u63A5\u6B64 Host\u3002
+DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\uFF1B\u5982\u9700\u66F4\u6362\u8BBE\u5907\u6216\u63A7\u5236\u5176\u4ED6\u4E3B\u673A\uFF0C\u8BF7\u9000\u51FA\u540E\u91CD\u65B0\u914D\u5BF9\u6216\u6539\u7528\u8D26\u53F7\u6388\u6743\u767B\u5F55\u3002`,
     pairingPending: "\u8BF7\u6062\u590D\u539F\u63D0\u4EA4\u7ED3\u679C\uFF0C\u4E0D\u8981\u66F4\u6362\u9A8C\u8BC1\u7801\u3002",
     pairingClosed: "\u914D\u5BF9\u5DF2\u7ED3\u675F\uFF0C\u8BF7\u91CD\u65B0\u751F\u6210\u4E8C\u7EF4\u7801\u3002",
     pairingQr: "DSH Go \u4E00\u6B21\u6027\u914D\u5BF9\u4E8C\u7EF4\u7801",
@@ -2116,6 +2122,7 @@ If a code was sent, recover the original submission without changing it.`,
     pairingRetry: "\u6062\u590D\u539F\u63D0\u4EA4\u7ED3\u679C",
     pairingCancel: "\u53D6\u6D88\u914D\u5BF9",
     pairingStart: "\u751F\u6210\u914D\u5BF9\u4E8C\u7EF4\u7801",
+    pairingDone: "\u5B8C\u6210",
     pairingBusy: "\u8BF7\u7A0D\u5019\u2026",
     pairingUnsupported: "\u5F53\u524D\u670D\u52A1\u5668\u4E0D\u652F\u6301\u8BBE\u5907\u626B\u7801\u914D\u5BF9\u3002",
     pairingError: `\u6682\u65F6\u65E0\u6CD5\u5B8C\u6210\u914D\u5BF9\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u3002
@@ -2492,13 +2499,16 @@ If a code was sent, recover the original submission without changing it.`,
     saveServerBeforeLogin: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u0430\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u043F\u0440\u0435\u0436\u0434\u0435 \u0447\u0435\u043C \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C \u0432\u0445\u043E\u0434 \u0438\u043B\u0438 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435.",
     pairingLoginTab: "DSH Go",
     pairingTitle: "\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0441 DSH Go",
-    pairingHint: `\u041E\u0442\u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0439\u0442\u0435 \u043A\u043E\u0434 \u0432 DSH Go \u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0435.
-\u0417\u0430\u0442\u0435\u043C \u0432\u0432\u0435\u0434\u0438\u0442\u0435 \u043A\u043E\u0434 \u0441 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435 \u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043F\u0440\u0438\u0432\u044F\u0437\u043A\u0443.`,
+    pairingHint: `\u041D\u0430\u0436\u043C\u0438\u0442\u0435 \u043A\u043D\u043E\u043F\u043A\u0443 \u043D\u0438\u0436\u0435, \u0447\u0442\u043E\u0431\u044B \u0441\u043E\u0437\u0434\u0430\u0442\u044C QR-\u043A\u043E\u0434 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u044F, \u0437\u0430\u0442\u0435\u043C \u043E\u0442\u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0439\u0442\u0435 \u0435\u0433\u043E \u0432 DSH Go.
+\u042D\u0442\u043E\u0442 \u0445\u043E\u0441\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F; \u0434\u043B\u044F \u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0434\u0440\u0443\u0433\u0438\u043C\u0438 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043E\u0439 \u0441\u043F\u043E\u0441\u043E\u0431 \u0432\u0445\u043E\u0434\u0430.`,
     pairingHostOnly: "\u041D\u043E\u0432\u044B\u0435 \u0445\u043E\u0441\u0442\u044B \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u044E\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F. \u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u043D\u0435 \u0434\u0430\u0451\u0442 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0434\u0440\u0443\u0433\u0438\u043C\u0438 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438.",
+    pairingHostOnlyDetail: "\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u043F\u043E QR-\u043A\u043E\u0434\u0443 DSH Go \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043E\u0434\u043D\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u0438 \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F. \u0427\u0442\u043E\u0431\u044B \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u0438\u043B\u0438 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0434\u0440\u0443\u0433\u0438\u043C\u0438 \u0445\u043E\u0441\u0442\u0430\u043C\u0438, \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0412\u044B\u0439\u0442\u0438\xBB \u043D\u0438\u0436\u0435 \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0438\u043B\u0438 \u0432\u043E\u0439\u0434\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 \u0430\u043A\u043A\u0430\u0443\u043D\u0442.",
     pairingSaveServer: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u0435 \u0430\u0434\u0440\u0435\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u043F\u0435\u0440\u0435\u0434 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435\u043C.",
-    pairingScan: "\u041E\u0442\u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 QR-\u043A\u043E\u0434 \u0432 DSH Go \u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0435.",
+    pairingScan: `\u041E\u0442\u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0439\u0442\u0435 \u044D\u0442\u043E\u0442 QR-\u043A\u043E\u0434 \u0432 DSH Go \u0438 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0435.
+\u042D\u0442\u043E\u0442 \u0445\u043E\u0441\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F; \u0434\u043B\u044F \u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0434\u0440\u0443\u0433\u0438\u043C\u0438 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430\u043C\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043E\u0439 \u0441\u043F\u043E\u0441\u043E\u0431 \u0432\u0445\u043E\u0434\u0430.`,
     pairingEnter: "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0442\u0435\u043B\u0435\u0444\u043E\u043D, \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0432\u0448\u0438\u0439 \u0437\u0430\u043F\u0440\u043E\u0441, \u0438 \u0432\u0432\u0435\u0434\u0438\u0442\u0435 \u0435\u0433\u043E \u043A\u043E\u0434.",
-    pairingComplete: "\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043E. \u0422\u0435\u043F\u0435\u0440\u044C DSH Go \u043C\u043E\u0436\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u044C\u0441\u044F \u043A \u044D\u0442\u043E\u043C\u0443 \u0445\u043E\u0441\u0442\u0443.",
+    pairingComplete: `\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043E. \u0422\u0435\u043F\u0435\u0440\u044C DSH Go \u043C\u043E\u0436\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u044C\u0441\u044F \u043A \u044D\u0442\u043E\u043C\u0443 \u0445\u043E\u0441\u0442\u0443.
+\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u043F\u043E QR-\u043A\u043E\u0434\u0443 DSH Go \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043E\u0434\u043D\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E; \u0447\u0442\u043E\u0431\u044B \u0441\u043C\u0435\u043D\u0438\u0442\u044C \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u043E \u0438\u043B\u0438 \u0443\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0434\u0440\u0443\u0433\u0438\u043C\u0438 \u0445\u043E\u0441\u0442\u0430\u043C\u0438, \u0432\u044B\u0439\u0434\u0438\u0442\u0435 \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0438\u043B\u0438 \u0432\u043E\u0439\u0434\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 \u0430\u043A\u043A\u0430\u0443\u043D\u0442.`,
     pairingPending: "\u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u0435 \u0438\u0441\u0445\u043E\u0434\u043D\u0443\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443, \u043D\u0435 \u043C\u0435\u043D\u044F\u044F \u043A\u043E\u0434.",
     pairingClosed: "\u0421\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E. \u0427\u0442\u043E\u0431\u044B \u043D\u0430\u0447\u0430\u0442\u044C \u0437\u0430\u043D\u043E\u0432\u043E, \u0441\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043D\u043E\u0432\u044B\u0439 QR-\u043A\u043E\u0434.",
     pairingQr: "\u041E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u044B\u0439 QR-\u043A\u043E\u0434 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u044F DSH Go",
@@ -2510,6 +2520,7 @@ If a code was sent, recover the original submission without changing it.`,
     pairingRetry: "\u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0438\u0441\u0445\u043E\u0434\u043D\u0443\u044E \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0443",
     pairingCancel: "\u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435",
     pairingStart: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C QR-\u043A\u043E\u0434 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u044F",
+    pairingDone: "\u0413\u043E\u0442\u043E\u0432\u043E",
     pairingBusy: "\u041F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435\u2026",
     pairingUnsupported: "\u042D\u0442\u043E\u0442 \u0441\u0435\u0440\u0432\u0435\u0440 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435 \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432.",
     pairingError: `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044C \u0441\u043E\u043F\u0440\u044F\u0436\u0435\u043D\u0438\u0435. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435.
@@ -2886,13 +2897,16 @@ If a code was sent, recover the original submission without changing it.`,
     saveServerBeforeLogin: "\u0417\u0431\u0435\u0440\u0435\u0436\u0456\u0442\u044C \u0430\u0434\u0440\u0435\u0441\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0430, \u043F\u0435\u0440\u0448 \u043D\u0456\u0436 \u043F\u0440\u043E\u0434\u043E\u0432\u0436\u0438\u0442\u0438 \u0432\u0445\u0456\u0434 \u0430\u0431\u043E \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F.",
     pairingLoginTab: "DSH Go",
     pairingTitle: "\u0421\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0437 DSH Go",
-    pairingHint: `\u0412\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u043A\u043E\u0434 \u0443 DSH Go \u0456 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u044C\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0456.
-\u041F\u043E\u0442\u0456\u043C \u0432\u0432\u0435\u0434\u0456\u0442\u044C \u043A\u043E\u0434 \u0456\u0437 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0430 \u043D\u0430 \u0446\u044C\u043E\u043C\u0443 \u043A\u043E\u043C\u043F\u02BC\u044E\u0442\u0435\u0440\u0456 \u0439 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u044C\u0442\u0435 \u043F\u0440\u0438\u0432\u02BC\u044F\u0437\u043A\u0443.`,
+    pairingHint: `\u041D\u0430\u0442\u0438\u0441\u043D\u0456\u0442\u044C \u043A\u043D\u043E\u043F\u043A\u0443 \u043D\u0438\u0436\u0447\u0435, \u0449\u043E\u0431 \u0437\u0433\u0435\u043D\u0435\u0440\u0443\u0432\u0430\u0442\u0438 QR-\u043A\u043E\u0434 \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F, \u0430 \u043F\u043E\u0442\u0456\u043C \u0432\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u0439\u043E\u0433\u043E \u0432 DSH Go.
+\u0426\u0435\u0439 \u0445\u043E\u0441\u0442 \u043B\u0438\u0448\u0435 \u043F\u0440\u0438\u0439\u043C\u0430\u0454 \u0437\u02BC\u0454\u0434\u043D\u0430\u043D\u043D\u044F; \u0449\u043E\u0431 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043D\u0448\u0438\u043C\u0438 \u043F\u0440\u0438\u0441\u0442\u0440\u043E\u044F\u043C\u0438, \u0441\u043A\u043E\u0440\u0438\u0441\u0442\u0430\u0439\u0442\u0435\u0441\u044F \u0456\u043D\u0448\u0438\u043C \u0441\u043F\u043E\u0441\u043E\u0431\u043E\u043C \u0432\u0445\u043E\u0434\u0443.`,
     pairingHostOnly: "\u041D\u043E\u0432\u0456 \u0445\u043E\u0441\u0442\u0438 \u043B\u0438\u0448\u0435 \u043F\u0440\u0438\u0439\u043C\u0430\u044E\u0442\u044C \u0437\u02BC\u0454\u0434\u043D\u0430\u043D\u043D\u044F. \u0421\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u043D\u0435 \u0434\u0430\u0454 \u0437\u043C\u043E\u0433\u0438 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043D\u0448\u0438\u043C\u0438 \u043F\u0440\u0438\u0441\u0442\u0440\u043E\u044F\u043C\u0438.",
+    pairingHostOnlyDetail: "\u0421\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0437\u0430 QR-\u043A\u043E\u0434\u043E\u043C DSH Go \u043F\u0456\u0434\u0442\u0440\u0438\u043C\u0443\u0454 \u043B\u0438\u0448\u0435 \u043E\u0434\u0438\u043D \u043F\u0440\u0438\u0441\u0442\u0440\u0456\u0439 \u0456 \u043F\u0440\u0438\u0439\u043C\u0430\u0454 \u043B\u0438\u0448\u0435 \u0432\u0445\u0456\u0434\u043D\u0456 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044F. \u0429\u043E\u0431 \u0437\u043C\u0456\u043D\u0438\u0442\u0438 \u043F\u0440\u0438\u0441\u0442\u0440\u0456\u0439 \u0430\u0431\u043E \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043D\u0448\u0438\u043C\u0438 \u0445\u043E\u0441\u0442\u0430\u043C\u0438, \u043D\u0430\u0442\u0438\u0441\u043D\u0456\u0442\u044C \xAB\u0412\u0438\u0439\u0442\u0438\xBB \u043D\u0438\u0436\u0447\u0435 \u0442\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u0456\u0442\u044C \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0430\u0431\u043E \u0443\u0432\u0456\u0439\u0434\u0456\u0442\u044C \u0447\u0435\u0440\u0435\u0437 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0438\u0439 \u0437\u0430\u043F\u0438\u0441.",
     pairingSaveServer: "\u0417\u0431\u0435\u0440\u0435\u0436\u0456\u0442\u044C \u0430\u0434\u0440\u0435\u0441\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u043F\u0435\u0440\u0435\u0434 \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F\u043C.",
-    pairingScan: "\u0412\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u0446\u0435\u0439 QR-\u043A\u043E\u0434 \u0443 DSH Go \u0456 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u044C\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0456.",
+    pairingScan: `\u0412\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u0446\u0435\u0439 QR-\u043A\u043E\u0434 \u0443 DSH Go \u0456 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u044C\u0442\u0435 \u043D\u0430 \u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0456.
+\u0426\u0435\u0439 \u0445\u043E\u0441\u0442 \u043B\u0438\u0448\u0435 \u043F\u0440\u0438\u0439\u043C\u0430\u0454 \u0437\u02BC\u0454\u0434\u043D\u0430\u043D\u043D\u044F; \u0449\u043E\u0431 \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043D\u0448\u0438\u043C\u0438 \u043F\u0440\u0438\u0441\u0442\u0440\u043E\u044F\u043C\u0438, \u0441\u043A\u043E\u0440\u0438\u0441\u0442\u0430\u0439\u0442\u0435\u0441\u044F \u0456\u043D\u0448\u0438\u043C \u0441\u043F\u043E\u0441\u043E\u0431\u043E\u043C \u0432\u0445\u043E\u0434\u0443.`,
     pairingEnter: "\u041F\u0435\u0440\u0435\u0432\u0456\u0440\u0442\u0435 \u0442\u0435\u043B\u0435\u0444\u043E\u043D, \u0449\u043E \u043D\u0430\u0434\u0456\u0441\u043B\u0430\u0432 \u0437\u0430\u043F\u0438\u0442, \u0456 \u0432\u0432\u0435\u0434\u0456\u0442\u044C \u0439\u043E\u0433\u043E \u043A\u043E\u0434.",
-    pairingComplete: "\u0421\u043F\u0430\u0440\u0435\u043D\u043E. \u0422\u0435\u043F\u0435\u0440 DSH Go \u043C\u043E\u0436\u0435 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u0446\u044C\u043E\u0433\u043E \u0445\u043E\u0441\u0442\u0430.",
+    pairingComplete: `\u0421\u043F\u0430\u0440\u0435\u043D\u043E. \u0422\u0435\u043F\u0435\u0440 DSH Go \u043C\u043E\u0436\u0435 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0430\u0442\u0438\u0441\u044F \u0434\u043E \u0446\u044C\u043E\u0433\u043E \u0445\u043E\u0441\u0442\u0430.
+\u0421\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0437\u0430 QR-\u043A\u043E\u0434\u043E\u043C DSH Go \u043F\u0456\u0434\u0442\u0440\u0438\u043C\u0443\u0454 \u043B\u0438\u0448\u0435 \u043E\u0434\u0438\u043D \u043F\u0440\u0438\u0441\u0442\u0440\u0456\u0439; \u0449\u043E\u0431 \u0437\u043C\u0456\u043D\u0438\u0442\u0438 \u043F\u0440\u0438\u0441\u0442\u0440\u0456\u0439 \u0430\u0431\u043E \u043A\u0435\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043D\u0448\u0438\u043C\u0438 \u0445\u043E\u0441\u0442\u0430\u043C\u0438, \u0432\u0438\u0439\u0434\u0456\u0442\u044C \u0456 \u043F\u043E\u0432\u0442\u043E\u0440\u0456\u0442\u044C \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0430\u0431\u043E \u0443\u0432\u0456\u0439\u0434\u0456\u0442\u044C \u0447\u0435\u0440\u0435\u0437 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0438\u0439 \u0437\u0430\u043F\u0438\u0441.`,
     pairingPending: "\u0412\u0456\u0434\u043D\u043E\u0432\u0456\u0442\u044C \u043F\u043E\u0447\u0430\u0442\u043A\u043E\u0432\u0435 \u043D\u0430\u0434\u0441\u0438\u043B\u0430\u043D\u043D\u044F, \u043D\u0435 \u0437\u043C\u0456\u043D\u044E\u044E\u0447\u0438 \u043A\u043E\u0434.",
     pairingClosed: "\u0421\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043E. \u0417\u0433\u0435\u043D\u0435\u0440\u0443\u0439\u0442\u0435 \u043D\u043E\u0432\u0438\u0439 QR-\u043A\u043E\u0434, \u0449\u043E\u0431 \u043F\u043E\u0447\u0430\u0442\u0438 \u0437\u043D\u043E\u0432\u0443.",
     pairingQr: "\u041E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u0438\u0439 QR-\u043A\u043E\u0434 \u0434\u043B\u044F \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u0437 DSH Go",
@@ -2904,6 +2918,7 @@ If a code was sent, recover the original submission without changing it.`,
     pairingRetry: "\u0412\u0456\u0434\u043D\u043E\u0432\u0438\u0442\u0438 \u043F\u043E\u0447\u0430\u0442\u043A\u043E\u0432\u0435 \u043D\u0430\u0434\u0441\u0438\u043B\u0430\u043D\u043D\u044F",
     pairingCancel: "\u0421\u043A\u0430\u0441\u0443\u0432\u0430\u0442\u0438 \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F",
     pairingStart: "\u0417\u0433\u0435\u043D\u0435\u0440\u0443\u0432\u0430\u0442\u0438 QR-\u043A\u043E\u0434 \u0434\u043B\u044F \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F",
+    pairingDone: "\u0413\u043E\u0442\u043E\u0432\u043E",
     pairingBusy: "\u0417\u0430\u0447\u0435\u043A\u0430\u0439\u0442\u0435\u2026",
     pairingUnsupported: "\u0426\u0435\u0439 \u0441\u0435\u0440\u0432\u0435\u0440 \u043D\u0435 \u043F\u0456\u0434\u0442\u0440\u0438\u043C\u0443\u0454 \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F \u043F\u0440\u0438\u0441\u0442\u0440\u043E\u0457\u0432.",
     pairingError: `\u041D\u0435 \u0432\u0434\u0430\u043B\u043E\u0441\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u0438 \u0441\u043F\u0430\u0440\u044E\u0432\u0430\u043D\u043D\u044F. \u041F\u0435\u0440\u0435\u0432\u0456\u0440\u0442\u0435 \u0437\u02BC\u0454\u0434\u043D\u0430\u043D\u043D\u044F.
@@ -3786,25 +3801,71 @@ If a code was sent, recover the original submission without changing it.`,
   var import_qrcode = __toESM(require_browser(), 1);
   function createHostPairingPanel(React) {
     return function(props) {
-      let { t } = props, [view, setView] = React.useState(void 0), [image, setImage] = React.useState(void 0), [now, setNow] = React.useState(Date.now()), [code, setCode] = React.useState(""), [busy, setBusy] = React.useState(!1), [locked, setLocked] = React.useState(!1), [error, setError] = React.useState(void 0), mounted = React.useRef(!1), flight = React.useRef(!1), attempts = React.useRef(/* @__PURE__ */ new Set()), completed = React.useRef(void 0), completion = React.useRef(props.onComplete);
+      let { t } = props, [view, setView] = React.useState(void 0), [image, setImage] = React.useState(void 0), [now, setNow] = React.useState(Date.now()), [code, setCode] = React.useState(""), [busy, setBusy] = React.useState(!1), [locked, setLocked] = React.useState(!1), [error, setError] = React.useState(void 0), mounted = React.useRef(!1), flight = React.useRef(!1), epoch = React.useRef(0), hydratedServer = React.useRef(void 0), prevServerUrl = React.useRef(props.serverUrl), attempts = React.useRef(/* @__PURE__ */ new Set()), completed = React.useRef(void 0), completing = React.useRef(void 0), completion = React.useRef(props.onComplete);
       completion.current = props.onComplete;
-      let apply = (next) => {
-        mounted.current && (next && !["created", "claimed", "approved"].includes(next.state) && attempts.current.delete(next.sessionId), setView(next), setLocked(next?.canRetry === !0 || next !== void 0 && attempts.current.has(next.sessionId)), next?.localSaved && completed.current !== next.sessionId && (completed.current = next.sessionId, completion.current()));
+      let runComplete = async () => {
+        let pending = completing.current ?? (async () => completion.current())();
+        completing.current = pending;
+        try {
+          await pending;
+        } finally {
+          completing.current === pending && (completing.current = void 0);
+        }
+      }, triggerComplete = async (sessionId) => {
+        if (completed.current === sessionId) return;
+        completed.current = sessionId;
+        let currentEpoch = epoch.current;
+        try {
+          await runComplete();
+        } catch (reason) {
+          completed.current === sessionId && (completed.current = void 0), mounted.current && currentEpoch === epoch.current && setError(messageOf(reason, t));
+        }
+      }, apply = (next) => {
+        mounted.current && (next && !["created", "claimed", "approved"].includes(next.state) && attempts.current.delete(next.sessionId), setView(next), setLocked(next?.canRetry === !0 || next !== void 0 && attempts.current.has(next.sessionId)), next?.localSaved && triggerComplete(next.sessionId));
       };
-      React.useEffect(() => {
-        mounted.current = !0;
-        let timer, poll = async () => {
-          if (!flight.current && !props.disabled && props.serverUrl)
+      React.useEffect(() => (mounted.current = !0, () => {
+        mounted.current = !1;
+      }), []), React.useEffect(() => {
+        prevServerUrl.current !== props.serverUrl && (prevServerUrl.current = props.serverUrl, hydratedServer.current = void 0, epoch.current += 1, completed.current = void 0, completing.current = void 0, attempts.current.clear(), setView(void 0), setLocked(!1), setCode(""), setError(void 0));
+      }, [props.serverUrl]), React.useEffect(() => {
+        if (props.disabled || !props.serverUrl || hydratedServer.current === props.serverUrl) return;
+        let cancelled = !1, currentEpoch = epoch.current;
+        return (async () => {
+          if (!flight.current)
             try {
-              apply(await props.control("host.pairing.status"));
+              let next = await props.control("host.pairing.status");
+              if (cancelled || !mounted.current || currentEpoch !== epoch.current) return;
+              hydratedServer.current = props.serverUrl, apply(next);
             } catch {
             }
-          mounted.current && (timer = setTimeout(() => void poll(), 2500));
+        })(), () => {
+          cancelled = !0;
         };
-        return poll(), () => {
-          mounted.current = !1, timer && clearTimeout(timer);
+      }, [props.serverUrl, props.disabled]);
+      let active = view !== void 0 && ["created", "claimed", "approved"].includes(view.state);
+      React.useEffect(() => {
+        if (!active || props.disabled || !props.serverUrl) return;
+        let cancelled = !1, timer, schedulePoll = () => {
+          cancelled || !mounted.current || (timer = setTimeout(() => {
+            poll();
+          }, 2500));
+        }, poll = async () => {
+          if (!(cancelled || !mounted.current)) {
+            if (!flight.current) {
+              let currentEpoch = epoch.current;
+              try {
+                let next = await props.control("host.pairing.status");
+                !cancelled && mounted.current && currentEpoch === epoch.current && apply(next);
+              } catch {
+              }
+            }
+            schedulePoll();
+          }
         };
-      }, [props.serverUrl, props.disabled]), React.useEffect(() => {
+        return schedulePoll(), () => {
+          cancelled = !0, timer !== void 0 && clearTimeout(timer);
+        };
+      }, [active, props.serverUrl, props.disabled]), React.useEffect(() => {
         let current = !0;
         return setImage(void 0), view?.qrPayload && import_qrcode.default.toDataURL(view.qrPayload, { width: 184, margin: 1, errorCorrectionLevel: "L" }).then((value) => {
           current && setImage(value);
@@ -3815,23 +3876,39 @@ If a code was sent, recover the original submission without changing it.`,
         };
       }, [view?.qrPayload]);
       let run = async (action, retry2 = !1) => {
-        if (!flight.current) {
-          flight.current = !0, setBusy(!0), setError(void 0), action === "confirm" && (view && attempts.current.add(view.sessionId), setLocked(!0), setCode(""));
-          try {
-            apply(await props.control("host.pairing." + action, action === "start" ? {} : {
-              sessionId: view?.sessionId,
-              ...action === "confirm" && !retry2 ? { verificationCode: code } : {}
-            }));
-          } catch (reason) {
-            if (mounted.current) {
-              let e = reason;
-              setError(t(e.code === "PAIRING_UNSUPPORTED" || e.details?.remoteCode === "PAIRING_UNSUPPORTED" ? "pairingUnsupported" : "pairingError"));
-            }
-          } finally {
-            flight.current = !1, mounted.current && setBusy(!1);
+        if (flight.current) return;
+        flight.current = !0;
+        let currentEpoch = ++epoch.current;
+        setBusy(!0), setError(void 0), action === "confirm" && (view && attempts.current.add(view.sessionId), setLocked(!0), setCode(""));
+        try {
+          let next = await props.control("host.pairing." + action, action === "start" ? {} : {
+            sessionId: view?.sessionId,
+            ...action === "confirm" && !retry2 ? { verificationCode: code } : {}
+          });
+          if (!mounted.current || currentEpoch !== epoch.current) return;
+          hydratedServer.current = props.serverUrl, apply(next);
+        } catch (reason) {
+          if (mounted.current && currentEpoch === epoch.current) {
+            let e = reason;
+            setError(t(e.code === "PAIRING_UNSUPPORTED" || e.details?.remoteCode === "PAIRING_UNSUPPORTED" ? "pairingUnsupported" : "pairingError"));
           }
+        } finally {
+          flight.current = !1, mounted.current && setBusy(!1);
         }
-      }, active = view !== void 0 && ["created", "claimed", "approved"].includes(view.state);
+      }, finish = async () => {
+        if (flight.current) return;
+        flight.current = !0;
+        let currentEpoch = ++epoch.current;
+        setBusy(!0), setError(void 0);
+        try {
+          if (await runComplete(), !mounted.current || currentEpoch !== epoch.current) return;
+          completed.current = void 0, setView(void 0), setLocked(!1), setCode("");
+        } catch (reason) {
+          mounted.current && currentEpoch === epoch.current && setError(messageOf(reason, t));
+        } finally {
+          flight.current = !1, mounted.current && setBusy(!1);
+        }
+      };
       React.useEffect(() => {
         if (!active) return;
         setNow(Date.now());
@@ -3894,6 +3971,12 @@ If a code was sent, recover the original submission without changing it.`,
             }
           }, t("pairingRetry")) : null,
           active && retry ? React.createElement("button", { type: "button", className: "dshRemoteDiscard", disabled: busy || props.disabled, onClick: () => void run("cancel") }, t("pairingCancel")) : null,
+          view?.state === "completed" ? React.createElement("button", {
+            type: "button",
+            className: "dshRemoteSave",
+            disabled: busy || props.disabled,
+            onClick: () => void finish()
+          }, t(busy ? "pairingBusy" : "pairingDone")) : null,
           active || view?.state === "completed" ? null : React.createElement("button", {
             type: "button",
             className: "dshRemoteSave",
@@ -4711,10 +4794,10 @@ If a code was sent, recover the original submission without changing it.`,
           loginMethod === "device_pairing" && pairingAvailable ? React.createElement(
             "div",
             { role: "tabpanel", id: "dsh-remote-settings-device-pairing-panel", "aria-labelledby": "dsh-remote-settings-device-pairing-tab" },
-            React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverDirty, t, onComplete: () => void props.control("settings.get").then((view) => {
+            React.createElement(HostPairingPanel, { key: settingsView?.config.serverUrl ?? "", control: props.control, serverUrl: settingsView?.config.serverUrl ?? "", disabled: busy || !writable || serverDirty, t, onComplete: async () => {
+              let view = await props.control("settings.get");
               applyView(view), setSignInOpen(!1), props.onSignIn?.();
-            }).catch(() => {
-            }) })
+            } })
           ) : passwordVisible ? React.createElement(
             "div",
             {
@@ -6093,9 +6176,7 @@ If a code was sent, recover the original submission without changing it.`,
                       serverUrl: status.serverUrl ?? "",
                       disabled: busy || savingServer || serverDirty,
                       t,
-                      onComplete: () => {
-                        refreshRemote();
-                      }
+                      onComplete: () => refreshRemote()
                     })
                   ) : passwordVisible ? React.createElement(
                     "div",
@@ -6299,7 +6380,7 @@ If a code was sent, recover the original submission without changing it.`,
                   React.createElement("div", {
                     className: `dshRemoteHostList${connectingHost === void 0 ? "" : " isCollapsed"}`,
                     "aria-busy": connectingHost === void 0 ? void 0 : !0
-                  }, listedHosts.length === 0 ? error !== void 0 || refreshingHosts ? null : React.createElement("p", null, t(status?.host?.pairingHostOnly ? "pairingHostOnly" : "noRemoteHosts")) : listedHosts.map((device) => React.createElement(
+                  }, listedHosts.length === 0 ? error !== void 0 || refreshingHosts ? null : React.createElement("p", null, t(status?.host?.pairingHostOnly ? "pairingHostOnlyDetail" : "noRemoteHosts")) : listedHosts.map((device) => React.createElement(
                     "button",
                     {
                       type: "button",
