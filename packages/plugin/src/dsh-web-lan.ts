@@ -122,7 +122,7 @@ export class DshWebLanPeer {
         else req.pipe(outgoing)
       }
 
-      const server = createServer(async (req, res) => {
+      const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const deny = () => res.writeHead(401, pageHeaders).end()
         if (!owns(req)) { deny(); return }
         if (req.method === 'GET' && req.url === '/__remote/lan-status') {
@@ -156,6 +156,9 @@ export class DshWebLanPeer {
         }
         if (!authorized(req)) { deny(); return }
         proxy(req, res)
+      }
+      const server = createServer((req, res) => {
+        void handleRequest(req, res).catch(() => { if (!res.destroyed) res.destroy() })
       })
       server.maxConnections = 64
       server.requestTimeout = 30_000

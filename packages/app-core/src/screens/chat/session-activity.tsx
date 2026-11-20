@@ -55,9 +55,7 @@ export function SessionActivityDock({
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const copy = strings.sessionActivity
-  const storeMode = typeof useAppStore === 'function'
-    ? useAppStore(state => state.activityDockMode)
-    : undefined
+  const storeMode = useAppStore(state => state.activityDockMode)
   const effectiveMode: ActivityDockMode = mode ?? storeMode ?? 'compact'
   const values = session.projections?.values
   const todos = todosFrom(values?.todos)

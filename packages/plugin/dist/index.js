@@ -97755,7 +97755,7 @@ var WorkspaceBridge = class {
     signal.throwIfAborted();
     const watcher = watch(target3, { recursive: false });
     const abort = () => {
-      watcher.return?.();
+      void watcher.return?.().catch(() => void 0);
       queue.end();
     };
     signal.addEventListener("abort", abort, { once: true });
@@ -98420,7 +98420,9 @@ var TranscriptWatcher = class extends EventEmitter2 {
       } catch {
       }
       if (!this.closed) {
-        this.pollTimer = setTimeout(poll, intervalMs);
+        this.pollTimer = setTimeout(() => {
+          void poll();
+        }, intervalMs);
         this.pollTimer.unref?.();
       }
     };
@@ -104723,7 +104725,7 @@ var DshWebLanPeer = class {
       };
       const authorized = (req) => owns(req) && redeemed && req.headers.cookie?.split(";").some((part) => part.trim() === cookie);
       const sockets = /* @__PURE__ */ new Set();
-      const server = createServer4(async (req, res) => {
+      const handleRequest = async (req, res) => {
         const deny = () => res.writeHead(401, pageHeaders).end();
         if (!owns(req)) {
           deny();
@@ -104778,6 +104780,11 @@ var DshWebLanPeer = class {
           return;
         }
         proxy2(req, res);
+      };
+      const server = createServer4((req, res) => {
+        void handleRequest(req, res).catch(() => {
+          if (!res.destroyed) res.destroy();
+        });
       });
       server.maxConnections = 64;
       server.requestTimeout = 3e4;

@@ -474,16 +474,18 @@ function SettingsForm({ settings, writable, onSaved }: {
       {
         text: strings.plugins.reset,
         style: 'destructive',
-        onPress: async () => {
-          setSaving(true)
-          try {
-            await mutatePluginSettings(settings.ns, overridden.map(key => ({ op: 'unset', path: [key] })), settings.revision)
-            onSaved()
-          } catch (cause) {
-            Alert.alert(strings.plugins.saveFailed, cause instanceof Error ? cause.message : '')
-          } finally {
-            setSaving(false)
-          }
+        onPress: () => {
+          void (async () => {
+            setSaving(true)
+            try {
+              await mutatePluginSettings(settings.ns, overridden.map(key => ({ op: 'unset', path: [key] })), settings.revision)
+              onSaved()
+            } catch (cause) {
+              Alert.alert(strings.plugins.saveFailed, cause instanceof Error ? cause.message : '')
+            } finally {
+              setSaving(false)
+            }
+          })()
         },
       },
     ])
