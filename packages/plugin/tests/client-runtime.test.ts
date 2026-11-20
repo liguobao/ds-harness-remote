@@ -1383,7 +1383,12 @@ describe('ClientModeRuntime Host account control', () => {
     await expect(handler?.('host.account.login', {
       email: 'host@example.com', password: 'correct horse battery staple',
     }, signal)).resolves.toMatchObject({ ok: true, value: { account: 'host@example.com' } })
-    expect(host.authorizeHostWithAccount).toHaveBeenCalledWith('host@example.com', 'correct horse battery staple')
+    expect(host.authorizeHostWithAccount).toHaveBeenLastCalledWith('host@example.com', 'correct horse battery staple', undefined)
+    const verification = { challenge: 'a'.repeat(43), code: '123456', serverUrl: 'https://server.example' }
+    await expect(handler?.('host.account.login', {
+      email: 'host@example.com', password: 'correct horse battery staple', verification,
+    }, signal)).resolves.toMatchObject({ ok: true })
+    expect(host.authorizeHostWithAccount).toHaveBeenLastCalledWith('host@example.com', 'correct horse battery staple', verification)
     await expect(handler?.('host.authorization.set', { enabled: true }, signal)).resolves.toMatchObject({ ok: true })
     expect(host.authorizeHostAsOwned).toHaveBeenCalledWith('client-access-token', 'owner@example.com')
     await expect(handler?.('host.authorization.set', { enabled: false }, signal)).resolves.toMatchObject({ ok: true })
