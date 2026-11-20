@@ -123,6 +123,11 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
         if (session.backend === 'codex') {
           const client = runtime.connection.requireCodex()
           const threadId = codexThreadId(session)
+          const loadGeneration = runtime.sessionLoadGeneration
+          const connGeneration = runtime.connectionGeneration
+          const isCurrentTarget = () => loadGeneration === runtime.sessionLoadGeneration
+            && connGeneration === runtime.connectionGeneration
+            && get().selectedSession?.sessionId === session.sessionId
           const promptInput = [
             ...(text.length === 0 ? [] : [{ type: 'text', text }]),
             ...images.map(image => ({ type: 'image', mediaType: image.mediaType, data: image.data })),
@@ -140,6 +145,19 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
               threadId,
               ...(selection?.provider === 'codex' ? { model: selection.model } : {}),
             })
+            if (!isCurrentTarget()) {
+              set(state => ({
+                messages: {
+                  ...state.messages,
+                  [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+                    item.id === optimistic.id && item.kind === 'message'
+                      ? { ...item, sendState: 'failed' as const }
+                      : item),
+                },
+                ...(state.busyAction === 'send-message' ? { busyAction: undefined } : {}),
+              }))
+              return 'rejected'
+            }
             const serverPreset = codexPermissionPresetFromResponse(resumeResult)
             if (serverPreset !== undefined) {
               set(state => withCodexPermissionState(state, session.sessionId, serverPreset))
@@ -152,20 +170,28 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
                 ...(selection.reasoningEffort === undefined ? {} : { effort: selection.reasoningEffort }),
               } : {}),
             }))
-            const turnId = stringValue(record(result.turn).id)
-            if (runtime.activeCodexTimeline?.session.nativeId === threadId) {
-              runtime.activeCodexTimeline = {
-                ...runtime.activeCodexTimeline,
-                ...(turnId === undefined ? {} : { activeTurnId: turnId }),
-                session: { ...runtime.activeCodexTimeline.session, status: 'running' },
-              }
+            runtime.flushPendingCodexFrames()
+            if (!isCurrentTarget()) {
+              set(state => state.busyAction === 'send-message' ? { busyAction: undefined } : {})
+              return 'sent'
             }
-            set(state => ({
-              sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true } : item),
-              selectedSession: state.selectedSession?.sessionId === session.sessionId
-                ? { ...state.selectedSession, running: true }
-                : state.selectedSession,
-            }))
+            const turnId = stringValue(record(result.turn).id)
+            const alreadyCompleted = turnId !== undefined && runtime.isCodexTurnCompleted(threadId, turnId)
+            if (!alreadyCompleted) {
+              if (runtime.activeCodexTimeline?.session.nativeId === threadId) {
+                runtime.activeCodexTimeline = {
+                  ...runtime.activeCodexTimeline,
+                  ...(turnId === undefined ? {} : { activeTurnId: turnId }),
+                  session: { ...runtime.activeCodexTimeline.session, status: 'running' },
+                }
+              }
+              set(state => ({
+                sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: true } : item),
+                selectedSession: state.selectedSession?.sessionId === session.sessionId
+                  ? { ...state.selectedSession, running: true }
+                  : state.selectedSession,
+              }))
+            }
           }
         } else if (isAcpManagedBackend(session.backend)) {
           if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)

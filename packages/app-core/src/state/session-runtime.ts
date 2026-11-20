@@ -40,6 +40,8 @@ export class SessionRuntime {
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
   private codexFlushTimer: ReturnType<typeof setTimeout> | undefined
+  private codexRecoveryTimer: ReturnType<typeof setTimeout> | undefined
+  private readonly completedCodexTurns = new Set<string>()
   historyCompactMode?: boolean
   readonly browsePages = new Map<string, {oldestLoadedSeq?: number; historyHasMore: boolean}>()
   sessionReadAbort: AbortController | undefined
@@ -274,7 +276,37 @@ export class SessionRuntime {
     })
   }
 
+  clearCodexRecoveryTimer(): void {
+    if (this.codexRecoveryTimer !== undefined) clearTimeout(this.codexRecoveryTimer)
+    this.codexRecoveryTimer = undefined
+  }
+
+  scheduleCodexRecovery(delayMs: number, task: () => void): void {
+    this.clearCodexRecoveryTimer()
+    this.codexRecoveryTimer = setTimeout(() => {
+      this.codexRecoveryTimer = undefined
+      task()
+    }, delayMs)
+    this.codexRecoveryTimer.unref?.()
+  }
+
+  markCodexTurnCompleted(threadId: string, turnId: string): void {
+    const key = `${threadId}:${turnId}`
+    if (this.completedCodexTurns.has(key)) return
+    this.completedCodexTurns.add(key)
+    while (this.completedCodexTurns.size > 64) {
+      const oldest = this.completedCodexTurns.keys().next().value
+      if (oldest === undefined) break
+      this.completedCodexTurns.delete(oldest)
+    }
+  }
+
+  isCodexTurnCompleted(threadId: string, turnId: string): boolean {
+    return this.completedCodexTurns.has(`${threadId}:${turnId}`)
+  }
+
   async closeActiveCodexStream(notifyRemote = true): Promise<void> {
+    this.clearCodexRecoveryTimer()
     this.clearPendingCodexFrames()
     const stream = this.activeCodexStream
     this.activeCodexStream = undefined

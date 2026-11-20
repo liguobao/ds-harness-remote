@@ -90,6 +90,7 @@ export interface CodexTimelineState {
 
 export interface CodexStream {
   streamId: string
+  replayTruncated?: boolean
   close(): Promise<void>
 }
 
@@ -190,11 +191,20 @@ export class CodexRemoteClient {
   ): Promise<CodexStream> {
     const streamId = createRemoteId()
     let closed = false
+    let opened = false
+    let coreClosed = false
     let unsubscribe: () => void = () => undefined
+    let unsubscribeCoreClose: () => void = () => undefined
+    const onAbort = () => {
+      if (!markClosed()) return
+      void this.core.rpc('codex.app.stream.close', { streamId }).catch(() => undefined)
+    }
     const markClosed = () => {
       if (closed) return false
       closed = true
       unsubscribe()
+      unsubscribeCoreClose()
+      signal?.removeEventListener('abort', onAbort)
       return true
     }
     unsubscribe = this.core.onEvent(event => {
@@ -208,14 +218,41 @@ export class CodexRemoteClient {
         || typeof event.data.frame.method !== 'string') return
       onFrame(event.data.frame as CodexAppFrameData['frame'])
     })
+    unsubscribeCoreClose = typeof this.core.onClose === 'function'
+      ? this.core.onClose(() => {
+        if (!opened) {
+          coreClosed = true
+          markClosed()
+          return
+        }
+        if (!markClosed()) return
+        onClose?.('peer-disconnected')
+      })
+      : () => undefined
+    let openResult: unknown
     try {
-      await this.core.rpc('codex.app.stream.open', { streamId, threadId }, signal)
+      openResult = await this.core.rpc('codex.app.stream.open', { streamId, threadId }, signal)
+      if (signal?.aborted) {
+        markClosed()
+        await this.core.rpc('codex.app.stream.close', { streamId }).catch(() => undefined)
+        throw signal.reason ?? new Error('Aborted')
+      }
+      if (coreClosed) {
+        markClosed()
+        throw new RemoteGatewayError('TRANSPORT_CLOSED', 'The Remote connection closed while opening the Codex stream.')
+      }
+      opened = true
+      if (!closed) {
+        signal?.addEventListener('abort', onAbort, { once: true })
+      }
     } catch (error) {
-      unsubscribe()
+      markClosed()
       throw error
     }
+    const replayTruncated = isRecord(openResult) && openResult.replayTruncated === true
     return {
       streamId,
+      ...(replayTruncated ? { replayTruncated: true as const } : {}),
       close: async () => {
         if (!markClosed()) return
         await this.core.rpc('codex.app.stream.close', { streamId }).catch(() => undefined)
@@ -555,6 +592,8 @@ function reduceCodexFrame(
 
   if (frame.method === 'serverRequest/resolved' && state.approval !== undefined) {
     const requestHandle = state.approval.requestHandle
+    // Legacy Hosts omit `requestHandle` on serverRequest/resolved; match strictly when present.
+    if (typeof params.requestHandle === 'string' && params.requestHandle !== requestHandle) return state
     return {
       ...state,
       approval: undefined,

@@ -65807,12 +65807,22 @@ var CodexRemoteClient = class {
   async subscribe(threadId, onFrame, signal, onClose) {
     const streamId = createRemoteId();
     let closed = false;
+    let opened = false;
+    let coreClosed = false;
     let unsubscribe = () => void 0;
+    let unsubscribeCoreClose = () => void 0;
+    const onAbort = () => {
+      if (!markClosed())
+        return;
+      void this.core.rpc("codex.app.stream.close", { streamId }).catch(() => void 0);
+    };
     const markClosed = () => {
       if (closed)
         return false;
       closed = true;
       unsubscribe();
+      unsubscribeCoreClose();
+      signal?.removeEventListener("abort", onAbort);
       return true;
     };
     unsubscribe = this.core.onEvent((event2) => {
@@ -65828,14 +65838,40 @@ var CodexRemoteClient = class {
         return;
       onFrame(event2.data.frame);
     });
+    unsubscribeCoreClose = typeof this.core.onClose === "function" ? this.core.onClose(() => {
+      if (!opened) {
+        coreClosed = true;
+        markClosed();
+        return;
+      }
+      if (!markClosed())
+        return;
+      onClose?.("peer-disconnected");
+    }) : () => void 0;
+    let openResult;
     try {
-      await this.core.rpc("codex.app.stream.open", { streamId, threadId }, signal);
+      openResult = await this.core.rpc("codex.app.stream.open", { streamId, threadId }, signal);
+      if (signal?.aborted) {
+        markClosed();
+        await this.core.rpc("codex.app.stream.close", { streamId }).catch(() => void 0);
+        throw signal.reason ?? new Error("Aborted");
+      }
+      if (coreClosed) {
+        markClosed();
+        throw new RemoteGatewayError("TRANSPORT_CLOSED", "The Remote connection closed while opening the Codex stream.");
+      }
+      opened = true;
+      if (!closed) {
+        signal?.addEventListener("abort", onAbort, { once: true });
+      }
     } catch (error62) {
-      unsubscribe();
+      markClosed();
       throw error62;
     }
+    const replayTruncated = isRecord(openResult) && openResult.replayTruncated === true;
     return {
       streamId,
+      ...replayTruncated ? { replayTruncated: true } : {},
       close: async () => {
         if (!markClosed())
           return;

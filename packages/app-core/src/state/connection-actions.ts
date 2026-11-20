@@ -275,6 +275,23 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         }
         return generation === runtime.connectionGeneration && current.connection.phase === 'connected'
       }
+      const restoreHealthySessionState = async () => {
+        await get().refreshConnectionNetworkDetails()
+        if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') return
+        const selected = get().selectedSession
+        if (
+          selected?.backend === 'codex'
+          && !get().busyAction?.startsWith('session:')
+          && (runtime.activeCodexStream === undefined || get().codexReadySessionId !== selected.sessionId)
+        ) {
+          void get().openSession(selected)
+        }
+        if (get().transportPreference === 'auto') {
+          const nextPreferred: readonly string[] = await resolveAutomaticPreferredTransports().catch(() => [])
+          if (generation !== runtime.connectionGeneration || get().connection.phase !== 'connected') return
+          void runtime.connection.promoteTransport({ preferLan: nextPreferred.includes('lan') })
+        }
+      }
       const healthy = await runtime.connection.checkHealth().catch(() => false)
       if (!await canContinueAfterProbe()) return
       if (!healthy) {
@@ -285,15 +302,11 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           await get().reconnect()
         } else {
           console.info('[dsh-remote] Resume health restored after retry')
-          await get().refreshConnectionNetworkDetails()
+          await restoreHealthySessionState()
         }
       }
       else {
-        await get().refreshConnectionNetworkDetails()
-        if (get().transportPreference === 'auto') {
-          const nextPreferred: readonly string[] = await resolveAutomaticPreferredTransports().catch(() => [])
-          void runtime.connection.promoteTransport({ preferLan: nextPreferred.includes('lan') })
-        }
+        await restoreHealthySessionState()
       }
     },
 
@@ -384,9 +397,11 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           claudeAvailable: false,
           hermesAvailable: false,
           sessions: state.sessions.map(item =>
-            isAcpManagedBackend(item.backend) && item.running ? { ...item, running: false } : item,
+            (isAcpManagedBackend(item.backend) || item.backend === 'codex') && item.running ? { ...item, running: false } : item,
           ),
-          selectedSession: state.selectedSession !== undefined && isAcpManagedBackend(state.selectedSession.backend) && state.selectedSession.running
+          selectedSession: state.selectedSession !== undefined
+            && (isAcpManagedBackend(state.selectedSession.backend) || state.selectedSession.backend === 'codex')
+            && state.selectedSession.running
             ? { ...state.selectedSession, running: false }
             : state.selectedSession,
         }))

@@ -11,7 +11,7 @@ const { proxy, transport, storage, authenticate, acp, codex, botDispatch, networ
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(), sessionSelectModel: vi.fn(),
     agentPresetList: vi.fn(), agentPresetSelect: vi.fn(), sessionCancel: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), getNetworkDetails: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn(), hasHermes: vi.fn(), requireClaude: vi.fn(), requireHermes: vi.fn(), requireSessionTools: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), setMode: vi.fn(), selectPermission: vi.fn(), archiveSession: vi.fn(), createSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn(), subscribe: vi.fn() },
@@ -46,7 +46,7 @@ vi.mock('../src/services/connection', async () => {
     requireOpencode() { return acp }
     requireClaude() { transport.requireClaude(); return acp }
     requireHermes() { transport.requireHermes(); return acp }
-    getNetworkDetails() { return Promise.resolve(undefined) }
+    getNetworkDetails = transport.getNetworkDetails
     getStats() { return { mode: 'Relay', connected: true } }
   } }
 })
@@ -71,6 +71,7 @@ const prepareScenario1 = () => {
   vi.resetAllMocks()
   network.preferred = ['relay']
   transport.checkHealth.mockResolvedValue(true)
+  transport.getNetworkDetails.mockResolvedValue(undefined)
   transport.hasCodex.mockReturnValue(false)
   transport.hasCursor.mockReturnValue(false)
   transport.hasAntigravity.mockReturnValue(false)
@@ -831,6 +832,158 @@ describe('session restore state machine', () => {
       vi.useRealTimers()
     }
   })
+  it('clears running state on setOffline and reopens a dropped Codex stream on healthy resumeConnection', async () => {
+    const thread = (id: string) => ({
+      id, cwd: '/project', status: { type: 'active', activeFlags: [] }, createdAt: 1, updatedAt: 2,
+    })
+    const openDroppedCodexSession = async () => {
+      transport.hasCodex.mockReturnValue(true)
+      codex.request.mockImplementation(async (method: string, args?: { threadId?: string }) => {
+        if (method === 'thread/list') return { data: [thread('thread-1')] }
+        if (method === 'project/list') return { data: [] }
+        if (method === 'thread/read') return { thread: thread(args?.threadId ?? 'thread-1') }
+        if (method === 'dsh/sessionHistory') {
+          return { header: { id: `codex:${args?.threadId ?? 'thread-1'}` }, records: [], hasMore: false }
+        }
+        if (method === 'model/list') return { data: [{ model: 'model-1' }] }
+        throw new Error(`Unexpected Codex RPC: ${method}`)
+      })
+      codex.subscribe.mockImplementation(async () => ({
+        streamId: `stream-${codex.subscribe.mock.calls.length}`,
+        close: async () => undefined,
+      }))
+      useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+      expect(await useAppStore.getState().connectDevice({ deviceId: 'host' } as never)).toBe(true)
+      await useAppStore.getState().refreshWorkspaces('codex')
+      const selected = useAppStore.getState().sessions.find(item => item.sessionId === 'codex:thread-1')!
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      expect(codex.subscribe).toHaveBeenCalledTimes(1)
+
+      const onStreamClose = codex.subscribe.mock.calls[0]![3] as (reason: string) => void
+      onStreamClose('peer-disconnected')
+      expect(useAppStore.getState().connection.phase).toBe('connected')
+      expect(useAppStore.getState().codexReadySessionId).toBeUndefined()
+    }
+    try {
+      await runScenarios([
+        {
+          name: 'setOffline resets running on selected and background Codex sessions without remote close',
+          run: async () => {
+            transport.hasCodex.mockReturnValue(true)
+            const streamClose = vi.fn(async () => undefined)
+            codex.request.mockImplementation(async (method: string, args?: { threadId?: string }) => {
+              if (method === 'thread/list') return { data: [thread('thread-1'), thread('thread-2')] }
+              if (method === 'project/list') return { data: [] }
+              if (method === 'thread/read') return { thread: thread(args?.threadId ?? 'thread-1') }
+              if (method === 'dsh/sessionHistory') {
+                return { header: { id: `codex:${args?.threadId ?? 'thread-1'}` }, records: [], hasMore: false, activeTurnId: 'turn-1' }
+              }
+              if (method === 'model/list') return { data: [{ model: 'model-1' }] }
+              throw new Error(`Unexpected Codex RPC: ${method}`)
+            })
+            codex.subscribe.mockResolvedValue({ streamId: 'stream-1', close: streamClose })
+            useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+            expect(await useAppStore.getState().connectDevice({ deviceId: 'host' } as never)).toBe(true)
+            await useAppStore.getState().refreshWorkspaces('codex')
+            const selected = useAppStore.getState().sessions.find(item => item.sessionId === 'codex:thread-1')!
+            expect(await useAppStore.getState().openSession(selected)).toBe(true)
+            const codexSessionsBefore = useAppStore.getState().sessions.filter(item => item.backend === 'codex')
+            expect(codexSessionsBefore).toHaveLength(2)
+            expect(codexSessionsBefore.every(item => item.running)).toBe(true)
+            expect(useAppStore.getState().selectedSession?.running).toBe(true)
+
+            useAppStore.getState().setOffline()
+
+            expect(useAppStore.getState().connection.phase).toBe('offline')
+            expect(useAppStore.getState().codexReadySessionId).toBeUndefined()
+            expect(useAppStore.getState().selectedSession?.running).toBe(false)
+            expect(useAppStore.getState().sessions.filter(item => item.backend === 'codex').every(item => !item.running)).toBe(true)
+            expect(streamClose).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'resumeConnection reopens a dropped Codex stream when connected and healthy without reconnecting transport',
+          run: async () => {
+            await openDroppedCodexSession()
+
+            await useAppStore.getState().resumeConnection()
+            await vi.waitFor(() => expect(codex.subscribe).toHaveBeenCalledTimes(2))
+            await vi.waitFor(() => expect(useAppStore.getState().codexReadySessionId).toBe('codex:thread-1'))
+            expect(transport.connect).toHaveBeenCalledTimes(1)
+            expect(useAppStore.getState().busyAction).toBeUndefined()
+
+            await useAppStore.getState().resumeConnection()
+            expect(codex.subscribe).toHaveBeenCalledTimes(2)
+          },
+        },
+        {
+          name: 'resumeConnection keeps zero reconnect and zero Codex reopen when no session is selected',
+          run: async () => {
+            transport.hasCodex.mockReturnValue(true)
+            useAppStore.setState({
+              selectedDevice: { deviceId: 'host' } as never,
+              selectedSession: undefined,
+              sessions: [],
+              config: { baseUrl: 'https://example.invalid' } as never,
+              identity: {} as never,
+            })
+            await useAppStore.getState().resumeConnection()
+            expect(transport.connect).not.toHaveBeenCalled()
+            expect(codex.subscribe).not.toHaveBeenCalled()
+            expect(codex.request).not.toHaveBeenCalled()
+            expect(proxy.sessionHistory).not.toHaveBeenCalled()
+          },
+        },
+        {
+          name: 'resumeConnection rebuilds a dropped Codex stream when initial checkHealth fails and retry succeeds',
+          run: async () => {
+            await openDroppedCodexSession()
+
+            const openSessionSpy = vi.fn(useAppStore.getState().openSession)
+            useAppStore.setState({ openSession: openSessionSpy })
+            transport.checkHealth.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+
+            await useAppStore.getState().resumeConnection()
+            expect(transport.checkHealth).toHaveBeenCalledTimes(2)
+            expect(transport.connect).toHaveBeenCalledTimes(1)
+            expect(openSessionSpy).toHaveBeenCalledTimes(1)
+            expect(openSessionSpy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'codex:thread-1' }))
+            await vi.waitFor(() => expect(codex.subscribe).toHaveBeenCalledTimes(2))
+            await vi.waitFor(() => expect(useAppStore.getState().codexReadySessionId).toBe('codex:thread-1'))
+            expect(useAppStore.getState().busyAction).toBeUndefined()
+          },
+        },
+        ...(['offline', 'disconnect'] as const).map(interruption => ({
+          name: `resumeConnection does not call openSession when transitioning to ${interruption} while refreshing network details`,
+          run: async () => {
+            await openDroppedCodexSession()
+
+            const openSessionSpy = vi.fn(useAppStore.getState().openSession)
+            useAppStore.setState({ openSession: openSessionSpy })
+            let resolveDetails!: (details: undefined) => void
+            transport.getNetworkDetails.mockClear()
+            transport.getNetworkDetails.mockImplementationOnce(() => new Promise<undefined>(resolve => { resolveDetails = resolve }))
+
+            const resuming = useAppStore.getState().resumeConnection()
+            await vi.waitFor(() => expect(transport.getNetworkDetails).toHaveBeenCalledTimes(1))
+            if (interruption === 'offline') useAppStore.getState().setOffline()
+            else await useAppStore.getState().disconnect()
+            resolveDetails(undefined)
+            await resuming
+
+            expect(openSessionSpy).not.toHaveBeenCalled()
+            expect(codex.subscribe).toHaveBeenCalledTimes(1)
+            expect(transport.connect).toHaveBeenCalledTimes(1)
+          },
+        })),
+      ], async () => {
+        await useAppStore.getState().disconnect()
+        prepareScenario1()
+      })
+    } finally {
+      await useAppStore.getState().disconnect()
+    }
+  })
   it('retains healthy carriers on resume and restores half-open connections without reviving a disconnected Host', async () => {
     await runScenarios([
       {
@@ -1262,6 +1415,7 @@ describe('ACP session creation targets the workspace backend', () => {
       run: async () => {
         vi.resetAllMocks()
         transport.checkHealth.mockResolvedValue(true)
+  transport.getNetworkDetails.mockResolvedValue(undefined)
         transport.hasClaude.mockReturnValue(backend === 'claude')
         transport.hasHermes.mockReturnValue(backend === 'hermes')
         acp.transferCall.mockResolvedValue({ events: [] })

@@ -273,6 +273,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // Retain live/optimistic rows and pending approvals/questions, not a misleading gap in cached history.
         return contiguousCache ? existing : existing.filter(item => !cachedIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
       }
+      runtime.clearCodexRecoveryTimer()
       runtime.sessionReadAbort?.abort()
       const readAbort = new AbortController()
       runtime.sessionReadAbort = readAbort
@@ -331,65 +332,185 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           void runtime.closeActiveCursorStream()
           const client = runtime.connection.requireCodex()
           const threadId = codexThreadId(session)
-          const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
-          if (!current()) return
-          const sessionWithPermission = withBestCodexPermission(session, undefined, savedPermissions)
-          const permission = codexPermissionPreset(sessionWithPermission)
-          const [read, history] = await Promise.all([
-            readCodexSession(client, threadId, permission, readAbort.signal),
-            readCodexHistoryPage(client, threadId, undefined, 16, readAbort.signal),
+          const recoveryDelaysMs = [1_500, 3_000, 6_000, 12_000] as const
+          const nonRetryableRecoveryCodes = new Set([
+            'FEATURE_NOT_SUPPORTED',
+            'CODEX_AUTH_REQUIRED',
+            'CODEX_THREAD_NOT_ALLOWED',
+            'CODEX_BINARY_UNAVAILABLE',
+            'CODEX_CLOSED',
+            'THREAD_NOT_FOUND',
           ])
-          if (!current()) return
-          const timeline = createCodexTimelineState({ ...read.thread, turns: [] })
-          if (timeline === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
-          runtime.activeCodexTimeline = withActiveCodexTurn(timeline, history.activeTurnId)
-          const items = foldHistory(history.events, session.sessionId, true)
-          const nextSession = {
-            ...sessionWithPermission,
-            ...read.session,
-            ...(history.activeTurnId === undefined ? {} : { running: true }),
+          const isCurrentCodexSession = () => current()
+            && get().connection.phase === 'connected'
+            && get().selectedSession?.sessionId === session.sessionId
+          const applyCodexSnapshot = (
+            read: Awaited<ReturnType<typeof readCodexSession>>,
+            history: Awaited<ReturnType<typeof readCodexHistoryPage>>,
+            savedPermissions: Awaited<ReturnType<typeof loadSavedCodexPermissions>>,
+            recovering = false,
+          ) => {
+            const timeline = createCodexTimelineState({ ...read.thread, turns: [] })
+            if (timeline === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
+            runtime.activeCodexTimeline = withActiveCodexTurn(timeline, history.activeTurnId)
+            const items = foldHistory(history.events, session.sessionId, true)
+            set(state => {
+              const latestSession = state.sessions.find(item => item.sessionId === session.sessionId) ?? session
+              const baseSession = recovering ? latestSession : withBestCodexPermission(latestSession, undefined, savedPermissions)
+              const nextSession = {
+                ...baseSession,
+                ...read.session,
+                ...(history.activeTurnId !== undefined ? { running: true } : recovering ? { running: false } : {}),
+              }
+              const codexMerged = mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []))
+              if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, codexMerged)
+              return {
+                selectedSession: state.selectedSession?.sessionId === session.sessionId ? nextSession : state.selectedSession,
+                sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
+                messages: {
+                  ...state.messages,
+                  [session.sessionId]: codexMerged,
+                },
+                ...pageState(history.hasMore, oldestSeq(history.events)),
+              }
+            })
           }
-          set(state => {
-            const codexMerged = mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []))
-            if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, codexMerged)
-            return {
-              selectedSession: nextSession,
-              sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
-              messages: {
-                ...state.messages,
-                [session.sessionId]: codexMerged,
-              },
-              ...pageState(history.hasMore, oldestSeq(history.events)),
+          const applyCodexRefreshedHistory = (history: Awaited<ReturnType<typeof readCodexHistoryPage>>) => {
+            const items = foldHistory(history.events, session.sessionId, true)
+            const activeTurnId = history.activeTurnId !== undefined
+              && !runtime.isCodexTurnCompleted(threadId, history.activeTurnId)
+              ? history.activeTurnId
+              : undefined
+            if (runtime.activeCodexTimeline?.session.nativeId === threadId && activeTurnId !== undefined
+              && runtime.activeCodexTimeline.activeTurnId === undefined) {
+              runtime.activeCodexTimeline = withActiveCodexTurn(runtime.activeCodexTimeline, activeTurnId)
             }
-          })
-          let streamClosed = false
-          const stream = await client.subscribe(
-            threadId,
-            frame => { if (current()) runtime.enqueueCodexFrame(loadGeneration, frame) },
-            // History reads can abort locally. An open must retain its ACK so
-            // a superseded load can close the subscription created on the Host.
-            undefined,
-            reason => {
-              streamClosed = true
-              if (!current()) return
-              if (runtime.activeCodexTimeline?.session.nativeId !== threadId) return
-              runtime.activeCodexStream = undefined
-              runtime.activeCodexTimeline = undefined
-              set(state => ({
-                codexReadySessionId: undefined,
-                sessions: state.sessions.map(item => item.sessionId === session.sessionId ? {...item, running: false} : item),
-                selectedSession: state.selectedSession?.sessionId === session.sessionId
-                  ? state.selectedSession
-                  : state.selectedSession,
-                ...(reason === 'failed' ? { error: zhCN.runtime.codexUnavailable } : {}),
-              }))
-            },
-          )
-          if (!current()) { await stream.close().catch(() => undefined); return }
-          if (streamClosed) throw new Error(zhCN.runtime.codexUnavailable)
-          runtime.activeCodexStream = stream
-          set({ busyAction: undefined, codexReadySessionId: session.sessionId })
-          void runtime.refreshCodexModels(session.sessionId)
+            set(state => {
+              const codexMerged = mergeHistoryAndLive(items, browseLive(items, state.messages[session.sessionId] ?? []))
+              if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, codexMerged)
+              const activeTurnKnown = activeTurnId !== undefined || runtime.activeCodexTimeline?.activeTurnId !== undefined
+              const syncRunning = (item: RemoteSession): RemoteSession => item.sessionId === session.sessionId
+                ? { ...item, running: activeTurnKnown }
+                : item
+              return {
+                selectedSession: state.selectedSession === undefined ? undefined : syncRunning(state.selectedSession),
+                sessions: state.sessions.map(syncRunning),
+                messages: {
+                  ...state.messages,
+                  [session.sessionId]: codexMerged,
+                },
+                ...pageState(history.hasMore, oldestSeq(history.events)),
+              }
+            })
+          }
+          const openCodexSubscription = async (recovering: boolean) => {
+            let subscribedStream: import('@dsh-remote/client-core').CodexStream | undefined
+            let streamClosed = false
+            let ready = false
+            const stream = await client.subscribe(
+              threadId,
+              frame => { if (current()) runtime.enqueueCodexFrame(loadGeneration, frame) },
+              // History reads can abort locally. An open must retain its ACK so
+              // a superseded load can close the subscription created on the Host.
+              undefined,
+              reason => {
+                streamClosed = true
+                if (!current()) return
+                if (subscribedStream !== undefined && runtime.activeCodexStream !== subscribedStream) return
+                if (subscribedStream === undefined && runtime.activeCodexTimeline?.session.nativeId !== threadId) return
+                runtime.activeCodexStream = undefined
+                runtime.activeCodexTimeline = undefined
+                set(state => ({
+                  codexReadySessionId: undefined,
+                  sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
+                  selectedSession: state.selectedSession?.sessionId === session.sessionId
+                    ? { ...state.selectedSession, running: false }
+                    : state.selectedSession,
+                  ...(reason === 'failed' ? { error: zhCN.runtime.codexUnavailable } : {}),
+                }))
+                if (ready && reason === 'failed' && get().connection.phase === 'connected'
+                  && get().selectedSession?.sessionId === session.sessionId) {
+                  scheduleCodexRecovery(0)
+                }
+              },
+            )
+            if (!current()) { await stream.close().catch(() => undefined); return }
+            if (streamClosed) {
+              await stream.close().catch(() => undefined)
+              throw new Error(zhCN.runtime.codexUnavailable)
+            }
+            subscribedStream = stream
+            runtime.activeCodexStream = stream
+            if (stream.replayTruncated === true) {
+              let refreshed: Awaited<ReturnType<typeof readCodexHistoryPage>>
+              try {
+                refreshed = await readCodexHistoryPage(client, threadId, undefined, 16, readAbort.signal)
+              } catch (error) {
+                if (runtime.activeCodexStream === stream) {
+                  runtime.activeCodexStream = undefined
+                  runtime.activeCodexTimeline = undefined
+                }
+                await stream.close().catch(() => undefined)
+                throw error
+              }
+              if (!current()) {
+                if (runtime.activeCodexStream === stream) runtime.activeCodexStream = undefined
+                await stream.close().catch(() => undefined)
+                return
+              }
+              if (streamClosed || runtime.activeCodexStream !== stream) {
+                if (runtime.activeCodexStream === stream) runtime.activeCodexStream = undefined
+                await stream.close().catch(() => undefined)
+                throw new Error(zhCN.runtime.codexUnavailable)
+              }
+              applyCodexRefreshedHistory(refreshed)
+            }
+            ready = true
+            set(state => ({
+              ...(recovering ? {} : { busyAction: undefined }),
+              codexReadySessionId: session.sessionId,
+              ...(recovering && state.error === zhCN.runtime.codexUnavailable ? { error: undefined } : {}),
+            }))
+            void runtime.refreshCodexModels(session.sessionId)
+          }
+          const loadAndApplyCodexSnapshot = async (recovering: boolean, activeCheck: () => boolean) => {
+            const savedPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
+            if (!activeCheck()) return false
+            const sessionWithPermission = withBestCodexPermission(session, undefined, savedPermissions)
+            const permission = codexPermissionPreset(sessionWithPermission)
+            const [read, history] = await Promise.all([
+              readCodexSession(client, threadId, permission, readAbort.signal),
+              readCodexHistoryPage(client, threadId, undefined, 16, readAbort.signal),
+            ])
+            if (!activeCheck()) return false
+            applyCodexSnapshot(read, history, savedPermissions, recovering)
+            return true
+          }
+          const scheduleCodexRecovery = (attempt: number) => {
+            const delayMs = recoveryDelaysMs[attempt]
+            if (delayMs === undefined) return
+            runtime.scheduleCodexRecovery(delayMs, () => {
+              void (async () => {
+                const canRecover = () => isCurrentCodexSession()
+                  && runtime.activeCodexStream === undefined
+                  && !get().busyAction?.startsWith('session:')
+                if (!canRecover()) return
+                try {
+                  if (!await loadAndApplyCodexSnapshot(true, canRecover)) return
+                  await openCodexSubscription(true)
+                } catch (error) {
+                  if (!canRecover()) return
+                  const code = typeof (error as { code?: unknown })?.code === 'string'
+                    ? (error as { code: string }).code
+                    : undefined
+                  if (code !== undefined && nonRetryableRecoveryCodes.has(code)) return
+                  if (attempt + 1 < recoveryDelaysMs.length) scheduleCodexRecovery(attempt + 1)
+                }
+              })()
+            })
+          }
+          if (!await loadAndApplyCodexSnapshot(false, current)) return
+          await openCodexSubscription(false)
           return
         }
         if (isAcpManagedBackend(session.backend)) {
