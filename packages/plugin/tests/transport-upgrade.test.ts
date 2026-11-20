@@ -16,6 +16,7 @@ import {
   type SequencedOutboundTransport,
 } from '@dsh-remote/webrtc'
 import { ServerNoiseChannel } from '../src/server-connection.js'
+import * as ipv6OnLink from '../src/ipv6-on-link.js'
 import { TransportUpgradeHost, wrapUpgradedTransportFrame, type TransportTier } from '../src/transport-upgrade.js'
 
 function makeStats(tier: 'LAN' | 'P2P' | 'TURN' | 'unverified'): RtcStats {
@@ -153,6 +154,41 @@ describe('LAN Web address selection', () => {
     transport = 'p2p'
     expect(await channel.lanWebAddress()).toBeUndefined()
     expect(channel.mode).toBe('P2P')
+  })
+})
+
+describe('IPv6 on-link display probe', () => {
+  it('requires an explicitly selected Host pair, matching ports and a kernel neighbor', async () => {
+    const verify = vi.spyOn(ipv6OnLink, 'isIpv6OnLink').mockResolvedValue(true)
+    try {
+      const pair = { hostAddress: '2001:db8::1', hostPort: 50_000, peerAddress: '2001:db8::2', peerPort: 50_001 }
+      const path = {
+        dataChannelState: 'open', explicitlySelected: true, transport: 'p2p',
+        localCandidateType: 'host', localAddress: '2001:db8::1:50000',
+        remoteCandidateType: 'prflx', remotePort: pair.peerPort,
+      }
+      const rtc = { connectionDetails: async () => path }
+      const channel = new ServerNoiseChannel({
+        connectionId: 'c', membershipId: 'm', peer: { deviceId: 'p', publicKey: 'k' }, rtc,
+      } as never, async () => {}, async () => {}, 'P2P')
+
+      await expect(channel.sameLinkIpv6Endpoints({ ...pair, hostPort: 50_002 })).resolves.toEqual([])
+      await expect(channel.sameLinkIpv6Endpoints({ ...pair, peerPort: 50_002 })).resolves.toEqual([])
+      path.explicitlySelected = false
+      await expect(channel.sameLinkIpv6Endpoints(pair)).resolves.toEqual([])
+      expect(verify).not.toHaveBeenCalled()
+
+      path.explicitlySelected = true
+      verify.mockResolvedValueOnce(false)
+      await expect(channel.sameLinkIpv6Endpoints(pair)).resolves.toEqual([])
+      await expect(channel.sameLinkIpv6Endpoints(pair)).resolves.toEqual(['2001:db8::1:50000'])
+      await expect(channel.lanWebAddress(pair)).resolves.toBe('2001:db8::1')
+      await expect(channel.lanWebAddress({ ...pair, peerPort: 50_002 })).resolves.toBeUndefined()
+      expect(verify).toHaveBeenCalledWith(pair.hostAddress, pair.peerAddress)
+      expect(channel.mode).toBe('P2P')
+    } finally {
+      verify.mockRestore()
+    }
   })
 })
 

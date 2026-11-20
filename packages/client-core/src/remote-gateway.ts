@@ -45,6 +45,7 @@ export interface RemoteHostFeatures {
   capabilities: readonly string[]
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
   sameLinkIpv6Endpoints?: readonly string[]
+  sameLinkIpv6PairProbe?: true
 }
 
 /** Optional type declarations refine negotiated capabilities; legacy Hosts omit them. */
@@ -157,6 +158,7 @@ export async function probeRemoteHostFeatures(
     pluginRoute: capabilities.has('plugin.route.v1'),
     capabilities: description.capabilities,
     ...(sameLinkIpv6Endpoints?.length ? { sameLinkIpv6Endpoints } : {}),
+    ...(description.sameLinkIpv6PairProbe === true ? { sameLinkIpv6PairProbe: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }
 }

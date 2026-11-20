@@ -251,6 +251,14 @@ describe('browser plugin route authority', () => {
 })
 
 describe('browser plugin route failure classification', () => {
+  it('sends a verified LAN Bot request directly to the Host once', async () => {
+    const original = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+    const request = { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) }
+    const wrapped = createPluginRouteFetch(original, 'http://[2001:db8::1]:8080/', { isLanWeb: async () => true })
+    expect((await wrapped('api/bot', request)).ok).toBe(true)
+    expect(original.mock.calls).toEqual([['api/bot', request]])
+  })
+
   const routeUrl = 'http://127.0.0.1/'
   // Correlate on the request's own rpcId: the probe and the route call differ.
   const envelope = (value: unknown, init?: RequestInit) => new Response(JSON.stringify({

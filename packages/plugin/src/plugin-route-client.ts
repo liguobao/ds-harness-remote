@@ -51,6 +51,7 @@ function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
 export interface PluginRouteClientOptions {
   /** Publish a remote roster only after the official Session catalog has caught up. */
   beforeResponse?(status: Record<string, unknown>, body: Record<string, unknown>, json: unknown, signal: AbortSignal): Promise<void>
+  isLanWeb?(signal: AbortSignal): Promise<boolean>
 }
 
 /** Route authority is read before each plugin request, including the first page load. */
@@ -117,6 +118,7 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
     const lifetime = signal ?? AbortSignal.timeout(45_000)
     try {
       lifetime.throwIfAborted()
+      if (options.isLanWeb && await options.isLanWeb(lifetime)) return original(input, init)
       // The 10s probe deadline is ours, not the caller's: while the outer
       // lifetime is still live, a probe timeout means the local control
       // channel is wedged, which needs a distinct reload-the-plugin signal.

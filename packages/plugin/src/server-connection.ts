@@ -31,6 +31,7 @@ import {
   type HelloAckPayload,
   type RelayPayload,
   type RemoteMessage,
+  type SameLinkIpv6Pair,
   type SecureHandshakePayload,
   type SelectedTransport,
   type SignalIcePayload,
@@ -1600,9 +1601,23 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     this.peerIdentityKey = tunnel.peer.publicKey
   }
 
-  async sameLinkIpv6Endpoints(): Promise<string[]> {
+  async sameLinkIpv6Endpoints(pair?: SameLinkIpv6Pair): Promise<string[]> {
     const rtc = this.tunnel.rtc
     if (rtc === undefined || this.mode === 'TURN' || this.mode === 'Relay') return []
+    if (pair !== undefined) {
+      const path = await rtc.connectionDetails()
+      const hostEndpoint = `${pair.hostAddress}:${pair.hostPort}`
+      // Native libwebrtc can mask peer-reflexive addresses but preserves the
+      // selected pair and port. If it reports an address, require a match.
+      if (path.dataChannelState !== 'open' || path.explicitlySelected !== true
+        || path.transport !== 'p2p' || path.localCandidateType !== 'host'
+        || path.localAddress?.toLowerCase() !== hostEndpoint.toLowerCase()
+        || (path.remoteCandidateType !== 'prflx' && path.remoteCandidateType !== 'host')
+        || (path.remoteAddress === undefined ? path.remoteCandidateType !== 'prflx'
+          : path.remoteAddress.toLowerCase() !== `${pair.peerAddress.toLowerCase()}:${pair.peerPort}`)
+        || path.remotePort !== pair.peerPort || !await isIpv6OnLink(pair.hostAddress, pair.peerAddress)) return []
+      return this.closed || rtc !== this.tunnel.rtc ? [] : [hostEndpoint]
+    }
     const endpoints = await rtc.nominatedGlobalIpv6Endpoints().catch(() => undefined)
     if (endpoints === undefined || endpoints.size > 8) return []
     const verified = await Promise.all([...endpoints].map(async ([address, { local, remotes }]) => {
@@ -1615,7 +1630,11 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     return this.closed || rtc !== this.tunnel.rtc ? [] : verified.filter(address => address !== undefined)
   }
 
-  async lanWebAddress() {
+  async lanWebAddress(pair?: SameLinkIpv6Pair) {
+    if (pair !== undefined) {
+      const verified = await this.sameLinkIpv6Endpoints(pair)
+      return verified.length === 1 ? pair.hostAddress : undefined
+    }
     const rtc = this.tunnel.rtc
     const mode = this.mode
     if (this.closed || !rtc || (mode !== 'LAN' && mode !== 'P2P')) return undefined

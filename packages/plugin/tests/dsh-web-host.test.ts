@@ -860,7 +860,7 @@ describe('LAN Web connection ownership', () => {
       expect(new URL(current.url).hostname).toBe(address)
       peer.close({ sessionId: stale.sessionId })
       const { url, browserGrant } = current
-      for (const path of ['', 'api/test', '__remote/browser', '__remote/session-bootstrap']) {
+      for (const path of ['', 'api/test', '__remote/browser', '__remote/session-bootstrap', '__remote/lan-status']) {
         expect((await fetch(url + path)).status).toBe(401)
       }
       const wsUrl = url.replace('http:', 'ws:')
@@ -871,6 +871,13 @@ describe('LAN Web connection ownership', () => {
       const [first, second] = await Promise.all([redeem(), redeem()])
       expect([first.status, second.status].sort()).toEqual([303, 401])
       const cookie = (first.status === 303 ? first : second).headers.get('set-cookie')!.split(';')[0]!
+      const lanStatus = await fetch(url + '__remote/lan-status', { headers: { cookie } })
+      expect(lanStatus.status).toBe(204)
+      expect(lanStatus.headers.get('x-dsh-web-lan')).toBe('1')
+      const bot = await fetch(url + 'api/bot', {
+        method: 'POST', headers: { cookie, origin: new URL(url).origin }, body: '{}',
+      })
+      expect(await bot.text()).toBe('hello')
       const page = await fetch(url, { headers: { cookie } })
       expect(await page.text()).toBe('hello')
       expect(page.headers.has('set-cookie')).toBe(false)

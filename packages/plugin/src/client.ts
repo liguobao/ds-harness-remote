@@ -64,12 +64,25 @@ class ControlRouteUnavailableError extends Error {
 
 // Install before ModuleLoader activation and React rendering: other plugins may
 // fetch their roster as soon as their own apply() runs.
+const isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location?.hostname ?? '')
 const originalPluginFetch = window.fetch
+const lanOrigin = window.location?.protocol === 'http:' && /^(?:[\d.]+|\[[0-9a-f:]+\])$/i.test(window.location.hostname)
+let verifiedLanOrigin = false
 let readyPluginSessions: (sessions: SessionsClientServiceLike) => void
 const pluginSessions = new Promise<SessionsClientServiceLike>(resolve => { readyPluginSessions = resolve })
-const pluginRouteFetch = typeof originalPluginFetch === 'function' && typeof document !== 'undefined'
+// HostC already proxies the Host's own bot API and blocks loopback control.
+const pluginRouteFetch = !isHostcTunnel && typeof originalPluginFetch === 'function' && typeof document !== 'undefined'
   ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
     beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions),
+    isLanWeb: lanOrigin ? async signal => {
+      if (verifiedLanOrigin) return true
+      const response = await originalPluginFetch(new URL('/__remote/lan-status', window.location.origin), {
+        credentials: 'same-origin',
+        signal,
+      }).catch(() => undefined)
+      verifiedLanOrigin = response?.status === 204 && response.headers.get('x-dsh-web-lan') === '1'
+      return verifiedLanOrigin
+    } : undefined,
   })
   : undefined
 if (pluginRouteFetch !== undefined) window.fetch = pluginRouteFetch
@@ -402,7 +415,6 @@ window.__ModuleLoader__.load({
           for (const listener of sidebarEntryListeners) listener()
         },
       }
-      const isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location.hostname)
       let controlRouteRetryAfter = 0
       let controlRouteBackoffIndex = 0
       const control = async <T,>(endpoint: string, payload: unknown = {}): Promise<T> => {

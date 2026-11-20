@@ -2,8 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http'
 import { request as secureRequest } from 'node:https'
 import { networkInterfaces } from 'node:os'
+import { isIPv6 } from 'node:net'
 import type { Duplex } from 'node:stream'
-import { dshWebLanOpenSchema, dshWebLanSessionSchema, isDshWebLanAddress } from '@dsh-remote/protocol'
+import { dshWebLanOpenSchema, dshWebLanSessionSchema, isDshWebLanAddress, type SameLinkIpv6Pair } from '@dsh-remote/protocol'
 import { openDshWebUpstream, type ResolveRuntime } from './dsh-web-upstream.js'
 import { stripHopByHop } from './hostc/protocol/index.js'
 import { fromRawHeaders, toLocalRequestHeaders, toPublicResponseHeaders } from './hostc/rewrite.js'
@@ -27,24 +28,27 @@ export class DshWebLanPeer {
   private lease?: { id: string; abort: AbortController }
   private disposed = false
   constructor(private readonly runtime: ResolveRuntime, private readonly mode: () => unknown,
-    private readonly address: () => Promise<string | undefined>) {}
+    private readonly address: (pair?: SameLinkIpv6Pair) => Promise<string | undefined>) {}
 
   available() { return !this.disposed && !!this.runtime() }
 
   async onLan() { return this.available() && await this.address() !== undefined && this.mode() === 'LAN' }
 
   async open(params: unknown) {
-    dshWebLanOpenSchema.parse(params)
+    const { sameLinkIpv6Pair } = dshWebLanOpenSchema.parse(params)
     if (!this.available()) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
     this.lease?.abort.abort()
     const lease = { id: randomUUID(), abort: new AbortController() }
     this.lease = lease
     const signal = lease.abort.signal
     try {
-      const address = await this.address()
-      if (this.mode() !== 'LAN') throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
-      if (!address || !isDshWebLanAddress(address) || !Object.values(networkInterfaces()).flat()
+      const address = await this.address(sameLinkIpv6Pair)
+      if (sameLinkIpv6Pair ? address !== sameLinkIpv6Pair.hostAddress : this.mode() !== 'LAN') {
+        throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
+      }
+      if (!address || (!sameLinkIpv6Pair && !isDshWebLanAddress(address)) || !Object.values(networkInterfaces()).flat()
         .some(iface => iface?.address === address && (!iface.internal || address === '127.0.0.1'))) throw new Error('LAN interface unavailable')
+      const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5000)]))
       signal.throwIfAborted()
       let ticket = randomBytes(32).toString('base64url')
@@ -54,11 +58,17 @@ export class DshWebLanPeer {
       let origin: URL
       const live = () => {
         try {
-          return !signal.aborted && this.mode() === 'LAN' && upstream.isCurrent() &&
+          return !signal.aborted && (sameLinkIpv6Pair ? ['LAN', 'P2P'].includes(String(this.mode())) : this.mode() === 'LAN') &&
+            upstream.isCurrent() &&
             Date.now() < (redeemed ? expiresAt + 30 * 60_000 : expiresAt)
         } catch { return false }
       }
-      const owns = (req: IncomingMessage) => live() && req.headers.host === origin.host
+      const owns = (req: IncomingMessage) => {
+        if (!live() || req.headers.host !== origin.host) return false
+        if (!peerHostname) return true
+        const peer = req.socket.remoteAddress
+        return peer !== undefined && isIPv6(peer) && new URL(`http://[${peer}]`).hostname === peerHostname
+      }
       const authorized = (req: IncomingMessage) => owns(req) && redeemed &&
         req.headers.cookie?.split(';').some(part => part.trim() === cookie)
       const sockets = new Set<Duplex>()
@@ -115,6 +125,11 @@ export class DshWebLanPeer {
       const server = createServer(async (req, res) => {
         const deny = () => res.writeHead(401, pageHeaders).end()
         if (!owns(req)) { deny(); return }
+        if (req.method === 'GET' && req.url === '/__remote/lan-status') {
+          if (!authorized(req)) { deny(); return }
+          res.writeHead(204, { 'cache-control': 'no-store', 'x-dsh-web-lan': '1' }).end()
+          return
+        }
         if (req.method === 'GET' && (req.url === '/__remote/browser' || req.url === '/__remote/launch')) {
           res.writeHead(401, pageHeaders).end(req.url.endsWith('browser') ? browserPage : form)
           return
@@ -155,7 +170,7 @@ export class DshWebLanPeer {
         if (!live()) { lease.abort.abort(); return }
         if (checkingPath) return
         checkingPath = true
-        void this.address().then(current => {
+        void this.address(sameLinkIpv6Pair).then(current => {
           if (current !== address) lease.abort.abort()
         }, () => lease.abort.abort()).finally(() => { checkingPath = false })
       }, 1000).unref()
@@ -175,7 +190,7 @@ export class DshWebLanPeer {
       })
       const bound = server.address()
       if (!live() || !bound || typeof bound === 'string') throw new Error('LAN Web unavailable')
-      origin = new URL('http://' + address + ':' + bound.port)
+      origin = new URL(`http://${sameLinkIpv6Pair ? `[${address}]` : address}:${bound.port}`)
       return { sessionId: lease.id, url: origin.href, browserGrant: ticket, expiresAt }
     } catch (error) {
       lease.abort.abort()

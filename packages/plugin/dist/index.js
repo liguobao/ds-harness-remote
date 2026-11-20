@@ -65000,16 +65000,26 @@ var dshWebGrantSchema = external_exports.object({
   expiresAt: external_exports.number().int().positive()
 }).strict();
 var DSH_WEB_LAN_CAPABILITY = "dsh.web.lan.direct.v1";
+var DSH_WEB_LAN_IPV6_CAPABILITY = "dsh.web.lan.ipv6.v1";
+var globalIpv6AddressSchema = external_exports.ipv6().refine((address2) => /^[23][0-9a-f]{3}:/i.test(address2));
+var sameLinkIpv6PairSchema = external_exports.object({
+  hostAddress: globalIpv6AddressSchema,
+  hostPort: external_exports.number().int().min(1).max(65535),
+  peerAddress: globalIpv6AddressSchema,
+  peerPort: external_exports.number().int().min(1).max(65535)
+}).strict();
 function isDshWebLanAddress(address2) {
   return address2 === "127.0.0.1" || isLanUploadAddress(address2);
 }
-var dshWebLanOpenSchema = external_exports.object({}).strict();
+var dshWebLanOpenSchema = external_exports.object({ sameLinkIpv6Pair: sameLinkIpv6PairSchema.optional() }).strict();
 var dshWebLanSessionSchema = external_exports.object({ sessionId: external_exports.uuid() }).strict();
 var dshWebLanGrantSchema = dshWebGrantSchema.extend({
   sessionId: external_exports.uuid(),
   url: external_exports.url().refine((value) => {
     const url2 = new URL(value);
-    return url2.protocol === "http:" && isDshWebLanAddress(url2.hostname) && !!url2.port && value === url2.origin + "/";
+    const host = url2.hostname;
+    const ipv63 = host.startsWith("[") && host.endsWith("]") && globalIpv6AddressSchema.safeParse(host.slice(1, -1)).success;
+    return url2.protocol === "http:" && (isDshWebLanAddress(host) || ipv63) && !!url2.port && value === url2.origin + "/";
   })
 });
 
@@ -67846,6 +67856,8 @@ function inspectSelectedPath(stats, onGlobalIpv6Pair) {
       remoteAddressScope,
       localAddress: candidateAddress(local),
       remoteAddress: candidateAddress(remote),
+      remotePort: numberStat(remote, "port"),
+      explicitlySelected: pair.selected === true || selectedPairIds.has(String(pair.id)),
       protocol: stringStat(local, "protocol") ?? stringStat(remote, "protocol"),
       relayProtocol: stringStat(local, "relayProtocol") ?? stringStat(remote, "relayProtocol"),
       currentRoundTripTimeMs: currentRoundTripTime === void 0 ? void 0 : Math.round(currentRoundTripTime * 1e3),
@@ -104202,6 +104214,7 @@ import { randomBytes as randomBytes13, randomUUID as randomUUID16 } from "node:c
 import { createServer as createServer4, request } from "node:http";
 import { request as secureRequest } from "node:https";
 import { networkInterfaces as networkInterfaces3 } from "node:os";
+import { isIPv6 as isIPv64 } from "node:net";
 
 // packages/plugin/src/dsh-web-upstream.ts
 var cordisOriginal = Symbol.for("cordis.original");
@@ -104609,7 +104622,7 @@ var DshWebLanPeer = class {
     return this.available() && await this.address() !== void 0 && this.mode() === "LAN";
   }
   async open(params) {
-    dshWebLanOpenSchema.parse(params);
+    const { sameLinkIpv6Pair } = dshWebLanOpenSchema.parse(params);
     if (!this.available()) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
     this.lease?.abort.abort();
     const lease = { id: randomUUID16(), abort: new AbortController() };
@@ -104682,9 +104695,12 @@ var DshWebLanPeer = class {
         else req.pipe(outgoing);
       };
       var track = track2, proxy = proxy2;
-      const address2 = await this.address();
-      if (this.mode() !== "LAN") throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
-      if (!address2 || !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
+      const address2 = await this.address(sameLinkIpv6Pair);
+      if (sameLinkIpv6Pair ? address2 !== sameLinkIpv6Pair.hostAddress : this.mode() !== "LAN") {
+        throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
+      }
+      if (!address2 || !sameLinkIpv6Pair && !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
+      const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname;
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
       signal.throwIfAborted();
       let ticket = randomBytes13(32).toString("base64url");
@@ -104694,18 +104710,31 @@ var DshWebLanPeer = class {
       let origin;
       const live = () => {
         try {
-          return !signal.aborted && this.mode() === "LAN" && upstream.isCurrent() && Date.now() < (redeemed ? expiresAt + 30 * 6e4 : expiresAt);
+          return !signal.aborted && (sameLinkIpv6Pair ? ["LAN", "P2P"].includes(String(this.mode())) : this.mode() === "LAN") && upstream.isCurrent() && Date.now() < (redeemed ? expiresAt + 30 * 6e4 : expiresAt);
         } catch {
           return false;
         }
       };
-      const owns = (req) => live() && req.headers.host === origin.host;
+      const owns = (req) => {
+        if (!live() || req.headers.host !== origin.host) return false;
+        if (!peerHostname) return true;
+        const peer = req.socket.remoteAddress;
+        return peer !== void 0 && isIPv64(peer) && new URL(`http://[${peer}]`).hostname === peerHostname;
+      };
       const authorized = (req) => owns(req) && redeemed && req.headers.cookie?.split(";").some((part) => part.trim() === cookie);
       const sockets = /* @__PURE__ */ new Set();
       const server = createServer4(async (req, res) => {
         const deny = () => res.writeHead(401, pageHeaders).end();
         if (!owns(req)) {
           deny();
+          return;
+        }
+        if (req.method === "GET" && req.url === "/__remote/lan-status") {
+          if (!authorized(req)) {
+            deny();
+            return;
+          }
+          res.writeHead(204, { "cache-control": "no-store", "x-dsh-web-lan": "1" }).end();
           return;
         }
         if (req.method === "GET" && (req.url === "/__remote/browser" || req.url === "/__remote/launch")) {
@@ -104772,7 +104801,7 @@ var DshWebLanPeer = class {
         }
         if (checkingPath) return;
         checkingPath = true;
-        void this.address().then((current) => {
+        void this.address(sameLinkIpv6Pair).then((current) => {
           if (current !== address2) lease.abort.abort();
         }, () => lease.abort.abort()).finally(() => {
           checkingPath = false;
@@ -104794,7 +104823,7 @@ var DshWebLanPeer = class {
       });
       const bound = server.address();
       if (!live() || !bound || typeof bound === "string") throw new Error("LAN Web unavailable");
-      origin = new URL("http://" + address2 + ":" + bound.port);
+      origin = new URL(`http://${sameLinkIpv6Pair ? `[${address2}]` : address2}:${bound.port}`);
       return { sessionId: lease.id, url: origin.href, browserGrant: ticket, expiresAt };
     } catch (error62) {
       lease.abort.abort();
@@ -107141,7 +107170,7 @@ var RpcRouter = class {
         await this.dshWeb?.close();
         return { closed: true };
       case "harness.transport.describe": {
-        emptyParamsSchema.parse(params);
+        const { sameLinkIpv6Pair } = external_exports.object({ sameLinkIpv6Pair: sameLinkIpv6PairSchema.optional() }).strict().parse(params);
         const hostCapabilities = (await this.capabilities()).filter((capability) => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY);
         const remoteAvailable = hostCapabilities.includes("harness.remote.v1") || hostCapabilities.includes("harness.remote.v3");
         const capabilities = [.../* @__PURE__ */ new Set([
@@ -107152,6 +107181,7 @@ var RpcRouter = class {
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
           ...this.sessionTransfer?.capabilities() ?? [],
           ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
+          ...this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === "linux" ? [DSH_WEB_LAN_IPV6_CAPABILITY] : [],
           ...this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : [],
           ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
         ])];
@@ -107163,10 +107193,11 @@ var RpcRouter = class {
             workspaceTypes = [];
           }
         }
-        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.() ?? [];
+        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.(sameLinkIpv6Pair) ?? [];
         if (sameLinkIpv6Endpoints.length > 0) this.logger?.info("nominated IPv6 WebRTC endpoints verified on-link", { mode: "LAN" });
         return {
           capabilities,
+          ...this.sameLinkIpv6Endpoints ? { sameLinkIpv6PairProbe: true } : {},
           ...sameLinkIpv6Endpoints.length > 0 ? { sameLinkIpv6Endpoints } : {},
           ...capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {},
           ...workspaceTypes === void 0 ? {} : { workspaceTypes }
@@ -108816,9 +108847,15 @@ var ServerNoiseChannel = class {
   closed = false;
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
-  async sameLinkIpv6Endpoints() {
+  async sameLinkIpv6Endpoints(pair) {
     const rtc = this.tunnel.rtc;
     if (rtc === void 0 || this.mode === "TURN" || this.mode === "Relay") return [];
+    if (pair !== void 0) {
+      const path = await rtc.connectionDetails();
+      const hostEndpoint = `${pair.hostAddress}:${pair.hostPort}`;
+      if (path.dataChannelState !== "open" || path.explicitlySelected !== true || path.transport !== "p2p" || path.localCandidateType !== "host" || path.localAddress?.toLowerCase() !== hostEndpoint.toLowerCase() || path.remoteCandidateType !== "prflx" && path.remoteCandidateType !== "host" || (path.remoteAddress === void 0 ? path.remoteCandidateType !== "prflx" : path.remoteAddress.toLowerCase() !== `${pair.peerAddress.toLowerCase()}:${pair.peerPort}`) || path.remotePort !== pair.peerPort || !await isIpv6OnLink(pair.hostAddress, pair.peerAddress)) return [];
+      return this.closed || rtc !== this.tunnel.rtc ? [] : [hostEndpoint];
+    }
     const endpoints = await rtc.nominatedGlobalIpv6Endpoints().catch(() => void 0);
     if (endpoints === void 0 || endpoints.size > 8) return [];
     const verified = await Promise.all([...endpoints].map(async ([address2, { local, remotes }]) => {
@@ -108830,7 +108867,11 @@ var ServerNoiseChannel = class {
     }));
     return this.closed || rtc !== this.tunnel.rtc ? [] : verified.filter((address2) => address2 !== void 0);
   }
-  async lanWebAddress() {
+  async lanWebAddress(pair) {
+    if (pair !== void 0) {
+      const verified = await this.sameLinkIpv6Endpoints(pair);
+      return verified.length === 1 ? pair.hostAddress : void 0;
+    }
     const rtc = this.tunnel.rtc;
     const mode2 = this.mode;
     if (this.closed || !rtc || mode2 !== "LAN" && mode2 !== "P2P") return void 0;

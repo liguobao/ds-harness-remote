@@ -7203,7 +7203,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
       if ((init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase() !== "POST" || requestUrl.href !== routeUrl.href) return original(input, init);
       let lifetime = (init?.signal !== void 0 ? init.signal ?? void 0 : input instanceof Request ? input.signal : void 0) ?? AbortSignal.timeout(45e3);
       try {
-        lifetime.throwIfAborted();
+        if (lifetime.throwIfAborted(), options.isLanWeb && await options.isLanWeb(lifetime)) return original(input, init);
         let status, probeTimeout = AbortSignal.timeout(1e4), probeSignal = AbortSignal.any([lifetime, probeTimeout]);
         try {
           status = await control("status", {}, probeSignal);
@@ -7504,10 +7504,19 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     constructor(message) {
       super(message), this.name = "ControlRouteUnavailableError";
     }
-  }, originalPluginFetch = window.fetch, readyPluginSessions, pluginSessions = new Promise((resolve) => {
+  }, isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location?.hostname ?? ""), originalPluginFetch = window.fetch, lanOrigin = window.location?.protocol === "http:" && /^(?:[\d.]+|\[[0-9a-f:]+\])$/i.test(window.location.hostname), verifiedLanOrigin = !1, readyPluginSessions, pluginSessions = new Promise((resolve) => {
     readyPluginSessions = resolve;
-  }), pluginRouteFetch = typeof originalPluginFetch == "function" && typeof document < "u" ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
-    beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions)
+  }), pluginRouteFetch = !isHostcTunnel && typeof originalPluginFetch == "function" && typeof document < "u" ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
+    beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions),
+    isLanWeb: lanOrigin ? async (signal) => {
+      if (verifiedLanOrigin) return !0;
+      let response = await originalPluginFetch(new URL("/__remote/lan-status", window.location.origin), {
+        credentials: "same-origin",
+        signal
+      }).catch(() => {
+      });
+      return verifiedLanOrigin = response?.status === 204 && response.headers.get("x-dsh-web-lan") === "1", verifiedLanOrigin;
+    } : void 0
   }) : void 0;
   pluginRouteFetch !== void 0 && (window.fetch = pluginRouteFetch);
   var uploadGlobal = globalThis, previousUploadHook = uploadGlobal.__DSH_FILE_UPLOAD__, remoteUploadHook = typeof originalPluginFetch == "function" && typeof document < "u" ? { fetch: createRemoteUploadFetch(previousUploadHook?.fetch ?? originalPluginFetch.bind(window), document.baseURI) } : void 0;
@@ -7748,7 +7757,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
               for (let listener of sidebarEntryListeners) listener();
             }
           }
-        }, isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location.hostname), controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
+        }, controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
           if (endpoint === "status" && (isHostcTunnel || Date.now() < controlRouteRetryAfter))
             return controlRouteUnavailableStatus();
           let result;

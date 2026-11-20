@@ -38,6 +38,8 @@ export interface RtcPathDetails {
   remoteAddressScope?: RtcAddressScope
   localAddress?: string
   remoteAddress?: string
+  remotePort?: number
+  explicitlySelected?: boolean
   protocol?: string
   relayProtocol?: string
   currentRoundTripTimeMs?: number
@@ -749,6 +751,8 @@ export function inspectSelectedPath(
       remoteAddressScope,
       localAddress: candidateAddress(local),
       remoteAddress: candidateAddress(remote),
+      remotePort: numberStat(remote, 'port'),
+      explicitlySelected: pair.selected === true || selectedPairIds.has(String(pair.id)),
       protocol: stringStat(local, 'protocol') ?? stringStat(remote, 'protocol'),
       relayProtocol: stringStat(local, 'relayProtocol') ?? stringStat(remote, 'relayProtocol'),
       currentRoundTripTimeMs: currentRoundTripTime === undefined

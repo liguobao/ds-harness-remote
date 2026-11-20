@@ -888,6 +888,7 @@ export interface HarnessTransportDescription {
   capabilities: string[]
   workspaceTypes?: RemoteWorkspaceTypeDescription[]
   sameLinkIpv6Endpoints?: string[]
+  sameLinkIpv6PairProbe?: true
 }
 
 export type CodexPermissionPreset = 'workspace-write' | 'danger-full-access'

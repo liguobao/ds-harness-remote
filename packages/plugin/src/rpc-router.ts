@@ -1,5 +1,5 @@
 import type { DshWebLanPeer } from './dsh-web-lan.js'
-import { DSH_WEB_CAPABILITY, DSH_WEB_LAN_CAPABILITY } from '@dsh-remote/protocol'
+import { DSH_WEB_CAPABILITY, DSH_WEB_LAN_CAPABILITY, DSH_WEB_LAN_IPV6_CAPABILITY } from '@dsh-remote/protocol'
 import type { DshWebPeer } from './dsh-web-host.js'
 import type { LanUploadHost } from './lan-upload.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
@@ -9,6 +9,7 @@ import {
   createRpcError,
   createRpcResponse,
   parseRemoteWorkspaceTypes,
+  sameLinkIpv6PairSchema,
   REMOTE_COMPACTION_CAPABILITY,
   sessionTransferMethods,
   type RemoteMessage,
@@ -21,6 +22,7 @@ import type { LoopbackHost } from './loopback-host.js'
 import type { RemoteFileViewerBridge } from './file-viewer-bridge.js'
 import type { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { SafeLogger } from './logging.js'
+import type { AuthenticatedPeerChannel } from './types.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode, workspaceFileFailureReason } from './safe-error.js'
@@ -136,7 +138,7 @@ export class RpcRouter {
     private readonly sessionTransfer?: SessionTransferPeer,
     private readonly dshWeb?: DshWebPeer,
     private readonly lanWeb?: DshWebLanPeer,
-    private readonly sameLinkIpv6Endpoints?: () => Promise<string[]>,
+    private readonly sameLinkIpv6Endpoints?: AuthenticatedPeerChannel['sameLinkIpv6Endpoints'],
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -218,7 +220,7 @@ export class RpcRouter {
         await this.dshWeb?.close()
         return { closed: true }
       case 'harness.transport.describe': {
-        emptyParamsSchema.parse(params)
+        const { sameLinkIpv6Pair } = z.object({ sameLinkIpv6Pair: sameLinkIpv6PairSchema.optional() }).strict().parse(params)
         const hostCapabilities = (await this.capabilities()).filter(capability => capability !== BINARY_UPLOAD_CAPABILITY && capability !== LAN_UPLOAD_CAPABILITY)
         const remoteAvailable = hostCapabilities.includes('harness.remote.v1') || hostCapabilities.includes('harness.remote.v3')
         const capabilities = [...new Set([...hostCapabilities, 'remote.history.compact.v1',
@@ -227,6 +229,7 @@ export class RpcRouter {
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
           ...(this.sessionTransfer?.capabilities() ?? []),
           ...(this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : []),
+          ...(this.lanWeb?.available() && this.sameLinkIpv6Endpoints && process.platform === 'linux' ? [DSH_WEB_LAN_IPV6_CAPABILITY] : []),
           ...(this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : []),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
         ])]
@@ -238,10 +241,11 @@ export class RpcRouter {
             workspaceTypes = []
           }
         }
-        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.() ?? []
+        const sameLinkIpv6Endpoints = await this.sameLinkIpv6Endpoints?.(sameLinkIpv6Pair) ?? []
         if (sameLinkIpv6Endpoints.length > 0) this.logger?.info('nominated IPv6 WebRTC endpoints verified on-link', { mode: 'LAN' })
         return {
           capabilities,
+          ...(this.sameLinkIpv6Endpoints ? { sameLinkIpv6PairProbe: true } : {}),
           ...(sameLinkIpv6Endpoints.length > 0 ? { sameLinkIpv6Endpoints } : {}),
           ...(capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: await this.lanWeb?.onLan() === true } : {}),
           ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
