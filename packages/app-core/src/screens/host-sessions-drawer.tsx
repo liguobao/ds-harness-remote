@@ -1161,37 +1161,27 @@ export function HostSessionsDrawer({
       <View style={[styles.container, fullWidthCentered && styles.centeredColumn]}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
-        <View style={styles.brandLeftGroup}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
-            disabled={onOpenAbout === undefined}
-            onPress={() => {
-              Keyboard.dismiss()
-              onOpenAbout?.()
-            }}
-            hitSlop={8}
-            style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
+          disabled={onOpenAbout === undefined}
+          onPress={() => {
+            Keyboard.dismiss()
+            onOpenAbout?.()
+          }}
+          hitSlop={8}
+          style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
+        >
+          <Svg
+            width={22}
+            height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+            accessible={false}
           >
-            <Svg
-              width={22}
-              height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
-              viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
-              accessible={false}
-            >
-              <Path d={FISH_LOGO_PATH} fill={colors.ink} />
-            </Svg>
-            <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
-          </Pressable>
-          {connected && onOpenAttentionInbox !== undefined && (
-            <AttentionHeaderPill
-              onPress={() => {
-                Keyboard.dismiss()
-                onOpenAttentionInbox()
-              }}
-            />
-          )}
-        </View>
+            <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+          </Svg>
+          <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
+        </Pressable>
         <View style={styles.brandRight}>
           {onOpenSettings !== undefined && (
             <Pressable
@@ -1729,22 +1719,34 @@ export function HostSessionsDrawer({
         </>
       )}
 
-      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧轻量设置按钮 */}
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧收件箱入口与设置按钮 */}
       <View style={styles.hostFooterBar}>
         <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        {onOpenSettings !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.settings.title}
-            onPress={() => {
-              Keyboard.dismiss()
-              onOpenSettings()
-            }}
-            hitSlop={8}
-            style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
-          >
-            <Settings size={17} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
+        {((connected && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
+          <View style={styles.hostFooterRight}>
+            {connected && onOpenAttentionInbox !== undefined && (
+              <AttentionHeaderPill
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenAttentionInbox()
+                }}
+              />
+            )}
+            {onOpenSettings !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.settings.title}
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenSettings()
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
+              >
+                <Settings size={17} color={colors.ink} strokeWidth={1.9} />
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
       </View>
@@ -2282,8 +2284,7 @@ const createStyles = (colors: ThemeColors) =>
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
-    brandLeftGroup: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.xs, gap: spacing.xs },
-    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, gap: 8 },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
     brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandBadge: {
       backgroundColor: colors.ink,
@@ -2439,6 +2440,7 @@ const createStyles = (colors: ThemeColors) =>
     hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
     hostFooterStatusText: { ...type.caption, fontSize: 12, color: colors.muted },
+    hostFooterRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
     footerSettingsBtn: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     sectionList: { flex: 1 },
 

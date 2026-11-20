@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { AttentionDigest, AttentionItem, AttentionStatus } from '@dsh-remote/protocol'
+import type { AttentionItem, AttentionStatus } from '@dsh-remote/protocol'
 import { strings } from '../locales/i18n'
 import {
   selectAttentionCounts,
@@ -29,7 +29,6 @@ import {
   useAttentionStore,
 } from '../state/attention-store'
 import { useAppStore } from '../state/store'
-import type { RemoteDevice } from '../types'
 import { IconButton } from '../ui/components'
 import { useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
@@ -381,7 +380,7 @@ export function AttentionInboxSheet({
 }
 
 /**
- * Compact header pill placed next to the sidebar brand title in HostSessionsDrawer
+ * Compact pill placed in the HostSessionsDrawer footer to the left of Settings,
  * showing urgent/active count and opening the Attention Inbox sheet.
  */
 export function AttentionHeaderPill({
@@ -448,136 +447,6 @@ export function AttentionHeaderPill({
         </Text>
       )}
     </Pressable>
-  )
-}
-
-export function digestTotalCount(digest: AttentionDigest | undefined): number {
-  if (!digest) return 0
-  return digest.pendingApprovals
-    + digest.pendingQuestions
-    + digest.runningSessions
-    + digest.completedUnread
-}
-
-export function formatDigestSegments(digest: AttentionDigest): Array<
-  | { key: string; label: string; urgent: true; tone: 'approval' | 'question' }
-  | { key: string; label: string; urgent: false }
-> {
-  const segments: Array<
-    | { key: string; label: string; urgent: true; tone: 'approval' | 'question' }
-    | { key: string; label: string; urgent: false }
-  > = []
-  if (digest.pendingApprovals > 0) {
-    segments.push({ key: 'approvals', label: strings.attention.approvalsCount(digest.pendingApprovals), urgent: true, tone: 'approval' })
-  }
-  if (digest.pendingQuestions > 0) {
-    segments.push({ key: 'questions', label: strings.attention.questionsCount(digest.pendingQuestions), urgent: true, tone: 'question' })
-  }
-  if (digest.runningSessions > 0) {
-    segments.push({ key: 'running', label: strings.attention.runningCount(digest.runningSessions), urgent: false })
-  }
-  if (digest.completedUnread > 0) {
-    segments.push({ key: 'completed', label: strings.attention.completedCount(digest.completedUnread), urgent: false })
-  }
-  return segments
-}
-
-/**
- * Cross-host summary banner shown above host lists when any online host
- * advertises pending approvals, questions, running tasks, or unread completions
- * in its Presence `attentionDigest`.
- */
-export function CrossHostAttentionBanner({
-  devices,
-  onSelectHost,
-}: {
-  devices: readonly RemoteDevice[]
-  onSelectHost: (device: RemoteDevice, token?: string) => void
-}) {
-  useAppStore(state => state.language)
-  const { colors, scheme } = useTheme()
-  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
-  const styles = useThemedStyles(createStyles)
-
-  const activeHosts = useMemo(() => {
-    return devices
-      .filter(device => device.online && device.trusted && digestTotalCount(device.attentionDigest) > 0)
-      .sort((a, b) => {
-        const aUrgent = (a.attentionDigest?.pendingApprovals ?? 0) + (a.attentionDigest?.pendingQuestions ?? 0)
-        const bUrgent = (b.attentionDigest?.pendingApprovals ?? 0) + (b.attentionDigest?.pendingQuestions ?? 0)
-        if (aUrgent !== bUrgent) return bUrgent - aUrgent
-        return (b.attentionDigest?.updatedAt ?? 0) - (a.attentionDigest?.updatedAt ?? 0)
-      })
-  }, [devices])
-
-  if (activeHosts.length === 0) return null
-
-  const anyApprovals = activeHosts.some(d => (d.attentionDigest?.pendingApprovals ?? 0) > 0)
-  const anyQuestions = activeHosts.some(d => (d.attentionDigest?.pendingQuestions ?? 0) > 0)
-  const headerDotColor = anyApprovals
-    ? palette.approval.dot
-    : anyQuestions
-      ? palette.question.dot
-      : palette.running.dot
-
-  return (
-    <View style={styles.bannerCard}>
-      <View style={styles.bannerHeader}>
-        <View style={[styles.bannerDot, { backgroundColor: headerDotColor }]} />
-        <Text style={styles.bannerTitle}>
-          {strings.attention.crossHostTitle}
-        </Text>
-      </View>
-      {activeHosts.map(device => {
-        const digest = device.attentionDigest!
-        const segments = formatDigestSegments(digest)
-        const urgentSegments = segments.filter(seg => seg.urgent)
-        const secondaryText = segments.filter(seg => !seg.urgent).map(seg => seg.label).join(' · ')
-        const summary = segments.map(seg => seg.label).join(' · ')
-        return (
-          <Pressable
-            key={device.deviceId}
-            accessibilityRole="button"
-            accessibilityLabel={`${device.name}, ${summary}`}
-            onPress={() => onSelectHost(device, digest.attentionToken)}
-            style={({ pressed }) => [
-              styles.bannerRow,
-              styles.bannerRowBorder,
-              pressed && styles.rowPressed,
-            ]}
-          >
-            <View style={styles.bannerRowText}>
-              <Text style={styles.bannerHostName} numberOfLines={1}>{device.name}</Text>
-              <View style={styles.bannerSummaryRow}>
-                {urgentSegments.map(seg => {
-                  const tone = seg.tone === 'question' ? palette.question : palette.approval
-                  return (
-                    <View
-                      key={seg.key}
-                      style={[
-                        styles.digestChip,
-                        { backgroundColor: tone.bg, borderColor: tone.border },
-                      ]}
-                    >
-                      <View style={[styles.digestDot, { backgroundColor: tone.dot }]} />
-                      <Text style={[styles.digestChipText, { color: tone.fg }]} numberOfLines={1}>
-                        {seg.label}
-                      </Text>
-                    </View>
-                  )
-                })}
-                {secondaryText.length > 0 && (
-                  <Text style={styles.bannerSummary} numberOfLines={1}>
-                    {secondaryText}
-                  </Text>
-                )}
-              </View>
-            </View>
-            <ChevronRight size={16} color={colors.subtle} />
-          </Pressable>
-        )
-      })}
-    </View>
   )
 }
 
@@ -740,70 +609,5 @@ function createStyles(colors: ThemeColors) {
       fontVariant: ['tabular-nums'],
     },
     pressed: { opacity: 0.72 },
-    digestChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 7,
-      paddingVertical: 2,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-    },
-    digestDot: {
-      width: 5,
-      height: 5,
-      borderRadius: 2.5,
-    },
-    digestChipText: {
-      ...type.caption,
-      fontSize: 11,
-      fontWeight: '600',
-      fontVariant: ['tabular-nums'],
-    },
-    bannerCard: {
-      backgroundColor: colors.grouped,
-      borderRadius: radius.xl,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      overflow: 'hidden',
-      marginBottom: spacing.sm,
-    },
-    bannerHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs + 3,
-    },
-    bannerDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-    },
-    bannerTitle: {
-      ...type.caption,
-      fontWeight: '600',
-      color: colors.muted,
-    },
-    bannerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      gap: spacing.sm,
-    },
-    bannerRowBorder: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
-    },
-    bannerRowText: { flex: 1, minWidth: 0, gap: 5 },
-    bannerHostName: { ...type.smallStrong, color: colors.ink },
-    bannerSummaryRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 6,
-    },
-    bannerSummary: { ...type.caption, color: colors.muted, fontWeight: '500' },
   })
 }

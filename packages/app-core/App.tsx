@@ -305,24 +305,6 @@ function AppNavigator() {
     }
   }
 
-  const openHostAttention = (device: (typeof devices)[number], token?: string) => {
-    setHostSwitcherOpen(false)
-    if (selectedDevice?.deviceId === device.deviceId && useAppStore.getState().connection.phase === 'connected') {
-      void openAttentionTarget({ token })
-      return
-    }
-    if (device.trusted && device.online) {
-      push({
-        name: 'connecting',
-        deviceId: device.deviceId,
-        openAttentionInbox: true,
-        ...(token !== undefined ? { attentionToken: token } : {}),
-      })
-      return
-    }
-    openDevice(device)
-  }
-
   const handleSelectAttentionItem = (item: AttentionItem) => {
     setAttentionInboxOpen(false)
     if (item.status === 'completed_unread' || item.status === 'failed_unread') {
@@ -626,7 +608,6 @@ function AppNavigator() {
           <RemoteHostsScreen
             onBack={backFromRemoteHosts}
             onSelectDevice={openDevice}
-            onSelectHostAttention={openHostAttention}
             onOpenDeviceDetail={device => push({ name: 'device', deviceId: device.deviceId })}
             onSignedOut={() => reset({ name: 'server' })}
             autoConnectHost={autoConnectHost}
