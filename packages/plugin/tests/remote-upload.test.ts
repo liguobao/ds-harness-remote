@@ -8,13 +8,13 @@ import { PluginRouteBridge } from '../src/plugin-route-bridge.js'
 import { createPluginRouteDispatcher } from '../src/plugin-route-dispatcher.js'
 
 const base = 'http://localhost/'
-function carrier(mode = 'remote', connected = true) {
+function carrier(mode = 'remote', connected = true, backend?: string) {
   const calls: { method: string; payload: any }[] = []
   const original = vi.fn(async (_input: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body))
     calls.push(body)
     return Response.json({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value:
-      body.method === 'status' ? { mode, connected, target: { deviceId: 'host-1' } } : { status: 200, json: { ok: true, value: { receiptId: 'remote-receipt' } } } } })
+      body.method === 'status' ? { mode, connected, backend, target: { deviceId: 'host-1' } } : { status: 200, json: { ok: true, value: { receiptId: 'remote-receipt' } } } } })
   }) as unknown as typeof fetch
   return { original, calls, upload: createRemoteUploadFetch(original, base) }
 }
@@ -28,6 +28,16 @@ describe('Remote attachment upload', () => {
     expect(await response.json()).toEqual({ ok: true, value: { receiptId: 'remote-receipt' } })
     expect(calls[1]?.payload.targetDeviceId).toBe('host-1')
     expect(calls[1]?.payload.body.payload).toEqual({ sessionId: 's', mediaType: 'image/png', name: 'a.png', data: 'AID/' })
+  })
+  it('routes Desktop CodeX attachments through the selected Host control route', async () => {
+    const { upload, calls } = carrier('remote', true, 'codex')
+    await upload(`${base}api/session/uploadFileBinary?sessionId=codex%3Athr_1&name=notes.txt`, {
+      method: 'POST', body: 'notes',
+    })
+    expect(calls[1]?.payload).toMatchObject({
+      targetDeviceId: 'host-1',
+      body: { endpoint: 'file', payload: { sessionId: 'codex:thr_1', name: 'notes.txt', data: 'bm90ZXM=' } },
+    })
   })
   it.each(['image', 'file'] as const)('uploads a 9 MiB %s through ordered bounded transfer frames exactly once', async kind => {
     const bytes = Buffer.alloc(9 * 1024 * 1024, 173)

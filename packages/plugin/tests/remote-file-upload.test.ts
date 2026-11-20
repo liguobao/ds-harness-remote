@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, readFile, readdir, rm, truncate } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { uploadRemoteFile } from '../src/remote-file-upload.js'
+import { uploadRemoteBuffer, uploadRemoteFile } from '../src/remote-file-upload.js'
 import { WorkspaceUploadHost } from '../src/workspace-upload.js'
 import { RemoteSessionTools } from '../src/remote-session-tools.js'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
@@ -63,6 +63,28 @@ describe('Remote upload tool transfer and receipts', () => {
         expect((await readdir(remote)).some(name => name.endsWith('.part'))).toBe(false)
       } finally { await host.closeAll(); await rm(root, { recursive: true, force: true }) }
     } })))
+  })
+
+  it('publishes Desktop CodeX bytes in the authorized workspace and never overwrites', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'remote-desktop-upload-'))
+    const host = new WorkspaceUploadHost(async (sessionId) => sessionId === 'codex:thread' ? root : undefined)
+    const rpc = vi.fn((method: string, params: unknown) => host.call(method, params))
+    const client = { rpc, getStats: () => ({ mode: 'Relay' }) } as unknown as RemoteClientCore
+    const signal = new AbortController().signal
+    const bytes = Buffer.alloc(140_000, 7)
+    try {
+      await writeFile(join(root, 'notes.txt'), 'existing')
+      await expect(uploadRemoteBuffer(client, 'codex:foreign', 'notes.txt', bytes, signal, () => {})).rejects.toThrow()
+      await expect(uploadRemoteBuffer(client, 'codex:thread', 'notes.txt', bytes, signal, () => {})).resolves.toMatchObject({
+        path: './notes (1).txt', bytes: bytes.length,
+      })
+      expect(await readFile(join(root, 'notes.txt'), 'utf8')).toBe('existing')
+      expect(await readFile(join(root, 'notes (1).txt'))).toEqual(bytes)
+      expect(rpc.mock.calls.filter(([method]) => method === 'workspace.upload.commit')).toHaveLength(1)
+    } finally {
+      await host.closeAll()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('deduplicates upload operations and rejects foreign sessions before reading or transmitting local files', async () => {

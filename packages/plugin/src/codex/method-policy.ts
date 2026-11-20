@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isCanonicalBase64 } from './codex-image-codec.js'
 import { RpcError } from '../safe-error.js'
 import { CODEX_HISTORY_PAGE_MAX_MESSAGES } from './virtual-values.js'
 
@@ -12,7 +13,7 @@ const imageMediaType = z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/g
 const canonicalBase64 = z.string()
   .min(4)
   .max(288 * 1024 * 1024)
-  .refine(value => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+  .refine(isCanonicalBase64, {
     message: 'Image data must use canonical base64.',
   })
 const imageInput = z.object({

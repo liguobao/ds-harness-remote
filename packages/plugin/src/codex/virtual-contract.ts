@@ -70,6 +70,8 @@ export interface FollowState {
   pendingToolImages: JsonRecord[]
   requestId?: string
   activeTurnId?: string
+  completedTurnId?: string
+  recoveringTurnId?: string
   close?: () => Promise<void>
 }
 

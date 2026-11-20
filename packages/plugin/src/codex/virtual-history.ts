@@ -70,6 +70,7 @@ export function projectCodexNativeHistory(
   thread: JsonRecord,
   sessionId: string,
   sessionGeneration: HarnessSessionGeneration = 'legacy',
+  cacheToolImages?: (images: JsonRecord[]) => void,
 ): CodexNativeHistory {
   const entries: CodexNativeHistory['entries'] = []
   let seq = 0
@@ -137,6 +138,7 @@ export function projectCodexNativeHistory(
         selection,
         sessionId,
         itemIndex === imageOwner ? toolImages : [],
+        cacheToolImages,
       )) {
         const eventSeq = append(
           event.type,
@@ -306,6 +308,7 @@ export function itemEvents(
   selection: CodexModelSelection = modelSelection(),
   sessionId = CODEX_SESSION_PREFIX,
   supplementalImages: JsonRecord[] = [],
+  cacheToolImages?: (images: JsonRecord[]) => void,
 ): ProjectedNativeEvent[] {
   const type = string(item.type)
   const id = string(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`
@@ -351,7 +354,7 @@ export function itemEvents(
         data: { turn, step, callId: id, name, arguments: JSON.stringify(args) },
         view: { for: 'call', view: toolCallView(item, type, args) },
       },
-      toolResultEvent(item, turn, step, id, toolResultText(item, type, text)),
+      toolResultEvent(item, turn, step, id, toolResultText(item, type, text), sessionId, cacheToolImages),
     ]
   }
   if (type === 'error') return [{
@@ -391,7 +394,12 @@ export function toolResultEvent(
   step: number,
   id: string,
   resultText: string,
+  sessionId?: string,
+  cacheToolImages?: (images: JsonRecord[]) => void,
 ): ProjectedNativeEvent {
+  const images = sessionId === undefined ? [] : contentBlocks(toolOutputImageBlocks(item), `${sessionId}:${id}:result`)
+  if (images.length > 0) cacheToolImages?.(images)
+  const imageReferences = images.map(image => ({ type: 'image', attachment: image.attachment }))
   const type = string(item.type) ?? 'unknown'
   return {
     type: 'tool/result',
@@ -404,7 +412,7 @@ export function toolResultEvent(
         content: [{
           type: 'tool-result',
           toolCallId: id,
-          content: [{ type: 'text', text: resultText }],
+          content: [{ type: 'text', text: resultText }, ...imageReferences],
           ...(item.status === 'failed' || item.success === false ? { isError: true } : {}),
         }],
         source: { kind: 'tool', callId: id },

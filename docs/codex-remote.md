@@ -99,8 +99,9 @@ Web 与 Desktop Remote 的审批模式按 Thread 显示 Host 已确认的设置�
 内存快照，不恢复会话；Host 重启后，尚未再次获知的模式回到未知状态。
 
 Codex 支持文本 Prompt，以及 Desktop 剪贴板粘贴或 Android 系统图片选择器提供的 PNG、JPEG、WebP、
-GIF 图片 Prompt。图片走受限的加密分块传输；通用文件附件、外部 URL、Host path 直接引用和目录写入
-不开放。
+GIF 图片 Prompt。图片走受限的加密分块传输。Desktop 普通文件通过专用工作区上传通道写入当前
+Codex 会话的工作目录，发送时将同一会话的上传回执转换为相对路径引用。上传不会覆盖已有文件。
+外部图片 URL 和由 Client 指定 Host 上传目录的操作不开放。
 
 权限遵循 Remote 原有 Host 边界：同账号 membership、Host identity 固定、Noise 安全通道、自适应
 传输和连接隔离都必须继续成立。虚拟 Workspace/Session 不得写入 DSH SessionStore、Workspace 存储、

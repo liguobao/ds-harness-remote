@@ -44701,75 +44701,6 @@ var require_lib = __commonJS({
 // packages/plugin/src/index.ts
 import * as DshConnection from "@deepseek-ai/dsh-client-connection";
 
-// packages/plugin/src/local-mention-upload.ts
-import { lstat, readFile } from "node:fs/promises";
-import { posix, win32 } from "node:path";
-var MAX_MENTION_BYTES = 192 * 1024 * 1024;
-var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
-async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
-  if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
-  const request = payload.args.request;
-  if (typeof request.sessionId !== "string" || !Array.isArray(request.content)) return payload;
-  const content = [];
-  let uploaded = 0;
-  let seen = 0;
-  let staged = 0;
-  for (const block of request.content) {
-    if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
-      content.push(block);
-      continue;
-    }
-    const matches = [...block.text.matchAll(LOCAL_MENTION)].filter((match) => (platform3 === "win32" ? win32 : posix).isAbsolute(match[2] ?? match[3]));
-    if (matches.length === 0) {
-      content.push(block);
-      continue;
-    }
-    let cursor3 = 0;
-    for (const match of matches) {
-      signal.throwIfAborted();
-      const start = match.index + (match[1]?.length ?? 0);
-      if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
-      const path = match[2] ?? match[3];
-      const candidates = await remote.dispatch("fileReferences/list", { args: {
-        agentId: request.sessionId,
-        query: path
-      } }, signal);
-      if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
-      if (++seen > 4) throw new Error("Remote supports at most four absolute local file mentions per message.");
-      let file2;
-      try {
-        file2 = await fileIO.lstat(path);
-      } catch (error62) {
-        if (isMissingFile(error62)) continue;
-        throw error62;
-      }
-      if (!file2.isFile() || file2.isSymbolicLink() || uploaded + file2.size > MAX_MENTION_BYTES) {
-        throw new Error("The selected local file is unavailable or exceeds the Remote transfer limit.");
-      }
-      uploaded += file2.size;
-      const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
-      const result = await remote.dispatch("fileUploads/upload", { args: {
-        agentId: request.sessionId,
-        request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
-      } }, signal);
-      if (!result.ok) throw new Error(result.error.message);
-      const value = result.value;
-      if (typeof value?.receiptId !== "string" || value.receiptId.length === 0) throw new Error("The Remote Host did not return a file receipt.");
-      content.push({ type: "file", receiptId: value.receiptId });
-      staged++;
-      cursor3 = match.index + match[0].length;
-    }
-    if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
-  }
-  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request, content } } };
-}
-function isMentionRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isMissingFile(error62) {
-  return isMentionRecord(error62) && (error62.code === "ENOENT" || error62.code === "ENOTDIR");
-}
-
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -64487,6 +64418,259 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// packages/plugin/src/safe-error.ts
+var RpcError = class extends Error {
+  constructor(code, message, details2, retryable = false) {
+    super(message);
+    this.code = code;
+    this.details = details2;
+    this.retryable = retryable;
+  }
+};
+function safeErrorCode(error62) {
+  if (error62 instanceof RpcError) return error62.code;
+  if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
+  return "INTERNAL_ERROR";
+}
+var WORKSPACE_FILE_FAILURE_REASONS = [
+  "scope-missing",
+  "authority-unavailable",
+  "root-invalid",
+  "outside-root",
+  "symlink",
+  "not-regular-file",
+  "not-found",
+  "too-large",
+  "io"
+];
+var workspaceFileFailureReasons = new Set(WORKSPACE_FILE_FAILURE_REASONS);
+function workspaceFileFailureReason(error62) {
+  if (typeof error62 !== "object" || error62 === null || !("details" in error62)) return void 0;
+  const details2 = error62.details;
+  if (typeof details2 !== "object" || details2 === null) return void 0;
+  const reason = details2.reason;
+  return typeof reason === "string" && workspaceFileFailureReasons.has(reason) ? reason : void 0;
+}
+function workspaceFileFailure(code, message, reason) {
+  return new RpcError(code, message, { reason });
+}
+var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
+  "IDENTITY_INVALID",
+  "IDENTITY_LOCKED",
+  "STORAGE_CONFLICT",
+  "SERVER_CREDENTIALS_INVALID",
+  "SERVER_CREDENTIALS_BUSY",
+  "SERVER_CREDENTIALS_LOCK_DIRECTORY"
+]);
+var CREDENTIALS_LOCK_DIRECTORY_MESSAGE = "The credential refresh lock is a directory. Stop all Harness instances, then move the old lock directory aside and restart.";
+var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
+  "device identity is incomplete; repair it explicitly before reconnecting",
+  "device public and private keys do not match",
+  "device identity is locked by another process; stop other DSH instances and retry",
+  "Remote storage fallback record is invalid; no credentials were changed.",
+  "Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.",
+  "Legacy Remote storage changed after fallback; inspect it before reconnecting.",
+  "Pinned Remote storage is missing; no replacement identity was created.",
+  "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
+  "Remote storage must be a real directory; symbolic links are not migrated.",
+  "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration."
+]);
+var SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/;
+function safeStartupError(error62) {
+  const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && SAFE_STARTUP_CODES.has(error62.code) ? error62.code : safeErrorCode(error62);
+  if (code === "SERVER_CREDENTIALS_INVALID") {
+    return { code, message: "Local Remote server credentials are invalid." };
+  }
+  if (code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") return { code, message: CREDENTIALS_LOCK_DIRECTORY_MESSAGE };
+  if (code === "SERVER_CREDENTIALS_BUSY") {
+    return {
+      code,
+      message: "Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops."
+    };
+  }
+  if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
+    const rawMessage = error62 instanceof Error ? error62.message : "";
+    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE.test(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
+      return { code, message: rawMessage };
+    }
+    if (rawMessage.startsWith("device identity is invalid")) {
+      return { code, message: "device identity is invalid" };
+    }
+    if (rawMessage.startsWith("trusted peer ")) {
+      return { code, message: "trusted peer record is invalid" };
+    }
+    return {
+      code,
+      message: code === "IDENTITY_LOCKED" ? "device identity is locked by another process; stop other DSH instances and retry" : code === "STORAGE_CONFLICT" ? "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." : "device identity is invalid"
+    };
+  }
+  return { code, message: "Remote plugin failed to start." };
+}
+
+// packages/plugin/src/codex/session-id.ts
+function parseCodexSessionId(value) {
+  if (typeof value !== "string") return void 0;
+  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
+  return match === null ? void 0 : { sessionId: value, threadId: match[1] };
+}
+
+// packages/plugin/src/workspace-transfer-limits.ts
+function workspaceUploadMaxBytes(mode2) {
+  return mode2 === "LAN" || mode2 === "P2P" ? 1024 * 1024 * 1024 : 20 * 1024 * 1024;
+}
+
+// packages/plugin/src/remote-file-upload.ts
+import { constants } from "node:fs";
+import { open as open2 } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+var CHUNK = 64 * 1024;
+async function uploadRemoteFile(client, sessionId, localPath, name2, signal, assertCurrent) {
+  let file2;
+  try {
+    file2 = await open2(localPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const handle = file2;
+    const before = await handle.stat();
+    if (!before.isFile()) return { status: "rejected" };
+    return await uploadWorkspaceSource(client, sessionId, name2, before.size, signal, assertCurrent, async (offset2, length) => {
+      const buffer3 = Buffer.alloc(length);
+      const read = await handle.read(buffer3, 0, length, offset2);
+      return buffer3.subarray(0, read.bytesRead);
+    }, async () => {
+      const after = await handle.stat();
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+        throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
+      }
+    });
+  } catch {
+    return { status: "rejected" };
+  } finally {
+    await file2?.close();
+  }
+}
+async function uploadRemoteBuffer(client, sessionId, name2, data2, signal, assertCurrent) {
+  const result = await uploadWorkspaceSource(
+    client,
+    sessionId,
+    name2,
+    data2.byteLength,
+    signal,
+    assertCurrent,
+    (offset2, size2) => data2.subarray(offset2, offset2 + size2)
+  );
+  if (result.status === "accepted") return result;
+  throw new Error(result.status === "unknown" ? "The upload result is uncertain. Check the remote workspace before retrying." : "The file could not be uploaded to the selected CodeX workspace.");
+}
+async function uploadWorkspaceSource(client, sessionId, name2, totalBytes, signal, assertCurrent, read, beforeCommit) {
+  const uploadId = randomUUID();
+  const scope3 = { sessionId, uploadId };
+  let remoteOpened = false;
+  let committing = false;
+  const check2 = () => {
+    signal.throwIfAborted();
+    assertCurrent();
+    if (totalBytes > workspaceUploadMaxBytes(client.getStats?.().mode)) throw new Error("UPLOAD_TRANSPORT_LIMIT");
+  };
+  const call = async (method, params) => {
+    check2();
+    const result = await client.rpc(method, params, signal);
+    check2();
+    return result;
+  };
+  try {
+    check2();
+    remoteOpened = true;
+    const opened = external_exports.object({ uploadId: external_exports.literal(uploadId), chunkBytes: external_exports.number().int().min(1).max(CHUNK) }).parse(await call("workspace.upload.open", { ...scope3, name: name2, totalBytes }));
+    let offset2 = 0;
+    while (offset2 < totalBytes) {
+      check2();
+      const chunk = await read(offset2, Math.min(opened.chunkBytes, totalBytes - offset2));
+      if (chunk.length === 0) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
+      const next = offset2 + chunk.length;
+      external_exports.object({ uploadId: external_exports.literal(uploadId), receivedBytes: external_exports.literal(next) }).parse(
+        await call("workspace.upload.chunk", { ...scope3, offset: offset2, data: Buffer.from(chunk).toString("base64") })
+      );
+      offset2 = next;
+    }
+    await beforeCommit?.();
+    check2();
+    committing = true;
+    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(totalBytes) }).parse(await call("workspace.upload.commit", scope3));
+    return { status: "accepted", ...result };
+  } catch {
+    if (remoteOpened) await client.rpc("workspace.upload.abort", scope3, AbortSignal.timeout(5e3)).catch(() => void 0);
+    return { status: committing ? "unknown" : "rejected" };
+  }
+}
+
+// packages/plugin/src/local-mention-upload.ts
+import { lstat, readFile } from "node:fs/promises";
+import { posix, win32 } from "node:path";
+var MAX_MENTION_BYTES = 192 * 1024 * 1024;
+var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
+async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
+  if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
+  const request = payload.args.request;
+  if (typeof request.sessionId !== "string" || !Array.isArray(request.content)) return payload;
+  const content = [];
+  let uploaded = 0;
+  let seen = 0;
+  let staged = 0;
+  for (const block of request.content) {
+    if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
+      content.push(block);
+      continue;
+    }
+    const matches = [...block.text.matchAll(LOCAL_MENTION)].filter((match) => (platform3 === "win32" ? win32 : posix).isAbsolute(match[2] ?? match[3]));
+    if (matches.length === 0) {
+      content.push(block);
+      continue;
+    }
+    let cursor3 = 0;
+    for (const match of matches) {
+      signal.throwIfAborted();
+      const start = match.index + (match[1]?.length ?? 0);
+      if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
+      const path = match[2] ?? match[3];
+      const candidates = await remote.dispatch("fileReferences/list", { args: {
+        agentId: request.sessionId,
+        query: path
+      } }, signal);
+      if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
+      if (++seen > 4) throw new Error("Remote supports at most four absolute local file mentions per message.");
+      let file2;
+      try {
+        file2 = await fileIO.lstat(path);
+      } catch (error62) {
+        if (isMissingFile(error62)) continue;
+        throw error62;
+      }
+      if (!file2.isFile() || file2.isSymbolicLink() || uploaded + file2.size > MAX_MENTION_BYTES) {
+        throw new Error("The selected local file is unavailable or exceeds the Remote transfer limit.");
+      }
+      uploaded += file2.size;
+      const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
+      const result = await remote.dispatch("fileUploads/upload", { args: {
+        agentId: request.sessionId,
+        request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
+      } }, signal);
+      if (!result.ok) throw new Error(result.error.message);
+      const value = result.value;
+      if (typeof value?.receiptId !== "string" || value.receiptId.length === 0) throw new Error("The Remote Host did not return a file receipt.");
+      content.push({ type: "file", receiptId: value.receiptId });
+      staged++;
+      cursor3 = match.index + match[0].length;
+    }
+    if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
+  }
+  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request, content } } };
+}
+function isMentionRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isMissingFile(error62) {
+  return isMentionRecord(error62) && (error62.code === "ENOENT" || error62.code === "ENOTDIR");
+}
+
 // packages/protocol/dist/lan-upload.js
 var LAN_UPLOAD_CAPABILITY = "workspace.upload.lan.v1";
 var LAN_UPLOAD_MIN_BYTES = 1024 * 1024;
@@ -80439,7 +80623,7 @@ function canReconnect(error62) {
 }
 
 // packages/plugin/src/loopback-preview.ts
-import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
+import { randomBytes as randomBytes6, randomUUID as randomUUID2 } from "node:crypto";
 import { createServer } from "node:http";
 
 // node_modules/ws/wrapper.mjs
@@ -80455,97 +80639,6 @@ var wrapper_default = import_websocket.default;
 
 // packages/plugin/src/loopback-host.ts
 import { request as httpRequest } from "node:http";
-
-// packages/plugin/src/safe-error.ts
-var RpcError = class extends Error {
-  constructor(code, message, details2, retryable = false) {
-    super(message);
-    this.code = code;
-    this.details = details2;
-    this.retryable = retryable;
-  }
-};
-function safeErrorCode(error62) {
-  if (error62 instanceof RpcError) return error62.code;
-  if (error62 instanceof external_exports.ZodError) return "INVALID_MESSAGE";
-  return "INTERNAL_ERROR";
-}
-var WORKSPACE_FILE_FAILURE_REASONS = [
-  "scope-missing",
-  "authority-unavailable",
-  "root-invalid",
-  "outside-root",
-  "symlink",
-  "not-regular-file",
-  "not-found",
-  "too-large",
-  "io"
-];
-var workspaceFileFailureReasons = new Set(WORKSPACE_FILE_FAILURE_REASONS);
-function workspaceFileFailureReason(error62) {
-  if (typeof error62 !== "object" || error62 === null || !("details" in error62)) return void 0;
-  const details2 = error62.details;
-  if (typeof details2 !== "object" || details2 === null) return void 0;
-  const reason = details2.reason;
-  return typeof reason === "string" && workspaceFileFailureReasons.has(reason) ? reason : void 0;
-}
-function workspaceFileFailure(code, message, reason) {
-  return new RpcError(code, message, { reason });
-}
-var SAFE_STARTUP_CODES = /* @__PURE__ */ new Set([
-  "IDENTITY_INVALID",
-  "IDENTITY_LOCKED",
-  "STORAGE_CONFLICT",
-  "SERVER_CREDENTIALS_INVALID",
-  "SERVER_CREDENTIALS_BUSY",
-  "SERVER_CREDENTIALS_LOCK_DIRECTORY"
-]);
-var CREDENTIALS_LOCK_DIRECTORY_MESSAGE = "The credential refresh lock is a directory. Stop all Harness instances, then move the old lock directory aside and restart.";
-var SAFE_STATIC_STARTUP_MESSAGES = /* @__PURE__ */ new Set([
-  "device identity is incomplete; repair it explicitly before reconnecting",
-  "device public and private keys do not match",
-  "device identity is locked by another process; stop other DSH instances and retry",
-  "Remote storage fallback record is invalid; no credentials were changed.",
-  "Both Remote storage directories exist; stop all Harness instances and resolve them manually. No credentials were overwritten.",
-  "Legacy Remote storage changed after fallback; inspect it before reconnecting.",
-  "Pinned Remote storage is missing; no replacement identity was created.",
-  "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually.",
-  "Remote storage must be a real directory; symbolic links are not migrated.",
-  "Remote storage contains a lock or symbolic link; stop all Harness instances and inspect it before migration."
-]);
-var SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE = /^Remote storage ownership could not be verified; nothing was moved\. Inspect the legacy directory manually\. Unexpected entry "[A-Za-z0-9._-]{1,160}" was found\.$/;
-function safeStartupError(error62) {
-  const code = error62 instanceof Error && "code" in error62 && typeof error62.code === "string" && SAFE_STARTUP_CODES.has(error62.code) ? error62.code : safeErrorCode(error62);
-  if (code === "SERVER_CREDENTIALS_INVALID") {
-    return { code, message: "Local Remote server credentials are invalid." };
-  }
-  if (code === "SERVER_CREDENTIALS_LOCK_DIRECTORY") return { code, message: CREDENTIALS_LOCK_DIRECTORY_MESSAGE };
-  if (code === "SERVER_CREDENTIALS_BUSY") {
-    return {
-      code,
-      message: "Credential refresh is busy. The Host will retry. Remove a legacy refresh lock only after every instance stops."
-    };
-  }
-  if (code === "IDENTITY_INVALID" || code === "IDENTITY_LOCKED" || code === "STORAGE_CONFLICT") {
-    const rawMessage = error62 instanceof Error ? error62.message : "";
-    if (SAFE_STATIC_STARTUP_MESSAGES.has(rawMessage) || SAFE_STORAGE_CONFLICT_ENTRY_MESSAGE.test(rawMessage) || /^private key permissions must be 0600, got [0-7]{3,4}$/.test(rawMessage)) {
-      return { code, message: rawMessage };
-    }
-    if (rawMessage.startsWith("device identity is invalid")) {
-      return { code, message: "device identity is invalid" };
-    }
-    if (rawMessage.startsWith("trusted peer ")) {
-      return { code, message: "trusted peer record is invalid" };
-    }
-    return {
-      code,
-      message: code === "IDENTITY_LOCKED" ? "device identity is locked by another process; stop other DSH instances and retry" : code === "STORAGE_CONFLICT" ? "Remote storage ownership could not be verified; nothing was moved. Inspect the legacy directory manually." : "device identity is invalid"
-    };
-  }
-  return { code, message: "Remote plugin failed to start." };
-}
-
-// packages/plugin/src/loopback-host.ts
 var HOP_HEADERS = /* @__PURE__ */ new Set([
   "connection",
   "keep-alive",
@@ -80871,7 +80964,7 @@ var LoopbackPreview = class {
         socket.destroy();
         return;
       }
-      const id7 = randomUUID();
+      const id7 = randomUUID2();
       const headers = this.headers(req, port);
       const protocols = (req.headers["sec-websocket-protocol"] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
       void this.client.rpc("loopback.call", { op: "ws.open", id: id7, port, path: req.url ?? "/", headers, protocols }, this.lifetime.signal).then((result) => {
@@ -80911,7 +81004,7 @@ var LoopbackPreview = class {
     return cleanHeaders(headerPairs(req.headers)).filter(([name2]) => !["origin", "referer"].includes(name2.toLowerCase())).concat(req.headers.origin === void 0 ? [] : [["origin", `http://127.0.0.1:${port}`]]);
   }
   async http(port, authority, req, res) {
-    const id7 = randomUUID();
+    const id7 = randomUUID2();
     const controller = new AbortController();
     const abort = () => {
       controller.abort();
@@ -82239,7 +82332,9 @@ function stringFromBytes(bytes, start, end) {
   return output2;
 }
 function isCanonicalBase642(value) {
-  return value.length >= 4 && value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value);
+  if (value.length < 4 || value.length % 4 !== 0) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return !/[^A-Za-z0-9+/]/u.test(value.slice(0, value.length - padding));
 }
 function hashString2(value) {
   let hash3 = 2166136261;
@@ -82532,7 +82627,7 @@ function projectTurnError(error62) {
 // packages/plugin/src/codex/virtual-history.ts
 var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
 var CODEX_PAGE_ENVELOPE_HEADROOM_BYTES = 2048;
-function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
+function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy", cacheToolImages) {
   const entries = [];
   let seq = 0;
   let turnNumber = 0;
@@ -82588,7 +82683,8 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
         void 0,
         selection,
         sessionId,
-        itemIndex === imageOwner ? toolImages : []
+        itemIndex === imageOwner ? toolImages : [],
+        cacheToolImages
       )) {
         const eventSeq = append(
           event2.type,
@@ -82714,7 +82810,7 @@ function adaptCodexHistoryPage(value, sessionGeneration) {
     records
   };
 }
-function itemEvents(item, turn, step, requestId2, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
+function itemEvents(item, turn, step, requestId2, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = [], cacheToolImages) {
   const type = string5(item.type);
   const id7 = string5(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`;
   const text = itemText2(item);
@@ -82755,7 +82851,7 @@ function itemEvents(item, turn, step, requestId2, selection = modelSelection(), 
         data: { turn, step, callId: id7, name: name2, arguments: JSON.stringify(args) },
         view: { for: "call", view: toolCallView(item, type, args) }
       },
-      toolResultEvent(item, turn, step, id7, toolResultText(item, type, text))
+      toolResultEvent(item, turn, step, id7, toolResultText(item, type, text), sessionId, cacheToolImages)
     ];
   }
   if (type === "error") return [{
@@ -82782,7 +82878,10 @@ function messageContent(item, attachmentSeed, fallbackText, supplementalImages =
   }
   return [{ type: "text", text: fallbackText ?? "" }];
 }
-function toolResultEvent(item, turn, step, id7, resultText) {
+function toolResultEvent(item, turn, step, id7, resultText, sessionId, cacheToolImages) {
+  const images = sessionId === void 0 ? [] : contentBlocks(toolOutputImageBlocks(item), `${sessionId}:${id7}:result`);
+  if (images.length > 0) cacheToolImages?.(images);
+  const imageReferences = images.map((image) => ({ type: "image", attachment: image.attachment }));
   const type = string5(item.type) ?? "unknown";
   return {
     type: "tool/result",
@@ -82795,7 +82894,7 @@ function toolResultEvent(item, turn, step, id7, resultText) {
         content: [{
           type: "tool-result",
           toolCallId: id7,
-          content: [{ type: "text", text: resultText }],
+          content: [{ type: "text", text: resultText }, ...imageReferences],
           ...item.status === "failed" || item.success === false ? { isError: true } : {}
         }],
         source: { kind: "tool", callId: id7 }
@@ -83259,8 +83358,12 @@ var CodexLiveProjection = class {
     }
     if (frame.method === "thread/status/changed") {
       const status2 = record5(params.status);
-      const running = status2.type === "active";
-      this.context.emitRemoteEvent("api-session/status", [follow.sessionId, running]);
+      if (status2.type === "idle" || status2.type === "systemError") {
+        this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+        if (follow.activeTurnId !== void 0) {
+          void this.recoverTerminalTurn(follow, follow.activeTurnId);
+        }
+      }
       return;
     }
     if (frame.method === "model/rerouted") {
@@ -83278,24 +83381,7 @@ var CodexLiveProjection = class {
       return;
     }
     if (frame.method === "turn/completed") {
-      const turn = record5(params.turn);
-      for (const item of array3(turn.items)) this.acceptCompletedItem(follow, record5(item), true);
-      if (follow.stepOpen) {
-        this.closeAllStreamBlocks(follow);
-        if (follow.streamActive) this.finishStream(follow);
-        this.endAssistantAttempt(follow, { kind: "abandoned" });
-        this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-        follow.stepOpen = false;
-      }
-      this.pushEvent(follow, "turn/end", {
-        turn: follow.turn,
-        reason: turnEndReason(turn)
-      });
-      this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
-      this.context.emitRemoteEvent("api-session/activity", [follow.sessionId, Date.now()]);
-      follow.activeTurnId = void 0;
-      this.context.pendingRequestIds.delete(follow.sessionId);
-      void this.context.refreshAndPublishWorkspaces(true);
+      this.finishTurn(follow, record5(params.turn));
       return;
     }
     if (frame.method === "item/commandExecution/requestApproval" || frame.method === "item/fileChange/requestApproval") {
@@ -83312,6 +83398,44 @@ var CodexLiveProjection = class {
         }
       });
     }
+  }
+  async recoverTerminalTurn(follow, activeTurnId2) {
+    if (follow.recoveringTurnId === activeTurnId2) return;
+    follow.recoveringTurnId = activeTurnId2;
+    try {
+      const response = record5(await this.context.client.request("thread/read", {
+        threadId: follow.threadId,
+        includeTurns: true
+      }, AbortSignal.timeout(5e3)));
+      const thread = record5(response.thread);
+      if (thread.id !== follow.threadId || !this.context.follows.has(follow) || follow.activeTurnId !== activeTurnId2) return;
+      const turn = array3(thread.turns).map(record5).find((item) => item.id === activeTurnId2);
+      if (turn && ["completed", "failed", "interrupted", "cancelled", "canceled", "aborted"].includes(string5(turn.status) ?? "")) {
+        this.finishTurn(follow, turn);
+      }
+    } catch {
+    } finally {
+      if (follow.recoveringTurnId === activeTurnId2) delete follow.recoveringTurnId;
+    }
+  }
+  finishTurn(follow, turn) {
+    const id7 = string5(turn.id);
+    if (id7 !== void 0 && (id7 === follow.completedTurnId || follow.activeTurnId !== void 0 && id7 !== follow.activeTurnId)) return;
+    for (const item of array3(turn.items)) this.acceptCompletedItem(follow, record5(item), true);
+    if (follow.stepOpen) {
+      this.closeAllStreamBlocks(follow);
+      if (follow.streamActive) this.finishStream(follow);
+      this.endAssistantAttempt(follow, { kind: "abandoned" });
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      follow.stepOpen = false;
+    }
+    this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: turnEndReason(turn) });
+    this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+    this.context.emitRemoteEvent("api-session/activity", [follow.sessionId, Date.now()]);
+    follow.completedTurnId = id7 ?? follow.activeTurnId;
+    follow.activeTurnId = void 0;
+    this.context.pendingRequestIds.delete(follow.sessionId);
+    void this.context.refreshAndPublishWorkspaces(true);
   }
   acceptCompletedItem(follow, item, settleAssistant) {
     const itemId = string5(item.id) ?? `item:${follow.nextSeq}`;
@@ -83330,7 +83454,8 @@ var CodexLiveProjection = class {
       follow.requestId,
       this.context.modelSelection(follow.sessionId),
       follow.sessionId,
-      supplementalImages
+      supplementalImages,
+      (images) => this.cacheImageBlocks(follow.sessionId, images)
     )) {
       if (event2.type === "tool/call" && follow.startedItems.has(itemId)) continue;
       if (event2.type === "tool/result") this.pushToolResult(follow, itemId, event2);
@@ -83692,6 +83817,22 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       void 0
     )?.id;
   }
+  desktopFileReceipts = /* @__PURE__ */ new Map();
+  async assertDesktopUploadSession(sessionId, signal) {
+    const workspace2 = this.selectedWorkspace(await this.currentCatalog(signal));
+    if (!workspace2?.sessionIds.includes(sessionId)) throw new Error("The selected CodeX session is no longer in this workspace.");
+  }
+  registerDesktopUpload(sessionId, receiptId, part) {
+    if (part.type === "image" && typeof part.data === "string") {
+      let pending = part.data.length;
+      for (const receipt of this.desktopFileReceipts.values()) {
+        if (typeof receipt.part.data === "string") pending += receipt.part.data.length;
+      }
+      if (pending > Math.ceil(100 * 1024 * 1024 / 3) * 4) throw new Error("Too many pending CodeX images.");
+    }
+    this.desktopFileReceipts.set(receiptId, { sessionId, part });
+    if (this.desktopFileReceipts.size > 64) this.desktopFileReceipts.delete(this.desktopFileReceipts.keys().next().value);
+  }
   async invoke(request) {
     const result = await this.dispatch(
       `${request.namespace}/${request.method}`,
@@ -83848,6 +83989,7 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.selectedModels.clear();
     this.selectedPermissions.clear();
     this.imageAttachments.clear();
+    this.desktopFileReceipts.clear();
   }
   async refreshCatalog(signal, force = false) {
     signal?.throwIfAborted();
@@ -84166,9 +84308,18 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   }
   async prompt(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
-    const content = array3(request.content);
+    const receipts = /* @__PURE__ */ new Set();
+    const content = array3(request.content).map((part) => {
+      const block = record5(part);
+      const receiptId = block.type === "file" ? string5(block.receiptId) : void 0;
+      if (receiptId === void 0) return part;
+      const receipt = this.desktopFileReceipts.get(receiptId);
+      if (receipt?.sessionId !== sessionId || receipts.has(receiptId)) return part;
+      receipts.add(receiptId);
+      return receipt.part;
+    });
     const input4 = codexPromptInput(content);
-    if (input4 === void 0) return failure3("attachment-error", "CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.");
+    if (input4 === void 0) return failure3("attachment-error", "CodeX requires supported images or a current upload receipt from this session.");
     const threadId = nativeThreadId(sessionId);
     const knownSelection = this.selectedModels.get(sessionId) ?? (() => {
       const session2 = this.catalog?.sessions.find((item) => item.id === sessionId);
@@ -84192,11 +84343,16 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     }
     this.pendingRequestIds.set(sessionId, string5(request.requestId) ?? "");
     const mode2 = request.mode === "steer" ? "turn/steer" : "turn/start";
+    if ([...receipts].some((id7) => !this.desktopFileReceipts.has(id7))) {
+      return failure3("attachment-error", "A CodeX upload was already submitted. Select the attachment again.");
+    }
     if (mode2 === "turn/steer") {
       const active2 = this.activeTurnId(threadId);
       if (active2 === void 0) return failure3("steer-unavailable", "The CodeX Thread has no active turn to steer.");
+      for (const receiptId of receipts) this.desktopFileReceipts.delete(receiptId);
       await this.client.request(mode2, { threadId, expectedTurnId: active2, input: input4 }, signal);
     } else {
+      for (const receiptId of receipts) this.desktopFileReceipts.delete(receiptId);
       await this.client.request(mode2, {
         threadId,
         input: input4,
@@ -84228,7 +84384,12 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const result = record5(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
     const thread = record5(result.thread);
     if (string5(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
-    this.cacheHistoryImages(projectCodexNativeHistory(thread, sessionId));
+    this.cacheHistoryImages(projectCodexNativeHistory(
+      thread,
+      sessionId,
+      "legacy",
+      (images) => this.live.cacheImageBlocks(sessionId, images)
+    ));
   }
   async cancel(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
@@ -85552,68 +85713,6 @@ function normalizeThemeNamespace(namespace) {
     ...namespace,
     value: { ...section, ...Object.fromEntries(missing) }
   };
-}
-
-// packages/plugin/src/workspace-transfer-limits.ts
-function workspaceUploadMaxBytes(mode2) {
-  return mode2 === "LAN" || mode2 === "P2P" ? 1024 * 1024 * 1024 : 20 * 1024 * 1024;
-}
-
-// packages/plugin/src/remote-file-upload.ts
-import { constants } from "node:fs";
-import { open as open2 } from "node:fs/promises";
-import { randomUUID as randomUUID2 } from "node:crypto";
-var CHUNK = 64 * 1024;
-async function uploadRemoteFile(client, sessionId, localPath, name2, signal, assertCurrent) {
-  const uploadId = randomUUID2();
-  const scope3 = { sessionId, uploadId };
-  let file2;
-  let remoteOpened = false;
-  let committing = false;
-  let totalBytes = 0;
-  const check2 = () => {
-    signal.throwIfAborted();
-    assertCurrent();
-    if (totalBytes > workspaceUploadMaxBytes(client.getStats?.().mode)) throw new Error("UPLOAD_TRANSPORT_LIMIT");
-  };
-  const call = async (method, params) => {
-    check2();
-    const result = await client.rpc(method, params, signal);
-    check2();
-    return result;
-  };
-  try {
-    file2 = await open2(localPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-    check2();
-    const before = await file2.stat();
-    totalBytes = before.size;
-    if (!before.isFile() || before.size > workspaceUploadMaxBytes(client.getStats?.().mode)) throw new Error("INVALID_LOCAL_UPLOAD_FILE");
-    remoteOpened = true;
-    const opened = external_exports.object({ uploadId: external_exports.literal(uploadId), chunkBytes: external_exports.number().int().min(1).max(CHUNK) }).parse(await call("workspace.upload.open", { ...scope3, name: name2, totalBytes: before.size }));
-    let offset2 = 0;
-    while (offset2 < before.size) {
-      check2();
-      const buffer3 = Buffer.alloc(Math.min(opened.chunkBytes, before.size - offset2));
-      const read = await file2.read(buffer3, 0, buffer3.length, offset2);
-      if (!read.bytesRead) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
-      const next = offset2 + read.bytesRead;
-      external_exports.object({ uploadId: external_exports.literal(uploadId), receivedBytes: external_exports.literal(next) }).parse(
-        await call("workspace.upload.chunk", { ...scope3, offset: offset2, data: buffer3.subarray(0, read.bytesRead).toString("base64") })
-      );
-      offset2 = next;
-    }
-    const after = await file2.stat();
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new Error("LOCAL_UPLOAD_FILE_CHANGED");
-    check2();
-    committing = true;
-    const result = external_exports.object({ name: external_exports.string().min(1), path: external_exports.string().min(1), bytes: external_exports.literal(before.size) }).parse(await call("workspace.upload.commit", scope3));
-    return { status: "accepted", ...result };
-  } catch {
-    if (remoteOpened) await client.rpc("workspace.upload.abort", scope3, AbortSignal.timeout(5e3)).catch(() => void 0);
-    return { status: committing ? "unknown" : "rejected" };
-  } finally {
-    await file2?.close();
-  }
 }
 
 // packages/plugin/src/remote-session-tools.ts
@@ -90793,6 +90892,50 @@ var ClientModeRuntime = class {
     if (remote === void 0 || this.status().mode !== "remote") {
       throw new ClientModeError("REMOTE_NOT_CONNECTED", "No Remote Host is selected.", true);
     }
+    if (route === "api/session/uploadFileBinary" && this.codexVirtual !== void 0) {
+      const virtual = this.codexVirtual;
+      const request = record3(body);
+      const payload = record3(request.payload);
+      const session2 = parseCodexSessionId(payload.sessionId);
+      const data2 = typeof payload.data === "string" ? payload.data : void 0;
+      const limit = workspaceUploadMaxBytes(remote.client.getStats().mode);
+      if (session2 === void 0 || data2 === void 0 || data2.length > Math.ceil(limit / 3) * 4 || request.endpoint !== "file" && request.endpoint !== "image") {
+        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid or exceeds the transfer limit.");
+      }
+      const assertCurrent = () => {
+        this.assertRemoteCurrent(remote, signal);
+        if (this.codexVirtual !== virtual) throw new ClientModeError("REMOTE_NOT_CONNECTED", "The selected CodeX workspace changed.");
+      };
+      assertCurrent();
+      await virtual.assertDesktopUploadSession(session2.sessionId, signal);
+      assertCurrent();
+      const bytes = Buffer.from(data2, "base64");
+      if (bytes.length > limit || bytes.toString("base64") !== data2) {
+        throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid or exceeds the transfer limit.");
+      }
+      const name2 = typeof payload.name === "string" && payload.name.length > 0 ? payload.name : "attachment";
+      const receiptId = uuidV7();
+      if (request.endpoint === "image") {
+        const mediaType = payload.mediaType;
+        if (typeof mediaType !== "string" || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType) || bytes.length === 0 || bytes.length > 20 * 1024 * 1024) {
+          throw new ClientModeError("INVALID_MESSAGE", "The CodeX image is unsupported or exceeds the image limit.");
+        }
+        virtual.registerDesktopUpload(session2.sessionId, receiptId, { type: "image", mediaType, data: data2 });
+        return { status: 200, json: { ok: true, value: { receiptId, file: { attachmentId: receiptId, name: name2, bytes: bytes.length } } } };
+      }
+      const uploaded = await uploadRemoteBuffer(remote.client, session2.sessionId, name2, bytes, signal, assertCurrent);
+      assertCurrent();
+      virtual.registerDesktopUpload(session2.sessionId, receiptId, {
+        type: "text",
+        text: `
+Attached workspace file: ${JSON.stringify(uploaded.path)}
+`
+      });
+      return { status: 200, json: { ok: true, value: {
+        receiptId,
+        file: { attachmentId: receiptId, name: uploaded.name, bytes: uploaded.bytes }
+      } } };
+    }
     if (!remote.features.pluginRoute) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The connected Host cannot forward plugin routes.");
     }
@@ -92443,7 +92586,7 @@ var textInput = external_exports.object({
   text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
 var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine(isCanonicalBase642, {
   message: "Image data must use canonical base64."
 });
 var imageInput = external_exports.object({
@@ -97301,15 +97444,6 @@ function readLimit(args) {
 
 // packages/plugin/src/terminal-policy.ts
 import { isDeepStrictEqual } from "node:util";
-
-// packages/plugin/src/codex/session-id.ts
-function parseCodexSessionId(value) {
-  if (typeof value !== "string") return void 0;
-  const match = /^codex:([A-Za-z0-9][A-Za-z0-9._-]{0,255})$/.exec(value);
-  return match === null ? void 0 : { sessionId: value, threadId: match[1] };
-}
-
-// packages/plugin/src/terminal-policy.ts
 var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/environment",
   "terminal/shells",

@@ -488,6 +488,23 @@ describe('CodexVirtualHarness', () => {
       },
     ])
 
+    const tool = (history.value as { events: Array<{ event: { type: string; data: unknown } }> }).events
+      .find(entry => entry.event.type === 'tool/result')!.event.data as {
+      message: { content: Array<{ content: Array<{ attachment?: { attachmentId: string } }> }> }
+    }
+    const toolImage = tool.message.content[0]!.content[1]!
+    expect(toolImage).not.toHaveProperty('data')
+    expect(toolImage).toMatchObject({
+      type: 'image',
+      attachment: { mediaType: 'image/png', name: 'current-browser.png' },
+    })
+    await expect(target.dispatch('session/attachment', {
+      args: { request: { sessionId: 'codex:thr_image', attachment: toolImage.attachment } },
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: { attachment: toolImage.attachment, data: imageData },
+    })
+
     const attachmentId = message.content[1]!.attachment!.attachmentId!
     const attachment = await target.dispatch('session/attachment', { args: { request: { sessionId: 'codex:thr_image' as never, attachmentId: attachmentId as never } } }, new AbortController().signal)
     expect(attachment).toMatchObject({
@@ -512,7 +529,116 @@ describe('CodexVirtualHarness', () => {
         data: imageData,
       },
     })
+    const controller = new AbortController()
+    const follow = await target.open('session/follow', {
+      args: { request: { address: { kind: 'session', sessionId: 'codex:thr_image' } } },
+    }, controller.signal)
+    const iterator = follow[Symbol.asyncIterator]()
+    try {
+      await iterator.next()
+      client.emit('thr_image', {
+        method: 'turn/started',
+        params: { turn: { id: 'live_screenshot_turn', status: 'inProgress', items: [] } },
+      })
+      await iterator.next()
+      await iterator.next()
+      const item = {
+        id: 'live_screenshot',
+        type: 'mcpToolCall',
+        status: 'completed',
+        result: { content: [{ type: 'image', data: imageData, mimeType: 'image/png' }] },
+      }
+      client.emit('thr_image', {
+        method: 'turn/completed',
+        params: { turn: { id: 'live_screenshot_turn', status: 'completed', items: [item] } },
+      })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'tool/call' } } })
+      const liveResult = await iterator.next()
+      expect(liveResult.value).toMatchObject({ event: {
+        type: 'tool/result',
+        data: { message: { content: [{ content: [expect.anything(), {
+          type: 'image', attachment: { mediaType: 'image/png' },
+        }] }] } },
+      } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'step/end' } } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'turn/end' } } })
+    } finally {
+      controller.abort()
+      await iterator.return?.()
+    }
     await target.close()
+  })
+
+  it('recovers a missing terminal frame from the exact completed CodeX turn', async () => {
+    const thread = { ...codexThread('thr_recovery', '/workspace/repo', 'Recover'), turns: [] as Record<string, unknown>[] }
+    const client = fakeCodex([thread])
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' }, 'v3')
+    const controller = new AbortController()
+    const source = await target.open('session/follow', {
+      args: { request: { address: { kind: 'session', sessionId: 'codex:thr_recovery' } } },
+    }, controller.signal)
+    const iterator = source[Symbol.asyncIterator]()
+    try {
+      await iterator.next()
+      client.emit('thr_recovery', { method: 'turn/started', params: { turn: { id: 'turn_recovery', items: [] } } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'turn/start' } } })
+      await iterator.next()
+      const turn = { id: 'turn_recovery', status: 'completed', items: [] }
+      thread.turns.push(turn)
+      client.emit('thr_recovery', { method: 'thread/status/changed', params: { status: { type: 'idle' } } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'step/end' } } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: {
+        type: 'turn/end', data: { reason: { kind: 'completed' } },
+      } } })
+      client.emit('thr_recovery', { method: 'turn/completed', params: { turn } })
+      client.emit('thr_recovery', { method: 'turn/started', params: { turn: { id: 'new_turn', items: [] } } })
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: { type: 'turn/start' } } })
+    } finally {
+      controller.abort()
+      await iterator.return?.()
+      await target.close()
+    }
+  })
+
+  it('validates a multi-megabyte inline image without overflowing the base64 matcher', async () => {
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    const signal = new AbortController().signal
+    const image = { type: 'image', mediaType: 'image/png', data: 'a'.repeat(20_000_000) }
+    try {
+      await expect(target.dispatch('session/prompt', {
+        args: { request: { sessionId: 'codex:thr_1', content: [image] } },
+      }, signal)).resolves.toMatchObject({ ok: true })
+      expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({ input: [image] }), signal)
+    } finally {
+      await target.close()
+    }
+  })
+
+  it('redeems only session-owned Desktop file and image receipts once', async () => {
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    const signal = new AbortController().signal
+    const image = { type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' }
+    const file = { type: 'text', text: 'Attached workspace file: "./notes.txt"' }
+    target.registerDesktopUpload('codex:thr_1', 'file-receipt', file)
+    target.registerDesktopUpload('codex:thr_1', 'image-receipt', image)
+    const prompt = (sessionId: string) => target.dispatch('session/prompt', {
+      args: { request: { sessionId, content: [
+        { type: 'file', receiptId: 'file-receipt' },
+        { type: 'file', receiptId: 'image-receipt' },
+      ] } },
+    }, signal)
+    try {
+      await expect(prompt('codex:other')).resolves.toMatchObject({ ok: false })
+      await expect(prompt('codex:thr_1')).resolves.toMatchObject({ ok: true })
+      expect(client.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+        input: [file, image],
+      }), signal)
+      await expect(prompt('codex:thr_1')).resolves.toMatchObject({ ok: false })
+    } finally {
+      await target.close()
+    }
   })
 
   it('emits Session V3 history, replacements, and assistant stream frames for v0.1.5', async () => {

@@ -230,6 +230,25 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       undefined)?.id
   }
 
+  private readonly desktopFileReceipts = new Map<string, { sessionId: string; part: JsonRecord }>()
+
+  async assertDesktopUploadSession(sessionId: string, signal: AbortSignal): Promise<void> {
+    const workspace = this.selectedWorkspace(await this.currentCatalog(signal))
+    if (!workspace?.sessionIds.includes(sessionId)) throw new Error('The selected CodeX session is no longer in this workspace.')
+  }
+
+  registerDesktopUpload(sessionId: string, receiptId: string, part: JsonRecord): void {
+    if (part.type === 'image' && typeof part.data === 'string') {
+      let pending = part.data.length
+      for (const receipt of this.desktopFileReceipts.values()) {
+        if (typeof receipt.part.data === 'string') pending += receipt.part.data.length
+      }
+      if (pending > Math.ceil(100 * 1024 * 1024 / 3) * 4) throw new Error('Too many pending CodeX images.')
+    }
+    this.desktopFileReceipts.set(receiptId, { sessionId, part })
+    if (this.desktopFileReceipts.size > 64) this.desktopFileReceipts.delete(this.desktopFileReceipts.keys().next().value!)
+  }
+
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
     const result = await this.dispatch(
       `${request.namespace}/${request.method}`,
@@ -360,6 +379,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.selectedModels.clear()
     this.selectedPermissions.clear()
     this.imageAttachments.clear()
+    this.desktopFileReceipts.clear()
   }
 
   private async refreshCatalog(signal?: AbortSignal, force = false): Promise<CatalogState> {
@@ -729,9 +749,18 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async prompt(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
     const sessionId = requiredString(request.sessionId, 'sessionId')
-    const content = array(request.content)
+    const receipts = new Set<string>()
+    const content = array(request.content).map(part => {
+      const block = record(part)
+      const receiptId = block.type === 'file' ? string(block.receiptId) : undefined
+      if (receiptId === undefined) return part
+      const receipt = this.desktopFileReceipts.get(receiptId)
+      if (receipt?.sessionId !== sessionId || receipts.has(receiptId)) return part
+      receipts.add(receiptId)
+      return receipt.part
+    })
     const input = codexPromptInput(content)
-    if (input === undefined) return failure('attachment-error', 'CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.')
+    if (input === undefined) return failure('attachment-error', 'CodeX requires supported images or a current upload receipt from this session.')
     const threadId = nativeThreadId(sessionId)
     // Session follow/history normally hydrates this selection before the
     // composer can send. Reuse that state (and the selection captured by
@@ -760,11 +789,16 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     }
     this.pendingRequestIds.set(sessionId, string(request.requestId) ?? '')
     const mode = request.mode === 'steer' ? 'turn/steer' : 'turn/start'
+    if ([...receipts].some(id => !this.desktopFileReceipts.has(id))) {
+      return failure('attachment-error', 'A CodeX upload was already submitted. Select the attachment again.')
+    }
     if (mode === 'turn/steer') {
       const active = this.activeTurnId(threadId)
       if (active === undefined) return failure('steer-unavailable', 'The CodeX Thread has no active turn to steer.')
+      for (const receiptId of receipts) this.desktopFileReceipts.delete(receiptId)
       await this.client.request(mode, { threadId, expectedTurnId: active, input }, signal)
     } else {
+      for (const receiptId of receipts) this.desktopFileReceipts.delete(receiptId)
       await this.client.request(mode, {
         threadId,
         input,
@@ -802,7 +836,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const result = record(await this.client.request('thread/read', { threadId, includeTurns: true }, signal))
     const thread = record(result.thread)
     if (string(thread.id) !== threadId) throw new Error('CodeX returned an invalid Thread history.')
-    this.cacheHistoryImages(projectCodexNativeHistory(thread, sessionId))
+    this.cacheHistoryImages(projectCodexNativeHistory(thread, sessionId, 'legacy',
+      images => this.live.cacheImageBlocks(sessionId, images)))
   }
 
   private async cancel(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
