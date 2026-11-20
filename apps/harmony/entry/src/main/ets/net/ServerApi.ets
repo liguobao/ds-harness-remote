@@ -322,6 +322,24 @@ export class RemoteServerApi {
     };
     const text = await this.requestText('/api/v1/auth/login', 'POST', JSON.stringify(body), undefined);
     const root = JSON.parse(text) as Record<string, Object>;
+    if (jsonBool(root, 'twoFactorRequired', false)) {
+      const result = new AccountLoginResult();
+      result.challenge = jsonStr(root, 'challenge', '');
+      if (!/^[A-Za-z0-9_-]{43}$/.test(result.challenge)) {
+        throw new RemoteApiError('INVALID_MESSAGE', 'The server returned an invalid two-factor challenge.', 0);
+      }
+      return result;
+    }
+    return this.parseAccountLogin(root);
+  }
+
+  async verifyAccountLogin(challenge: string, code: string): Promise<AccountLoginResult> {
+    const body: Record<string, Object> = { 'challenge': challenge, 'code': code.trim() };
+    const text = await this.requestText('/api/v1/auth/2fa/verify', 'POST', JSON.stringify(body), undefined);
+    return this.parseAccountLogin(JSON.parse(text) as Record<string, Object>);
+  }
+
+  private parseAccountLogin(root: Record<string, Object>): AccountLoginResult {
     const result = new AccountLoginResult();
     result.token = jsonStr(root, 'token', '');
     result.expiresAt = jsonNum(root, 'expiresAt', 0);

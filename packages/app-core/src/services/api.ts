@@ -23,6 +23,12 @@ interface ErrorBody {
   }
 }
 
+export class AccountTwoFactorRequired extends Error {
+  constructor(readonly challenge: string) {
+    super('Two-factor verification is required.')
+  }
+}
+
 interface AccountLoginResult {
   token: string
   expiresAt: number
@@ -235,6 +241,23 @@ export class RemoteServerApi {
       method: 'POST',
       body: JSON.stringify({ email: email.trim(), password }),
     }, false)
+    if (isRecord(body) && body.twoFactorRequired === true) {
+      if (typeof body.challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.challenge)) {
+        invalidResponse('two-factor challenge')
+      }
+      throw new AccountTwoFactorRequired(body.challenge)
+    }
+    return this.parseAccountLogin(body)
+  }
+
+  async verifyAccountLogin(challenge: string, code: string): Promise<AccountLoginResult> {
+    return this.parseAccountLogin(await this.request('/api/v1/auth/2fa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ challenge, code: code.trim() }),
+    }, false))
+  }
+
+  private parseAccountLogin(body: unknown): AccountLoginResult {
     if (!isRecord(body)
       || typeof body.token !== 'string' || body.token.length < 16
       || typeof body.account !== 'string' || body.account.length === 0

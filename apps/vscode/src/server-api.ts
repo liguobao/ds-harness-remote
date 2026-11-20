@@ -14,9 +14,25 @@ export class ServerApi {
     this.baseUrl = normalizeUrl(url)
   }
 
-  async login(email: string, password: string): Promise<{ token: string; account: string }> {
+  async login(email: string, password: string): Promise<{ token: string; account: string } | { challenge: string }> {
     const value = await this.request('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) }, false)
     const body = record(value, 'account login')
+    if (body.twoFactorRequired === true) {
+      if (typeof body.challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.challenge)) {
+        throw new Error('Server returned an invalid two-factor challenge.')
+      }
+      return { challenge: body.challenge }
+    }
+    return this.parseLogin(body)
+  }
+
+  async verifyLogin(challenge: string, code: string): Promise<{ token: string; account: string }> {
+    return this.parseLogin(record(await this.request('/api/v1/auth/2fa/verify', {
+      method: 'POST', body: JSON.stringify({ challenge, code: code.trim() }),
+    }, false), 'account login'))
+  }
+
+  private parseLogin(body: Record<string, unknown>): { token: string; account: string } {
     if (typeof body.token !== 'string' || typeof body.account !== 'string') throw new Error('Server returned an invalid account login.')
     return { token: body.token, account: body.account }
   }
@@ -120,7 +136,8 @@ export class ServerApi {
     const body: unknown = text ? JSON.parse(text) : undefined
     if (!response.ok) {
       const error = isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string' ? body.error.message : `Server request failed (${response.status}).`
-      throw new Error(error)
+      const code = isRecord(body) && isRecord(body.error) && typeof body.error.code === 'string' ? body.error.code : undefined
+      throw Object.assign(new Error(error), { code })
     }
     return body
   }

@@ -18,6 +18,8 @@ import {
 } from './identity-store.js'
 import { safeStartupError } from './safe-error.js'
 import { ClientServerApi, HostServerApi } from './server-api.js'
+import { readAccountVerification } from './client-runtime-contract.js'
+import { AccountTwoFactorRequired } from './account-two-factor-required.js'
 import { ServerCredentialStore, ServerCredentialsInvalidError } from './server-credentials.js'
 import { registerControlRoute, type HostWebServerLike } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
@@ -230,7 +232,7 @@ export class PluginControlRuntime {
         if (typeof value.email !== 'string' || typeof value.password !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
         }
-        return ok(await this.host.authorizeHostWithAccount(value.email, value.password))
+        return ok(await this.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification)))
       }
       if (endpoint === 'host.registration-code.submit') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
@@ -288,7 +290,7 @@ export class PluginControlRuntime {
       authorization = await api.authorizeWithAccount(identity, value.email, value.password, async () => {
         identity = await identities.reset(hostname())
         return identity
-      })
+      }, readAccountVerification(value.verification))
     }
     if (value.role === 'client' && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
       await this.client?.authorizeHostByDefault()
@@ -889,7 +891,10 @@ function fail(error: unknown): ControlResult<unknown> {
     error: {
       code: 'internal',
       message: source?.message ?? 'The plugin control operation failed.',
-      details: remoteCode === undefined ? {} : { remoteCode },
+      details: {
+        ...(remoteCode === undefined ? {} : { remoteCode }),
+        ...(source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}),
+      },
     },
   }
 }

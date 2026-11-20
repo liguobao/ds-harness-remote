@@ -626,6 +626,8 @@ const zhCN = {
   },
   status: { online: '在线', offline: '离线', disconnected: '未连接', lan: '局域网直连', relay: '服务器转发', p2p: 'P2P 直连', turn: 'TURN 转发', waiting: '连接中', running: '运行中' },
   setup: {
+    twoFactorCode: "验证码或恢复码",
+    twoFactorRestart: "重新输入密码",
     or: '或', heroSignIn: '登录 DeepSeek Harness Remote', emailSignIn: '使用邮箱登录', emailSignInCollapse: '收起邮箱登录',
     title: '登录', signIn: '登录账号', signInAgain: '重新登录', lead: '请选择与远端设备相同的登录方式，继续你的工作。',
     switchServer: "切换服务器", saveServer: "保存服务器", switchServerHint: "保存后会断开当前连接，并需要在新服务器重新登录。",

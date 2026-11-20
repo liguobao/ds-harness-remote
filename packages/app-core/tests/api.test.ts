@@ -104,6 +104,24 @@ describe('Remote Server API compatibility', () => {
     expect(fetchImplementation.mock.calls[0]?.[0]).toBe('https://remote.example.com/api/v1/auth/login')
   })
 
+  it('accepts a two-factor challenge and submits the code without resending the password', async () => {
+    const challenge = 'A'.repeat(43)
+    const session = { token: 'account-jwt-token-123456', expiresAt: 123456, account: 'user@example.com', isAdmin: false }
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ twoFactorRequired: true, challenge }))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: 'TWO_FACTOR_INVALID', message: 'Invalid code' } }, 400))
+      .mockResolvedValueOnce(jsonResponse(session))
+    const api = new RemoteServerApi('https://remote.example.com', undefined, fetchImplementation)
+
+    await expect(api.loginAccount('user@example.com', 'secret')).rejects.toMatchObject({ challenge })
+    await expect(api.verifyAccountLogin(challenge, '000000')).rejects.toMatchObject({ code: 'TWO_FACTOR_INVALID' })
+    await expect(api.verifyAccountLogin(challenge, ' recovery-code ')).resolves.toEqual(session)
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
+    expect(fetchImplementation.mock.calls[2]?.[0]).toBe('https://remote.example.com/api/v1/auth/2fa/verify')
+    expect(JSON.parse(String(fetchImplementation.mock.calls[2]?.[1]?.body))).toEqual({ challenge, code: 'recovery-code' })
+    expect(fetchImplementation.mock.calls[2]?.[1]?.headers).not.toMatchObject({ Authorization: expect.anything() })
+  })
+
   it('uses Bearer auth and accepts Server device and presence shapes that omit identity keys', async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async input => {
       const url = String(input)

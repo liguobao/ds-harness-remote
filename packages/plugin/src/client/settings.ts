@@ -1,3 +1,4 @@
+import { useAccountVerification } from './account-verification.js'
 import { createHostPairingPanel } from './pairing.js'
 import { createServerNotice } from './server-notice.js'
 import QRCode from 'qrcode'
@@ -377,8 +378,10 @@ export function createRemotePluginOptions(React: ClientReact) {
       }
     }
 
+    const verification = useAccountVerification(React, signInOpen && loginMethod === 'password' ? serverUrl : undefined)
+
     const signInClient = async (): Promise<void> => {
-      if (savingServer || serverDirty || loginEmail.trim() === '' || loginPassword === '') return
+      if (savingServer || serverDirty || (verification.pending ? !verification.ready : loginEmail.trim() === '' || loginPassword === '')) return
       setBusy(true)
       setError(undefined)
       try {
@@ -387,13 +390,16 @@ export function createRemotePluginOptions(React: ClientReact) {
           serverUrl: serverUrl.trim() || 'https://dsh.r2049.cn',
           email: loginEmail.trim(),
           password: loginPassword,
+          verification: verification.verification,
         })
+        verification.clear()
         applyView(result.settings)
         setSignInOpen(false)
         setLoginPassword('')
         setNotice({ key: 'authorizationComplete' })
       } catch (reason) {
-        setError(messageOf(reason, t))
+        if (verification.handle(reason)) setLoginPassword('')
+        else setError(messageOf(reason, t))
       } finally {
         setBusy(false)
       }
@@ -1085,16 +1091,16 @@ export function createRemotePluginOptions(React: ClientReact) {
           className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-settings-password-panel',
           'aria-labelledby': 'dsh-remote-settings-password-tab',
         },
-          React.createElement('input', {
+          verification.fields(t, busy, React.createElement('input', {
             type: 'email', value: loginEmail, disabled: busy, autoComplete: 'username', placeholder: t('account'),
             'aria-label': t('account'), onChange: (event: Event) => setLoginEmail((event.target as HTMLInputElement).value),
           }),
           React.createElement('input', {
             type: 'password', value: loginPassword, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
             'aria-label': t('password'), onChange: (event: Event) => setLoginPassword((event.target as HTMLInputElement).value),
-          }),
+          })),
           React.createElement('button', {
-            type: 'button', disabled: busy || loginEmail.trim() === '' || loginPassword === '',
+            type: 'button', disabled: busy || (verification.pending ? !verification.ready : loginEmail.trim() === '' || loginPassword === ''),
             onClick: () => void signInClient(),
           }, t(busy ? 'signingIn' : 'startSignIn')),
           React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))

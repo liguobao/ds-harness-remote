@@ -628,6 +628,8 @@ const enUS = {
   },
   status: { online: 'Online', offline: 'Offline', disconnected: 'Disconnected', lan: 'Direct LAN', relay: 'Server relay', p2p: 'Direct P2P', turn: 'TURN relay', waiting: 'Connecting', running: 'Running' },
   setup: {
+    twoFactorCode: "Verification or recovery code",
+    twoFactorRestart: "Enter password again",
     or: 'or', heroSignIn: 'Sign in to DeepSeek Harness Remote', emailSignIn: 'Sign in with email', emailSignInCollapse: 'Hide email sign-in',
     title: 'Sign in', signIn: 'Sign in to your account', signInAgain: 'Sign in again', lead: 'Choose the same sign-in method as on your remote device to continue your work.',
     switchServer: "Switch server", saveServer: "Save server", switchServerHint: "Saving disconnects the current connection and requires signing in to the new server.",

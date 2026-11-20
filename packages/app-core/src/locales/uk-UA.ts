@@ -639,6 +639,8 @@ const ukUA = {
   },
   status: { online: 'У мережі', offline: 'Не в мережі', disconnected: 'Відключено', lan: 'Напряму через LAN', relay: 'Ретрансляція через сервер', p2p: 'Напряму через P2P', turn: 'Ретрансляція TURN', waiting: 'Підключення', running: 'Виконується' },
   setup: {
+    twoFactorCode: "Код підтвердження або відновлення",
+    twoFactorRestart: "Ввести пароль знову",
     or: 'або', heroSignIn: 'Увійдіть у DeepSeek Harness Remote', emailSignIn: 'Увійти через ел. пошту', emailSignInCollapse: 'Сховати вхід через ел. пошту',
     title: 'Вхід', signIn: 'Увійдіть в обліковий запис', signInAgain: 'Увійти знову', lead: 'Виберіть той самий спосіб входу, що й на віддаленому пристрої, щоб продовжити роботу.',
     switchServer: "Змінити сервер", saveServer: "Зберегти сервер", switchServerHint: "Збереження розірве поточне зʼєднання, і потрібно буде увійти на новий сервер.",

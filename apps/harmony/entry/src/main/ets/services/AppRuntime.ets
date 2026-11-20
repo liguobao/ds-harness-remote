@@ -627,7 +627,7 @@ export class AppRuntime {
     this.notify();
   }
 
-  async login(baseUrl: string, email: string, password: string): Promise<void> {
+  async login(baseUrl: string, email: string, password: string, challenge: string = '', code: string = ''): Promise<string | undefined> {
     if (this.busy) {
       return;
     }
@@ -638,7 +638,14 @@ export class AppRuntime {
       const normalized: string = normalizeServerUrl(baseUrl);
       const api: RemoteServerApi = new RemoteServerApi(normalized);
       await api.health();
-      const account: AccountLoginResult = await api.loginAccount(email, password);
+      const account: AccountLoginResult = challenge.length > 0
+        ? await api.verifyAccountLogin(challenge, code)
+        : await api.loginAccount(email, password);
+      if (account.challenge.length > 0) {
+        this.setBusy(false);
+        this.notify();
+        return account.challenge;
+      }
       const identity: DeviceIdentity = await this.store.loadOrCreateIdentity();
       const tokens: TokenPair = await api.registerDevice(identity, account.token);
       const config: StoredServerConfig = new StoredServerConfig();
@@ -661,6 +668,9 @@ export class AppRuntime {
       this.errorMsg = errorMessage(error);
     }
     this.setBusy(false);
+      this.setBusy(false);
+      this.notify();
+      if (error instanceof RemoteApiError && error.code === 'TWO_FACTOR_EXPIRED') return '';
     this.notify();
   }
 
@@ -707,8 +717,7 @@ export class AppRuntime {
         this.refreshDevices();
       });
     }
-    this.setBusy(false);
-    this.notify();
+    return undefined;
   }
 
   /**

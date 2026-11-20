@@ -1813,6 +1813,8 @@ If a code was sent, recover the original submission without changing it.`,
     registrationCodeHint: "Generate it after signing in on the Server website. Use it once to connect this device.",
     accountHint: "The account must belong to the selected Server.",
     password: "Password",
+    twoFactorCode: "Verification or recovery code",
+    twoFactorRestart: "Enter password again",
     passwordHint: "Only DSH Remote Web or self-hosted service accounts; not DeepSeek Harness official.",
     modeSavedNeedsAuthorization: "Mode saved. Authorize {role} before connecting. Existing registrations were kept.",
     modeSavedReused: "Mode saved. Existing registration reused. Restart Harness to apply.",
@@ -2211,6 +2213,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     registrationCodeHint: "\u767B\u5F55 Server \u7F51\u9875\u540E\u751F\u6210\uFF0C\u7528\u4E00\u6B21\u5373\u53EF\u8FDE\u63A5\u8FD9\u53F0\u8BBE\u5907\u3002",
     accountHint: "\u8D26\u53F7\u5FC5\u987B\u5C5E\u4E8E\u6240\u9009 Server\u3002",
     password: "\u5BC6\u7801",
+    twoFactorCode: "\u9A8C\u8BC1\u7801\u6216\u6062\u590D\u7801",
+    twoFactorRestart: "\u91CD\u65B0\u8F93\u5165\u5BC6\u7801",
     passwordHint: "\u4EC5\u9650DSH Remote Web\u8D26\u53F7\u6216\u81EA\u6258\u7BA1\u670D\u52A1\u8D26\u53F7\uFF0C\u975E DeepSeek Harness\u5B98\u65B9\u3002",
     modeSavedNeedsAuthorization: "\u6A21\u5F0F\u5DF2\u4FDD\u5B58\u3002\u8FDE\u63A5\u524D\u8BF7\u5148\u6388\u6743 {role}\uFF1B\u5DF2\u6709\u6CE8\u518C\u4FE1\u606F\u5DF2\u4FDD\u7559\u3002",
     modeSavedReused: "\u6A21\u5F0F\u5DF2\u4FDD\u5B58\u5E76\u590D\u7528\u5DF2\u6709\u6CE8\u518C\u4FE1\u606F\u3002\u91CD\u542F Harness \u540E\u751F\u6548\u3002",
@@ -2609,6 +2613,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     registrationCodeHint: "\u0421\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u043F\u043E\u0441\u043B\u0435 \u0432\u0445\u043E\u0434\u0430 \u043D\u0430 \u0441\u0430\u0439\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440\u0430. \u041A\u043E\u0434 \u043E\u0434\u043D\u043E\u0440\u0430\u0437\u043E\u0432\u044B\u0439 \u0438 \u0441\u043B\u0443\u0436\u0438\u0442 \u0434\u043B\u044F \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u044D\u0442\u043E\u0433\u043E \u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430.",
     accountHint: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442 \u0434\u043E\u043B\u0436\u0435\u043D \u043F\u0440\u0438\u043D\u0430\u0434\u043B\u0435\u0436\u0430\u0442\u044C \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u043C\u0443 \u0441\u0435\u0440\u0432\u0435\u0440\u0443.",
     password: "\u041F\u0430\u0440\u043E\u043B\u044C",
+    twoFactorCode: "\u041A\u043E\u0434 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F \u0438\u043B\u0438 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F",
+    twoFactorRestart: "\u0412\u0432\u0435\u0441\u0442\u0438 \u043F\u0430\u0440\u043E\u043B\u044C \u0437\u0430\u043D\u043E\u0432\u043E",
     passwordHint: "\u0422\u043E\u043B\u044C\u043A\u043E \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u044B DSH Remote Web \u0438\u043B\u0438 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0433\u043E \u0441\u0435\u0440\u0432\u0438\u0441\u0430; \u043D\u0435 \u043E\u0444\u0438\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u044B DeepSeek Harness.",
     modeSavedNeedsAuthorization: "\u0420\u0435\u0436\u0438\u043C \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D. \u041F\u0435\u0440\u0435\u0434 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u043C \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u0430\u0446\u0438\u044E ({role}). \u0421\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044E\u0449\u0438\u0435 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B.",
     modeSavedReused: "\u0420\u0435\u0436\u0438\u043C \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D, \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0430 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044E\u0449\u0430\u044F \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044F. \u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 Harness, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C.",
@@ -3007,6 +3013,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     registrationCodeHint: "\u0417\u0433\u0435\u043D\u0435\u0440\u0443\u0439\u0442\u0435 \u0439\u043E\u0433\u043E \u043F\u0456\u0441\u043B\u044F \u0432\u0445\u043E\u0434\u0443 \u043D\u0430 \u0441\u0430\u0439\u0442\u0456 \u0441\u0435\u0440\u0432\u0435\u0440\u0430. \u0412\u0438\u043A\u043E\u0440\u0438\u0441\u0442\u0430\u0439\u0442\u0435 \u043E\u0434\u0438\u043D \u0440\u0430\u0437, \u0449\u043E\u0431 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u0438 \u0446\u0435\u0439 \u043F\u0440\u0438\u0441\u0442\u0440\u0456\u0439.",
     accountHint: "\u041E\u0431\u043B\u0456\u043A\u043E\u0432\u0438\u0439 \u0437\u0430\u043F\u0438\u0441 \u043C\u0430\u0454 \u043D\u0430\u043B\u0435\u0436\u0430\u0442\u0438 \u0434\u043E \u0432\u0438\u0431\u0440\u0430\u043D\u043E\u0433\u043E \u0441\u0435\u0440\u0432\u0435\u0440\u0430.",
     password: "\u041F\u0430\u0440\u043E\u043B\u044C",
+    twoFactorCode: "\u041A\u043E\u0434 \u043F\u0456\u0434\u0442\u0432\u0435\u0440\u0434\u0436\u0435\u043D\u043D\u044F \u0430\u0431\u043E \u0432\u0456\u0434\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044F",
+    twoFactorRestart: "\u0412\u0432\u0435\u0441\u0442\u0438 \u043F\u0430\u0440\u043E\u043B\u044C \u0437\u043D\u043E\u0432\u0443",
     passwordHint: "\u041B\u0438\u0448\u0435 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0456 \u0437\u0430\u043F\u0438\u0441\u0438 DSH Remote Web \u0430\u0431\u043E \u0432\u043B\u0430\u0441\u043D\u043E\u0433\u043E \u0440\u043E\u0437\u0433\u043E\u0440\u043D\u0443\u0442\u043E\u0433\u043E \u0441\u0435\u0440\u0432\u0456\u0441\u0443; \u043D\u0435 \u043E\u0444\u0456\u0446\u0456\u0439\u043D\u0456 \u043E\u0431\u043B\u0456\u043A\u043E\u0432\u0456 \u0437\u0430\u043F\u0438\u0441\u0438 DeepSeek Harness.",
     modeSavedNeedsAuthorization: "\u0420\u0435\u0436\u0438\u043C \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E. \u0410\u0432\u0442\u043E\u0440\u0438\u0437\u0443\u0439\u0442\u0435 {role} \u043F\u0435\u0440\u0435\u0434 \u043F\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044F\u043C. \u041D\u0430\u044F\u0432\u043D\u0456 \u0440\u0435\u0454\u0441\u0442\u0440\u0430\u0446\u0456\u0457 \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E.",
     modeSavedReused: "\u0420\u0435\u0436\u0438\u043C \u0437\u0431\u0435\u0440\u0435\u0436\u0435\u043D\u043E. \u0412\u0438\u043A\u043E\u0440\u0438\u0441\u0442\u0430\u043D\u043E \u043D\u0430\u044F\u0432\u043D\u0443 \u0440\u0435\u0454\u0441\u0442\u0440\u0430\u0446\u0456\u044E. \u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0456\u0442\u044C Harness, \u0449\u043E\u0431 \u0437\u0430\u0441\u0442\u043E\u0441\u0443\u0432\u0430\u0442\u0438.",
@@ -3686,6 +3694,39 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
     };
   }
 
+  // packages/plugin/src/client/account-verification.ts
+  function useAccountVerification(React, scope) {
+    let [pending, setPending] = React.useState(void 0), [code, setCode] = React.useState(""), clear = () => {
+      setPending(void 0), setCode("");
+    };
+    return React.useEffect(clear, [scope]), {
+      pending: pending !== void 0,
+      ready: pending === void 0 || code.trim().length > 0,
+      verification: pending === void 0 ? void 0 : { ...pending, code },
+      clear,
+      handle(error) {
+        let failure = error;
+        return failure?.code === "TWO_FACTOR_EXPIRED" && clear(), failure?.code !== "TWO_FACTOR_REQUIRED" || typeof failure.details?.challenge != "string" || typeof failure.details.serverUrl != "string" ? !1 : (setPending({ challenge: failure.details.challenge, serverUrl: failure.details.serverUrl }), setCode(""), !0);
+      },
+      fields(t, busy, ...passwordFields) {
+        return pending === void 0 ? React.createElement(React.Fragment, null, ...passwordFields) : React.createElement(
+          React.Fragment,
+          null,
+          React.createElement("input", {
+            value: code,
+            disabled: busy,
+            autoComplete: "one-time-code",
+            maxLength: 64,
+            placeholder: t("twoFactorCode"),
+            "aria-label": t("twoFactorCode"),
+            onChange: (event) => setCode(event.target.value)
+          }),
+          React.createElement("button", { type: "button", disabled: busy, onClick: clear }, t("twoFactorRestart"))
+        );
+      }
+    };
+  }
+
   // packages/plugin/src/client/control-result.ts
   function unwrapControlResult(result, fallbackMessage) {
     if (!result.ok) {
@@ -4131,19 +4172,20 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             setSavingServer(!1), setBusy(!1);
           }
         }
-      }, signInClient = async () => {
-        if (!(savingServer || serverDirty || loginEmail.trim() === "" || loginPassword === "")) {
+      }, verification = useAccountVerification(React, signInOpen && loginMethod === "password" ? serverUrl : void 0), signInClient = async () => {
+        if (!(savingServer || serverDirty || (verification.pending ? !verification.ready : loginEmail.trim() === "" || loginPassword === ""))) {
           setBusy(!0), setError(void 0);
           try {
             let result = await props.control("settings.configure", {
               role: "client",
               serverUrl: serverUrl.trim() || "https://dsh.r2049.cn",
               email: loginEmail.trim(),
-              password: loginPassword
+              password: loginPassword,
+              verification: verification.verification
             });
-            applyView(result.settings), setSignInOpen(!1), setLoginPassword(""), setNotice({ key: "authorizationComplete" });
+            verification.clear(), applyView(result.settings), setSignInOpen(!1), setLoginPassword(""), setNotice({ key: "authorizationComplete" });
           } catch (reason) {
-            setError(messageOf(reason, t));
+            verification.handle(reason) ? setLoginPassword("") : setError(messageOf(reason, t));
           } finally {
             setBusy(!1);
           }
@@ -4806,27 +4848,31 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
               id: "dsh-remote-settings-password-panel",
               "aria-labelledby": "dsh-remote-settings-password-tab"
             },
-            React.createElement("input", {
-              type: "email",
-              value: loginEmail,
-              disabled: busy,
-              autoComplete: "username",
-              placeholder: t("account"),
-              "aria-label": t("account"),
-              onChange: (event) => setLoginEmail(event.target.value)
-            }),
-            React.createElement("input", {
-              type: "password",
-              value: loginPassword,
-              disabled: busy,
-              autoComplete: "current-password",
-              placeholder: t("password"),
-              "aria-label": t("password"),
-              onChange: (event) => setLoginPassword(event.target.value)
-            }),
+            verification.fields(
+              t,
+              busy,
+              React.createElement("input", {
+                type: "email",
+                value: loginEmail,
+                disabled: busy,
+                autoComplete: "username",
+                placeholder: t("account"),
+                "aria-label": t("account"),
+                onChange: (event) => setLoginEmail(event.target.value)
+              }),
+              React.createElement("input", {
+                type: "password",
+                value: loginPassword,
+                disabled: busy,
+                autoComplete: "current-password",
+                placeholder: t("password"),
+                "aria-label": t("password"),
+                onChange: (event) => setLoginPassword(event.target.value)
+              })
+            ),
             React.createElement("button", {
               type: "button",
-              disabled: busy || loginEmail.trim() === "" || loginPassword === "",
+              disabled: busy || (verification.pending ? !verification.ready : loginEmail.trim() === "" || loginPassword === ""),
               onClick: () => void signInClient()
             }, t(busy ? "signingIn" : "startSignIn")),
             React.createElement("p", { className: "dshRemotePasswordHint" }, t("passwordHint"))
@@ -5804,29 +5850,30 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             setSavingServer(!1), setBusy(!1);
           }
         }
-      }, signInClient = async () => {
-        if (!(serverDirty || savingServer || email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
+      }, clientVerification = useAccountVerification(React, open && loginMethod === "password" ? loginServerUrl : void 0), hostVerification = useAccountVerification(React, open ? status?.serverUrl : void 0), signInClient = async () => {
+        if (!(serverDirty || savingServer || loginServerUrl.trim() === "" || (clientVerification.pending ? !clientVerification.ready : email.trim() === "" || password === ""))) {
           setBusy(!0), setError(void 0);
           try {
-            status?.clientAuthRequired ? await props.control("client.account.login", { email: email.trim(), password }) : await props.control("settings.configure", {
+            status?.clientAuthRequired ? await props.control("client.account.login", { email: email.trim(), password, verification: clientVerification.verification }) : await props.control("settings.configure", {
               role: "client",
               serverUrl: loginServerUrl.trim(),
               email: email.trim(),
-              password
-            }), setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
+              password,
+              verification: clientVerification.verification
+            }), clientVerification.clear(), setDevices(await props.control("devices")), setStatus(await props.control("status")), setNeedsAuthorization(!1), setPassword("");
           } catch (reason) {
-            setError(connectionErrorMessageFor(reason, t));
+            clientVerification.handle(reason) ? setPassword("") : setError(connectionErrorMessageFor(reason, t));
           } finally {
             setBusy(!1);
           }
         }
       }, authorizeHost = async (kind) => {
-        if (!(kind === "account" && (hostEmail.trim() === "" || hostPassword === "")) && !(kind === "code" && hostRegistrationCode.trim() === "")) {
+        if (!(kind === "account" && (hostVerification.pending ? !hostVerification.ready : hostEmail.trim() === "" || hostPassword === "")) && !(kind === "code" && hostRegistrationCode.trim() === "")) {
           setBusy(!0), setError(void 0);
           try {
-            kind === "account" ? (await props.control("host.account.login", { email: hostEmail.trim(), password: hostPassword }), setHostPassword("")) : (await props.control("host.registration-code.submit", { code: hostRegistrationCode.trim() }), setHostRegistrationCode("")), setStatus(await props.control("status"));
+            kind === "account" ? (await props.control("host.account.login", { email: hostEmail.trim(), password: hostPassword, verification: hostVerification.verification }), hostVerification.clear(), setHostPassword("")) : (await props.control("host.registration-code.submit", { code: hostRegistrationCode.trim() }), setHostRegistrationCode("")), setStatus(await props.control("status"));
           } catch (reason) {
-            setError(connectionErrorMessageFor(reason, t));
+            kind === "account" && hostVerification.handle(reason) ? setHostPassword("") : setError(connectionErrorMessageFor(reason, t));
           } finally {
             setBusy(!1);
           }
@@ -6186,25 +6233,29 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
                       id: "dsh-remote-password-panel",
                       "aria-labelledby": "dsh-remote-password-tab"
                     },
-                    React.createElement("input", {
-                      type: "email",
-                      value: email,
-                      disabled: busy,
-                      autoComplete: "username",
-                      placeholder: t("account"),
-                      "aria-label": t("account"),
-                      onChange: (event) => setEmail(event.target.value)
-                    }),
-                    React.createElement("input", {
-                      type: "password",
-                      value: password,
-                      disabled: busy,
-                      autoComplete: "current-password",
-                      placeholder: t("password"),
-                      "aria-label": t("password"),
-                      onChange: (event) => setPassword(event.target.value)
-                    }),
-                    React.createElement("button", { type: "button", disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn")),
+                    clientVerification.fields(
+                      t,
+                      busy,
+                      React.createElement("input", {
+                        type: "email",
+                        value: email,
+                        disabled: busy,
+                        autoComplete: "username",
+                        placeholder: t("account"),
+                        "aria-label": t("account"),
+                        onChange: (event) => setEmail(event.target.value)
+                      }),
+                      React.createElement("input", {
+                        type: "password",
+                        value: password,
+                        disabled: busy,
+                        autoComplete: "current-password",
+                        placeholder: t("password"),
+                        "aria-label": t("password"),
+                        onChange: (event) => setPassword(event.target.value)
+                      })
+                    ),
+                    React.createElement("button", { type: "button", disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === "" || (clientVerification.pending ? !clientVerification.ready : email.trim() === "" || password === ""), onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn")),
                     React.createElement("p", { className: "dshRemotePasswordHint" }, t("passwordHint"))
                   ) : selectedProvider !== void 0 ? React.createElement(
                     "div",
@@ -6340,9 +6391,13 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
                     React.createElement(
                       "div",
                       { className: "dshRemoteLogin" },
-                      React.createElement("input", { type: "email", value: hostEmail, disabled: busy, autoComplete: "username", placeholder: t("serverAccountEmail"), "aria-label": t("serverAccountEmail"), onChange: (event) => setHostEmail(event.target.value) }),
-                      React.createElement("input", { type: "password", value: hostPassword, disabled: busy, autoComplete: "current-password", placeholder: t("serverAccountPassword"), "aria-label": t("serverAccountPassword"), onChange: (event) => setHostPassword(event.target.value) }),
-                      React.createElement("button", { type: "button", disabled: busy || hostEmail.trim() === "" || hostPassword === "", onClick: () => void authorizeHost("account") }, t(busy ? "signingIn" : "signInRegisterHost")),
+                      hostVerification.fields(
+                        t,
+                        busy,
+                        React.createElement("input", { type: "email", value: hostEmail, disabled: busy, autoComplete: "username", placeholder: t("serverAccountEmail"), "aria-label": t("serverAccountEmail"), onChange: (event) => setHostEmail(event.target.value) }),
+                        React.createElement("input", { type: "password", value: hostPassword, disabled: busy, autoComplete: "current-password", placeholder: t("serverAccountPassword"), "aria-label": t("serverAccountPassword"), onChange: (event) => setHostPassword(event.target.value) })
+                      ),
+                      React.createElement("button", { type: "button", disabled: busy || (hostVerification.pending ? !hostVerification.ready : hostEmail.trim() === "" || hostPassword === ""), onClick: () => void authorizeHost("account") }, t(busy ? "signingIn" : "signInRegisterHost")),
                       React.createElement("input", { value: hostRegistrationCode, disabled: busy, autoComplete: "one-time-code", placeholder: t("hostRegistrationCode"), "aria-label": t("hostRegistrationCode"), onChange: (event) => setHostRegistrationCode(event.target.value) }),
                       React.createElement("button", { type: "button", disabled: busy || hostRegistrationCode.trim() === "", onClick: () => void authorizeHost("code") }, t(busy ? "registering" : "useRegistrationCode"))
                     )
@@ -7503,7 +7558,7 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
         "sessions"
       ];
       function RemoteModeAction(props) {
-        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), refresh = async () => {
+        let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [hostRegistrationCode, setHostRegistrationCode] = React.useState(""), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), hostVerification = useAccountVerification(React, status?.serverUrl), [busy, setBusy] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), [error, setError] = React.useState(void 0), [supported, setSupported] = React.useState(!0), refresh = async () => {
           let [nextStatus, nextDevices] = await Promise.all([
             props.control("status"),
             props.control("devices").catch(() => [])
@@ -7538,12 +7593,12 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             setError(messageOf(reason, t)), setBusy(!1);
           }
         }, loginHost = async () => {
-          if (!(email.trim() === "" || password === "")) {
+          if (!(hostVerification.pending ? !hostVerification.ready : email.trim() === "" || password === "")) {
             setBusy(!0), setError(void 0);
             try {
-              await props.control("host.account.login", { email: email.trim(), password }), await refreshStatus();
+              await props.control("host.account.login", { email: email.trim(), password, verification: hostVerification.verification }), hostVerification.clear(), await refreshStatus();
             } catch (reason) {
-              setError(messageOf(reason, t));
+              hostVerification.handle(reason) || setError(messageOf(reason, t));
             } finally {
               setPassword(""), setBusy(!1);
             }
@@ -7609,27 +7664,31 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
                 status.host.accountRequired ? React.createElement(
                   "div",
                   { className: "dshRemoteLogin" },
-                  React.createElement("input", {
-                    type: "email",
-                    value: email,
-                    disabled: busy,
-                    autoComplete: "username",
-                    placeholder: t("serverAccountEmail"),
-                    "aria-label": t("serverAccountEmail"),
-                    onChange: (event) => setEmail(event.target.value)
-                  }),
-                  React.createElement("input", {
-                    type: "password",
-                    value: password,
-                    disabled: busy,
-                    autoComplete: "current-password",
-                    placeholder: t("password"),
-                    "aria-label": t("serverAccountPassword"),
-                    onChange: (event) => setPassword(event.target.value)
-                  }),
+                  hostVerification.fields(
+                    t,
+                    busy,
+                    React.createElement("input", {
+                      type: "email",
+                      value: email,
+                      disabled: busy,
+                      autoComplete: "username",
+                      placeholder: t("serverAccountEmail"),
+                      "aria-label": t("serverAccountEmail"),
+                      onChange: (event) => setEmail(event.target.value)
+                    }),
+                    React.createElement("input", {
+                      type: "password",
+                      value: password,
+                      disabled: busy,
+                      autoComplete: "current-password",
+                      placeholder: t("password"),
+                      "aria-label": t("serverAccountPassword"),
+                      onChange: (event) => setPassword(event.target.value)
+                    })
+                  ),
                   React.createElement("button", {
                     type: "button",
-                    disabled: busy || email.trim() === "" || password === "",
+                    disabled: busy || (hostVerification.pending ? !hostVerification.ready : email.trim() === "" || password === ""),
                     onClick: () => void loginHost()
                   }, t(busy ? "signingIn" : "signInRegisterHost")),
                   React.createElement("input", {

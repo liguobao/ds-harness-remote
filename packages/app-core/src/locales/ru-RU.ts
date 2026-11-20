@@ -636,6 +636,8 @@ const ruRU = {
   },
   status: { online: 'В сети', offline: 'Не в сети', disconnected: 'Отключено', lan: 'LAN напрямую', relay: 'Ретрансляция через сервер', p2p: 'P2P напрямую', turn: 'Ретрансляция TURN', waiting: 'Подключение', running: 'Выполняется' },
   setup: {
+    twoFactorCode: "Код подтверждения или восстановления",
+    twoFactorRestart: "Ввести пароль заново",
     or: 'или', heroSignIn: 'Вход в DeepSeek Harness Remote', emailSignIn: 'Войти по email', emailSignInCollapse: 'Скрыть вход по email',
     title: 'Вход', signIn: 'Войдите в аккаунт', signInAgain: 'Войти снова', lead: 'Выберите тот же способ входа, что и на удалённом устройстве, чтобы продолжить работу.',
     switchServer: "Сменить сервер", saveServer: "Сохранить сервер", switchServerHint: "Сохранение разорвёт текущее подключение, после этого потребуется войти на новом сервере.",

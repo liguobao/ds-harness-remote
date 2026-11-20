@@ -67751,6 +67751,7 @@ function inspectSelectedPath(stats) {
   const candidates = /* @__PURE__ */ new Map();
   const candidatePairs = /* @__PURE__ */ new Map();
   const selectedPairs = [];
+  const nominatedPairs = [];
   const selectedPairIds = /* @__PURE__ */ new Set();
   for (const [reportId, entry] of stats) {
     if (entry.type === "local-candidate" || entry.type === "remote-candidate") {
@@ -67759,15 +67760,18 @@ function inspectSelectedPath(stats) {
       }
     } else if (entry.type === "candidate-pair") {
       candidatePairs.set(String(entry.id ?? reportId), entry);
-      if (entry.selected === true || entry.nominated === true)
+      if (entry.selected === true)
         selectedPairs.push(entry);
+      else if (entry.nominated === true && entry.state === "succeeded")
+        nominatedPairs.push(entry);
     } else if (entry.type === "transport" && typeof entry.selectedCandidatePairId === "string") {
       selectedPairIds.add(entry.selectedCandidatePairId);
     }
   }
   const pairs = [
     ...[...selectedPairIds].map((id7) => candidatePairs.get(id7)).filter((pair) => pair !== void 0),
-    ...selectedPairs
+    ...selectedPairs,
+    ...nominatedPairs
   ];
   for (const pair of pairs) {
     const local = candidates.get(String(pair.localCandidateId));
@@ -72844,6 +72848,16 @@ function isAllowedHostCarrierOpen(endpoint) {
   return endpoint === "remoteAccess/follow" || endpoint.startsWith("account/") || endpoint.startsWith("settings/");
 }
 
+// packages/plugin/src/account-two-factor-required.ts
+var AccountTwoFactorRequired = class extends Error {
+  constructor(challenge, serverUrl) {
+    super("Two-factor verification is required.");
+    this.challenge = challenge;
+    this.serverUrl = serverUrl;
+  }
+  code = "TWO_FACTOR_REQUIRED";
+};
+
 // packages/plugin/src/client-runtime-contract.ts
 var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
 var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
@@ -72894,6 +72908,13 @@ function record3(value) {
 function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function readAccountVerification(value) {
+  if (value === void 0) return void 0;
+  if (!isRecord5(value) || typeof value.challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.challenge) || typeof value.code !== "string" || value.code.trim().length === 0 || value.code.trim().length > 64 || typeof value.serverUrl !== "string") {
+    throw new ClientModeError("INVALID_MESSAGE", "Invalid two-factor verification input.");
+  }
+  return { challenge: value.challenge, code: value.code.trim(), serverUrl: value.serverUrl };
+}
 function ok(value) {
   return { ok: true, value };
 }
@@ -72906,7 +72927,10 @@ function fail2(error62) {
     error: {
       code: "internal",
       message: source?.message ?? "The remote-mode operation failed.",
-      details: remoteCode === void 0 ? {} : { remoteCode, retryable }
+      details: {
+        ...remoteCode === void 0 ? {} : { remoteCode, retryable },
+        ...source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}
+      }
     }
   };
 }
@@ -81442,7 +81466,7 @@ var ClientControl = class {
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
-        return ok(await this.context.authorizeClientWithAccount(value.email, value.password));
+        return ok(await this.context.authorizeClientWithAccount(value.email, value.password, readAccountVerification(value.verification)));
       }
       if (endpoint === "client.account.qr.start") {
         const value = record3(payload);
@@ -81729,7 +81753,7 @@ var ClientControl = class {
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
-        return ok(await this.context.host.authorizeHostWithAccount(value.email, value.password));
+        return ok(await this.context.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification)));
       }
       if (endpoint === "host.authorization.set") {
         const value = record3(payload);
@@ -87876,16 +87900,26 @@ var HostServerApi = class {
       await this.clearAuthorization();
     }
   }
-  async authorizeWithAccount(identity3, email3, password, recoverIdentity) {
+  async authorizeWithAccount(identity3, email3, password, recoverIdentity, verification) {
     this.bindIdentity(identity3);
     const account = email3.trim();
-    if (account.length === 0 || password.length === 0) {
+    if (verification === void 0 && (account.length === 0 || password.length === 0)) {
       throw new ServerApiError("INVALID_MESSAGE", "Email and password are required.", false);
     }
-    const login2 = validateWebLogin(await this.publicRequest("/api/v1/auth/login", {
+    if (verification !== void 0 && verification.serverUrl !== this.baseUrl) {
+      throw new ServerApiError("TWO_FACTOR_EXPIRED", "The Server changed. Sign in again.", false);
+    }
+    const response = await this.publicRequest(verification === void 0 ? "/api/v1/auth/login" : "/api/v1/auth/2fa/verify", {
       method: "POST",
-      body: JSON.stringify({ email: account, password })
-    }));
+      body: JSON.stringify(verification === void 0 ? { email: account, password } : { challenge: verification.challenge, code: verification.code })
+    });
+    if (verification === void 0 && isAccountRecord(response) && response.twoFactorRequired === true) {
+      if (typeof response.challenge !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(response.challenge)) {
+        throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid two-factor challenge.", false);
+      }
+      throw new AccountTwoFactorRequired(response.challenge, this.baseUrl);
+    }
+    const login2 = validateWebLogin(response);
     const authorization = {
       accountToken: login2.token,
       account: login2.account,
@@ -88422,8 +88456,11 @@ function isIdentityKey(value) {
     return false;
   }
 }
+function isAccountRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function requireRecord(value, name2) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isAccountRecord(value)) {
     throw new ServerApiError("INVALID_MESSAGE", `The Server returned invalid ${name2} data.`, false);
   }
   return value;
@@ -90489,16 +90526,11 @@ var ClientModeRuntime = class {
     const message = status2.error === "DEVICE_REVOKED" ? "The local Host was revoked on the Server. Sign out and authorize this Host again." : "The local Host authorization is no longer valid. Sign out and authorize this Host again.";
     throw new ClientModeError(status2.error, message);
   }
-  async authorizeClientWithAccount(email3, password) {
-    let authorization;
-    try {
-      authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email3, password);
-    } catch (error62) {
-      if (!(error62 instanceof ServerApiError) || error62.code !== "DEVICE_REVOKED") throw error62;
+  async authorizeClientWithAccount(email3, password, verification) {
+    const authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email3, password, async () => {
       this.identity = await this.identities.reset(this.config.deviceName);
-      this.server.bindIdentity(this.identity);
-      authorization = await this.server.authorizeWithAccount(this.identity, email3, password);
-    }
+      return this.identity;
+    }, verification);
     await this.authorizeHostByDefault();
     this.clientAuthRequired = false;
     this.logger.info("Client account authorized");
@@ -103153,7 +103185,7 @@ var PluginControlRuntime = class {
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
-        return ok3(await this.host.authorizeHostWithAccount(value.email, value.password));
+        return ok3(await this.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification)));
       }
       if (endpoint === "host.registration-code.submit") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -103207,7 +103239,7 @@ var PluginControlRuntime = class {
       authorization = await api.authorizeWithAccount(identity3, value.email, value.password, async () => {
         identity3 = await identities.reset(hostname4());
         return identity3;
-      });
+      }, readAccountVerification(value.verification));
     }
     if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
       await this.client?.authorizeHostByDefault();
@@ -103757,7 +103789,10 @@ function fail5(error62) {
     error: {
       code: "internal",
       message: source?.message ?? "The plugin control operation failed.",
-      details: remoteCode === void 0 ? {} : { remoteCode }
+      details: {
+        ...remoteCode === void 0 ? {} : { remoteCode },
+        ...source instanceof AccountTwoFactorRequired ? { challenge: source.challenge, serverUrl: source.serverUrl } : {}
+      }
     }
   };
 }
@@ -110842,7 +110877,7 @@ var HostPluginRuntime = class {
     this.logger.info("Host authorized as an owned device");
     return result;
   }
-  async authorizeHostWithAccount(email3, password) {
+  async authorizeHostWithAccount(email3, password, verification) {
     if (this.serverApi === void 0) {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Configure serverUrl before signing in.", false);
     }
@@ -110856,7 +110891,7 @@ var HostPluginRuntime = class {
       this.initializePairing();
       this.logger.info("Rotated revoked Host identity before account authorization");
       return this.identity;
-    });
+    }, verification);
     this.serverConnection?.resume();
     this.logger.info("Host account authorized");
     return result;

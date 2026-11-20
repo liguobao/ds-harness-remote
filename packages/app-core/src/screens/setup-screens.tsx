@@ -88,6 +88,12 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   const serverDirty = serverDraft.trim() !== serverUrl
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [challenge, setChallenge] = useState<string>()
+  const [code, setCode] = useState('')
+  const clearVerification = () => {
+    setChallenge(undefined)
+    setCode('')
+  }
   const [showPassword, setShowPassword] = useState(false)
   const preferredLoginMethod: SetupLoginMethod = language.startsWith('zh-') ? 'oauth' : 'google-oauth'
   const [loginMethod, setLoginMethod] = useState<SetupLoginMethod>(preferredLoginMethod)
@@ -179,12 +185,23 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     setServerDraft(saved)
     setProviderReload(value => value + 1)
     setPassword('')
+    clearVerification()
     setServerExpanded(false)
   }
 
   const submit = async () => {
-    if (serverDirty) return
-    if (await configure(serverUrl, email, password)) onComplete()
+    if (serverDirty || busy || oauthFlowBusy) return
+    const result = await configure(serverUrl, email, password, challenge === undefined ? undefined : { challenge, code })
+    if (!mounted.current) return
+    if (typeof result === 'object' && 'challenge' in result) {
+      setChallenge(result.challenge)
+      setPassword('')
+    } else if (result === true) {
+      clearVerification()
+      onComplete()
+    } else if (result !== false) {
+      clearVerification()
+    }
   }
 
   const signInWithZhihu = async () => {
@@ -219,7 +236,9 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     if (url !== undefined) await Linking.openURL(url)
   }
 
-  const canSubmit = email.trim().length > 0 && password.length > 0
+  const canSubmit = challenge === undefined
+    ? email.trim().length > 0 && password.length > 0
+    : code.trim().length > 0
 
   const startQrFor = async (provider: OAuthProviderInfo, run: number) => {
     qrCompleted.current = false
@@ -343,6 +362,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     }
     setLoginMethod(method)
     setShowPassword(false)
+    clearVerification()
     if (method === 'oauth') void signInWithZhihu()
     else if (method === 'github-oauth') void signInWithGithub()
     else if (method === 'google-oauth') void signInWithGoogle()
@@ -361,13 +381,14 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     setLoginMethod(method)
     setShowPassword(false)
     setShowQr(true)
+    clearVerification()
     void refreshQr(method)
   }
 
   // Third-party sign-in is the primary path; email is a collapsed fallback
   // (the Server has no email sign-up). QR is offered on large screens only.
   const qrVisible = largeScreen && showQr
-  const emailVisible = showPassword || (providersPhase === 'ready' && oauthMethods.length === 0)
+  const emailVisible = challenge !== undefined || showPassword || (providersPhase === 'ready' && oauthMethods.length === 0)
   const controlsDisabled = busy || oauthBusy || serverDirty
 
   const providerIcon = (method: SetupLoginMethod, size = 22) => method === 'oauth'
@@ -429,30 +450,46 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
 
   const emailContent = (
     <View style={styles.emailForm}>
-      <TextInput
+      {challenge === undefined ? <>
+        <TextInput
+          style={styles.loginInput}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          textContentType="username"
+          placeholder={zhCN.setup.emailPlaceholder}
+          placeholderTextColor={colors.muted}
+          accessibilityLabel={zhCN.setup.email}
+        />
+        <TextInput
+          style={styles.loginInput}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          textContentType="password"
+          returnKeyType="go"
+          onSubmitEditing={() => { if (canSubmit) void submit() }}
+          placeholder={zhCN.setup.passwordPlaceholder}
+          placeholderTextColor={colors.muted}
+          accessibilityLabel={zhCN.setup.password}
+        />
+      </> : <TextInput
         style={styles.loginInput}
-        value={email}
-        onChangeText={setEmail}
+        value={code}
+        onChangeText={setCode}
         autoCapitalize="none"
         autoCorrect={false}
-        keyboardType="email-address"
-        textContentType="username"
-        placeholder={zhCN.setup.emailPlaceholder}
-        placeholderTextColor={colors.muted}
-        accessibilityLabel={zhCN.setup.email}
-      />
-      <TextInput
-        style={styles.loginInput}
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        textContentType="password"
+        autoComplete="one-time-code"
+        maxLength={64}
+        editable={!busy}
         returnKeyType="go"
-        onSubmitEditing={() => { if (canSubmit) void submit() }}
-        placeholder={zhCN.setup.passwordPlaceholder}
+        onSubmitEditing={() => { if (canSubmit && !busy) void submit() }}
+        placeholder={zhCN.setup.twoFactorCode}
         placeholderTextColor={colors.muted}
-        accessibilityLabel={zhCN.setup.password}
-      />
+        accessibilityLabel={zhCN.setup.twoFactorCode}
+      />}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={zhCN.setup.title}
@@ -465,7 +502,10 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
           ? <ActivityIndicator color={colors.white} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
       </Pressable>
-      <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text>
+      {challenge === undefined ? <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text> :
+        <Pressable accessibilityRole="button" disabled={busy} onPress={clearVerification} style={styles.textLink}>
+          <Text style={styles.textLinkLabel}>{zhCN.setup.twoFactorRestart}</Text>
+        </Pressable>}
     </View>
   )
 
@@ -551,6 +591,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                             disabled={busy}
                             onPress={() => {
                               if (emailVisible) {
+                                clearVerification()
                                 setShowPassword(false)
                               } else {
                                 setShowPassword(true)

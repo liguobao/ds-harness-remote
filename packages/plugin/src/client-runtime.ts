@@ -55,7 +55,7 @@ import {
 } from './session-history-cache.js'
 import { safeErrorCode } from './safe-error.js'
 import { RemoteSessionTools, type SessionToolOperation } from './remote-session-tools.js'
-import type { OAuthProvider } from './server-api.js'
+import type { AccountVerification, OAuthProvider } from './server-api.js'
 import { ClientServerApi, ServerApiError } from './server-api.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
@@ -382,16 +382,11 @@ export class ClientModeRuntime {
     throw new ClientModeError(status.error, message)
   }
 
-  async authorizeClientWithAccount(email: string, password: string): Promise<unknown> {
-    let authorization
-    try {
-      authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password)
-    } catch (error) {
-      if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
+  async authorizeClientWithAccount(email: string, password: string, verification?: AccountVerification): Promise<unknown> {
+    const authorization = await this.server.authorizeWithAccount(this.requireIdentity(), email, password, async () => {
       this.identity = await this.identities.reset(this.config.deviceName)
-      this.server.bindIdentity(this.identity)
-      authorization = await this.server.authorizeWithAccount(this.identity, email, password)
-    }
+      return this.identity
+    }, verification)
     await this.authorizeHostByDefault()
     this.clientAuthRequired = false
     this.logger.info('Client account authorized')

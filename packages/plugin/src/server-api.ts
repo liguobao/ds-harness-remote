@@ -1,3 +1,4 @@
+import { AccountTwoFactorRequired } from './account-two-factor-required.js'
 import type { PairingCredentials } from './pairing-contract.js'
 import { platform } from 'node:os'
 import { fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
@@ -167,16 +168,29 @@ export class HostServerApi {
     email: string,
     password: string,
     recoverIdentity?: () => Promise<HostIdentity>,
+    verification?: AccountVerification,
   ): Promise<DeviceAuthorization> {
     this.bindIdentity(identity)
     const account = email.trim()
-    if (account.length === 0 || password.length === 0) {
+    if (verification === undefined && (account.length === 0 || password.length === 0)) {
       throw new ServerApiError('INVALID_MESSAGE', 'Email and password are required.', false)
     }
-    const login = validateWebLogin(await this.publicRequest<unknown>('/api/v1/auth/login', {
+    if (verification !== undefined && verification.serverUrl !== this.baseUrl) {
+      throw new ServerApiError('TWO_FACTOR_EXPIRED', 'The Server changed. Sign in again.', false)
+    }
+    const response = await this.publicRequest<unknown>(verification === undefined ? '/api/v1/auth/login' : '/api/v1/auth/2fa/verify', {
       method: 'POST',
-      body: JSON.stringify({ email: account, password }),
-    }))
+      body: JSON.stringify(verification === undefined
+        ? { email: account, password }
+        : { challenge: verification.challenge, code: verification.code }),
+    })
+    if (verification === undefined && isAccountRecord(response) && response.twoFactorRequired === true) {
+      if (typeof response.challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(response.challenge)) {
+        throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid two-factor challenge.', false)
+      }
+      throw new AccountTwoFactorRequired(response.challenge, this.baseUrl)
+    }
+    const login = validateWebLogin(response)
     const authorization = {
       accountToken: login.token,
       account: login.account,
@@ -677,6 +691,12 @@ export class ServerApiError extends Error {
   ) { super(message) }
 }
 
+export interface AccountVerification {
+  challenge: string
+  code: string
+  serverUrl: string
+}
+
 function validateTokens(value: unknown): TokenPair {
   const parsed = deviceTokenPairSchema.safeParse(value)
   if (!parsed.success) {
@@ -807,8 +827,12 @@ function isIdentityKey(value: string): boolean {
   }
 }
 
+function isAccountRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function requireRecord(value: unknown, name: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isAccountRecord(value)) {
     throw new ServerApiError('INVALID_MESSAGE', `The Server returned invalid ${name} data.`, false)
   }
   return value as Record<string, unknown>

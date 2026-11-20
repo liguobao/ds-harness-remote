@@ -99,8 +99,8 @@ export class Controller {
 
   async signInWithCredentials(serverUrl: string, email: string, password: string): Promise<void> {
     const api = new ServerApi(serverUrl)
-    const login = await api.login(email, password)
-    await this.completeSignIn(api, login)
+    const login = await this.finishPasswordLogin(api, email, password)
+    if (login) await this.completeSignIn(api, login)
   }
 
   async startInlineQr(serverUrl: string): Promise<{ api: ServerApi; qrId: string; scanUrl: string }> {
@@ -157,7 +157,30 @@ export class Controller {
     if (!email) return
     const password = await vscode.window.showInputBox({ title: 'Account and password', prompt: 'Password', password: true, ignoreFocusOut: true })
     if (!password) return
-    return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Signing in to DS Harness Remote…' }, () => api.login(email, password))
+    return this.finishPasswordLogin(api, email, password)
+  }
+
+  private async finishPasswordLogin(api: ServerApi, email: string, password: string) {
+    const login = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Signing in to DS Harness Remote…' }, () => api.login(email, password))
+    if (!('challenge' in login)) return login
+    let validationMessage: string | undefined
+    while (true) {
+      const code = await vscode.window.showInputBox({
+        title: 'Two-factor verification',
+        prompt: validationMessage ?? 'Enter a verification or recovery code',
+        ignoreFocusOut: true,
+        password: true,
+        validateInput: value => value.trim().length === 0 || value.trim().length > 64
+          ? 'Enter a code between 1 and 64 characters.' : undefined,
+      })
+      if (code === undefined) return
+      try {
+        return await api.verifyLogin(login.challenge, code)
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'TWO_FACTOR_INVALID') throw error
+        validationMessage = error.message
+      }
+    }
   }
 
   private async signInWithQr(api: ServerApi): Promise<{ token: string; account: string } | undefined> {

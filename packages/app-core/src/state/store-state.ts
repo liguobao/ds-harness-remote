@@ -151,7 +151,7 @@ export interface AppState {
   requireReauth(message?: string): Promise<void>
   consumePendingAutoConnect(): string | undefined
   selectServer(input: string): Promise<string | undefined>
-  configureServer(input: string, email: string, password: string): Promise<boolean>
+  configureServer(input: string, email: string, password: string, verification?: { challenge: string; code: string }): Promise<boolean | { challenge: string } | { expired: true }>
   startOAuth(input: string): Promise<string | undefined>
   startGithubOAuth(input: string): Promise<string | undefined>
   startGoogleOAuth(input: string): Promise<string | undefined>

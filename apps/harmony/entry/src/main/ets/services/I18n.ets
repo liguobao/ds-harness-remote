@@ -183,6 +183,8 @@ function buildEnglish(): Map<string, string> {
   map.set('收起邮箱登录', 'Hide email sign-in');
   map.set('仅用于邀请或自建账号。', 'Invite or self-hosted accounts only.');
   map.set('输入密码', 'Enter your password');
+  map.set('验证码或恢复码', 'Verification or recovery code');
+  map.set('重新输入密码', 'Enter password again');
   map.set('输入邮箱', 'Enter your email');
   map.set('或', 'or');
   map.set('将在浏览器中完成授权，然后自动返回此处。', 'A browser will open to finish authorization, then return here automatically.');

@@ -12,20 +12,19 @@ import type {
   RemoteWorkspaceSelection,
   RemoteWorkspaceView,
 } from './client-runtime-contract.js'
-import { ClientModeError, fail, isRecord, ok, record } from './client-runtime-contract.js'
+import { ClientModeError, fail, isRecord, ok, readAccountVerification, record } from './client-runtime-contract.js'
 import type { CodexVirtualWorkspaceView } from './codex/virtual-harness.js'
 import type { RemoteFileViewerEndpoint } from './file-viewer-contract.js'
 import { LoopbackPreview } from './loopback-preview.js'
 import { isAllowedPluginRoute } from './plugin-route-bridge.js'
-import type { OAuthProvider } from './server-api.js'
-import { ClientServerApi } from './server-api.js'
+import type { AccountVerification, ClientServerApi, OAuthProvider } from './server-api.js'
 
 /** Collaborates with one ClientModeRuntime; never creates a second session or connection state. */
 export interface ClientControlContext {
   readonly detailedStatus: () => Promise<Record<string, unknown>>
   readonly devices: () => Promise<RemoteDeviceView[]>
   readonly server: ClientServerApi
-  readonly authorizeClientWithAccount: (email: string, password: string) => Promise<unknown>
+  readonly authorizeClientWithAccount: (email: string, password: string, verification?: AccountVerification) => Promise<unknown>
   readonly startClientOAuthQrLogin: (provider: OAuthProvider) => Promise<unknown>
   readonly pollClientOAuthQrLogin: (qrId: string) => Promise<unknown>
   readonly activeRemote: () => ConnectedRemote | undefined
@@ -69,7 +68,7 @@ export class ClientControl {
         if (typeof value.email !== 'string' || typeof value.password !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
         }
-        return ok(await this.context.authorizeClientWithAccount(value.email, value.password))
+        return ok(await this.context.authorizeClientWithAccount(value.email, value.password, readAccountVerification(value.verification)))
       }
       if (endpoint === 'client.account.qr.start') {
         const value = record(payload)
@@ -359,7 +358,7 @@ export class ClientControl {
         if (typeof value.email !== 'string' || typeof value.password !== 'string') {
           throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
         }
-        return ok(await this.context.host.authorizeHostWithAccount(value.email, value.password))
+        return ok(await this.context.host.authorizeHostWithAccount(value.email, value.password, readAccountVerification(value.verification)))
       }
       if (endpoint === 'host.authorization.set') {
         const value = record(payload)

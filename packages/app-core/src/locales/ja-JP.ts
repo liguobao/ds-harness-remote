@@ -628,6 +628,8 @@ const jaJP = {
   },
   status: { online: "オンライン", offline: "オフライン", disconnected: "切断されました", lan: "直接LAN", relay: "サーバーリレー", p2p: "ダイレクト P2P", turn: "ターンリレー", waiting: "接続中", running: "実行中" },
   setup: {
+    twoFactorCode: "確認コードまたはリカバリーコード",
+    twoFactorRestart: "パスワードを再入力",
     or: 'または', heroSignIn: 'DeepSeek Harness Remote にサインイン', emailSignIn: 'メールでサインイン', emailSignInCollapse: 'メールログインを閉じる',
     title: "サインイン", signIn: "アカウントにサインインする", signInAgain: "再度サインインしてください", lead: "リモートデバイスと同じログイン方法を選択して、作業を続けてください。",
     switchServer: "サーバーを切り替える", saveServer: "サーバーを保存", switchServerHint: "保存すると現在の接続が切断され、新しいサーバーへのログインが必要になります。",

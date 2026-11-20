@@ -14,6 +14,7 @@ export class TokenPair {
 }
 
 export class AccountLoginResult {
+  challenge: string = '';
   token: string = '';
   expiresAt: number = 0;
   account: string = '';

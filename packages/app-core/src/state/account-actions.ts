@@ -1,10 +1,10 @@
 import { normalizeServerUrl } from '../lib/server-url'
 import * as Haptics from 'expo-haptics'
 import { resolveAutoConnectDevice } from '../lib/auto-connect'
-import { friendlyError, isSessionAuthError } from '../lib/errors'
+import { friendlyError, isSessionAuthError, RemoteApiError } from '../lib/errors'
 import { applyLanguagePreference, strings as zhCN } from '../locales/i18n'
 import { reconcileTrustedDevices } from '../services/device-directory'
-import { RemoteServerApi } from '../services/api'
+import { AccountTwoFactorRequired, RemoteServerApi } from '../services/api'
 import type { LoginOutcome } from '../services/login'
 import {
   githubOAuthLoginChannel,
@@ -94,7 +94,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     } finally {
       --accountChanges
     }
-    if (refresh && result !== false && accountChanges === 0 && generation === accountGeneration) {
+    if (refresh && (result === true || result === undefined) && accountChanges === 0 && generation === accountGeneration) {
       await get().refreshDevices()
     }
     return result
@@ -209,16 +209,21 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       }
     },
 
-    async configureServer(input, email, password) {
+    async configureServer(input, email, password, verification) {
       set({ busyAction: passwordLoginChannel.busyAction, error: undefined })
       try {
         const identity = get().identity
         if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
         const context = await loginFlow.createContext(input, identity)
-        const outcome = await loginFlow.signInWith(passwordLoginChannel, context, { email, password })
+        const outcome = await loginFlow.signInWith(passwordLoginChannel, context, verification ?? { email, password })
         return await finalizeLogin(set, context.baseUrl, outcome)
       } catch (error) {
+        if (error instanceof AccountTwoFactorRequired) {
+          set({ busyAction: undefined })
+          return { challenge: error.challenge }
+        }
         set({ busyAction: undefined, error: friendlyError(error) })
+        if (error instanceof RemoteApiError && error.code === 'TWO_FACTOR_EXPIRED') return { expired: true }
         return false
       }
     },
@@ -603,7 +608,12 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       }
     },
     selectServer: input => redirect(() => actions.selectServer(input)),
-    configureServer: (...args) => login(() => actions.configureServer(...args)),
+    configureServer: async (...args) => {
+      const generation = accountGeneration + 1
+      const result = await change(() => actions.configureServer(...args), true)
+      if (generation !== accountGeneration) return false
+      return typeof result === 'boolean' ? result && !get().reauthRequired : result
+    },
     completeOAuth: token => login(() => actions.completeOAuth(token)),
     listLoginProviders: input => actions.listLoginProviders(input),
     listQrProviders: async input => {

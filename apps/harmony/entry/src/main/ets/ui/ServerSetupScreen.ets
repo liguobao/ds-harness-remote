@@ -15,9 +15,12 @@ export struct ServerSetupScreen {
   @Prop minContentHeight: number = 0;
   @Link emailInput: string;
   @Link passwordInput: string;
+  @Prop twoFactorRequired: boolean = false;
+  @State code: string = '';
   @Link passwordLoginOpen: boolean;
   onMore: () => void = () => {};
-  onLogin: (email: string, password: string) => void = () => {};
+  onLogin: (email: string, password: string, code: string) => void = () => {};
+  onRestartPassword: () => void = () => {};
   onProvider: (id: string) => void = () => {};
   onOpenAuthorization: () => void = () => {};
   onCopyAuthorization: () => void = () => {};
@@ -26,9 +29,15 @@ export struct ServerSetupScreen {
   onResetIdentity: () => void = () => {};
   onOpenCredits: () => void = () => {};
 
+  private canSubmit(): boolean {
+    return this.twoFactorRequired ? this.code.trim().length > 0
+      : this.emailInput.trim().length > 0 && this.passwordInput.length > 0;
+  }
+
   private submit(): void {
-    if (!this.busy && this.emailInput.trim().length > 0 && this.passwordInput.length > 0) {
-      this.onLogin(this.emailInput, this.passwordInput);
+    if (!this.busy && this.canSubmit()) {
+      this.onLogin(this.emailInput, this.passwordInput, this.twoFactorRequired ? this.code : '');
+      this.code = '';
     }
   }
 
@@ -154,51 +163,72 @@ export struct ServerSetupScreen {
               .width('100%')
               .padding({ top: 10, bottom: 10 })
             }
-            if (this.showPasswordLogin() && this.qrUrl.length === 0) {
-              TextInput({ text: this.emailInput, placeholder: t('输入邮箱') })
-                .height(50)
-                .backgroundColor(this.palette.chip)
-                .fontColor(this.palette.text)
-                .placeholderColor(this.palette.text3)
-                .caretColor(this.palette.primary)
-                .borderRadius(14)
-                .padding({ left: 16, right: 16 })
-                .onChange((value: string) => {
-                  this.emailInput = value;
-                })
-              TextInput({ text: this.passwordInput, placeholder: t('输入密码') })
-                .type(InputType.Password)
-                .height(50)
-                .backgroundColor(this.palette.chip)
-                .fontColor(this.palette.text)
-                .placeholderColor(this.palette.text3)
-                .caretColor(this.palette.primary)
-                .borderRadius(14)
-                .padding({ left: 16, right: 16 })
-                .onChange((value: string) => {
-                  this.passwordInput = value;
-                })
-                .onSubmit(() => {
-                  this.submit();
-                })
+            if ((this.twoFactorRequired || this.showPasswordLogin()) && this.qrUrl.length === 0) {
+              if (this.twoFactorRequired) {
+                TextInput({ text: this.code, placeholder: t('验证码或恢复码') })
+                  .height(50)
+                  .maxLength(64)
+                  .backgroundColor(this.palette.chip)
+                  .fontColor(this.palette.text)
+                  .placeholderColor(this.palette.text3)
+                  .borderRadius(14)
+                  .onChange((value: string) => { this.code = value; })
+                  .onSubmit(() => { this.submit(); })
+              } else {
+                TextInput({ text: this.emailInput, placeholder: t('输入邮箱') })
+                  .height(50)
+                  .backgroundColor(this.palette.chip)
+                  .fontColor(this.palette.text)
+                  .placeholderColor(this.palette.text3)
+                  .caretColor(this.palette.primary)
+                  .borderRadius(14)
+                  .padding({ left: 16, right: 16 })
+                  .onChange((value: string) => {
+                    this.emailInput = value;
+                  })
+                TextInput({ text: this.passwordInput, placeholder: t('输入密码') })
+                  .type(InputType.Password)
+                  .height(50)
+                  .backgroundColor(this.palette.chip)
+                  .fontColor(this.palette.text)
+                  .placeholderColor(this.palette.text3)
+                  .caretColor(this.palette.primary)
+                  .borderRadius(14)
+                  .padding({ left: 16, right: 16 })
+                  .onChange((value: string) => {
+                    this.passwordInput = value;
+                  })
+                  .onSubmit(() => {
+                    this.submit();
+                  })
+              }
               Button(t('登录'), { type: ButtonType.ROUNDED_RECTANGLE })
                 .width('100%')
                 .height(50)
-                .backgroundColor(this.emailInput.trim().length > 0 && this.passwordInput.length > 0
+                .backgroundColor(this.canSubmit()
                   ? this.palette.primary : this.palette.chip)
-                .fontColor(this.emailInput.trim().length > 0 && this.passwordInput.length > 0
+                .fontColor(this.canSubmit()
                   ? '#FFFFFF' : this.palette.text2)
                 .fontSize(16)
                 .fontWeight(FontWeight.Medium)
                 .borderRadius(14)
-                .enabled(!this.busy && this.emailInput.trim().length > 0 && this.passwordInput.length > 0)
+                .enabled(!this.busy && this.canSubmit())
                 .onClick(() => {
                   this.submit();
                 })
-              Text(t('仅用于邀请或自建账号。'))
-                .fontSize(12)
-                .fontColor(this.palette.text2)
-                .textAlign(TextAlign.Center)
+              if (this.twoFactorRequired) {
+                Button(t('重新输入密码'))
+                  .enabled(!this.busy)
+                  .onClick(() => {
+                    this.code = '';
+                    this.onRestartPassword();
+                  })
+              } else {
+                Text(t('仅用于邀请或自建账号。'))
+                  .fontSize(12)
+                  .fontColor(this.palette.text2)
+                  .textAlign(TextAlign.Center)
+              }
             }
             if (this.providers.length > 0 && this.qrUrl.length === 0) {
               Row({ space: 6 }) {

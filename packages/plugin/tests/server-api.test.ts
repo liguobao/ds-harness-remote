@@ -16,6 +16,41 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('waits to register until account verification succeeds on the issuing Server', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-server-2fa-'))
+    directories.push(directory)
+    const identity = hostIdentity()
+    const serverUrl = 'https://dsh.r2049.cn'
+    const challenge = 'A'.repeat(43)
+    const verification = { challenge, serverUrl, code: 'recovery-code' }
+    const account = 'host@example.com'
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(json({ twoFactorRequired: true, challenge }))
+      .mockResolvedValueOnce(errorJson('TWO_FACTOR_INVALID', 'Invalid code', 400))
+      .mockResolvedValueOnce(json({ token: 'web-account-token-value', expiresAt: 123456, account, isAdmin: false }))
+      .mockResolvedValueOnce(json(tokens()))
+    const api = new HostServerApi(serverUrl, new ServerCredentialStore(directory), fetchMock)
+
+    await expect(api.authorizeWithAccount(identity, account, 'password')).rejects.toMatchObject({
+      code: 'TWO_FACTOR_REQUIRED', challenge, serverUrl,
+    })
+    await expect(api.authorizeWithAccount(identity, '', '', undefined, { ...verification, serverUrl: 'https://other.example' }))
+      .rejects.toMatchObject({ code: 'TWO_FACTOR_EXPIRED' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await expect(api.authorizeWithAccount(identity, '', '', undefined, verification))
+      .rejects.toMatchObject({ code: 'TWO_FACTOR_INVALID' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await expect(api.authorizeWithAccount(identity, '', '', undefined, verification))
+      .resolves.toMatchObject({ method: 'account', account })
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      serverUrl + '/api/v1/auth/login',
+      serverUrl + '/api/v1/auth/2fa/verify',
+      serverUrl + '/api/v1/auth/2fa/verify',
+      serverUrl + '/api/v1/devices/register',
+    ])
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ challenge, code: 'recovery-code' })
+  })
+
   it('reports a directory refresh lock without making an authentication request', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-directory-lock-'))
     directories.push(directory)

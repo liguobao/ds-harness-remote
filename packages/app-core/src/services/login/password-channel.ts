@@ -1,17 +1,18 @@
 import type { ImmediateLoginChannel } from './types'
 import { serverSession } from '../server-session'
 
-export interface PasswordLoginInput {
-  email: string
-  password: string
-}
+export type PasswordLoginInput =
+  | { email: string; password: string }
+  | { challenge: string; code: string }
 
 export const passwordLoginChannel: ImmediateLoginChannel<PasswordLoginInput> = {
   method: 'password',
   busyAction: 'server',
 
-  async signIn({ baseUrl, identity, publicApi }, { email, password }) {
-    const login = await publicApi.loginAccount(email, password)
+  async signIn({ baseUrl, identity, publicApi }, input) {
+    const login = 'challenge' in input
+      ? await publicApi.verifyAccountLogin(input.challenge, input.code)
+      : await publicApi.loginAccount(input.email, input.password)
     const { credentials } = await serverSession.registerWithAccountToken(
       baseUrl,
       identity,

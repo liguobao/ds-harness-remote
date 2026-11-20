@@ -1,3 +1,4 @@
+import { useAccountVerification } from './account-verification.js'
 import { mountAccountEntry } from './account-entry.js'
 import { watchFooterLane, type FooterForm } from './footer-lane.js'
 import { createHostPairingPanel } from './pairing.js'
@@ -903,40 +904,47 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
       }
     }
 
+    const clientVerification = useAccountVerification(React, open && loginMethod === 'password' ? loginServerUrl : undefined)
+    const hostVerification = useAccountVerification(React, open ? status?.serverUrl : undefined)
+
     const signInClient = async (): Promise<void> => {
-      if (serverDirty || savingServer || email.trim() === '' || password === '' || loginServerUrl.trim() === '') return
+      if (serverDirty || savingServer || loginServerUrl.trim() === '' || (clientVerification.pending ? !clientVerification.ready : email.trim() === '' || password === '')) return
       setBusy(true)
       setError(undefined)
       try {
         if (status?.clientAuthRequired) {
-          await props.control('client.account.login', { email: email.trim(), password })
+          await props.control('client.account.login', { email: email.trim(), password, verification: clientVerification.verification })
         } else {
           await props.control('settings.configure', {
             role: 'client',
             serverUrl: loginServerUrl.trim(),
             email: email.trim(),
             password,
+            verification: clientVerification.verification,
           })
         }
+        clientVerification.clear()
         setDevices(await props.control<RemoteDevice[]>('devices'))
         setStatus(await props.control<RemoteStatus>('status'))
         setNeedsAuthorization(false)
         setPassword('')
       } catch (reason) {
-        setError(connectionErrorMessageFor(reason, t))
+        if (clientVerification.handle(reason)) setPassword('')
+        else setError(connectionErrorMessageFor(reason, t))
       } finally {
         setBusy(false)
       }
     }
 
     const authorizeHost = async (kind: 'account' | 'code'): Promise<void> => {
-      if (kind === 'account' && (hostEmail.trim() === '' || hostPassword === '')) return
+      if (kind === 'account' && (hostVerification.pending ? !hostVerification.ready : hostEmail.trim() === '' || hostPassword === '')) return
       if (kind === 'code' && hostRegistrationCode.trim() === '') return
       setBusy(true)
       setError(undefined)
       try {
         if (kind === 'account') {
-          await props.control('host.account.login', { email: hostEmail.trim(), password: hostPassword })
+          await props.control('host.account.login', { email: hostEmail.trim(), password: hostPassword, verification: hostVerification.verification })
+          hostVerification.clear()
           setHostPassword('')
         } else {
           await props.control('host.registration-code.submit', { code: hostRegistrationCode.trim() })
@@ -944,7 +952,8 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
         }
         setStatus(await props.control<RemoteStatus>('status'))
       } catch (reason) {
-        setError(connectionErrorMessageFor(reason, t))
+        if (kind === 'account' && hostVerification.handle(reason)) setHostPassword('')
+        else setError(connectionErrorMessageFor(reason, t))
       } finally {
         setBusy(false)
       }
@@ -1397,15 +1406,15 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
                   'aria-labelledby': 'dsh-remote-password-tab',
                 },
-                  React.createElement('input', {
+                  clientVerification.fields(t, busy, React.createElement('input', {
                     type: 'email', value: email, disabled: busy, autoComplete: 'username', placeholder: t('account'),
                     'aria-label': t('account'), onChange: (event: Event) => setEmail((event.target as HTMLInputElement).value),
                   }),
                   React.createElement('input', {
                     type: 'password', value: password, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
                     'aria-label': t('password'), onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
-                  }),
-                  React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')),
+                  })),
+                  React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || (clientVerification.pending ? !clientVerification.ready : email.trim() === '' || password === ''), onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')),
                   React.createElement('p', { className: 'dshRemotePasswordHint' }, t('passwordHint')))
                 : selectedProvider !== undefined
                   ? React.createElement('div', {
@@ -1489,9 +1498,9 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                     React.createElement('strong', null, t('thisMachineHost')),
                     React.createElement('p', null, t('hostSignInHint')),
                     React.createElement('div', { className: 'dshRemoteLogin' },
-                      React.createElement('input', { type: 'email', value: hostEmail, disabled: busy, autoComplete: 'username', placeholder: t('serverAccountEmail'), 'aria-label': t('serverAccountEmail'), onChange: (event: Event) => setHostEmail((event.target as HTMLInputElement).value) }),
-                      React.createElement('input', { type: 'password', value: hostPassword, disabled: busy, autoComplete: 'current-password', placeholder: t('serverAccountPassword'), 'aria-label': t('serverAccountPassword'), onChange: (event: Event) => setHostPassword((event.target as HTMLInputElement).value) }),
-                      React.createElement('button', { type: 'button', disabled: busy || hostEmail.trim() === '' || hostPassword === '', onClick: () => void authorizeHost('account') }, t(busy ? 'signingIn' : 'signInRegisterHost')),
+                      hostVerification.fields(t, busy, React.createElement('input', { type: 'email', value: hostEmail, disabled: busy, autoComplete: 'username', placeholder: t('serverAccountEmail'), 'aria-label': t('serverAccountEmail'), onChange: (event: Event) => setHostEmail((event.target as HTMLInputElement).value) }),
+                      React.createElement('input', { type: 'password', value: hostPassword, disabled: busy, autoComplete: 'current-password', placeholder: t('serverAccountPassword'), 'aria-label': t('serverAccountPassword'), onChange: (event: Event) => setHostPassword((event.target as HTMLInputElement).value) })),
+                      React.createElement('button', { type: 'button', disabled: busy || (hostVerification.pending ? !hostVerification.ready : hostEmail.trim() === '' || hostPassword === ''), onClick: () => void authorizeHost('account') }, t(busy ? 'signingIn' : 'signInRegisterHost')),
                       React.createElement('input', { value: hostRegistrationCode, disabled: busy, autoComplete: 'one-time-code', placeholder: t('hostRegistrationCode'), 'aria-label': t('hostRegistrationCode'), onChange: (event: Event) => setHostRegistrationCode((event.target as HTMLInputElement).value) }),
                       React.createElement('button', { type: 'button', disabled: busy || hostRegistrationCode.trim() === '', onClick: () => void authorizeHost('code') }, t(busy ? 'registering' : 'useRegistrationCode'))))
                   : null,

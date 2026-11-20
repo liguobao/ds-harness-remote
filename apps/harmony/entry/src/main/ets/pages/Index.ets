@@ -290,6 +290,8 @@ struct Index {
   @State serverInput: string = '';
   @State emailInput: string = '';
   @State passwordInput: string = '';
+  @State passwordChallenge: string = '';
+  private passwordChallengeServer: string = '';
   @State attachmentMenuOpen: boolean = false;
   @State promptInput: string = '';
   @State qrUrl: string = '';
@@ -665,6 +667,7 @@ struct Index {
     this.phase = this.runtime.phase;
     if (this.phase !== previousPhase) {
       if (this.phase === PHASE_SETUP) {
+        this.passwordChallenge = '';
         this.passwordInput = '';
         this.emailInput = '';
         this.hostSwitcherOpen = false;
@@ -2097,10 +2100,27 @@ struct Index {
             minContentHeight: Math.max(0, this.windowHeightVp - this.topSafePadding() - 36),
             emailInput: $emailInput,
             passwordInput: $passwordInput,
+            twoFactorRequired: this.passwordChallenge.length > 0 && this.passwordChallengeServer === this.serverInput,
             passwordLoginOpen: $passwordLoginOpen,
             onMore: () => { this.showMoreMenu = true; },
-            onLogin: (email: string, password: string) => { this.runtime.login(this.serverInput, email, password); },
-            onProvider: (id: string) => { this.startProviderLogin(id); },
+            onLogin: (email: string, password: string, code: string) => {
+              const server = this.serverInput;
+              const challenge = this.passwordChallengeServer === server ? this.passwordChallenge : '';
+              this.runtime.login(server, email, password, challenge, code).then((next: string | undefined) => {
+                if (next !== undefined && this.phase === PHASE_SETUP && this.serverInput === server) {
+                  this.passwordChallengeServer = server;
+                  this.passwordChallenge = next;
+                  this.passwordInput = '';
+                } else if (this.phase !== PHASE_SETUP) {
+                  this.passwordChallenge = '';
+                }
+              });
+            },
+            onRestartPassword: () => { this.passwordChallenge = ''; },
+            onProvider: (id: string) => {
+              this.passwordChallenge = '';
+              this.startProviderLogin(id);
+            },
             onOpenAuthorization: () => { this.openAuthorizeLink(); },
             onCopyAuthorization: () => { this.copyAuthorizeLink(); },
             onCancelAuthorization: () => { this.runtime.cancelQrLogin(); },
@@ -2229,6 +2249,7 @@ struct Index {
           palette: this.pal(),
           serverInput: this.serverInput,
           onSave: (server: string) => {
+            this.passwordChallenge = '';
             this.serverInput = server;
             this.runtime.cancelQrLogin();
             this.providers = [];

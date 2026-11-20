@@ -3,6 +3,7 @@ import { renderBodyPortal } from './client/portal.js'
 import type { LocaleKey, Translate } from './client-locale.js'
 import { en, localeNamespace, ru, uk, zh } from './client-locale.js'
 import { createRemoteSessionHeaderAction } from './client/header.js'
+import { useAccountVerification } from './client/account-verification.js'
 import { unwrapControlResult } from './client/control-result.js'
 import { pendingWorkspaceSelectionKey, storedWorkspaceSelection, workspacesReady } from './client/navigation.js'
 import { connectedProgress, connectionErrorMessage, messageOf } from './client/presentation.js'
@@ -152,6 +153,7 @@ window.__ModuleLoader__.load({
       const [hostRegistrationCode, setHostRegistrationCode] = React.useState('')
       const [email, setEmail] = React.useState('')
       const [password, setPassword] = React.useState('')
+      const hostVerification = useAccountVerification(React, status?.serverUrl)
       const [busy, setBusy] = React.useState(false)
       const [progress, setProgress] = React.useState<RemoteConnectionProgress | undefined>(undefined)
       const progressRun = React.useRef(0)
@@ -213,14 +215,15 @@ window.__ModuleLoader__.load({
       }
 
       const loginHost = async (): Promise<void> => {
-        if (email.trim() === '' || password === '') return
+        if (hostVerification.pending ? !hostVerification.ready : email.trim() === '' || password === '') return
         setBusy(true)
         setError(undefined)
         try {
-          await props.control('host.account.login', { email: email.trim(), password })
+          await props.control('host.account.login', { email: email.trim(), password, verification: hostVerification.verification })
+          hostVerification.clear()
           await refreshStatus()
         } catch (reason) {
-          setError(messageOf(reason, t))
+          if (!hostVerification.handle(reason)) setError(messageOf(reason, t))
         } finally {
           setPassword('')
           setBusy(false)
@@ -291,7 +294,7 @@ window.__ModuleLoader__.load({
                     ? t('checkingHost')
                     : t('hostUnavailable', { error: connectionErrorMessage(status.host.error, t) })),
               status.host.accountRequired ? React.createElement('div', { className: 'dshRemoteLogin' },
-                React.createElement('input', {
+                hostVerification.fields(t, busy, React.createElement('input', {
                   type: 'email',
                   value: email,
                   disabled: busy,
@@ -308,10 +311,10 @@ window.__ModuleLoader__.load({
                   placeholder: t('password'),
                   'aria-label': t('serverAccountPassword'),
                   onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
-                }),
+                })),
                 React.createElement('button', {
                   type: 'button',
-                  disabled: busy || email.trim() === '' || password === '',
+                  disabled: busy || (hostVerification.pending ? !hostVerification.ready : email.trim() === '' || password === ''),
                   onClick: () => void loginHost(),
                 }, t(busy ? 'signingIn' : 'signInRegisterHost')),
                 React.createElement('input', {
