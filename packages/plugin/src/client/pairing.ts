@@ -2,11 +2,12 @@ import QRCode from 'qrcode'
 import type { ClientReact } from './types.js'
 import type { Translate } from '../client-locale.js'
 import type { HostPairingView } from '../pairing-contract.js'
+import { messageOf } from './presentation.js'
 
 export function createHostPairingPanel(React: ClientReact) {
   return function HostPairingPanel(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
-    serverUrl: string; disabled: boolean; t: Translate; onComplete(): void
+    serverUrl: string; disabled: boolean; t: Translate; onComplete(): void | Promise<void>
   }): unknown {
     const { t } = props
     const [view, setView] = React.useState<HostPairingView | undefined>(undefined)
@@ -18,28 +19,99 @@ export function createHostPairingPanel(React: ClientReact) {
     const [error, setError] = React.useState<string | undefined>(undefined)
     const mounted = React.useRef(false)
     const flight = React.useRef(false)
+    const epoch = React.useRef(0)
+    const hydratedServer = React.useRef<string | undefined>(undefined)
+    const prevServerUrl = React.useRef(props.serverUrl)
     const attempts = React.useRef(new Set<string>())
     const completed = React.useRef<string | undefined>(undefined)
+    const completing = React.useRef<Promise<void> | undefined>(undefined)
     const completion = React.useRef(props.onComplete)
     completion.current = props.onComplete
+    const runComplete = async (): Promise<void> => {
+      const pending = completing.current ?? (async () => completion.current())()
+      completing.current = pending
+      try {
+        await pending
+      } finally {
+        if (completing.current === pending) completing.current = undefined
+      }
+    }
+    const triggerComplete = async (sessionId: string): Promise<void> => {
+      if (completed.current === sessionId) return
+      completed.current = sessionId
+      const currentEpoch = epoch.current
+      try {
+        await runComplete()
+      } catch (reason) {
+        if (completed.current === sessionId) completed.current = undefined
+        if (mounted.current && currentEpoch === epoch.current) setError(messageOf(reason, t))
+      }
+    }
     const apply = (next: HostPairingView | undefined): void => {
       if (!mounted.current) return
       if (next && !['created', 'claimed', 'approved'].includes(next.state)) attempts.current.delete(next.sessionId)
       setView(next); setLocked(next?.canRetry === true || next !== undefined && attempts.current.has(next.sessionId))
-      if (next?.localSaved && completed.current !== next.sessionId) { completed.current = next.sessionId; completion.current() }
+      if (next?.localSaved) void triggerComplete(next.sessionId)
     }
     React.useEffect(() => {
       mounted.current = true
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const poll = async (): Promise<void> => {
-        if (!flight.current && !props.disabled && props.serverUrl) {
-          try { apply(await props.control<HostPairingView | undefined>('host.pairing.status')) } catch { /* foreground actions own errors */ }
-        }
-        if (mounted.current) timer = setTimeout(() => void poll(), 2500)
+      return () => { mounted.current = false }
+    }, [])
+    React.useEffect(() => {
+      if (prevServerUrl.current === props.serverUrl) return
+      prevServerUrl.current = props.serverUrl
+      hydratedServer.current = undefined
+      epoch.current += 1
+      completed.current = undefined
+      completing.current = undefined
+      attempts.current.clear()
+      setView(undefined)
+      setLocked(false)
+      setCode('')
+      setError(undefined)
+    }, [props.serverUrl])
+    React.useEffect(() => {
+      if (props.disabled || !props.serverUrl || hydratedServer.current === props.serverUrl) return
+      let cancelled = false
+      const currentEpoch = epoch.current
+      const hydrate = async (): Promise<void> => {
+        if (flight.current) return
+        try {
+          const next = await props.control<HostPairingView | undefined>('host.pairing.status')
+          if (cancelled || !mounted.current || currentEpoch !== epoch.current) return
+          hydratedServer.current = props.serverUrl
+          apply(next)
+        } catch { /* foreground actions own errors */ }
       }
-      void poll()
-      return () => { mounted.current = false; if (timer) clearTimeout(timer) }
+      void hydrate()
+      return () => { cancelled = true }
     }, [props.serverUrl, props.disabled])
+    const active = view !== undefined && ['created', 'claimed', 'approved'].includes(view.state)
+    React.useEffect(() => {
+      if (!active || props.disabled || !props.serverUrl) return
+      let cancelled = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const schedulePoll = (): void => {
+        if (cancelled || !mounted.current) return
+        timer = setTimeout(() => { void poll() }, 2500)
+      }
+      const poll = async (): Promise<void> => {
+        if (cancelled || !mounted.current) return
+        if (!flight.current) {
+          const currentEpoch = epoch.current
+          try {
+            const next = await props.control<HostPairingView | undefined>('host.pairing.status')
+            if (!cancelled && mounted.current && currentEpoch === epoch.current) apply(next)
+          } catch { /* foreground actions own errors */ }
+        }
+        schedulePoll()
+      }
+      schedulePoll()
+      return () => {
+        cancelled = true
+        if (timer !== undefined) clearTimeout(timer)
+      }
+    }, [active, props.serverUrl, props.disabled])
     React.useEffect(() => {
       let current = true; setImage(undefined)
       if (view?.qrPayload) void QRCode.toDataURL(view.qrPayload, { width: 184, margin: 1, errorCorrectionLevel: 'L' })
@@ -48,16 +120,41 @@ export function createHostPairingPanel(React: ClientReact) {
     }, [view?.qrPayload])
     const run = async (action: 'start' | 'confirm' | 'cancel', retry = false): Promise<void> => {
       if (flight.current) return
-      flight.current = true; setBusy(true); setError(undefined)
+      flight.current = true
+      const currentEpoch = ++epoch.current
+      setBusy(true); setError(undefined)
       if (action === 'confirm') { if (view) attempts.current.add(view.sessionId); setLocked(true); setCode('') }
-      try { apply(await props.control<HostPairingView>('host.pairing.' + action, action === 'start' ? {} : {
-        sessionId: view?.sessionId, ...(action === 'confirm' && !retry ? { verificationCode: code } : {}),
-      })) } catch (reason) {
-        if (mounted.current) { const e = reason as { code?: string; details?: { remoteCode?: string } }
+      try {
+        const next = await props.control<HostPairingView>('host.pairing.' + action, action === 'start' ? {} : {
+          sessionId: view?.sessionId, ...(action === 'confirm' && !retry ? { verificationCode: code } : {}),
+        })
+        if (!mounted.current || currentEpoch !== epoch.current) return
+        hydratedServer.current = props.serverUrl
+        apply(next)
+      } catch (reason) {
+        if (mounted.current && currentEpoch === epoch.current) { const e = reason as { code?: string; details?: { remoteCode?: string } }
           setError(t(e.code === 'PAIRING_UNSUPPORTED' || e.details?.remoteCode === 'PAIRING_UNSUPPORTED' ? 'pairingUnsupported' : 'pairingError')) }
       } finally { flight.current = false; if (mounted.current) setBusy(false) }
     }
-    const active = view !== undefined && ['created', 'claimed', 'approved'].includes(view.state)
+    const finish = async (): Promise<void> => {
+      if (flight.current) return
+      flight.current = true
+      const currentEpoch = ++epoch.current
+      setBusy(true); setError(undefined)
+      try {
+        await runComplete()
+        if (!mounted.current || currentEpoch !== epoch.current) return
+        completed.current = undefined
+        setView(undefined)
+        setLocked(false)
+        setCode('')
+      } catch (reason) {
+        if (mounted.current && currentEpoch === epoch.current) setError(messageOf(reason, t))
+      } finally {
+        flight.current = false
+        if (mounted.current) setBusy(false)
+      }
+    }
     React.useEffect(() => {
       if (!active) return
       setNow(Date.now())
@@ -97,6 +194,8 @@ export function createHostPairingPanel(React: ClientReact) {
         active && retry ? React.createElement('button', { type: 'button', disabled: busy || props.disabled, className: 'dshRemoteSave',
           onClick: (event: { nativeEvent?: Event }) => { if (event.nativeEvent?.isTrusted) void run('confirm', true) } }, t('pairingRetry')) : null,
         active && retry ? React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || props.disabled, onClick: () => void run('cancel') }, t('pairingCancel')) : null,
+        view?.state === 'completed' ? React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || props.disabled,
+          onClick: () => void finish() }, t(busy ? 'pairingBusy' : 'pairingDone')) : null,
         active || view?.state === 'completed' ? null : React.createElement('button', { type: 'button', className: 'dshRemoteSave', disabled: busy || props.disabled || !props.serverUrl,
           onClick: () => void run(active ? 'cancel' : 'start') }, t(busy ? 'pairingBusy' : active ? 'pairingCancel' : 'pairingStart'))))
   }

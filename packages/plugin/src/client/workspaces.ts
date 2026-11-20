@@ -1391,7 +1391,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                 ? React.createElement('div', { role: 'tabpanel', id: 'dsh-remote-pairing-panel', 'aria-labelledby': 'dsh-remote-pairing-tab', className: 'dshRemotePanelPairing' },
                   React.createElement(HostPairingPanel, { key: status.serverUrl ?? '', control: props.control,
                     serverUrl: status.serverUrl ?? '', disabled: busy || savingServer || serverDirty, t,
-                    onComplete: () => { void refreshRemote() } }))
+                    onComplete: () => refreshRemote() }))
                 : passwordVisible
                 ? React.createElement('div', {
                   className: 'dshRemoteClientLogin', role: 'tabpanel', id: 'dsh-remote-password-panel',
@@ -1518,7 +1518,7 @@ export function createRemoteWorkspaceAction(React: ClientReact, portal?: PortalR
                   className: `dshRemoteHostList${connectingHost === undefined ? '' : ' isCollapsed'}`,
                   'aria-busy': connectingHost === undefined ? undefined : true,
                 }, listedHosts.length === 0
-                  ? (error !== undefined || refreshingHosts ? null : React.createElement('p', null, t(status?.host?.pairingHostOnly ? 'pairingHostOnly' : 'noRemoteHosts')))
+                  ? (error !== undefined || refreshingHosts ? null : React.createElement('p', null, t(status?.host?.pairingHostOnly ? 'pairingHostOnlyDetail' : 'noRemoteHosts')))
                   : listedHosts.map(device => React.createElement('button', {
                     type: 'button',
                     key: device.deviceId,

@@ -96,7 +96,7 @@ try {
     assert.equal((await pairing.confirm(qr.sessionId, claim.verificationCode)).state, 'completed');
     assert.equal(api.pairingHostOnly(), true);
     const resumed = new HostPairing(apiUrl, identities.directory, host, descriptor, result => api.adoptPairing(result));
-    assert.equal((await resumed.status())?.localSaved, true);
+    assert.equal(await resumed.status(), undefined);
     const result = pairingStatusSchema.parse(await mobile('mobile/status', {}));
     assert(result.credentials);
     assert.equal(result.credentials.device.deviceId, phone.deviceId);

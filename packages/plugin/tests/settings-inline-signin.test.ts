@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRemotePluginOptions } from '../src/client/settings.js'
+import { createHostPairingPanel } from '../src/client/pairing.js'
 import { createRemoteWorkspaceAction } from '../src/client/workspaces.js'
 import type { ClientReact, PluginSettingsView } from '../src/client/types.js'
 
@@ -858,4 +859,185 @@ describe('RemotePluginOptions inline sign-in suite', () => {
     unmount()
   })
 
+})
+
+describe('HostPairingPanel completion and polling lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('hydrates once when idle, stops polling in completed state, keeps pairingDone across disabled toggles, and retries failed onComplete', async () => {
+    vi.useFakeTimers()
+    const { React, resetRender, unmount } = createTestHarness()
+    let statusCalls = 0
+    let state: 'idle' | 'created' | 'claimed' | 'completed' = 'idle'
+    const session = {
+      sessionId: '019a0000-0000-7000-8000-000000000099',
+      expiresAt: Date.now() + 180_000,
+      serverUrl: 'https://dsh.r2049.cn',
+      hostFingerprint: 'host-fp',
+      canRetry: false,
+      localSaved: false,
+    }
+    const control = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'host.pairing.status') {
+        statusCalls += 1
+        if (state === 'idle' || state === 'completed') return undefined
+        if (state === 'created') return { ...session, state: 'created', qrPayload: 'https://dsh.r2049.cn/pair#v1.abc' }
+        return { ...session, state: 'claimed', mobile: { deviceId: 'phone-1', name: 'Pixel', fingerprint: 'phone-fp' } }
+      }
+      if (endpoint === 'host.pairing.start') {
+        state = 'created'
+        return { ...session, state: 'created', qrPayload: 'https://dsh.r2049.cn/pair#v1.abc' }
+      }
+      if (endpoint === 'host.pairing.confirm') {
+        state = 'completed'
+        return {
+          ...session,
+          state: 'completed',
+          localSaved: true,
+          mobile: { deviceId: 'phone-1', name: 'Pixel', fingerprint: 'phone-fp' },
+        }
+      }
+      return undefined
+    })
+
+    let failComplete = true
+    const onComplete = vi.fn(async () => {
+      if (failComplete) throw new Error('refresh failed')
+    })
+
+    let disabled = false
+    const Panel = createHostPairingPanel(React) as any
+    const render = () => {
+      resetRender()
+      return Panel({
+        control,
+        serverUrl: 'https://dsh.r2049.cn',
+        disabled,
+        t: (k: string) => k,
+        onComplete,
+      })
+    }
+
+    try {
+      let tree = render()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(statusCalls).toBe(1)
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingHint')
+      const startBtn = findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart'))
+      expect(startBtn).not.toBeNull()
+
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(statusCalls).toBe(1)
+
+      startBtn.props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      state = 'claimed'
+      await vi.advanceTimersByTimeAsync(2500)
+      tree = render()
+      expect(statusCalls).toBe(2)
+
+      const codeInput = findElement(tree, (n: any) => n.type === 'input' && n.props?.maxLength === 8)
+      codeInput.props.onChange({ target: { value: '12345678' } })
+      tree = render()
+      const codeForm = findElement(tree, (n: any) => n.type === 'form' && n.props?.className === 'dshRemotePairingCodeForm')
+      codeForm.props.onSubmit({ preventDefault() {}, nativeEvent: { isTrusted: true } })
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(onComplete).toHaveBeenCalledTimes(1)
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingComplete')
+      expect(findElement(tree, (n: any) => n.props?.role === 'alert')?.children).toContain('refresh failed')
+      expect(findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart'))).toBeNull()
+      const doneBtn = findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone'))
+      expect(doneBtn).not.toBeNull()
+
+      const statusAtComplete = statusCalls
+      disabled = true
+      tree = render()
+      disabled = false
+      tree = render()
+      await vi.advanceTimersByTimeAsync(6000)
+      tree = render()
+      expect(statusCalls).toBe(statusAtComplete)
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingComplete')
+
+      failComplete = false
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(onComplete).toHaveBeenCalledTimes(2)
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingHint')
+      expect(findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart'))).not.toBeNull()
+      expect(findElement(tree, (n: any) => n.props?.role === 'alert')).toBeNull()
+    } finally {
+      unmount()
+    }
+  })
+
+  it('coalesces pairingDone with an in-flight auto onComplete and drops stale rejection after reset', async () => {
+    vi.useFakeTimers()
+    const { React, resetRender, unmount } = createTestHarness()
+    let rejectFirst!: (reason?: unknown) => void
+    let resolveSecond!: () => void
+    let call = 0
+    const onComplete = vi.fn(() => {
+      call += 1
+      if (call === 1) return new Promise<void>((_, reject) => { rejectFirst = reject })
+      return new Promise<void>((resolve) => { resolveSecond = resolve })
+    })
+    const session = {
+      sessionId: '019a0000-0000-7000-8000-000000000100',
+      expiresAt: Date.now() + 180_000,
+      serverUrl: 'https://dsh.r2049.cn',
+      hostFingerprint: 'host-fp',
+      canRetry: false,
+      localSaved: false,
+    }
+    const control = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'host.pairing.status') return { ...session, state: 'claimed', mobile: { deviceId: 'phone-1', name: 'Pixel', fingerprint: 'phone-fp' } }
+      return { ...session, state: 'completed', localSaved: true, mobile: { deviceId: 'phone-1', name: 'Pixel', fingerprint: 'phone-fp' } }
+    })
+    const Panel = createHostPairingPanel(React) as any
+    const render = () => {
+      resetRender()
+      return Panel({ control, serverUrl: 'https://dsh.r2049.cn', disabled: false, t: (k: string) => k, onComplete })
+    }
+    try {
+      let tree = render()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      const codeInput = findElement(tree, (n: any) => n.type === 'input' && n.props?.maxLength === 8)
+      codeInput.props.onChange({ target: { value: '12345678' } })
+      tree = render()
+      findElement(tree, (n: any) => n.type === 'form' && n.props?.className === 'dshRemotePairingCodeForm').props.onSubmit({
+        preventDefault() {}, nativeEvent: { isTrusted: true },
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(onComplete).toHaveBeenCalledTimes(1)
+
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onComplete).toHaveBeenCalledTimes(1)
+
+      rejectFirst(new Error('late auto error'))
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(findElement(tree, (n: any) => n.props?.role === 'alert')?.children).toContain('late auto error')
+
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+      expect(onComplete).toHaveBeenCalledTimes(2)
+      resolveSecond()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingHint')
+      expect(findElement(tree, (n: any) => n.props?.role === 'alert')).toBeNull()
+    } finally {
+      unmount()
+    }
+  })
 })
