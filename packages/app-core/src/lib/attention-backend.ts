@@ -123,7 +123,7 @@ export function resolveAttentionBackendIdentity(
 
   const rawAdapter = (item.acpAdapter ?? '').trim()
   const normalized = rawAdapter.toLowerCase()
-  const known = KNOWN_BACKENDS[normalized]
+  const known = Object.hasOwn(KNOWN_BACKENDS, normalized) ? KNOWN_BACKENDS[normalized] : undefined
   if (known !== undefined) return known
 
   if (normalized.length === 0) {

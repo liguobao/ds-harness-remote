@@ -898,7 +898,6 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
     activeGeneration += 1
     activeClient = undefined
     activeAttachPromise = undefined
-    await stopActiveSubscription(false)
     set({
       hostId: undefined,
       connectionGeneration: activeGeneration,
@@ -909,6 +908,7 @@ export const useAttentionStore = create<AttentionStoreState>((set, get) => ({
       loading: false,
       localAckedIds: [],
     })
+    await stopActiveSubscription(false)
   },
 
   syncLegacyFallback(sources: LegacyAttentionSources) {

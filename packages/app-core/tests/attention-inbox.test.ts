@@ -815,9 +815,11 @@ describe('attention platform differentiation and cross-host switching state', ()
       client: createRemoteAttentionClient(fakeA.transport),
     })
 
-    // Switching away detaches host-a active items while keeping cachedByHost['host-a']
-    await useAttentionStore.getState().detachConnection()
+    // Switching away detaches host-a active items synchronously while keeping cachedByHost['host-a']
+    const detachPromise = useAttentionStore.getState().detachConnection()
+    expect(useAttentionStore.getState().hostId).toBeUndefined()
     expect(useAttentionStore.getState().items).toEqual([])
+    await detachPromise
     expect(useAttentionStore.getState().cachedByHost['host-a']?.items.map(i => i.id)).toEqual(['hermes-approval'])
 
     const fakeB = createFakeAttentionTransport()
@@ -944,5 +946,18 @@ describe('attention platform differentiation and cross-host switching state', ()
     expect(useAttentionStore.getState().cachedByHost['host-b']).toBeDefined()
     useAttentionStore.getState().reset()
     expect(useAttentionStore.getState().cachedByHost).toEqual({})
+  })
+
+  it('ignores prototype property names when resolving custom ACP adapter metadata', () => {
+    expect(resolveAttentionBackendIdentity({ backend: 'acp', acpAdapter: 'constructor' })).toMatchObject({
+      key: 'acp:constructor',
+      label: 'Constructor',
+      shortBadge: 'C',
+    })
+    expect(resolveAttentionBackendIdentity({ backend: 'acp', acpAdapter: 'toString' })).toMatchObject({
+      key: 'acp:tostring',
+      label: 'toString',
+      shortBadge: 'T',
+    })
   })
 })
