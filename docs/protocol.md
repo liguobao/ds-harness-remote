@@ -1304,6 +1304,7 @@ realpath 后的规范根目录计算，避免符号链接父目录或大小写�
 Harness 从 `0.2.1-alpha.3` 起将原生输入改为 `terminal/attach` 双向流，RC.1 沿用此契约。
 本仓库不增加通用 uplink RPC：Desktop 在本地将原生 attach 转成既有 follow/write/resize，
 Host 在通过终端策略后将 Harness follow 转成官方 attach；CodeX/ACP 保留各自终端域。
+Desktop 原生 write 帧可附带布尔值 `typed`，转成加密 write RPC 时只转发输入数据。
 每个 attachment 的输入 sequence 从 1 递增，Host ack 后才完成 write/resize；拒绝、取消或
 断线不能确认或重放输入。Host 每 attachment 至多 32 个待确认输入，队列上限 64 项/256 KiB；
 原生客户端侧输出缓冲最多 256 项/4 MiB。状态快照按官方 writable 映射既有 controllerId。

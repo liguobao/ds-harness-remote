@@ -88283,10 +88283,10 @@ function requireRecord(value, name2) {
 var identity2 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
 var attachmentArgs = external_exports.object({ agentId: identity2, id: identity2, attachmentId: identity2 }).strict();
 var dimensions = { cols: external_exports.number().int().min(1).max(1e3), rows: external_exports.number().int().min(1).max(1e3) };
-var input2 = external_exports.discriminatedUnion("type", [
-  external_exports.object({ type: external_exports.literal("write"), sequence: external_exports.number().int().positive().safe(), data: external_exports.string().max(64 * 1024) }).strict(),
-  external_exports.object({ type: external_exports.literal("resize"), sequence: external_exports.number().int().positive().safe(), ...dimensions }).strict()
-]);
+var writeInput = external_exports.object({ type: external_exports.literal("write"), sequence: external_exports.number().int().positive().safe(), data: external_exports.string().max(64 * 1024) }).strict();
+var resizeInput = external_exports.object({ type: external_exports.literal("resize"), sequence: external_exports.number().int().positive().safe(), ...dimensions }).strict();
+var input2 = external_exports.discriminatedUnion("type", [writeInput, resizeInput]);
+var desktopInput = external_exports.discriminatedUnion("type", [writeInput.extend({ typed: external_exports.boolean().optional() }), resizeInput]);
 function usesDuplexTerminal(version2) {
   const match = /^(?:dsh-)?v?0\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(version2 ?? "");
   if (!match) return false;
@@ -88470,7 +88470,7 @@ async function openRemoteTerminal(target3, payload, signal, uplink) {
       while (!lifetime2.aborted) {
         const next = await iterator.next();
         if (next.done || lifetime2.aborted) break;
-        const value = input2.parse(next.value);
+        const value = desktopInput.parse(next.value);
         if (value.sequence !== ++sequence2) throw new RpcError("INVALID_MESSAGE", "Terminal input sequence is invalid.");
         if (!writable) {
           output2.push({ type: "ack", sequence: sequence2, refusal: "read-only" });

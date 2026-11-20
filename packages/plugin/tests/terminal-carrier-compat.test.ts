@@ -50,14 +50,20 @@ describe('RC.1 terminal carrier compatibility', () => {
     }
     const uplink = (async function* () {
       yield { type: 'write', sequence: 1, data: 'echo fixture\r' }
-      yield { type: 'resize', sequence: 2, cols: 80, rows: 24 }
+      yield { type: 'write', sequence: 2, data: 'x', typed: true }
+      yield { type: 'resize', sequence: 3, cols: 80, rows: 24 }
     })()
     const iterator = (await openRemoteTerminal(target, { args: { agentId: 's1', id: 't1' } }, control.signal, uplink))[Symbol.asyncIterator]()
     try {
       expect((await iterator.next()).value).toMatchObject({ type: 'snapshot', writable: true })
       expect((await iterator.next()).value).toEqual({ type: 'ack', sequence: 1 })
       expect((await iterator.next()).value).toEqual({ type: 'ack', sequence: 2 })
-      expect(inputs).toEqual([{ type: 'write', sequence: 1, data: 'echo fixture\r' }, { type: 'resize', sequence: 2, cols: 80, rows: 24 }])
+      expect((await iterator.next()).value).toEqual({ type: 'ack', sequence: 3 })
+      expect(inputs).toEqual([
+        { type: 'write', sequence: 1, data: 'echo fixture\r' },
+        { type: 'write', sequence: 2, data: 'x' },
+        { type: 'resize', sequence: 3, cols: 80, rows: 24 },
+      ])
     } finally { control.abort(); await iterator.return?.() }
   })
 
