@@ -31,9 +31,11 @@ apps/harmony/
 
 ## 构建与验证
 
-安装包含 API 26 SDK 的 DevEco Studio，并配置其 `hvigorw`、`ohpm` 和 `hdc` 命令。可在 DevEco Studio 中直接打开 `apps/harmony`。命令行构建：
+安装包含 API 26 SDK 的 DevEco Studio，并配置其 `hvigorw`、`ohpm` 和 `hdc` 命令。打开 DevEco Studio 前，先在仓库根目录生成共用的终端资源。生成后可直接打开 `apps/harmony`。
 
 ```sh
+pnpm --filter @dsh-remote/app-core install --frozen-lockfile
+node packages/app-core/scripts/build-terminal.mjs apps/harmony/entry/src/main/resources/rawfile/terminal.html
 cd apps/harmony
 ohpm install --all
 # 未签名编译验证：清除产品的 signingConfig 引用，不需要签名凭据。

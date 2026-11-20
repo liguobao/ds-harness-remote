@@ -21,3 +21,4 @@
 .*-entry.ts
 .*-stub.ts
 .build-profile.tracked.json5
+/entry/src/main/resources/rawfile/terminal.html

@@ -1,3 +1,5 @@
+import { parsePluginSettings, PluginSettingOperation } from './PluginSettings';
+import { HostPluginBundle, readPluginInventory } from './PluginInventory';
 import { RemoteClientCore } from './RemoteClientCore';
 import { logInfo, logWarn, logError } from '../util/Log';
 import { RemoteGateway, RemoteGatewayError, RemoteGatewayStream, StreamHandler } from './RemoteGateway';
@@ -10,6 +12,15 @@ export class DirectoryEntry {
   path: string = '';
   isDirectory: boolean = false;
   size: number = 0;
+}
+
+export const WORKSPACE_TEXT_PAGE_LINES: number = 200;
+
+export class WorkspaceTextPage {
+  text: string = '';
+  offset: number = 1;
+  lines: number = 0;
+  eof: boolean = true;
 }
 
 /** 一个 Host 工作区（`workspace/list` item）。 */
@@ -344,6 +355,33 @@ export class HarnessAlphaClient {
     return out;
   }
 
+  async listSessionFiles(sessionId: string, path: string): Promise<DirectoryEntry[]> {
+    const args: Record<string, Object> = { 'workspaceFileScopeId': sessionId, 'path': path || '.' };
+    const value = asRecord(await this.callValue('workspaceFiles/list', args));
+    const entries = value === undefined ? undefined : asArray(value['entries']);
+    if (entries === undefined) {
+      throw new Error('INVALID_MESSAGE');
+    }
+    const result: DirectoryEntry[] = [];
+    for (const item of entries) {
+      const record = asRecord(item);
+      if (record === undefined) {
+        continue;
+      }
+      const name = jsonStr(record, 'name', '');
+      const type = jsonStr(record, 'type', '');
+      if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\')
+        || (type !== 'directory' && type !== 'file')) {
+        continue;
+      }
+      const entry = new DirectoryEntry();
+      entry.name = name;
+      entry.isDirectory = type === 'directory';
+      result.push(entry);
+    }
+    return result;
+  }
+
   /** 新建工作区（Host 侧创建目录并登记）。 */
   async workspaceCreate(path: string, title: string): Promise<string> {
     const request: Record<string, Object> = { 'path': path };
@@ -489,6 +527,22 @@ export class HarnessAlphaClient {
     const value: Object = await this.callValue('commands/execute', args);
     logInfo('commands/execute ok');
     return asRecord(value);
+  }
+
+  async readWorkspaceText(sessionId: string, path: string, offset: number): Promise<WorkspaceTextPage> {
+    const range: Record<string, Object> = { 'offset': offset, 'limit': WORKSPACE_TEXT_PAGE_LINES };
+    const args: Record<string, Object> = { 'workspaceFileScopeId': sessionId, 'path': path, 'range': range };
+    const value = asRecord(await this.callValue('workspaceFiles/read', args));
+    if (value === undefined || typeof value['text'] !== 'string' || typeof value['offset'] !== 'number'
+      || typeof value['lines'] !== 'number' || typeof value['eof'] !== 'boolean') {
+      throw new Error('INVALID_MESSAGE');
+    }
+    const page = new WorkspaceTextPage();
+    page.text = value['text'] as string;
+    page.offset = value['offset'] as number;
+    page.lines = value['lines'] as number;
+    page.eof = value['eof'] as boolean;
+    return page;
   }
 
   /**
@@ -933,6 +987,29 @@ export class HarnessAlphaClient {
     };
     const payload: Record<string, Object> = { 'args': args };
     await this.gateway.call('$events/result', payload);
+  }
+
+  async pluginInventory(): Promise<HostPluginBundle[]> {
+    const bundles = await this.callValue('pluginManager/listBundles', {});
+    const plugins = await this.callValue('pluginManager/listPlugins', {});
+    const settings = await this.callValue('settings/describe', {}).catch((): Object => new Object());
+    return readPluginInventory(bundles, plugins, parsePluginSettings(settings));
+  }
+
+  async saveHostPluginSettings(namespace: string, revision: number, operations: PluginSettingOperation[]): Promise<void> {
+    const args: Record<string, Object> = { 'ns': namespace, 'expectedRevision': revision, 'ops': operations };
+    await this.callValue('settings/mutate', args);
+  }
+
+  async setHostPluginEnabled(target: string, enabled: boolean, bundle: boolean): Promise<string> {
+    const args: Record<string, Object> = bundle ? { 'name': target, 'enabled': enabled }
+      : { 'id': target, 'enabled': enabled };
+    const value = asRecord(await this.callValue(bundle
+      ? 'pluginManager/setBundleEnabled' : 'pluginManager/setPluginEnabled', args));
+    if (value === undefined || typeof value['application'] !== 'string') {
+      throw new Error('INVALID_MESSAGE');
+    }
+    return value['application'] as string;
   }
 
   private async callValue(endpoint: string, args: Record<string, Object>, timeoutMs?: number): Promise<Object> {

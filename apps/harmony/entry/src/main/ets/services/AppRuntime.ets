@@ -1,3 +1,8 @@
+import { DshWebGrant, parseDshWebGrant } from '../net/DshWebGrant';
+import { PluginSettingOperation, PluginSettingsForm } from '../net/PluginSettings';
+import { BotCatalogRow, parseBotCatalog } from '../net/BotCatalog';
+import { TerminalSession } from '../net/TerminalSession';
+import { HostPluginBundle } from '../net/PluginInventory';
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -13,7 +18,7 @@ import { RemoteClientCore, RemoteClientError } from '../net/RemoteClientCore';
 import { RemoteGateway, RemoteGatewayError, RemoteHostFeatures } from '../net/RemoteGateway';
 import { HarnessAlphaClient, HarnessClientFrame, HarnessHistoryEntry, HarnessRemoteSession,
   DirectoryEntry, HarnessSchedule, HarnessScheduleDelivery, HarnessSessionEvent, HarnessWorkspace,
-  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart } from '../net/HarnessClient';
+  HarnessWorkspaceSnapshot, HistoryPage, PromptImagePart, WorkspaceTextPage } from '../net/HarnessClient';
 import { DeviceIdentity, TokenPair, RemoteHostDevice, AuthorizedPeerDevice, AccountLoginResult } from '../model/Types';
 import { asArray, asBool, asNum, asRecord, asStr, jsonStr, jsonNum } from '../protocol/Types';
 import { randomId } from '../crypto/Bytes';
@@ -73,6 +78,8 @@ export class ChatItem {
   requestRpcId: string = '';
   sessionId: string = '';
   timestamp: number = 0;
+  totalTokens: number = -1;
+  turnCompleted: boolean = false;
   toolName: string = '';
   toolState: string = ''; // '' | 'running' | 'finished' | 'failed'
   summary: string = '';
@@ -130,6 +137,8 @@ export class AppRuntime {
   private identity: DeviceIdentity | undefined = undefined;
   private credentials: TokenPair | undefined = undefined;
   private core: RemoteClientCore | undefined = undefined;
+  private webLeaseCore: RemoteClientCore | undefined = undefined;
+  private webGrantOperation: Promise<void> = Promise.resolve();
   private harness: HarnessAlphaClient | undefined = undefined;
   private unsubscribeClose: (() => void) | undefined = undefined;
   /** 预热中的中继通道：还没交给 SecureTransport/Core 就失败时由 teardown 负责关掉，否则会漏一条 socket。 */
@@ -176,6 +185,7 @@ export class AppRuntime {
   qrUrl: string = '';
   /** Login providers offered by the Server; empty until loaded. */
   providers: OAuthProvider[] = [];
+  private providersRequest: number = 0;
   providerId: string = 'google';
   private qrId: string = '';
   private qrBaseUrl: string = '';
@@ -209,6 +219,7 @@ export class AppRuntime {
   /** 系统网络是否掉过（掉过之后要把链路当作可疑，别信「WebSocket 还开着」）。 */
   private awaitingNetwork: boolean = false;
   /** 用户主动断开/退出登录后，本次运行内别再自动连。 */
+  autoConnectLastHost: boolean = true;
   private autoConnectSuppressed: boolean = false;
   /** 掉网 8 秒后主动判死的那次定时器。 */
   private netLossTimer: number = -1;
@@ -264,6 +275,9 @@ export class AppRuntime {
   permissionOptions: string[] = [];
   /** 文件浏览：当前目录路径与条目。 */
   browsePath: string = '';
+  browseLoading: boolean = false;
+  browseError: string = '';
+  private browseRequest: number = 0;
   directoryEntries: DirectoryEntry[] = [];
   /** Host 上的工作区列表。 */
   workspaces: HarnessWorkspace[] = [];
@@ -358,7 +372,8 @@ export class AppRuntime {
   networkType: string = '';
   /** 文件预览：主机上某个文本文件的内容。 */
   filePreviewPath: string = '';
-  filePreviewText: string = '';
+  filePreviewPage: WorkspaceTextPage = new WorkspaceTextPage();
+  private filePreviewRequest: number = 0;
   filePreviewError: string = '';
   filePreviewLoading: boolean = false;
   /** Language preference: 0 = follow system, 1 = Chinese, 2 = English. */
@@ -373,6 +388,7 @@ export class AppRuntime {
   iceServersJson: string = '';
   /** 连接过程中的阶段文案（连接页显示，让等待有进度感）。 */
   connectStage: string = '';
+  connectStageIndex: number = 0;
   /** System dark-mode flag, kept fresh by EntryAbility configuration updates. */
   systemDark: boolean = false;
   /** System orientation flag, kept fresh by EntryAbility configuration updates. */
@@ -420,6 +436,14 @@ export class AppRuntime {
   setThemeTint(tint: number): void {
     this.themeTint = tint;
     this.store.saveThemeTint(tint);
+    this.notify();
+  }
+
+  setAutoConnectLastHost(value: boolean): void {
+    this.autoConnectLastHost = value;
+    this.store.saveAutoConnectLastHost(value).catch(() => {
+      logWarn('save autoConnectLastHost failed');
+    });
     this.notify();
   }
 
@@ -549,6 +573,7 @@ export class AppRuntime {
       this.credentials = await this.store.loadCredentials();
       this.deviceAliases = this.store.loadDeviceAliases();
       this.themeMode = this.store.loadThemeMode();
+      this.autoConnectLastHost = this.store.loadAutoConnectLastHost();
       this.themeTint = this.store.loadThemeTint();
       this.petEnabled = this.store.loadPet();
       this.languageMode = this.store.loadLanguageMode();
@@ -582,13 +607,13 @@ export class AppRuntime {
       this.phase = PHASE_DEVICES;
       this.notify();
       const lastHost: string = this.store.loadLastHost();
-      if (lastHost.length > 0 && !this.autoConnectSuppressed) {
+      if (lastHost.length > 0 && this.autoConnectLastHost && !this.autoConnectSuppressed) {
         // 上次连着主机：启动后直接连它，不用每次手点「连接」。
         // 失败照常落到设备列表 + 重试按钮，不影响用户重新选主机。
         logInfo('auto-connect last host ' + lastHost);
         LinkLog.write('conn', '启动后自动连接上次的主机 ' + lastHost);
         setTimeout(() => {
-          if (this.phase === PHASE_DEVICES && this.core === undefined) {
+          if (this.phase === PHASE_DEVICES && this.core === undefined && this.autoConnectLastHost) {
             this.connectDevice(lastHost).catch((error: Error) => {
               logWarn('auto connect failed');
             });
@@ -767,6 +792,8 @@ export class AppRuntime {
     this.connectCancelled = false;
     this.lastDeviceId = deviceId;
     this.phase = PHASE_CONNECTING;
+    this.connectStageIndex = 0;
+    this.connectStage = '';
     this.errorMsg = '';
     this.notify();
     this.armConnectDeadline(deviceId);
@@ -807,7 +834,7 @@ export class AppRuntime {
       let relay: RelayTransport = new RelayTransport(websocketUrl(config.baseUrl), relayOptions);
       this.pendingRelay = relay;
       const tokenFresh: boolean = credentials.accessTokenExpiresAt - Date.now() > 120000;
-      this.setConnectStage('读取主机信息…');
+      this.setConnectStage(0, '读取主机信息…');
       const relayWarm: Promise<boolean> = tokenFresh
         ? relay.connect().then(() => true).catch(() => false)
         : Promise.resolve(false);
@@ -827,7 +854,7 @@ export class AppRuntime {
       // 恢复场景（刚断线重连/网络刚恢复）不再单独探一次在线状态：
       // 我们几十秒前还连着这台主机，而 Wi-Fi 刚关联上时每个额外 HTTP 往返都要几秒。
       if (!host.presenceKnown && !recovering) {
-        this.setConnectStage('检查主机在线状态…');
+        this.setConnectStage(0, '检查主机在线状态…');
         const presence: HostPresence = await this.presenceWithRetry(host.deviceId);
         host.online = presence.online;
         host.presenceKnown = true;
@@ -864,7 +891,7 @@ export class AppRuntime {
       this.unsubscribeClose = core.onClose((error: Error | undefined) => {
         this.handleDisconnect();
       });
-      this.setConnectStage('建立加密通道（Noise IK 握手）…');
+      this.setConnectStage(1, '建立加密通道（Noise IK 握手）…');
       const tRelay: number = Date.now();
       await core.connect();
       const tSecure: number = Date.now();
@@ -873,10 +900,10 @@ export class AppRuntime {
       }
       // ICE 体检只用于诊断，绝不能挡在连接主链路上（慢链路下单次 HTTP 可能几十秒）
       this.probeIceConfig(relay).catch(() => undefined);
-      this.setConnectStage('读取主机能力…');
+      this.setConnectStage(2, '读取主机能力…');
       const gateway: RemoteGateway = new RemoteGateway(core);
       // 能力探测是每次连接一个 RPC 往返；主机版本不变就没有重新探测的必要
-      const featureKey: string = host.clientVersion + '|' + host.harnessVersion;
+      const featureKey: string = host.deviceId + '|' + host.clientVersion + '|' + host.harnessVersion;
       let features: RemoteHostFeatures | undefined = this.featuresCacheKey === featureKey
         ? this.featuresCacheValue : undefined;
       if (features === undefined) {
@@ -884,7 +911,7 @@ export class AppRuntime {
         this.featuresCacheKey = featureKey;
         this.featuresCacheValue = features;
       } else {
-        logInfo('host features cached for ' + featureKey);
+        logInfo('host features cached');
       }
       logInfo('host features: sessionFormat=' + features.sessionFormat + ' apiProxy=' + features.apiProxy
         + ' remoteGateway=' + features.remoteGateway + ' caps=' + features.capabilities.join(','));
@@ -943,7 +970,7 @@ export class AppRuntime {
         });
         // 给快的直连路径一个有界窗口：LAN/P2P 能在历史/目录大请求之前切过去，
         // 高延迟蜂窝网络最多等 250ms 就回落到中继，不乱拖连接速度。
-        this.setConnectStage('尝试直连数据面…');
+        this.setConnectStage(2, '尝试直连数据面…');
         await upgrader.waitForInitialWindow(waitMs);
         if (this.connectCancelled) {
           return;
@@ -957,7 +984,7 @@ export class AppRuntime {
           this.handleFrame(frame);
         });
       this.harness = harness;
-      this.setConnectStage('订阅会话事件…');
+      this.setConnectStage(3, '订阅会话事件…');
       await harness.start();
       const tHarness: number = Date.now();
       NetTrace.record('connect 分段', tHarness - t0,
@@ -1013,6 +1040,9 @@ export class AppRuntime {
       this.phase = PHASE_CHAT;
       this.notify();
       await this.loadSessionsAfterConnect();
+      if (this.harness === harness && !this.modelCatalogLoaded) {
+        this.refreshModelCatalog();
+      }
       // 工作区快照实测要 6.4 秒，且与会话列表/首帧抢同一条中继：挪到首屏之后再做，
       // 抽屉打开时也会各自再拉一次，用户几乎察觉不到。
       setTimeout(() => {
@@ -1318,48 +1348,38 @@ export class AppRuntime {
     return bytes.buffer as ArrayBuffer;
   }
 
-  /** 预览主机上的文本文件：走 workspaceFiles/readBytes，base64 解码成 UTF-8。 */
-  async previewFile(path: string): Promise<void> {
+  async previewFile(path: string, requestPath: string, offset: number): Promise<void> {
+    const harness = this.harness;
+    const sessionId = this.currentSessionId;
+    const request = ++this.filePreviewRequest;
     this.filePreviewPath = path;
-    this.filePreviewText = '';
     this.filePreviewError = '';
     this.filePreviewLoading = true;
     this.notify();
     try {
-      const base64: string = await this.readImageBase64(path);
-      if (base64.length === 0) {
-        this.filePreviewError = '主机返回了空内容';
-        this.filePreviewLoading = false;
-        this.notify();
-        return;
+      if (harness === undefined || sessionId.length === 0) {
+        throw new Error(t('未连接'));
       }
-      const helper: util.Base64Helper = new util.Base64Helper();
-      const bytes: Uint8Array = helper.decodeSync(base64);
-      // 二进制文件会解出大量 NUL，直接给个提示，别把乱码糊到屏幕上
-      let nulCount: number = 0;
-      const probe: number = Math.min(bytes.length, 4096);
-      for (let i = 0; i < probe; i++) {
-        if (bytes[i] === 0) {
-          nulCount++;
-        }
+      const page = await harness.readWorkspaceText(sessionId, requestPath, offset);
+      if (request === this.filePreviewRequest && harness === this.harness && sessionId === this.currentSessionId) {
+        this.filePreviewPage = page;
       }
-      if (probe > 0 && nulCount * 20 > probe) {
-        this.filePreviewError = '这是一个二进制文件，暂不支持预览';
-        this.filePreviewLoading = false;
-        this.notify();
-        return;
-      }
-      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
-      let text: string = decoder.decodeToString(bytes);
-      if (text.length > 200000) {
-        text = text.substring(0, 200000) + '\n\n…（内容超过 20 万字符，已截断）';
-      }
-      this.filePreviewText = text;
     } catch (error) {
-      this.filePreviewError = errorMessage(error);
+      if (request === this.filePreviewRequest && harness === this.harness && sessionId === this.currentSessionId) {
+        this.filePreviewError = errorMessage(this.fileAccessHint(asError(error)));
+      }
+    } finally {
+      if (request === this.filePreviewRequest) {
+        this.filePreviewLoading = false;
+        this.notify();
+      }
     }
+  }
+
+  cancelTextPreview(): void {
+    this.filePreviewRequest += 1;
     this.filePreviewLoading = false;
-    this.notify();
+    this.filePreviewPage = new WorkspaceTextPage();
   }
 
   /** 把一段录音（WAV base64）交给主机转写，返回文本；未连接或失败时抛错。 */
@@ -1864,52 +1884,135 @@ export class AppRuntime {
     }
   }
 
-  /** 打开工作区根目录。 */
-  async openWorkspace(workspaceId: string): Promise<void> {
-    const harness: HarnessAlphaClient | undefined = this.harness;
+  async loadBotCatalog(): Promise<BotCatalogRow[]> {
+    const core = this.core;
+    if (core === undefined || this.phase !== PHASE_CHAT || this.reconnecting) {
+      throw new Error('BOT_DISCONNECTED');
+    }
+    if (this.featuresCacheValue?.capabilities.includes('plugin.route.v1') !== true) {
+      throw new Error('BOT_UNSUPPORTED');
+    }
+    const body: Record<string, Object | null> = { 'endpoint': 'state', 'payload': null };
+    const request: Record<string, Object> = { 'route': 'api/bot', 'body': body };
+    const value = await core.rpc('plugin.route.call', request);
+    if (core !== this.core || this.reconnecting || this.phase !== PHASE_CHAT) {
+      throw new Error('BOT_DISCONNECTED');
+    }
+    return parseBotCatalog(value);
+  }
+
+  openTerminalSession(sessionId: string): TerminalSession | undefined {
+    if (this.core === undefined || this.reconnecting || this.phase !== PHASE_CHAT
+      || sessionId.length === 0 || sessionId !== this.currentSessionId) {
+      return undefined;
+    }
+    return new TerminalSession(new RemoteGateway(this.core), sessionId);
+  }
+
+  supportsDshWeb(): boolean {
+    return (this.phase === PHASE_CHAT || this.phase === PHASE_DEVICES) && this.harness !== undefined
+      && this.connectedDeviceId.length > 0 && !this.reconnecting
+      && this.featuresCacheValue?.capabilities.includes('dsh.web.v1') === true;
+  }
+
+  async openDshWeb(deviceId: string): Promise<DshWebGrant> {
+    const core = this.core;
+    const pending = this.webGrantOperation.then(async (): Promise<DshWebGrant> => {
+      await this.releaseDshWebLease();
+      if (core === undefined || core !== this.core || deviceId !== this.connectedDeviceId || !this.supportsDshWeb()) {
+        throw new Error(t('未连接'));
+      }
+      this.webLeaseCore = core;
+      try {
+        const result = await core.rpc('dsh.web.open', {});
+        if (core !== this.core || deviceId !== this.connectedDeviceId || !this.supportsDshWeb()) {
+          throw new Error('DSH_WEB_CONNECTION_CHANGED');
+        }
+        return parseDshWebGrant(result, Date.now());
+      } catch (error) {
+        if (error instanceof RemoteClientError && error.code !== 'RPC_TIMEOUT' && error.code !== 'CONNECTION_FAILED') {
+          this.webLeaseCore = undefined;
+        } else {
+          await this.releaseDshWebLease();
+        }
+        throw new Error('DSH_WEB_UNAVAILABLE');
+      }
+    });
+    this.webGrantOperation = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
+
+  closeDshWeb(): Promise<void> {
+    const pending = this.webGrantOperation.then(() => this.releaseDshWebLease());
+    this.webGrantOperation = pending;
+    return pending;
+  }
+
+  private async releaseDshWebLease(): Promise<void> {
+    const core = this.webLeaseCore;
+    this.webLeaseCore = undefined;
+    if (core !== undefined) {
+      await core.rpc('dsh.web.close', {}, 4000).catch(() => undefined);
+    }
+  }
+
+  async hostPluginInventory(): Promise<HostPluginBundle[]> {
+    const harness = this.harness;
     if (harness === undefined) {
+      throw new Error(t('未连接'));
+    }
+    const inventory = await harness.pluginInventory();
+    if (harness !== this.harness) {
+      throw new Error(t('未连接'));
+    }
+    return inventory;
+  }
+
+  async saveHostPluginSettings(deviceId: string, form: PluginSettingsForm,
+    operations: PluginSettingOperation[]): Promise<void> {
+    const harness = this.harness;
+    if (harness === undefined || this.connectedDeviceId !== deviceId || this.reconnecting || !form.writable) {
+      throw new Error(t('未连接'));
+    }
+    await harness.saveHostPluginSettings(form.namespace, form.revision, operations);
+  }
+
+  async setHostPluginEnabled(deviceId: string, target: string, enabled: boolean, bundle: boolean): Promise<string> {
+    const harness = this.harness;
+    if (harness === undefined || this.connectedDeviceId !== deviceId || this.reconnecting) {
+      throw new Error(t('未连接'));
+    }
+    return harness.setHostPluginEnabled(target, enabled, bundle);
+  }
+
+  async browseDirectory(path: string, sessionId: string = '', relativePath: string = ''): Promise<void> {
+    const harness = this.harness;
+    if (harness === undefined || path.length === 0 || (sessionId.length > 0 && sessionId !== this.currentSessionId)) {
       return;
     }
-    let path: string = '';
-    for (const workspace of this.workspaces) {
-      if (workspace.workspaceId === workspaceId) {
-        path = workspace.path;
-        break;
+    const request = ++this.browseRequest;
+    this.browsePath = path;
+    this.directoryEntries = [];
+    this.browseLoading = true;
+    this.browseError = '';
+    this.notify();
+    try {
+      const entries = sessionId.length > 0
+        ? await harness.listSessionFiles(sessionId, relativePath)
+        : await harness.listDirectory(path);
+      if (request === this.browseRequest && harness === this.harness) {
+        this.directoryEntries = entries;
+      }
+    } catch (error) {
+      if (request === this.browseRequest && harness === this.harness) {
+        this.browseError = errorMessage(error);
+      }
+    } finally {
+      if (request === this.browseRequest) {
+        this.browseLoading = false;
+        this.notify();
       }
     }
-    if (path.length === 0) {
-      return;
-    }
-    await this.browseDirectory(path);
-  }
-
-  /** 列出某个目录的内容。 */
-  async browseDirectory(path: string): Promise<void> {
-    const harness: HarnessAlphaClient | undefined = this.harness;
-    if (harness === undefined || path.length === 0) {
-      return;
-    }
-    try {
-      this.directoryEntries = await harness.listDirectory(path);
-      this.browsePath = path;
-      this.notify();
-    } catch (error) {
-      this.errorMsg = errorMessage(error);
-      this.notify();
-    }
-  }
-
-  /** 返回上一级目录。 */
-  async browseUp(): Promise<void> {
-    const current: string = this.browsePath;
-    if (current.length === 0) {
-      return;
-    }
-    const cut: number = current.lastIndexOf('/');
-    if (cut <= 0) {
-      return;
-    }
-    await this.browseDirectory(current.substring(0, cut));
   }
 
   /** 新建工作区并刷新列表。 */
@@ -2390,6 +2493,9 @@ export class AppRuntime {
     }
     try {
       const raw: Record<string, Object> = await harness.modelCatalog();
+      if (this.harness !== harness) {
+        return;
+      }
       this.modelCatalogRaw = raw;
       const options: ModelOption[] = [];
       const groups: Object[] | undefined = asArray(raw['groups']);
@@ -3052,13 +3158,16 @@ export class AppRuntime {
     return Promise.race([probe, timeout]);
   }
 
-  /** Start QR login against `baseUrl`; the UI renders `qrUrl` and polling runs by itself. */
-  /** Load the provider list once so the login screen can offer Google / Zhihu / GitHub. */
+  /** Load providers for the selected login server. */
   async loadProviders(baseUrl: string): Promise<void> {
+    const request: number = ++this.providersRequest;
     try {
       const raw: string = baseUrl.trim().length > 0 ? baseUrl.trim() : DEFAULT_SERVER_URL;
       const api: RemoteServerApi = new RemoteServerApi(normalizeServerUrl(raw));
       const items: OAuthProvider[] = await api.oauthProviders();
+      if (request !== this.providersRequest) {
+        return;
+      }
       if (items.length > 0) {
         this.providers = items;
         let stillValid: boolean = false;
@@ -3078,8 +3187,10 @@ export class AppRuntime {
       // 失败不该在登录页糊一条红字（METHOD_NOT_FOUND 之类），记日志就够。
       logWarn('oauth providers unavailable');
     }
-    this.providers = [];
-    this.notify();
+    if (request === this.providersRequest) {
+      this.providers = [];
+      this.notify();
+    }
   }
 
   selectProvider(id: string): void {
@@ -3186,7 +3297,12 @@ export class AppRuntime {
   }
 
   /** 更新连接阶段文案并推给界面。 */
-  private setConnectStage(text: string): void {
+  connectionTargetId(): string {
+    return this.lastDeviceId;
+  }
+
+  private setConnectStage(index: number, text: string): void {
+    this.connectStageIndex = index;
     this.connectStage = text;
     logInfo('connect stage: ' + text);
     this.notify();
@@ -3720,6 +3836,12 @@ export class AppRuntime {
     }
     const harness: HarnessAlphaClient | undefined = this.harness;
     this.harness = undefined;
+    this.modelCatalogLoaded = false;
+    this.modelOptions = [];
+    this.modelCatalogRaw = {};
+    this.currentModelProvider = '';
+    this.currentModelLabel = '';
+    this.currentModelEffort = '';
     this.connectedHostName = '';
     this.connectedDeviceId = '';
     this.keepAliveDeviceId = '';
@@ -4920,6 +5042,8 @@ function cloneItem(item: ChatItem): ChatItem {
   copy.requestRpcId = item.requestRpcId;
   copy.sessionId = item.sessionId;
   copy.timestamp = item.timestamp;
+  copy.totalTokens = item.totalTokens;
+  copy.turnCompleted = item.turnCompleted;
   copy.toolName = item.toolName;
   copy.toolState = item.toolState;
   copy.summary = item.summary;
@@ -5002,7 +5126,7 @@ function applySessionEventInner(items: ChatItem[], event: HarnessSessionEvent): 
   if (event.type === 'turn/end') {
     // 失败的一轮必须让用户看见：turn/end 的 reason.kind === 'error' 带着结构化失败
     // （上下文超窗就是 code=CONTEXT_WINDOW_EXCEEDED），以前这里只 settleTurn，手机上什么都没有。
-    return appendTurnFailure(settleTurn(items), data, event.time);
+    return appendTurnFailure(markCompletedResponse(settleTurn(items), data), data, event.time);
   }
   if (event.type === 'user/message') {
     return addUserMessage(items, data, event.time);
@@ -5018,6 +5142,24 @@ function applySessionEventInner(items: ChatItem[], event: HarnessSessionEvent): 
   }
   if (event.type === 'tool/result') {
     return applyToolEvent(items, data, event.time, 'finished');
+  }
+  return items;
+}
+
+function markCompletedResponse(items: ChatItem[], data: Record<string, Object>): ChatItem[] {
+  const reason: Record<string, Object> | undefined = asRecord(data['reason']);
+  if ((reason === undefined ? data['reason'] : jsonStr(reason, 'kind', '')) !== 'completed') {
+    return items;
+  }
+  for (let i: number = items.length - 1; i >= 0 && items[i].kind !== 'user'; i--) {
+    if (items[i].kind === 'assistant' && items[i].text.length > 0) {
+      const next: ChatItem[] = items.slice();
+      const response: ChatItem = cloneItem(items[i]);
+      response.turnCompleted = true;
+      response.rev += 1;
+      next[i] = response;
+      return next;
+    }
   }
   return items;
 }
@@ -5200,8 +5342,60 @@ function addUserMessage(items: ChatItem[], data: Record<string, Object>, time: n
   return next;
 }
 
+function nativeMessageTotalTokens(data: Record<string, Object>): number {
+  let usage: Record<string, Object> | undefined = asRecord(data['usage']) ?? asRecord(messageRecord(data)['usage']);
+  if (usage === undefined) {
+    const stream: Object[] | undefined = asArray(data['stream']);
+    for (let i: number = (stream?.length ?? 0) - 1; stream !== undefined && i >= 0; i--) {
+      const row: Record<string, Object> | undefined = asRecord(stream[i]);
+      if (row !== undefined && jsonStr(row, 'type', '') === 'chunk') {
+        const chunk: Record<string, Object> | undefined = asRecord(row['chunk']);
+        if (chunk !== undefined && jsonStr(chunk, 'type', '') === 'usage') {
+          usage = asRecord(chunk['usage']);
+          break;
+        }
+      }
+    }
+  }
+  if (usage === undefined) {
+    return -1;
+  }
+  const input: Object | undefined = usage['inputTokens'];
+  const output: Object | undefined = usage['outputTokens'];
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0 ||
+      typeof output !== 'number' || !Number.isSafeInteger(output) || output < 0) {
+    return -1;
+  }
+  let knownTotal: number = input + output;
+  const fields: string[] = ['cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'];
+  for (const key of fields) {
+    const count: Object | undefined = usage[key];
+    if (count === undefined) {
+      continue;
+    }
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0 ||
+        (key === 'reasoningTokens' && count > output)) {
+      return -1;
+    }
+    if (key !== 'reasoningTokens') {
+      knownTotal += count;
+    }
+  }
+  if (!Number.isSafeInteger(knownTotal)) {
+    return -1;
+  }
+  const complete: boolean = usage['cacheReadTokens'] !== undefined && usage['cacheWriteTokens'] !== undefined;
+  const total: Object | undefined = usage['totalTokens'];
+  if (total === undefined) {
+    return complete ? knownTotal : -1;
+  }
+  return typeof total === 'number' && Number.isSafeInteger(total) &&
+    (complete ? total === knownTotal : total >= knownTotal) ? total : -1;
+}
+
 function addAssistantMessage(items: ChatItem[], data: Record<string, Object>, time: number): ChatItem[] {
   const id: string = messageIdOf(data);
+  const totalTokens: number = nativeMessageTotalTokens(data);
   const text: string = messageTextOf(data);
   const reasoning: string = messageReasoningOf(data);
   const streamId: string = `stream:${stepKeyOf(data)}`;
@@ -5232,6 +5426,9 @@ function addAssistantMessage(items: ChatItem[], data: Record<string, Object>, ti
     settled.text = finalText;
     settled.reasoning = finalReasoning;
     settled.streaming = false;
+    if (totalTokens >= 0) {
+      settled.totalTokens = totalTokens;
+    }
     if (time > 0) {
       settled.timestamp = time;
     }
@@ -5250,6 +5447,7 @@ function addAssistantMessage(items: ChatItem[], data: Record<string, Object>, ti
   message.role = 'assistant';
   message.text = finalText;
   message.reasoning = finalReasoning;
+  message.totalTokens = totalTokens;
   message.timestamp = time > 0 ? time : Date.now();
   next.push(message);
   return next;
@@ -5261,6 +5459,20 @@ function applyAssistantChunk(items: ChatItem[], data: Record<string, Object>, ti
     return items;
   }
   const type: string = jsonStr(chunk, 'type', '');
+  if (type === 'usage') {
+    const total: number = nativeMessageTotalTokens(chunk);
+    const streamId: string = `stream:${stepKeyOf(data)}`;
+    const index: number = items.findIndex((item: ChatItem) => item.kind === 'assistant' && item.id === streamId);
+    if (total < 0 || index < 0) {
+      return items;
+    }
+    const next: ChatItem[] = items.slice();
+    const updated: ChatItem = cloneItem(items[index]);
+    updated.totalTokens = total;
+    updated.rev += 1;
+    next[index] = updated;
+    return next;
+  }
   if (type !== 'text-delta' && type !== 'reasoning-delta') {
     return items;
   }

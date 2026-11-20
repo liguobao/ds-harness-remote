@@ -24,28 +24,42 @@ export class Palette {
   /** Secondary text. */
   text2: string = '';
   /** Tertiary / hint text. */
+  primary: string = '';
+  primarySoft: string = '';
+  inverse: string = '';
+  onInverse: string = '';
+  success: string = '';
+  danger: string = '';
+  userBubble: string = '';
   text3: string = '';
 }
 
 export function darkPalette(): Palette {
   const p: Palette = new Palette();
-  p.bg = '#070B16';
-  p.panel = '#0B101E';
-  p.backdrop = 'rgba(2,5,12,0.55)';
-  p.card = 'rgba(255,255,255,0.045)';
-  p.chip = 'rgba(255,255,255,0.06)';
-  p.inputBg = 'rgba(255,255,255,0.07)';
-  p.border = 'rgba(255,255,255,0.08)';
-  p.borderStrong = 'rgba(255,255,255,0.12)';
-  p.text = '#EAF0FB';
-  p.text2 = '#9AA5B8';
-  p.text3 = '#6B7280';
+  p.bg = '#0B0D11';
+  p.panel = '#161A21';
+  p.backdrop = 'rgba(0, 0, 0, 0.58)';
+  p.card = 'rgba(255, 255, 255, 0.05)';
+  p.chip = '#232832';
+  p.inputBg = '#161A21';
+  p.border = '#2B313C';
+  p.borderStrong = '#2B313C';
+  p.text = '#F2F4F7';
+  p.text2 = '#A2A9B6';
+  p.text3 = '#A2A9B6';
+  p.primary = '#6F89FF';
+  p.primarySoft = '#19213F';
+  p.inverse = '#F2F4F7';
+  p.onInverse = '#0B0D11';
+  p.success = '#4CC07D';
+  p.danger = '#F2736C';
+  p.userBubble = '#1E2430';
   return p;
 }
 
 /**
  * 主题着色：在深/浅底色的基础上换一套「氛围色」（背景/面板/表面/分隔线），
- * 强调色保持品牌蓝青，避免把整界面配色拆成两套维护。
+ * 强调色保持 Android 的品牌蓝，避免把整界面配色拆成两套维护。
  * tint: 0 默认 · 1 深海 · 2 森林 · 3 暖沙 · 4 玫紫
  */
 export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
@@ -64,6 +78,13 @@ export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
   out.text = p.text;
   out.text2 = p.text2;
   out.text3 = p.text3;
+  out.primary = p.primary;
+  out.primarySoft = p.primarySoft;
+  out.inverse = p.inverse;
+  out.onInverse = p.onInverse;
+  out.success = p.success;
+  out.danger = p.danger;
+  out.userBubble = p.userBubble;
   if (tint === 1) {
     out.bg = dark ? '#05101F' : '#EDF4FB';
     out.panel = dark ? '#081A2E' : '#F7FBFF';
@@ -90,16 +111,23 @@ export function applyTint(p: Palette, tint: number, dark: boolean): Palette {
 
 export function lightPalette(): Palette {
   const p: Palette = new Palette();
-  p.bg = '#F2F5FA';
+  p.bg = '#F8F8F8';
   p.panel = '#FFFFFF';
-  p.backdrop = 'rgba(15,23,42,0.35)';
+  p.backdrop = 'rgba(15, 15, 15, 0.40)';
   p.card = '#FFFFFF';
-  p.chip = 'rgba(15,23,42,0.05)';
+  p.chip = '#ECEFF4';
   p.inputBg = '#FFFFFF';
-  p.border = 'rgba(15,23,42,0.08)';
-  p.borderStrong = 'rgba(15,23,42,0.14)';
-  p.text = '#1B2437';
-  p.text2 = '#5B6478';
-  p.text3 = '#98A1B3';
+  p.border = '#EDEDED';
+  p.borderStrong = '#EDEDED';
+  p.text = '#0F0F0F';
+  p.text2 = '#59606D';
+  p.text3 = '#59606D';
+  p.primary = '#4D6BFE';
+  p.primarySoft = '#EBEFFF';
+  p.inverse = '#0F0F0F';
+  p.onInverse = '#FFFFFF';
+  p.success = '#1E8449';
+  p.danger = '#C2362F';
+  p.userBubble = '#ECEFF5';
   return p;
 }

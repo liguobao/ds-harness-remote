@@ -24,6 +24,7 @@ const KEY_PROMPTS = 'dshremote.prompts.v1';
 const KEY_SESSION_META = 'dshremote.sessionMeta.v1';
 /** 上次连着的主机：下次启动自动连它（聊天客户端该有的行为）。 */
 const KEY_LAST_HOST = 'dshremote.lastHost.v1';
+const KEY_AUTO_CONNECT_LAST_HOST = 'dshremote.autoConnectLastHost.v1';
 /** 上次成功拉到的主机信息（deviceId/公钥/版本），重连时省掉一次设备查询往返。 */
 const KEY_HOST_INFO = 'dshremote.hostInfo.v1';
 /** 上次成功拉到的会话列表（只存侧栏要用的字段），启动/重连时先把列表画出来。 */
@@ -409,6 +410,14 @@ export class SecureStore {
       list.push(body);
     }
     await this.putSync(KEY_HOST_PINS + '.profiles', JSON.stringify(list));
+  }
+
+  loadAutoConnectLastHost(): boolean {
+    return this.getSync(KEY_AUTO_CONNECT_LAST_HOST, '1') !== '0';
+  }
+
+  async saveAutoConnectLastHost(value: boolean): Promise<void> {
+    await this.putSync(KEY_AUTO_CONNECT_LAST_HOST, value ? '1' : '0');
   }
 
   /** Theme preference: 0 = follow system, 1 = light, 2 = dark. */

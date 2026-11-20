@@ -46,6 +46,13 @@ jobs:
           hvigorw --version
           node --version
 
+      - uses: pnpm/action-setup@v6
+
+      - name: Build the shared terminal renderer
+        run: |
+          pnpm --dir ../.. --filter @dsh-remote/app-core install --frozen-lockfile
+          node ../../packages/app-core/scripts/build-terminal.mjs entry/src/main/resources/rawfile/terminal.html
+
       - name: Install HarmonyOS dependencies
         run: ohpm install --all
 
