@@ -61,6 +61,7 @@ import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
+import { drawerWidthForWindow, modalSheetMaxHeight } from '../ui/responsive'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
@@ -85,7 +86,6 @@ import { HomeActionsMenu } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
 const SESSION_PAGE_SIZE = 3
-const DRAWER_WIDTH_RATIO = 1
 /** Padding inside the Agent / DS-Bot underline tab track. */
 const MODE_SWITCHER_INSET = 0
 
@@ -358,7 +358,7 @@ export function HostSessionsDrawer({
 
   const [harnessPickerOpen, setHarnessPickerOpen] = useState(false)
   const windowDimensions = useWindowDimensions()
-  const sheetMaxHeight = Math.min(windowDimensions.height * 0.75, 520)
+  const sheetMaxHeight = Math.min(modalSheetMaxHeight(windowDimensions.height), 520)
 
   const isBackendAvailable = (target: AgentBackend) => {
     switch (target) {
@@ -829,9 +829,9 @@ export function HostSessionsDrawer({
     return [...recentSections, ...treeSections]
   }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds, orderBy, manualOrders, searchQuery])
 
-  // 手势与抽屉动画
+  // 手势与抽屉动画。宽窗口下抽屉宽度封顶（DRAWER_MAX_WIDTH），手机仍全宽。
   const { width: screenWidth } = useWindowDimensions()
-  const drawerWidth = Math.round(screenWidth * DRAWER_WIDTH_RATIO)
+  const drawerWidth = Math.round(drawerWidthForWindow(screenWidth))
   const immediateMount = entrance === 'immediate'
   const translateX = useRef(new Animated.Value(immediateMount ? 0 : -drawerWidth)).current
   const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
@@ -2150,7 +2150,7 @@ export function HostSessionsDrawer({
         <Animated.View
           accessibilityViewIsModal
           {...drawerTouchProps}
-          style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, transform: [{ translateX }] }]}
+          style={[styles.drawer, { paddingTop: insets.top, paddingBottom: insets.bottom, maxWidth: drawerWidth, transform: [{ translateX }] }]}
         >
           {content}
         </Animated.View>
