@@ -30,7 +30,9 @@ export const motionTokens = {
   duration: {
     micro: 160,
     sheet: 380,
-    sheetExit: 260,
+    // Exits read best fast: the scrim and card leave well before the eye has
+    // settled on where they were (Material: exits are quicker than entrances).
+    sheetExit: 120,
     fullscreen: 480,
     indicator: 420,
     stagger: 25,
@@ -39,7 +41,9 @@ export const motionTokens = {
   /** Cubic-bezier control points: fast start, long tail. */
   easing: {
     expand: [0.32, 0.72, 0, 1],
-    retreat: [0.4, 0, 0.6, 1],
+    // Accelerated ease-in: the card drops away immediately instead of
+    // hovering through a symmetric middle.
+    retreat: [0.3, 0, 0.8, 0.15],
   },
   spring: { bounciness: 0, speed: 14 },
 } as const
