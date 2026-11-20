@@ -45,11 +45,14 @@ export function createStyles(
     },
     latestTurnButtonPressed: { opacity: 0.7 },
     modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
+    // Wide-window variant: the same surface as a centered dialog card.
+    modalDialogBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'center', alignItems: 'center' },
     // Keep the sheet above the full-screen dismiss target on Android. Without an
     // explicit stacking order, the transparent backdrop can win hit testing on
     // some RN/Android combinations even though it is rendered first.
     // maxHeight is applied by ModalSurface from the live window size (landscape phones get ~92%).
     modalSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.lg, paddingBottom: spacing.xxl },
+    modalDialogSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderRadius: radius.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
     modalHeaderCopy: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     modalTitle: { ...t.heading, color: colors.ink, flexShrink: 1 },
