@@ -1,0 +1,67 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react"],
+  "categories": {
+    "correctness": "off"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/generated/**",
+    "**/vendor/**",
+    "**/node_modules/**",
+    "apps/harmony/**",
+    "apps/android/android/**",
+    "apps/ios/ios/**",
+    "examples/mock-host/**",
+    "patches/**",
+    "artifacts/**",
+    "fixtures/**"
+  ],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": [
+      "error",
+      {
+        "checksVoidReturn": {
+          "attributes": false
+        }
+      }
+    ],
+    "eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "eslint/no-debugger": "error",
+    "eslint/no-dupe-keys": "error",
+    "eslint/no-duplicate-case": "error",
+    "eslint/no-unreachable": "error",
+    "eslint/no-const-assign": "error",
+    "eslint/valid-typeof": "error",
+    "eslint/use-isnan": "error",
+    "eslint/no-async-promise-executor": "error",
+    "eslint/no-loss-of-precision": "error",
+    "eslint/no-self-assign": "error",
+    "eslint/no-compare-neg-zero": "error",
+    "eslint/no-unsafe-finally": "error",
+    "typescript/no-duplicate-enum-values": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "scripts/transport-bench/**"
+      ],
+      "rules": {
+        "react/rules-of-hooks": "off",
+        "typescript/no-misused-promises": "off"
+      }
+    }
+  ]
+}
