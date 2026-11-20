@@ -25,8 +25,11 @@ export const MAX_CHUNK_BYTES = 64 * 1024;
 /** Per-stream, per-direction flow control window for HTTP bodies. */
 export const STREAM_WINDOW_BYTES = 256 * 1024;
 
-/** WebSocket messages are forwarded whole and never split. */
-export const MAX_WEBSOCKET_MESSAGE_BYTES = 1024 * 1024 - 64;
+/**
+ * WebSocket messages are forwarded whole and never split.
+ * Cloudflare Workers/DO accepts received messages up to 32 MiB; 16 MiB leaves headroom for frame encoding inside the 128 MiB isolate limit.
+ */
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 /** Concurrent streams (HTTP requests + WebSockets) per tunnel. */
 export const MAX_STREAMS = 256;

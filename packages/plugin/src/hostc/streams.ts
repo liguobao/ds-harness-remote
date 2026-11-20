@@ -56,7 +56,7 @@ export type StreamContext = {
  * be paused (the Durable Object has no backpressure on hibernatable sockets, and pausing the shared
  * connection would stall every stream and the heartbeat), so the stream closes instead.
  */
-const MAX_LOCAL_QUEUE_BYTES = 4 * 1024 * 1024;
+const MAX_LOCAL_QUEUE_BYTES = 32 * 1024 * 1024;
 
 export interface Stream {
 	start(): void;
@@ -318,7 +318,8 @@ class WebSocketStream implements Stream {
 				return;
 			}
 			if (this.settled) {
-				send(FrameType.End, this.id, encodeClose({ code: 1011, reason: error.message }));
+				const code = (error as { code?: unknown }).code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" ? 1009 : 1011;
+				send(FrameType.End, this.id, encodeClose({ code, reason: error.message }));
 			} else {
 				send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
 				this.settle(502);

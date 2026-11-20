@@ -104205,7 +104205,7 @@ var HEARTBEAT_INTERVAL_MS = 15e3;
 var HEARTBEAT_TIMEOUT_MS = 1e4;
 var MAX_CHUNK_BYTES = 64 * 1024;
 var STREAM_WINDOW_BYTES = 256 * 1024;
-var MAX_WEBSOCKET_MESSAGE_BYTES = 1024 * 1024 - 64;
+var MAX_WEBSOCKET_MESSAGE_BYTES = 16 * 1024 * 1024;
 var MAX_STREAMS2 = 256;
 var CONNECT_GRACE_MS = 2 * 6e4;
 var RECONNECT_GRACE_MS = 10 * 6e4;
@@ -104780,7 +104780,7 @@ function errorFromResponse(status2, text) {
 // packages/plugin/src/hostc/streams.ts
 import http from "node:http";
 import https from "node:https";
-var MAX_LOCAL_QUEUE_BYTES = 4 * 1024 * 1024;
+var MAX_LOCAL_QUEUE_BYTES = 32 * 1024 * 1024;
 function createStream(context, id7, open7) {
   return open7.websocket ? new WebSocketStream(context, id7, open7) : new HttpStream(context, id7, open7);
 }
@@ -105016,7 +105016,8 @@ var WebSocketStream = class {
         return;
       }
       if (this.settled) {
-        send(FrameType.End, this.id, encodeClose({ code: 1011, reason: error62.message }));
+        const code = error62.code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" ? 1009 : 1011;
+        send(FrameType.End, this.id, encodeClose({ code, reason: error62.message }));
       } else {
         send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
         this.settle(502);

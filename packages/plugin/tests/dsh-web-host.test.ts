@@ -8,6 +8,7 @@ import { authorizeUpstream, DshWebPeer, type DshWebBrowserAuth } from '../src/ds
 import { Connection } from '../src/hostc/connection.js'
 import {
   CLOSE_SHUTDOWN,
+  decodeClose,
   decodeFrame,
   decodeHead,
   decodeText,
@@ -19,6 +20,7 @@ import {
   FrameType,
   type HeaderList,
   MAX_STREAMS,
+  MAX_WEBSOCKET_MESSAGE_BYTES,
   type OpenMessage,
 } from '../src/hostc/protocol/index.js'
 import type { HostServerApi } from '../src/server-api.js'
@@ -673,6 +675,94 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
     await peer.dispose()
     expect(closedSessions).toEqual(['p22222222222', 'p33333333333'])
   })
+
+  it('forwards >4 MiB WebSocket frames bidirectionally without closing', async () => {
+    const local = await listenWs()
+    cleanups.push(local.close)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: new URL(local.url.replace('ws:', 'http:')),
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    const localClientPromise = local.nextClient()
+    peerWs.send(encodeFrame(FrameType.Open, 1, encodeOpen({ method: 'GET', path: '/ws', headers: [], body: false, websocket: [] })))
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.Head))
+    expect(decodeHead(frames.find(f => f.stream === 1 && f.type === FrameType.Head)!.payload).status).toBe(101)
+    const localWs = await localClientPromise
+
+    const receivedAtLocal: Array<{ data: Uint8Array; isBinary: boolean }> = []
+    localWs.on('message', (data, isBinary) => {
+      receivedAtLocal.push({ data: rawToUint8Array(data), isBinary })
+    })
+
+    const largeSize = 5 * 1024 * 1024
+    const ingressPayload = Buffer.alloc(largeSize, 0x41)
+    peerWs.send(encodeFrame(FrameType.Text, 1, ingressPayload))
+
+    const deadline = Date.now() + 10_000
+    while (receivedAtLocal.length < 1 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(receivedAtLocal).toHaveLength(1)
+    expect(receivedAtLocal[0]!.isBinary).toBe(false)
+    expect(Buffer.from(receivedAtLocal[0]!.data).equals(ingressPayload)).toBe(true)
+    expect(localWs.readyState).toBe(WebSocket.OPEN)
+
+    const egressPayload = Buffer.alloc(largeSize, 0x42)
+    localWs.send(egressPayload)
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.Data), 10_000)
+
+    const dataFrame = frames.find(f => f.stream === 1 && f.type === FrameType.Data)!
+    expect(Buffer.from(dataFrame.payload).equals(egressPayload)).toBe(true)
+    expect(frames.some(f => f.stream === 1 && (f.type === FrameType.End || f.type === FrameType.Reset))).toBe(false)
+    expect(localWs.readyState).toBe(WebSocket.OPEN)
+  }, 30_000)
+
+  it('maps oversized local WebSocket payload errors to close code 1009', async () => {
+    const local = await listenWs()
+    cleanups.push(local.close)
+
+    const tunnel = await listenWs()
+    cleanups.push(tunnel.close)
+
+    const clientPromise = tunnel.nextClient()
+    const conn = await Connection.open({
+      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      target: new URL(local.url.replace('ws:', 'http:')),
+      authorize: req => req,
+      stripResponseHeaders,
+      onRequest: () => undefined,
+    })
+    cleanups.push(() => { conn.close(CLOSE_SHUTDOWN, 'test') })
+    const peerWs = await clientPromise
+    const { frames, waitFor } = collectFrames(peerWs)
+
+    const localClientPromise = local.nextClient()
+    peerWs.send(encodeFrame(FrameType.Open, 1, encodeOpen({ method: 'GET', path: '/ws', headers: [], body: false, websocket: [] })))
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.Head))
+    expect(decodeHead(frames.find(f => f.stream === 1 && f.type === FrameType.Head)!.payload).status).toBe(101)
+    const localWs = await localClientPromise
+
+    localWs.send(Buffer.alloc(MAX_WEBSOCKET_MESSAGE_BYTES + 1, 0x61), { binary: true })
+    await waitFor(all => all.some(f => f.stream === 1 && f.type === FrameType.End), 10_000)
+
+    const endFrame = frames.find(f => f.stream === 1 && f.type === FrameType.End)!
+    expect(decodeClose(endFrame.payload)).toEqual({
+      code: 1009,
+      reason: 'Max payload size exceeded',
+    })
+  }, 30_000)
 })
 
 describe('DSH Web connector establishment', () => {
