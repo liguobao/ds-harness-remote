@@ -88,12 +88,7 @@ export interface AttentionSurfacePalette {
   failed: AttentionToneTokens
 }
 
-/**
- * Refined light/dark semantic accents scoped to Attention Inbox surfaces.
- * In dark mode, surfaces stay cool obsidian-neutral (never flooding cards or
- * pills with opaque muddy brown fills) while high-luminance accents live on
- * crisp icons, hairline borders, and small semantic chips.
- */
+/** Light/dark status tokens for Attention Inbox pills, banners, and drawer badges. */
 export function attentionSurfacePalette(
   colors: ThemeColors,
   scheme: ColorScheme = 'light',
@@ -465,18 +460,14 @@ export function digestTotalCount(digest: AttentionDigest | undefined): number {
     + digest.completedUnread
 }
 
-export function formatDigestSegments(digest: AttentionDigest): Array<{
-  key: string
-  label: string
-  urgent: boolean
-  tone: 'approval' | 'question' | 'running' | 'completed'
-}> {
-  const segments: Array<{
-    key: string
-    label: string
-    urgent: boolean
-    tone: 'approval' | 'question' | 'running' | 'completed'
-  }> = []
+export function formatDigestSegments(digest: AttentionDigest): Array<
+  | { key: string; label: string; urgent: true; tone: 'approval' | 'question' }
+  | { key: string; label: string; urgent: false }
+> {
+  const segments: Array<
+    | { key: string; label: string; urgent: true; tone: 'approval' | 'question' }
+    | { key: string; label: string; urgent: false }
+  > = []
   if (digest.pendingApprovals > 0) {
     segments.push({ key: 'approvals', label: strings.attention.approvalsCount(digest.pendingApprovals), urgent: true, tone: 'approval' })
   }
@@ -484,49 +475,12 @@ export function formatDigestSegments(digest: AttentionDigest): Array<{
     segments.push({ key: 'questions', label: strings.attention.questionsCount(digest.pendingQuestions), urgent: true, tone: 'question' })
   }
   if (digest.runningSessions > 0) {
-    segments.push({ key: 'running', label: strings.attention.runningCount(digest.runningSessions), urgent: false, tone: 'running' })
+    segments.push({ key: 'running', label: strings.attention.runningCount(digest.runningSessions), urgent: false })
   }
   if (digest.completedUnread > 0) {
-    segments.push({ key: 'completed', label: strings.attention.completedCount(digest.completedUnread), urgent: false, tone: 'completed' })
+    segments.push({ key: 'completed', label: strings.attention.completedCount(digest.completedUnread), urgent: false })
   }
   return segments
-}
-
-/** Inline attention summary pills rendered under an online host row. */
-export function HostDigestPills({ digest }: { digest?: AttentionDigest }) {
-  const { colors, scheme } = useTheme()
-  const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
-  const styles = useThemedStyles(createStyles)
-  if (!digest || digestTotalCount(digest) === 0) return null
-  const segments = formatDigestSegments(digest)
-  const urgentSegments = segments.filter(seg => seg.urgent)
-  const secondaryText = segments.filter(seg => !seg.urgent).map(seg => seg.label).join(' · ')
-  return (
-    <View style={styles.inlineDigestRow}>
-      {urgentSegments.map(seg => {
-        const tone = seg.tone === 'question' ? palette.question : palette.approval
-        return (
-          <View
-            key={seg.key}
-            style={[
-              styles.digestChip,
-              { backgroundColor: tone.bg, borderColor: tone.border },
-            ]}
-          >
-            <View style={[styles.digestDot, { backgroundColor: tone.dot }]} />
-            <Text style={[styles.digestChipText, { color: tone.fg }]} numberOfLines={1}>
-              {seg.label}
-            </Text>
-          </View>
-        )
-      })}
-      {secondaryText.length > 0 && (
-        <Text style={styles.inlineDigestSecondary} numberOfLines={1}>
-          {secondaryText}
-        </Text>
-      )}
-    </View>
-  )
 }
 
 /**
@@ -786,18 +740,6 @@ function createStyles(colors: ThemeColors) {
       fontVariant: ['tabular-nums'],
     },
     pressed: { opacity: 0.72 },
-    inlineDigestRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 6,
-      marginTop: 3,
-    },
-    inlineDigestSecondary: {
-      ...type.caption,
-      color: colors.muted,
-      fontWeight: '500',
-    },
     digestChip: {
       flexDirection: 'row',
       alignItems: 'center',
