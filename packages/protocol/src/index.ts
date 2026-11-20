@@ -225,6 +225,8 @@ export const rpcMethods = [
   'harness.transport.describe',
   'dsh.web.open',
   'dsh.web.close',
+  'dsh.web.lan.direct.open',
+  'dsh.web.lan.direct.close',
   'remote.history.configure',
   'harness.api.call',
   'harness.api.transfer.open',

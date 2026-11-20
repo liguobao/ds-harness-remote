@@ -402,10 +402,11 @@ window.__ModuleLoader__.load({
           for (const listener of sidebarEntryListeners) listener()
         },
       }
+      const isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location.hostname)
       let controlRouteRetryAfter = 0
       let controlRouteBackoffIndex = 0
       const control = async <T,>(endpoint: string, payload: unknown = {}): Promise<T> => {
-        if (endpoint === 'status' && Date.now() < controlRouteRetryAfter) {
+        if (endpoint === 'status' && (isHostcTunnel || Date.now() < controlRouteRetryAfter)) {
           return controlRouteUnavailableStatus() as T
         }
         let result: ControlResult
@@ -426,13 +427,15 @@ window.__ModuleLoader__.load({
       // One pushed status stream feeds every Host-status render in this page.
       // Hosts without the event stream keep answering the unary status control
       // call, which the feed itself polls at the interval this replaced.
-      const statusFeed = createStatusFeed<RemoteStatus>({
-        url: STATUS_STREAM_PATH.slice(1),
-        readStatus: () => control<RemoteStatus>('status'),
-        onFallback: reason => {
-          console.warn('ds-harness-remote: status event stream unavailable, polling status instead:', reason)
-        },
-      })
+      const statusFeed: StatusFeed<RemoteStatus> = isHostcTunnel
+        ? { getSnapshot: () => undefined, subscribe: () => () => {}, close: () => {} }
+        : createStatusFeed<RemoteStatus>({
+          url: STATUS_STREAM_PATH.slice(1),
+          readStatus: () => control<RemoteStatus>('status'),
+          onFallback: reason => {
+            console.warn('ds-harness-remote: status event stream unavailable, polling status instead:', reason)
+          },
+        })
       ctx.effect(() => () => statusFeed.close(), 'ds-harness-remote: status stream')
       ctx.effect(() => {
         const unsubscribe = statusFeed.subscribe(status => {

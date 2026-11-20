@@ -2278,7 +2278,7 @@ var require_websocket = __commonJS({
     var http2 = __require("http");
     var net2 = __require("net");
     var tls3 = __require("tls");
-    var { randomBytes: randomBytes15, createHash: createHash9 } = __require("crypto");
+    var { randomBytes: randomBytes16, createHash: createHash9 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -2816,8 +2816,8 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort2 = isSecure ? 443 : 80;
-      const key = randomBytes15(16).toString("base64");
-      const request = isSecure ? https2.request : http2.request;
+      const key = randomBytes16(16).toString("base64");
+      const request2 = isSecure ? https2.request : http2.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
       opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
@@ -2894,12 +2894,12 @@ var require_websocket = __commonJS({
         if (opts.auth && !options.headers.authorization) {
           options.headers.authorization = "Basic " + Buffer.from(opts.auth).toString("base64");
         }
-        req = websocket._req = request(opts);
+        req = websocket._req = request2(opts);
         if (websocket._redirects) {
           websocket.emit("redirect", websocket.url, req);
         }
       } else {
-        req = websocket._req = request(opts);
+        req = websocket._req = request2(opts);
       }
       if (opts.timeout) {
         req.on("timeout", () => {
@@ -8626,13 +8626,13 @@ function candidatePairPriority(local, remote, iceControlling) {
   return (1 << 32) * Math.min(G, D) + 2 * Math.max(G, D) + (G > D ? 1 : 0);
 }
 async function serverReflexiveCandidate(protocol, stunServer) {
-  const request = new Message(
+  const request2 = new Message(
     1,
     0
     /* REQUEST */
   );
   try {
-    const [response] = await protocol.request(request, stunServer);
+    const [response] = await protocol.request(request2, stunServer);
     const localCandidate2 = protocol.localCandidate;
     if (!localCandidate2) {
       throw new Error("not exist");
@@ -8991,13 +8991,13 @@ function selectAddressesFromInterfaces(interfaces, family, options = {}, isLinkL
 async function getGlobalIp(stunServer, interfaceAddresses) {
   const protocol = new StunProtocol();
   await protocol.connectionMade(true, void 0, interfaceAddresses);
-  const request = new Message(
+  const request2 = new Message(
     1,
     0
     /* REQUEST */
   );
   const [response] = await protocol.request(
-    request,
+    request2,
     stunServer ?? ["stun.l.google.com", 19302]
   );
   await protocol.close();
@@ -18873,8 +18873,8 @@ var init_lib = __esm({
     };
     log20 = debug("werift-ice:packages/ice/src/stun/transaction.ts");
     Transaction = class {
-      constructor(request, addr, protocol, retransmissionsOrOptions, onRequestSent) {
-        this.request = request;
+      constructor(request2, addr, protocol, retransmissionsOrOptions, onRequestSent) {
+        this.request = request2;
         this.addr = addr;
         this.protocol = protocol;
         const options = normalizeTransactionOptions(
@@ -19123,12 +19123,12 @@ var init_lib = __esm({
         }
         await this.transport.send(data2, addr);
       }
-      async request(request, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
-        if (this.transactionsKeys.includes(request.transactionIdHex))
+      async request(request2, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
+        if (this.transactionsKeys.includes(request2.transactionIdHex))
           throw new Error("already request ed");
         if (integrityKey) {
-          request.addMessageIntegrity(integrityKey);
-          request.addFingerprint();
+          request2.addMessageIntegrity(integrityKey);
+          request2.addFingerprint();
         }
         const resolvedAddr = await resolveRequestAddress(
           addr,
@@ -19141,18 +19141,18 @@ var init_lib = __esm({
           onRequestSent
         );
         const transaction = new Transaction(
-          request,
+          request2,
           resolvedAddr,
           this,
           options
         );
-        this.transactions[request.transactionIdHex] = transaction;
+        this.transactions[request2.transactionIdHex] = transaction;
         try {
           return await transaction.run();
         } catch (e) {
           throw e;
         } finally {
-          delete this.transactions[request.transactionIdHex];
+          delete this.transactions[request2.transactionIdHex];
         }
       }
       async close() {
@@ -19305,13 +19305,13 @@ var init_lib = __esm({
       async sendData(data2, addr) {
         await this.sendFrame(data2, addr);
       }
-      async request(request, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
-        if (this.transactions[request.transactionIdHex]) {
+      async request(request2, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
+        if (this.transactions[request2.transactionIdHex]) {
           throw new Error("already requested");
         }
         if (integrityKey) {
-          request.addMessageIntegrity(integrityKey);
-          request.addFingerprint();
+          request2.addMessageIntegrity(integrityKey);
+          request2.addFingerprint();
         }
         const resolvedAddr = await resolveRequestAddress(addr);
         if (this.closed) throw new TransactionCancelled();
@@ -19324,12 +19324,12 @@ var init_lib = __esm({
             onRequestSent
           )
         };
-        const transaction = new Transaction(request, resolvedAddr, this, options);
-        this.transactions[request.transactionIdHex] = transaction;
+        const transaction = new Transaction(request2, resolvedAddr, this, options);
+        this.transactions[request2.transactionIdHex] = transaction;
         try {
           return await transaction.run();
         } finally {
-          delete this.transactions[request.transactionIdHex];
+          delete this.transactions[request2.transactionIdHex];
         }
       }
       async pruneForSelection(remoteAddr) {
@@ -19483,13 +19483,13 @@ var init_lib = __esm({
           log23("datagramReceived error", error62);
         }
       };
-      async request(request, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
-        if (this.turn.transactions[request.transactionIdHex]) {
+      async request(request2, addr, integrityKey, retransmissionsOrOptions, onRequestSent) {
+        if (this.turn.transactions[request2.transactionIdHex]) {
           throw new Error("exist");
         }
         if (integrityKey) {
-          request.addMessageIntegrity(integrityKey);
-          request.addFingerprint();
+          request2.addMessageIntegrity(integrityKey);
+          request2.addFingerprint();
         }
         const resolvedAddr = await resolveRequestAddress(addr);
         const options = buildTransactionOptions(
@@ -19497,14 +19497,14 @@ var init_lib = __esm({
           retransmissionsOrOptions,
           onRequestSent
         );
-        const transaction = new Transaction(request, resolvedAddr, this, options);
-        this.turn.transactions[request.transactionIdHex] = transaction;
+        const transaction = new Transaction(request2, resolvedAddr, this, options);
+        this.turn.transactions[request2.transactionIdHex] = transaction;
         try {
           return await transaction.run();
         } catch (e) {
           throw e;
         } finally {
-          delete this.turn.transactions[request.transactionIdHex];
+          delete this.turn.transactions[request2.transactionIdHex];
         }
       }
       async connectionMade() {
@@ -19612,13 +19612,13 @@ var init_lib = __esm({
         const maxRedirects = this.options.maxAllocateRedirects ?? DEFAULT_MAX_ALLOCATE_REDIRECTS;
         const tried = [];
         for (let redirects = 0; ; redirects++) {
-          const request = new Message(
+          const request2 = new Message(
             3,
             0
             /* REQUEST */
           ).setAttribute("LIFETIME", this.lifetime).setAttribute("REQUESTED-TRANSPORT", UDP_TRANSPORT);
           try {
-            return await this.requestWithRetry(request, this.server);
+            return await this.requestWithRetry(request2, this.server);
           } catch (error62) {
             const alternate = tryAlternateOf(error62, this.transport.addressFamily);
             if (!alternate) {
@@ -19753,13 +19753,13 @@ var init_lib = __esm({
         );
       }
       async createPermission(peerAddress) {
-        const request = new Message(
+        const request2 = new Message(
           8,
           0
           /* REQUEST */
         );
-        request.setAttribute("XOR-PEER-ADDRESS", peerAddress).setAttribute("USERNAME", this.username).setAttribute("REALM", this.realm).setAttribute("NONCE", this.nonce);
-        await this.requestWithRetry(request, this.server);
+        request2.setAttribute("XOR-PEER-ADDRESS", peerAddress).setAttribute("USERNAME", this.username).setAttribute("REALM", this.realm).setAttribute("NONCE", this.nonce);
+        await this.requestWithRetry(request2, this.server);
       }
       refresh = (exp) => {
         this.refreshHandle = cancelable(async (_, __, onCancel) => {
@@ -19781,15 +19781,15 @@ var init_lib = __esm({
             if (abort.signal.aborted) {
               return;
             }
-            const request = new Message(
+            const request2 = new Message(
               4,
               0
               /* REQUEST */
             );
-            request.setAttribute("LIFETIME", exp);
+            request2.setAttribute("LIFETIME", exp);
             try {
               const [message] = await this.requestWithRetry(
-                request,
+                request2,
                 this.server,
                 abort.signal
               );
@@ -19804,12 +19804,12 @@ var init_lib = __esm({
           }
         });
       };
-      async request(request, addr, _integrityKey, retransmissionsOrOptions, onRequestSent) {
-        if (this.transactions[request.transactionIdHex]) {
+      async request(request2, addr, _integrityKey, retransmissionsOrOptions, onRequestSent) {
+        if (this.transactions[request2.transactionIdHex]) {
           throw new Error("exist");
         }
         if (this.integrityKey) {
-          request.setAttribute("USERNAME", this.username).setAttribute("REALM", this.realm).setAttribute("NONCE", this.nonce).addMessageIntegrity(this.integrityKey).addFingerprint();
+          request2.setAttribute("USERNAME", this.username).setAttribute("REALM", this.realm).setAttribute("NONCE", this.nonce).addMessageIntegrity(this.integrityKey).addFingerprint();
         }
         const resolvedAddr = await this.resolveRequestTarget(addr);
         if (this.closed) throw new TransactionCancelled();
@@ -19818,14 +19818,14 @@ var init_lib = __esm({
           retransmissionsOrOptions,
           onRequestSent
         );
-        const transaction = new Transaction(request, resolvedAddr, this, options);
-        this.transactions[request.transactionIdHex] = transaction;
+        const transaction = new Transaction(request2, resolvedAddr, this, options);
+        this.transactions[request2.transactionIdHex] = transaction;
         try {
           return await transaction.run();
         } catch (e) {
           throw e;
         } finally {
-          delete this.transactions[request.transactionIdHex];
+          delete this.transactions[request2.transactionIdHex];
         }
       }
       /**
@@ -19883,10 +19883,10 @@ var init_lib = __esm({
         }
         return resolveRequestAddress(this.server);
       }
-      async requestWithRetry(request, addr, signal) {
+      async requestWithRetry(request2, addr, signal) {
         let message, address2;
         try {
-          [message, address2] = await this.request(request, addr, void 0, {
+          [message, address2] = await this.request(request2, addr, void 0, {
             signal
           });
         } catch (error62) {
@@ -19908,9 +19908,9 @@ var init_lib = __esm({
               this.realm,
               this.password
             );
-            request.transactionId = randomTransactionId();
+            request2.transactionId = randomTransactionId();
             [message, address2] = await this.request(
-              request,
+              request2,
               this.server,
               void 0,
               { signal }
@@ -20050,13 +20050,13 @@ var init_lib = __esm({
         }
       }
       async channelBind(channelNumber, addr) {
-        const request = new Message(
+        const request2 = new Message(
           9,
           0
           /* REQUEST */
         );
-        request.setAttribute("CHANNEL-NUMBER", channelNumber).setAttribute("XOR-PEER-ADDRESS", addr);
-        const [response] = await this.requestWithRetry(request, this.server);
+        request2.setAttribute("CHANNEL-NUMBER", channelNumber).setAttribute("XOR-PEER-ADDRESS", addr);
+        const [response] = await this.requestWithRetry(request2, this.server);
         if (response.messageMethod !== 9) {
           throw new Error("should be CHANNEL_BIND");
         }
@@ -20513,7 +20513,7 @@ var init_lib = __esm({
           /* IN_PROGRESS */
         );
         const nominate = this.iceControlling && !this.remoteIsLite;
-        const request = this.buildRequest({
+        const request2 = this.buildRequest({
           nominate,
           localUsername: generation.localUsername,
           remoteUsername: generation.remoteUsername,
@@ -20523,7 +20523,7 @@ var init_lib = __esm({
         try {
           pair.requestsSent++;
           const [, addr] = await pair.protocol.request(
-            request,
+            request2,
             pair.remoteAddr,
             Buffer.from(generation.remotePassword, "utf8"),
             {
@@ -20550,7 +20550,7 @@ var init_lib = __esm({
             /* FAILED */
           );
           if (code === 487 && retry) {
-            this.switchRole(request.attributesKeys.includes("ICE-CONTROLLED"));
+            this.switchRole(request2.attributesKeys.includes("ICE-CONTROLLED"));
             pair.updateState(
               1
               /* WAITING */
@@ -20574,7 +20574,7 @@ var init_lib = __esm({
       }
       async nominateProvisional(generation, pair, belongs) {
         generation.nominating = true;
-        const request = this.buildRequest({
+        const request2 = this.buildRequest({
           nominate: true,
           localUsername: generation.localUsername,
           remoteUsername: generation.remoteUsername,
@@ -20584,7 +20584,7 @@ var init_lib = __esm({
         try {
           pair.requestsSent++;
           await pair.protocol.request(
-            request,
+            request2,
             pair.remoteAddr,
             Buffer.from(generation.remotePassword, "utf8"),
             {
@@ -21419,7 +21419,7 @@ var init_lib = __esm({
               const generation = this.remoteGeneration;
               const remotePassword = this.remotePassword;
               const { localUsername, remoteUsername, iceControlling } = this;
-              const request = this.buildRequest({
+              const request2 = this.buildRequest({
                 nominate: this.shouldNominateConsentRequest(nominated),
                 localUsername,
                 remoteUsername,
@@ -21434,7 +21434,7 @@ var init_lib = __esm({
               const responseTimeout = consentResponseTimeoutMs(nominated.rtt);
               const requestStartedAt = performance.now();
               nominated.protocol.request(
-                request,
+                request2,
                 nominated.remoteAddr,
                 Buffer.from(remotePassword, "utf8"),
                 {
@@ -21728,7 +21728,7 @@ var init_lib = __esm({
         const { remotePassword, remoteUsername, generation } = this;
         const localUsername = pair.localCandidate.ufrag ?? this.localUsername;
         const nominate = this.iceControlling && !this.remoteIsLite && !this.isTcpPair(pair);
-        const request = this.buildRequest({
+        const request2 = this.buildRequest({
           nominate,
           localUsername,
           remoteUsername,
@@ -21739,7 +21739,7 @@ var init_lib = __esm({
         try {
           pair.requestsSent++;
           const [response, addr] = await pair.protocol.request(
-            request,
+            request2,
             pair.remoteAddr,
             Buffer.from(remotePassword, "utf8"),
             { ...this.checkRequestOptions(pair), signal }
@@ -21750,7 +21750,7 @@ var init_lib = __esm({
           pair.rtt = rtt;
           pair.totalRoundTripTime += rtt;
           pair.roundTripTimeMeasurements++;
-          log24("response received", request.toJSON(), response.toJSON(), addr, {
+          log24("response received", request2.toJSON(), response.toJSON(), addr, {
             localUsername,
             remoteUsername,
             remotePassword,
@@ -21767,7 +21767,7 @@ var init_lib = __esm({
           const exc = error62;
           log24(
             "failure case",
-            request.toJSON(),
+            request2.toJSON(),
             exc.response ? JSON.stringify(exc.response.toJSON(), null, 2) : error62,
             {
               localUsername,
@@ -21778,9 +21778,9 @@ var init_lib = __esm({
             pair.remoteAddr
           );
           if (exc.response?.getAttributeValue("ERROR-CODE")[0] === 487) {
-            if (request.attributesKeys.includes("ICE-CONTROLLED")) {
+            if (request2.attributesKeys.includes("ICE-CONTROLLED")) {
               this.switchRole(true);
-            } else if (request.attributesKeys.includes("ICE-CONTROLLING")) {
+            } else if (request2.attributesKeys.includes("ICE-CONTROLLING")) {
               this.switchRole(false);
             }
             await this.retryCheck(pair, onCancel);
@@ -21817,7 +21817,7 @@ var init_lib = __esm({
         } else if (this.usesTcpRegularNomination(pair)) {
         } else if (this.iceControlling && !this.nominating) {
           this.nominating = true;
-          const request2 = this.buildRequest({
+          const request22 = this.buildRequest({
             nominate: true,
             localUsername,
             remoteUsername,
@@ -21827,7 +21827,7 @@ var init_lib = __esm({
           try {
             pair.requestsSent++;
             await pair.protocol.request(
-              request2,
+              request22,
               pair.remoteAddr,
               Buffer.from(this.remotePassword, "utf8"),
               { ...this.checkRequestOptions(pair), signal }
@@ -21921,7 +21921,7 @@ var init_lib = __esm({
       nominateTcpPair(pair) {
         this.nominating = true;
         const generation = this.remoteGeneration;
-        const request = this.buildRequest({
+        const request2 = this.buildRequest({
           nominate: true,
           localUsername: pair.localCandidate.ufrag ?? this.localUsername,
           remoteUsername: this.remoteUsername,
@@ -21930,7 +21930,7 @@ var init_lib = __esm({
         });
         pair.requestsSent++;
         pair.protocol.request(
-          request,
+          request2,
           pair.remoteAddr,
           Buffer.from(this.remotePassword, "utf8"),
           { ...this.checkRequestOptions(pair), signal: this.remoteChecks.signal }
@@ -22086,12 +22086,12 @@ var init_lib = __esm({
         localCandidate: localCandidate2
       }) {
         const txUsername = encodeTxUsername({ remoteUsername, localUsername });
-        const request = new Message(
+        const request2 = new Message(
           1,
           0
           /* REQUEST */
         );
-        request.setAttribute("USERNAME", txUsername).setAttribute(
+        request2.setAttribute("USERNAME", txUsername).setAttribute(
           "PRIORITY",
           candidatePriority("prflx", {
             transport: localCandidate2?.transport,
@@ -22099,14 +22099,14 @@ var init_lib = __esm({
           })
         );
         if (iceControlling) {
-          request.setAttribute("ICE-CONTROLLING", this.tieBreaker);
+          request2.setAttribute("ICE-CONTROLLING", this.tieBreaker);
           if (nominate) {
-            request.setAttribute("USE-CANDIDATE", null);
+            request2.setAttribute("USE-CANDIDATE", null);
           }
         } else {
-          request.setAttribute("ICE-CONTROLLED", this.tieBreaker);
+          request2.setAttribute("ICE-CONTROLLED", this.tieBreaker);
         }
-        return request;
+        return request2;
       }
       pruneTcpConnections(selectedPair) {
         for (const protocol of this.protocols) {
@@ -22120,11 +22120,11 @@ var init_lib = __esm({
           }
         }
       }
-      respondError(request, addr, protocol, errorCode5, localPassword = this.localPassword) {
+      respondError(request2, addr, protocol, errorCode5, localPassword = this.localPassword) {
         const response = new Message(
-          request.messageMethod,
+          request2.messageMethod,
           272,
-          request.transactionId
+          request2.transactionId
         );
         response.setAttribute("ERROR-CODE", errorCode5).addMessageIntegrity(Buffer.from(localPassword, "utf8")).addFingerprint();
         protocol.sendStun(response, addr).catch((e) => {
@@ -59938,8 +59938,8 @@ function _overwrite(tx) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _normalize(form) {
-  return /* @__PURE__ */ _overwrite((input4) => input4.normalize(form));
+function _normalize(form2) {
+  return /* @__PURE__ */ _overwrite((input4) => input4.normalize(form2));
 }
 // @__NO_SIDE_EFFECTS__
 function _trim() {
@@ -64609,13 +64609,13 @@ var MAX_MENTION_BYTES = 192 * 1024 * 1024;
 var LOCAL_MENTION = /(^|\s)@(?:"([^"\r\n]+)"|([^\s]+))/gu;
 async function uploadLocalMentions(payload, remote, signal, platform3 = process.platform, fileIO = { lstat, readFile }) {
   if (!isMentionRecord(payload) || !isMentionRecord(payload.args) || !isMentionRecord(payload.args.request)) return payload;
-  const request = payload.args.request;
-  if (typeof request.sessionId !== "string" || !Array.isArray(request.content)) return payload;
+  const request2 = payload.args.request;
+  if (typeof request2.sessionId !== "string" || !Array.isArray(request2.content)) return payload;
   const content = [];
   let uploaded = 0;
   let seen = 0;
   let staged = 0;
-  for (const block of request.content) {
+  for (const block of request2.content) {
     if (!isMentionRecord(block) || block.type !== "text" || typeof block.text !== "string") {
       content.push(block);
       continue;
@@ -64632,7 +64632,7 @@ async function uploadLocalMentions(payload, remote, signal, platform3 = process.
       if (start > cursor3) content.push({ ...block, text: block.text.slice(cursor3, start) });
       const path = match[2] ?? match[3];
       const candidates = await remote.dispatch("fileReferences/list", { args: {
-        agentId: request.sessionId,
+        agentId: request2.sessionId,
         query: path
       } }, signal);
       if (candidates.ok && Array.isArray(candidates.value) && candidates.value.some((candidate) => isMentionRecord(candidate) && candidate.kind === "file" && candidate.path === path)) continue;
@@ -64650,7 +64650,7 @@ async function uploadLocalMentions(payload, remote, signal, platform3 = process.
       uploaded += file2.size;
       const data2 = (await fileIO.readFile(path, { signal })).toString("base64");
       const result = await remote.dispatch("fileUploads/upload", { args: {
-        agentId: request.sessionId,
+        agentId: request2.sessionId,
         request: { data: data2, name: (platform3 === "win32" ? win32 : posix).basename(path) }
       } }, signal);
       if (!result.ok) throw new Error(result.error.message);
@@ -64662,7 +64662,7 @@ async function uploadLocalMentions(payload, remote, signal, platform3 = process.
     }
     if (cursor3 < block.text.length) content.push({ ...block, text: block.text.slice(cursor3) });
   }
-  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request, content } } };
+  return staged === 0 ? payload : { ...payload, args: { ...payload.args, request: { ...request2, content } } };
 }
 function isMentionRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -64999,6 +64999,19 @@ var dshWebGrantSchema = external_exports.object({
   browserGrant: external_exports.string().regex(/^[A-Za-z0-9_-]{43}$/),
   expiresAt: external_exports.number().int().positive()
 }).strict();
+var DSH_WEB_LAN_CAPABILITY = "dsh.web.lan.direct.v1";
+function isDshWebLanAddress(address2) {
+  return address2 === "127.0.0.1" || isLanUploadAddress(address2);
+}
+var dshWebLanOpenSchema = external_exports.object({}).strict();
+var dshWebLanSessionSchema = external_exports.object({ sessionId: external_exports.uuid() }).strict();
+var dshWebLanGrantSchema = dshWebGrantSchema.extend({
+  sessionId: external_exports.uuid(),
+  url: external_exports.url().refine((value) => {
+    const url2 = new URL(value);
+    return url2.protocol === "http:" && isDshWebLanAddress(url2.hostname) && !!url2.port && value === url2.origin + "/";
+  })
+});
 
 // packages/protocol/dist/index.js
 var WEBRTC_RESUME_CAPABILITY = "transport.webrtc.resume.v1";
@@ -65098,6 +65111,8 @@ var rpcMethods = [
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
+  "dsh.web.lan.direct.open",
+  "dsh.web.lan.direct.close",
   "remote.history.configure",
   "harness.api.call",
   "harness.api.transfer.open",
@@ -67987,10 +68002,10 @@ var ControlLease = class {
   sequence = 0;
   timer;
   lastRequest = -Infinity;
-  constructor(connectionId, ticket, request, expired) {
+  constructor(connectionId, ticket, request2, expired) {
     this.connectionId = connectionId;
     this.ticket = ticket;
-    this.request = request;
+    this.request = request2;
     this.expired = expired;
   }
   start() {
@@ -68635,7 +68650,7 @@ var AdaptiveTransport = class extends BaseTransport {
     if (this.options.fetchIceServers === void 0)
       return [];
     return new Promise((resolve10, reject) => {
-      const request = new AbortController();
+      const request2 = new AbortController();
       let settled = false;
       const finish = (error62, servers = []) => {
         if (settled)
@@ -68650,11 +68665,11 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       const onAbort = () => {
         finish(new Error("ICE configuration request was aborted"));
-        request.abort();
+        request2.abort();
       };
       const timer2 = setTimeout(() => {
         finish(new Error("ICE configuration request timed out"));
-        request.abort();
+        request2.abort();
       }, this.options.iceServersTimeoutMs ?? 1e4);
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) {
@@ -68662,8 +68677,8 @@ var AdaptiveTransport = class extends BaseTransport {
         return;
       }
       Promise.resolve().then(() => {
-        throwIfAborted(request.signal);
-        return this.options.fetchIceServers(connectionId, request.signal);
+        throwIfAborted(request2.signal);
+        return this.options.fetchIceServers(connectionId, request2.signal);
       }).then((servers) => finish(void 0, servers), (error62) => finish(error62 instanceof Error ? error62 : new Error("ICE configuration request failed")));
     });
   }
@@ -69015,10 +69030,10 @@ var RemoteClientCore = class {
       throw new RemoteClientError(this.terminalCode, `RPC ${method} cannot start after the remote client closed`);
     }
     const timeoutMs = typeof options === "number" ? options : callTimeoutMs(this.timeoutMs, options);
-    const request = createRpcRequest(method, params);
+    const request2 = createRpcRequest(method, params);
     const result = new Promise((resolve10, reject) => {
       const timer2 = setTimeout(() => {
-        this.rejectPending(request.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
+        this.rejectPending(request2.id, new RemoteClientError("RPC_TIMEOUT", `RPC ${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       const pending = {
         method,
@@ -69028,22 +69043,22 @@ var RemoteClientCore = class {
       };
       if (signal !== void 0) {
         const onAbort = () => {
-          if (this.pending.get(request.id) !== pending)
+          if (this.pending.get(request2.id) !== pending)
             return;
-          this.rejectPending(request.id, rpcAbortedError(method, signal.reason));
+          this.rejectPending(request2.id, rpcAbortedError(method, signal.reason));
         };
         signal.addEventListener("abort", onAbort, { once: true });
         pending.removeAbort = () => signal.removeEventListener("abort", onAbort);
       }
-      this.pending.set(request.id, pending);
+      this.pending.set(request2.id, pending);
     });
     try {
-      const send = this.transport.send(encodeMessage(request));
+      const send = this.transport.send(encodeMessage(request2));
       void send.catch((error62) => {
-        this.rejectPending(request.id, transportSendError(error62));
+        this.rejectPending(request2.id, transportSendError(error62));
       });
     } catch (error62) {
-      this.rejectPending(request.id, transportSendError(error62));
+      this.rejectPending(request2.id, transportSendError(error62));
     }
     return result;
   }
@@ -69203,11 +69218,11 @@ function attachSharedInFlight(entry, signal) {
 function extractSessionIdFromGatewayPayload(payload) {
   if (!isRecord3(payload)) return void 0;
   const args = isRecord3(payload.args) ? payload.args : payload;
-  const request = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
-  if (typeof request.sessionId === "string" && request.sessionId.length > 0) return request.sessionId;
-  if (typeof request.agentId === "string" && request.agentId.length > 0) return request.agentId;
-  if (isRecord3(request.address)) {
-    const address2 = request.address;
+  const request2 = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
+  if (typeof request2.sessionId === "string" && request2.sessionId.length > 0) return request2.sessionId;
+  if (typeof request2.agentId === "string" && request2.agentId.length > 0) return request2.agentId;
+  if (isRecord3(request2.address)) {
+    const address2 = request2.address;
     if (typeof address2.sessionId === "string" && address2.sessionId.length > 0) return address2.sessionId;
     if (typeof address2.childSessionId === "string" && address2.childSessionId.length > 0) return address2.childSessionId;
   }
@@ -69219,13 +69234,13 @@ function isSessionMutationEndpoint(endpoint) {
 function canonicalUnaryHistoryKey(endpoint, payload) {
   if (!isRecord3(payload)) return endpoint;
   const args = isRecord3(payload.args) ? payload.args : payload;
-  const request = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
+  const request2 = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
   return JSON.stringify([
     endpoint,
-    typeof request.beforeSeq === "number" ? request.beforeSeq : null,
-    typeof request.throughSeq === "number" ? request.throughSeq : null,
-    typeof request.maxMessages === "number" ? request.maxMessages : typeof request.limit === "number" ? request.limit : null,
-    request.turnWindow ?? null
+    typeof request2.beforeSeq === "number" ? request2.beforeSeq : null,
+    typeof request2.throughSeq === "number" ? request2.throughSeq : null,
+    typeof request2.maxMessages === "number" ? request2.maxMessages : typeof request2.limit === "number" ? request2.limit : null,
+    request2.turnWindow ?? null
   ]);
 }
 var RemoteSessionHistoryCache = class {
@@ -69398,19 +69413,19 @@ var RemoteSessionHistoryCache = class {
   sliceSnapshotRecords(snapshot2, payload) {
     if (!Array.isArray(snapshot2.records)) return void 0;
     const args = isRecord3(payload) && isRecord3(payload.args) ? payload.args : isRecord3(payload) ? payload : {};
-    const request = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
-    if (request.turnWindow !== void 0) return void 0;
+    const request2 = isRecord3(args.request) ? args.request : isRecord3(args._request) ? args._request : args;
+    if (request2.turnWindow !== void 0) return void 0;
     const snapshotCursor = typeof snapshot2.cursor === "number" ? snapshot2.cursor : -1;
-    const throughSeq = typeof request.throughSeq === "number" ? request.throughSeq : snapshotCursor;
+    const throughSeq = typeof request2.throughSeq === "number" ? request2.throughSeq : snapshotCursor;
     if (throughSeq > snapshotCursor) return void 0;
-    const beforeSeq = typeof request.beforeSeq === "number" ? request.beforeSeq : void 0;
+    const beforeSeq = typeof request2.beforeSeq === "number" ? request2.beforeSeq : void 0;
     const endSeq = beforeSeq === void 0 ? throughSeq : Math.min(throughSeq, beforeSeq - 1);
     const window2 = endSeq < 0 ? [] : snapshot2.records.filter((item) => isRecord3(item) && isRecord3(item.event) && typeof item.event.seq === "number" && item.event.seq <= endSeq);
     if (throughSeq >= 0 && beforeSeq === void 0 && window2.length > 0) {
       const tail = window2.at(-1);
       if (!isRecord3(tail) || !isRecord3(tail.event) || tail.event.seq !== throughSeq) return void 0;
     }
-    const maxMessages = typeof request.maxMessages === "number" && request.maxMessages > 0 ? request.maxMessages : typeof request.limit === "number" && request.limit > 0 ? request.limit : void 0;
+    const maxMessages = typeof request2.maxMessages === "number" && request2.maxMessages > 0 ? request2.maxMessages : typeof request2.limit === "number" && request2.limit > 0 ? request2.limit : void 0;
     const records = maxMessages === void 0 ? window2 : window2.slice(Math.max(0, window2.length - maxMessages));
     const hasMore = Boolean(snapshot2.hasMore) || window2.length > records.length;
     return cloneStructured({
@@ -70397,9 +70412,9 @@ function sessionIdFromAddress(address2) {
   }
   throw new Error("The sessionId is required.");
 }
-function extractSessionId(request) {
-  if (typeof request.sessionId === "string" && request.sessionId.length > 0) return request.sessionId;
-  if (isRecord4(request.address)) return sessionIdFromAddress(request.address);
+function extractSessionId(request2) {
+  if (typeof request2.sessionId === "string" && request2.sessionId.length > 0) return request2.sessionId;
+  if (isRecord4(request2.address)) return sessionIdFromAddress(request2.address);
   throw new Error("The sessionId is required.");
 }
 function sessionPrefix(backend) {
@@ -70724,8 +70739,8 @@ var AcpLiveProjection = class {
     this.context.emitRemoteEvent("api-session/status", [session2.sessionId, false]);
     this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(reason), true);
   }
-  async sessionFollow(request, signal) {
-    const requestedId = extractSessionId(request);
+  async sessionFollow(request2, signal) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.context.lookupSession(requestedId);
     if (session2 === void 0) throw new Error("The Session was not found.");
     const sessionId = session2.sessionId;
@@ -70764,8 +70779,8 @@ var AcpLiveProjection = class {
     let history2;
     try {
       history2 = this.context.historyPage(session2, {
-        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        limit: optionalPositiveInteger(request2.maxMessages) ?? optionalPositiveInteger(request2.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow),
         extraEnvelopeBytes: projectionsOverhead
       });
     } catch (error62) {
@@ -71700,11 +71715,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     return sessionIds[0] ?? sessionIds.at(-1);
   }
-  async invoke(request) {
+  async invoke(request2) {
     const result = await this.dispatch(
-      `${request.namespace}/${request.method}`,
-      { args: request.args },
-      request.signal ?? new AbortController().signal
+      `${request2.namespace}/${request2.method}`,
+      { args: request2.args },
+      request2.signal ?? new AbortController().signal
     );
     if (result.ok) return result.value;
     throw Object.assign(new Error(result.error.message), {
@@ -71897,17 +71912,17 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       ...ordered.filter((item) => item.workspaceId !== selected.workspaceId)
     ];
   }
-  async createWorkspace(request) {
-    const path = string4(request.path)?.trim();
-    const title = string4(request.title)?.trim();
+  async createWorkspace(request2) {
+    const path = string4(request2.path)?.trim();
+    const title = string4(request2.title)?.trim();
     if (path === void 0 || path.length === 0) return failure2("bad-request", `A ${this.backendLabel()} working directory is required.`);
     const workspace2 = await this.selectOrCreateWorkspace(path, title);
     this.publishWorkspaceBaseline();
     return success2({ workspace: nativeWorkspace(workspace2), created: true });
   }
-  async renameWorkspace(request) {
-    const workspaceId = requiredString(request.workspaceId, "workspaceId");
-    const title = string4(request.title)?.trim();
+  async renameWorkspace(request2) {
+    const workspaceId = requiredString(request2.workspaceId, "workspaceId");
+    const title = string4(request2.title)?.trim();
     const workspace2 = this.workspaceById.get(workspaceId);
     if (workspace2 === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
     if (title === void 0 || title.length === 0) return failure2("bad-request", "A Workspace name is required.");
@@ -71919,8 +71934,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return success2({ workspace: nativeWorkspace(next) });
   }
-  async deleteWorkspace(request) {
-    const workspaceId = requiredString(request.workspaceId, "workspaceId");
+  async deleteWorkspace(request2) {
+    const workspaceId = requiredString(request2.workspaceId, "workspaceId");
     const workspace2 = this.workspaceById.get(workspaceId);
     if (workspace2 === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
     if (this.client.deleteWorkspace !== void 0) {
@@ -71935,9 +71950,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return success2({ workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId) });
   }
-  async reorderWorkspaces(request) {
-    const workspaceId = requiredString(request.workspaceId, "workspaceId");
-    const beforeWorkspaceId = string4(request.beforeWorkspaceId);
+  async reorderWorkspaces(request2) {
+    const workspaceId = requiredString(request2.workspaceId, "workspaceId");
+    const beforeWorkspaceId = string4(request2.beforeWorkspaceId);
     const current = this.visibleWorkspaces().map((item) => item.workspaceId);
     if (!current.includes(workspaceId)) {
       return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
@@ -71955,8 +71970,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return success2({ workspaceIds: remaining });
   }
-  async pinSession(request) {
-    const sessionId = this.resolveSessionId(extractSessionId(request));
+  async pinSession(request2) {
+    const sessionId = this.resolveSessionId(extractSessionId(request2));
     if (this.client.pinSession !== void 0) {
       const updated = await this.client.pinSession(nativeAcpId(sessionId, this.backend), this.backend);
       this.pinnedSessionIds.clear();
@@ -71969,8 +71984,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return success2({ pinnedSessionIds: [...this.pinnedSessionIds] });
   }
-  async unpinSession(request) {
-    const sessionId = this.resolveSessionId(extractSessionId(request));
+  async unpinSession(request2) {
+    const sessionId = this.resolveSessionId(extractSessionId(request2));
     if (this.client.unpinSession !== void 0) {
       const updated = await this.client.unpinSession(nativeAcpId(sessionId, this.backend), this.backend);
       this.pinnedSessionIds.clear();
@@ -71983,12 +71998,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishWorkspaceBaseline();
     return success2({ pinnedSessionIds: [...this.pinnedSessionIds] });
   }
-  searchSessions(request) {
-    const query = (string4(request.query) ?? "").trim().toLowerCase();
-    const workspaceId = string4(request.workspaceId);
+  searchSessions(request2) {
+    const query = (string4(request2.query) ?? "").trim().toLowerCase();
+    const workspaceId = string4(request2.workspaceId);
     const allowedWorkspace = workspaceId !== void 0 ? this.workspaceById.get(workspaceId) : void 0;
     const allowedIds = allowedWorkspace !== void 0 ? new Set(allowedWorkspace.sessionIds) : void 0;
-    const limit = optionalPositiveInteger(request.limit) ?? 30;
+    const limit = optionalPositiveInteger(request2.limit) ?? 30;
     const matched = [...this.sessions.values()].filter((session2) => !this.archivedSessionIds.has(session2.sessionId)).filter((session2) => allowedIds === void 0 || allowedIds.has(session2.sessionId)).filter((session2) => {
       if (!query) return true;
       if ((session2.title ?? "").toLowerCase().includes(query)) return true;
@@ -72001,8 +72016,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const slice = matched.slice(0, limit).map((session2) => this.sessionSummary(session2, session2.projectionSeq ?? -1));
     return { items: slice, hasMore: matched.length > slice.length };
   }
-  async forkSession(request, signal) {
-    const rawId = extractSessionId(request);
+  async forkSession(request2, signal) {
+    const rawId = extractSessionId(request2);
     const source = this.lookupSession(rawId);
     if (source === void 0) return failure2("session-not-found", "The Session was not found.");
     if (this.client.forkSession === void 0) {
@@ -72058,13 +72073,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.events.publishProjection(sessionId, "agentPreset", committed, seq);
     return success2(committed);
   }
-  async workspaceForSession(request) {
-    const sessionId = string4(request.sessionId);
+  async workspaceForSession(request2) {
+    const sessionId = string4(request2.sessionId);
     const workspace2 = [...this.workspaceById.values()].find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
     return workspace2 === void 0 ? failure2("workspace-not-found", "The Cursor virtual Workspace was not found.") : success2({ workspace: nativeWorkspace(workspace2) });
   }
-  async archiveSession(request) {
-    const sessionId = extractSessionId(request);
+  async archiveSession(request2) {
+    const sessionId = extractSessionId(request2);
     if (this.backend === "opencode") {
       if (!this.client.supportsArchive?.(this.backend) || !this.client.archiveSession) return failure2("archive-unavailable", "Update the Host plugin to archive OpenCode conversations.");
       await this.client.archiveSession(nativeAcpId(sessionId, this.backend), this.backend);
@@ -72089,12 +72104,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.events.emitRemoteEvent("api-session/removed", [sessionId]);
     this.publishWorkspaceBaseline();
   }
-  async createSession(request, signal) {
-    const workspaceId = string4(request.workspaceId) ?? this.selectedWorkspaceId;
+  async createSession(request2, signal) {
+    const workspaceId = string4(request2.workspaceId) ?? this.selectedWorkspaceId;
     const workspace2 = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
-    const cwd2 = string4(request.cwd) ?? workspace2?.path;
+    const cwd2 = string4(request2.cwd) ?? workspace2?.path;
     if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    const requestedSessionId = string4(request.sessionId);
+    const requestedSessionId = string4(request2.sessionId);
     const reusable = requestedSessionId === void 0 ? void 0 : this.sessions.get(requestedSessionId);
     if (reusable !== void 0 && reusable.cwd === cwd2 && reusable.blank && !reusable.running) {
       return success2({ sessionId: reusable.sessionId });
@@ -72120,17 +72135,17 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     return void 0;
   }
-  async prompt(request, signal) {
-    const requestedId = extractSessionId(request);
+  async prompt(request2, signal) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
-    const text = extractPromptText(array2(request.content));
+    const text = extractPromptText(array2(request2.content));
     let images;
     try {
-      images = array2(request.content).filter((part) => record2(part).type === "image").map(parseAcpImage);
-      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" && this.backend !== "hermes" || array2(request.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
+      images = array2(request2.content).filter((part) => record2(part).type === "image").map(parseAcpImage);
+      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" && this.backend !== "hermes" || array2(request2.content).some((part) => !["text", "image"].includes(String(record2(part).type)))) throw new Error("Unsupported ACP content.");
     } catch {
       return failure2("attachment-error", "Invalid or unsupported image attachment.");
     }
@@ -72147,7 +72162,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const prevTitleOverridden = session2.titleOverridden;
     const prevAttachmentIds = new Set(this.imageAttachments.keys());
     this.cacheImageAttachments(sessionId, imageBlocks);
-    const requestId2 = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
+    const requestId2 = typeof request2.requestId === "string" && request2.requestId.length > 0 ? request2.requestId : void 0;
     try {
       await this.live.ensureFollow(session2);
     } catch (error62) {
@@ -72225,8 +72240,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     return success2({ accepted: true });
   }
-  async cancel(request, signal) {
-    const requestedId = extractSessionId(request);
+  async cancel(request2, signal) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     const sessionId = session2.sessionId;
@@ -72241,9 +72256,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.events.emitRemoteEvent("api-session/status", [sessionId, false]);
     return success2({ accepted: true });
   }
-  async renameSession(request) {
-    const requestedId = extractSessionId(request);
-    const title = string4(request.title)?.trim();
+  async renameSession(request2) {
+    const requestedId = extractSessionId(request2);
+    const title = string4(request2.title)?.trim();
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     if (!title) return failure2("bad-request", "A Session title is required.");
@@ -72264,9 +72279,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       }
     }
   }
-  async attachment(request) {
-    const requestedId = extractSessionId(request);
-    const attachmentId = string4(request.attachmentId) ?? string4(record2(request.attachment).attachmentId);
+  async attachment(request2) {
+    const requestedId = extractSessionId(request2);
+    const attachmentId = string4(request2.attachmentId) ?? string4(record2(request2.attachment).attachmentId);
     const session2 = this.lookupSession(requestedId);
     if (this.backend !== "antigravity" && this.backend !== "hermes" || session2 === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this Session.");
     await this.hydrateSession(session2);
@@ -72376,13 +72391,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       ...permissionPreset2 === void 0 ? {} : { permissionPreset: permissionPreset2 }
     });
   }
-  async sessionHistory(request) {
-    const requestedId = extractSessionId(request);
+  async sessionHistory(request2) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     const sessionId = session2.sessionId;
     await this.hydrateSession(session2);
-    const beforeSeq = optionalInteger(request.beforeSeq);
+    const beforeSeq = optionalInteger(request2.beforeSeq);
     if (beforeSeq === void 0) {
       this.rememberOpenedSession(sessionId);
     }
@@ -72403,9 +72418,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     try {
       page = this.historyPage(session2, {
         beforeSeq,
-        throughSeq: optionalInteger(request.throughSeq),
-        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        throughSeq: optionalInteger(request2.throughSeq),
+        limit: optionalPositiveInteger(request2.maxMessages) ?? optionalPositiveInteger(request2.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow),
         extraEnvelopeBytes: utf8JsonByteLength({ events: [], projections }) + 16,
         measureRecordBytes: (entry) => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1
       });
@@ -72421,24 +72436,24 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections
     });
   }
-  async sessionProjections(request) {
-    const requestedId = extractSessionId(request);
+  async sessionProjections(request2) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return success2(null);
     await this.hydrateSession(session2);
     return success2(this.sessionSummary(session2, session2.projectionSeq ?? -1).projections);
   }
-  async sessionPage(request) {
-    const requestedId = extractSessionId(request);
+  async sessionPage(request2) {
+    const requestedId = extractSessionId(request2);
     const session2 = this.lookupSession(requestedId);
     if (session2 === void 0) return failure2("session-not-found", "The Session was not found.");
     await this.hydrateSession(session2);
     try {
       const page = this.historyPage(session2, {
-        beforeSeq: optionalInteger(request.beforeSeq),
-        throughSeq: optionalInteger(request.throughSeq),
-        limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+        beforeSeq: optionalInteger(request2.beforeSeq),
+        throughSeq: optionalInteger(request2.throughSeq),
+        limit: optionalPositiveInteger(request2.limit) ?? optionalPositiveInteger(request2.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow)
       });
       return success2({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
     } catch (error62) {
@@ -72508,10 +72523,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       canOpenPath: workspace2 !== void 0
     };
   }
-  async listDirectory(request, signal) {
+  async listDirectory(request2, signal) {
     const workspace2 = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     if (workspace2 === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
-    const path = string4(request.path) ?? workspace2.path;
+    const path = string4(request2.path) ?? workspace2.path;
     return success2(await this.client.listDirectory(path, signal));
   }
   registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
@@ -72767,12 +72782,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.selectedModels.set(resolvedId, models.current);
     return models;
   }
-  async selectModel(request) {
-    const rawSessionId = extractSessionId(request);
+  async selectModel(request2) {
+    const rawSessionId = extractSessionId(request2);
     const sessionId = this.resolveSessionId(rawSessionId);
-    const provider = requiredString(request.provider, "provider");
-    const model = requiredString(request.model, "model");
-    const reasoningEffort = string4(request.reasoningEffort);
+    const provider = requiredString(request2.provider, "provider");
+    const model = requiredString(request2.model, "model");
+    const reasoningEffort = string4(request2.reasoningEffort);
     const catalog = await this.hostSessionModels(sessionId);
     const group = catalog.groups.find((g) => g.id === provider || g.id.toLowerCase() === provider.toLowerCase());
     let targetModel = group?.models.find((item) => item.id === model);
@@ -74852,7 +74867,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes15 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes16 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain2 = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -74934,7 +74949,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size2,
     seed: _size2
   };
-  function randomSecretKey(seed = randomBytes15(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes16(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -77258,18 +77273,18 @@ function validateTableBytes(numPoints, fpBytes) {
   if (bytes > TABLE_BYTES_MAX)
     throw new Error("invalid window size: table would need ~" + Math.ceil(bytes / 2 ** 20) + " MiB, max " + TABLE_BYTES_MAX / 2 ** 20 + " MiB");
 }
-function probeRandomBytes(randomBytes15, length) {
-  if (randomBytes15 === void 0)
+function probeRandomBytes(randomBytes16, length) {
+  if (randomBytes16 === void 0)
     return void 0;
-  afunction(randomBytes15, "randomBytes");
+  afunction(randomBytes16, "randomBytes");
   try {
-    const probe = randomBytes15(length);
+    const probe = randomBytes16(length);
     if (!isBytes3(probe) || probe.length !== length)
       return void 0;
   } catch {
     return void 0;
   }
-  return randomBytes15;
+  return randomBytes16;
 }
 function validateMSMPoints2(points, c) {
   aarray(points, "points");
@@ -77362,9 +77377,9 @@ var ScalarMultiplier = class {
   baseCanBeBlinded;
   bits;
   // Parametrized with a given Point class (not individual point)
-  constructor(Point, randomBytes15) {
+  constructor(Point, randomBytes16) {
     validatePointCons(Point);
-    this.randomBytes = probeRandomBytes(randomBytes15, BLIND_BYTES);
+    this.randomBytes = probeRandomBytes(randomBytes16, BLIND_BYTES);
     this.Point = Point;
     this.BASE = Point.BASE;
     this.ZERO = Point.ZERO;
@@ -77635,7 +77650,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes15 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
+  const randomBytes16 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -77896,7 +77911,7 @@ function edwards2(params, extraOpts = {}) {
     }
   }
   const normalize = (points) => normalizeZ2(Point, points);
-  const wnaf = new ScalarMultiplier(Point, randomBytes15);
+  const wnaf = new ScalarMultiplier(Point, randomBytes16);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
   Object.freeze(Point.prototype);
@@ -80891,7 +80906,7 @@ var LoopbackHost = class {
     return new Promise((resolve10, reject) => {
       const headers = Object.fromEntries(cleanHeaders(value.headers));
       let handle;
-      const request = httpRequest({
+      const request2 = httpRequest({
         hostname: "127.0.0.1",
         port: value.port,
         method: value.method,
@@ -80910,16 +80925,16 @@ var LoopbackHost = class {
         resolve10({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
       });
       const timer2 = setTimeout(() => {
-        request.destroy();
+        request2.destroy();
         reject(new Error("timeout"));
       }, 2e4);
-      request.on("error", () => {
+      request2.on("error", () => {
         clearTimeout(timer2);
         reject(new Error("upstream"));
       });
-      handle = { kind: "http", port: value.port, request, reading: false, total: 0, touched: Date.now() };
+      handle = { kind: "http", port: value.port, request: request2, reading: false, total: 0, touched: Date.now() };
       this.handles.set(value.id, handle);
-      request.end(body);
+      request2.end(body);
     });
   }
   openWs(value) {
@@ -82787,11 +82802,11 @@ function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legac
     ...active2 === void 0 ? {} : { activeTurnId: active2 }
   };
 }
-function paginateCodexNativeHistory(history2, request) {
-  const throughSeq = Math.min(request.throughSeq ?? history2.lastSeq, history2.lastSeq);
-  const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
+function paginateCodexNativeHistory(history2, request2) {
+  const throughSeq = Math.min(request2.throughSeq ?? history2.lastSeq, history2.lastSeq);
+  const endSeq = Math.min(throughSeq, request2.beforeSeq === void 0 ? throughSeq : request2.beforeSeq - 1);
   const window2 = endSeq < 0 ? [] : history2.entries.filter((entry) => entry.event.seq <= endSeq);
-  const maxBytes2 = request.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES;
+  const maxBytes2 = request2.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES;
   const headroom = Math.min(CODEX_PAGE_ENVELOPE_HEADROOM_BYTES, Math.floor(maxBytes2 / 8));
   const envelopeBytes = utf8JsonByteLength({
     header: history2.header,
@@ -82802,11 +82817,11 @@ function paginateCodexNativeHistory(history2, request) {
     ...history2.activeTurnId === void 0 ? {} : { activeTurnId: history2.activeTurnId }
   }) + headroom;
   const slice = selectVirtualHistorySlice(window2, {
-    maxMessages: request.maxMessages,
-    turnWindow: request.turnWindow,
+    maxMessages: request2.maxMessages,
+    turnWindow: request2.turnWindow,
     countSurfaceMessages: true,
     maxBytes: maxBytes2,
-    hardMaxBytes: request.hardMaxBytes,
+    hardMaxBytes: request2.hardMaxBytes,
     envelopeBytes
   });
   return {
@@ -83214,12 +83229,12 @@ var CodexLiveProjection = class {
   constructor(context) {
     this.context = context;
   }
-  async sessionFollow(request, signal) {
-    const sessionId = sessionIdFromAddress2(record5(request.address));
+  async sessionFollow(request2, signal) {
+    const sessionId = sessionIdFromAddress2(record5(request2.address));
     const threadId = nativeThreadId(sessionId);
     const historyPromise = this.context.readHistoryPage(threadId, {
-      maxMessages: optionalPositiveInteger2(request.maxMessages) ?? optionalPositiveInteger2(request.limit),
-      turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+      maxMessages: optionalPositiveInteger2(request2.maxMessages) ?? optionalPositiveInteger2(request2.limit),
+      turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow)
     }, signal).catch((error62) => {
       if (error62 instanceof VirtualHistoryResponseTooLargeError) {
         throw Object.assign(new Error(error62.message), {
@@ -83908,11 +83923,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.desktopFileReceipts.set(receiptId, { sessionId, part });
     if (this.desktopFileReceipts.size > 64) this.desktopFileReceipts.delete(this.desktopFileReceipts.keys().next().value);
   }
-  async invoke(request) {
+  async invoke(request2) {
     const result = await this.dispatch(
-      `${request.namespace}/${request.method}`,
-      { args: request.args },
-      request.signal ?? new AbortController().signal
+      `${request2.namespace}/${request2.method}`,
+      { args: request2.args },
+      request2.signal ?? new AbortController().signal
     );
     if (result.ok) return result.value;
     throw Object.assign(new Error(result.error.message), {
@@ -84170,12 +84185,12 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const session2 = this.catalog?.sessions.find((item) => item.id === sessionId);
     return session2 === void 0 ? null : displayTitle(session2);
   }
-  async selectModel(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async selectModel(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     nativeThreadId(sessionId);
-    const provider = requiredString2(request.provider, "provider");
-    const model = requiredString2(request.model, "model");
-    const reasoningEffort = string5(request.reasoningEffort);
+    const provider = requiredString2(request2.provider, "provider");
+    const model = requiredString2(request2.model, "model");
+    const reasoningEffort = string5(request2.reasoningEffort);
     const directory = await this.models(signal);
     const available = directory.models.get(model);
     if (provider !== CODEX_PROVIDER || available === void 0) {
@@ -84244,8 +84259,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       }
     };
   }
-  async searchSessions(request, signal) {
-    const query = requiredString2(request.query, "query").trim();
+  async searchSessions(request2, signal) {
+    const query = requiredString2(request2.query, "query").trim();
     if (query.length === 0 || query.length > 500 || query.includes("\0")) {
       return failure3("bad-request", "The CodeX Session search query is invalid.");
     }
@@ -84264,19 +84279,19 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       hasMore: matches.length > SESSION_SEARCH_RESULT_LIMIT
     });
   }
-  async createWorkspace(request, signal) {
-    const path = string5(request.path);
+  async createWorkspace(request2, signal) {
+    const path = string5(request2.path);
     if (path === void 0 || path.trim() === "") return failure3("bad-request", "A CodeX working directory is required.");
     const catalog = await this.currentCatalog(signal);
     const existing = catalog.workspaces.find((item) => item.path === path);
     if (existing !== void 0) return success3({ workspace: nativeWorkspace2(existing), created: false });
     return failure3("workspace-not-found", "The selected directory is not visible to CodeX Remote.");
   }
-  async renameWorkspace(request) {
-    return failure3("workspace-read-only", `CodeX virtual Workspace ${string5(request.workspaceId) ?? ""} cannot be renamed.`);
+  async renameWorkspace(request2) {
+    return failure3("workspace-read-only", `CodeX virtual Workspace ${string5(request2.workspaceId) ?? ""} cannot be renamed.`);
   }
-  async workspaceForSession(request, signal) {
-    const sessionId = string5(request.sessionId);
+  async workspaceForSession(request2, signal) {
+    const sessionId = string5(request2.sessionId);
     const catalog = await this.currentCatalog(signal);
     const workspace2 = catalog.workspaces.find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
     return workspace2 === void 0 ? failure3("workspace-not-found", "The CodeX virtual Workspace was not found.") : success3({ workspace: nativeWorkspace2(workspace2) });
@@ -84298,11 +84313,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       canOpenPath: workspace2 !== void 0
     };
   }
-  async listDirectory(request, signal) {
+  async listDirectory(request2, signal) {
     const catalog = await this.currentCatalog(signal);
     const workspace2 = this.selectedWorkspace(catalog);
     if (workspace2 === void 0) return failure3("workspace-not-found", "The CodeX virtual Workspace was not found.");
-    const path = string5(request.path) ?? workspace2.path;
+    const path = string5(request2.path) ?? workspace2.path;
     if (!containsPath(workspace2.path, path)) {
       return failure3("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
     }
@@ -84321,8 +84336,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     }
     return success3(listing);
   }
-  async archiveSession(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async archiveSession(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     const threadId = nativeThreadId(sessionId);
     await this.client.request("thread/archive", { threadId }, signal);
     this.historyCache.removeThread(threadId);
@@ -84330,11 +84345,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.publishWorkspaceBaseline(catalog);
     return success3({ archivedSessionIds: [sessionId] });
   }
-  async createSession(request, signal) {
+  async createSession(request2, signal) {
     const catalog = await this.currentCatalog(signal);
-    const workspaceId = string5(request.workspaceId) ?? this.selectedWorkspaceId;
+    const workspaceId = string5(request2.workspaceId) ?? this.selectedWorkspaceId;
     const workspace2 = workspaceId === void 0 ? void 0 : catalog.workspaces.find((item) => item.workspaceId === workspaceId);
-    const cwd2 = string5(request.cwd) ?? workspace2?.path;
+    const cwd2 = string5(request2.cwd) ?? workspace2?.path;
     if (cwd2 === void 0) return failure3("workspace-not-found", "The CodeX virtual Workspace was not found.");
     if (workspace2 !== void 0 && !containsPath(workspace2.path, cwd2)) {
       return failure3("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
@@ -84366,8 +84381,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.events.publishProjection(projected.id, "title", displayTitle(projected), seq);
     return success3({ sessionId: projected.id });
   }
-  async forkSession(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async forkSession(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     const result = record5(await this.client.request("thread/fork", {
       threadId: nativeThreadId(sessionId)
     }, signal));
@@ -84381,10 +84396,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.events.publishProjection(projected.id, "title", displayTitle(projected), seq);
     return success3({ sessionId: projected.id });
   }
-  async prompt(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async prompt(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     const receipts = /* @__PURE__ */ new Set();
-    const content = array3(request.content).map((part) => {
+    const content = array3(request2.content).map((part) => {
       const block = record5(part);
       const receiptId = block.type === "file" ? string5(block.receiptId) : void 0;
       if (receiptId === void 0) return part;
@@ -84416,8 +84431,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         this.setPermissionSelection(sessionId, serverPreset);
       }
     }
-    this.pendingRequestIds.set(sessionId, string5(request.requestId) ?? "");
-    const mode2 = request.mode === "steer" ? "turn/steer" : "turn/start";
+    this.pendingRequestIds.set(sessionId, string5(request2.requestId) ?? "");
+    const mode2 = request2.mode === "steer" ? "turn/steer" : "turn/start";
     if ([...receipts].some((id7) => !this.desktopFileReceipts.has(id7))) {
       return failure3("attachment-error", "A CodeX upload was already submitted. Select the attachment again.");
     }
@@ -84438,9 +84453,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.historyCache.invalidateThread(threadId);
     return success3({ accepted: true });
   }
-  async attachment(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
-    const attachmentId = string5(request.attachmentId) ?? string5(record5(request.attachment).attachmentId);
+  async attachment(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
+    const attachmentId = string5(request2.attachmentId) ?? string5(record5(request2.attachment).attachmentId);
     if (attachmentId === void 0) {
       return failure3("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "invalid" });
     }
@@ -84466,17 +84481,17 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       (images) => this.live.cacheImageBlocks(sessionId, images)
     ));
   }
-  async cancel(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async cancel(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     const threadId = nativeThreadId(sessionId);
     const turnId = this.activeTurnId(threadId);
     if (turnId !== void 0) await this.client.request("turn/interrupt", { threadId, turnId }, signal);
     this.historyCache.invalidateThread(threadId);
     return success3({ accepted: true });
   }
-  async renameSession(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
-    const title = requiredString2(request.title, "title");
+  async renameSession(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
+    const title = requiredString2(request2.title, "title");
     await this.client.request("thread/name/set", { threadId: nativeThreadId(sessionId), name: title }, signal);
     const seq = this.nextProjectionSeq();
     this.updateThreadName(nativeThreadId(sessionId), title);
@@ -84484,8 +84499,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     await this.refreshAndPublishWorkspaces(true);
     return success3({ title, seq });
   }
-  async sessionProjections(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
+  async sessionProjections(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
     const catalog = await this.currentCatalog(signal);
     const session2 = catalog.sessions.find((item) => item.id === sessionId);
     if (session2 === void 0) return success3(null);
@@ -84500,14 +84515,14 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       asOfSeq: cursor3
     })).projections);
   }
-  async sessionPage(request, signal) {
-    const sessionId = sessionIdFromAddress2(record5(request.address));
+  async sessionPage(request2, signal) {
+    const sessionId = sessionIdFromAddress2(record5(request2.address));
     try {
       const page = await this.readHistoryPage(nativeThreadId(sessionId), {
-        beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
-        throughSeq: optionalInteger2(request.throughSeq),
-        maxMessages: optionalPositiveInteger2(request.limit) ?? optionalPositiveInteger2(request.maxMessages),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+        beforeSeq: optionalNonNegativeInteger(request2.beforeSeq),
+        throughSeq: optionalInteger2(request2.throughSeq),
+        maxMessages: optionalPositiveInteger2(request2.limit) ?? optionalPositiveInteger2(request2.maxMessages),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow)
       }, signal);
       return success3({ records: page.records, hasMore: page.hasMore, cursor: page.cursor });
     } catch (error62) {
@@ -84638,16 +84653,16 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const entries = "entries" in history2 ? history2.entries : history2.records;
     for (const entry of entries) this.live.cacheImageBlocks(sessionId, entry.event.data);
   }
-  async sessionHistory(request, signal) {
-    const sessionId = requiredString2(request.sessionId, "sessionId");
-    const beforeSeq = optionalNonNegativeInteger(request.beforeSeq);
+  async sessionHistory(request2, signal) {
+    const sessionId = requiredString2(request2.sessionId, "sessionId");
+    const beforeSeq = optionalNonNegativeInteger(request2.beforeSeq);
     let history2;
     try {
       history2 = await this.readHistoryPage(nativeThreadId(sessionId), {
         beforeSeq,
-        throughSeq: optionalInteger2(request.throughSeq),
-        maxMessages: optionalPositiveInteger2(request.maxMessages) ?? optionalPositiveInteger2(request.limit),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow)
+        throughSeq: optionalInteger2(request2.throughSeq),
+        maxMessages: optionalPositiveInteger2(request2.maxMessages) ?? optionalPositiveInteger2(request2.limit),
+        turnWindow: normalizeVirtualHistoryTurnWindow(request2.turnWindow)
       }, signal);
     } catch (error62) {
       if (error62 instanceof VirtualHistoryResponseTooLargeError) {
@@ -85161,11 +85176,11 @@ var RemoteTypertGateway2 = class {
     this.historyCache = historyCache;
   }
   frameTransfers;
-  async invoke(request) {
+  async invoke(request2) {
     const result = await this.dispatch(
-      `${request.namespace}/${request.method}`,
-      { args: request.args },
-      request.signal ?? new AbortController().signal
+      `${request2.namespace}/${request2.method}`,
+      { args: request2.args },
+      request2.signal ?? new AbortController().signal
     );
     if (result.ok) return result.value;
     throw remoteFailure(result.error);
@@ -85215,14 +85230,14 @@ var RemoteTypertGateway2 = class {
     return result;
   }
   async dispatchRemote(endpoint, payload, signal) {
-    const request = { endpoint, payload };
-    const encoded = new TextEncoder().encode(JSON.stringify(request));
+    const request2 = { endpoint, payload };
+    const encoded = new TextEncoder().encode(JSON.stringify(request2));
     let response;
     if (encoded.byteLength > DIRECT_REMOTE_CALL_BYTES2) {
       response = await this.callTransferred(encoded, signal);
     } else {
       try {
-        response = await this.client.rpc("harness.remote.call", request, signal);
+        response = await this.client.rpc("harness.remote.call", request2, signal);
       } catch (error62) {
         if (!hasErrorCode(error62, "RESPONSE_TOO_LARGE")) throw error62;
         response = await this.callTransferred(encoded, signal);
@@ -86189,9 +86204,9 @@ var RemoteSessionTools = class {
             return;
           }
           const endpoint = operation === "remote_send_message" ? "session/prompt" : "session/cancel";
-          const request = operation === "remote_send_message" ? { sessionId: args.sessionId, requestId: receipt.requestId, mode: "queue", content: [{ type: "text", text: args.message }] } : { sessionId: args.sessionId };
+          const request2 = operation === "remote_send_message" ? { sessionId: args.sessionId, requestId: receipt.requestId, mode: "queue", content: [{ type: "text", text: args.message }] } : { sessionId: args.sessionId };
           dispatched = true;
-          const result = await gateway.dispatch(endpoint, { args: { request } }, active2);
+          const result = await gateway.dispatch(endpoint, { args: { request: request2 } }, active2);
           if (!result.ok) {
             entry.receipt = { ...receipt, status: "rejected" };
             return;
@@ -88732,11 +88747,11 @@ var TypertGatewaySwitch = class {
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
   local(callingPeer) {
     const peer = callingPeer ?? this.fallbackPeer?.();
-    const invoke = (request) => this.localInvoke({ ...request, ...peer === void 0 ? {} : { peer } });
+    const invoke = (request2) => this.localInvoke({ ...request2, ...peer === void 0 ? {} : { peer } });
     const dispatch = this.localDispatch === void 0 ? (async (endpoint, payload, signal) => {
       try {
-        const request = requestFromCarrier(endpoint, payload, signal);
-        return { ok: true, value: await invoke(request) };
+        const request2 = requestFromCarrier(endpoint, payload, signal);
+        return { ok: true, value: await invoke(request2) };
       } catch (error62) {
         return { ok: false, error: this.failure(error62) };
       }
@@ -88748,7 +88763,7 @@ var TypertGatewaySwitch = class {
     return {
       invoke,
       peer,
-      ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
+      ...this.localStream === void 0 ? {} : { stream: (request2) => this.localStream({ ...request2, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
       open: open7,
       failure: (error62) => this.failure(error62),
@@ -88763,9 +88778,9 @@ var TypertGatewaySwitch = class {
   }
   install() {
     if (this.installed) return;
-    this.runtime.invoke = (request) => this.selectInvoke(request);
+    this.runtime.invoke = (request2) => this.selectInvoke(request2);
     if (this.originalStream !== void 0) {
-      this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.openRemote(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal, request.uplink);
+      this.runtime.stream = (request2) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request2)) ? this.localStream(request2) : this.openRemote(endpointOf(request2), { args: request2.args }, request2.signal ?? new AbortController().signal, request2.uplink);
     }
     if (this.originalDispatch !== void 0) {
       this.runtime.dispatchRpc = (...args) => {
@@ -88792,7 +88807,7 @@ var TypertGatewaySwitch = class {
   }
   selectRemote(remote, support = ALL_REMOTE_COMMANDS, target3) {
     if (!this.installed) throw new Error("The Typert gateway switch is not installed.");
-    this.remoteInvoke = typeof remote === "function" ? remote : (request) => remote.invoke(request);
+    this.remoteInvoke = typeof remote === "function" ? remote : (request2) => remote.invoke(request2);
     this.remoteTarget = typeof remote === "function" ? void 0 : remote;
     this.remoteSupport = { ...support };
     this.target = target3 === void 0 ? void 0 : { ...target3 };
@@ -88834,15 +88849,15 @@ var TypertGatewaySwitch = class {
   openRemote(endpoint, payload, signal, uplink) {
     return endpoint === "terminal/attach" ? openRemoteTerminal(this.remoteTarget, payload, signal, uplink ?? endedUplink()) : this.remoteTarget.open(endpoint, payload, signal);
   }
-  selectInvoke(request) {
-    if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
-    if (this.remoteTarget !== void 0) return this.remoteTarget.invoke(request).then((value) => normalizeTerminalEnvironment(endpointOf(request), value));
-    if (request.namespace !== "commands" || !isRemoteCommandMethod(request.method) || this.remoteInvoke === void 0) {
-      return this.localInvoke(request);
+  selectInvoke(request2) {
+    if (isLocalOnlyEndpoint(endpointOf(request2))) return this.localInvoke(request2);
+    if (this.remoteTarget !== void 0) return this.remoteTarget.invoke(request2).then((value) => normalizeTerminalEnvironment(endpointOf(request2), value));
+    if (request2.namespace !== "commands" || !isRemoteCommandMethod(request2.method) || this.remoteInvoke === void 0) {
+      return this.localInvoke(request2);
     }
-    if (this.remoteSupport[request.method]) return this.remoteInvoke(request);
-    if (request.method === "list") return Promise.resolve([]);
-    return this.localInvoke(request);
+    if (this.remoteSupport[request2.method]) return this.remoteInvoke(request2);
+    if (request2.method === "list") return Promise.resolve([]);
+    return this.localInvoke(request2);
   }
   failure(error62) {
     const normalized = this.runtime.wireStream?.failure(error62);
@@ -88910,8 +88925,8 @@ function requestFromCarrier(endpoint, payload, signal) {
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
 }
-function endpointOf(request) {
-  return `${request.namespace}/${request.method}`;
+function endpointOf(request2) {
+  return `${request2.namespace}/${request2.method}`;
 }
 function isLocalOnlyEndpoint(endpoint) {
   const separator = endpoint.indexOf("/");
@@ -90977,12 +90992,12 @@ var ClientModeRuntime = class {
     }
     if (route === "api/session/uploadFileBinary" && this.codexVirtual !== void 0) {
       const virtual = this.codexVirtual;
-      const request = record3(body);
-      const payload = record3(request.payload);
+      const request2 = record3(body);
+      const payload = record3(request2.payload);
       const session2 = parseCodexSessionId(payload.sessionId);
       const data2 = typeof payload.data === "string" ? payload.data : void 0;
       const limit = workspaceUploadMaxBytes(remote.client.getStats().mode);
-      if (session2 === void 0 || data2 === void 0 || data2.length > Math.ceil(limit / 3) * 4 || request.endpoint !== "file" && request.endpoint !== "image") {
+      if (session2 === void 0 || data2 === void 0 || data2.length > Math.ceil(limit / 3) * 4 || request2.endpoint !== "file" && request2.endpoint !== "image") {
         throw new ClientModeError("INVALID_MESSAGE", "The CodeX upload is invalid or exceeds the transfer limit.");
       }
       const assertCurrent = () => {
@@ -90998,7 +91013,7 @@ var ClientModeRuntime = class {
       }
       const name2 = typeof payload.name === "string" && payload.name.length > 0 ? payload.name : "attachment";
       const receiptId = uuidV7();
-      if (request.endpoint === "image") {
+      if (request2.endpoint === "image") {
         const mediaType = payload.mediaType;
         if (typeof mediaType !== "string" || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mediaType) || bytes.length === 0 || bytes.length > 20 * 1024 * 1024) {
           throw new ClientModeError("INVALID_MESSAGE", "The CodeX image is unsupported or exceeds the image limit.");
@@ -91038,10 +91053,10 @@ Attached workspace file: ${JSON.stringify(uploaded.path)}
     const target3 = { deviceId: remote.target.deviceId, name: remote.target.name };
     const gateway = this.remoteTypertGateway(remote);
     const selected = {
-      invoke: async (request) => {
-        if (`${request.namespace}/${request.method}` !== "session/prompt") return gateway.invoke(request);
-        const payload = await uploadLocalMentions({ args: request.args }, gateway, request.signal ?? new AbortController().signal);
-        return gateway.invoke({ ...request, args: payload.args });
+      invoke: async (request2) => {
+        if (`${request2.namespace}/${request2.method}` !== "session/prompt") return gateway.invoke(request2);
+        const payload = await uploadLocalMentions({ args: request2.args }, gateway, request2.signal ?? new AbortController().signal);
+        return gateway.invoke({ ...request2, args: payload.args });
       },
       dispatch: async (endpoint, payload, signal) => gateway.dispatch(
         endpoint,
@@ -93526,18 +93541,18 @@ var CodexPeerBridge = class {
     if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
       throw new RpcError("INVALID_MESSAGE", "The Codex transfer is incomplete.");
     }
-    let request;
+    let request2;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks(transfer.chunks, transfer.totalBytes)));
+      request2 = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Codex transfer does not contain a valid request.");
     }
     let response;
     try {
-      response = await this.callDomain(request, false);
+      response = await this.callDomain(request2, false);
     } catch (error62) {
       this.logger?.warn("Codex transfer call failed", {
-        method: safeMethod(request),
+        method: safeMethod(request2),
         code: safeErrorCode2(error62)
       });
       throw error62;
@@ -95922,14 +95937,14 @@ var AcpSessionModelState = class {
       availableModes: this.modes.availableModes.map((item) => ({ ...item }))
     };
   }
-  async setMode(sessionId, modeId, request) {
+  async setMode(sessionId, modeId, request2) {
     if (typeof modeId !== "string" || !this.modes.availableModes.some((item) => item.id === modeId)) {
       throw new Error(`The selected ${this.label} mode is unavailable on this Host.`);
     }
     if (this.modeConfigId !== void 0) {
-      this.update(await request("session/set_config_option", { sessionId, configId: this.modeConfigId, value: modeId }));
+      this.update(await request2("session/set_config_option", { sessionId, configId: this.modeConfigId, value: modeId }));
     } else {
-      await request("session/set_mode", { sessionId, modeId });
+      await request2("session/set_mode", { sessionId, modeId });
       this.modes = { ...this.modes, currentModeId: modeId };
     }
     if (this.modes.currentModeId !== modeId) {
@@ -95956,7 +95971,7 @@ var AcpSessionModelState = class {
       groups: [{ id: this.backend, name: this.label, models }]
     };
   }
-  async select(sessionId, model, effort, request) {
+  async select(sessionId, model, effort, request2) {
     if (typeof model !== "string" || !this.model?.options.some((item) => item.id === model)) {
       throw new Error(`The selected ${this.label} model is unavailable on this Host.`);
     }
@@ -95964,15 +95979,15 @@ var AcpSessionModelState = class {
       throw new Error(`Select the ${this.label} model before choosing an available effort level.`);
     }
     if (this.legacy) {
-      await request("session/set_model", { sessionId, modelId: model });
+      await request2("session/set_model", { sessionId, modelId: model });
       this.model.current = model;
     } else {
       if (model !== this.model.current) {
-        this.update(await request("session/set_config_option", { sessionId, configId: this.model.id, value: model }));
+        this.update(await request2("session/set_config_option", { sessionId, configId: this.model.id, value: model }));
         if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`);
       }
       if (effort !== void 0 && this.effort) {
-        this.update(await request("session/set_config_option", { sessionId, configId: this.effort.id, value: effort }));
+        this.update(await request2("session/set_config_option", { sessionId, configId: this.effort.id, value: effort }));
         if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`);
       }
     }
@@ -97450,8 +97465,8 @@ var RemoteTerminalController = class {
     }
   }
   async create(sessionId, cwd2, args, signal) {
-    const request = typeof args.request === "object" && args.request !== null ? args.request : {};
-    const id7 = identifier(request.id), key = `${sessionId}/${id7}`;
+    const request2 = typeof args.request === "object" && args.request !== null ? args.request : {};
+    const id7 = identifier(request2.id), key = `${sessionId}/${id7}`;
     const existing = this.shared.terminals.get(key);
     if (existing) {
       if (existing.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is closing.");
@@ -97465,8 +97480,8 @@ var RemoteTerminalController = class {
       sessionId,
       id7,
       cwd2,
-      dimension(request.cols ?? 80, MAX_COLS),
-      dimension(request.rows ?? 24, MAX_ROWS),
+      dimension(request2.cols ?? 80, MAX_COLS),
+      dimension(request2.rows ?? 24, MAX_ROWS),
       () => {
         if (this.shared.terminals.get(key) === terminal) {
           this.shared.terminals.delete(key);
@@ -97480,7 +97495,7 @@ var RemoteTerminalController = class {
     const allocationSignal = AbortSignal.any([signal, terminal.allocation.signal]);
     terminal.pending = (async () => {
       const shells = await this.shells(allocationSignal);
-      const shell = request.shellPath === void 0 ? shells[0] : shells.find((shell2) => shell2.path === request.shellPath);
+      const shell = request2.shellPath === void 0 ? shells[0] : shells.find((shell2) => shell2.path === request2.shellPath);
       if (!shell) throw new RpcError("INVALID_MESSAGE", "The requested shell is not available for this workspace.");
       terminal.shell = shell;
       terminal.title = shell.name;
@@ -97807,8 +97822,8 @@ var TerminalPolicy = class _TerminalPolicy {
     const codexSession = parseCodexSessionId(sessionId);
     void codexSession;
     if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request = endpoint === "terminal/create" ? external_exports.object({ id: id4 }).passthrough().parse(args.request) : void 0;
-    const terminalId = id4.parse(request?.id ?? args.id);
+    const request2 = endpoint === "terminal/create" ? external_exports.object({ id: id4 }).passthrough().parse(args.request) : void 0;
+    const terminalId = id4.parse(request2?.id ?? args.id);
     const key = `${sessionId}/${terminalId}`;
     if (endpoint === "terminal/create") {
       if (this.owners.has(key) && this.owners.get(key) !== this.deviceId) this.deny();
@@ -99213,9 +99228,9 @@ ${stderr}`);
   }
 }
 var OpencodeNativeApi = class {
-  constructor(origin, request = fetch) {
+  constructor(origin, request2 = fetch) {
     this.origin = origin;
-    this.request = request;
+    this.request = request2;
     if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(origin) || Number(new URL(origin).port) > 65535) throw unavailable();
   }
   password = randomBytes12(32).toString("hex");
@@ -100503,18 +100518,18 @@ var AcpPeerBridge = class {
     if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
       throw new RpcError("INVALID_MESSAGE", "The ACP transfer is incomplete.");
     }
-    let request;
+    let request2;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks2(transfer.chunks, transfer.totalBytes)));
+      request2 = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks2(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The ACP transfer does not contain a valid request.");
     }
     let response;
     try {
-      response = await this.callDomain(request, false);
+      response = await this.callDomain(request2, false);
     } catch (error62) {
       this.logger?.warn("ACP transfer call failed", {
-        method: safeMethod2(request),
+        method: safeMethod2(request2),
         code: safeErrorCode3(error62)
       });
       throw error62;
@@ -104111,9 +104126,76 @@ function redact(value, key = "") {
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
 
-// packages/plugin/src/dsh-web-host.ts
-import { randomUUID as randomUUID16 } from "node:crypto";
-import { setTimeout as sleep2 } from "node:timers/promises";
+// packages/plugin/src/dsh-web-lan.ts
+import { randomBytes as randomBytes13, randomUUID as randomUUID16 } from "node:crypto";
+import { createServer as createServer4, request } from "node:http";
+import { request as secureRequest } from "node:https";
+import { networkInterfaces as networkInterfaces3 } from "node:os";
+
+// packages/plugin/src/dsh-web-upstream.ts
+var cordisOriginal = Symbol.for("cordis.original");
+function originalAuth(auth) {
+  return Reflect.get(auth, cordisOriginal) ?? auth;
+}
+async function openDshWebUpstream(resolveRuntime, signal) {
+  const runtime = resolveRuntime();
+  if (!runtime) throw new RpcError("DSH_WEB_NOT_READY", "The DSH Web GUI is unavailable.", void 0, true);
+  const authInstance = originalAuth(runtime.auth);
+  const cookie = browserCookie(runtime);
+  const local = await fetch(runtime.origin, { headers: { cookie }, redirect: "manual", signal });
+  await local.body?.cancel();
+  if (!local.ok || !local.headers.get("content-type")?.startsWith("text/html"))
+    throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI did not respond.", void 0, true);
+  const isCurrent = () => {
+    const current = resolveRuntime();
+    return current?.origin.href === runtime.origin.href && originalAuth(current.auth) === authInstance;
+  };
+  return {
+    target: runtime.origin,
+    isCurrent,
+    authorize(request2, browserOrigin) {
+      if (!isCurrent()) return;
+      return authorizeUpstream(request2, browserOrigin, cookie);
+    },
+    stripResponseHeaders
+  };
+}
+function browserCookie({ origin, auth }) {
+  const bootstrap = new URL(auth.authenticatedUrl(origin.href));
+  let cookie;
+  auth.authorizeIndex({ method: "GET", url: "/" + bootstrap.search, headers: { host: origin.host } }, {
+    writeHead(status2, headers) {
+      if (status2 === 303) cookie = headers?.["set-cookie"]?.split(";")[0];
+    },
+    end() {
+    }
+  });
+  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== void 0)
+    throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI authentication is unavailable.", void 0, true);
+  return cookie;
+}
+function authorizeUpstream(request2, publicUrl, cookie) {
+  let path;
+  try {
+    path = decodeURIComponent(request2.path.split("?")[0] ?? "");
+  } catch {
+    return;
+  }
+  if (!path.startsWith("/") || path.startsWith("//") || /[%\\\u0000-\u0020\u007f?#]/.test(path) || path.split("/").some((segment) => segment === "." || segment === "..") || /^\/(ds-harness-remote|__remote|connect)(\/|$)/i.test(path) || new URL(request2.path, publicUrl).searchParams.has("token") || !/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(request2.method)) return;
+  const headers = [];
+  for (const [name2, value] of request2.headers) {
+    const lower = name2.toLowerCase();
+    if (lower === "origin" && value !== publicUrl.origin) return;
+    if (lower === "sec-fetch-site" && value === "cross-site") return;
+    if (lower === "cookie" || lower === "authorization" || lower === "forwarded" || lower.startsWith("x-forwarded-")) continue;
+    headers.push([name2, value]);
+  }
+  headers.push(["cookie", cookie]);
+  return { ...request2, headers };
+}
+function stripResponseHeaders(headers) {
+  return headers.filter(([name2, value]) => name2.toLowerCase() !== "set-cookie" && !(name2.toLowerCase() === "location" && /[?&]token=/i.test(value)));
+}
 
 // packages/plugin/src/hostc/protocol/constants.ts
 var PROTOCOL_VERSION2 = 5;
@@ -104371,44 +104453,6 @@ var GrowingWindow = class {
   }
 };
 
-// packages/plugin/src/hostc/api.ts
-var TunnelError = class extends Error {
-  name = "TunnelError";
-  code;
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-  }
-};
-var PROTOCOL_HEADERS = { [PROTOCOL_HEADER]: String(PROTOCOL_VERSION2) };
-function errorFromResponse(status2, text) {
-  let message = text;
-  try {
-    const body = JSON.parse(text);
-    if (typeof body.error === "string") {
-      message = body.error;
-    }
-  } catch {
-  }
-  switch (status2) {
-    case 426:
-      return new TunnelError("upgrade_required", message);
-    case 429:
-      return new TunnelError("rate_limited", message);
-    case 401:
-      return new TunnelError("unauthorized", message);
-    case 404:
-    case 410:
-      return new TunnelError("tunnel_gone", message);
-    default:
-      return new TunnelError("server_error", `Server responded ${status2}: ${message}`);
-  }
-}
-
-// packages/plugin/src/hostc/streams.ts
-import http from "node:http";
-import https from "node:https";
-
 // packages/plugin/src/hostc/rewrite.ts
 function toLocalRequestHeaders(headers, publicOrigin, target3) {
   const result = [["host", target3.host]];
@@ -104461,7 +104505,281 @@ function toRawHeaders(headers) {
   return headers.flat();
 }
 
+// packages/plugin/src/dsh-web-lan.ts
+var form = '<form method="post" action="/__remote/session"><input type="hidden" name="browserGrant"></form>';
+var browserPage = form + `<script>
+addEventListener('message', e => {
+  if (!opener || e.source !== opener || e.data?.type !== 'dsh.web.grant' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(e.data.browserGrant)) return;
+  document.forms[0].elements.browserGrant.value = e.data.browserGrant;
+  window.opener = null;
+  document.forms[0].submit();
+});
+opener?.postMessage('dsh.web.ready','*');
+</script>`;
+var pageHeaders = {
+  "cache-control": "no-store",
+  "content-type": "text/html; charset=utf-8",
+  "referrer-policy": "same-origin",
+  "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+};
+var DshWebLanPeer = class {
+  constructor(runtime, mode2, address2) {
+    this.runtime = runtime;
+    this.mode = mode2;
+    this.address = address2;
+  }
+  lease;
+  disposed = false;
+  available() {
+    return !this.disposed && !!this.runtime();
+  }
+  onLan() {
+    return this.mode() === "LAN";
+  }
+  async open(params) {
+    dshWebLanOpenSchema.parse(params);
+    if (!this.onLan() || !this.available()) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
+    this.lease?.abort.abort();
+    const lease = { id: randomUUID16(), abort: new AbortController() };
+    this.lease = lease;
+    const signal = lease.abort.signal;
+    try {
+      let track2 = function(socket) {
+        sockets.add(socket);
+        socket.once("close", () => sockets.delete(socket));
+        socket.on("error", () => socket.destroy());
+      }, proxy2 = function(req, res, socket, head) {
+        const candidate = upstream.authorize({
+          path: req.url ?? "",
+          method: req.method ?? "",
+          headers: fromRawHeaders(req.rawHeaders),
+          body: true
+        }, origin);
+        if (!candidate || (socket || !["GET", "HEAD", "OPTIONS"].includes(candidate.method)) && req.headers.origin !== origin.origin) {
+          if (res) res.writeHead(403).end();
+          else socket?.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+          return;
+        }
+        const target3 = upstream.target;
+        const headers = toLocalRequestHeaders(stripHopByHop(candidate.headers, ["x-dsh-web-grant"]), origin.origin, target3);
+        if (socket) headers.push(["connection", "Upgrade"], ["upgrade", "websocket"]);
+        const outgoing = (target3.protocol === "https:" ? secureRequest : request)(target3, {
+          path: candidate.path,
+          method: candidate.method,
+          headers: headers.flat(),
+          signal,
+          agent: false
+        });
+        const cancel = () => outgoing.destroy();
+        res?.once("close", cancel);
+        socket?.once("close", cancel);
+        outgoing.on("error", () => {
+          if (res && !res.headersSent) res.writeHead(502).end();
+          else res?.destroy();
+          socket?.destroy();
+        });
+        outgoing.on("response", (response) => {
+          if (!res) {
+            response.destroy();
+            socket?.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+            return;
+          }
+          const headers2 = toPublicResponseHeaders(upstream.stripResponseHeaders(stripHopByHop(
+            fromRawHeaders(response.rawHeaders),
+            ["cache-control"]
+          )), origin.origin, target3);
+          res.writeHead(response.statusCode ?? 502, [...headers2.flat(), "cache-control", "no-store"]);
+          response.on("error", () => res.destroy()).pipe(res);
+        });
+        outgoing.on("upgrade", (response, remote, first2) => {
+          if (!socket || socket.destroyed || !live()) {
+            remote.destroy();
+            socket?.destroy();
+            return;
+          }
+          track2(remote);
+          const headers2 = upstream.stripResponseHeaders(stripHopByHop(fromRawHeaders(response.rawHeaders)));
+          socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" + headers2.map(([k, v]) => k + ": " + v + "\r\n").join("") + "\r\n");
+          if (first2.length) socket.write(first2);
+          if (head?.length) remote.write(head);
+          remote.once("close", () => socket.destroy());
+          socket.once("close", () => remote.destroy());
+          remote.pipe(socket).pipe(remote);
+        });
+        if (socket) outgoing.end();
+        else req.pipe(outgoing);
+      };
+      var track = track2, proxy = proxy2;
+      const address2 = await this.address();
+      if (!address2 || !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
+      const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
+      signal.throwIfAborted();
+      let ticket = randomBytes13(32).toString("base64url");
+      const expiresAt = Date.now() + 3e4;
+      const cookie = "dsh_lan_" + lease.id.replaceAll("-", "") + "=" + randomBytes13(32).toString("base64url");
+      let redeemed = false;
+      let origin;
+      const live = () => {
+        try {
+          return !signal.aborted && this.mode() === "LAN" && upstream.isCurrent() && Date.now() < (redeemed ? expiresAt + 30 * 6e4 : expiresAt);
+        } catch {
+          return false;
+        }
+      };
+      const owns = (req) => live() && req.headers.host === origin.host;
+      const authorized = (req) => owns(req) && redeemed && req.headers.cookie?.split(";").some((part) => part.trim() === cookie);
+      const sockets = /* @__PURE__ */ new Set();
+      const server = createServer4(async (req, res) => {
+        const deny = () => res.writeHead(401, pageHeaders).end();
+        if (!owns(req)) {
+          deny();
+          return;
+        }
+        if (req.method === "GET" && (req.url === "/__remote/browser" || req.url === "/__remote/launch")) {
+          res.writeHead(401, pageHeaders).end(req.url.endsWith("browser") ? browserPage : form);
+          return;
+        }
+        const bootstrap = req.method === "GET" && req.url === "/__remote/session-bootstrap";
+        if (bootstrap || req.method === "POST" && req.url === "/__remote/session") {
+          let input4 = req.headers["x-dsh-web-grant"];
+          if (!bootstrap) {
+            if (req.headers.origin !== origin.origin || req.headers["content-type"]?.split(";")[0] !== "application/x-www-form-urlencoded") {
+              deny();
+              return;
+            }
+            let body = "";
+            try {
+              for await (const part of req) {
+                if (body.length + part.length > 256) {
+                  deny();
+                  return;
+                }
+                body += part.toString();
+              }
+            } catch {
+              res.destroy();
+              return;
+            }
+            input4 = new URLSearchParams(body).get("browserGrant") ?? "";
+          }
+          if (!owns(req) || redeemed || Date.now() >= expiresAt || !ticket || input4 !== ticket) {
+            deny();
+            return;
+          }
+          redeemed = true;
+          ticket = "";
+          res.writeHead(303, { ...pageHeaders, location: "/", "set-cookie": cookie + "; Path=/; Max-Age=1800; HttpOnly; SameSite=Strict" }).end();
+          return;
+        }
+        if (!authorized(req)) {
+          deny();
+          return;
+        }
+        proxy2(req, res);
+      });
+      server.maxConnections = 64;
+      server.requestTimeout = 3e4;
+      server.on("connection", track2);
+      server.on("upgrade", (req, socket, head) => {
+        if (!authorized(req)) {
+          socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+          return;
+        }
+        if (req.headers.upgrade?.toLowerCase() !== "websocket") {
+          socket.destroy();
+          return;
+        }
+        proxy2(req, void 0, socket, head);
+      });
+      let checkingPath = false;
+      const timer2 = setInterval(() => {
+        if (!live()) {
+          lease.abort.abort();
+          return;
+        }
+        if (checkingPath) return;
+        checkingPath = true;
+        void this.address().then((current) => {
+          if (current !== address2) lease.abort.abort();
+        }, () => lease.abort.abort()).finally(() => {
+          checkingPath = false;
+        });
+      }, 1e3).unref();
+      signal.addEventListener("abort", () => {
+        clearInterval(timer2);
+        server.close();
+        for (const socket of sockets) socket.destroy();
+      }, { once: true });
+      await new Promise((resolve10, reject) => {
+        const cancelled = () => reject(new Error("LAN Web closed"));
+        signal.addEventListener("abort", cancelled, { once: true });
+        server.once("error", reject);
+        server.listen({ host: address2, port: 0, signal }, () => {
+          signal.removeEventListener("abort", cancelled);
+          resolve10();
+        });
+      });
+      const bound = server.address();
+      if (!live() || !bound || typeof bound === "string") throw new Error("LAN Web unavailable");
+      origin = new URL("http://" + address2 + ":" + bound.port);
+      return { sessionId: lease.id, url: origin.href, browserGrant: ticket, expiresAt };
+    } catch {
+      lease.abort.abort();
+      throw new RpcError("DSH_WEB_NOT_READY", "LAN Web is unavailable.");
+    }
+  }
+  close(params) {
+    if (dshWebLanSessionSchema.parse(params).sessionId === this.lease?.id) this.lease.abort.abort();
+    return { closed: true };
+  }
+  dispose() {
+    this.disposed = true;
+    this.lease?.abort.abort();
+  }
+};
+
+// packages/plugin/src/dsh-web-host.ts
+import { randomUUID as randomUUID17 } from "node:crypto";
+import { setTimeout as sleep2 } from "node:timers/promises";
+
+// packages/plugin/src/hostc/api.ts
+var TunnelError = class extends Error {
+  name = "TunnelError";
+  code;
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+  }
+};
+var PROTOCOL_HEADERS = { [PROTOCOL_HEADER]: String(PROTOCOL_VERSION2) };
+function errorFromResponse(status2, text) {
+  let message = text;
+  try {
+    const body = JSON.parse(text);
+    if (typeof body.error === "string") {
+      message = body.error;
+    }
+  } catch {
+  }
+  switch (status2) {
+    case 426:
+      return new TunnelError("upgrade_required", message);
+    case 429:
+      return new TunnelError("rate_limited", message);
+    case 401:
+      return new TunnelError("unauthorized", message);
+    case 404:
+    case 410:
+      return new TunnelError("tunnel_gone", message);
+    default:
+      return new TunnelError("server_error", `Server responded ${status2}: ${message}`);
+  }
+}
+
 // packages/plugin/src/hostc/streams.ts
+import http from "node:http";
+import https from "node:https";
 var MAX_LOCAL_QUEUE_BYTES = 4 * 1024 * 1024;
 function createStream(context, id7, open7) {
   return open7.websocket ? new WebSocketStream(context, id7, open7) : new HttpStream(context, id7, open7);
@@ -104488,7 +104806,7 @@ var HttpStream = class {
   start() {
     const { target: target3, publicOrigin } = this.context;
     const secure = target3.protocol === "https:";
-    const request = (secure ? https : http).request({
+    const request2 = (secure ? https : http).request({
       protocol: target3.protocol,
       hostname: target3.hostname.replace(/^\[|\]$/g, ""),
       port: target3.port || (secure ? 443 : 80),
@@ -104496,9 +104814,9 @@ var HttpStream = class {
       path: this.open.path,
       headers: toRawHeaders(toLocalRequestHeaders(this.open.headers, publicOrigin, target3))
     });
-    this.request = request;
-    request.on("response", (response) => void this.respond(response));
-    request.on("error", () => {
+    this.request = request2;
+    request2.on("response", (response) => void this.respond(response));
+    request2.on("error", () => {
       if (!this.finished) {
         this.context.send(FrameType.Reset, this.id, encodeText("Local Web server unavailable"));
         this.abort();
@@ -104507,20 +104825,20 @@ var HttpStream = class {
     });
     if (!this.open.body) {
       this.requestEnded = true;
-      request.end();
+      request2.end();
     }
   }
   receive(frame) {
     switch (frame.type) {
       case FrameType.Data: {
-        const request = this.request;
+        const request2 = this.request;
         const bytes = frame.payload.byteLength;
         if (bytes === 0) {
           return;
         }
-        request?.write(frame.payload, () => {
+        request2?.write(frame.payload, () => {
           if (!this.finished) {
-            const grant = bytes + this.window.delivered(bytes, request.writableLength === 0);
+            const grant = bytes + this.window.delivered(bytes, request2.writableLength === 0);
             if (grant > 0) {
               this.context.send(FrameType.Window, this.id, encodeWindow(grant));
             }
@@ -104881,8 +105199,8 @@ var Connection2 = class _Connection {
       this.send(FrameType.Reset, frame.stream, encodeText("Too many concurrent streams"));
       return;
     }
-    const request = this.options.authorize(decodeOpen(frame.payload));
-    if (request === void 0) {
+    const request2 = this.options.authorize(decodeOpen(frame.payload));
+    if (request2 === void 0) {
       this.send(FrameType.Head, frame.stream, encodeHead({ status: 403, headers: [], body: false }));
       return;
     }
@@ -104897,7 +105215,7 @@ var Connection2 = class _Connection {
         windowBudget: this.windowBudget
       },
       frame.stream,
-      request
+      request2
     );
     this.streams.set(frame.stream, stream);
     stream.start();
@@ -104913,10 +105231,6 @@ function closeDescription(code) {
 }
 
 // packages/plugin/src/dsh-web-host.ts
-var cordisOriginal = Symbol.for("cordis.original");
-function originalAuth(auth) {
-  return Reflect.get(auth, cordisOriginal) ?? auth;
-}
 var allocationSchema = external_exports.object({
   sessionId: external_exports.string().regex(/^[pt][abcdefghijkmnpqrstuvwxyz23456789]{11}$/),
   url: external_exports.url(),
@@ -104995,18 +105309,11 @@ var DshWebPeer = class {
     await this.closeActive();
     const signal = AbortSignal.any([this.lifetime.signal, openingSignal, AbortSignal.timeout(21e3)]);
     const startedAt = Date.now();
-    const input4 = { ...this.peer, requestId: randomUUID16(), leaseExpiresAt: startedAt + 9 * 6e4 };
+    const input4 = { ...this.peer, requestId: randomUUID17(), leaseExpiresAt: startedAt + 9 * 6e4 };
     const maxLeaseExpiresAt = startedAt + 120 * 6e4;
     try {
       signal.throwIfAborted();
-      const runtime = this.resolveRuntime();
-      if (runtime === void 0) throw new RpcError("DSH_WEB_NOT_READY", "The DSH Web GUI is unavailable.", void 0, true);
-      const authInstance = originalAuth(runtime.auth);
-      const cookie = browserCookie(runtime);
-      const local = await fetch(runtime.origin, { headers: { cookie }, redirect: "manual", signal });
-      await local.body?.cancel();
-      if (!local.ok || !local.headers.get("content-type")?.startsWith("text/html"))
-        throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI did not respond.", void 0, true);
+      const upstream = await openDshWebUpstream(this.resolveRuntime, signal);
       const allocation = allocationSchema.parse(await this.api.dshWebRequest("allocate", { ...input4, useServerLease: true }, signal));
       const publicUrl = new URL(allocation.url);
       const dial = new URL(allocation.connectUrl);
@@ -105018,14 +105325,12 @@ var DshWebPeer = class {
       const listenSignal = AbortSignal.any([signal, lease.stop.signal]);
       const connect4 = (connectSignal) => Connection2.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
-        target: runtime.origin,
-        authorize: (request) => {
+        target: upstream.target,
+        authorize: (request2) => {
           if (lease.stop.signal.aborted || Date.now() >= lease.request.leaseExpiresAt) return;
-          const current = this.resolveRuntime();
-          if (current?.origin.href !== runtime.origin.href || originalAuth(current.auth) !== authInstance) return;
-          return authorizeUpstream(request, publicUrl, cookie);
+          return upstream.authorize(request2, publicUrl);
         },
-        stripResponseHeaders,
+        stripResponseHeaders: upstream.stripResponseHeaders,
         onRequest: () => void 0
       }, connectSignal);
       await attachConnector(lease, connect4, listenSignal);
@@ -105090,7 +105395,7 @@ async function waitForCheck(connector, signal) {
     return await Promise.race([connector.closed, new Promise((resolve10) => {
       onAbort = () => resolve10(void 0);
       signal.addEventListener("abort", onAbort, { once: true });
-      timer2 = setTimeout(onAbort, 15e3);
+      timer2 = setTimeout(onAbort, 12e4);
       timer2.unref();
     })]);
   } finally {
@@ -105098,45 +105403,9 @@ async function waitForCheck(connector, signal) {
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
-function browserCookie({ origin, auth }) {
-  const bootstrap = new URL(auth.authenticatedUrl(origin.href));
-  let cookie;
-  auth.authorizeIndex({ method: "GET", url: "/" + bootstrap.search, headers: { host: origin.host } }, {
-    writeHead(status2, headers) {
-      if (status2 === 303) cookie = headers?.["set-cookie"]?.split(";")[0];
-    },
-    end() {
-    }
-  });
-  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== void 0)
-    throw new RpcError("DSH_WEB_NOT_READY", "The local Web GUI authentication is unavailable.", void 0, true);
-  return cookie;
-}
-function authorizeUpstream(request, publicUrl, cookie) {
-  let path;
-  try {
-    path = decodeURIComponent(request.path.split("?")[0] ?? "");
-  } catch {
-    return;
-  }
-  if (!path.startsWith("/") || path.startsWith("//") || /[%\\\u0000-\u0020\u007f?#]/.test(path) || path.split("/").some((segment) => segment === "." || segment === "..") || /^\/(ds-harness-remote|__remote|connect)(\/|$)/i.test(path) || new URL(request.path, publicUrl).searchParams.has("token") || !/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(request.method)) return;
-  const headers = [];
-  for (const [name2, value] of request.headers) {
-    const lower = name2.toLowerCase();
-    if (lower === "origin" && value !== publicUrl.origin) return;
-    if (lower === "sec-fetch-site" && value === "cross-site") return;
-    if (lower === "cookie" || lower === "authorization" || lower === "forwarded" || lower.startsWith("x-forwarded-")) continue;
-    headers.push([name2, value]);
-  }
-  headers.push(["cookie", cookie]);
-  return { ...request, headers };
-}
-function stripResponseHeaders(headers) {
-  return headers.filter(([name2, value]) => name2.toLowerCase() !== "set-cookie" && !(name2.toLowerCase() === "location" && /[?&]token=/i.test(value)));
-}
 
 // packages/plugin/src/session-transfer.ts
-import { createHash as createHash7, randomUUID as randomUUID17 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID18 } from "node:crypto";
 import { stat as stat7 } from "node:fs/promises";
 import { promisify as promisify6 } from "node:util";
 import { gunzip, gzip } from "node:zlib";
@@ -105251,7 +105520,7 @@ var SessionTransferPeer = class {
           }
           sessions.set(sessionId, { throughSeq, inheritedEventCount: snapshot2.inheritedEventCount });
         }
-        const handle = randomUUID17();
+        const handle = randomUUID18();
         this.outgoing = { handle, sessions };
         return { handle, sessions: [...sessions].map(([sessionId, { throughSeq }]) => ({ sessionId, throughSeq })), chunkBytes };
       }
@@ -105302,7 +105571,7 @@ var SessionTransferPeer = class {
         if (!this.capabilities().includes("session.transfer.import.v1")) fail6("FEATURE_NOT_SUPPORTED", "Session import is unavailable.");
         if (this.incoming) fail6("RATE_LIMITED", "An import is already open.");
         this.workspace(input4.workspaceId);
-        const handle = randomUUID17();
+        const handle = randomUUID18();
         this.incoming = { ...input4, handle, received: 0, chunks: [] };
         return { handle, chunkBytes, maxBytes };
       }
@@ -105378,8 +105647,8 @@ var SessionTransferPeer = class {
     if (this.incoming?.handle !== handle) fail6("INVALID_PARAMS", "The import handle is unavailable.");
     return this.incoming;
   }
-  commitKey(batchId, request) {
-    return JSON.stringify([this.deviceId, batchId, request]);
+  commitKey(batchId, request2) {
+    return JSON.stringify([this.deviceId, batchId, request2]);
   }
   async write(workspaceId, data2) {
     const { persistence, sessions } = this.services();
@@ -105396,7 +105665,7 @@ var SessionTransferPeer = class {
     if (!(await stat7(cwd2).catch(() => void 0))?.isDirectory() || this.workspace(workspaceId).path !== cwd2) {
       fail6("SESSION_TRANSFER_WORKSPACE_UNAVAILABLE", "The target workspace directory is unavailable.");
     }
-    const sessionId = `session-${randomUUID17()}`;
+    const sessionId = `session-${randomUUID18()}`;
     const { inheritedEventCount } = source;
     const events = source.events.map((item) => {
       if (item.type === "working-directory/change") return { ...item, data: { cwd: cwd2 } };
@@ -105439,11 +105708,11 @@ var SessionTransferPeer = class {
 };
 
 // packages/plugin/src/lan-upload.ts
-import { randomBytes as randomBytes13 } from "node:crypto";
-import { createServer as createServer4 } from "node:http";
-import { networkInterfaces as networkInterfaces3 } from "node:os";
+import { randomBytes as randomBytes14 } from "node:crypto";
+import { createServer as createServer5 } from "node:http";
+import { networkInterfaces as networkInterfaces4 } from "node:os";
 var LanUploadHost = class {
-  constructor(upload, owner, localAddresses = () => Object.values(networkInterfaces3()).flatMap((list2) => list2 ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => a.address)) {
+  constructor(upload, owner, localAddresses = () => Object.values(networkInterfaces4()).flatMap((list2) => list2 ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => a.address)) {
     this.upload = upload;
     this.owner = owner;
     this.localAddresses = localAddresses;
@@ -105454,7 +105723,7 @@ var LanUploadHost = class {
     const p = lanUploadRequestSchema.parse(input4);
     if (!this.live() || !isLanUploadAddress(p.address) || !this.localAddresses().includes(p.address) || this.entries.size >= 2) throw unavailable2();
     if ([...this.entries].some((e) => e.uploadId === p.uploadId)) throw unavailable2();
-    const server = createServer4((_request, response) => {
+    const server = createServer5((_request, response) => {
       response.writeHead(404).end();
     });
     server.maxConnections = 4;
@@ -105480,7 +105749,7 @@ var LanUploadHost = class {
       if (!this.live() || entry.disposed) throw unavailable2();
       const address2 = server.address();
       if (!address2 || typeof address2 === "string") throw unavailable2();
-      const token = randomBytes13(32).toString("base64url");
+      const token = randomBytes14(32).toString("base64url");
       const path = `/ds-harness-remote/upload/${token}`;
       const offer = {
         sessionId: p.sessionId,
@@ -105496,15 +105765,15 @@ var LanUploadHost = class {
       server.on("error", () => {
         void this.dispose(entry);
       });
-      server.on("upgrade", (request, socket, head) => {
-        if (!this.live() || entry.disposed || entry.used || request.url !== path) {
+      server.on("upgrade", (request2, socket, head) => {
+        if (!this.live() || entry.disposed || entry.used || request2.url !== path) {
           socket.destroy();
           return;
         }
         entry.used = true;
         clearTimeout(entry.timer);
         try {
-          wss.handleUpgrade(request, socket, head, (ws) => this.attach(entry, offer, ws));
+          wss.handleUpgrade(request2, socket, head, (ws) => this.attach(entry, offer, ws));
         } catch {
           socket.destroy();
           void this.dispose(entry);
@@ -105630,7 +105899,7 @@ function unavailable2() {
 }
 
 // packages/plugin/src/host-pairing.ts
-import { createHash as createHash8, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes14, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
+import { createHash as createHash8, createHmac as createHmac6, createPrivateKey as createPrivateKey4, createPublicKey as createPublicKey2, diffieHellman as diffieHellman2, hkdfSync, randomBytes as randomBytes15, createCipheriv as createCipheriv5, createDecipheriv as createDecipheriv4 } from "node:crypto";
 import { join as join16 } from "node:path";
 import { rm as rm5 } from "node:fs/promises";
 var root = "/api/v1/device-pairing/sessions";
@@ -105846,7 +106115,7 @@ var HostPairing = class {
     const key = createHash8("sha256").update("dsh-pairing-host-submission-v1\0").update(rawKey(this.identity.privateKey)).digest();
     try {
       if (encrypt) {
-        const iv = randomBytes14(12);
+        const iv = randomBytes15(12);
         const c2 = createCipheriv5("aes-256-gcm", key, iv);
         c2.setAAD(Buffer.from(id7));
         const data2 = Buffer.concat([c2.update(value, "utf8"), c2.final()]);
@@ -105864,7 +106133,7 @@ var HostPairing = class {
 };
 
 // packages/plugin/src/workspace-upload.ts
-import { randomUUID as randomUUID18 } from "node:crypto";
+import { randomUUID as randomUUID19 } from "node:crypto";
 import { constants as constants6 } from "node:fs";
 import { link as link2, lstat as lstat5, open as open6, realpath as realpath6, stat as stat8, unlink as unlink2 } from "node:fs/promises";
 import { extname, isAbsolute as isAbsolute8, join as join17 } from "node:path";
@@ -106015,7 +106284,7 @@ var WorkspaceUploadHost = class {
     const directory = await stat8(root2);
     if (!directory.isDirectory()) throw failure4("UPLOAD_WORKSPACE_UNAVAILABLE");
     const reservation = await this.budget.reserve(root2, directory.dev, p.sessionId, p.totalBytes);
-    const temp = join17(root2, `.dsh-upload-${randomUUID18()}.part`);
+    const temp = join17(root2, `.dsh-upload-${randomUUID19()}.part`);
     let handle;
     try {
       handle = await open6(temp, constants6.O_CREAT | constants6.O_EXCL | constants6.O_RDWR | (constants6.O_NOFOLLOW ?? 0), 384);
@@ -106237,7 +106506,7 @@ var ConnectionController = class {
     }
     await Promise.all(replaced.map((connection2) => this.disconnect(connection2, "CONNECTION_REPLACED")));
     const router = this.createRouter(
-      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
+      { connectionId, peerDeviceId: channel.peerDeviceId, peerIdentityKey: channel.peerIdentityKey, transportMode: () => channel.mode, lanWebAddress: channel.lanWebAddress?.bind(channel), createTransportUpgradeHost: channel.createTransportUpgradeHost?.bind(channel) },
       (message) => this.sendTo(connectionId, channel, message)
     );
     const connection = {
@@ -106648,6 +106917,8 @@ var apiMethods = /* @__PURE__ */ new Set([
   "harness.transport.describe",
   "dsh.web.open",
   "dsh.web.close",
+  "dsh.web.lan.direct.open",
+  "dsh.web.lan.direct.close",
   "remote.history.configure",
   "harness.remote.call",
   "harness.remote.transfer.open",
@@ -106704,7 +106975,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb) {
+  constructor(maxPending = 128, logger2, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload, compaction, lanUpload, transportUpgrade, sessionTransfer, dshWeb, lanWeb) {
     this.maxPending = maxPending;
     this.logger = logger2;
     this.fileViewer = fileViewer;
@@ -106721,9 +106992,11 @@ var RpcRouter = class {
     this.transportUpgrade = transportUpgrade;
     this.sessionTransfer = sessionTransfer;
     this.dshWeb = dshWeb;
+    this.lanWeb = lanWeb;
   }
   active = 0;
   async closePeerStreams() {
+    this.lanWeb?.dispose();
     this.loopback?.closeAll();
     this.sessionTransfer?.close();
     await Promise.all([
@@ -106745,27 +107018,27 @@ var RpcRouter = class {
     if (!apiMethods.has(parsedPayload.data.method)) {
       return createRpcError(message.id, "METHOD_NOT_FOUND", "The requested method does not exist.");
     }
-    const request = message;
+    const request2 = message;
     if (this.active >= this.maxPending) {
-      return createRpcError(request.id, "RATE_LIMITED", "Too many Host requests are already pending.", void 0, true);
+      return createRpcError(request2.id, "RATE_LIMITED", "Too many Host requests are already pending.", void 0, true);
     }
     this.active += 1;
     const startedAt = performance.now();
     try {
-      const result = await this.invoke(request.payload.method, request.payload.params);
-      const subMethod = !request.payload.method.startsWith("session.transfer.") && typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
+      const result = await this.invoke(request2.payload.method, request2.payload.params);
+      const subMethod = !request2.payload.method.startsWith("session.transfer.") && typeof request2.payload.params?.method === "string" ? String(request2.payload.params.method) : void 0;
       this.logger?.info("host rpc ok", {
-        method: request.payload.method,
+        method: request2.payload.method,
         ...subMethod ? { subMethod } : {},
         durationMs: Math.round(performance.now() - startedAt)
       });
-      return createRpcResponse(request.id, result);
+      return createRpcResponse(request2.id, result);
     } catch (error62) {
-      const response = errorResponse2(request.id, error62);
-      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && !request.payload.method.startsWith("session.transfer.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
+      const response = errorResponse2(request2.id, error62);
+      const failedEndpoint = !request2.payload.method.startsWith("workspace.upload.") && !request2.payload.method.startsWith("session.transfer.") && typeof request2.payload.params?.endpoint === "string" ? String(request2.payload.params.endpoint) : void 0;
       const reason = workspaceFileFailureReason(error62);
       this.logger?.warn("host rpc failed", {
-        method: request.payload.method,
+        method: request2.payload.method,
         ...failedEndpoint ? { endpoint: failedEndpoint } : {},
         durationMs: Math.round(performance.now() - startedAt),
         code: response.payload.code,
@@ -106779,6 +107052,11 @@ var RpcRouter = class {
   }
   async invoke(method, params) {
     switch (method) {
+      case "dsh.web.lan.direct.open":
+      case "dsh.web.lan.direct.close":
+        if (!this.lanWeb) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
+        if (method === "dsh.web.lan.direct.open") return this.lanWeb.open(params);
+        return this.lanWeb.close(params);
       case "dsh.web.open":
         emptyParamsSchema.parse(params);
         if (!this.dshWeb) throw new RpcError("FEATURE_NOT_SUPPORTED", "DSH Web is unavailable.");
@@ -106798,6 +107076,7 @@ var RpcRouter = class {
           ...this.compaction === void 0 ? [] : [REMOTE_COMPACTION_CAPABILITY],
           ...this.workspaceUpload === void 0 || !hostCapabilities.includes("workspace.upload.v1") ? [] : [BINARY_UPLOAD_CAPABILITY, ...this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : []],
           ...this.sessionTransfer?.capabilities() ?? [],
+          ...this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : [],
           ...this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : [],
           ...this.transportUpgrade === void 0 ? [] : [TRANSPORT_UPGRADE_CAPABILITY]
         ])];
@@ -106811,6 +107090,7 @@ var RpcRouter = class {
         }
         return {
           capabilities,
+          ...capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: this.lanWeb?.onLan() === true } : {},
           ...workspaceTypes === void 0 ? {} : { workspaceTypes }
         };
       }
@@ -108430,6 +108710,14 @@ var ServerNoiseChannel = class {
   closed = false;
   /** Noise + SecureMessageCodec counters are not re-entrant; serialize sends. */
   sendTail = Promise.resolve();
+  async lanWebAddress() {
+    const rtc = this.tunnel.rtc;
+    const path = await rtc?.connectionDetails();
+    if (this.mode === "LAN" && rtc === this.tunnel.rtc && path?.mode === "LAN") {
+      return /^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$/.exec(path.localAddress ?? "")?.[1];
+    }
+    return void 0;
+  }
   get outboundCounter() {
     return Number(this.tunnel.noise.sendingCounter());
   }
@@ -108692,7 +108980,7 @@ function closeCode(code) {
 }
 
 // packages/plugin/src/harness-remote-bridge.ts
-import { randomUUID as randomUUID19 } from "node:crypto";
+import { randomUUID as randomUUID20 } from "node:crypto";
 import { homedir as homedir10 } from "node:os";
 import { lstat as lstat6, realpath as realpath7, stat as stat10 } from "node:fs/promises";
 import { dirname as dirname9, isAbsolute as isAbsolute10, join as join18, parse as parse4, relative as relative5, resolve as resolve9, sep as sep3 } from "node:path";
@@ -109011,8 +109299,8 @@ var HarnessRemoteBridge = class {
       return { ok: true, value: true };
     }
     if (params.endpoint === "workspace/create") {
-      const request = requestArgs(params.payload);
-      const folder = typeof request.path === "string" ? request.path : "";
+      const request2 = requestArgs(params.payload);
+      const folder = typeof request2.path === "string" ? request2.path : "";
       await ensureHostWorkspaceDirectory(folder);
     }
     const startedAt = performance.now();
@@ -109090,9 +109378,9 @@ var HarnessRemoteBridge = class {
         }
       };
     }
-    const { sessionId, ...request } = parsed.data;
+    const { sessionId, ...request2 } = parsed.data;
     try {
-      const record11 = await this.schedule.create(sessionId, request, AbortSignal.timeout(6e4));
+      const record11 = await this.schedule.create(sessionId, request2, AbortSignal.timeout(6e4));
       return { ok: true, value: record11 };
     } catch (error62) {
       const published = isRecord25(error62) && typeof error62.code === "string" ? PUBLIC_SCHEDULE_ERRORS[error62.code] : void 0;
@@ -109164,13 +109452,13 @@ var HarnessRemoteBridge = class {
     if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer is incomplete.");
     }
-    let request;
+    let request2;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
+      request2 = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
-    const response = await this.call(callSchema3.parse(request));
+    const response = await this.call(callSchema3.parse(request2));
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -109251,7 +109539,7 @@ var HarnessRemoteBridge = class {
       first2 = await iterator.next();
     } catch (error62) {
       if (!await this.canUseIdleRemoteEvents(error62, signal)) throw error62;
-      yield { type: "ready", clientId: randomUUID19(), host: { home: homedir10() } };
+      yield { type: "ready", clientId: randomUUID20(), host: { home: homedir10() } };
       await new Promise((resolve10) => {
         if (signal.aborted) {
           resolve10();
@@ -109390,7 +109678,7 @@ var HarnessRemoteBridge = class {
     const bytes = new TextEncoder().encode(JSON.stringify(frame));
     if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
     if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
-    const transferId = randomUUID19();
+    const transferId = randomUUID20();
     const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
     let finish;
     const completed = new Promise((resolve10, reject) => {
@@ -109632,20 +109920,20 @@ function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
 }
 async function normalizeSessionAttachmentPayload(endpoint, payload, harnessVersion, gateway, signal) {
   if (endpoint !== "session/attachment" || !isRecord25(payload) || !isRecord25(payload.args)) return payload;
-  const request = isRecord25(payload.args.request) ? payload.args.request : void 0;
-  if (request === void 0) return payload;
-  const attachment = isRecord25(request.attachment) ? request.attachment : void 0;
-  const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request.attachmentId === "string" ? request.attachmentId : void 0;
+  const request2 = isRecord25(payload.args.request) ? payload.args.request : void 0;
+  if (request2 === void 0) return payload;
+  const attachment = isRecord25(request2.attachment) ? request2.attachment : void 0;
+  const attachmentId = attachment !== void 0 && typeof attachment.attachmentId === "string" ? attachment.attachmentId : typeof request2.attachmentId === "string" ? request2.attachmentId : void 0;
   if (attachmentId === void 0) return payload;
   if (!isDshV022OrNewer(harnessVersion)) {
-    const sessionId = request.sessionId;
+    const sessionId = request2.sessionId;
     return { ...payload, args: { ...payload.args, request: { sessionId, attachmentId } } };
   }
   if (attachment !== void 0 && isCompleteImageReference(attachment)) return payload;
-  const reference = await findSessionAttachmentReference(gateway, request.sessionId, attachmentId, signal);
+  const reference = await findSessionAttachmentReference(gateway, request2.sessionId, attachmentId, signal);
   if (reference === void 0) return payload;
   const mergedAttachment = attachment !== void 0 ? { ...reference, ...attachment } : reference;
-  return { ...payload, args: { ...payload.args, request: { ...request, attachment: mergedAttachment } } };
+  return { ...payload, args: { ...payload.args, request: { ...request2, attachment: mergedAttachment } } };
 }
 async function findSessionAttachmentReference(gateway, sessionId, attachmentId, signal) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return void 0;
@@ -109976,7 +110264,7 @@ function remoteOwnedBundleRow(row, plugin) {
 }
 
 // packages/plugin/src/remote-compaction-operations.ts
-import { randomUUID as randomUUID20 } from "node:crypto";
+import { randomUUID as randomUUID21 } from "node:crypto";
 var MIN_BUDGET_MS = 6e4;
 var MAX_BUDGET_MS = 72e5;
 var DEFAULT_BUDGET_MS = 18e5;
@@ -110084,7 +110372,7 @@ var RemoteCompactionOperations = class {
       resolveCommandSettled = resolve10;
     });
     return {
-      operationId: randomUUID20(),
+      operationId: randomUUID21(),
       requestId: params.requestId,
       sessionId: params.sessionId,
       ownerDeviceId: owner.deviceId,
@@ -110643,7 +110931,8 @@ var HostPluginRuntime = class {
         this.serverApi && resolveDshWeb ? new DshWebPeer(this.serverApi, {
           clientDeviceId: context.peerDeviceId,
           connectionId: context.connectionId
-        }, resolveDshWeb) : void 0
+        }, resolveDshWeb) : void 0,
+        resolveDshWeb && context.transportMode && context.lanWebAddress ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : void 0
       );
     }, this.logger);
     if (config2.serverUrl !== void 0) {
@@ -111564,7 +111853,7 @@ var PluginUpdateChecker = class {
 };
 
 // packages/plugin/src/plugin-self-update.ts
-import { randomUUID as randomUUID21 } from "node:crypto";
+import { randomUUID as randomUUID23 } from "node:crypto";
 
 // packages/plugin/src/version-compare.ts
 var VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -111610,7 +111899,7 @@ function compareVersions(left, right) {
 // packages/plugin/src/plugin-self-update.ts
 var REMOTE_PLUGIN_PACKAGE = "ds-harness-remote";
 var LocalPluginUpgrade = class {
-  constructor(checker, manager, subscribe, requestId2 = randomUUID21) {
+  constructor(checker, manager, subscribe, requestId2 = randomUUID23) {
     this.checker = checker;
     this.manager = manager;
     this.subscribe = subscribe;
@@ -111783,16 +112072,16 @@ function createRemoteFileContentProvider(call, options = {}) {
         isDirectory: value.isDirectory
       };
     },
-    async read(locator2, request) {
-      if (!Number.isInteger(request.offset) || request.offset < 0) throw new Error("A non-negative integer offset is required.");
-      if (!Number.isInteger(request.length) || request.length <= 0) throw new Error("A positive integer length is required.");
+    async read(locator2, request2) {
+      if (!Number.isInteger(request2.offset) || request2.offset < 0) throw new Error("A non-negative integer offset is required.");
+      if (!Number.isInteger(request2.length) || request2.length <= 0) throw new Error("A positive integer length is required.");
       const chunks = [];
       let received = 0;
-      while (received < request.length) {
-        request.signal.throwIfAborted();
-        const length = Math.min(REMOTE_FILE_CHUNK_BYTES, request.length - received);
-        const offset2 = request.offset + received;
-        const range = await call("fileviewer.readRange", { path: locator2, offset: offset2, length }, request.signal);
+      while (received < request2.length) {
+        request2.signal.throwIfAborted();
+        const length = Math.min(REMOTE_FILE_CHUNK_BYTES, request2.length - received);
+        const offset2 = request2.offset + received;
+        const range = await call("fileviewer.readRange", { path: locator2, offset: offset2, length }, request2.signal);
         if (range.offset !== offset2) throw new Error("The Remote Host returned a mismatched file range.");
         const bytes = decodeBase64(range.data);
         if (bytes.byteLength > length) throw new Error("The Remote Host returned more file bytes than requested.");

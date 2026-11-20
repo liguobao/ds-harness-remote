@@ -4,31 +4,16 @@ import { dshWebGrantSchema, type DshWebGrant } from '@dsh-remote/protocol'
 import { z } from 'zod'
 import { Connection } from './hostc/connection.js'
 import { TunnelError } from './hostc/api.js'
-import { CLOSE_REPLACED, CLOSE_SHUTDOWN, type HeaderList, type OpenMessage } from './hostc/protocol/index.js'
+import { CLOSE_REPLACED, CLOSE_SHUTDOWN } from './hostc/protocol/index.js'
 import { RpcError } from './safe-error.js'
 import { ServerApiError, type DshWebRequest, type HostServerApi } from './server-api.js'
 
-export interface DshWebBrowserAuth {
-  authenticatedUrl(origin: string): string
-  authorizeIndex(
-    request: { headers: Record<string, string>; url: string; method: string },
-    response: { writeHead(status: number, headers?: Readonly<Record<string, string>>): void; end(): void },
-  ): boolean
-  requestRejection(request: { headers: Record<string, string> }): number | undefined
-}
+import { openDshWebUpstream, type ResolveRuntime } from './dsh-web-upstream.js'
+export { authorizeUpstream, type DshWebBrowserAuth, type DshWebRuntime } from './dsh-web-upstream.js'
 
-export type DshWebRuntime = { origin: URL; auth: DshWebBrowserAuth }
-type ResolveRuntime = () => DshWebRuntime | undefined
 type DialConnector = (signal: AbortSignal) => Promise<Connection>
 type WebSessionApi = Pick<HostServerApi, 'dshWebRequest' | 'closeDshWeb'>
 type Peer = Pick<DshWebRequest, 'clientDeviceId' | 'connectionId'>
-
-// Cordis returns a fresh tracing proxy on each context lookup.
-const cordisOriginal = Symbol.for('cordis.original')
-
-function originalAuth(auth: DshWebBrowserAuth): unknown {
-  return Reflect.get(auth, cordisOriginal) ?? auth
-}
 
 const allocationSchema = z.object({
   sessionId: z.string().regex(/^[pt][abcdefghijkmnpqrstuvwxyz23456789]{11}$/),
@@ -120,14 +105,7 @@ export class DshWebPeer {
     const maxLeaseExpiresAt = startedAt + 120 * 60_000
     try {
       signal.throwIfAborted()
-      const runtime = this.resolveRuntime()
-      if (runtime === undefined) throw new RpcError('DSH_WEB_NOT_READY', 'The DSH Web GUI is unavailable.', undefined, true)
-      const authInstance = originalAuth(runtime.auth)
-      const cookie = browserCookie(runtime)
-      const local = await fetch(runtime.origin, { headers: { cookie }, redirect: 'manual', signal })
-      await local.body?.cancel()
-      if (!local.ok || !local.headers.get('content-type')?.startsWith('text/html'))
-        throw new RpcError('DSH_WEB_NOT_READY', 'The local Web GUI did not respond.', undefined, true)
+      const upstream = await openDshWebUpstream(this.resolveRuntime, signal)
       const allocation = allocationSchema.parse(await this.api.dshWebRequest('allocate', { ...input, useServerLease: true }, signal))
       const publicUrl = new URL(allocation.url)
       const dial = new URL(allocation.connectUrl)
@@ -141,14 +119,12 @@ export class DshWebPeer {
       const listenSignal = AbortSignal.any([signal, lease.stop.signal])
       const connect: DialConnector = connectSignal => Connection.open({
         tunnel: { id: lease.id, url: publicUrl.href, connectUrl: dial.href, token: allocation.connectToken },
-        target: runtime.origin,
+        target: upstream.target,
         authorize: request => {
           if (lease.stop.signal.aborted || Date.now() >= lease.request.leaseExpiresAt) return
-          const current = this.resolveRuntime()
-          if (current?.origin.href !== runtime.origin.href || originalAuth(current.auth) !== authInstance) return
-          return authorizeUpstream(request, publicUrl, cookie)
+          return upstream.authorize(request, publicUrl)
         },
-        stripResponseHeaders,
+        stripResponseHeaders: upstream.stripResponseHeaders,
         onRequest: () => undefined,
       }, connectSignal)
       await attachConnector(lease, connect, listenSignal)
@@ -215,48 +191,11 @@ async function waitForCheck(connector: Connection, signal: AbortSignal) {
     return await Promise.race([connector.closed, new Promise<undefined>(resolve => {
       onAbort = () => resolve(undefined)
       signal.addEventListener('abort', onAbort, { once: true })
-      timer = setTimeout(onAbort, 15_000)
+      timer = setTimeout(onAbort, 120_000)
       timer.unref()
     })])
   } finally {
     clearTimeout(timer)
     if (onAbort) signal.removeEventListener('abort', onAbort)
   }
-}
-
-function browserCookie({ origin, auth }: DshWebRuntime): string {
-  const bootstrap = new URL(auth.authenticatedUrl(origin.href))
-  let cookie: string | undefined
-  auth.authorizeIndex({ method: 'GET', url: '/' + bootstrap.search, headers: { host: origin.host } }, {
-    writeHead(status, headers) { if (status === 303) cookie = headers?.['set-cookie']?.split(';')[0] },
-    end() {},
-  })
-  if (!cookie || auth.requestRejection({ headers: { host: origin.host, cookie } }) !== undefined)
-    throw new RpcError('DSH_WEB_NOT_READY', 'The local Web GUI authentication is unavailable.', undefined, true)
-  return cookie
-}
-
-export function authorizeUpstream(request: OpenMessage, publicUrl: URL, cookie: string): OpenMessage | undefined {
-  let path: string
-  try { path = decodeURIComponent(request.path.split('?')[0] ?? '') } catch { return }
-  if (!path.startsWith('/') || path.startsWith('//') || /[%\\\u0000-\u0020\u007f?#]/.test(path)
-    || path.split('/').some(segment => segment === '.' || segment === '..')
-    || /^\/(ds-harness-remote|__remote|connect)(\/|$)/i.test(path)
-    || new URL(request.path, publicUrl).searchParams.has('token')
-    || !/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(request.method)) return
-  const headers: HeaderList = []
-  for (const [name, value] of request.headers) {
-    const lower = name.toLowerCase()
-    if (lower === 'origin' && value !== publicUrl.origin) return
-    if (lower === 'sec-fetch-site' && value === 'cross-site') return
-    if (lower === 'cookie' || lower === 'authorization' || lower === 'forwarded' || lower.startsWith('x-forwarded-')) continue
-    headers.push([name, value])
-  }
-  headers.push(['cookie', cookie])
-  return { ...request, headers }
-}
-
-function stripResponseHeaders(headers: HeaderList): HeaderList {
-  return headers.filter(([name, value]) => name.toLowerCase() !== 'set-cookie'
-    && !(name.toLowerCase() === 'location' && /[?&]token=/i.test(value)))
 }

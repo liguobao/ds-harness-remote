@@ -2,6 +2,18 @@
   "name": "capability-negotiation",
   "cases": [
     {
+      "name": "web-client-without-lan-support-selects-public-handoff",
+      "operation": "selectCapabilities",
+      "input": {
+        "offered": ["dsh.web.v1", "dsh.web.lan.direct.v1"],
+        "supported": ["dsh.web.v1"]
+      },
+      "expect": {
+        "accepted": true,
+        "value": ["dsh.web.v1"]
+      }
+    },
+    {
       "name": "select-highest-common-protocol-version",
       "operation": "selectProtocolVersion",
       "input": {

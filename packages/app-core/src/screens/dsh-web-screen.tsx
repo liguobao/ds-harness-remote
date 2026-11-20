@@ -7,7 +7,9 @@ import { useAppStore } from '../state/store'
 import { ErrorBanner, TopBar } from '../ui/components'
 import { useTheme } from '../ui/theme-context'
 
-type Rpc = (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>
+type LanWebSession = DshWebGrant & { close(): Promise<void> }
+
+type Rpc = ((method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>) & { openLanWeb?: (onFailure: () => void) => Promise<LanWebSession> | undefined }
 
 const FATAL_SAME_ORIGIN_HTTP_STATUSES = new Set([401, 502, 503, 504])
 export const DSH_WEB_GRANT_CLOCK_SKEW_MS = 60_000
@@ -47,6 +49,7 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
 
   useEffect(() => {
     const abort = new AbortController()
+    let local: Promise<LanWebSession> | undefined
     let shouldClose = false
     setFailed(false)
     setLoaded(false)
@@ -54,6 +57,15 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
 
     const startOpen = () => {
       if (abort.signal.aborted) return
+      try {
+        local = rpc.openLanWeb?.(() => { if (!abort.signal.aborted) setFailed(true) })
+      } catch { setFailed(true); return }
+      if (local) {
+        void local.then(session => {
+          if (!abort.signal.aborted) setGrant(session)
+        }, () => { if (!abort.signal.aborted) setFailed(true) })
+        return
+      }
       shouldClose = true
       void rpc('dsh.web.open', {}, abort.signal).then(
         result => {
@@ -86,6 +98,7 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
 
     return () => {
       abort.abort()
+      if (local) pendingCloseRef.current = local.then(session => session.close()).catch(() => undefined)
       if (shouldClose) {
         const previous = pendingCloseRef.current
         const closeCall = () => {
@@ -117,6 +130,10 @@ export function DshWebScreen({ rpc, hostName, onClose }: {
   const sessionUri = grantUrl && new URL('/__remote/session', grantUrl).href
   const source = useMemo(() => {
     if (!grant || !grantUrl) return undefined
+    if ('close' in grant) return {
+      uri: new URL('/__remote/session-bootstrap', grantUrl).href,
+      headers: { 'X-DSH-Web-Grant': grant.browserGrant },
+    }
     // Native POST can send an opaque Origin. Submit from the tunnel origin.
     return {
       baseUrl: new URL('/__remote/session-bootstrap', grantUrl).href,

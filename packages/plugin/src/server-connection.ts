@@ -1599,6 +1599,16 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
     this.peerIdentityKey = tunnel.peer.publicKey
   }
 
+  async lanWebAddress() {
+    const rtc = this.tunnel.rtc
+    const path = await rtc?.connectionDetails()
+    if (this.mode === 'LAN' && rtc === this.tunnel.rtc && path?.mode === 'LAN') {
+      // RTC diagnostics include the selected candidate port when available.
+      return /^(\d+\.\d+\.\d+\.\d+)(?::\d+)?$/.exec(path.localAddress ?? '')?.[1]
+    }
+    return undefined
+  }
+
   get outboundCounter(): number { return Number(this.tunnel.noise.sendingCounter()) }
 
   async upgradeTransport<T extends object = RtcDataChannelTransport>(

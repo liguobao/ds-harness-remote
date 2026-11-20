@@ -738,3 +738,65 @@ describe('DSH Web connector establishment', () => {
     expect(api.closeDshWeb).toHaveBeenCalledWith(id)
   })
 })
+
+describe('LAN Web connection ownership', () => {
+  it.each(['private IPv4', 'loopback'])('requires a one-time Noise grant and retires the %s lease', async scope => {
+    const { DshWebLanPeer } = await import('../src/dsh-web-lan.js')
+    const { networkInterfaces } = await import('node:os')
+    const { dshWebLanGrantSchema, isLanUploadAddress } = await import('@dsh-remote/protocol')
+    const address = scope === 'loopback' ? '127.0.0.1' : Object.values(networkInterfaces()).flat().find(i => i && !i.internal && isLanUploadAddress(i.address))?.address
+    const upstream = await listenHttp((req, res) => {
+      res.writeHead(req.headers.cookie === 'local=owned' ? 200 : 401, { 'content-type': 'text/html', 'set-cookie': 'local=owned' })
+      res.end('hello')
+    })
+    const wsServer = new WebSocketServer({ server: upstream.server })
+    wsServer.on('connection', (ws, req) => ws.send(req.headers.cookie === 'local=owned' ? 'hello' : 'denied'))
+    let mode = 'LAN'
+    const auth: DshWebBrowserAuth = {
+      authenticatedUrl: url => url,
+      authorizeIndex: (_, res) => { res.writeHead(303, { 'set-cookie': 'local=owned' }); return true },
+      requestRejection: () => undefined,
+    }
+    const peer = new DshWebLanPeer(() => ({ origin: upstream.origin, auth }), () => mode, async () => address)
+    try {
+      for (mode of ['P2P', 'TURN', 'Relay']) {
+        expect(peer.onLan()).toBe(false)
+        await expect(peer.open({})).rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      }
+      mode = 'LAN'
+      expect(peer.onLan()).toBe(true)
+      const stale = await peer.open({})
+      const current = dshWebLanGrantSchema.parse(await peer.open({}))
+      expect(new URL(current.url).hostname).toBe(address)
+      peer.close({ sessionId: stale.sessionId })
+      const { url, browserGrant } = current
+      for (const path of ['', 'api/test', '__remote/browser', '__remote/session-bootstrap']) {
+        expect((await fetch(url + path)).status).toBe(401)
+      }
+      const wsUrl = url.replace('http:', 'ws:')
+      const anonymous = new WebSocket(wsUrl)
+      await expect(new Promise((_resolve, reject) => anonymous.once('error', reject))).rejects.toThrow('401')
+      const redeem = () => fetch(url + '__remote/session', { method: 'POST', redirect: 'manual',
+        headers: { origin: new URL(url).origin }, body: new URLSearchParams({ browserGrant }) })
+      const [first, second] = await Promise.all([redeem(), redeem()])
+      expect([first.status, second.status].sort()).toEqual([303, 401])
+      const cookie = (first.status === 303 ? first : second).headers.get('set-cookie')!.split(';')[0]!
+      const page = await fetch(url, { headers: { cookie } })
+      expect(await page.text()).toBe('hello')
+      expect(page.headers.has('set-cookie')).toBe(false)
+      expect((await fetch(url + 'ds-harness-remote', { headers: { cookie } })).status).toBe(403)
+      expect((await fetch(url, { method: 'POST', headers: { cookie, origin: 'http://example.invalid' } })).status).toBe(403)
+      const ws = new WebSocket(wsUrl, { headers: { cookie, origin: new URL(url).origin } })
+      expect(await new Promise((resolve, reject) => ws.once('message', data => resolve(data.toString())).once('error', reject))).toBe('hello')
+      const closed = new Promise(resolve => ws.once('close', resolve))
+      mode = 'TURN'
+      await closed
+      await expect(peer.open({})).rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      await expect(fetch(url, { headers: { cookie } })).rejects.toThrow()
+    } finally {
+      peer.dispose()
+      wsServer.close()
+      await upstream.close()
+    }
+  })
+})

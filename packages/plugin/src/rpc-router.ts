@@ -1,4 +1,5 @@
-import { DSH_WEB_CAPABILITY } from '@dsh-remote/protocol'
+import type { DshWebLanPeer } from './dsh-web-lan.js'
+import { DSH_WEB_CAPABILITY, DSH_WEB_LAN_CAPABILITY } from '@dsh-remote/protocol'
 import type { DshWebPeer } from './dsh-web-host.js'
 import type { LanUploadHost } from './lan-upload.js'
 import { TRANSPORT_UPGRADE_CAPABILITY, type TransportUpgradeHost } from './transport-upgrade.js'
@@ -49,6 +50,8 @@ const apiMethods = new Set([
   'harness.transport.describe',
   'dsh.web.open',
   'dsh.web.close',
+  'dsh.web.lan.direct.open',
+  'dsh.web.lan.direct.close',
   'remote.history.configure',
   'harness.remote.call',
   'harness.remote.transfer.open',
@@ -132,9 +135,11 @@ export class RpcRouter {
     private readonly transportUpgrade?: TransportUpgradeHost,
     private readonly sessionTransfer?: SessionTransferPeer,
     private readonly dshWeb?: DshWebPeer,
+    private readonly lanWeb?: DshWebLanPeer,
   ) {}
 
   async closePeerStreams(): Promise<void> {
+    this.lanWeb?.dispose()
     this.loopback?.closeAll()
     this.sessionTransfer?.close()
     await Promise.all([
@@ -198,6 +203,11 @@ export class RpcRouter {
 
   private async invoke(method: string, params: unknown): Promise<unknown> {
     switch (method) {
+      case 'dsh.web.lan.direct.open':
+      case 'dsh.web.lan.direct.close':
+        if (!this.lanWeb) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
+        if (method === 'dsh.web.lan.direct.open') return this.lanWeb.open(params)
+        return this.lanWeb.close(params)
       case 'dsh.web.open':
         emptyParamsSchema.parse(params)
         if (!this.dshWeb) throw new RpcError('FEATURE_NOT_SUPPORTED', 'DSH Web is unavailable.')
@@ -215,6 +225,7 @@ export class RpcRouter {
           ...(this.compaction === undefined ? [] : [REMOTE_COMPACTION_CAPABILITY]),
           ...(this.workspaceUpload === undefined || !hostCapabilities.includes('workspace.upload.v1') ? [] : [BINARY_UPLOAD_CAPABILITY, ...(this.lanUpload ? [LAN_UPLOAD_CAPABILITY] : [])]),
           ...(this.sessionTransfer?.capabilities() ?? []),
+          ...(this.lanWeb?.available() ? [DSH_WEB_LAN_CAPABILITY] : []),
           ...(this.dshWeb?.available() ? [DSH_WEB_CAPABILITY] : []),
           ...(this.transportUpgrade === undefined ? [] : [TRANSPORT_UPGRADE_CAPABILITY]),
         ])]
@@ -228,6 +239,7 @@ export class RpcRouter {
         }
         return {
           capabilities,
+          ...(capabilities.includes(DSH_WEB_LAN_CAPABILITY) ? { dshWebLanReady: this.lanWeb?.onLan() === true } : {}),
           ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
         }
       }

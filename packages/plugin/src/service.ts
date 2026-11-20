@@ -1,3 +1,4 @@
+import { DshWebLanPeer } from './dsh-web-lan.js'
 import { DshWebPeer, type DshWebRuntime } from './dsh-web-host.js'
 import { SessionTransferHost, type TransferServices } from './session-transfer.js'
 import { LanUploadHost } from './lan-upload.js'
@@ -23,8 +24,8 @@ import { RemoteFileViewerBridge, type FileViewerHostServiceLike } from './file-v
 import {
   HostServerApi,
   ServerApiError,
-  type DeviceAuthorization,
   type AccountVerification,
+  type DeviceAuthorization,
   type OAuthProvider,
   type OAuthProviderInfo,
   type OAuthQrPollResult,
@@ -241,6 +242,8 @@ export class HostPluginRuntime {
           clientDeviceId: context.peerDeviceId,
           connectionId: context.connectionId,
         }, resolveDshWeb) : undefined,
+        resolveDshWeb && context.transportMode && context.lanWebAddress
+          ? new DshWebLanPeer(resolveDshWeb, context.transportMode, context.lanWebAddress) : undefined,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {

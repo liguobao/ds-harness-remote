@@ -119,7 +119,7 @@ export class RemoteClientCore {
       // 「relay connection has not been authorized」。这不是业务失败，等一小会儿重发同一帧即可；
       // 以前直接把它抛给上层，用户看到的就是「会话列表加载失败：… relay connection has not been authorized」。
       const message: Object = buildRpcRequestMessage(method, params, requestId);
-      this.sendWithAuthRetry(message, (usedRetries: number) => {
+      this.sendWithAuthRetry(message, !method.startsWith('dsh.web.lan.'), (usedRetries: number) => {
         sentAt = Date.now();
         retries = usedRetries;
       }).catch((error: Error) => {
@@ -135,7 +135,7 @@ export class RemoteClientCore {
    * 只在明文同一帧上重发，不会重复业务请求（requestId 不变，主机按 requestId 去重）。
    * `onSent(用掉的重发次数)` 在真正发出后回调一次，供上层打点。
    */
-  private async sendWithAuthRetry(message: Object, onSent: (retries: number) => void): Promise<void> {
+  private async sendWithAuthRetry(message: Object, allowRetry: boolean, onSent: (retries: number) => void): Promise<void> {
     const data: Uint8Array = message as Uint8Array;
     let lastError: Error = new Error('send failed');
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -148,7 +148,7 @@ export class RemoteClientCore {
         const text: string = lastError.message.toLowerCase();
         const retriable: boolean = text.indexOf('not been authorized') >= 0
           || text.indexOf('relay connection') >= 0;
-        if (!retriable || attempt === 3) {
+        if (!allowRetry || !retriable || attempt === 3) {
           throw lastError;
         }
         NetTrace.authRetry();

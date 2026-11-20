@@ -15,6 +15,7 @@ export struct DshWebPage {
   @State loaded: boolean = false;
   @State failed: boolean = false;
   private grantToken: string = '';
+  private localGrant: boolean = false;
   private grantOrigin: string = '';
   private controller: webview.WebviewController = new webview.WebviewController();
   private active: boolean = false;
@@ -40,6 +41,7 @@ export struct DshWebPage {
       const grant = await this.openGrant();
       if (this.active) {
         this.controller = new webview.WebviewController();
+        this.localGrant = grant.origin.startsWith('http://');
         this.grantToken = grant.browserGrant;
         this.grantOrigin = grant.origin;
         this.grantUrl = grant.url;
@@ -84,7 +86,7 @@ export struct DshWebPage {
       } else {
         Stack() {
           if (this.grantUrl.length > 0) {
-            Web({ src: 'about:blank', controller: this.controller, incognitoMode: true })
+            Web({ src: this.localGrant ? this.grantUrl + '__remote/launch' : 'about:blank', controller: this.controller, incognitoMode: true })
               .width('100%').height('100%')
               .javaScriptAccess(true)
               .domStorageAccess(true)
@@ -100,7 +102,12 @@ export struct DshWebPage {
               })
               .onPermissionRequest((event: OnPermissionRequestEvent) => { event.request.deny(); })
               .onPageEnd((event: OnPageEndEvent) => {
-                if (event.url === 'about:blank' && this.grantToken.length > 0) {
+                if (this.localGrant && event.url === this.grantUrl + '__remote/launch' && this.grantToken.length > 0) {
+                  const token = this.grantToken;
+                  this.grantToken = '';
+                  this.controller.runJavaScript("document.forms[0].elements.browserGrant.value='" + token +
+                    "';document.forms[0].submit()").catch(() => { this.failed = true; });
+                } else if (!this.localGrant && event.url === 'about:blank' && this.grantToken.length > 0) {
                   this.submitGrant();
                 } else if (event.url === this.grantUrl) {
                   this.loaded = true;
@@ -112,6 +119,8 @@ export struct DshWebPage {
                 }
               })
               .onHttpErrorReceive((event: OnHttpErrorReceiveEvent) => {
+                if (this.localGrant && event.response.getResponseCode() === 401 &&
+                  event.request.getRequestUrl() === this.grantUrl + '__remote/launch') return;
                 if (isFatalDshWebHttpError(event.request.getRequestUrl(), event.response.getResponseCode(),
                   this.grantUrl, this.grantOrigin)) {
                   this.failed = true;

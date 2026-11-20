@@ -1,3 +1,4 @@
+import { DshWebLan } from '../net/DshWebLan';
 import { DshWebGrant, parseDshWebGrant } from '../net/DshWebGrant';
 import { PluginSettingOperation, PluginSettingsForm } from '../net/PluginSettings';
 import { BotCatalogRow, parseBotCatalog } from '../net/BotCatalog';
@@ -137,6 +138,7 @@ export class AppRuntime {
   private identity: DeviceIdentity | undefined = undefined;
   private credentials: TokenPair | undefined = undefined;
   private core: RemoteClientCore | undefined = undefined;
+  private lanWebLease?: DshWebLan;
   private webLeaseCore: RemoteClientCore | undefined = undefined;
   private webGrantOperation: Promise<void> = Promise.resolve();
   private harness: HarnessAlphaClient | undefined = undefined;
@@ -666,12 +668,11 @@ export class AppRuntime {
       return;
     } catch (error) {
       this.errorMsg = errorMessage(error);
-    }
-    this.setBusy(false);
       this.setBusy(false);
       this.notify();
       if (error instanceof RemoteApiError && error.code === 'TWO_FACTOR_EXPIRED') return '';
-    this.notify();
+    }
+    return undefined;
   }
 
   async readAccountMembership(): Promise<AccountMembership> {
@@ -717,7 +718,8 @@ export class AppRuntime {
         this.refreshDevices();
       });
     }
-    return undefined;
+    this.setBusy(false);
+    this.notify();
   }
 
   /**
@@ -1921,7 +1923,12 @@ export class AppRuntime {
   supportsDshWeb(): boolean {
     return (this.phase === PHASE_CHAT || this.phase === PHASE_DEVICES) && this.harness !== undefined
       && this.connectedDeviceId.length > 0 && !this.reconnecting
-      && this.featuresCacheValue?.capabilities.includes('dsh.web.v1') === true;
+      && (this.featuresCacheValue?.capabilities.includes('dsh.web.v1') === true || this.canOpenLanWeb());
+  }
+
+  private canOpenLanWeb(): boolean {
+    return this.activeRelay !== undefined && this.transportLabelFor(this.activeRelay) === 'lan'
+      && this.featuresCacheValue?.capabilities.includes('dsh.web.lan.direct.v1') === true;
   }
 
   async openDshWeb(deviceId: string): Promise<DshWebGrant> {
@@ -1930,6 +1937,11 @@ export class AppRuntime {
       await this.releaseDshWebLease();
       if (core === undefined || core !== this.core || deviceId !== this.connectedDeviceId || !this.supportsDshWeb()) {
         throw new Error(t('未连接'));
+      }
+      if (this.canOpenLanWeb()) {
+        const lease = new DshWebLan(core, () => core === this.core && this.canOpenLanWeb());
+        this.lanWebLease = lease;
+        return await lease.open();
       }
       this.webLeaseCore = core;
       try {
@@ -1958,6 +1970,9 @@ export class AppRuntime {
   }
 
   private async releaseDshWebLease(): Promise<void> {
+    const lan = this.lanWebLease;
+    this.lanWebLease = undefined;
+    await lan?.close();
     const core = this.webLeaseCore;
     this.webLeaseCore = undefined;
     if (core !== undefined) {

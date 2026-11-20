@@ -2312,3 +2312,11 @@ sets its host-only session cookie, and redirects with 303 to `/`.
 The Host checks authorization at least every 15 seconds while connected and
 before reconnecting the allocated tunnel. The official DSH application cookie
 stays in Host memory and authenticates the local upstream.
+
+### DSH Web LAN handoff
+
+With `dsh.web.lan.direct.v1`, `harness.transport.describe` also reports the optional boolean `dshWebLanReady`, reflecting the Host-side mode of this authenticated connection at discovery. If a browser sees LAN but the Host reports false, it selects hostc. The capability itself remains stable across in-band transport upgrades. A Host advertising `dsh.web.lan.direct.v1` accepts `dsh.web.lan.direct.open({})` over the authenticated LAN Noise connection. The response contains a UUID `sessionId`, a canonical HTTP root `url` on the selected Host RFC1918 IPv4 or same-machine 127.0.0.1, with an ephemeral port, a 32-byte base64url `browserGrant` and Unix-millisecond `expiresAt`. The grant expires after 30 seconds and can be redeemed once.
+
+The browser opens `/__remote/browser` and signals its opener with `dsh.web.ready`. The opener checks the window and exact origin before posting `{type: "dsh.web.grant", browserGrant}`. The landing page submits the grant to same-origin `POST /__remote/session`. WebViews can use the same form or present the grant as `X-DSH-Web-Grant` to `GET /__remote/session-bootstrap`. Redemption sets an HttpOnly session cookie. The Host checks the cookie before forwarding HTTP or upgrading WebSocket. Anonymous requests receive 401, including the two bootstrap HTML pages, which contain no application data. The upstream DSH credential stays on the Host.
+
+Opening another session on this connection replaces the first. `dsh.web.lan.direct.close({sessionId})`, disconnect, expiry, or loss of LAN closes the listener and streams. Session lifetime is capped at 30 minutes after the grant deadline. HTTP and WS on the LAN are plaintext. Non-LAN connections and Hosts lacking the capability use the existing hostc flow.

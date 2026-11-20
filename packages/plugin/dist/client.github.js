@@ -7748,8 +7748,8 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
               for (let listener of sidebarEntryListeners) listener();
             }
           }
-        }, controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
-          if (endpoint === "status" && Date.now() < controlRouteRetryAfter)
+        }, isHostcTunnel = /\.(?:hostc|tun|tun-test)\.4ba\.io\.?$/.test(window.location.hostname), controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
+          if (endpoint === "status" && (isHostcTunnel || Date.now() < controlRouteRetryAfter))
             return controlRouteUnavailableStatus();
           let result;
           try {
@@ -7761,7 +7761,10 @@ DSH Go \u626B\u7801\u6682\u4E0D\u652F\u6301\u591A\u53F0\u8BBE\u5907\u63A7\u5236\
             throw new ControlRouteUnavailableError(t("remoteControlUnavailable"));
           }
           return unwrapControlResult(result, t("remoteRequestFailed"));
-        }, statusFeed = createStatusFeed({
+        }, statusFeed = isHostcTunnel ? { getSnapshot: () => {
+        }, subscribe: () => () => {
+        }, close: () => {
+        } } : createStatusFeed({
           url: STATUS_STREAM_PATH.slice(1),
           readStatus: () => control("status"),
           onFallback: (reason) => {

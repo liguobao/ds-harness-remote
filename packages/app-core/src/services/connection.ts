@@ -1,4 +1,4 @@
-import { DSH_WEB_CAPABILITY } from '@dsh-remote/protocol'
+import { dshWebLanGrantSchema, DSH_WEB_LAN_CAPABILITY, DSH_WEB_CAPABILITY } from '@dsh-remote/protocol'
 import { LanUploadRoutes } from './lan-upload'
 import { nativeWebSocketSender } from './native-websocket-binary'
 import { AgentAcpClient, ClientLiveTransportUpgrader, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
@@ -36,6 +36,7 @@ export interface AndroidConnectionOptions {
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
   private binaryUploads = false
+  private lanWeb = false
   private dshWeb = false
   private lanUploads?: LanUploadRoutes
   private sessionEventsSupported = false
@@ -290,6 +291,7 @@ export class AndroidRemoteConnection {
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
     this.sessionEventsSupported = features.sessionEvents
     this.pluginRouteSupported = features.pluginRoute
+    this.lanWeb = features.capabilities.includes(DSH_WEB_LAN_CAPABILITY)
     this.dshWeb = features.capabilities.includes(DSH_WEB_CAPABILITY)
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
@@ -363,7 +365,24 @@ export class AndroidRemoteConnection {
     )
   }
 
-  supportsDshWeb(): boolean { return this.core !== undefined && this.dshWeb }
+  openLanWeb(onFailure: () => void) {
+    const core = this.core
+    if (!core || !this.lanWeb || core.getStats().mode !== 'LAN') return undefined
+    return core.rpc('dsh.web.lan.direct.open', {}).then(async result => {
+      const grant = dshWebLanGrantSchema.parse(result)
+      const close = async () => {
+        await core.rpc('dsh.web.lan.direct.close', { sessionId: grant.sessionId }).catch(() => undefined)
+      }
+      if (this.core !== core || core.getStats().mode !== 'LAN' || grant.expiresAt <= Date.now()) {
+        await close()
+        throw new Error('LAN Web session expired')
+      }
+      const unsubscribe = core.onClose(onFailure)
+      return { ...grant, close: async () => { unsubscribe(); await close() } }
+    })
+  }
+
+  supportsDshWeb(): boolean { return this.core !== undefined && (this.dshWeb || (this.lanWeb && this.getStats()?.mode === 'LAN')) }
 
   supportsBinaryUpload(): boolean { return this.core !== undefined && this.binaryUploads }
 

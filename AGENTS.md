@@ -86,10 +86,11 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 - Token、私钥、配对码、二维码、Prompt、源码、隐私路径与工具/终端输出禁写日志。
 
 ### 2. 网络监听、Loopback 控制与本机自升级
-- Plugin 不监听公网，仅两处受限监听例外：
+- Plugin 不监听公网，仅以下受限监听例外：
   - Desktop Client 监听 `127.0.0.1` 随机端口承载 `loopback.ports` 预览（Host 只出站连 `127.0.0.1` 白名单，禁公网/任意目标/CONNECT/通用 TCP 转发）。
   - Host `workspace.upload.lan.v1` 仅在本机非回环 RFC1918 IPv4 临时监听，凭 10s 一次性票据升级并绑定 connection/device key/session/upload。
   - LAN 上传 Client 锁死 RTC 选中 IPv4（禁 DNS/公网/loopback），父连接关/替即销毁监听器与临时文件。
+  - Host DSH Web 只在当前 LAN 连接选中的本机 RFC1918 IPv4 或同机回环地址 `127.0.0.1` 临时监听。Noise 分发一次性票据，浏览器换票后凭会话 Cookie 访问，父连接关闭时回收。
 - Host 控制路由限 loopback `/ds-harness-remote`（Web SSE 用相对路径保代理前缀）。
 - `client.authorization.status` 纯只读不刷新不联网；loopback 错误须保留 `details.remoteCode` 与 `code`。
 - `settings/update|replace|mutate` 禁远程改 `ds-harness-remote`/`dsh-remote`；启动仅自动禁用自有 `@dsh-remote/plugin`，严禁误禁他人 `dsh-remote`。

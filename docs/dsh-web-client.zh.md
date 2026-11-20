@@ -2,6 +2,8 @@
 
 适用于 Android、iOS 和复用 Remote Noise RPC 的其他 Client。线协议见 [DSH Web browser handoff](protocol.md#dsh-web-browser-handoff)，返回值校验复用 [共享 schema](../packages/protocol/src/dsh-web.ts)。
 
+支持局域网能力的客户端先检查当前传输模式。LAN 本地会话使用独立的 [局域网交接接口](design/dsh-web-lan.md)。以下流程适用于 hostc 公网入口。
+
 ## 联调前置条件
 
 | 组件 | 需要具备的能力 |
