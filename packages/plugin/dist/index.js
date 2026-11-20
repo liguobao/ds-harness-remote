@@ -66462,7 +66462,11 @@ var AgentAcpClient = class {
     const result = await this.call("dsh/sessionCommands", { sessionId, backend }, signal);
     if (!isRecord2(result) || !Array.isArray(result.commands))
       return [];
-    return result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{ name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : []);
+    return result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{
+      name: item.name,
+      ...typeof item.description === "string" ? { description: item.description } : {},
+      ...isRecord2(item.input) && typeof item.input.hint === "string" ? { input: { hint: item.input.hint } } : {}
+    }] : []);
   }
   async forkSession(sessionId, backend, signal) {
     const result = await this.call("session/fork", { sessionId, backend }, signal);
@@ -66558,7 +66562,11 @@ var AgentAcpClient = class {
       ...typeof result.modes.currentModeId === "string" ? { currentModeId: result.modes.currentModeId } : {},
       availableModes: result.modes.availableModes.flatMap((item) => isRecord2(item) && typeof item.id === "string" && typeof item.name === "string" ? [{ id: item.id, name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : [])
     } : void 0;
-    const commands = Array.isArray(result.commands) ? result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{ name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : []) : void 0;
+    const commands = Array.isArray(result.commands) ? result.commands.flatMap((item) => isRecord2(item) && typeof item.name === "string" ? [{
+      name: item.name,
+      ...typeof item.description === "string" ? { description: item.description } : {},
+      ...isRecord2(item.input) && typeof item.input.hint === "string" ? { input: { hint: item.input.hint } } : {}
+    }] : []) : void 0;
     return {
       events,
       ...permissionPreset2 ? { permissionPreset: permissionPreset2 } : {},
@@ -96536,11 +96544,22 @@ function acpHistoryEvents(messages, sessionId, provider) {
       }
       pending ??= { role: role2, content: [] };
       if (isImage) {
-        pending.content.push({
-          type: "image",
-          mimeType: content.mimeType,
-          data: content.data
-        });
+        try {
+          const parsed = parseAcpImage(content);
+          const ext = parsed.mimeType === "image/jpeg" ? "jpg" : parsed.mimeType.slice(6);
+          const attachmentId = `agy-image:history-${sessionId}-${events.length}-${pending.content.length}.${ext}`;
+          pending.content.push({
+            ...acpImageContent(parsed, attachmentId),
+            mimeType: parsed.mimeType
+          });
+        } catch {
+          pending.content.push({
+            type: "image",
+            mimeType: content.mimeType,
+            mediaType: content.mimeType,
+            data: content.data
+          });
+        }
       } else {
         const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
         const previous = pending.content.at(-1);
@@ -97950,6 +97969,7 @@ import { Buffer as Buffer5 } from "node:buffer";
 var DEFAULT_LOAD_TOMBSTONE_TTL_MS = 6e4;
 var MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 6e4;
 var MAX_LOAD_TOMBSTONES = 256;
+var MAX_HISTORY_METADATA = 64;
 var ClaudeAcpClient = class extends CursorAcpClient {
   live = /* @__PURE__ */ new Map();
   loads = /* @__PURE__ */ new Map();
@@ -97960,6 +97980,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   historyStop;
   historyReading = false;
   shuttingDown = false;
+  historyMetadata = /* @__PURE__ */ new Map();
   makeClient;
   constructor(binary = "claude-agent-acp", logger2, spawnAcp, options = {}, backend = "claude") {
     const config2 = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend };
@@ -98094,6 +98115,9 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     if (id7 !== void 0 && id7 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
   }
+  lastHistoryMetadata(sessionId) {
+    return this.historyMetadata.get(sessionId);
+  }
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId, cwd2) {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
@@ -98126,6 +98150,21 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
+      const [modesRaw, commandsRaw] = await Promise.all([
+        client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
+        client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
+      ]);
+      const modes = isRecord18(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0 ? modesRaw : void 0;
+      const commands = isRecord18(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
+      if (modes !== void 0 || commands !== void 0) {
+        this.historyMetadata.delete(sessionId);
+        this.historyMetadata.set(sessionId, { ...modes ? { modes } : {}, ...commands ? { commands } : {} });
+        while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
+          const oldest = this.historyMetadata.keys().next().value;
+          if (oldest === void 0) break;
+          this.historyMetadata.delete(oldest);
+        }
+      }
       return acpHistoryEvents(updates, sessionId, this.modelLabel);
     } catch (error62) {
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
@@ -98142,6 +98181,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   async close() {
     this.shuttingDown = true;
     this.clearAllLoadSuppressions();
+    this.historyMetadata.clear();
     await Promise.all([super.close(), this.historyStop?.()]);
     this.live.clear();
   }
@@ -99183,10 +99223,8 @@ function withoutSelectionArgs(args) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity-acp.ts
-import { execFile as execFile3 } from "node:child_process";
-import { promisify as promisify4 } from "node:util";
-var execFileAsync2 = promisify4(execFile3);
 var NEGATIVE_CACHE_TTL_MS = 3e4;
+var NATIVE_PROBE_TIMEOUT_MS = 5e3;
 var nativeAcpSupportCache = /* @__PURE__ */ new Map();
 function supportsAntigravityNativeAcp(binary = "agy") {
   const key = binary.trim() || "agy";
@@ -99195,10 +99233,9 @@ function supportsAntigravityNativeAcp(binary = "agy") {
     return cached2.promise;
   }
   const entry = {
-    promise: execFileAsync2(key, ["acp", "--help"], {
-      timeout: 3e3,
-      windowsHide: true,
-      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(key)
+    promise: execFileCommand(key, ["acp", "--help"], {
+      timeout: NATIVE_PROBE_TIMEOUT_MS,
+      windowsHide: true
     }).then(
       () => true,
       () => {
@@ -100186,15 +100223,15 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile6 } = await import("node:child_process");
-    const { promisify: promisify8 } = await import("node:util");
-    const execFileAsync4 = promisify8(execFile6);
+    const { execFile: execFile5 } = await import("node:child_process");
+    const { promisify: promisify7 } = await import("node:util");
+    const execFileAsync3 = promisify7(execFile5);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync4("sqlite3", [dbPath, "-json", formattedSql], { windowsHide: true });
+    const { stdout } = await execFileAsync3("sqlite3", [dbPath, "-json", formattedSql], { windowsHide: true });
     return JSON.parse(stdout || "[]");
   } catch {
     return [];
@@ -101399,7 +101436,13 @@ var AcpRemoteGateway = class {
           return { events: [], ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
         }
         const events2 = await this.readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent);
-        return { events: events2, ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+        const cachedMeta = client.lastHistoryMetadata?.(conversationId);
+        return {
+          events: events2,
+          ...persistedPreset ? { permissionPreset: persistedPreset } : {},
+          ...cachedMeta?.modes ? { modes: cachedMeta.modes } : {},
+          ...cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}
+        };
       }
       if (backend !== "antigravity") return { events: [] };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
@@ -102393,10 +102436,10 @@ var AcpRemoteGateway = class {
     const modes = await client.call("dsh/sessionModes", { sessionId }).catch(() => void 0);
     if (!isRecord22(modes) || !Array.isArray(modes.availableModes)) return;
     const current = typeof modes.currentModeId === "string" ? modes.currentModeId : void 0;
-    const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk"]);
+    const permissionModes = /* @__PURE__ */ new Set(["default", "accept-edits", "auto", "acceptEdits", "bypassPermissions", "dontAsk", "yolo", "full-auto"]);
     if (current && !permissionModes.has(current)) return;
     const ids = modes.availableModes.filter((item) => isRecord22(item) && typeof item.id === "string").map((item) => item.id);
-    const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "accept-edits", "acceptEdits"].find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
+    const target3 = preset === "danger-full-access" ? ["auto", "bypassPermissions", "yolo", "full-auto", "accept-edits", "acceptEdits"].find((id7) => ids.includes(id7)) : ids.find((id7) => id7 === "default");
     if (target3 && target3 !== current) {
       await client.call("session/set_mode", { sessionId, modeId: target3 });
     }
@@ -102760,12 +102803,12 @@ function isRecord22(value) {
 }
 
 // packages/plugin/src/acp/backend-installer.ts
-import { execFile as execFile4, execFileSync as execFileSync2 } from "node:child_process";
+import { execFile as execFile3, execFileSync as execFileSync2 } from "node:child_process";
 import { existsSync as existsSync4, constants as constants5, accessSync as accessSync2, statSync as statSync4 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname6, join as join14, posix as posix2, win32 as win323 } from "node:path";
-import { promisify as promisify5 } from "node:util";
-var execFileAsync3 = promisify5(execFile4);
+import { promisify as promisify4 } from "node:util";
+var execFileAsync2 = promisify4(execFile3);
 var BUILTIN_ACP_SPECS = Object.freeze({
   codex: Object.freeze({
     id: "codex",
@@ -103081,7 +103124,7 @@ async function installOrConfigureBackend(backendId2, options = {}) {
   const fileToExec = npmCli ? process.execPath : "npm";
   const argsToExec = npmCli ? [npmCli, "install", "-g", spec.npmPackage, "--no-fund", "--no-audit"] : ["install", "-g", spec.npmPackage, "--no-fund", "--no-audit"];
   const runner = options.execFileImpl ?? (async (file2, cmdArgs, opts) => {
-    return execFileAsync3(file2, cmdArgs, opts);
+    return execFileAsync2(file2, cmdArgs, opts);
   });
   try {
     await runner(fileToExec, argsToExec, {
@@ -105438,10 +105481,10 @@ async function waitForCheck(connector, signal) {
 // packages/plugin/src/session-transfer.ts
 import { createHash as createHash7, randomUUID as randomUUID18 } from "node:crypto";
 import { stat as stat7 } from "node:fs/promises";
-import { promisify as promisify6 } from "node:util";
+import { promisify as promisify5 } from "node:util";
 import { gunzip, gzip } from "node:zlib";
-var pack = promisify6(gzip);
-var unpack = promisify6(gunzip);
+var pack = promisify5(gzip);
+var unpack = promisify5(gunzip);
 var transferVersion = 1;
 var maxBytes = 8 * 1024 * 1024;
 var chunkBytes = 256 * 1024;
@@ -107415,11 +107458,11 @@ function createNodeWebSocket(url2) {
 }
 
 // packages/plugin/src/ipv6-on-link.ts
-import { execFile as execFile5 } from "node:child_process";
+import { execFile as execFile4 } from "node:child_process";
 import { isIP as isIP4 } from "node:net";
 import { networkInterfaces as networkInterfaces5 } from "node:os";
-import { promisify as promisify7 } from "node:util";
-var run = promisify7(execFile5);
+import { promisify as promisify6 } from "node:util";
+var run = promisify6(execFile4);
 var reachableNeighborStates = /* @__PURE__ */ new Set(["REACHABLE", "STALE", "DELAY", "PROBE"]);
 async function isIpv6OnLink(local, remote) {
   if (process.platform !== "linux" || isIP4(local) !== 6 || isIP4(remote) !== 6) return false;

@@ -166,6 +166,8 @@ export function ChatScreen({
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
+  const storeError = useAppStore(state => state.error)
+  const clearError = useAppStore(state => state.clearError)
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
@@ -1231,6 +1233,20 @@ export function ChatScreen({
             {strings.chat.syncingHistory}
           </Text>
         </View>
+      )}
+      {storeError !== undefined && (
+        <Pressable
+          style={styles.errorBanner}
+          accessibilityRole="alert"
+          accessibilityLabel={storeError}
+          onPress={clearError}
+        >
+          <View style={styles.errorDot} />
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {storeError}
+          </Text>
+          <X size={14} color={colors.danger} />
+        </Pressable>
       )}
     </>
   return wrapChatShell(
