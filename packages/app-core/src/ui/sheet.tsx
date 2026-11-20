@@ -17,6 +17,7 @@ import { strings } from '../locales/i18n'
 import {
   anchorRise,
   easingCurve,
+  finishSheetExit,
   motionTokens,
   nextSheetPhase,
   sheetPhaseDuration,
@@ -44,6 +45,10 @@ export function dismissClosingSheets() {
   routeDismissEpoch += 1
   notifySheetOpening('__route__')
 }
+
+// `animationType="none"` dismisses on UIKit in 1–2 frames; this caps wait time if
+// the native Modal never presented (e.g. closed before attaching to a window).
+const NATIVE_DISMISS_FALLBACK_MS = 180
 
 /**
  * Bottom sheet container with an interruptible enter/exit transition.
@@ -88,47 +93,72 @@ export function SheetModal({
   const { height: windowHeight } = useWindowDimensions()
   const reduceMotion = useReduceMotion()
   const sheetId = useId()
+  const waitForNativeDismiss = Platform.OS === 'ios'
   const [phase, setPhase] = useState<SheetPhase>(() => visible ? 'opening' : 'unmounted')
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
   const [availableHeight, setAvailableHeight] = useState<number>()
   const progress = useRef(new Animated.Value(0)).current
   const animationRef = useRef<Animated.CompositeAnimation | null>(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const notifiedOpenRef = useRef(false)
   const openedAtRouteEpochRef = useRef(routeDismissEpoch)
   const supersededByOtherRef = useRef(false)
   // Keep the closing sheet populated after the caller clears its target.
   const retainedChildren = useRef(children)
   if (visible) retainedChildren.current = children
 
+  const settleNativeDismiss = () => {
+    if (phaseRef.current !== 'dismissing') return
+    phaseRef.current = 'unmounted'
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+      dismissTimerRef.current = undefined
+    }
+    setPhase(current => current === 'dismissing' ? 'unmounted' : current)
+    onDismissRef.current?.()
+  }
+
   useEffect(() => {
     const onOtherSheetOpen = (openerId: string) => {
       if (openerId === sheetId || visibleRef.current) return
       supersededByOtherRef.current = true
       setPhase(current => {
-        if (current === 'unmounted') return current
+        if (current === 'unmounted' || current === 'dismissing') return current
         animationRef.current?.stop()
-        return nextSheetPhase(current, false, true)
+        return nextSheetPhase(current, false, true, waitForNativeDismiss)
       })
     }
     sheetOpenListeners.add(onOtherSheetOpen)
     return () => { sheetOpenListeners.delete(onOtherSheetOpen) }
-  }, [sheetId])
+  }, [sheetId, waitForNativeDismiss])
 
   useEffect(() => {
     if (visible) {
-      openedAtRouteEpochRef.current = routeDismissEpoch
-      supersededByOtherRef.current = false
-      notifySheetOpening(sheetId)
-      setPhase(current => nextSheetPhase(current, true))
+      // Wait for an in-flight native iOS Modal dismissal to settle through
+      // `unmounted` before re-opening so UIKit never receives a concurrent present.
+      if (phase === 'dismissing') return
+      if (!notifiedOpenRef.current) {
+        notifiedOpenRef.current = true
+        openedAtRouteEpochRef.current = routeDismissEpoch
+        supersededByOtherRef.current = false
+        notifySheetOpening(sheetId)
+      }
+      setPhase(current => nextSheetPhase(current, true, false, waitForNativeDismiss))
       return
     }
+    notifiedOpenRef.current = false
     const superseded = supersededByOtherRef.current || routeDismissEpoch !== openedAtRouteEpochRef.current
     if (superseded) animationRef.current?.stop()
-    setPhase(current => nextSheetPhase(current, false, superseded))
-  }, [visible, sheetId])
+    setPhase(current => nextSheetPhase(current, false, superseded, waitForNativeDismiss))
+  }, [visible, phase, sheetId, waitForNativeDismiss])
 
   useEffect(() => {
-    if (phase === 'unmounted') {
+    if (phase === 'unmounted' || phase === 'dismissing') {
       animationRef.current?.stop()
       progress.setValue(0)
       return
@@ -144,12 +174,33 @@ export function SheetModal({
     animationRef.current = animation
     animation.start(({ finished }) => {
       if (!finished) return
-      setPhase(current => current === 'opening' ? 'open' : current === 'closing' ? 'unmounted' : current)
+      setPhase(current => current === 'opening' ? 'open' : finishSheetExit(current, waitForNativeDismiss))
     })
     return () => animation.stop()
-  }, [phase, progress, reduceMotion])
+  }, [phase, progress, reduceMotion, waitForNativeDismiss])
 
-  useEffect(() => () => animationRef.current?.stop(), [])
+  useEffect(() => {
+    if (phase !== 'dismissing' || phaseRef.current !== 'dismissing') return
+    dismissTimerRef.current = setTimeout(() => {
+      dismissTimerRef.current = undefined
+      settleNativeDismiss()
+    }, NATIVE_DISMISS_FALLBACK_MS)
+    return () => {
+      if (dismissTimerRef.current !== undefined) {
+        clearTimeout(dismissTimerRef.current)
+        dismissTimerRef.current = undefined
+      }
+    }
+  }, [phase])
+
+  useEffect(() => () => {
+    phaseRef.current = 'unmounted'
+    animationRef.current?.stop()
+    if (dismissTimerRef.current !== undefined) {
+      clearTimeout(dismissTimerRef.current)
+      dismissTimerRef.current = undefined
+    }
+  }, [])
 
   if (phase === 'unmounted') return null
 
@@ -158,10 +209,10 @@ export function SheetModal({
   const requestClose = onRequestClose ?? onClose
   const content = visible ? children : retainedChildren.current
 
-  const body = (
+  const body = phase === 'dismissing' ? null : (
     <View
       style={styles.container}
-      pointerEvents="box-none"
+      pointerEvents={visible ? 'box-none' : 'none'}
       onLayout={event => setAvailableHeight(event.nativeEvent.layout.height)}
     >
       <Animated.View
@@ -171,8 +222,9 @@ export function SheetModal({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={dismissLabel ?? strings.common.close}
+        disabled={!visible}
         onPress={onClose}
-        pointerEvents="box-only"
+        pointerEvents={visible ? 'box-only' : 'none'}
         style={StyleSheet.absoluteFill}
       />
       <Animated.View
@@ -199,23 +251,25 @@ export function SheetModal({
 
   return (
     <Modal
-      visible
+      visible={phase !== 'dismissing'}
       transparent
       animationType="none"
-      onRequestClose={requestClose}
-      onDismiss={onDismiss}
+      onRequestClose={() => { if (visible) requestClose() }}
+      onDismiss={waitForNativeDismiss ? settleNativeDismiss : onDismiss}
       statusBarTranslucent
     >
-      {avoidKeyboard
-        ? (
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.container}
-          >
-            {body}
-          </KeyboardAvoidingView>
-        )
-        : body}
+      {phase === 'dismissing'
+        ? null
+        : avoidKeyboard
+          ? (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.container}
+            >
+              {body}
+            </KeyboardAvoidingView>
+          )
+          : body}
     </Modal>
   )
 }
