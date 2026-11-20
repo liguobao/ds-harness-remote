@@ -105,7 +105,7 @@ export class CodexThreadLifecycle {
     }
     state.releasing = true
     const release = this.unload(threadId, state).finally(() => {
-      state.releasing = false
+      if (state.release === release) state.releasing = false
     })
     state.release = release
     await release.catch(error => this.failed(error))
@@ -113,7 +113,9 @@ export class CodexThreadLifecycle {
 
   private async unload(threadId: string, state: ThreadState): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
+    let onClosed!: () => void
     const closed = new Promise<void>((resolve, reject) => {
+      onClosed = resolve
       state.closed = resolve
       timer = setTimeout(() => reject(new RpcError('CODEX_THREAD_CLOSING', 'The CodeX thread is still closing. Please retry shortly.')), this.closeTimeoutMs)
       timer.unref?.()
@@ -122,8 +124,8 @@ export class CodexThreadLifecycle {
     try {
       const result = await this.unsubscribe(threadId)
       if (typeof result === 'object' && result !== null && 'status' in result && result.status === 'notLoaded') {
-        this.closed(threadId)
-      } else {
+        if (this.threads.get(threadId) === state && state.closed === onClosed) this.closed(threadId)
+      } else if (this.threads.get(threadId) === state && state.closed === onClosed) {
         await closed
       }
     } finally {

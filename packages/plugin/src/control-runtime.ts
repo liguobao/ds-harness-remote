@@ -26,7 +26,7 @@ import type { PluginSelfUpdateResult } from './plugin-self-update.js'
 import { codexBinaryCandidates } from './codex/domain.js'
 import { cursorBinaryCandidates } from './acp/gateway.js'
 import { isValidAcpBackendId } from './acp/method-policy.js'
-import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend } from './acp/backend-installer.js'
+import { defaultCheckExecutable, installOrConfigureBackend, isBuiltinAcpBackend, lookupSystemPath } from './acp/backend-installer.js'
 import type { AcpAuthDiagnostic } from '@dsh-remote/protocol'
 import type { HostLogSnapshot, HostLogStore, PluginLogFilter } from './host-log-store.js'
 
@@ -807,12 +807,19 @@ function backendCommandAvailable(backend: string, command: string): boolean {
   if (defaultCheckExecutable(trimmed)) return true
   const candidates = backend === 'codex' ? codexBinaryCandidates(trimmed)
     : backend === 'cursor' || backend === 'antigravity' || backend === 'opencode' ? cursorBinaryCandidates(trimmed) : [trimmed]
-  return candidates.some(candidate => defaultCheckExecutable(candidate) || commandAvailable(candidate))
+  return candidates.some(candidate => defaultCheckExecutable(candidate) || (!hasPathSeparator(candidate) && commandAvailable(candidate)))
+}
+
+function hasPathSeparator(command: string): boolean {
+  return command.includes('/') || command.includes('\\')
 }
 
 function commandAvailable(command: string): boolean {
+  if (process.platform === 'win32') {
+    return lookupSystemPath(command, 'win32') !== undefined
+  }
   try {
-    execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], {
+    execFileSync('which', [command], {
       stdio: 'ignore',
       timeout: 5000,
       windowsHide: true,

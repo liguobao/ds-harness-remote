@@ -1,5 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
+import { spawnCommand } from '../acp/windows-spawn.js'
 import type { SafeLogger } from '../logging.js'
 import { PLUGIN_VERSION } from '../version.js'
 
@@ -62,17 +63,22 @@ export class CodexAppServerClient implements CodexAppServerLike {
   private readonly pending = new Map<string | number, PendingRequest>()
   private readonly inboundHandlers = new Set<CodexAppServerInboundHandler>()
   private readonly unavailableHandlers = new Set<CodexAppServerUnavailableHandler>()
-  private stdoutBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
+  private stdoutChunks: Buffer[] = []
+  private stdoutBytes = 0
   private stderrBytes = 0
   private ready = false
   private closed = false
   private failureNotified = false
   private startPromise?: Promise<void>
+  private readonly exitedChildren = new WeakSet<ChildProcessWithoutNullStreams>()
+  private readonly childExitPromises = new WeakMap<ChildProcessWithoutNullStreams, Promise<void>>()
+  private readonly terminatingChildren = new WeakMap<ChildProcessWithoutNullStreams, Promise<void>>()
+  private pendingTermination?: Promise<void>
 
   constructor(
     private readonly binary: string,
     private readonly logger?: SafeLogger,
-    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawn(binary, ['app-server', '-c', 'thread_unload_delay_secs=0'], {
+    private readonly spawnAppServer: SpawnCodexAppServer = binary => spawnCommand(binary, ['app-server', '-c', 'thread_unload_delay_secs=0'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     }),
@@ -111,46 +117,62 @@ export class CodexAppServerClient implements CodexAppServerLike {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return
-    this.closed = true
-    this.ready = false
-    this.failPending(new CodexAppServerError('CODEX_CLOSED', 'Codex App Server was closed.'))
-    const child = this.process
-    this.process = undefined
-    if (child === undefined || child.exitCode !== null || child.killed) return
-    await new Promise<void>(resolve => {
-      const timer = setTimeout(() => {
-        child.kill('SIGKILL')
-        resolve()
-      }, 2_000)
-      timer.unref?.()
-      child.once('exit', () => {
-        clearTimeout(timer)
-        resolve()
-      })
-      child.kill('SIGTERM')
-    })
+    if (!this.closed) {
+      this.closed = true
+      this.ready = false
+      this.resetStdoutBuffer()
+      this.failPending(new CodexAppServerError('CODEX_CLOSED', 'Codex App Server was closed.'))
+      const child = this.process
+      this.process = undefined
+      await this.terminateChild(child)
+    }
+    await this.pendingTermination
   }
 
   private async startOnce(): Promise<void> {
     if (this.process !== undefined) {
       throw new CodexAppServerError('CODEX_STARTING', 'Codex App Server is already starting.')
     }
-    const child = this.spawnAppServer(this.binary)
-    this.process = child
     this.failureNotified = false
-    this.stdoutBuffer = Buffer.alloc(0)
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = this.spawnAppServer(this.binary)
+    } catch (error) {
+      const cause = error instanceof Error ? error : new Error(String(error))
+      this.handleProcessFailure('CODEX_BINARY_UNAVAILABLE', cause)
+      throw new CodexAppServerError('CODEX_BINARY_UNAVAILABLE', 'Codex App Server binary is unavailable.', { cause })
+    }
+    let resolveExit!: () => void
+    const exitPromise = new Promise<void>(resolve => { resolveExit = resolve })
+    this.childExitPromises.set(child, exitPromise)
+    this.process = child
+    this.resetStdoutBuffer()
     this.stderrBytes = 0
-    child.stdout.on('data', chunk => this.consumeStdout(Buffer.from(chunk as Uint8Array)))
+    child.stdin.on('error', error => {
+      if (this.process === child) this.handleProcessFailure('CODEX_APP_SERVER_EXITED', error)
+    })
+    child.stdout.on('data', chunk => {
+      if (this.process === child) this.consumeStdout(child, Buffer.from(chunk as Uint8Array))
+    })
     child.stderr.on('data', chunk => {
+      if (this.process !== child) return
       // Always drain stderr, but never log Codex payloads or paths.
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer.byteLength(chunk))
     })
-    child.on('error', error => this.handleProcessFailure('CODEX_BINARY_UNAVAILABLE', error))
+    child.on('error', error => {
+      if (child.pid === undefined) {
+        this.exitedChildren.add(child)
+        resolveExit()
+      }
+      if (this.process === child) this.handleProcessFailure('CODEX_BINARY_UNAVAILABLE', error)
+    })
     child.on('exit', (code, signal) => {
+      this.exitedChildren.add(child)
+      resolveExit()
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
+      this.resetStdoutBuffer()
       this.failPending(new CodexAppServerError('CODEX_APP_SERVER_EXITED', 'Codex App Server exited unexpectedly.'))
       if (!this.closed) {
         this.logger?.warn('Codex App Server exited', {
@@ -174,11 +196,20 @@ export class CodexAppServerClient implements CodexAppServerLike {
           mcpServerOpenaiFormElicitation: false,
         },
       }, APP_SERVER_START_TIMEOUT_MS)
+      if (this.closed || this.process !== child) {
+        throw new CodexAppServerError('CODEX_CLOSED', 'Codex App Server was closed during initialization.')
+      }
       this.write({ method: 'initialized', params: {} })
+      if (this.closed || this.process !== child) {
+        throw new CodexAppServerError('CODEX_CLOSED', 'Codex App Server was closed during initialization.')
+      }
       this.ready = true
       this.logger?.info('Codex App Server ready')
     } catch (error) {
-      child.kill('SIGTERM')
+      this.ready = false
+      this.resetStdoutBuffer()
+      if (this.process === child) this.process = undefined
+      void this.terminateChild(child)
       if (error instanceof CodexAppServerError) throw error
       throw new CodexAppServerError('CODEX_INITIALIZE_FAILED', 'Codex App Server initialization failed.', { cause: error })
     }
@@ -211,62 +242,124 @@ export class CodexAppServerClient implements CodexAppServerLike {
     child.stdin.write(`${JSON.stringify(message)}\n`)
   }
 
-  private consumeStdout(chunk: Buffer): void {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer.concat([this.stdoutBuffer, chunk])
-    if (this.stdoutBuffer.length > MAX_APP_SERVER_LINE_BYTES) {
-      this.handleProcessFailure(
-        'CODEX_RESPONSE_TOO_LARGE',
-        new Error('Codex App Server emitted an oversized JSONL message.'),
-      )
-      return
-    }
-    let newline = this.stdoutBuffer.indexOf(0x0a)
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline)
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1)
-      if (line.length > 0) this.handleLine(line)
-      newline = this.stdoutBuffer.indexOf(0x0a)
+  private consumeStdout(child: ChildProcessWithoutNullStreams, chunk: Buffer): void {
+    let offset = 0
+    while (offset < chunk.length) {
+      if (this.process !== child || this.closed) return
+      const newline = chunk.indexOf(0x0a, offset)
+      if (newline < 0) {
+        const tail = offset === 0 ? chunk : chunk.subarray(offset)
+        if (this.stdoutBytes + tail.length > MAX_APP_SERVER_LINE_BYTES) {
+          this.handleProcessFailure(
+            'CODEX_RESPONSE_TOO_LARGE',
+            new Error('Codex App Server emitted an oversized JSONL message.'),
+          )
+          return
+        }
+        this.stdoutChunks.push(tail)
+        this.stdoutBytes += tail.length
+        return
+      }
+      const tail = chunk.subarray(offset, newline)
+      const lineBytes = this.stdoutBytes + tail.length
+      if (lineBytes > MAX_APP_SERVER_LINE_BYTES) {
+        this.handleProcessFailure(
+          'CODEX_RESPONSE_TOO_LARGE',
+          new Error('Codex App Server emitted an oversized JSONL message.'),
+        )
+        return
+      }
+      const line = this.stdoutChunks.length === 0
+        ? tail
+        : Buffer.concat([...this.stdoutChunks, tail], lineBytes)
+      this.resetStdoutBuffer()
+      offset = newline + 1
+      if (line.length > 0 && !this.handleLine(line)) return
     }
   }
 
-  private handleLine(line: Buffer): void {
+  private handleLine(line: Buffer): boolean {
     let value: unknown
     try {
       value = JSON.parse(line.toString('utf8'))
     } catch {
       this.handleProcessFailure('CODEX_INVALID_RESPONSE', new Error('Codex App Server emitted invalid JSON.'))
-      return
+      return false
     }
     if (!isRecord(value)) {
       this.handleProcessFailure('CODEX_INVALID_RESPONSE', new Error('Codex App Server emitted an invalid message.'))
-      return
+      return false
     }
     if ((typeof value.id === 'number' || typeof value.id === 'string') && ('result' in value || 'error' in value)) {
       const pending = this.takePending(value.id)
-      if (pending === undefined) return
+      if (pending === undefined) return true
       if ('error' in value && value.error !== undefined) {
         pending.reject(safeUpstreamError(value.error, pending.method))
       } else {
         pending.resolve(value.result)
       }
-      return
+      return true
     }
-    if (typeof value.method !== 'string' || value.method.length === 0 || value.method.length > 160) return
+    if (typeof value.method !== 'string' || value.method.length === 0 || value.method.length > 160) return true
     const params = value.params ?? {}
     const inbound: CodexAppServerInbound = typeof value.id === 'string' || typeof value.id === 'number'
       ? { kind: 'request', id: value.id, method: value.method, params }
       : { kind: 'notification', method: value.method, params }
     for (const handler of this.inboundHandlers) handler(inbound)
+    return true
   }
 
   private handleProcessFailure(code: string, cause: Error): void {
     this.ready = false
+    this.resetStdoutBuffer()
     this.failPending(new CodexAppServerError(code, 'Codex App Server communication failed.', { cause }))
     const child = this.process
     this.process = undefined
-    child?.kill('SIGTERM')
+    void this.terminateChild(child)
     this.logger?.warn('Codex App Server communication failed', { code })
     if (!this.closed) this.notifyUnavailable(code)
+  }
+
+  private terminateChild(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+    if (child === undefined || this.hasChildExited(child)) return Promise.resolve()
+    const existing = this.terminatingChildren.get(child)
+    if (existing !== undefined) return existing
+    const exitPromise = this.childExitPromises.get(child)
+    const termination = new Promise<void>(resolve => {
+      let finished = false
+      const finish = () => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(() => {
+        if (!this.hasChildExited(child)) {
+          try { child.kill('SIGKILL') } catch { /* ignore already exited */ }
+        }
+        finish()
+      }, 2_000)
+      timer.unref?.()
+      if (exitPromise !== undefined) void exitPromise.then(finish)
+      else child.once('exit', finish)
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        finish()
+      }
+    })
+    this.terminatingChildren.set(child, termination)
+    this.pendingTermination = termination
+    return termination
+  }
+
+  private hasChildExited(child: ChildProcessWithoutNullStreams): boolean {
+    return this.exitedChildren.has(child) || child.exitCode != null || child.signalCode != null
+  }
+
+  private resetStdoutBuffer(): void {
+    this.stdoutChunks = []
+    this.stdoutBytes = 0
   }
 
   private notifyUnavailable(code: string): void {

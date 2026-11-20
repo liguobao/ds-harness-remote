@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import {
   CODEX_THREAD_UNMATERIALIZED,
@@ -9,6 +12,14 @@ import {
   CodexAppServerClient,
 } from '../src/codex/app-server.js'
 import type { SafeLogger } from '../src/logging.js'
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  await Promise.all(tempDirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
+})
 
 describe('CodexAppServerClient', () => {
   it('distinguishes unsupported Goal reads from transient failures without exposing upstream details', async () => {
@@ -161,9 +172,180 @@ describe('CodexAppServerClient', () => {
     })
     await client.close()
   })
+
+  it('catches stdin pipe errors without crashing the host and notifies unavailable once', async () => {
+    const fake = fakeProcess()
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line) as Record<string, unknown>
+        if (message.method === 'initialize') {
+          fake.stdout.write(`${JSON.stringify({ id: message.id, result: { userAgent: 'codex' } })}\n`)
+        }
+      }
+    })
+    const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+    const unavailable = vi.fn()
+    client.onUnavailable(unavailable)
+    await client.start()
+
+    const pending = client.call('thread/list', {})
+    fake.child.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+    await expect(pending).rejects.toMatchObject({ code: 'CODEX_APP_SERVER_EXITED' })
+    expect(client.isReady()).toBe(false)
+    expect(unavailable).toHaveBeenCalledOnce()
+    expect(unavailable).toHaveBeenCalledWith('CODEX_APP_SERVER_EXITED')
+    await client.close()
+  })
+
+  it('escalates to SIGKILL when SIGTERM is ignored after init failure or protocol failure', async () => {
+    vi.useFakeTimers()
+    await runScenarios([
+      {
+        name: 'init-timeout',
+        run: async () => {
+          const fake = fakeProcess({ ignoreSigterm: true })
+          const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+          const starting = client.start()
+          const rejection = expect(starting).rejects.toMatchObject({ code: 'CODEX_REQUEST_TIMEOUT' })
+          await vi.advanceTimersByTimeAsync(15_000)
+          await rejection
+          expect(fake.kill).toHaveBeenCalledWith('SIGTERM')
+
+          let closedDone = false
+          const closing = client.close().then(() => { closedDone = true })
+          await vi.advanceTimersByTimeAsync(1_999)
+          expect(closedDone).toBe(false)
+          await vi.advanceTimersByTimeAsync(1)
+          await closing
+          expect(fake.kill).toHaveBeenCalledWith('SIGKILL')
+          expect(closedDone).toBe(true)
+        },
+      },
+      {
+        name: 'protocol-failure',
+        run: async () => {
+          const fake = fakeProcess({ ignoreSigterm: true })
+          fake.child.stdin.on('data', chunk => {
+            const message = JSON.parse(String(chunk).trim()) as Record<string, unknown>
+            if (message.method === 'initialize') {
+              fake.stdout.write(`${JSON.stringify({ id: message.id, result: { userAgent: 'codex' } })}\n`)
+            }
+          })
+          const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+          await client.start()
+          fake.stdout.write('not-json\n')
+          await vi.advanceTimersByTimeAsync(0)
+          expect(fake.kill).toHaveBeenCalledWith('SIGTERM')
+
+          let closedDone = false
+          const closing = client.close().then(() => { closedDone = true })
+          await vi.advanceTimersByTimeAsync(2_000)
+          await closing
+          expect(fake.kill).toHaveBeenCalledWith('SIGKILL')
+        },
+      },
+      {
+        name: 'unspawned-enoent-does-not-wait-for-sigkill',
+        run: async () => {
+          const fake = fakeProcess({ pid: undefined })
+          const client = new CodexAppServerClient('missing-codex', logger(), () => fake.child)
+          const starting = client.start()
+          const rejection = expect(starting).rejects.toMatchObject({ code: 'CODEX_BINARY_UNAVAILABLE' })
+          queueMicrotask(() => fake.child.emit('error', Object.assign(new Error('ENOENT'), { code: 'ENOENT' })))
+          await rejection
+          let closedDone = false
+          const closing = client.close().then(() => { closedDone = true })
+          await Promise.resolve()
+          await closing
+          expect(closedDone).toBe(true)
+          expect(fake.kill).not.toHaveBeenCalledWith('SIGKILL')
+        },
+      },
+    ])
+  })
+
+  it('stops processing remaining lines in the same stdout chunk after invalid JSON and reassembles split lines', async () => {
+    const fake = fakeProcess()
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line) as Record<string, unknown>
+        if (message.method === 'initialize') {
+          fake.stdout.write(`${JSON.stringify({ id: message.id, result: { userAgent: 'codex' } })}\n`)
+        }
+      }
+    })
+    const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+    const inbound = vi.fn()
+    client.onInbound(inbound)
+    await client.start()
+
+    const call = client.call('thread/list', {})
+    await flush()
+    const payload = JSON.stringify({ id: 2, result: { data: [{ id: 't1' }] } })
+    const mid = Math.floor(payload.length / 2)
+    fake.stdout.write(payload.slice(0, mid))
+    fake.stdout.write(`${payload.slice(mid)}\n\n`)
+    await expect(call).resolves.toEqual({ data: [{ id: 't1' }] })
+
+    fake.stdout.write('bad-json\n{"method":"turn/completed","params":{"threadId":"thr_1"}}\n')
+    await flush()
+    expect(inbound).not.toHaveBeenCalled()
+    expect(client.isReady()).toBe(false)
+    await client.close()
+  })
+
+  it('turns synchronous spawn failures into CODEX_BINARY_UNAVAILABLE and executes Windows .cmd shims natively', async () => {
+    const syncEinval = Object.assign(new Error('spawn codex.cmd EINVAL'), { code: 'EINVAL' })
+    const throwingClient = new CodexAppServerClient('codex.cmd', logger(), () => { throw syncEinval })
+    const unavailable = vi.fn()
+    throwingClient.onUnavailable(unavailable)
+    await expect(throwingClient.start()).rejects.toMatchObject({ code: 'CODEX_BINARY_UNAVAILABLE' })
+    expect(unavailable).toHaveBeenCalledWith('CODEX_BINARY_UNAVAILABLE')
+    await throwingClient.close()
+
+    if (process.platform === 'win32') {
+      const dir = await mkdtemp(join(tmpdir(), 'dsh-codex-cmd-'))
+      tempDirs.push(dir)
+      const pkgDir = join(dir, 'node_modules', '@openai', 'codex', 'bin')
+      await mkdir(pkgDir, { recursive: true })
+      const serverJs = join(pkgDir, 'codex.js')
+      await writeFile(serverJs, [
+        'const readline = require("node:readline");',
+        'if (!process.argv.includes("app-server")) process.exit(2);',
+        'const rl = readline.createInterface({ input: process.stdin });',
+        'rl.on("line", line => {',
+        '  const msg = JSON.parse(line);',
+        '  if (msg.method === "initialize") process.stdout.write(JSON.stringify({ id: msg.id, result: { userAgent: "fake-codex" } }) + "\\n");',
+        '  else if (msg.id !== undefined) process.stdout.write(JSON.stringify({ id: msg.id, result: { data: [] } }) + "\\n");',
+        '});',
+      ].join('\n'))
+      const cmdShim = join(dir, 'codex.cmd')
+      await writeFile(cmdShim, [
+        '@ECHO off',
+        'GOTO start',
+        ':find_dp0',
+        'SET dp0=%~dp0',
+        'EXIT /b',
+        ':start',
+        'SETLOCAL',
+        'CALL :find_dp0',
+        'SET "_prog=node"',
+        'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+      ].join('\r\n'))
+
+      const realClient = new CodexAppServerClient(cmdShim, logger())
+      await realClient.start()
+      await expect(realClient.call('project/list', {})).resolves.toEqual({ data: [] })
+      await realClient.close()
+    }
+  })
 })
 
-function fakeProcess(): { child: ChildProcessWithoutNullStreams; stdout: PassThrough; kill: ReturnType<typeof vi.fn> } {
+function fakeProcess(options: { ignoreSigterm?: boolean; pid?: number | undefined } = {}): {
+  child: ChildProcessWithoutNullStreams
+  stdout: PassThrough
+  kill: ReturnType<typeof vi.fn>
+} {
   const emitter = new EventEmitter()
   const stdin = new PassThrough()
   const stdout = new PassThrough()
@@ -171,19 +353,25 @@ function fakeProcess(): { child: ChildProcessWithoutNullStreams; stdout: PassThr
   const state = { killed: false, exitCode: null as number | null }
   const kill = vi.fn((signal?: NodeJS.Signals | number) => {
     state.killed = true
-    queueMicrotask(() => emitter.emit('exit', 0, typeof signal === 'string' ? signal : null))
+    if (options.ignoreSigterm && signal === 'SIGTERM') return true
+    queueMicrotask(() => {
+      state.exitCode = 0
+      emitter.emit('exit', 0, typeof signal === 'string' ? signal : null)
+    })
     return true
   })
   const child = Object.assign(emitter, {
     stdin,
     stdout,
     stderr,
-    pid: 123,
+    pid: 'pid' in options ? options.pid : 123,
     kill,
-    get killed() { return state.killed },
-    get exitCode() { return state.exitCode },
-  }) as unknown as ChildProcessWithoutNullStreams
-  return { child, stdout, kill }
+  })
+  Object.defineProperties(child, {
+    killed: { get: () => state.killed },
+    exitCode: { get: () => state.exitCode },
+  })
+  return { child: child as unknown as ChildProcessWithoutNullStreams, stdout, kill }
 }
 
 function logger(): SafeLogger {

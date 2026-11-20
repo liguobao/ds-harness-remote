@@ -1467,6 +1467,69 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('completes peer teardown even when a remembered thread is stuck closing', async () => {
+    vi.useFakeTimers()
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const original = app.call.bind(app)
+    vi.spyOn(app, 'call').mockImplementation((method, params) => {
+      if (method === 'thread/unsubscribe') return Promise.resolve({ status: 'unsubscribed' })
+      return original(method, params)
+    })
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peerOne = domain.createPeer({ connectionId: 'conn-1', peerDeviceId: 'phone-1' }, async () => undefined)!
+    const peerTwo = domain.createPeer({ connectionId: 'conn-2', peerDeviceId: 'phone-2' }, async () => undefined)!
+    try {
+      await peerOne.call({ method: 'thread/read', params: { threadId: 'allowed-thread' } })
+      await peerTwo.openStream({ streamId: 's-2', threadId: 'allowed-thread' })
+      const closingTwo = peerTwo.closeAll()
+      await vi.advanceTimersByTimeAsync(5_000)
+      await closingTwo
+
+      await expect(peerOne.closeAll()).resolves.toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+      await domain.close()
+    }
+  })
+
+  it('absorbs rejected releaseThread errors when closing a stream after an oversized frame', async () => {
+    const { root } = await directories()
+    const app = new FakeAppServer(root)
+    const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+    await domain.start()
+    const peer = domain.createPeer({ connectionId: 'conn-oversized', peerDeviceId: 'phone-1' }, async () => undefined)!
+    const originalRelease = domain.releaseThread.bind(domain)
+    let releasedThread: string | undefined
+    // Use a plain async override instead of vi.spyOn/vi.fn because Vitest's spy attaches `.then` to record `settledResults`, masking unhandled rejections.
+    domain.releaseThread = async (threadId: string) => {
+      releasedThread = threadId
+      throw new RpcError('CODEX_THREAD_CLOSING', 'The CodeX thread is still closing.')
+    }
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      await peer.openStream({ streamId: 's-oversized', threadId: 'allowed-thread' })
+      const oversizedDelta = 'x'.repeat(MAX_SECURE_MESSAGE_BYTES)
+      app.emit({
+        kind: 'notification',
+        method: 'item/agentMessage/delta',
+        params: { threadId: 'allowed-thread', itemId: 'msg-big', delta: oversizedDelta },
+      })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(releasedThread).toBe('allowed-thread')
+      expect(unhandled).toHaveLength(0)
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+      domain.releaseThread = originalRelease
+      await peer.closeAll()
+      await domain.close()
+    }
+  })
+
   it('maps active writer rejections to a CodeX busy error', async () => {
     const { root } = await directories()
     const app = new FakeAppServer(root)
