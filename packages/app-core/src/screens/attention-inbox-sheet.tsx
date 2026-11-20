@@ -381,9 +381,8 @@ export function AttentionInboxSheet({
 }
 
 /**
- * Compact header pill for ChatScreen and BotModeScreen showing urgent count
- * (highlighted amber when approvals/questions await, subtle neutral when running/unread,
- * quiet icon when 0) and opening the Attention Inbox sheet.
+ * Compact header pill placed next to the sidebar brand title in HostSessionsDrawer
+ * showing urgent/active count and opening the Attention Inbox sheet.
  */
 export function AttentionHeaderPill({
   onPress,
@@ -725,6 +724,7 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
+      flexShrink: 0,
       gap: 5,
       minHeight: 32,
       minWidth: 32,

@@ -755,7 +755,6 @@ function AppNavigator() {
           setHostSwitcherOpen(false)
           openDevice(device)
         }}
-        onSelectHostAttention={openHostAttention}
         onManageHosts={() => {
           setHostSwitcherOpen(false)
           push({ name: 'remote-hosts' })

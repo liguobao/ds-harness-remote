@@ -49,7 +49,7 @@ import {
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
-import { attentionStatusVisual } from './attention-inbox-sheet'
+import { AttentionHeaderPill, attentionStatusVisual } from './attention-inbox-sheet'
 import { useAttentionStore } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends } from '../state/store-state'
@@ -195,6 +195,7 @@ export function HostSessionsDrawer({
   onOpenHostSwitcher,
   onOpenSettings,
   onOpenAbout,
+  onOpenAttentionInbox,
   botMode,
   onBotModeChange,
   onSelectBot,
@@ -215,6 +216,7 @@ export function HostSessionsDrawer({
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
+  onOpenAttentionInbox?: () => void
   botMode?: boolean
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (botId: string) => void
@@ -1159,27 +1161,37 @@ export function HostSessionsDrawer({
       <View style={[styles.container, fullWidthCentered && styles.centeredColumn]}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
-          disabled={onOpenAbout === undefined}
-          onPress={() => {
-            Keyboard.dismiss()
-            onOpenAbout?.()
-          }}
-          hitSlop={8}
-          style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
-        >
-          <Svg
-            width={22}
-            height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
-            viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
-            accessible={false}
+        <View style={styles.brandLeftGroup}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`DS Harness Remote · ${strings.settings.about}`}
+            disabled={onOpenAbout === undefined}
+            onPress={() => {
+              Keyboard.dismiss()
+              onOpenAbout?.()
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [styles.brandLeft, pressed && styles.pressedFade]}
           >
-            <Path d={FISH_LOGO_PATH} fill={colors.ink} />
-          </Svg>
-          <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
-        </Pressable>
+            <Svg
+              width={22}
+              height={(22 * FISH_LOGO_VIEWBOX.height) / FISH_LOGO_VIEWBOX.width}
+              viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`}
+              accessible={false}
+            >
+              <Path d={FISH_LOGO_PATH} fill={colors.ink} />
+            </Svg>
+            <Text style={styles.brandTitle} numberOfLines={1}>DS Harness Remote</Text>
+          </Pressable>
+          {connected && onOpenAttentionInbox !== undefined && (
+            <AttentionHeaderPill
+              onPress={() => {
+                Keyboard.dismiss()
+                onOpenAttentionInbox()
+              }}
+            />
+          )}
+        </View>
         <View style={styles.brandRight}>
           {onOpenSettings !== undefined && (
             <Pressable
@@ -2270,7 +2282,8 @@ const createStyles = (colors: ThemeColors) =>
       paddingTop: spacing.md,
       paddingBottom: spacing.md,
     },
-    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
+    brandLeftGroup: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.xs, gap: spacing.xs },
+    brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, gap: 8 },
     brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
     brandBadge: {
       backgroundColor: colors.ink,

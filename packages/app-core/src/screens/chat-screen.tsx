@@ -108,7 +108,6 @@ import { useChatPrompts } from './chat/use-chat-prompts'
 import { useChatScroll } from './chat/use-chat-scroll'
 import { useChatTranscript } from './chat/use-chat-transcript'
 import { BotModeScreen } from './bot-mode-screen'
-import { AttentionHeaderPill } from './attention-inbox-sheet'
 import { useLiveSessionStatus } from './device-screens'
 import { HostSessionsDrawer } from './host-sessions-drawer'
 import { PluginsModal } from './plugins-modal'
@@ -661,6 +660,7 @@ export function ChatScreen({
         onOpenHostSwitcher()
       } : undefined}
       onOpenAbout={onOpenAbout}
+      onOpenAttentionInbox={openAttentionInbox}
       onOpenSettings={() => {
         Keyboard.dismiss()
         onOpenSettings?.()
@@ -744,7 +744,6 @@ export function ChatScreen({
           onOpenDrawer={openSessionsDrawer}
           onDeviceInfo={() => onOpenDeviceInfo?.()}
           onMore={() => onOpenSettings?.()}
-          onOpenAttentionInbox={openAttentionInbox}
           splitView={splitNav}
           drawerOpen={sessionsOpen || splitNav}
           screenActive={active && (!sessionsOpen || splitNav)}
@@ -765,7 +764,6 @@ export function ChatScreen({
         backLabel={strings.chat.openHostSessions}
         action={
           <>
-            {connected && <AttentionHeaderPill onPress={openAttentionInbox} />}
             <IconButton
               label={strings.chat.newChat}
               icon={OfficialMenuIcons.newChat}
@@ -1220,7 +1218,6 @@ export function ChatScreen({
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
         action={<>
-          {connected && <AttentionHeaderPill onPress={openAttentionInbox} />}
           <IconButton label={trajectory ? strings.trajectory.close : strings.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
