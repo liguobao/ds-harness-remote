@@ -16,12 +16,16 @@ body:
       description: 该功能主要改进哪个部分？
       options:
         - "Android App (apps/android)"
-        - "Web 客户端 / 浏览器端 (apps/browser)"
+        - "iOS App (apps/ios)"
+        - "HarmonyOS App (apps/harmony)"
+        - "移动端共享核心 (packages/app-core，Android / iOS 共用)"
+        - "Web 客户端 / 浏览器扩展 (dsh.r2049.cn / apps/browser)"
         - "中继 / 信令服务端 (apps/server)"
         - "VS Code 插件 (apps/vscode)"
         - "DSH 桌面插件 (packages/plugin)"
+        - "DSH TUI 插件 (packages/tui)"
         - "联动插件与生态扩展 (dsh-go / ds-bot / intelligent ui 等)"
-        - "通信与核心协议 (client-core / webrtc / protocol)"
+        - "通信与核心协议 (client-core / webrtc / crypto / protocol)"
         - "文档与开发者体验 (docs / dx)"
         - "整体架构与其它"
     validations:

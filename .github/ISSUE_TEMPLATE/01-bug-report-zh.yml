@@ -12,7 +12,7 @@ body:
         **安全与隐私注意（重要）**：
         - 请勿在此公开发布安全漏洞或未经脱敏的敏感信息。
         - 提报前请务必抹去日志和截图中的 **Token、私钥、配对二维码、Agent 对话与提示词（Prompt）、本地绝对路径** 等敏感内容。
-        - 本 Issue 追踪器涵盖 Android 端、Web 端、自部署 Server、桌面插件、核心通信协议，以及与 dsh-go、ds-bot、intelligent ui 等生态插件的联动兼容性。
+        - 本 Issue 追踪器涵盖 Android / iOS / HarmonyOS 客户端、Web 端与浏览器扩展、VS Code 插件、自部署 Server、DSH 桌面与 TUI 插件、核心通信协议，以及与 dsh-go、ds-bot、intelligent ui 等生态插件的联动兼容性。
 
   - type: dropdown
     id: area
@@ -21,12 +21,16 @@ body:
       description: 哪个组件或模块出现了问题？
       options:
         - "Android App (apps/android)"
-        - "Web 客户端 / 浏览器端 (apps/browser)"
+        - "iOS App (apps/ios)"
+        - "HarmonyOS App (apps/harmony)"
+        - "移动端共享核心 (packages/app-core，Android / iOS 共用)"
+        - "Web 客户端 / 浏览器扩展 (dsh.r2049.cn / apps/browser)"
         - "中继 / 信令服务端 (apps/server)"
         - "VS Code 插件 (apps/vscode)"
         - "DSH 桌面插件 (packages/plugin)"
+        - "DSH TUI 插件 (packages/tui)"
         - "联动插件与扩展 (dsh-go / ds-bot / intelligent ui 等)"
-        - "通信与核心协议 (client-core / webrtc / protocol)"
+        - "通信与核心协议 (client-core / webrtc / crypto / protocol)"
         - "文档与部署示例 (docs / examples)"
         - "其他 / 未知"
     validations:
@@ -38,9 +42,15 @@ body:
       label: 客户端 / 部署方式 (Installation method)
       options:
         - "Android APK (GitHub Release / Pre-release)"
+        - "iOS App (TestFlight)"
+        - "HarmonyOS HAP (GitHub Release / Pre-release)"
         - "DSH 桌面插件 (插件市场)"
+        - "DSH TUI 插件 (ds-harness-remote-tui)"
         - "官方托管 Web 端 (dsh.r2049.cn/app)"
+        - "浏览器扩展 (Chrome / Edge MV3)"
+        - "VS Code 扩展 (apps/vscode)"
         - "自建 Docker 服务端 (Self-hosted Server)"
+        - "Linux 服务 / 一键安装脚本 (install.sh)"
         - "npm / CLI (ds-harness-remote 包)"
         - "源码编译安装 (Built from source)"
         - "其他"
@@ -51,8 +61,8 @@ body:
     id: version
     attributes:
       label: 版本或 Commit (Version or commit)
-      description: 客户端版本、插件版本或源码 commit SHA。
-      placeholder: "例如: 0.6.3 或 0123456"
+      description: 客户端版本（移动端可附 versionCode / buildNumber）、插件版本或源码 commit SHA。
+      placeholder: "例如: 0.6.6 (74) 或 0123456"
     validations:
       required: true
 
@@ -60,8 +70,8 @@ body:
     id: os
     attributes:
       label: 运行环境与操作系统 (Operating system)
-      description: 操作系统版本及 CPU 架构（如涉及 Android 请包含手机机型与系统版本）。
-      placeholder: "例如: Android 14 (HyperOS / Pixel), Windows 11 x64, macOS 15.0 arm64"
+      description: 操作系统版本及 CPU 架构（如涉及移动端请包含设备机型与 Android / iOS / HarmonyOS 版本）。
+      placeholder: "例如: iOS 18.x (iPhone), Android 14 (HyperOS / Pixel), HarmonyOS 7.0, Windows 11 x64, macOS 15.0 arm64"
     validations:
       required: true
 
@@ -70,7 +80,7 @@ body:
     attributes:
       label: 接入的 Agent / 后端运行环境 (Agent runtime)
       description: 本地工作电脑上运行的 Agent 类型及版本。
-      placeholder: "例如: DeepSeek Harness Desktop 0.6.x, Codex CLI, Cursor, Antigravity"
+      placeholder: "例如: DeepSeek Harness Desktop / TUI 0.2.2, Codex CLI, Cursor, Antigravity, OpenCode, Claude Code, Pi, Hermes"
 
   - type: input
     id: companion-plugins
@@ -131,7 +141,7 @@ body:
     id: additional-context
     attributes:
       label: 补充信息与截图 (Additional context)
-      description: 截图、网络环境（局域网 / P2P / WebRTC 中继）或其他有助于排查的细节。请注意遮挡二维码与个人路径。
+      description: 截图、网络环境（局域网 / P2P / TURN / Relay 中继）或其他有助于排查的细节。请注意遮挡二维码与个人路径。
 
   - type: checkboxes
     id: validations
