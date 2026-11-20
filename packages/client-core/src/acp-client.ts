@@ -65,7 +65,7 @@ export class AgentAcpClient {
   }
 
   async initialize(
-    params: { protocolVersion?: number; clientInfo?: { name?: string; version?: string } } = {},
+    params: { protocolVersion?: number; backend?: AcpAgentBackend; clientInfo?: { name?: string; version?: string } } = {},
     signal?: AbortSignal,
   ): Promise<unknown> {
     return this.call('initialize', params, signal)
@@ -126,7 +126,11 @@ export class AgentAcpClient {
     if (!isRecord(result) || !Array.isArray(result.commands)) return []
     return result.commands.flatMap(item => (
       isRecord(item) && typeof item.name === 'string'
-        ? [{ name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+        ? [{
+            name: item.name,
+            ...(typeof item.description === 'string' ? { description: item.description } : {}),
+            ...(isRecord(item.input) && typeof item.input.hint === 'string' ? { input: { hint: item.input.hint } } : {}),
+          }]
         : []
     ))
   }
@@ -273,7 +277,11 @@ export class AgentAcpClient {
     const commands = Array.isArray(result.commands)
       ? result.commands.flatMap(item => (
           isRecord(item) && typeof item.name === 'string'
-            ? [{ name: item.name, ...(typeof item.description === 'string' ? { description: item.description } : {}) }]
+            ? [{
+                name: item.name,
+                ...(typeof item.description === 'string' ? { description: item.description } : {}),
+                ...(isRecord(item.input) && typeof item.input.hint === 'string' ? { input: { hint: item.input.hint } } : {}),
+              }]
             : []
         ))
       : undefined

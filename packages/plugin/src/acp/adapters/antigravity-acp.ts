@@ -1,11 +1,10 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { SafeLogger } from '../../logging.js'
+import { execFileCommand } from '../windows-spawn.js'
 import { ClaudeAcpClient } from './claude-process.js'
 import type { CursorAcpOptions, SpawnCursorAcp } from './cursor-process.js'
 
-const execFileAsync = promisify(execFile)
 const NEGATIVE_CACHE_TTL_MS = 30_000
+const NATIVE_PROBE_TIMEOUT_MS = 5_000
 const nativeAcpSupportCache = new Map<string, { promise: Promise<boolean>; expiresAt?: number }>()
 
 /**
@@ -20,10 +19,9 @@ export function supportsAntigravityNativeAcp(binary: string = 'agy'): Promise<bo
     return cached.promise
   }
   const entry: { promise: Promise<boolean>; expiresAt?: number } = {
-    promise: execFileAsync(key, ['acp', '--help'], {
-      timeout: 3_000,
+    promise: execFileCommand(key, ['acp', '--help'], {
+      timeout: NATIVE_PROBE_TIMEOUT_MS,
       windowsHide: true,
-      shell: process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(key),
     }).then(
       () => true,
       () => {

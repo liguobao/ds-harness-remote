@@ -166,6 +166,8 @@ export function ChatScreen({
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
+  const storeError = useAppStore(state => state.error)
+  const clearError = useAppStore(state => state.clearError)
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
@@ -363,12 +365,12 @@ export function ChatScreen({
     setPermissionOptions(undefined)
     setPermissionError(undefined)
     setPermissionLoading(false)
-    if (session === undefined || session.backend === 'codex' || connection.phase !== 'connected') return
+    if (session === undefined || (session.backend !== undefined && session.backend !== 'harness') || connection.phase !== 'connected') return
     const projected = sessionPermissions(session)
     if (projected === undefined || projected.options.length > 0) return
     const controller = new AbortController()
     setPermissionLoading(true)
-    void Promise.resolve().then(() => requireSessionTools().permissionOptions(controller.signal))
+    void Promise.resolve().then(() => requireSessionTools(session.sessionId).permissionOptions(controller.signal))
       .then(options => { if (!controller.signal.aborted) setPermissionOptions(options) })
       .catch(() => { if (!controller.signal.aborted) setPermissionError(strings.tools.permissionUnavailable) })
       .finally(() => { if (!controller.signal.aborted) setPermissionLoading(false) })
@@ -1231,6 +1233,20 @@ export function ChatScreen({
             {strings.chat.syncingHistory}
           </Text>
         </View>
+      )}
+      {storeError !== undefined && (
+        <Pressable
+          style={styles.errorBanner}
+          accessibilityRole="alert"
+          accessibilityLabel={storeError}
+          onPress={clearError}
+        >
+          <View style={styles.errorDot} />
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {storeError}
+          </Text>
+          <X size={14} color={colors.danger} />
+        </Pressable>
       )}
     </>
   return wrapChatShell(

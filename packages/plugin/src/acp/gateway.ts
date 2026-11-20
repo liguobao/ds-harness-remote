@@ -635,12 +635,21 @@ export class AcpRemoteGateway {
         assertCurrent()
         // History uses an isolated reader and must neither require nor claim
         // the live session's control ownership.
-        const client = this.requireAcp(backend) as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
+        const client = this.requireAcp(backend) as CursorAcpLike & {
+          history?: (sessionId: string, cwd: string) => Promise<unknown[]>
+          lastHistoryMetadata?: (sessionId: string) => { modes?: unknown; commands?: unknown[] } | undefined
+        }
         if (!client.history) {
           return { events: [], ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
         }
         const events = await this.readCatalogHistory(backend, client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> }, conversationId, cwd, assertCurrent)
-        return { events, ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
+        const cachedMeta = client.lastHistoryMetadata?.(conversationId)
+        return {
+          events,
+          ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
+          ...(cachedMeta?.modes ? { modes: cachedMeta.modes } : {}),
+          ...(cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}),
+        }
       }
       if (backend !== 'antigravity') return { events: [] }
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
@@ -1755,13 +1764,13 @@ export class AcpRemoteGateway {
     const modes = await client.call('dsh/sessionModes', { sessionId }).catch(() => undefined)
     if (!isRecord(modes) || !Array.isArray(modes.availableModes)) return
     const current = typeof modes.currentModeId === 'string' ? modes.currentModeId : undefined
-    const permissionModes = new Set(['default', 'accept-edits', 'auto', 'acceptEdits', 'bypassPermissions', 'dontAsk'])
+    const permissionModes = new Set(['default', 'accept-edits', 'auto', 'acceptEdits', 'bypassPermissions', 'dontAsk', 'yolo', 'full-auto'])
     if (current && !permissionModes.has(current)) return
     const ids = modes.availableModes
       .filter((item): item is { id: string } => isRecord(item) && typeof item.id === 'string')
       .map(item => item.id)
     const target = preset === 'danger-full-access'
-      ? ['auto', 'bypassPermissions', 'accept-edits', 'acceptEdits'].find(id => ids.includes(id))
+      ? ['auto', 'bypassPermissions', 'yolo', 'full-auto', 'accept-edits', 'acceptEdits'].find(id => ids.includes(id))
       : ids.find(id => id === 'default')
     if (target && target !== current) {
       await client.call('session/set_mode', { sessionId, modeId: target })

@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import type { AcpAvailableCommand, AcpSessionModes } from '@dsh-remote/protocol'
 import type { SafeLogger } from '../../logging.js'
 import { CursorAcpClient, CursorAcpError, type CursorAcpOptions, type SpawnCursorAcp, type CursorAcpInboundHandler } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
@@ -6,6 +7,7 @@ import { acpHistoryEvents } from '../history-events.js'
 const DEFAULT_LOAD_TOMBSTONE_TTL_MS = 60_000
 const MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 60_000
 const MAX_LOAD_TOMBSTONES = 256
+const MAX_HISTORY_METADATA = 64
 
 /** Host-local authentication; no interactive login or filesystem transcript reads.
  *
@@ -24,6 +26,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
   private historyStop?: () => Promise<void>
   private historyReading = false
   private shuttingDown = false
+  private readonly historyMetadata = new Map<string, { modes?: AcpSessionModes; commands?: AcpAvailableCommand[] }>()
   private readonly makeClient: () => CursorAcpClient
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
@@ -170,6 +173,10 @@ export class ClaudeAcpClient extends CursorAcpClient {
     if (id !== undefined && id !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid history session.`)
   }
 
+  lastHistoryMetadata(sessionId: string): { modes?: AcpSessionModes; commands?: AcpAvailableCommand[] } | undefined {
+    return this.historyMetadata.get(sessionId)
+  }
+
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId: string, cwd: string): Promise<unknown[]> {
     if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
@@ -205,6 +212,25 @@ export class ClaudeAcpClient extends CursorAcpClient {
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       this.assertLoaded(result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
+      const [modesRaw, commandsRaw] = await Promise.all([
+        client.call('dsh/sessionModes', { sessionId }).catch(() => undefined),
+        client.call('dsh/sessionCommands', { sessionId }).catch(() => undefined),
+      ])
+      const modes = isRecord(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0
+        ? modesRaw as unknown as AcpSessionModes
+        : undefined
+      const commands = isRecord(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0
+        ? commandsRaw.commands as AcpAvailableCommand[]
+        : undefined
+      if (modes !== undefined || commands !== undefined) {
+        this.historyMetadata.delete(sessionId)
+        this.historyMetadata.set(sessionId, { ...(modes ? { modes } : {}), ...(commands ? { commands } : {}) })
+        while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
+          const oldest = this.historyMetadata.keys().next().value
+          if (oldest === undefined) break
+          this.historyMetadata.delete(oldest)
+        }
+      }
       return acpHistoryEvents(updates, sessionId, this.modelLabel)
     } catch (error) {
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
@@ -217,6 +243,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
   override async close(): Promise<void> {
     this.shuttingDown = true
     this.clearAllLoadSuppressions()
+    this.historyMetadata.clear()
     await Promise.all([super.close(), this.historyStop?.()])
     this.live.clear()
   }
