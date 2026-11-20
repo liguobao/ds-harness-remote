@@ -323,6 +323,44 @@ describe('account and device authorization', () => {
   })
 })
 describe('control authorization and encrypted relay', () => {
+  it('closes an established connection on restart without a spurious connection failure', async () => {
+    const ctx = await connection()
+    await handshake(ctx)
+    const info = vi.spyOn(app.gateway.logger, 'info')
+    const hostClose = once(ctx.host.ws, 'close')
+    const clientClose = once(ctx.client.ws, 'close')
+    await app.close()
+    await Promise.all([hostClose, clientClose])
+    await vi.waitFor(() => expect(info.mock.calls.filter(([event]) => event === 'ws_connection_closed')).toHaveLength(2))
+    expect(info.mock.calls.filter(([event]) => event === 'ws_peer_disconnected')).toEqual([])
+    expect(ctx.host.messages.filter(frame => frame.type === 'error')).toEqual([])
+    expect(ctx.client.messages.filter(frame => frame.type === 'error')).toEqual([])
+    await start()
+    const host = await socket(ctx.h)
+    const client = await socket(ctx.c)
+    expect((await host.next('hello.ack')).capabilities).not.toContain('transport.webrtc.resume.v1')
+    await client.next('hello.ack')
+    client.send('relay', { connectionId: ctx.connectionId, targetDeviceId: ctx.h.deviceId, counter: 0, ciphertext: 'AQIDBA' })
+    expect((await client.next('error')).code).toBe('CONNECTION_NOT_FOUND')
+    client.send('connect.request', { hostDeviceId: ctx.h.deviceId, preferredTransports: ['relay'] })
+    const incoming = await host.next('connect.incoming')
+    expect(incoming.connectionId).not.toBe(ctx.connectionId)
+  })
+  it('drops an established link when the Host control TCP socket fails', async () => {
+    const ctx = await connection()
+    await handshake(ctx)
+    ctx.host.ws.terminate()
+    expect((await ctx.client.next('error'))).toMatchObject({
+      code: 'CONNECTION_FAILED', connectionId: ctx.connectionId, retryable: true,
+    })
+    ctx.client.send('relay', {
+      connectionId: ctx.connectionId, targetDeviceId: ctx.h.deviceId, counter: 0, ciphertext: 'AQIDBA',
+    })
+    ctx.client.send('ping', { nonce: 'stale-link-barrier' })
+    expect(await ctx.client.next('pong')).toEqual({ nonce: 'stale-link-barrier' })
+    expect(ctx.client.messages.filter(frame => frame.type === 'error')).toEqual([])
+    expect(ctx.host.messages.filter(frame => frame.type === 'relay')).toEqual([])
+  })
   it('requires the complete native origin when NetStack omits the WebSocket port', async () => {
     const hint = 'X-DSH-Native-Origin: http://localhost:8080'
     await runScenarios([
