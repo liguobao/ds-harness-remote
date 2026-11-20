@@ -15,6 +15,7 @@ import {
   readCodexSession,
 } from '../services/codex'
 import {
+  acpPermissionsValue,
   createAcpSession,
   createAntigravitySession,
   createCursorSession,
@@ -45,16 +46,6 @@ import type { AppState } from './store-state'
 
 const ACP_PAGE_SIZE = 60
 const acpOlderHistory = new Map<string, import('../types').ChatItem[]>()
-
-function acpPermissionsValue(currentValue: string) {
-  return {
-    options: [
-      { value: 'workspace-write', name: 'workspace-write', description: 'Interactive one-time approval for tool executions and commands.' },
-      { value: 'danger-full-access', name: 'danger-full-access', description: 'Auto-approve tool requests for subsequent turns in this session.' },
-    ],
-    currentValue,
-  }
-}
 
 export function hasAcpBackendFor(connection: SessionAccess['runtime']['connection'], backend: string): boolean {
   if (backend === 'claude') return connection.hasClaude()
@@ -562,15 +553,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             ...session,
             ...(details.modes?.currentModeId ? { agentPreset: details.modes.currentModeId } : {}),
             ...(details.availableCommands ? { availableCommands: details.availableCommands } : {}),
-            ...(details.permissionPreset ? {
-              projections: {
-                ...session.projections,
-                values: {
-                  ...session.projections?.values,
-                  permissions: acpPermissionsValue(details.permissionPreset),
-                },
+            projections: {
+              ...session.projections,
+              values: {
+                ...session.projections?.values,
+                permissions: details.permissionPreset
+                  ? acpPermissionsValue(details.permissionPreset)
+                  : (session.projections?.values?.permissions ?? acpPermissionsValue()),
               },
-            } : {}),
+            },
           }
           set(state => {
             const currentMessages = state.messages[session.sessionId] ?? []
@@ -843,12 +834,47 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             }))
             return get().openSession(created)
           }
+          const applyDefaultAcpPermission = async (
+            acpBackend: string,
+            client: ReturnType<typeof acpClientForBackend>,
+            session: RemoteSession,
+          ): Promise<RemoteSession> => {
+            if (defaultPermission !== 'workspace-write' && defaultPermission !== 'danger-full-access') {
+              return session
+            }
+            if (defaultPermission === 'workspace-write') return session
+            try {
+              const confirmed = await client.selectPermission(cursorNativeId(session), acpBackend, defaultPermission)
+              const confirmedRecord = typeof confirmed === 'object' && confirmed !== null
+                ? confirmed as Record<string, unknown>
+                : undefined
+              const effective = typeof confirmedRecord?.preset === 'string'
+                ? confirmedRecord.preset
+                : defaultPermission
+              return {
+                ...session,
+                projections: {
+                  ...session.projections,
+                  values: {
+                    ...session.projections?.values,
+                    permissions: acpPermissionsValue(effective),
+                  },
+                },
+              }
+            } catch {
+              // Older Hosts may not support dsh/selectPermission; keep the safe default.
+              return session
+            }
+          }
           if (backend === 'cursor') {
-            const created = await runtime.connection.requireCursor().createSession(cwd, 'agent', 'cursor')
-            const session = createCursorSession({
+            const client = runtime.connection.requireCursor()
+            const created = await client.createSession(cwd, 'agent', 'cursor')
+            if (generation !== runtime.connectionGeneration) return false
+            const session = await applyDefaultAcpPermission('cursor', client, createCursorSession({
               acpSessionId: created.sessionId,
               cwd,
-            })
+            }))
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {
@@ -865,11 +891,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (backend === 'antigravity') {
-            const created = await runtime.connection.requireAntigravity().createSession(cwd, 'agent', 'antigravity')
-            const session = createAntigravitySession({
+            const client = runtime.connection.requireAntigravity()
+            const created = await client.createSession(cwd, 'agent', 'antigravity')
+            if (generation !== runtime.connectionGeneration) return false
+            const session = await applyDefaultAcpPermission('antigravity', client, createAntigravitySession({
               acpSessionId: created.sessionId,
               cwd,
-            })
+            }))
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {
@@ -886,12 +915,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (backend === 'pi') {
-            const created = await runtime.connection.requirePi().createSession(cwd, 'agent', 'pi')
+            const client = runtime.connection.requirePi()
+            const created = await client.createSession(cwd, 'agent', 'pi')
             if (generation !== runtime.connectionGeneration) return false
-            const session = createPiSession({
+            const session = await applyDefaultAcpPermission('pi', client, createPiSession({
               acpSessionId: created.sessionId,
               cwd,
-            })
+            }))
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {
@@ -908,12 +939,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (backend === 'opencode') {
-            const created = await runtime.connection.requireOpencode().createSession(cwd, 'agent', 'opencode')
+            const client = runtime.connection.requireOpencode()
+            const created = await client.createSession(cwd, 'agent', 'opencode')
             if (generation !== runtime.connectionGeneration) return false
-            const session = createOpencodeSession({
+            const session = await applyDefaultAcpPermission('opencode', client, createOpencodeSession({
               acpSessionId: created.sessionId,
               cwd,
-            })
+            }))
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {
@@ -930,16 +963,19 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (backend === 'claude' || backend === 'hermes') {
-            const created = backend === 'hermes'
-              ? await runtime.connection.requireHermes().createSession(cwd, 'agent', 'hermes')
-              : await runtime.connection.requireClaude().createSession(cwd, 'agent', 'claude')
+            const client = backend === 'hermes'
+              ? runtime.connection.requireHermes()
+              : runtime.connection.requireClaude()
+            const created = await client.createSession(cwd, 'agent', backend)
             if (generation !== runtime.connectionGeneration) return false
-            const session = backend === 'hermes'
+            const baseSession = backend === 'hermes'
               ? createHermesSession({ acpSessionId: created.sessionId, cwd })
               : createClaudeSession({
                 acpSessionId: created.sessionId,
                 cwd,
               })
+            const session = await applyDefaultAcpPermission(backend, client, baseSession)
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {
@@ -956,9 +992,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             return get().openSession(session)
           }
           if (isAcpManagedBackend(backend) && backend !== 'cursor' && backend !== 'antigravity' && backend !== 'pi' && backend !== 'opencode' && backend !== 'claude' && backend !== 'hermes') {
-            const created = await runtime.connection.requireAcpBackend(backend).createSession(cwd, 'agent', backend)
+            const client = runtime.connection.requireAcpBackend(backend)
+            const created = await client.createSession(cwd, 'agent', backend)
             if (generation !== runtime.connectionGeneration) return false
-            const session = createAcpSession({ backend, acpSessionId: created.sessionId, cwd, title: workspace?.title })
+            const session = await applyDefaultAcpPermission(backend, client, createAcpSession({ backend, acpSessionId: created.sessionId, cwd, title: workspace?.title }))
+            if (generation !== runtime.connectionGeneration) return false
             set(state => ({
               sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
               ...(workspace === undefined ? {} : {

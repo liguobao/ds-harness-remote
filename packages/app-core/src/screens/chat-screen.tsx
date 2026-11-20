@@ -363,12 +363,12 @@ export function ChatScreen({
     setPermissionOptions(undefined)
     setPermissionError(undefined)
     setPermissionLoading(false)
-    if (session === undefined || session.backend === 'codex' || connection.phase !== 'connected') return
+    if (session === undefined || (session.backend !== undefined && session.backend !== 'harness') || connection.phase !== 'connected') return
     const projected = sessionPermissions(session)
     if (projected === undefined || projected.options.length > 0) return
     const controller = new AbortController()
     setPermissionLoading(true)
-    void Promise.resolve().then(() => requireSessionTools().permissionOptions(controller.signal))
+    void Promise.resolve().then(() => requireSessionTools(session.sessionId).permissionOptions(controller.signal))
       .then(options => { if (!controller.signal.aborted) setPermissionOptions(options) })
       .catch(() => { if (!controller.signal.aborted) setPermissionError(strings.tools.permissionUnavailable) })
       .finally(() => { if (!controller.signal.aborted) setPermissionLoading(false) })

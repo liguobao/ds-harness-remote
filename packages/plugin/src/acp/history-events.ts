@@ -1,4 +1,5 @@
 import type { CursorAcpInbound } from './adapters/cursor-process.js'
+import { acpImageContent, parseAcpImage } from './image-content.js'
 import { piToolResult } from './pi-tool-result.js'
 
 /**
@@ -89,11 +90,22 @@ export function acpHistoryEvents(
       }
       pending ??= { role, content: [] }
       if (isImage) {
-        pending.content.push({
-          type: 'image',
-          mimeType: content.mimeType,
-          data: content.data,
-        })
+        try {
+          const parsed = parseAcpImage(content)
+          const ext = parsed.mimeType === 'image/jpeg' ? 'jpg' : parsed.mimeType.slice(6)
+          const attachmentId = `agy-image:history-${sessionId}-${events.length}-${pending.content.length}.${ext}`
+          pending.content.push({
+            ...acpImageContent(parsed, attachmentId),
+            mimeType: parsed.mimeType,
+          })
+        } catch {
+          pending.content.push({
+            type: 'image',
+            mimeType: content.mimeType,
+            mediaType: content.mimeType,
+            data: content.data,
+          })
+        }
       } else {
         const type = kind === 'agent_thought_chunk' ? 'reasoning' : 'text'
         const previous = pending.content.at(-1)

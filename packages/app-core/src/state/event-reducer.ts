@@ -742,7 +742,7 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
     // Image attachments have been recorded under several field names across
     // Harness releases; accept whichever variant the Host persisted.
     const name = firstString(block, ['name']) ?? firstString(attachment, ['name', 'fileName'])
-    const mediaType = firstString(block, ['mediaType'])
+    const mediaType = firstString(block, ['mediaType', 'mimeType'])
       ?? firstString(attachment, ['mediaType', 'mimeType', 'contentType'])
     const bytes = firstNumber(block, ['bytes'])
       ?? firstNumber(attachment, ['bytes', 'byteLength', 'size'])
@@ -781,7 +781,7 @@ function imageDataUri(block: UnknownRecord): string | undefined {
   const parsed = url === undefined ? undefined : parseDataImageUrl(url)
   if (parsed !== undefined) return parsed
   const data = stringValue(block.data)
-  const mediaType = stringValue(block.mediaType)
+  const mediaType = stringValue(block.mediaType) ?? stringValue(block.mimeType)
   if (data === undefined || mediaType === undefined || !IMAGE_MEDIA_TYPES.has(mediaType) || !isCanonicalBase64(data)) {
     return undefined
   }

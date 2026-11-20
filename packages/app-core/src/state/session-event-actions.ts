@@ -1,4 +1,5 @@
 import { reduceCodexTimelineFrame } from '@dsh-remote/client-core'
+import { friendlyError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
 import {
   codexItemsToChat,
@@ -390,7 +391,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             sessions: state.sessions.map(applySessionMetadata),
             selectedSession: state.selectedSession === undefined ? undefined : applySessionMetadata(state.selectedSession),
             ...(kind === 'prompt_failed'
-              ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'hermes' ? zhCN.runtime.hermesUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
+              ? { error: acpPromptFailureMessage(session.backend, update) }
               : {}),
           }
           : {}),
@@ -406,4 +407,25 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
       }
     },
   }
+}
+
+function acpPromptFailureMessage(
+  backend: RemoteSession['backend'],
+  update: Record<string, unknown> | undefined,
+): string {
+  const fallback = backend === 'claude' ? zhCN.runtime.claudeUnavailable
+    : backend === 'hermes' ? zhCN.runtime.hermesUnavailable
+    : backend === 'opencode' ? zhCN.runtime.opencodeUnavailable
+    : backend === 'pi' ? zhCN.runtime.piUnavailable
+    : backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable
+    : zhCN.runtime.cursorUnavailable
+  const code = typeof update?.code === 'string' && update.code.trim().length > 0 ? update.code.trim() : undefined
+  const message = typeof update?.message === 'string' && update.message.trim().length > 0 ? update.message.trim() : undefined
+  if (code === undefined && message === undefined) return fallback
+  const err = Object.assign(new Error(message ?? fallback), code === undefined ? {} : { code })
+  const resolved = friendlyError(err)
+  if (code !== undefined && resolved === fallback && message === undefined && code !== 'CURSOR_UNAVAILABLE') {
+    return `${fallback} (${code})`
+  }
+  return resolved
 }

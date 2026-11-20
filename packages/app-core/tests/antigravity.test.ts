@@ -23,12 +23,23 @@ describe('AGY catalog and recovery', () => {
   it('loads history through bounded transfer and restores image bytes without exposing cache markers', async () => {
     const transferCall = vi.fn(async () => ({ events: [{ event: { type: 'user/message', time: 100, seq: 0, data: {
       id: 'image-user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Read this' },
-        { type: 'image', mediaType: 'image/png', data: 'aGVsbG8=' }],
+        { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }],
     } } }] }))
     const events = await readAntigravityHistory({ transferCall } as unknown as AgentAcpClient, 'durable')
     expect(transferCall).toHaveBeenCalledWith('dsh/sessionHistory', { backend: 'antigravity', sessionId: 'durable' })
     const user = foldAcpHistory(events, 'antigravity:durable')[0]
     expect(user).toMatchObject({ role: 'user', images: [{ uri: 'data:image/png;base64,aGVsbG8=' }] })
+  })
+
+  it('provides default permission projection on newly created AGY sessions', () => {
+    const session = createAntigravitySession({ acpSessionId: 'perm-1', cwd: '/host/project' })
+    expect(session.projections?.values?.permissions).toMatchObject({
+      currentValue: 'workspace-write',
+      options: [
+        { value: 'workspace-write' },
+        { value: 'danger-full-access' },
+      ],
+    })
   })
 
   it('propagates failed history reads instead of reporting an empty conversation', async () => {

@@ -172,6 +172,30 @@ describe('Issue #469 ACP parity (plugin)', () => {
     expect(commands).toEqual({ commands: [{ name: 'compact', description: 'Compact context' }] })
     expect(inbound.some(frame => frame.method === 'session/update' && (frame.params as Record<string, unknown> & { update?: { sessionUpdate?: string } }).update?.sessionUpdate === 'usage_update')).toBe(true)
 
+    const { acpHistoryEvents } = await import('../src/acp/history-events.js')
+    const replayed = acpHistoryEvents([{
+      kind: 'notification',
+      method: 'session/update',
+      params: {
+        sessionId: 'agy-native-1',
+        update: {
+          sessionUpdate: 'user_message_chunk',
+          content: {
+            type: 'image',
+            mimeType: 'image/png',
+            data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          },
+        },
+      },
+    }], 'agy-native-1', 'antigravity') as Array<{ event: { type: string; data: { content: Array<Record<string, unknown>> } } }>
+    const userMsg = replayed.find(entry => entry.event.type === 'user/message')
+    expect(userMsg?.event.data.content[0]).toMatchObject({
+      type: 'image',
+      mimeType: 'image/png',
+      mediaType: 'image/png',
+      attachment: { attachmentId: expect.stringMatching(/^agy-image:/) },
+    })
+
     await client.close()
   })
 

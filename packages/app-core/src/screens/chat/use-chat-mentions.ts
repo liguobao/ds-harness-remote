@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from 'react-native'
 import { Alert } from '../../ui/alert'
+import { isAcpManagedBackend } from '../../lib/workspace-key'
 import { strings } from '../../locales/i18n'
 import type { SkillEntry } from '../../services/session-tools'
 import { requireSessionTools } from '../../state/store'
@@ -154,7 +155,7 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
     setMentionType(null)
     const sessionId = session?.sessionId
     if (sessionId === undefined) return
-    void Promise.resolve().then(() => requireSessionTools().executeCommand(sessionId, '/export'))
+    void Promise.resolve().then(() => requireSessionTools(sessionId).executeCommand(sessionId, '/export'))
       .then(result => {
         Alert.alert(strings.mention.exportTitle, result.text ?? (result.kind === 'success' ? strings.mention.exportTriggered : strings.mention.exportFailed))
       })
@@ -163,33 +164,59 @@ export function useChatMentions({ session, sessions, workspaces, connectionPhase
       })
   }
 
-  // 「/」菜单：添加 / 指令 / 技能 三组，动作按 DeepSeek Harness Web 端绑定。
-  const commandAddItems: MentionItem[] = [
-    { id: 'file', icon: OfficialMenuIcons.file, title: strings.mention.file, description: strings.mention.fileDescription, onPress: () => insertMentionText('/file ') },
-    { id: 'goal', icon: OfficialMenuIcons.goal, title: strings.mention.goal, description: strings.mention.goalDescription, onPress: () => insertMentionText('/goal ') },
-    { id: 'plan', icon: OfficialMenuIcons.plan, title: strings.mention.plan, description: strings.mention.planDescription, onPress: () => insertMentionText('/plan ') },
-    { id: 'feedback', icon: OfficialMenuIcons.feedback, title: strings.mention.feedback, description: strings.mention.feedbackDescription, onPress: () => insertMentionText('/feedback ') },
-  ]
-  const commandControlItems: MentionItem[] = [
-    { id: 'compact', icon: OfficialMenuIcons.compact, title: strings.mention.compact, description: strings.mention.compactDescription, onPress: () => insertMentionText('/compact') },
-    { id: 'permission', icon: OfficialMenuIcons.permission, title: strings.mention.permission, description: strings.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
-    { id: 'model', icon: OfficialMenuIcons.model, title: strings.mention.model, description: strings.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
-    { id: 'export', icon: OfficialMenuIcons.export, title: strings.mention.export, description: strings.mention.exportDescription, onPress: runSessionExport },
-  ]
+  const isAcpSession = isAcpManagedBackend(session?.backend)
+  const isHarnessSession = session?.backend === undefined || session.backend === 'harness'
+  // 「/」菜单：Harness 保留原生三组；ACP（含 AGY）优先展示上游 availableCommands + 会话控制。
+  const commandAddItems: MentionItem[] = isHarnessSession
+    ? [
+        { id: 'file', icon: OfficialMenuIcons.file, title: strings.mention.file, description: strings.mention.fileDescription, onPress: () => insertMentionText('/file ') },
+        { id: 'goal', icon: OfficialMenuIcons.goal, title: strings.mention.goal, description: strings.mention.goalDescription, onPress: () => insertMentionText('/goal ') },
+        { id: 'plan', icon: OfficialMenuIcons.plan, title: strings.mention.plan, description: strings.mention.planDescription, onPress: () => insertMentionText('/plan ') },
+        { id: 'feedback', icon: OfficialMenuIcons.feedback, title: strings.mention.feedback, description: strings.mention.feedbackDescription, onPress: () => insertMentionText('/feedback ') },
+      ]
+    : []
+  const acpCommandItems: MentionItem[] = useMemo(() => {
+    if (!isAcpSession) return []
+    return (session?.availableCommands ?? []).map(cmd => ({
+      id: `acp-cmd:${cmd.name}`,
+      icon: OfficialMenuIcons.skill,
+      title: `/${cmd.name}`,
+      ...(cmd.description !== undefined && cmd.description.length > 0
+        ? { description: cmd.description }
+        : cmd.input?.hint !== undefined && cmd.input.hint.length > 0
+          ? { description: cmd.input.hint }
+          : {}),
+      onPress: () => insertMentionText(`/${cmd.name} `),
+    }))
+  }, [isAcpSession, session?.availableCommands])
+  const commandControlItems: MentionItem[] = isHarnessSession
+    ? [
+        { id: 'compact', icon: OfficialMenuIcons.compact, title: strings.mention.compact, description: strings.mention.compactDescription, onPress: () => insertMentionText('/compact') },
+        { id: 'permission', icon: OfficialMenuIcons.permission, title: strings.mention.permission, description: strings.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
+        { id: 'model', icon: OfficialMenuIcons.model, title: strings.mention.model, description: strings.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
+        { id: 'export', icon: OfficialMenuIcons.export, title: strings.mention.export, description: strings.mention.exportDescription, onPress: runSessionExport },
+      ]
+    : [
+        { id: 'permission', icon: OfficialMenuIcons.permission, title: strings.mention.permission, description: strings.mention.permissionDescription, onPress: () => { setMentionType(null); setPermissionPickerOpen(true) } },
+        { id: 'model', icon: OfficialMenuIcons.model, title: strings.mention.model, description: strings.mention.modelDescription, onPress: () => { setMentionType(null); setModelPickerOpen(true) } },
+        ...acpCommandItems,
+      ]
   const mentionTexts = (item: MentionItem) => [item.title, item.description ?? '', item.meta ?? '']
   const buildMentionGroups = (): MentionGroup[] => {
     const matching = (items: MentionItem[], limit = 20) => filterByQuery(items, mentionQuery, mentionTexts).slice(0, limit)
     switch (mentionType) {
       case 'command': return [
-        { key: 'add', title: strings.mention.addSection, items: matching(commandAddItems) },
+        ...(commandAddItems.length > 0 ? [{ key: 'add', title: strings.mention.addSection, items: matching(commandAddItems) }] : []),
         { key: 'commands', title: strings.mention.commandSection, items: matching(commandControlItems) },
-        {
-          key: 'skills',
-          title: strings.mention.skillSection,
-          items: skillCatalog === undefined && skillCatalogFailed
-            ? []
-            : matching(skillItems),
-        },
+        ...(isHarnessSession
+          ? [{
+              key: 'skills',
+              title: strings.mention.skillSection,
+              items: skillCatalog === undefined && skillCatalogFailed
+                ? []
+                : matching(skillItems),
+            }]
+          : []),
       ]
       case 'context': return [
         { key: 'sessions', title: strings.mention.sessionSection, items: matching(sessionItems) },

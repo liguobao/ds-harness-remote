@@ -46,6 +46,16 @@ export function createAcpWorkspace(backend: AcpManagedBackend, path: string, tit
   }
 }
 
+export function acpPermissionsValue(currentValue = 'workspace-write') {
+  return {
+    options: [
+      { value: 'workspace-write', name: 'workspace-write', description: 'Interactive one-time approval for tool executions and commands.' },
+      { value: 'danger-full-access', name: 'danger-full-access', description: 'Auto-approve tool requests for subsequent turns in this session.' },
+    ],
+    currentValue,
+  }
+}
+
 export function createAcpSession(input: {
   backend: AcpManagedBackend
   acpSessionId: string
@@ -65,6 +75,7 @@ export function createAcpSession(input: {
     projections: {
       values: {
         backend: input.backend,
+        permissions: acpPermissionsValue(),
         ...(supportsImages ? {
           imageLimits: {
             maxImageBytes: 8 * 1024 * 1024,
@@ -326,7 +337,7 @@ export function createCursorSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'cursor' },
+      values: { backend: 'cursor', permissions: acpPermissionsValue() },
     },
   }
 }
@@ -346,7 +357,7 @@ export function createPiSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'pi' },
+      values: { backend: 'pi', permissions: acpPermissionsValue() },
     },
   }
 }
@@ -366,7 +377,7 @@ export function createAntigravitySession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'antigravity', imageLimits: {
+      values: { backend: 'antigravity', permissions: acpPermissionsValue(), imageLimits: {
         maxImageBytes: 8 * 1024 * 1024, maxImagesPerMessage: 4, maxMessageImageBytes: 32 * 1024 * 1024,
         maxImagePixels: 40_000_000, maxImageDimension: 8192, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
       } },
@@ -389,7 +400,7 @@ export function createOpencodeSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'opencode' },
+      values: { backend: 'opencode', permissions: acpPermissionsValue() },
     },
   }
 }
@@ -425,6 +436,7 @@ export function createHermesSession(input: {
     projections: {
       values: {
         backend: 'hermes',
+        permissions: acpPermissionsValue(),
         imageLimits: {
           maxImageBytes: 8 * 1024 * 1024,
           maxImagesPerMessage: 4,
@@ -453,7 +465,7 @@ export function createClaudeSession(input: {
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
-      values: { backend: 'claude' },
+      values: { backend: 'claude', permissions: acpPermissionsValue() },
     },
   }
 }
@@ -720,8 +732,7 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
     const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
     const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? previous?.toolName ?? 'tool'
-    const pi = sessionId.startsWith('pi:')
-    const meta = pi && isRecord(update._meta) ? update._meta : {}
+    const meta = isRecord(update._meta) ? update._meta : {}
     const terminalOutput = isRecord(meta.terminal_output) ? meta.terminal_output : {}
     const terminalExit = isRecord(meta.terminal_exit) ? meta.terminal_exit : {}
     const exitCode = typeof terminalExit.exit_code === 'number' && Number.isInteger(terminalExit.exit_code)
