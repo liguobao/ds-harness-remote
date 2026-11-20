@@ -36,6 +36,7 @@
 
 ## 维护
 
+- [贡献指南](../CONTRIBUTING.zh.md)（[English](../CONTRIBUTING.md)）：环境准备、构建与验证命令、多语言同步、PR 与安全上报规范。
 - [TODO](TODO.md) 只保留待办与已知限制；版本变更写入 [CHANGELOG](CHANGELOG.md)。
 - 当前版本和依赖以各包 manifest、lockfile 与源码为准；发布状态以正式 Release 为准。
 - 协议变化同步 `protocol.md`、共享 schema 与消费端，不另建重复契约。

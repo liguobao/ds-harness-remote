@@ -160,7 +160,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 
 ## Documentation Rules
 
-- 根目录留 `README.md`（默认英文，不另建独立英文副本）、`README.zh.md`、`README.ja.md`、`AGENTS.md` 与根清单。
+- 根目录留 `README.md`（默认英文，不另建独立英文副本）、`README.zh.md`、`README.ja.md`、`CONTRIBUTING.md`、`CONTRIBUTING.zh.md`、`AGENTS.md` 与根清单。
 - 专题集中于 [docs/](docs/README.md)，设计位于 `docs/design/`（旧归档目录已移除）；自部署 Server 实际能力见 [apps/server/README.zh.md](apps/server/README.zh.md)。
 - `docs/TODO.md` 只记待办与已知限制（保留 Metro `@noble/hashes/crypto.js` fallback 待办，未修禁删）。
 - `docs/CHANGELOG.md` 与 Release Notes 只写用户可感知变化与贡献者，不写测试数、构建命令或未验收表。

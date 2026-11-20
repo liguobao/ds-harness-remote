@@ -273,6 +273,7 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - [Codex Remote 技術ノート](docs/codex-remote.md)
 - [ACP Remote / Agent アダプターノート](docs/acp-remote.md)
 - [ドキュメント一覧](docs/README.md)
+- [コントリビューションガイド](CONTRIBUTING.md)（[简体中文](CONTRIBUTING.zh.md)）
 - [エンドツーエンド暗号化](docs/end-to-end-encryption.md)
 - [ネットワークと通信方式](docs/network.md)
 - [Remote プロトコル](docs/protocol.md)
@@ -310,6 +311,8 @@ DS Bot は DeepSeek Harness（dsh）を bot として利用できるようにす
 - **ドキュメントと多言語対応**：利用ガイドの改善、表現のブラッシュアップ、英語・中国語・日本語ドキュメントの同期支援。
 - **実機テストとフィードバック**：お使いの環境（Desktop / Web / Android）で動作を試し、実際の使用感を教えてください。
 - **コードの作成とレビュー**：バグ修正、新機能の実装、またはコミュニティから寄せられた Pull Request のレビュー。
+
+開発環境の準備、検証コマンド、PR の進め方については [コントリビューションガイド](CONTRIBUTING.md)（[简体中文](CONTRIBUTING.zh.md)）をご覧ください。
 
 <p align="center">
   <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">

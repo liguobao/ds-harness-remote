@@ -275,6 +275,7 @@ DS Bot is a bot plugin for DeepSeek Harness (dsh) that turns dsh into a bot. You
 - [Codex Remote technical notes](docs/codex-remote.md)
 - [ACP Remote / Agent adapter notes](docs/acp-remote.md)
 - [Documentation index](docs/README.md)
+- [Contributing guide](CONTRIBUTING.md) ([简体中文](CONTRIBUTING.zh.md))
 - [End-to-end encryption](docs/end-to-end-encryption.md)
 - [Network and transport](docs/network.md)
 - [Remote Protocol](docs/protocol.md)
@@ -312,6 +313,8 @@ No matter your background, your involvement is deeply valued:
 - **Docs & Localization**: Improve guides, polish explanations, or help keep English, Chinese, and Japanese docs in sync.
 - **Testing & Cross-Platform**: Run the project across your devices (Desktop / Web / Android) and tell us how it feels in real environments.
 - **Code & Review**: Tackle open tasks, fix bugs, implement features, or help review community Pull Requests.
+
+Ready to get started? Read the [Contributing Guide](CONTRIBUTING.md) ([简体中文](CONTRIBUTING.zh.md)) for environment setup, verification commands, and PR guidelines.
 
 <p align="center">
   <a href="https://github.com/liguobao/ds-harness-remote/graphs/contributors">
