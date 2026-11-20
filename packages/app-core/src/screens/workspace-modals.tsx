@@ -75,7 +75,12 @@ export function WorkspaceActionsModal({
   const canManage = canManageWorkspace(target)
 
   return (
-    <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+    <SheetModal
+      visible={target !== undefined}
+      onClose={onClose}
+      backdropStyle={styles.backdrop}
+      sheetStyle={[styles.sheet, sheetAsDialog ? { paddingTop: spacing.lg } : { maxHeight: sheetMaxHeight }]}
+    >
         {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <View style={styles.workspaceActionHeading}>
@@ -438,7 +443,12 @@ export function RenameWorkspaceModal({
   }
 
   return (
-    <SheetModal visible={target !== undefined} onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+    <SheetModal
+      visible={target !== undefined}
+      onClose={onClose}
+      backdropStyle={styles.backdrop}
+      sheetStyle={[styles.sheet, sheetAsDialog ? { paddingTop: spacing.lg } : { maxHeight: sheetMaxHeight }]}
+    >
         {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.renameTitle}</Text>
@@ -523,7 +533,13 @@ export function DirectoryBrowserModal({
   const entries = listing === undefined ? [] : listing.entries.filter(entry => showHidden || !entry.hidden)
 
   return (
-    <SheetModal visible={visible} onClose={onClose} avoidKeyboard backdropStyle={styles.backdrop} sheetStyle={[styles.browserSheet, { height: browserSheetHeight }]}>
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      avoidKeyboard
+      backdropStyle={styles.backdrop}
+      sheetStyle={[styles.browserSheet, { height: browserSheetHeight }, sheetAsDialog && { paddingTop: spacing.lg }]}
+    >
         {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>

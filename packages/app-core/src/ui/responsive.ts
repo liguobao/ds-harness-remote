@@ -20,9 +20,16 @@ export const WINDOW_SIZE_EXPANDED = 840
 
 /**
  * Overlay drawers fill compact windows but are capped on medium/expanded
- * ones so the conversation behind the scrim stays partially visible.
+ * ones (Material 3 modal drawer width) so the conversation behind the scrim
+ * stays visible with comfortable breathing room and close-tap target.
  */
-export const DRAWER_MAX_WIDTH = 420
+export const DRAWER_MAX_WIDTH = 360
+
+/**
+ * Reading width cap for full-width non-dismissible drawers (cold start / host
+ * switch) on wide windows so workspace rows do not stretch edge-to-edge.
+ */
+export const DRAWER_FULL_CONTENT_MAX_WIDTH = 560
 
 /** Width cap for bottom sheets promoted to centered dialog cards on wide windows. */
 export const DIALOG_SHEET_MAX_WIDTH = 560

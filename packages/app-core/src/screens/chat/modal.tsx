@@ -25,7 +25,7 @@ import { createStyles } from './styles'
 export function ModalSurface({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
+  const { height: windowHeight, sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const reduceMotion = useReduceMotion()
   const progress = useRef(new Animated.Value(0)).current
 
@@ -42,8 +42,8 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
   }, [progress, reduceMotion])
 
   // Wide windows promote the bottom sheet to a centered dialog card. The card
-  // stays opaque (only the backdrop fades) so Android never flashes its
-  // elevation shadow in from nothing; reduced motion drops the scale.
+  // stays opaque so Android never flashes its elevation shadow in from
+  // nothing; reduced motion drops the scale.
   const asDialog = sheetAsDialog
   const sheetTransform = asDialog
     ? { transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.96, 1] }) }] }
@@ -55,15 +55,20 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
           }),
         }],
       }
+  const dialogPadTop = Math.max(spacing.md, insets.top)
+  const dialogPadBottom = Math.max(spacing.md, insets.bottom)
+  const dialogPadLeft = Math.max(spacing.md, insets.left)
+  const dialogPadRight = Math.max(spacing.md, insets.right)
 
   return (
     <View
       style={[
         asDialog ? styles.modalDialogBackdrop : styles.modalBackdrop,
         asDialog && {
-          paddingTop: insets.top,
-          paddingBottom: insets.bottom,
-          paddingHorizontal: spacing.md,
+          paddingTop: dialogPadTop,
+          paddingBottom: dialogPadBottom,
+          paddingLeft: dialogPadLeft,
+          paddingRight: dialogPadRight,
         },
       ]}
       pointerEvents="box-none"
@@ -80,7 +85,7 @@ export function ModalSurface({ onClose, children }: { onClose: () => void; child
           asDialog ? styles.modalDialogSheet : styles.modalSheet,
           {
             maxHeight: asDialog
-              ? Math.max(200, sheetMaxHeight - insets.top - insets.bottom)
+              ? Math.min(sheetMaxHeight, Math.max(0, windowHeight - dialogPadTop - dialogPadBottom))
               : sheetMaxHeight,
             ...(asDialog ? {
               width: '100%',

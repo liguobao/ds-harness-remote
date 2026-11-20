@@ -67,7 +67,12 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
       visible={visible}
       onClose={dismiss}
       backdropStyle={styles.backdrop}
-      sheetStyle={[styles.sheet, { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom }]}
+      sheetStyle={[
+        styles.sheet,
+        sheetAsDialog
+          ? { paddingTop: spacing.lg, paddingBottom: spacing.lg }
+          : { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom },
+      ]}
     >
           {!sheetAsDialog && <View style={styles.grabber} />}
           <View style={styles.sheetHeader}>
