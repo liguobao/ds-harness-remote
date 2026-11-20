@@ -107,7 +107,7 @@ function collectFrames(ws: WebSocket) {
 }
 
 describe('DSH Web Host forwarding boundary', () => {
-  const url = new URL('https://test.hostc.4ba.io/')
+  const url = new URL('https://test.tun-test.4ba.io/')
   const request: OpenMessage = { method: 'GET', path: '/api/web', headers: [], body: false }
 
   it.each(['/ds-harness-remote/api', '/%64s-harness-remote/api', '/%252e%252e/',
@@ -150,7 +150,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
 
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: local.origin,
       authorize: req => req,
       stripResponseHeaders,
@@ -229,7 +229,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
     const logs: Array<{ path: string; status: number }> = []
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: local.origin,
       authorize: req => req,
       stripResponseHeaders,
@@ -304,7 +304,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
 
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: local.origin,
       authorize: req => req,
       stripResponseHeaders,
@@ -326,7 +326,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
     const head1 = decodeHead(frames.find(f => f.stream === 1 && f.type === FrameType.Head)!.payload)
     expect(head1.status).toBe(302)
     expect(head1.headers.some(([k]) => k.toLowerCase() === 'set-cookie')).toBe(false)
-    expect(head1.headers).toContainEqual(['Location', 'https://test.hostc.4ba.io/login'])
+    expect(head1.headers).toContainEqual(['Location', 'https://test.tun-test.4ba.io/login'])
     expect(head1.headers).toContainEqual(['X-Safe', 'ok'])
 
     const head2 = decodeHead(frames.find(f => f.stream === 2 && f.type === FrameType.Head)!.payload)
@@ -366,7 +366,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
 
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: local.origin,
       authorize: req => req,
       stripResponseHeaders,
@@ -415,7 +415,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
     const preAborted = new AbortController()
     preAborted.abort(new Error('already cancelled'))
     await expect(Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: 'ws://127.0.0.1:1', token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: 'ws://127.0.0.1:1', token: 'tok' },
       target: new URL('http://127.0.0.1:1'),
       authorize: req => req,
       stripResponseHeaders,
@@ -685,7 +685,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
 
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: new URL(local.url.replace('ws:', 'http:')),
       authorize: req => req,
       stripResponseHeaders,
@@ -738,7 +738,7 @@ describe('hostc tunnel stream and lifecycle hardening', () => {
 
     const clientPromise = tunnel.nextClient()
     const conn = await Connection.open({
-      tunnel: { id: 't22222222222', url: 'https://test.hostc.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
+      tunnel: { id: 't22222222222', url: 'https://test.tun-test.4ba.io/', connectUrl: tunnel.url, token: 'tok' },
       target: new URL(local.url.replace('ws:', 'http:')),
       authorize: req => req,
       stripResponseHeaders,
@@ -773,12 +773,12 @@ describe('DSH Web connector establishment', () => {
 
   it.each(['network_error', 'unauthorized'] as const)('handles initial %s without reallocating', async code => {
     const id = 'tbcdefghijkm'
-    const url = `https://${id}.hostc.4ba.io/`
+    const url = `https://${id}.tun-test.4ba.io/`
     const leaseExpiresAt = Date.now() + 30 * 60_000
     const grant = { url, browserGrant: 'b'.repeat(43), expiresAt: Date.now() + 30_000 }
     const api = {
       dshWebRequest: vi.fn(async (action: string, _input: unknown) => action === 'allocate' ? {
-        sessionId: id, url, connectUrl: `wss://hostc.4ba.io/api/tunnels/${id}/connect`,
+        sessionId: id, url, connectUrl: `wss://tun-test.4ba.io/api/tunnels/${id}/connect`,
         connectToken: 't'.repeat(43), leaseExpiresAt,
       } : grant),
       closeDshWeb: vi.fn(async () => undefined),
