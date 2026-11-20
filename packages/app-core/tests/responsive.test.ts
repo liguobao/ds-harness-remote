@@ -67,6 +67,7 @@ describe('drawerWidthForWindow', () => {
 
   it('caps overlay drawers on wide windows', () => {
     expect(drawerWidthForWindow(WINDOW_SIZE_MEDIUM)).toBe(DRAWER_MAX_WIDTH)
+    expect(drawerWidthForWindow(640)).toBe(DRAWER_MAX_WIDTH)
     expect(drawerWidthForWindow(768)).toBe(DRAWER_MAX_WIDTH)
     expect(drawerWidthForWindow(1280)).toBe(DRAWER_MAX_WIDTH)
   })

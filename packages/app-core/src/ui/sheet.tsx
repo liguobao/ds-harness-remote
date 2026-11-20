@@ -225,14 +225,26 @@ export function SheetModal({
   // card's elevation shadow in from nothing (see #512).
   const dialogScale = progress.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 1 : 0.96, 1] })
 
+  const dialogPadTop = Math.max(spacing.md, insets.top)
+  const dialogPadBottom = Math.max(spacing.md, insets.bottom)
+  const dialogPadLeft = Math.max(spacing.md, insets.left)
+  const dialogPadRight = Math.max(spacing.md, insets.right)
+  // A resized Modal may be shorter than the normal sheet cap. Leave
+  // safe-area / outer margins above and below tall, scrollable forms too.
+  const resolvedMaxHeight = Math.min(
+    sheetMaxHeight,
+    Math.max(0, (availableHeight ?? windowHeight) - (asDialog ? dialogPadTop + dialogPadBottom : insets.top)),
+  )
+
   const body = phase === 'dismissing' ? null : (
     <View
       style={[
         asDialog ? styles.dialogContainer : styles.container,
         asDialog && {
-          paddingTop: insets.top,
-          paddingBottom: insets.bottom,
-          paddingHorizontal: spacing.md,
+          paddingTop: dialogPadTop,
+          paddingBottom: dialogPadBottom,
+          paddingLeft: dialogPadLeft,
+          paddingRight: dialogPadRight,
         },
       ]}
       pointerEvents={visible ? 'box-none' : 'none'}
@@ -255,29 +267,25 @@ export function SheetModal({
         pointerEvents="box-none"
         style={[
           asDialog ? styles.dialogSheet : styles.sheet,
-          {
-            // A resized Modal may be shorter than the normal sheet cap. Leave
-            // the status-bar inset above and the gesture bar below tall,
-            // scrollable input forms too.
-            maxHeight: Math.min(sheetMaxHeight, Math.max(0, (availableHeight ?? windowHeight) - insets.top - (asDialog ? insets.bottom : 0))),
-          },
           // Caller styles first in dialog form so bottom-sheet-only overrides
-          // (top-corner radius, bottom inset padding, grabber spacing) cannot
-          // clobber the centered card's rounded shape.
+          // (top-corner radius, bottom inset padding, stale maxHeight) cannot
+          // clobber the centered card's rounded geometry, while callers that
+          // own their own horizontal insets (e.g. HostSwitcherSheet's
+          // `paddingHorizontal: 0`) keep them without double-padding.
           ...(asDialog ? [sheetStyle] : []),
           asDialog
             ? {
                 width: '100%' as const,
                 maxWidth: DIALOG_SHEET_MAX_WIDTH,
+                maxHeight: resolvedMaxHeight,
                 borderRadius: radius.xl,
                 borderTopLeftRadius: radius.xl,
                 borderTopRightRadius: radius.xl,
-                paddingLeft: spacing.lg,
-                paddingRight: spacing.lg,
                 paddingBottom: spacing.lg,
                 transform: [{ scale: dialogScale }],
               }
             : {
+                maxHeight: resolvedMaxHeight,
                 paddingLeft: spacing.lg + insets.left,
                 paddingRight: spacing.lg + insets.right,
                 paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),

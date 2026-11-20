@@ -55,12 +55,13 @@ describe('sheet visibility state machine', () => {
     expect(nextSheetPhase('closing', true, true)).toBe('opening')
   })
 
-  it('uses a slower entry than exit, and the same 150ms cap for reduced motion', () => {
+  it('uses a slower entry than exit, and caps reduced motion without slowing a faster exit', () => {
     expect(sheetPhaseDuration('opening', false)).toBe(motionTokens.duration.sheet)
     expect(sheetPhaseDuration('closing', false)).toBe(motionTokens.duration.sheetExit)
     expect(sheetPhaseDuration('opening', false)).toBeGreaterThan(sheetPhaseDuration('closing', false))
     expect(sheetPhaseDuration('opening', true)).toBe(motionTokens.duration.reduced)
-    expect(sheetPhaseDuration('closing', true)).toBe(motionTokens.duration.reduced)
+    expect(sheetPhaseDuration('closing', true)).toBe(Math.min(motionTokens.duration.sheetExit, motionTokens.duration.reduced))
+    expect(sheetPhaseDuration('closing', true)).toBeLessThanOrEqual(motionTokens.duration.sheetExit)
   })
 
   it('handles iOS native dismissing and finishSheetExit across Android and iOS', async () => {

@@ -86,8 +86,8 @@ export function resolveMotion(kind: MotionKind, reduceMotion: boolean): {
 
 /** Enter is slower than exit so dismissal feels immediate. */
 export function sheetPhaseDuration(phase: SheetPhase, reduceMotion: boolean): number {
-  if (reduceMotion) return motionTokens.duration.reduced
-  return phase === 'opening' ? motionTokens.duration.sheet : motionTokens.duration.sheetExit
+  const normal = phase === 'opening' ? motionTokens.duration.sheet : motionTokens.duration.sheetExit
+  return reduceMotion ? Math.min(normal, motionTokens.duration.reduced) : normal
 }
 
 /**

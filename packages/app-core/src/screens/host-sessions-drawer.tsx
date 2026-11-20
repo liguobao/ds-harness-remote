@@ -60,7 +60,13 @@ import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
-import { drawerWidthForWindow, modalSheetMaxHeight, useResponsiveLayout } from '../ui/responsive'
+import {
+  DRAWER_FULL_CONTENT_MAX_WIDTH,
+  WINDOW_SIZE_MEDIUM,
+  drawerWidthForWindow,
+  modalSheetMaxHeight,
+  useResponsiveLayout,
+} from '../ui/responsive'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { resolveSessionDisplayTitle } from './session-title'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
@@ -566,12 +572,13 @@ export function HostSessionsDrawer({
   }, [deviceId, groupScopeKey])
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({})
 
-  // 浮窗定位：记录工具栏在覆盖层坐标系中的底部位置（默认兜底 200，测量后精准对齐）
+  // 浮窗定位：记录工具栏在覆盖层坐标系中的底部与右侧偏移（默认兜底，测量后精准对齐）
   const [popoverTop, setPopoverTop] = useState<number>(200)
+  const [popoverRight, setPopoverRight] = useState<number>(POPOVER_RIGHT_INSET)
   const toolbarRef = useRef<View>(null)
   const containerRef = useRef<View>(null)
 
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
 
@@ -603,16 +610,19 @@ export function HostSessionsDrawer({
     return () => clearTimeout(timer)
   }, [toastMessage])
 
-  // 打开浮窗时测量工具栏位置，确保浮窗紧贴工具栏下方
+  // 打开浮窗时测量工具栏位置，确保浮窗紧贴工具栏下方并对齐居中列右缘
   useEffect(() => {
     if (!showConfigModal) return
     const raf = requestAnimationFrame(() => {
       if (!containerRef.current || !toolbarRef.current) return
-      containerRef.current.measureInWindow((_cx, cy) => {
-        toolbarRef.current?.measureInWindow((_tx, ty, _tw, th) => {
+      containerRef.current.measureInWindow((cx, cy, cw) => {
+        toolbarRef.current?.measureInWindow((tx, ty, tw, th) => {
           if (typeof cy !== 'number' || typeof ty !== 'number' || typeof th !== 'number') return
           // 工具栏底部相对覆盖层顶部的偏移
           setPopoverTop(ty - cy + th + POPOVER_OFFSET)
+          if (typeof cx === 'number' && typeof cw === 'number' && typeof tx === 'number' && typeof tw === 'number') {
+            setPopoverRight(Math.max(POPOVER_RIGHT_INSET, (cx + cw) - (tx + tw) + POPOVER_RIGHT_INSET))
+          }
         })
       })
     })
@@ -829,12 +839,16 @@ export function HostSessionsDrawer({
   }, [groupBy, backendWorkspaces, backend, filteredSessions, recentIds, selected, expandedWorkspaces, visibleCounts, language, pinnedSessionIds, archivedIds, orderBy, manualOrders, searchQuery])
 
   // 手势与抽屉动画。宽窗口下抽屉宽度封顶（DRAWER_MAX_WIDTH），手机仍全宽。
-  // 不可关闭态（冷启动/切 Host）保持全宽：封顶后右侧露出的大片遮罩点击无
-  // 响应，会显得卡死。
+  // 不可关闭态（冷启动/切 Host）保持全宽背景并用居中列限宽，避免右侧露出
+  // 点不动的假遮罩，也不把列表行拉成超长白条。
   const screenWidth = layout.width
   const drawerWidth = !dismissible ? Math.round(screenWidth) : Math.round(drawerWidthForWindow(screenWidth))
+  const cappedDrawer = !inline && drawerWidth < Math.round(screenWidth)
+  const fullWidthCentered = !inline && !dismissible && screenWidth >= WINDOW_SIZE_MEDIUM
+  // Extra travel clears the right-edge elevation shadow off-screen during exit.
+  const closedTranslateX = -(drawerWidth + (cappedDrawer ? 24 : 0))
   const immediateMount = entrance === 'immediate'
-  const translateX = useRef(new Animated.Value(immediateMount ? 0 : -drawerWidth)).current
+  const translateX = useRef(new Animated.Value(immediateMount ? 0 : closedTranslateX)).current
   const overlayOpacity = useRef(new Animated.Value(immediateMount ? 1 : 0)).current
   const hasSettledOpenRef = useRef(immediateMount)
   const dragStartX = useRef(0)
@@ -852,7 +866,9 @@ export function HostSessionsDrawer({
     if (showSearch) setSearchMounted(true)
     const animation = Animated.timing(searchMotion, {
       toValue: showSearch ? 1 : 0,
-      duration: reduceMotion ? motionTokens.duration.reduced : motionTokens.duration.sheetExit,
+      duration: reduceMotion
+        ? Math.min(motionTokens.duration.sheetExit, motionTokens.duration.reduced)
+        : motionTokens.duration.sheetExit,
       easing: Easing.bezier(...easingCurve(showSearch ? 'expand' : 'retreat')),
       useNativeDriver: true,
     })
@@ -888,7 +904,7 @@ export function HostSessionsDrawer({
     currentAnim.current?.stop()
 
     const anim = Animated.parallel([
-      Animated.timing(translateX, { toValue: -drawerWidth, duration: 200, useNativeDriver: true }),
+      Animated.timing(translateX, { toValue: closedTranslateX, duration: 200, useNativeDriver: true }),
       Animated.timing(overlayOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ])
     currentAnim.current = anim
@@ -1027,7 +1043,7 @@ export function HostSessionsDrawer({
     <Animated.View
       style={[
         styles.configPopover,
-        { top: popoverTop, right: POPOVER_RIGHT_INSET },
+        { top: popoverTop, right: popoverRight },
         {
           opacity: configMotion,
           transform: [{ translateY: configMotion.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }],
@@ -1126,6 +1142,7 @@ export function HostSessionsDrawer({
 
   const content = (
     <View ref={containerRef} style={styles.container} collapsable={false}>
+      <View style={[styles.container, fullWidthCentered && styles.centeredColumn]}>
       {/* 品牌顶部区 */}
       <View style={styles.brandHeader}>
         <Pressable
@@ -1689,6 +1706,7 @@ export function HostSessionsDrawer({
           </Pressable>
         )}
       </View>
+      </View>
 
       {/* 会话上下文操作浮层/菜单 */}
       {menuSession && (
@@ -2145,26 +2163,43 @@ export function HostSessionsDrawer({
   return (
     <View style={[StyleSheet.absoluteFill, styles.drawerHost]} pointerEvents="box-none">
       <View style={styles.overlayContainer}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.overlay, { opacity: overlayOpacity }]}>
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            styles.overlay,
+            cappedDrawer && (scheme === 'dark' ? styles.overlayCappedDark : styles.overlayCappedLight),
+            { opacity: overlayOpacity },
+          ]}
+        >
           <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" onPress={() => smoothClose(true)} />
         </Animated.View>
         <Animated.View
           accessibilityViewIsModal
           {...drawerTouchProps}
           style={[
-            styles.drawer,
+            styles.overlayDrawerShell,
             {
-              paddingTop: insets.top,
-              paddingBottom: insets.bottom,
               maxWidth: drawerWidth,
               transform: [{ translateX }],
             },
-            // Capped overlay drawer: mark the right edge like `inlineDrawer`
-            // so dark themes keep a visible boundary against the scrim.
-            drawerWidth < Math.round(screenWidth) && styles.drawerCappedEdge,
+            // Capped overlay drawer floats above the dimmed conversation with
+            // rounded trailing corners and a soft right-side shadow; keep
+            // overflow unclipped on this shell so iOS preserves the shadow.
+            // Dark mode lifts the floating surface to `colors.surface` so the
+            // drawer edge stays distinct against the dark scrim without a border.
+            cappedDrawer && styles.drawerCapped,
+            cappedDrawer && scheme === 'dark' && styles.drawerCappedDark,
           ]}
         >
-          {content}
+          <View
+            style={[
+              styles.drawerClip,
+              { paddingTop: insets.top, paddingBottom: insets.bottom },
+              cappedDrawer && styles.drawerClipCapped,
+            ]}
+          >
+            {content}
+          </View>
         </Animated.View>
       </View>
     </View>
@@ -2176,10 +2211,25 @@ const createStyles = (colors: ThemeColors) =>
     drawerHost: { zIndex: 20, elevation: 20 },
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
+    overlayCappedLight: { backgroundColor: 'rgba(15, 15, 15, 0.50)' },
+    overlayCappedDark: { backgroundColor: 'rgba(0, 0, 0, 0.68)' },
     drawer: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background, overflow: 'hidden' },
+    overlayDrawerShell: { flex: 1, width: '100%', maxWidth: '100%', backgroundColor: colors.background },
+    drawerCapped: {
+      borderTopRightRadius: radius.xl,
+      borderBottomRightRadius: radius.xl,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 4, height: 0 },
+      shadowOpacity: 0.16,
+      shadowRadius: 16,
+      elevation: 12,
+    },
+    drawerCappedDark: { backgroundColor: colors.surface },
+    drawerClip: { flex: 1, overflow: 'hidden' },
+    drawerClipCapped: { borderTopRightRadius: radius.xl, borderBottomRightRadius: radius.xl },
     inlineDrawer: { width: '100%', maxWidth: '100%', borderRadius: 0, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
-    drawerCappedEdge: { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
     container: { flex: 1 },
+    centeredColumn: { width: '100%', maxWidth: DRAWER_FULL_CONTENT_MAX_WIDTH, alignSelf: 'center' },
 
     brandHeader: {
       flexDirection: 'row',
@@ -2325,7 +2375,7 @@ const createStyles = (colors: ThemeColors) =>
       gap: spacing.xs,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.separator,
-      backgroundColor: colors.background,
+      backgroundColor: 'transparent',
       paddingLeft: spacing.sm,
       paddingRight: spacing.sm,
       paddingVertical: 5,
