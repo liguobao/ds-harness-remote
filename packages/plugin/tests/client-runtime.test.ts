@@ -785,6 +785,100 @@ describe('ClientModeRuntime Host account control', () => {
     await runtime.close()
   })
 
+  it('forwards replayTruncated from codex.stream.open only when true across remote and local hosts', async () => {
+    await runScenarios([
+      { name: 'remote-truncated', mode: 'remote', upstreamResult: { opened: true, replayTruncated: true }, expectTruncated: true },
+      { name: 'remote-omitted', mode: 'remote', upstreamResult: { opened: true }, expectTruncated: false },
+      { name: 'remote-false', mode: 'remote', upstreamResult: { opened: true, replayTruncated: false }, expectTruncated: false },
+      { name: 'local-truncated', mode: 'local', upstreamResult: { opened: true, streamId: 'stream-local-truncated', threadId: 'thr_1', replayTruncated: true }, expectTruncated: true },
+      { name: 'local-omitted', mode: 'local', upstreamResult: { opened: true, streamId: 'stream-local-omitted', threadId: 'thr_1' }, expectTruncated: false },
+    ].map(row => ({
+      name: row.name,
+      run: async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'dsh-client-codex-replay-'))
+        directories.push(directory)
+        const host = row.mode === 'local'
+          ? {
+              hostStatus: () => ({ configured: false, online: false, reconnecting: false, authorized: false, accountRequired: false }),
+              reconnectHost: vi.fn(),
+              clearHostAuthorization: vi.fn(async () => undefined),
+              authorizeHostAsOwned: vi.fn(async () => undefined),
+              authorizeHostWithAccount: vi.fn(async () => undefined),
+              authorizeHostWithCode: vi.fn(async () => undefined),
+              codexStatus: () => ({ available: true }),
+              codexCall: vi.fn(async () => ({})),
+              codexRespond: vi.fn(async () => ({ resolved: true as const })),
+              codexOpenStream: vi.fn(async () => row.upstreamResult),
+              codexCloseStream: vi.fn(async () => ({ closed: true })),
+            } as unknown as HostAuthorizationControl
+          : undefined
+        const runtime = new ClientModeRuntime(
+          config(),
+          new IdentityStore({ directory }),
+          { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+          gateway(),
+          logger(),
+          host,
+        )
+        await runtime.start()
+        const rpc = vi.fn(async (method: string) => {
+          if (method === 'codex.app.stream.open') return row.upstreamResult
+          if (method === 'codex.app.stream.close') return { closed: true }
+          throw new Error(`Unexpected RPC method: ${method}`)
+        })
+        if (row.mode === 'remote') {
+          ;(runtime as unknown as { connected: unknown }).connected = {
+            client: {
+              rpc,
+              close: vi.fn(async () => undefined),
+              getStats: () => ({ mode: 'Relay', connected: true }),
+              onEvent: () => () => undefined,
+            },
+            target: {
+              deviceId: 'host-device-1',
+              name: 'Workstation',
+              platform: 'linux',
+              publicKey: 'peer-key',
+              fingerprint: 'PEER',
+              trustedAt: 1,
+            },
+            transport: {},
+            features: { commandList: false, fileViewer: false, remoteGateway: false, codex: true },
+          }
+        }
+        const streamId = `stream-${row.name}`
+        const signal = new AbortController().signal
+        try {
+          const opened = await runtime.handleControl('codex.stream.open', {
+            streamId,
+            threadId: 'thr_1',
+          }, signal)
+          expect(opened).toEqual({
+            ok: true,
+            value: {
+              opened: true,
+              streamId,
+              threadId: 'thr_1',
+              ...(row.expectTruncated ? { replayTruncated: true } : {}),
+            },
+          })
+          if (!row.expectTruncated && opened.ok) {
+            expect('replayTruncated' in (opened.value as Record<string, unknown>)).toBe(false)
+          }
+          if (row.mode === 'remote') {
+            expect(rpc).toHaveBeenCalledWith('codex.app.stream.open', { streamId, threadId: 'thr_1' }, signal)
+          } else {
+            expect(host?.codexOpenStream).toHaveBeenCalledWith({ streamId, threadId: 'thr_1' }, expect.any(Function), signal)
+          }
+          await runtime.handleControl('codex.stream.close', { streamId }, signal)
+        } finally {
+          ;(runtime as unknown as { connected: unknown }).connected = undefined
+          await runtime.close()
+        }
+      },
+    })), cleanupScenario1)
+  })
+
   it('creates a CodeX project and selects its virtual Workspace', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-codex-project-'))
     directories.push(directory)

@@ -149,9 +149,12 @@ export class CodexRemoteDomain {
   private readonly permissionPresets = new Map<string, CodexPermissionPreset>()
   private readonly recentFrames = new Map<string, BufferedCodexThread>()
   private nextBufferSeq = 1
+  private readonly inboundChains = new Map<string, Promise<void>>()
+  private readonly pendingRequestThreads = new Map<string | number, { id: string | number; threadId: string }>()
   private approvalExpiryTimer?: ReturnType<typeof setTimeout>
   private restartTimer?: ReturnType<typeof setTimeout>
   private restartAttempt = 0
+  private lastOnDemandRecoveryAt = 0
   private available = false
   private closed = false
   /**
@@ -171,6 +174,8 @@ export class CodexRemoteDomain {
   private readonly knownThreadPromises = new Map<string, Promise<{ thread: Record<string, unknown>; cwd?: string }>>()
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
   private unavailableCode?: string
+  private lifecycleGeneration = 0
+  private reconfigureDepth = 0
 
   constructor(
     public config: ResolvedCodexConfig,
@@ -178,6 +183,7 @@ export class CodexRemoteDomain {
     private readonly createAppServer: AppServerFactory = (binary, targetLogger) => new CodexAppServerClient(binary, targetLogger),
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
     private readonly turnSilenceTimeoutMs: number = DEFAULT_TURN_SILENCE_TIMEOUT_MS,
+    private readonly onDemandCooldownMs = 30_000,
   ) {}
 
   private startPromise?: Promise<void>
@@ -187,18 +193,37 @@ export class CodexRemoteDomain {
     return this.startPromise
   }
 
+  tryRecoverOnDemand(): void {
+    if (this.closed || !this.config.enabled || this.reconfigureDepth > 0 || this.isAvailable()) return
+    if (this.startPromise !== undefined || this.restartTimer !== undefined) return
+    if (this.state === 'starting' || this.state === 'restarting') return
+    const now = Date.now()
+    if (now - this.lastOnDemandRecoveryAt < this.onDemandCooldownMs) return
+    this.lastOnDemandRecoveryAt = now
+    void this.start().catch(() => undefined)
+  }
+
   private async startOnce(): Promise<void> {
     if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
     if (!this.config.enabled) return
+    const generation = this.lifecycleGeneration
+    this.restartAttempt = 0
     try {
       this.state = 'starting'
-      await this.launchAppServer()
+      await this.launchAppServer(generation)
     } catch (error) {
+      if (this.closed || generation !== this.lifecycleGeneration) return
       this.available = false
-      this.state = 'unavailable'
+      this.lastOnDemandRecoveryAt = Date.now()
       this.unavailableCode = errorCode(error)
       await this.disposeAppServer(this.appServer)
+      if (this.closed || generation !== this.lifecycleGeneration) return
       this.logger.warn('Codex Remote domain unavailable', { code: this.unavailableCode })
+      if (this.config.enabled && isRetryableCodexStartError(error) && this.restartDelaysMs.length > 0) {
+        this.scheduleRestart(generation)
+      } else {
+        this.state = 'unavailable'
+      }
     }
   }
 
@@ -446,7 +471,6 @@ export class CodexRemoteDomain {
     if (call.method === 'thread/unsubscribe') {
       const bridge = this.peers.get(connectionId)
       bridge?.removeThreadSubscriptions(threadId!)
-      this.recentFrames.delete(threadId!)
       await this.releaseThread(threadId!)
       if (!this.hasSubscriber(threadId!)) this.recentFrames.delete(threadId!)
       return { status: 'unsubscribed' }
@@ -582,34 +606,49 @@ export class CodexRemoteDomain {
   async reconfigure(config: ResolvedCodexConfig): Promise<void> {
     if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
     if (JSON.stringify(this.config) === JSON.stringify(config)) return
-    this.config = config
-    this.available = false
-    this.threadLifecycle.reset()
-    this.peerThreads.clear()
-    this.threadGoals.clear()
-    if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
-    this.restartTimer = undefined
-    await this.startPromise?.catch(() => undefined)
-    this.available = false
-    await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
-    this.clearAllTurnWatchdogs()
-    this.turnOwners.clear()
-    this.permissionPresets.clear()
-    this.recentFrames.clear()
-    this.knownThreadPromises.clear()
-    this.approvals.clear()
-    if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
-    this.approvalExpiryTimer = undefined
-    await this.disposeAppServer(this.appServer)
-    this.restartAttempt = 0
-    this.unavailableCode = undefined
-    this.state = 'disabled'
-    await this.start()
+    this.reconfigureDepth += 1
+    try {
+      this.config = config
+      this.lifecycleGeneration += 1
+      this.available = false
+      this.state = config.enabled ? 'starting' : 'disabled'
+      this.threadLifecycle.reset()
+      this.peerThreads.clear()
+      this.threadGoals.clear()
+      if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+      this.restartTimer = undefined
+      await this.disposeAppServer(this.appServer)
+      await this.startPromise?.catch(() => undefined)
+      if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
+      this.restartTimer = undefined
+      this.available = false
+      await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
+      this.clearAllTurnWatchdogs()
+      this.turnOwners.clear()
+      this.permissionPresets.clear()
+      this.recentFrames.clear()
+      this.knownThreadPromises.clear()
+      this.approvals.clear()
+      if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
+      this.approvalExpiryTimer = undefined
+      await this.disposeAppServer(this.appServer)
+      this.inboundChains.clear()
+      this.pendingRequestThreads.clear()
+      this.lastOnDemandRecoveryAt = 0
+      this.restartAttempt = 0
+      this.unavailableCode = undefined
+      this.state = 'disabled'
+      if (this.closed) throw new RpcError('CODEX_CLOSED', 'The Codex Remote domain is closed.')
+      await this.start()
+    } finally {
+      this.reconfigureDepth -= 1
+    }
   }
 
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.lifecycleGeneration += 1
     this.available = false
     this.threadLifecycle.reset()
     this.peerThreads.clear()
@@ -627,6 +666,8 @@ export class CodexRemoteDomain {
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
     this.approvals.clear()
+    this.inboundChains.clear()
+    this.pendingRequestThreads.clear()
     this.unsubscribeInbound?.()
     this.unsubscribeInbound = undefined
     this.unsubscribeUnavailable?.()
@@ -635,13 +676,15 @@ export class CodexRemoteDomain {
     this.appServer = undefined
   }
 
-  private async launchAppServer(): Promise<void> {
+  private async launchAppServer(generation = this.lifecycleGeneration): Promise<void> {
     let lastError: unknown
     for (const binary of codexBinaryCandidates(this.config.binary)) {
+      if (this.closed || generation !== this.lifecycleGeneration) return
       try {
-        await this.launchAppServerCandidate(binary)
+        await this.launchAppServerCandidate(binary, generation)
         return
       } catch (error) {
+        if (this.closed || generation !== this.lifecycleGeneration) return
         lastError = error
         if (!canTryNextBinary(error)) throw error
       }
@@ -649,14 +692,12 @@ export class CodexRemoteDomain {
     throw lastError ?? new RpcError('CODEX_START_FAILED', 'Codex App Server could not be started.')
   }
 
-  private async launchAppServerCandidate(binary: string): Promise<void> {
+  private async launchAppServerCandidate(binary: string, generation: number): Promise<void> {
+    if (this.closed || generation !== this.lifecycleGeneration) return
     const appServer = this.createAppServer(binary, this.logger)
     this.appServer = appServer
     this.unsubscribeInbound = appServer.onInbound(message => {
-      if (this.appServer !== appServer) return
-      void this.handleInbound(message).catch(error => {
-        this.logger.warn('Codex inbound handling failed', { code: errorCode(error) })
-      })
+      this.enqueueInbound(appServer, message)
     })
     this.unsubscribeUnavailable = appServer.onUnavailable(code => {
       if (this.available && this.appServer === appServer) {
@@ -665,11 +706,17 @@ export class CodexRemoteDomain {
     })
     try {
       await appServer.start()
+      if (this.closed || generation !== this.lifecycleGeneration || this.appServer !== appServer) {
+        await this.disposeAppServer(appServer)
+        await appServer.close().catch(() => undefined)
+        return
+      }
       const account = await appServer.call('account/read', { refreshToken: false }, 15_000)
       if (!accountCanRun(account)) {
         throw new RpcError('CODEX_AUTH_REQUIRED', 'Codex is not signed in on this Host.')
       }
-      if (this.closed || this.appServer !== appServer) {
+      if (this.closed || generation !== this.lifecycleGeneration || this.appServer !== appServer) {
+        await this.disposeAppServer(appServer)
         await appServer.close().catch(() => undefined)
         return
       }
@@ -686,6 +733,7 @@ export class CodexRemoteDomain {
 
   private async handleAppServerUnavailable(appServer: CodexAppServerLike, code: string): Promise<void> {
     if (this.closed || this.appServer !== appServer) return
+    const generation = this.lifecycleGeneration
     this.available = false
     this.threadLifecycle.reset()
     this.peerThreads.clear()
@@ -700,12 +748,16 @@ export class CodexRemoteDomain {
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
     await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
+    if (this.closed || generation !== this.lifecycleGeneration) return
     await this.disposeAppServer(appServer)
-    this.scheduleRestart()
+    if (this.closed || generation !== this.lifecycleGeneration) return
+    this.inboundChains.clear()
+    this.pendingRequestThreads.clear()
+    this.scheduleRestart(generation)
   }
 
-  private scheduleRestart(): void {
-    if (this.closed || this.restartTimer !== undefined) return
+  private scheduleRestart(generation = this.lifecycleGeneration): void {
+    if (this.closed || this.restartTimer !== undefined || generation !== this.lifecycleGeneration) return
     if (this.restartAttempt >= this.restartDelaysMs.length) {
       this.state = 'unavailable'
       this.logger.warn('Codex App Server restart attempts exhausted', { attempts: this.restartAttempt })
@@ -716,25 +768,30 @@ export class CodexRemoteDomain {
     this.state = 'restarting'
     this.restartTimer = setTimeout(() => {
       this.restartTimer = undefined
-      void this.restartAfterFailure()
+      void this.restartAfterFailure(generation)
     }, delayMs)
     this.restartTimer.unref?.()
     this.logger.warn('Codex App Server restart scheduled', { attempt: this.restartAttempt, delayMs })
   }
 
-  private async restartAfterFailure(): Promise<void> {
-    if (this.closed) return
+  private async restartAfterFailure(generation: number): Promise<void> {
+    if (this.closed || generation !== this.lifecycleGeneration) return
     try {
-      await this.launchAppServer()
+      await this.launchAppServer(generation)
     } catch (error) {
+      if (this.closed || generation !== this.lifecycleGeneration) return
       this.available = false
-      this.state = 'restarting'
+      this.lastOnDemandRecoveryAt = Date.now()
       this.unavailableCode = errorCode(error)
       this.logger.warn('Codex App Server restart failed', {
         attempt: this.restartAttempt,
         code: this.unavailableCode,
       })
-      this.scheduleRestart()
+      if (!isRetryableCodexStartError(error)) {
+        this.state = 'unavailable'
+        return
+      }
+      this.scheduleRestart(generation)
     }
   }
 
@@ -748,7 +805,7 @@ export class CodexRemoteDomain {
     await appServer.close().catch(() => undefined)
   }
 
-  private async handleInbound(message: CodexAppServerInbound): Promise<void> {
+  private async handleInbound(message: CodexAppServerInbound, receivedAt = Date.now()): Promise<void> {
     if (!this.available) return
     if (message.kind === 'request') {
       await this.handleServerRequest(message)
@@ -759,7 +816,7 @@ export class CodexRemoteDomain {
       const active = message.method !== 'thread/goal/cleared'
         && (!isRecord(message.params) || goalRetainsThread(message.params.goal, threadId))
       this.threadGoals.set(threadId, { active })
-      await this.threadLifecycle.retry(threadId)
+      void this.threadLifecycle.retry(threadId)
     }
     if (message.method === 'thread/settings/updated' && threadId !== undefined) {
       this.rememberPermission(threadId, message.params)
@@ -806,13 +863,29 @@ export class CodexRemoteDomain {
       && isRecord(message.params) && isRecord(message.params.status) && message.params.status.type === 'active') {
       this.threadLifecycle.active(threadId, true)
     }
-    if (message.method === 'serverRequest/resolved') this.resolveUpstreamApproval(message.params)
+    if (message.method === 'serverRequest/resolved') {
+      const resolved = this.resolveUpstreamApproval(message.params)
+      if (resolved.length > 0) {
+        for (const entry of resolved) {
+          const targetThreadId = threadId ?? entry.threadId
+          if (this.turnOwners.has(targetThreadId)) this.armTurnWatchdog(targetThreadId)
+          const params = isRecord(message.params)
+            ? { ...message.params, threadId: targetThreadId, requestHandle: entry.handle }
+            : { threadId: targetThreadId, requestHandle: entry.handle }
+          await this.publishToThread(targetThreadId, {
+            method: message.method,
+            params,
+          }, receivedAt)
+        }
+        return
+      }
+    }
     if (threadId === undefined) return
     if (this.turnOwners.has(threadId)) this.armTurnWatchdog(threadId)
     await this.publishToThread(threadId, {
       method: message.method,
       params: message.params,
-    })
+    }, receivedAt)
   }
 
   /** Replay buffered real-time frames missed while no stream was subscribed. */
@@ -872,10 +945,14 @@ export class CodexRemoteDomain {
     }
   }
 
-  private async publishToThread(threadId: string, frame: { method: string; params: unknown }): Promise<void> {
+  private async publishToThread(
+    threadId: string,
+    frame: { method: string; params: unknown },
+    receivedAt = Date.now(),
+  ): Promise<void> {
     const subscribers = [...this.peers.values()].filter(peer => peer.hasThreadSubscription(threadId))
     if (subscribers.length === 0) {
-      this.bufferFrame(threadId, frame)
+      this.bufferFrame(threadId, frame, receivedAt)
       return
     }
     let deliveryFailed = false
@@ -892,10 +969,10 @@ export class CodexRemoteDomain {
         })
       }
     }))
-    if (deliveryFailed) this.bufferFrame(threadId, frame)
+    if (deliveryFailed) this.bufferFrame(threadId, frame, receivedAt)
   }
 
-  private bufferFrame(threadId: string, frame: { method: string; params: unknown }): void {
+  private bufferFrame(threadId: string, frame: { method: string; params: unknown }, receivedAt = Date.now()): void {
     if (!BUFFERABLE_CODEX_METHODS.has(frame.method)) return
     if (isOversizedCodexFrame(frame)) {
       this.logger.warn('Skipped buffering oversized Codex frame', {
@@ -904,10 +981,10 @@ export class CodexRemoteDomain {
       })
       return
     }
-    this.pruneFrameBuffer()
+    this.pruneFrameBuffer(undefined, receivedAt)
     const entry = this.recentFrames.get(threadId) ?? { frames: [], truncated: false, truncatedAtSeq: 0 }
     this.recentFrames.delete(threadId)
-    entry.frames.push({ seq: this.nextBufferSeq++, method: frame.method, params: frame.params, at: Date.now() })
+    entry.frames.push({ seq: this.nextBufferSeq++, method: frame.method, params: frame.params, at: receivedAt })
     while (entry.frames.length > MAX_BUFFERED_CODEX_FRAMES) {
       entry.frames.shift()
       entry.truncated = true
@@ -939,32 +1016,27 @@ export class CodexRemoteDomain {
     this.evictExcessBufferedThreads()
   }
 
-  private pruneFrameBuffer(threadId?: string): void {
-    const validAfter = Date.now() - CODEX_FRAME_BUFFER_TTL_MS
+  private pruneFrameBuffer(threadId?: string, now = Date.now()): void {
+    const validAfter = now - CODEX_FRAME_BUFFER_TTL_MS
+    const pruneEntry = (id: string, entry: BufferedCodexThread): void => {
+      const next = entry.frames.filter(frame => frame.at >= validAfter)
+      if (next.length === 0) {
+        this.recentFrames.delete(id)
+        return
+      }
+      if (next.length < entry.frames.length) {
+        entry.truncated = true
+        entry.truncatedAtSeq = this.nextBufferSeq
+      }
+      entry.frames = next
+    }
     if (threadId !== undefined) {
       const entry = this.recentFrames.get(threadId)
-      if (entry === undefined) return
-      const next = entry.frames.filter(frame => frame.at >= validAfter)
-      if (next.length === 0) this.recentFrames.delete(threadId)
-      else {
-        if (next.length < entry.frames.length) {
-          entry.truncated = true
-          entry.truncatedAtSeq = this.nextBufferSeq
-        }
-        entry.frames = next
-      }
+      if (entry !== undefined) pruneEntry(threadId, entry)
       return
     }
     for (const [id, entry] of this.recentFrames) {
-      const next = entry.frames.filter(frame => frame.at >= validAfter)
-      if (next.length === 0) this.recentFrames.delete(id)
-      else {
-        if (next.length < entry.frames.length) {
-          entry.truncated = true
-          entry.truncatedAtSeq = this.nextBufferSeq
-        }
-        entry.frames = next
-      }
+      pruneEntry(id, entry)
     }
   }
 
@@ -1101,9 +1173,12 @@ export class CodexRemoteDomain {
   }
 
   private async publishPermission(threadId: string, value: unknown): Promise<void> {
+    if (!this.available) return
     const source = isRecord(value) ? value : {}
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox }
-    await this.handleInbound({ kind: 'notification', method: 'thread/settings/updated', params: { threadId, threadSettings } })
+    const params = { threadId, threadSettings }
+    this.rememberPermission(threadId, params)
+    await this.publishToThread(threadId, { method: 'thread/settings/updated', params })
   }
 
   private async handleServerRequest(message: Extract<CodexAppServerInbound, { kind: 'request' }>): Promise<void> {
@@ -1131,6 +1206,7 @@ export class CodexRemoteDomain {
       expiresAt: Date.now() + APPROVAL_TTL_MS,
     })
     this.scheduleApprovalExpiry()
+    this.armTurnWatchdog(threadId)
     try {
       await peer.publishInbound(threadId, {
         method: message.method,
@@ -1370,14 +1446,66 @@ export class CodexRemoteDomain {
     return [...this.peers.values()].some(peer => peer.hasThreadSubscription(threadId))
   }
 
-  private resolveUpstreamApproval(params: unknown): void {
-    if (!isRecord(params) || (typeof params.requestId !== 'string' && typeof params.requestId !== 'number')) return
+  private enqueueInbound(appServer: CodexAppServerLike, message: CodexAppServerInbound): void {
+    if (this.closed || this.appServer !== appServer) return
+    const receivedAt = Date.now()
+    const explicitThreadId = extractThreadId(message.params)
+    const pendingToken = message.kind === 'request' && explicitThreadId !== undefined
+      ? { id: message.id, threadId: explicitThreadId }
+      : undefined
+    if (pendingToken !== undefined) {
+      this.pendingRequestThreads.set(pendingToken.id, pendingToken)
+    }
+    const chainThreadId = explicitThreadId
+      ?? (message.kind === 'notification' && message.method === 'serverRequest/resolved'
+        ? this.findInboundThreadForResolved(message.params)
+        : undefined)
+    const key = chainThreadId === undefined ? '__global__' : `thread:${chainThreadId}`
+    const prev = this.inboundChains.get(key) ?? Promise.resolve()
+    const next = prev.then(async () => {
+      try {
+        if (this.closed || this.appServer !== appServer) return
+        await this.handleInbound(message, receivedAt)
+      } catch (error) {
+        this.logger.warn('Codex inbound handling failed', { code: errorCode(error) })
+      } finally {
+        if (pendingToken !== undefined && this.pendingRequestThreads.get(pendingToken.id) === pendingToken) {
+          this.pendingRequestThreads.delete(pendingToken.id)
+        }
+      }
+    })
+    this.inboundChains.set(key, next)
+    void next.finally(() => {
+      if (this.inboundChains.get(key) === next) this.inboundChains.delete(key)
+    })
+  }
+
+  private findInboundThreadForResolved(params: unknown): string | undefined {
+    if (!isRecord(params) || (typeof params.requestId !== 'string' && typeof params.requestId !== 'number')) return undefined
+    return this.pendingRequestThreads.get(params.requestId)?.threadId
+      ?? this.findMatchingApprovals(params)[0]?.threadId
+  }
+
+  private findMatchingApprovals(params: unknown): Array<{ handle: string; threadId: string }> {
+    if (!isRecord(params) || (typeof params.requestId !== 'string' && typeof params.requestId !== 'number')) return []
+    const matches: Array<{ handle: string; threadId: string }> = []
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) {
-        this.approvals.delete(handle)
-        void this.threadLifecycle.retry(approval.threadId)
+        matches.push({ handle, threadId: approval.threadId })
       }
     }
+    return matches
+  }
+
+  private resolveUpstreamApproval(params: unknown): Array<{ handle: string; threadId: string }> {
+    const matches = this.findMatchingApprovals(params)
+    if (matches.length === 0) return matches
+    for (const match of matches) {
+      this.approvals.delete(match.handle)
+      void this.threadLifecycle.retry(match.threadId)
+    }
+    this.scheduleApprovalExpiry()
+    return matches
   }
 
   private async expireApprovals(): Promise<void> {
@@ -1387,7 +1515,7 @@ export class CodexRemoteDomain {
       if (approval.expiresAt > now) continue
       this.approvals.delete(handle)
       await appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
-      await this.threadLifecycle.retry(approval.threadId)
+      void this.threadLifecycle.retry(approval.threadId)
     }
     this.scheduleApprovalExpiry()
   }
@@ -2137,4 +2265,8 @@ function isResponseTooLargeError(error: unknown): boolean {
  * turn list is unavailable and must be projected as an empty history. */
 function isUnmaterializedThreadError(error: unknown): boolean {
   return error instanceof RpcError && error.code === CODEX_THREAD_UNMATERIALIZED
+}
+
+function isRetryableCodexStartError(error: unknown): boolean {
+  return !['CODEX_BINARY_UNAVAILABLE', 'CODEX_AUTH_REQUIRED', 'CODEX_CLOSED'].includes(errorCode(error))
 }
