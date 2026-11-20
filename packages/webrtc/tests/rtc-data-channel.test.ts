@@ -143,6 +143,20 @@ function turnStats(): RtcStatsEntry[] {
 }
 
 describe('detectSelectedTransport', () => {
+  it('prefers an explicitly selected pair and ignores pending nominations', () => {
+    const entries: RtcStatsEntry[] = [
+      { id: 'local', type: 'local-candidate', candidateType: 'host', address: '192.168.1.2' },
+      { id: 'public', type: 'remote-candidate', candidateType: 'host', address: '203.0.113.2' },
+      { id: 'lan', type: 'remote-candidate', candidateType: 'host', address: '192.168.1.3' },
+      { type: 'candidate-pair', nominated: true, state: 'waiting', localCandidateId: 'local', remoteCandidateId: 'public' },
+      { type: 'candidate-pair', nominated: true, state: 'succeeded', localCandidateId: 'local', remoteCandidateId: 'public' },
+      { type: 'candidate-pair', selected: true, localCandidateId: 'local', remoteCandidateId: 'lan' },
+    ]
+    expect(detectSelectedTransport(asStats(entries))).toBe('lan')
+    expect(detectSelectedTransport(asStats(entries.slice(0, -2)))).toBeUndefined()
+    expect(detectSelectedTransport(asStats(entries.slice(0, -1)))).toBe('p2p')
+  })
+
   it('classifies selected candidate pairs as LAN, P2P or TURN', async () => {
     await runScenarios([
       {

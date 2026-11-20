@@ -675,6 +675,7 @@ export function inspectSelectedPath(stats: RtcStats): RtcPathDetails {
   const candidates = new Map<string, RtcStatsEntry>()
   const candidatePairs = new Map<string, RtcStatsEntry>()
   const selectedPairs: RtcStatsEntry[] = []
+  const nominatedPairs: RtcStatsEntry[] = []
   const selectedPairIds = new Set<string>()
   for (const [reportId, entry] of stats) {
     if (entry.type === 'local-candidate' || entry.type === 'remote-candidate') {
@@ -683,7 +684,8 @@ export function inspectSelectedPath(stats: RtcStats): RtcPathDetails {
       }
     } else if (entry.type === 'candidate-pair') {
       candidatePairs.set(String(entry.id ?? reportId), entry)
-      if (entry.selected === true || entry.nominated === true) selectedPairs.push(entry)
+      if (entry.selected === true) selectedPairs.push(entry)
+      else if (entry.nominated === true && entry.state === 'succeeded') nominatedPairs.push(entry)
     } else if (entry.type === 'transport' && typeof entry.selectedCandidatePairId === 'string') {
       selectedPairIds.add(entry.selectedCandidatePairId)
     }
@@ -691,6 +693,7 @@ export function inspectSelectedPath(stats: RtcStats): RtcPathDetails {
   const pairs = [
     ...[...selectedPairIds].map(id => candidatePairs.get(id)).filter((pair): pair is RtcStatsEntry => pair !== undefined),
     ...selectedPairs,
+    ...nominatedPairs,
   ]
   for (const pair of pairs) {
     const local = candidates.get(String(pair.localCandidateId))
