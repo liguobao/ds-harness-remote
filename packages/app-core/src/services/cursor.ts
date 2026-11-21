@@ -732,7 +732,7 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
     const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
     const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? previous?.toolName ?? 'tool'
-    const meta = sessionId.startsWith('pi:') && isRecord(update._meta) ? update._meta : {}
+    const meta = isRecord(update._meta) ? update._meta : {}
     const terminalOutput = isRecord(meta.terminal_output) ? meta.terminal_output : {}
     const terminalExit = isRecord(meta.terminal_exit) ? meta.terminal_exit : {}
     const exitCode = typeof terminalExit.exit_code === 'number' && Number.isInteger(terminalExit.exit_code)
