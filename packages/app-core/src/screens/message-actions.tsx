@@ -5,6 +5,8 @@ import * as Clipboard from 'expo-clipboard'
 import type { ChatItemBase, ChatMessage, RemoteSession } from '../types'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
+import { continuousRadius, elevationStyle } from '../ui/platform-style'
+import { radius } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { formatTokens } from '../ui/quote-helpers'
 import { resolveUncachedInputTokens } from './chat-process'
@@ -73,8 +75,8 @@ export function TurnUsageModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={[styles.modalOverlay, { backgroundColor: colors.scrim }]} onPress={onClose}>
-        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.border, shadowColor: colors.shadow }]} onStartShouldSetResponder={() => true}>
+      <Pressable style={[styles.modalOverlay, { backgroundColor: colors.modalBackdrop }]} onPress={onClose}>
+        <View style={[styles.usageCard, { backgroundColor: colors.surface, borderColor: colors.separator }, elevationStyle(colors, 3)]} onStartShouldSetResponder={() => true}>
           {/* Header row */}
           <View style={styles.usageTitleRow}>
             <View style={styles.usageTitleLeft}>
@@ -345,13 +347,9 @@ const styles = StyleSheet.create({
   usageCard: {
     width: '100%',
     maxWidth: 340,
-    borderRadius: 16,
+    ...continuousRadius(radius.xl),
     borderWidth: StyleSheet.hairlineWidth,
     padding: 16,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 8,
   },
   usageTitleRow: {
     flexDirection: 'row',

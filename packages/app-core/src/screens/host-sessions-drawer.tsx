@@ -4,14 +4,12 @@ import {
   Animated,
   Easing,
   Keyboard,
-  KeyboardAvoidingView,
   PanResponder,
   Platform,
   TextInput,
   SectionList,
   RefreshControl,
   ScrollView,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -55,7 +53,8 @@ import { strings } from '../locales/i18n'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
-import { elevationStyle } from '../ui/platform-style'
+import { continuousRadius, elevationStyle } from '../ui/platform-style'
+import { SheetModal } from '../ui/sheet'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
@@ -86,6 +85,7 @@ import {
 import { clampDrawerTranslate, shouldConfirmSwipeLeftClose, shouldStartSwipeLeftToClose } from '../lib/gesture-swipe-rules'
 import { buildTreeSections, applyManualOrder, reorderSessionIds } from '../lib/workspace-tree'
 import { BotModalsHost, BotSidebarSection, useBotTeamLoad } from './bot-sidebar-section'
+import { createModalActionQueue } from './chat/modal-action-queue'
 import { HomeActionsMenu } from './setup-screens'
 import { CreateWorkspaceModal, RenameWorkspaceModal, WorkspaceActionsModal } from './workspace-modals'
 
@@ -326,6 +326,13 @@ export function HostSessionsDrawer({
   const [renameError, setRenameError] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const sessionMenuActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  const harnessPickerActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+
+  useEffect(() => () => {
+    sessionMenuActions.cancel()
+    harnessPickerActions.cancel()
+  }, [sessionMenuActions, harnessPickerActions])
 
   const menuBackend = menuSession?.backend ?? 'harness'
   const canUseHarnessActions = !!menuSession && menuBackend === 'harness'
@@ -1670,104 +1677,90 @@ export function HostSessionsDrawer({
       </View>
 
       {/* 会话上下文操作浮层/菜单 */}
-      {menuSession && (
-        <Modal
-          transparent
-          animationType="fade"
-          visible={true}
-          onRequestClose={() => setMenuSession(null)}
-          statusBarTranslucent
-        >
-          <Pressable style={styles.menuBackdrop} onPress={() => setMenuSession(null)}>
-            <View style={styles.contextMenuCard} onStartShouldSetResponder={() => true}>
-              <View style={styles.menuHeader}>
-                <Text style={styles.menuTitle} numberOfLines={1}>
-                  {resolveSessionDisplayTitle(menuSession) ?? strings.sessions.untitled}
-                </Text>
-              </View>
-
-              {canPinSession && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const targetBackend = menuSession.backend
-                    setMenuSession(null)
-                    if (menuIsPinned) {
+      <SheetModal
+        visible={menuSession !== null}
+        onClose={() => setMenuSession(null)}
+        onDismiss={sessionMenuActions.onDismiss}
+      >
+        {menuSession !== null && (() => {
+          const activeSession = menuSession
+          const sessionMenuRows: Array<{
+            key: string
+            icon: typeof OfficialMenuIcons.pin
+            label: string
+            onPress: () => void
+          }> = []
+          if (canPinSession) {
+            const wasPinned = menuIsPinned
+            sessionMenuRows.push({
+              key: 'pin',
+              icon: wasPinned ? OfficialMenuIcons.pinFill : OfficialMenuIcons.pin,
+              label: wasPinned ? strings.sessions.unpinSession : strings.sessions.pinSession,
+              onPress: () => {
+                const sid = activeSession.sessionId
+                const targetBackend = activeSession.backend
+                sessionMenuActions.run(() => setMenuSession(null), () => {
+                  void (async () => {
+                    if (wasPinned) {
                       const ok = await unpinSession(sid, targetBackend)
                       if (!ok) setToastMessage(strings.sessions.unpinFailed)
                     } else {
                       const ok = await pinSession(sid, targetBackend)
                       if (!ok) setToastMessage(strings.sessions.pinFailed)
                     }
-                  }}
-                >
-                  {menuIsPinned ? (
-                    <OfficialMenuIcons.pinFill size={16} color={colors.ink} />
-                  ) : (
-                    <OfficialMenuIcons.pin size={16} color={colors.ink} />
-                  )}
-                  <Text style={styles.menuItemText}>
-                    {menuIsPinned ? strings.sessions.unpinSession : strings.sessions.pinSession}
-                  </Text>
-                </Pressable>
-              )}
-
-              {canUseHarnessActions && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={strings.sessions.renameSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={() => {
-                    const target = {
-                      sessionId: menuSession.sessionId,
-                      currentTitle: resolveSessionDisplayTitle(menuSession) ?? '',
-                      backend: menuSession.backend,
-                    }
-                    setMenuSession(null)
-                    setRenameError(null)
-                    setRenameTarget(target)
-                  }}
-                >
-                  <OfficialMenuIcons.edit size={16} color={colors.ink} />
-                  <Text style={styles.menuItemText}>{strings.sessions.renameSession}</Text>
-                </Pressable>
-              )}
-
-              {canForkSession && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={strings.sessions.forkSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const targetBackend = menuSession.backend
-                    setMenuSession(null)
-                    const created = await forkSession(sid, targetBackend)
-                    if (created) {
-                      closeDrawer()
-                    }
-                  }}
-                >
-                  <OfficialMenuIcons.fork size={16} color={colors.ink} />
-                  <Text style={styles.menuItemText}>{strings.sessions.forkSession}</Text>
-                </Pressable>
-              )}
-
-              {canUseHarnessActions && (
-                <Pressable
-                  accessibilityRole="menuitem"
-                  accessibilityLabel={menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
-                  style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                  onPress={async () => {
-                    const sid = menuSession.sessionId
-                    const wasArchived = menuIsArchived
-                    const isCurrent = sid === selected?.sessionId
-                    setMenuSession(null)
+                  })()
+                })
+              },
+            })
+          }
+          if (canUseHarnessActions) {
+            sessionMenuRows.push({
+              key: 'rename',
+              icon: OfficialMenuIcons.edit,
+              label: strings.sessions.renameSession,
+              onPress: () => {
+                const target = {
+                  sessionId: activeSession.sessionId,
+                  currentTitle: resolveSessionDisplayTitle(activeSession) ?? '',
+                  backend: activeSession.backend,
+                }
+                sessionMenuActions.run(() => setMenuSession(null), () => {
+                  setRenameError(null)
+                  setRenameTarget(target)
+                })
+              },
+            })
+          }
+          if (canForkSession) {
+            sessionMenuRows.push({
+              key: 'fork',
+              icon: OfficialMenuIcons.fork,
+              label: strings.sessions.forkSession,
+              onPress: () => {
+                const sid = activeSession.sessionId
+                const targetBackend = activeSession.backend
+                sessionMenuActions.run(() => setMenuSession(null), () => {
+                  void forkSession(sid, targetBackend).then(created => {
+                    if (created) closeDrawer()
+                  })
+                })
+              },
+            })
+          }
+          if (canUseHarnessActions) {
+            const wasArchived = menuIsArchived
+            sessionMenuRows.push({
+              key: 'archive',
+              icon: wasArchived ? OfficialMenuIcons.unarchive : OfficialMenuIcons.archive,
+              label: wasArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession,
+              onPress: () => {
+                const sid = activeSession.sessionId
+                const targetBackend = activeSession.backend
+                const isCurrent = sid === selected?.sessionId
+                sessionMenuActions.run(() => setMenuSession(null), () => {
+                  void (async () => {
                     if (wasArchived) {
-                      const ok = await unarchiveSession(sid, menuSession.backend)
+                      const ok = await unarchiveSession(sid, targetBackend)
                       if (!ok) setToastMessage(strings.sessions.unarchiveFailed)
                     } else {
                       const ok = await archiveSession(sid)
@@ -1777,134 +1770,149 @@ export function HostSessionsDrawer({
                         closeDrawer()
                       }
                     }
-                  }}
-                >
-                  {menuIsArchived ? (
-                    <OfficialMenuIcons.unarchive size={16} color={colors.ink} />
-                  ) : (
-                    <OfficialMenuIcons.archive size={16} color={colors.ink} />
-                  )}
-                  <Text style={styles.menuItemText}>
-                    {menuIsArchived ? strings.sessions.unarchiveSession : strings.sessions.archiveSession}
-                  </Text>
-                </Pressable>
-              )}
-
-              {/* 复制 Session ID 对所有会话可用 */}
-              <Pressable
-                accessibilityRole="menuitem"
-                accessibilityLabel={strings.sessions.copySessionId}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.pressedBg]}
-                onPress={async () => {
-                  const sid = menuSession.sessionId
-                  setMenuSession(null)
-                  try {
-                    await Clipboard.setStringAsync(sid)
+                  })()
+                })
+              },
+            })
+          }
+          sessionMenuRows.push({
+            key: 'copy',
+            icon: OfficialMenuIcons.copy,
+            label: strings.sessions.copySessionId,
+            onPress: () => {
+              const sid = activeSession.sessionId
+              sessionMenuActions.run(() => setMenuSession(null), () => {
+                void Clipboard.setStringAsync(sid).then(
+                  () => {
                     setToastMessage(strings.sessions.sessionIdCopied)
                     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined)
-                  } catch {
-                    setToastMessage(strings.sessions.copyFailed)
-                  }
-                }}
-              >
-                <OfficialMenuIcons.copy size={16} color={colors.ink} />
-                <Text style={styles.menuItemText}>{strings.sessions.copySessionId}</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Modal>
-      )}
+                  },
+                  () => setToastMessage(strings.sessions.copyFailed),
+                )
+              })
+            },
+          })
+
+          return (
+            <>
+              <View style={styles.sheetHeader}>
+                <Text style={styles.sheetTitle} numberOfLines={1}>
+                  {resolveSessionDisplayTitle(activeSession) ?? strings.sessions.untitled}
+                </Text>
+                <IconButton label={strings.common.close} icon={X} dense onPress={() => setMenuSession(null)} />
+              </View>
+              <GroupCard>
+                {sessionMenuRows.map((row, idx) => (
+                  <GroupRow
+                    key={row.key}
+                    first={idx === 0}
+                    icon={row.icon}
+                    label={row.label}
+                    chevron={false}
+                    onPress={row.onPress}
+                  />
+                ))}
+              </GroupCard>
+            </>
+          )
+        })()}
+      </SheetModal>
 
       {/* 重命名模态弹窗 */}
-      {renameTarget && (
-        <Modal
-          transparent
-          animationType="fade"
-          visible={true}
-          onRequestClose={() => {
-            if (!renaming) {
-              setRenameTarget(null)
-              setRenameError(null)
-            }
-          }}
-          statusBarTranslucent
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.renameBackdrop}
-          >
-            <View style={styles.renameCard}>
+      <SheetModal
+        visible={renameTarget !== null}
+        avoidKeyboard
+        onClose={() => {
+          if (!renaming) {
+            setRenameTarget(null)
+            setRenameError(null)
+          }
+        }}
+      >
+        {renameTarget !== null && (
+          <View>
+            <View style={styles.sheetHeader}>
               <Text style={styles.renameModalTitle}>{strings.sessions.renameSessionTitle}</Text>
-              <TextInput
-                value={renameDraft}
-                onChangeText={(text) => {
-                  setRenameDraft(text)
-                  if (renameError) setRenameError(null)
+              <IconButton
+                label={strings.common.close}
+                icon={X}
+                dense
+                disabled={renaming}
+                onPress={() => {
+                  setRenameTarget(null)
+                  setRenameError(null)
                 }}
-                placeholder={strings.sessions.renamePlaceholder}
-                placeholderTextColor={colors.muted}
-                style={styles.renameInput}
-                autoFocus
-                selectTextOnFocus
-                editable={!renaming}
-                accessibilityLabel={strings.sessions.renameSessionTitle}
               />
-              {renameError ? (
-                <Text accessibilityRole="alert" style={styles.renameErrorText}>
-                  {renameError}
-                </Text>
-              ) : null}
-              <View style={styles.renameButtonRow}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.common.cancel}
-                  disabled={renaming}
-                  onPress={() => {
-                    setRenameTarget(null)
-                    setRenameError(null)
-                  }}
-                  style={({ pressed }) => [styles.renameCancelBtn, pressed && styles.pressedBg]}
-                >
-                  <Text style={styles.renameCancelText}>{strings.common.cancel}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.sessions.renameSession}
-                  disabled={renaming || !renameDraft.trim()}
-                  onPress={async () => {
-                    if (renaming || !renameDraft.trim() || !renameTarget) return
-                    const target = renameTarget
-                    setRenaming(true)
-                    setRenameError(null)
-                    try {
-                      const ok = await renameSession(target.sessionId, renameDraft.trim(), target.backend)
-                      if (ok) {
-                        setRenameTarget(null)
-                        setRenameError(null)
-                      } else {
-                        setRenameError(strings.sessions.renameFailed)
-                      }
-                    } finally {
-                      setRenaming(false)
-                    }
-                  }}
-                  style={({ pressed }) => [
-                    styles.renameConfirmBtn,
-                    (!renameDraft.trim() || renaming) && styles.btnDisabled,
-                    pressed && styles.pressedBg,
-                  ]}
-                >
-                  {renaming ? (
-                    <ActivityIndicator size="small" color={colors.surface} />
-                  ) : (
-                    <Text style={styles.renameConfirmText}>{strings.sessions.renameSession}</Text>
-                  )}
-                </Pressable>
-              </View>
             </View>
-          </KeyboardAvoidingView>
-        </Modal>
-      )}
+            <TextInput
+              value={renameDraft}
+              onChangeText={(text) => {
+                setRenameDraft(text)
+                if (renameError) setRenameError(null)
+              }}
+              placeholder={strings.sessions.renamePlaceholder}
+              placeholderTextColor={colors.muted}
+              style={styles.renameInput}
+              autoFocus
+              selectTextOnFocus
+              editable={!renaming}
+              accessibilityLabel={strings.sessions.renameSessionTitle}
+            />
+            {renameError ? (
+              <Text accessibilityRole="alert" style={styles.renameErrorText}>
+                {renameError}
+              </Text>
+            ) : null}
+            <View style={styles.renameButtonRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.common.cancel}
+                disabled={renaming}
+                onPress={() => {
+                  setRenameTarget(null)
+                  setRenameError(null)
+                }}
+                style={({ pressed }) => [styles.renameCancelBtn, pressed && styles.pressedBg]}
+              >
+                <Text style={styles.renameCancelText}>{strings.common.cancel}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.sessions.renameSession}
+                disabled={renaming || !renameDraft.trim()}
+                onPress={async () => {
+                  if (renaming || !renameDraft.trim() || !renameTarget) return
+                  const target = renameTarget
+                  setRenaming(true)
+                  setRenameError(null)
+                  try {
+                    const ok = await renameSession(target.sessionId, renameDraft.trim(), target.backend)
+                    if (ok) {
+                      setRenameTarget(null)
+                      setRenameError(null)
+                    } else {
+                      setRenameError(strings.sessions.renameFailed)
+                    }
+                  } finally {
+                    setRenaming(false)
+                  }
+                }}
+                style={({ pressed }) => [
+                  styles.renameConfirmBtn,
+                  (!renameDraft.trim() || renaming) && styles.btnDisabled,
+                  pressed && styles.pressedBg,
+                ]}
+              >
+                {renaming ? (
+                  <ActivityIndicator size="small" color={colors.onPrimary ?? colors.white} />
+                ) : (
+                  <Text style={styles.renameConfirmText}>{strings.sessions.renameSession}</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </SheetModal>
 
       {/* 轻量 Toast 提示 */}
       {toastMessage && (
@@ -1929,46 +1937,39 @@ export function HostSessionsDrawer({
       )}
 
       {/* 切换 Harness 模态弹窗 */}
-      <Modal
+      <SheetModal
         visible={harnessPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setHarnessPickerOpen(false)}
-        statusBarTranslucent
+        onClose={() => setHarnessPickerOpen(false)}
+        onDismiss={harnessPickerActions.onDismiss}
       >
-        <View style={styles.harnessBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={() => setHarnessPickerOpen(false)} />
-          <View style={[styles.harnessDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
-            <View style={styles.harnessHeader}>
-              <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
-              <IconButton label={strings.common.close} icon={X} onPress={() => setHarnessPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
-              <GroupCard>
-                {[
-                  ...HARNESS_OPTIONS,
-                  ...customAcpBackends.map(id => ({ value: id as AgentBackend, name: harnessDisplayName(id) })),
-                ].filter(option => backends.includes(option.value)).map((option, index) => {
-                  const chosen = option.value === backend
-                  const descriptionMap = strings.sessions.backendDescriptions as Record<string, string | undefined>
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => void handleSelectHarness(option.value)}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-          </View>
+        <View style={styles.harnessHeader}>
+          <Text style={styles.harnessTitle} accessibilityRole="header">{strings.sessions.switchHarness}</Text>
+          <IconButton label={strings.common.close} icon={X} dense onPress={() => setHarnessPickerOpen(false)} />
         </View>
-      </Modal>
+        <ScrollView style={{ maxHeight: sheetMaxHeight }} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.harnessList}>
+          <GroupCard>
+            {[
+              ...HARNESS_OPTIONS,
+              ...customAcpBackends.map(id => ({ value: id as AgentBackend, name: harnessDisplayName(id) })),
+            ].filter(option => backends.includes(option.value)).map((option, index) => {
+              const chosen = option.value === backend
+              const descriptionMap = strings.sessions.backendDescriptions as Record<string, string | undefined>
+              return (
+                <GroupRow
+                  key={option.value}
+                  first={index === 0}
+                  label={option.name}
+                  detail={descriptionMap[option.value] ?? strings.sessions.customAcpDescription}
+                  selected={chosen}
+                  chevron={false}
+                  accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                  onPress={() => harnessPickerActions.run(() => setHarnessPickerOpen(false), () => { void handleSelectHarness(option.value) })}
+                />
+              )
+            })}
+          </GroupCard>
+        </ScrollView>
+      </SheetModal>
 
       {/* 工作区新建 / 管理 / 重命名弹窗 */}
       <CreateWorkspaceModal
@@ -2076,41 +2077,22 @@ export function HostSessionsDrawer({
         }}
       />
 
-      <Modal
+      <HomeActionsMenu
+        presentation="sheet"
         visible={appMenuOpen}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setAppMenuOpen(false)}
-      >
-        <View style={{ flex: 1 }}>
-          <HomeActionsMenu
-            visible={appMenuOpen}
-            onClose={() => setAppMenuOpen(false)}
-            onPlugins={() => {
-              setAppMenuOpen(false)
-              onOpenPlugins?.()
-            }}
-            pluginsDisabled={!connected || onOpenPlugins === undefined}
-            onAutomationTasks={() => {
-              setAppMenuOpen(false)
-              if (onOpenAutomationTasks) {
-                onOpenAutomationTasks()
-              } else {
-                Alert.alert(strings.automation.title, strings.automation.empty)
-              }
-            }}
-            onSettings={() => {
-              setAppMenuOpen(false)
-              onOpenSettings?.()
-            }}
-            onAbout={() => {
-              setAppMenuOpen(false)
-              onOpenAbout?.()
-            }}
-          />
-        </View>
-      </Modal>
+        onClose={() => setAppMenuOpen(false)}
+        onPlugins={() => onOpenPlugins?.()}
+        pluginsDisabled={!connected || onOpenPlugins === undefined}
+        onAutomationTasks={() => {
+          if (onOpenAutomationTasks) {
+            onOpenAutomationTasks()
+          } else {
+            Alert.alert(strings.automation.title, strings.automation.empty)
+          }
+        }}
+        onSettings={() => onOpenSettings?.()}
+        onAbout={() => onOpenAbout?.()}
+      />
 
       {/* DS-Bot 弹窗宿主 (创建/编辑 Bot & 群聊、上下文菜单、用量/日程报表) */}
       <BotModalsHost />
@@ -2508,72 +2490,26 @@ const createStyles = (colors: ThemeColors) =>
       justifyContent: 'center',
     },
 
-    menuBackdrop: {
-      flex: 1,
-      backgroundColor: colors.modalBackdrop,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: spacing.md,
-    },
-    contextMenuCard: {
-      width: '80%',
-      maxWidth: 280,
-      backgroundColor: colors.surface,
-      borderRadius: radius.xl,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      paddingVertical: spacing.xs,
-      ...floatingShadow(colors, 'high'),
-    },
-    menuHeader: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.separator,
-      marginBottom: spacing.xxs,
-    },
-    menuTitle: {
-      ...type.caption,
-      fontWeight: '600',
-      color: colors.muted,
-    },
-    menuItem: {
+    sheetHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      minHeight: 48,
-      paddingHorizontal: spacing.lg,
-      gap: spacing.md,
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+      marginBottom: spacing.sm,
     },
-    menuItemText: {
-      ...type.body,
+    sheetTitle: {
+      ...type.heading,
       color: colors.ink,
       flex: 1,
-    },
-
-    renameBackdrop: {
-      flex: 1,
-      backgroundColor: colors.modalBackdrop,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: spacing.md,
-    },
-    renameCard: {
-      width: '85%',
-      maxWidth: 340,
-      backgroundColor: colors.surface,
-      borderRadius: radius.xl,
-      padding: spacing.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      ...floatingShadow(colors, 'high'),
     },
     renameModalTitle: {
       ...type.heading,
       color: colors.ink,
       fontWeight: '600',
+      flex: 1,
     },
     renameInput: {
-      borderRadius: radius.lg,
+      ...continuousRadius(radius.lg),
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
       marginVertical: spacing.md,
@@ -2585,7 +2521,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     renameErrorText: {
       ...type.caption,
-      color: colors.ink,
+      color: colors.danger,
       fontWeight: '600',
       marginBottom: spacing.sm,
     },
@@ -2612,7 +2548,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     renameConfirmText: {
       ...type.small,
-      color: colors.white,
+      color: colors.onPrimary ?? colors.white,
       fontWeight: '600',
     },
     btnDisabled: {
@@ -2651,26 +2587,12 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.muted,
       maxWidth: 100,
     },
-    harnessBackdrop: {
-      flex: 1,
-      backgroundColor: colors.modalBackdrop,
-      justifyContent: 'flex-end',
-    },
-    harnessDialog: {
-      backgroundColor: colors.background,
-      borderTopLeftRadius: radius.xxl,
-      borderTopRightRadius: radius.xxl,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.md,
-      paddingBottom: spacing.xxl,
-      gap: spacing.md,
-      ...floatingShadow(colors, 'high'),
-    },
     harnessHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingLeft: spacing.xs,
+      marginBottom: spacing.sm,
     },
     harnessTitle: {
       ...type.heading,
@@ -2680,36 +2602,5 @@ const createStyles = (colors: ThemeColors) =>
     },
     harnessList: {
       paddingBottom: spacing.md,
-    },
-    harnessOptionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
-    },
-    harnessOptionDivider: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
-    },
-    harnessOptionInfo: {
-      flex: 1,
-      gap: 2,
-      marginRight: spacing.sm,
-    },
-    harnessOptionName: {
-      ...type.body,
-      fontSize: 16,
-      color: colors.ink,
-    },
-    harnessOptionNameActive: {
-      fontWeight: '600',
-      color: colors.primary,
-    },
-    harnessOptionDesc: {
-      ...type.small,
-      fontSize: 13,
-      lineHeight: 18,
-      color: colors.muted,
     },
   })

@@ -12,9 +12,9 @@ import {
   View,
 } from 'react-native'
 import { Alert } from '../ui/alert'
+import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import {
   AlertCircle,
-  ArrowLeft,
   Bot,
   Calendar,
   Check,
@@ -883,25 +883,66 @@ export function AutomationTasksModal({
     onClose()
   }
 
+  const modalHeader = isNonNativeBackend ? (
+    <TopBar
+      title={strings.automation.title}
+      centered
+      onBack={onClose}
+      backIcon={X}
+      backLabel={strings.common.close}
+    />
+  ) : formMode !== null ? (
+    <TopBar
+      title={formMode === 'create' ? strings.automation.newTask : strings.automation.editTask}
+      subtitle={strings.automation.title}
+      centered
+      onBack={() => {
+        formTokenRef.current++
+        setSubmitting(false)
+        setFormMode(null)
+      }}
+      backLabel={strings.common.cancel}
+    />
+  ) : selectedTask !== undefined ? (
+    <TopBar
+      title={selectedTask.title || strings.automation.detailTitle}
+      centered
+      onBack={() => setSelectedTaskId(null)}
+      backLabel={strings.common.back}
+      action={
+        <IconButton
+          label={strings.automation.editTask}
+          icon={Edit2}
+          onPress={() => openEditForm(selectedTask)}
+        />
+      }
+    />
+  ) : (
+    <TopBar
+      title={strings.automation.title}
+      centered
+      onBack={onClose}
+      backIcon={X}
+      backLabel={strings.common.close}
+      action={
+        <IconButton
+          label={strings.automation.newTask}
+          icon={Plus}
+          tint={colors.primary}
+          onPress={openCreateForm}
+        />
+      }
+    />
+  )
+
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={handleRequestClose}>
-      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <Modal visible={visible} animationType="slide" transparent={false} statusBarTranslucent onRequestClose={handleRequestClose}>
+      <View style={styles.container}>
+        <BlurHeaderFrame inset header={modalHeader}>
+          <View style={[styles.flex, { paddingBottom: insets.bottom }]}>
         {/* Unsupported Backend View */}
         {isNonNativeBackend ? (
           <View style={styles.flex}>
-            <View style={styles.header}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.common.close}
-                onPress={onClose}
-                hitSlop={8}
-                style={styles.headerBtn}
-              >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
-              <Text style={styles.headerTitle}>{strings.automation.title}</Text>
-              <View style={styles.headerRightSpacer} />
-            </View>
             <View style={styles.centerContainer}>
               <AlertCircle size={52} color={colors.muted} style={styles.emptyIcon} />
               <Text style={styles.unsupportedHeading}>{strings.automation.unsupportedBackendTitle}</Text>
@@ -918,28 +959,6 @@ export function AutomationTasksModal({
         ) : formMode !== null ? (
           /* Create / Edit Form View */
           <View style={styles.flex}>
-            <View style={styles.formHeader}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.common.cancel}
-                onPress={() => {
-                  formTokenRef.current++
-                  setSubmitting(false)
-                  setFormMode(null)
-                }}
-                hitSlop={8}
-                style={[styles.headerBtn, styles.formBackBtn]}
-              >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
-              <View style={styles.formHeaderText}>
-                <Text style={styles.formEyebrow}>{strings.automation.title}</Text>
-                <Text style={styles.formTitleLeft} numberOfLines={1}>
-                  {formMode === 'create' ? strings.automation.newTask : strings.automation.editTask}
-                </Text>
-              </View>
-            </View>
-
             <ScrollView
               contentContainerStyle={styles.formContainer}
               keyboardShouldPersistTaps="handled"
@@ -1189,6 +1208,7 @@ export function AutomationTasksModal({
             <Modal
               visible={picker !== null}
               transparent
+              statusBarTranslucent
               animationType="none"
               onRequestClose={() => {
                 setExpandedRow(null)
@@ -1240,31 +1260,6 @@ export function AutomationTasksModal({
         ) : selectedTask !== undefined ? (
           /* Detail view */
           <View style={styles.flex}>
-            {/* Detail Header */}
-            <View style={styles.header}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.common.back}
-                onPress={() => setSelectedTaskId(null)}
-                hitSlop={8}
-                style={styles.headerBtn}
-              >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {selectedTask.title || strings.automation.detailTitle}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.automation.editTask}
-                onPress={() => openEditForm(selectedTask)}
-                hitSlop={8}
-                style={styles.headerBtn}
-              >
-                <Edit2 size={18} color={colors.ink} />
-              </Pressable>
-            </View>
-
             {/* Detail Tabs */}
             <View style={styles.tabBar}>
               <Pressable
@@ -1452,28 +1447,6 @@ export function AutomationTasksModal({
         ) : (
           /* List view */
           <View style={styles.flex}>
-            {/* Top Header */}
-            <View style={styles.header}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.common.close}
-                onPress={onClose}
-                hitSlop={8}
-                style={styles.headerBtn}
-              >
-                <ArrowLeft size={20} color={colors.ink} />
-              </Pressable>
-              <Text style={styles.headerTitle}>{strings.automation.title}</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.automation.newTask}
-                onPress={openCreateForm}
-                hitSlop={8}
-                style={[styles.headerBtn, styles.headerBtnPrimary]}
-              >
-                <Plus size={20} color={colors.white} />
-              </Pressable>
-            </View>
             <Text style={styles.subtitle}>{strings.automation.subtitle}</Text>
 
             {/* Error Banner if error occurred */}
@@ -1633,6 +1606,8 @@ export function AutomationTasksModal({
             )}
           </View>
         )}
+          </View>
+        </BlurHeaderFrame>
       </View>
     </Modal>
   )
@@ -1642,61 +1617,13 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     flex: { flex: 1 },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-    },
-    headerBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: radius.pill,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.elevated,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      ...floatingShadow(colors),
-    },
-    saveHeaderBtn: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    headerRightSpacer: { width: 44 },
-    headerTitle: {
-      ...type.heading,
-      fontSize: 17,
-      fontWeight: '700',
-      color: colors.ink,
-      flex: 1,
-      textAlign: 'center',
-      marginHorizontal: spacing.sm,
-    },
-    headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    newBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.primary,
-      width: 'auto',
-      paddingHorizontal: spacing.md,
-      height: 44,
-      borderRadius: radius.pill,
-      borderWidth: 0,
-      gap: 4,
-    },
-    newBtnText: { ...type.smallStrong, color: colors.white },
     subtitle: {
       ...type.caption,
       color: colors.muted,
       textAlign: 'center',
       paddingHorizontal: spacing.lg,
-      marginTop: -spacing.xxs,
-      marginBottom: spacing.sm,
-    },
-    headerBtnPrimary: {
-      backgroundColor: colors.primary,
+      marginTop: spacing.xs,
+      marginBottom: spacing.xs,
     },
     filterRow: {
       flexDirection: 'row',
@@ -1958,32 +1885,6 @@ function createStyles(colors: ThemeColors) {
     formContainer: {
       padding: spacing.md,
       paddingBottom: 120,
-    },
-    formHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      paddingHorizontal: spacing.md,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.separator,
-    },
-    formBackBtn: {
-      alignSelf: 'flex-start',
-    },
-    formHeaderText: { flex: 1 },
-    formEyebrow: {
-      ...type.caption,
-      color: colors.muted,
-      marginBottom: 2,
-    },
-    formTitleLeft: {
-      fontSize: 22,
-      lineHeight: 28,
-      fontWeight: '700',
-      color: colors.ink,
-      includeFontPadding: false,
     },
     titleInput: {
       fontSize: 16,

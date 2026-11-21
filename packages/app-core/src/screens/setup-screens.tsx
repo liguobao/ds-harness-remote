@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { connectionLogEntries, connectionLogText, subscribeConnectionLog } from '../services/connection-log'
 import { exportConnectionLog } from '../services/export-connection-log'
 import { useBrowseMemory, browsePreference } from '../services/browse-memory'
@@ -7,7 +7,7 @@ import * as Clipboard from 'expo-clipboard'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Animated, Easing, Image, Linking, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
 import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
@@ -36,6 +36,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, resolveMotion } from '../ui/motion'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
+import { createModalActionQueue } from './chat/modal-action-queue'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ActivityDockMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
@@ -123,7 +124,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
-  const { width, height, sheetMaxHeight } = useResponsiveLayout()
+  const { width, height } = useResponsiveLayout()
   // Give tablets a larger code while keeping the same login tabs on all screens.
   const largeScreen = Math.min(width, height) >= 600
   const { colors } = useTheme()
@@ -623,33 +624,31 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
           </View>
         </Screen>
       </BlurHeaderFrame>
-      <Modal visible={serverExpanded} transparent animationType="fade" onRequestClose={closeServerEditor} statusBarTranslucent>
-        <KeyboardAvoidingView behavior="padding" style={styles.serverBackdrop}>
-          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={closeServerEditor} />
-          <View style={[styles.serverDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.serverDialogContent}>
-              <Text style={styles.serverDialogTitle} accessibilityRole="header">{zhCN.setup.switchServer}</Text>
-                <Field label={zhCN.setup.server} value={serverDraft} onChangeText={value => {
-                  qrRun.current += 1
-                  setQrLogin(undefined)
-                  setQrPhase('idle')
-                  setShowQr(false)
-                  setServerDraft(value)
-                  setServerError(undefined)
-                }} editable={!busy && !oauthFlowBusy} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.switchServerHint} placeholder="https://remote.example.com" />
-                {serverError !== undefined && <Text accessibilityRole="alert" style={styles.preferenceError}>{serverError}</Text>}
-                <View style={styles.serverActions}>
-                  <View style={styles.flex}>
-                    <Button label={zhCN.setup.saveServer} onPress={() => void saveServer()} loading={busy} disabled={oauthFlowBusy || !serverDirty || serverDraft.trim() === ''} />
-                  </View>
-                  <View style={styles.flex}>
-                    <Button label={zhCN.common.cancel} variant="secondary" disabled={busy} onPress={closeServerEditor} />
-                  </View>
-                </View>
-            </ScrollView>
+      <SheetModal visible={serverExpanded} onClose={closeServerEditor} avoidKeyboard>
+        <View style={styles.serverDialogHeader}>
+          <Text style={styles.serverDialogTitle} accessibilityRole="header">{zhCN.setup.switchServer}</Text>
+          <IconButton label={zhCN.common.close} icon={X} dense disabled={busy} onPress={closeServerEditor} />
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.serverDialogContent}>
+          <Field label={zhCN.setup.server} value={serverDraft} onChangeText={value => {
+            qrRun.current += 1
+            setQrLogin(undefined)
+            setQrPhase('idle')
+            setShowQr(false)
+            setServerDraft(value)
+            setServerError(undefined)
+          }} editable={!busy && !oauthFlowBusy} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.switchServerHint} placeholder="https://remote.example.com" />
+          {serverError !== undefined && <Text accessibilityRole="alert" style={styles.preferenceError}>{serverError}</Text>}
+          <View style={styles.serverActions}>
+            <View style={styles.flex}>
+              <Button label={zhCN.setup.saveServer} onPress={() => void saveServer()} loading={busy} disabled={oauthFlowBusy || !serverDirty || serverDraft.trim() === ''} />
+            </View>
+            <View style={styles.flex}>
+              <Button label={zhCN.common.cancel} variant="secondary" disabled={busy} onPress={closeServerEditor} />
+            </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </ScrollView>
+      </SheetModal>
     </View>
   )
 }
@@ -1382,7 +1381,7 @@ function ThemeTile({ value, label, selected, onPress }: { value: ThemePreference
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer, onPlugins, pluginsDisabled = false, onAutomationTasks }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onRemoteHosts, onSwitchServer, onPlugins, pluginsDisabled = false, onAutomationTasks, presentation = 'popover' }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
@@ -1393,19 +1392,22 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   onPlugins?: () => void
   pluginsDisabled?: boolean
   onAutomationTasks?: () => void
+  presentation?: 'popover' | 'sheet'
 }) {
   const language = useAppStore(state => state.language)
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
-  const { width: windowWidth, height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
+  const { width: windowWidth, height: windowHeight, landscape, compactHeight, sheetMaxHeight } = useResponsiveLayout()
   const reduceMotion = useReduceMotion()
+  const sheetActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  useEffect(() => () => sheetActions.cancel(), [sheetActions])
   // The menu is anchored under the toolbar chip; growing from that corner
   // avoids a card that pops in from nowhere.
   const entrance = useRef(new Animated.Value(1)).current
   useEffect(() => {
-    if (!visible) return
+    if (!visible || presentation === 'sheet') return
     entrance.setValue(0)
     const animation = Animated.timing(entrance, {
       toValue: 1,
@@ -1415,7 +1417,122 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
     })
     animation.start()
     return () => animation.stop()
-  }, [visible, entrance, reduceMotion])
+  }, [visible, presentation, entrance, reduceMotion])
+
+  if (presentation === 'sheet') {
+    const runAfterSheet = (action: () => void) => {
+      sheetActions.run(onClose, action)
+    }
+    const updateDetail = phase === 'checking'
+      ? zhCN.settings.checkingUpdates
+      : phase === 'downloading'
+        ? progress === null ? zhCN.settings.downloadingUpdate : `${zhCN.settings.downloadingUpdate} ${progress}%`
+        : undefined
+    const sheetRows: Array<{
+      key: string
+      icon: LucideIcon
+      label: string
+      detail?: string
+      disabled?: boolean
+      accessory?: ReactNode
+      onPress: () => void
+    }> = []
+    if (onPlugins !== undefined) {
+      sheetRows.push({
+        key: 'plugins',
+        icon: Puzzle,
+        label: zhCN.plugins.nav,
+        detail: pluginsDisabled ? zhCN.plugins.connectHostFirst : undefined,
+        disabled: pluginsDisabled,
+        onPress: () => runAfterSheet(onPlugins),
+      })
+    }
+    if (onAutomationTasks !== undefined) {
+      sheetRows.push({
+        key: 'automation',
+        icon: Clock,
+        label: zhCN.automation.nav,
+        onPress: () => runAfterSheet(onAutomationTasks),
+      })
+    }
+    if (onDevices !== undefined) {
+      sheetRows.push({
+        key: 'devices',
+        icon: Laptop,
+        label: zhCN.devices.myDevices,
+        onPress: () => runAfterSheet(onDevices),
+      })
+    }
+    if (onRemoteHosts !== undefined) {
+      sheetRows.push({
+        key: 'remote-hosts',
+        icon: SlidersHorizontal,
+        label: zhCN.remoteHosts.title,
+        onPress: () => runAfterSheet(onRemoteHosts),
+      })
+    }
+    if (onSwitchServer !== undefined) {
+      sheetRows.push({
+        key: 'switch-server',
+        icon: RotateCcw,
+        label: zhCN.setup.switchServer,
+        onPress: () => runAfterSheet(onSwitchServer),
+      })
+    }
+    sheetRows.push({
+      key: 'membership',
+      icon: ShieldCheck,
+      label: zhCN.settings.membership.plan,
+      onPress: () => runAfterSheet(() => { void openSettingsUrl(membershipPricingUrl) }),
+    })
+    sheetRows.push({
+      key: 'settings',
+      icon: Settings,
+      label: zhCN.settings.title,
+      onPress: () => runAfterSheet(onSettings),
+    })
+    sheetRows.push({
+      key: 'about',
+      icon: Info,
+      label: zhCN.settings.about,
+      onPress: () => runAfterSheet(onAbout),
+    })
+    sheetRows.push({
+      key: 'updates',
+      icon: Download,
+      label: zhCN.settings.checkUpdates,
+      detail: updateDetail,
+      disabled: phase !== 'idle',
+      accessory: phase !== 'idle' ? <ActivityIndicator size="small" color={colors.primary} /> : undefined,
+      onPress: () => { void checkForUpdates() },
+    })
+
+    return (
+      <SheetModal visible={visible} onClose={onClose} onDismiss={sheetActions.onDismiss}>
+        <View style={styles.serverDialogHeader}>
+          <Text style={styles.serverDialogTitle} accessibilityRole="header">{zhCN.settings.more}</Text>
+          <IconButton label={zhCN.common.close} icon={X} dense onPress={onClose} />
+        </View>
+        <ScrollView style={{ maxHeight: Math.max(160, sheetMaxHeight - 104) }} bounces={false} showsVerticalScrollIndicator={false}>
+          <GroupCard>
+            {sheetRows.map((row, index) => (
+              <GroupRow
+                key={row.key}
+                first={index === 0}
+                icon={row.icon}
+                label={row.label}
+                detail={row.detail}
+                disabled={row.disabled}
+                accessory={row.accessory}
+                chevron={false}
+                onPress={row.onPress}
+              />
+            ))}
+          </GroupCard>
+        </ScrollView>
+      </SheetModal>
+    )
+  }
 
   if (!visible) return null
 
@@ -2012,10 +2129,9 @@ function createStyles(colors: ThemeColors) {
   methodTabText: { ...type.smallStrong, color: colors.muted },
   methodTabTextActive: { color: colors.primary },
   serverActions: { flexDirection: 'row', gap: spacing.sm },
-  serverBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: colors.modalBackdrop },
-  serverDialog: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
+  serverDialogHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.sm },
   serverDialogContent: { gap: spacing.md },
-  serverDialogTitle: { ...type.heading, color: colors.ink },
+  serverDialogTitle: { ...type.heading, color: colors.ink, flex: 1 },
   serverLabel: { ...type.smallStrong, color: colors.muted },
   formLarge: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   qrPanel: { alignItems: 'center', gap: spacing.md },

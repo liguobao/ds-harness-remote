@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   RefreshControl,
@@ -51,11 +50,12 @@ import { requireBotClient, useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
 import { Button, EmptyState, GroupCard, GroupRow, IconButton } from '../ui/components'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
+import { androidRipple, continuousRadius, elevationStyle, tabularNumsStyle } from '../ui/platform-style'
+import { SheetModal } from '../ui/sheet'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
-import { ModalSurface } from './chat/modal'
 import { ConfirmDialog } from './chat/confirm-dialog'
 import { resolveSessionDisplayTitle } from './session-title'
 import { BotAgentBadge, engineOfModel } from './bot/agent-badge'
@@ -170,7 +170,7 @@ export function BotSidebarSection({
   showSearch?: boolean
   onSelectBot: (id: string) => void
 }) {
-  const { colors, scheme } = useTheme()
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const sessions = useAppStore(state => state.sessions)
   const state = useBotTeamStore(store => store.state)
@@ -295,9 +295,6 @@ export function BotSidebarSection({
     },
   ]
 
-  const surfaceBg = scheme === 'light' ? '#FFFFFF' : colors.surface
-  const filterPillBg = scheme === 'light' ? '#F2F2F7' : colors.grouped
-
   const showBots = filter === 'all' || filter === 'bots'
   const showRooms = filter === 'all' || filter === 'rooms'
   const showAgents = filter === 'all' || filter === 'agents'
@@ -309,10 +306,10 @@ export function BotSidebarSection({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={filterLabel}
+            android_ripple={androidRipple(colors)}
             onPress={() => setFilterMenuOpen(true)}
             style={({ pressed }) => [
               styles.filterPill,
-              { backgroundColor: filterPillBg },
               pressed && styles.pressedFade,
             ]}
           >
@@ -320,7 +317,7 @@ export function BotSidebarSection({
             <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />
           </Pressable>
 
-          <View style={[styles.topSearchCapsule, { backgroundColor: filterPillBg }]}>
+          <View style={styles.topSearchCapsule}>
             <Search size={15} color={colors.muted} strokeWidth={2} />
             <TextInput
               value={searchQuery}
@@ -346,10 +343,10 @@ export function BotSidebarSection({
             accessibilityRole="button"
             accessibilityLabel={s.bots.add}
             disabled={busy || Boolean(state.readOnly)}
+            android_ripple={androidRipple(colors, true)}
             onPress={() => setCreateMenuOpen(true)}
             style={({ pressed }) => [
               styles.plusCircleBtn,
-              { backgroundColor: surfaceBg },
               pressed && styles.pressedFade,
               (busy || Boolean(state.readOnly)) && styles.disabled,
             ]}
@@ -438,6 +435,7 @@ export function BotSidebarSection({
               accessibilityRole="button"
               accessibilityLabel={entry.main ? `${entry.name}, ${s.bots.main}` : entry.name}
               accessibilityState={{ selected: isSelected }}
+              android_ripple={androidRipple(colors)}
               onPress={() => onSelectBot(entry.id)}
               onLongPress={() => {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
@@ -451,7 +449,7 @@ export function BotSidebarSection({
             >
               <BotAvatarWithBadge
                 bot={entry}
-                size={50}
+                size={40}
                 showMainStar
                 statusColor={dotColor}
                 badgeBorderColor={colors.surface}
@@ -500,6 +498,7 @@ export function BotSidebarSection({
               accessibilityRole="button"
               accessibilityLabel={entry.name}
               accessibilityState={{ selected: isSelected }}
+              android_ripple={androidRipple(colors)}
               onPress={() => onSelectBot(entry.id)}
               onLongPress={() => {
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
@@ -511,16 +510,16 @@ export function BotSidebarSection({
                 pressed && styles.rowPressed,
               ]}
             >
-              <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
+              <View style={styles.groupAvatarBox}>
                 {entry.members.slice(0, 3).map((id, idx) => {
                   const member = state.bots.find(b => b.id === id)
                   return member ? (
-                    <View key={id} style={{ position: 'absolute', left: 5 + idx * 8, top: 7 + (idx % 2) * 11 }}>
-                      <BotAvatar bot={member} size={24} />
+                    <View key={id} style={{ position: 'absolute', left: 3 + idx * 7, top: 5 + (idx % 2) * 9 }}>
+                      <BotAvatar bot={member} size={20} />
                     </View>
                   ) : null
                 })}
-                {entry.members.length === 0 && <Users color={colors.muted} size={22} />}
+                {entry.members.length === 0 && <Users color={colors.muted} size={18} />}
               </View>
 
               <View style={styles.rowBody}>
@@ -573,6 +572,7 @@ export function BotSidebarSection({
                   accessibilityRole="button"
                   accessibilityLabel={title}
                   accessibilityState={{ selected: isSelected }}
+                  android_ripple={androidRipple(colors)}
                   onPress={() => onSelectBot(sid)}
                   onLongPress={() => {
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined)
@@ -584,8 +584,8 @@ export function BotSidebarSection({
                     pressed && styles.rowPressed,
                   ]}
                 >
-                  <View style={[styles.groupAvatarBox, { backgroundColor: filterPillBg }]}>
-                    <Sparkles size={22} color={colors.primary} />
+                  <View style={styles.groupAvatarBox}>
+                    <Sparkles size={18} color={colors.primary} />
                   </View>
                   <View style={styles.rowBody}>
                     <View style={styles.rowTopLine}>
@@ -608,15 +608,11 @@ export function BotSidebarSection({
         visible={filterMenuOpen}
         actions={filterActions}
         onClose={() => setFilterMenuOpen(false)}
-        anchor="top-left"
-        topOffset={104}
       />
       <BotFloatingPopover
         visible={createMenuOpen}
         actions={createActions}
         onClose={() => setCreateMenuOpen(false)}
-        anchor="top-right"
-        topOffset={104}
       />
     </View>
   )
@@ -771,8 +767,7 @@ export function BotModalsHost() {
         visible={contextMenu !== undefined && contextActions.length > 0}
         actions={contextActions}
         onClose={() => setContextMenu(undefined)}
-        anchor="top-right"
-        topOffset={120}
+        title={menuBot?.name ?? menuRoom?.name ?? (menuAgent ? 'DSH Agent' : undefined)}
       />
 
       {state !== undefined && (
@@ -807,25 +802,22 @@ export function BotModalsHost() {
         />
       )}
 
-      {report !== undefined && (
-        <Modal
-          transparent
-          visible
-          animationType="slide"
-          onRequestClose={() => setReport(undefined)}
-          statusBarTranslucent
-        >
-          <ModalSurface onClose={() => setReport(undefined)}>
+      <SheetModal
+        visible={report !== undefined}
+        onClose={() => setReport(undefined)}
+      >
+        {report !== undefined && (
+          <>
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, styles.grow]}>{report.title}</Text>
-              <IconButton label={s.common.close} icon={X} onPress={() => setReport(undefined)} />
+              <IconButton label={s.common.close} icon={X} dense onPress={() => setReport(undefined)} />
             </View>
             <ScrollView style={{ maxHeight: sheetMaxHeight }} contentContainerStyle={styles.sheetBody}>
               <BotReportView kind={report.kind} state={state} value={report.value} />
             </ScrollView>
-          </ModalSurface>
-        </Modal>
-      )}
+          </>
+        )}
+      </SheetModal>
 
       <ConfirmDialog
         visible={deleteConfirm !== undefined}
@@ -985,13 +977,14 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      height: 38,
-      paddingHorizontal: 13,
-      borderRadius: 19,
+      height: 36,
+      paddingHorizontal: 12,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
       flexShrink: 0,
     },
     filterPillText: {
-      fontSize: 14,
+      fontSize: 13.5,
       fontWeight: '500',
       color: colors.muted,
     },
@@ -1000,9 +993,10 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      height: 38,
+      height: 36,
       paddingHorizontal: 12,
-      borderRadius: 19,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
       minWidth: 0,
     },
     topSearchInput: {
@@ -1013,19 +1007,16 @@ function createStyles(colors: ThemeColors) {
       minWidth: 0,
     },
     plusCircleBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
       flexShrink: 0,
       alignItems: 'center',
       justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 2,
+      backgroundColor: colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
+      ...elevationStyle(colors, 1),
     },
     scroll: {
       flex: 1,
@@ -1039,22 +1030,23 @@ function createStyles(colors: ThemeColors) {
     inboxRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
+      gap: 12,
       paddingHorizontal: 10,
-      paddingVertical: 11,
-      minHeight: 72,
-      borderRadius: 18,
+      paddingVertical: 8,
+      minHeight: 58,
+      ...continuousRadius(radius.lg),
     },
     rowSelected: {
       backgroundColor: colors.primarySoft,
     },
     rowPressed: {
-      backgroundColor: colors.grouped,
+      backgroundColor: colors.surfaceStrong,
     },
     groupAvatarBox: {
-      width: 50,
-      height: 50,
-      borderRadius: 18,
+      width: 40,
+      height: 40,
+      ...continuousRadius(radius.md),
+      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
@@ -1062,7 +1054,7 @@ function createStyles(colors: ThemeColors) {
     rowBody: {
       flex: 1,
       minWidth: 0,
-      gap: 4,
+      gap: 2,
     },
     rowTopLine: {
       flexDirection: 'row',
@@ -1078,7 +1070,8 @@ function createStyles(colors: ThemeColors) {
       minWidth: 0,
     },
     inboxTitle: {
-      fontSize: 16.5,
+      fontSize: 15,
+      lineHeight: 20,
       fontWeight: '600',
       color: colors.ink,
       flexShrink: 1,
@@ -1087,7 +1080,8 @@ function createStyles(colors: ThemeColors) {
       color: colors.primary,
     },
     inboxDate: {
-      fontSize: 13,
+      fontSize: 12,
+      ...tabularNumsStyle,
       color: colors.muted,
       flexShrink: 0,
     },
@@ -1102,8 +1096,8 @@ function createStyles(colors: ThemeColors) {
     },
     inboxSubtitle: {
       flex: 1,
-      fontSize: 14,
-      lineHeight: 19,
+      fontSize: 13,
+      lineHeight: 18,
       color: colors.muted,
     },
     rowSubtitleActive: {
@@ -1114,50 +1108,6 @@ function createStyles(colors: ThemeColors) {
       color: colors.warning,
       fontWeight: '500',
     },
-    bottomDock: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingHorizontal: 14,
-      paddingTop: 6,
-      paddingBottom: 10,
-    },
-    dockGridBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 2,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-    },
-    dockSearchCapsule: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      height: 44,
-      paddingHorizontal: 14,
-      borderRadius: 22,
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 2,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-    },
-    dockSearchInput: {
-      flex: 1,
-      fontSize: 15.5,
-      color: colors.ink,
-      paddingVertical: 0,
-    },
     errorBanner: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1167,7 +1117,7 @@ function createStyles(colors: ThemeColors) {
       marginBottom: 4,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
-      borderRadius: radius.lg,
+      ...continuousRadius(radius.lg),
       backgroundColor: colors.dangerSoft,
     },
     errorText: { ...type.small, color: colors.danger, flex: 1 },

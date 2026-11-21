@@ -4,6 +4,7 @@ import { X } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
 import { object, text, type BotObject } from '../../services/bot-catalog'
 import { Button } from '../../ui/components'
+import { androidRipple, continuousRadius, elevationStyle } from '../../ui/platform-style'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
@@ -16,7 +17,7 @@ const keyLetter = (index: number) => String.fromCharCode(65 + index)
 export function BotQuestion({ question, busy, answer, dismiss }: { question: BotObject; busy: boolean; answer: (value: BotObject) => void; dismiss: () => void }) {
   const styles = useThemedStyles(createBotStyles)
   const localStyles = useThemedStyles(createCardStyles)
-  const { colors, scheme } = useTheme()
+  const { colors } = useTheme()
   const [selected, setSelected] = useState<string[]>([])
   const [custom, setCustom] = useState('')
   const options = (Array.isArray(question.options) ? question.options : []).map(option => typeof option === 'string' ? { label: option } : object(option))
@@ -38,7 +39,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
 
   return (
     <View style={localStyles.wrapper}>
-      <View style={[localStyles.questionCard, scheme === 'light' ? localStyles.questionCardLight : localStyles.questionCardDark]}>
+      <View style={localStyles.questionCard}>
         <View style={localStyles.headerRow}>
           <View style={localStyles.headerTextWrap}>
             {Boolean(subHeader) && <Text style={localStyles.kickerText}>{subHeader}</Text>}
@@ -50,6 +51,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
             accessibilityLabel={s.bots.dismiss}
             disabled={busy}
             hitSlop={10}
+            android_ripple={androidRipple(colors, true)}
             onPress={dismiss}
             style={({ pressed }) => [localStyles.closeBtn, pressed && { opacity: 0.55 }, busy && { opacity: 0.35 }]}
           >
@@ -70,6 +72,7 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
                   accessibilityState={{ checked: isChecked, disabled: busy }}
                   accessibilityLabel={`${keyLetter(i)}. ${label}`}
                   disabled={busy}
+                  android_ripple={androidRipple(colors)}
                   onPress={() => handleOptionPress(label)}
                   style={({ pressed }) => [
                     localStyles.optionRow,
@@ -80,7 +83,6 @@ export function BotQuestion({ question, busy, answer, dismiss }: { question: Bot
                   <View
                     style={[
                       localStyles.letterBadge,
-                      scheme === 'light' ? localStyles.letterBadgeLight : localStyles.letterBadgeDark,
                       isChecked && localStyles.letterBadgeActive,
                     ]}
                   >
@@ -140,8 +142,9 @@ export function BotSettledCard({ title, closed }: { title: string; closed: 'repl
   )
 }
 
-const createCardStyles = (colors: ThemeColors) =>
-  StyleSheet.create({
+const createCardStyles = (colors: ThemeColors) => {
+  const raisedLight = colors.card === colors.cardOpaque
+  return StyleSheet.create({
     wrapper: {
       gap: 8,
     },
@@ -149,23 +152,12 @@ const createCardStyles = (colors: ThemeColors) =>
       paddingHorizontal: 20,
       paddingTop: 18,
       paddingBottom: 16,
-      borderRadius: 24,
+      ...continuousRadius(radius.xl),
       gap: 14,
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 3,
-    },
-    questionCardLight: {
-      backgroundColor: '#FFFFFF',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: 'rgba(0, 0, 0, 0.05)',
-    },
-    questionCardDark: {
-      backgroundColor: colors.cardOpaque,
+      backgroundColor: colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
+      ...(raisedLight ? elevationStyle(colors, 2) : elevationStyle(colors, 0)),
     },
     headerRow: {
       flexDirection: 'row',
@@ -212,26 +204,21 @@ const createCardStyles = (colors: ThemeColors) =>
       paddingVertical: 9,
       paddingHorizontal: 6,
       marginHorizontal: -6,
-      borderRadius: 14,
+      ...continuousRadius(radius.md),
     },
     optionRowPressed: {
-      backgroundColor: colors.grouped,
+      backgroundColor: colors.surfaceStrong,
     },
     letterBadge: {
       width: 26,
       height: 26,
-      borderRadius: 8,
+      ...continuousRadius(radius.sm),
+      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    letterBadgeLight: {
-      backgroundColor: '#EAECEF',
-    },
-    letterBadgeDark: {
-      backgroundColor: colors.surfaceStrong,
-    },
     letterBadgeActive: {
-      backgroundColor: colors.ink,
+      backgroundColor: colors.inverse,
     },
     letterText: {
       fontSize: 13,
@@ -239,7 +226,7 @@ const createCardStyles = (colors: ThemeColors) =>
       color: colors.muted,
     },
     letterTextActive: {
-      color: colors.surface,
+      color: colors.onInverse,
     },
     optionBody: {
       flex: 1,
@@ -273,7 +260,7 @@ const createCardStyles = (colors: ThemeColors) =>
       gap: spacing.sm,
       paddingHorizontal: spacing.md,
       paddingVertical: 10,
-      borderRadius: radius.lg,
+      ...continuousRadius(radius.lg),
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
       backgroundColor: colors.card,
@@ -287,3 +274,4 @@ const createCardStyles = (colors: ThemeColors) =>
     },
     settledBadgeText: { ...type.caption, fontSize: 11.5, color: colors.muted, fontWeight: '600' },
   })
+}

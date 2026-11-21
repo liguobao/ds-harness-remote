@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, AppState, Easing, Pressable, ScrollView, Text, View } from 'react-native'
+import { ActivityIndicator, Animated, AppState, Easing, ScrollView, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import * as Clipboard from 'expo-clipboard'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   ArrowLeftRight,
   Bot,
-  ChevronLeft,
   Copy,
   Info,
   Menu,
@@ -236,7 +234,6 @@ export function BotModeScreen({
     else void retryOpenSession()
   }
 
-  const insets = useSafeAreaInsets()
   const navBack = splitView ? undefined : (onOpenDrawer ?? (selectedId ? () => handleSelect(undefined) : onBack))
   const goalSteps = objects(room?.goal?.steps)
   const goalDoneCount = goalSteps.filter(step => text(step.status) === 'done').length
@@ -318,65 +315,56 @@ export function BotModeScreen({
     }
   }
 
-  const header = selectedId && (bot || room) ? (
-    <View style={[styles.headerBar, { paddingTop: insets.top + 8, minHeight: 54 + insets.top }]}>
-      <View style={styles.headerSide}>
-        {navBack !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
-            onPress={navBack}
-            hitSlop={8}
-            style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
-          >
-            <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-          </Pressable>
-        )}
-      </View>
+  const chatSubtitle = bot
+    ? (bot.role.trim() || (bot.model || bot.appliedModel)?.split('/').pop() || undefined)
+    : room
+      ? (goalTitle ? room.name : (room.members.length > 0 ? s.dsBotSettings.membersCount(room.members.length) : undefined))
+      : undefined
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={bot?.name ?? room?.name ?? s.bots.title}
-        onPress={() => setDetailsOpen(true)}
-        style={({ pressed }) => [styles.headerPill, pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] }]}
-      >
-        {bot ? (
-          <BotAvatar bot={bot} size={26} />
+  const header = selectedId && (bot || room) ? (
+    <TopBar
+      title={goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
+      subtitle={chatSubtitle}
+      titleLines={1}
+      titleAlign="between"
+      titleLeading={
+        bot ? (
+          <BotAvatar bot={bot} size={22} />
         ) : room && room.members.length > 0 ? (
-          <RoomAvatar members={room.members} bots={state?.bots ?? []} size={26} />
+          <RoomAvatar members={room.members} bots={state?.bots ?? []} size={22} />
         ) : roomLeadBot ? (
-          <BotAvatar bot={roomLeadBot} size={26} />
+          <BotAvatar bot={roomLeadBot} size={22} />
         ) : (
-          <Users size={18} color={colors.primary} />
-        )}
-        <Text numberOfLines={1} style={styles.headerPillName}>
-          {goalTitle || (bot?.name ?? room?.name ?? s.bots.title)}
-        </Text>
-        {bot && <BotAgentBadge engine={bot.engine ?? engineOfModel(bot.model || bot.appliedModel)} size={14} />}
-        {room?.goal !== undefined && goalSteps.length > 0 && (
-          <Text style={styles.headerPillGoalCount}>
+          <Users size={17} color={colors.primary} />
+        )
+      }
+      titleAccessory={
+        bot ? (
+          <BotAgentBadge engine={bot.engine ?? engineOfModel(bot.model || bot.appliedModel)} size={14} />
+        ) : room?.goal !== undefined && goalSteps.length > 0 ? (
+          <Text style={styles.headerGoalCount}>
             {goalDoneCount}/{goalSteps.length}
           </Text>
-        )}
-      </Pressable>
-
-      <View style={styles.headerSide}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={s.sessions.moreActions}
+        ) : null
+      }
+      backIcon={onOpenDrawer ? Menu : undefined}
+      backLabel={onOpenDrawer ? s.chat.openHostSessions : s.common.back}
+      onBack={navBack}
+      onTitlePress={() => setDetailsOpen(true)}
+      action={
+        <IconButton
+          dense
+          label={s.sessions.moreActions}
+          icon={MoreHorizontal}
           onPress={() => setChatMoreOpen(true)}
-          hitSlop={8}
-          style={({ pressed }) => [styles.headerSideChip, pressed && { opacity: 0.72 }]}
-        >
-          <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
-        </Pressable>
-      </View>
-    </View>
+        />
+      }
+    />
   ) : (
     <TopBar
       title={device?.name ?? s.bots.title}
       titleLines={1}
-      centered={80}
+      titleAlign="between"
       titleAccessory={null}
       backIcon={onOpenDrawer ? Menu : undefined}
       backLabel={onOpenDrawer ? s.chat.openHostSessions : undefined}
@@ -476,7 +464,7 @@ export function BotModeScreen({
           visible={chatMoreOpen}
           actions={headerMoreActions}
           onClose={() => setChatMoreOpen(false)}
-          anchor="top-right"
+          title={bot?.name ?? room?.name}
         />
         {conversationReady && expandedComposerProps !== null && (
           <ExpandedComposer {...expandedComposerProps} />

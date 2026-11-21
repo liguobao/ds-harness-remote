@@ -64,12 +64,12 @@ import {
   TopBar,
 } from '../../ui/components'
 import { useResponsiveLayout } from '../../ui/responsive'
+import { SheetModal } from '../../ui/sheet'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { Toggle } from '../../ui/toggle'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DsBotInstallCard } from '../bot-sidebar-section'
-import { ModalSurface } from '../chat/modal'
 import { PluginsModal } from '../plugins-modal'
 import { BotAgentBadge } from './agent-badge'
 import { BotAvatarWithBadge } from './avatar'
@@ -161,10 +161,9 @@ export function DsBotSettingsModal({
   initialTab?: DsBotSettingsTab
   onClose: () => void
 }) {
-  const { colors, scheme } = useTheme()
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { contentMaxWidth, landscape } = useResponsiveLayout()
-  const isDark = scheme === 'dark'
 
   const language = useAppStore(store => store.language)
   const connected = useAppStore(store => store.connection.phase === 'connected')
@@ -980,7 +979,7 @@ export function DsBotSettingsModal({
                             bot={bot}
                             size={42}
                             showMainStar
-                            badgeBorderColor={isDark ? colors.cardOpaque : '#FFFFFF'}
+                            badgeBorderColor={colors.cardOpaque}
                           />
                           <View style={{ flex: 1, minWidth: 0 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -1185,97 +1184,97 @@ export function DsBotSettingsModal({
         </BlurHeaderFrame>
 
         {/* Main Bot Picker Modal */}
-        {mainBotPickerOpen && (
-          <Modal transparent animationType="fade" visible onRequestClose={() => setMainBotPickerOpen(false)}>
-            <ModalSurface onClose={() => setMainBotPickerOpen(false)}>
-              <View style={{ gap: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.sheetTitle}>{s.dsBotSettings.chooseMainBot}</Text>
-                  <IconButton label={s.common.close} icon={X} onPress={() => setMainBotPickerOpen(false)} />
-                </View>
-                <GroupCard>
-                  {effectiveState.bots
-                    .filter(b => !b.private)
-                    .map((bot, idx) => {
-                      const on = bot.id === mainBot?.id
-                      return (
-                        <GroupRow
-                          key={bot.id}
-                          first={idx === 0}
-                          icon={Bot}
-                          label={bot.name}
-                          detail={bot.role || undefined}
-                          selected={on}
-                          chevron={false}
-                          accessory={on ? <Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                          onPress={() => {
-                            setMainBotPickerOpen(false)
-                            if (bot.id !== mainBot?.id) {
-                              void perform('set-main', {
-                                id: bot.id,
-                                main: true,
-                                primary: true,
-                                ...(mainBot?.id ? { replace: mainBot.id } : {}),
-                              })
-                            }
-                          }}
-                        />
-                      )
-                    })}
-                </GroupCard>
-              </View>
-            </ModalSurface>
-          </Modal>
-        )}
+        <SheetModal
+          visible={mainBotPickerOpen}
+          onClose={() => setMainBotPickerOpen(false)}
+        >
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.sheetTitle}>{s.dsBotSettings.chooseMainBot}</Text>
+              <IconButton label={s.common.close} icon={X} dense onPress={() => setMainBotPickerOpen(false)} />
+            </View>
+            <ScrollView style={{ maxHeight: 380 }}>
+              <GroupCard>
+                {effectiveState.bots
+                  .filter(b => !b.private)
+                  .map((bot, idx) => {
+                    const on = bot.id === mainBot?.id
+                    return (
+                      <GroupRow
+                        key={bot.id}
+                        first={idx === 0}
+                        icon={Bot}
+                        label={bot.name}
+                        detail={bot.role || undefined}
+                        selected={on}
+                        chevron={false}
+                        accessory={on ? <Check size={18} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                        onPress={() => {
+                          setMainBotPickerOpen(false)
+                          if (bot.id !== mainBot?.id) {
+                            void perform('set-main', {
+                              id: bot.id,
+                              main: true,
+                              primary: true,
+                              ...(mainBot?.id ? { replace: mainBot.id } : {}),
+                            })
+                          }
+                        }}
+                      />
+                    )
+                  })}
+              </GroupCard>
+            </ScrollView>
+          </View>
+        </SheetModal>
 
         {/* Default Model Picker Modal */}
-        {defaultModelPickerOpen && (
-          <Modal transparent animationType="fade" visible onRequestClose={() => setDefaultModelPickerOpen(false)}>
-            <ModalSurface onClose={() => setDefaultModelPickerOpen(false)}>
-              <View style={{ gap: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.sheetTitle}>{s.bots.defaultModel}</Text>
-                  <IconButton label={s.common.close} icon={X} onPress={() => setDefaultModelPickerOpen(false)} />
-                </View>
-                <ScrollView style={{ maxHeight: 380 }}>
-                  <GroupCard>
-                    {effectiveState.models.length === 0 ? (
+        <SheetModal
+          visible={defaultModelPickerOpen}
+          onClose={() => setDefaultModelPickerOpen(false)}
+        >
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.sheetTitle}>{s.bots.defaultModel}</Text>
+              <IconButton label={s.common.close} icon={X} dense onPress={() => setDefaultModelPickerOpen(false)} />
+            </View>
+            <ScrollView style={{ maxHeight: 380 }}>
+              <GroupCard>
+                {effectiveState.models.length === 0 ? (
+                  <GroupRow
+                    first
+                    label={defaultBotModel || 'deepseek/deepseek-chat'}
+                    selected
+                    chevron={false}
+                    accessory={<Check size={18} color={colors.primary} />}
+                    onPress={() => setDefaultModelPickerOpen(false)}
+                  />
+                ) : (
+                  effectiveState.models.map((m, idx) => {
+                    const ref = text(m.ref)
+                    const label = text(m.name) || text(m.label) || ref
+                    const on = defaultBotModel === ref
+                    return (
                       <GroupRow
-                        first
-                        label={defaultBotModel || 'deepseek/deepseek-chat'}
-                        selected
+                        key={ref}
+                        first={idx === 0}
+                        label={label}
+                        detail={ref}
+                        selected={on}
                         chevron={false}
-                        accessory={<Check size={18} color={colors.primary} />}
-                        onPress={() => setDefaultModelPickerOpen(false)}
+                        accessory={on ? <Check size={18} color={colors.primary} /> : undefined}
+                        onPress={() => {
+                          setDefaultModelPickerOpen(false)
+                          void setPref({ defaultBotModel: ref })
+                        }}
                       />
-                    ) : (
-                      effectiveState.models.map((m, idx) => {
-                        const ref = text(m.ref)
-                        const label = text(m.name) || text(m.label) || ref
-                        const on = defaultBotModel === ref
-                        return (
-                          <GroupRow
-                            key={ref}
-                            first={idx === 0}
-                            label={label}
-                            detail={ref}
-                            selected={on}
-                            chevron={false}
-                            accessory={on ? <Check size={18} color={colors.primary} /> : undefined}
-                            onPress={() => {
-                              setDefaultModelPickerOpen(false)
-                              void setPref({ defaultBotModel: ref })
-                            }}
-                          />
-                        )
-                      })
-                    )}
-                  </GroupCard>
-                </ScrollView>
-              </View>
-            </ModalSurface>
-          </Modal>
-        )}
+                    )
+                  })
+                )}
+              </GroupCard>
+            </ScrollView>
+          </View>
+        </SheetModal>
 
         {/* Team Workspace Folder Picker */}
         <BotFolderPickerModal
@@ -1378,7 +1377,7 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.ink,
     },
     smallPillTextActive: {
-      color: colors.white,
+      color: colors.onPrimary ?? colors.white,
       fontWeight: '600',
     },
     inlineCreateBtn: {

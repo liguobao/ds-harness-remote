@@ -6,6 +6,7 @@ import {
   Dimensions,
   Easing,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import {
 import { Alert } from '../../ui/alert'
 import * as Clipboard from 'expo-clipboard'
 import {
+  ArrowLeft,
   ArrowLeftRight,
   Check,
   ChevronDown,
@@ -51,10 +53,12 @@ import {
 } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import { Button, IconButton } from '../../ui/components'
+import { continuousRadius, elevationStyle } from '../../ui/platform-style'
+import { SheetModal } from '../../ui/sheet'
+import { radius } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { Toggle } from '../../ui/toggle'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { ModalSurface } from '../chat/modal'
 import { BotAgentBadge, engineOfModel } from './agent-badge'
 import { BotAvatar, BotAvatarWithBadge } from './avatar'
 import { BotFloatingPopover, type BotPopoverAction } from './popover-menu'
@@ -119,7 +123,7 @@ export function BotProfilePage({
   perform: (operation: BotOperation, payload?: BotObject) => Promise<{ ok: boolean; value?: unknown }>
 }) {
   const insets = useSafeAreaInsets()
-  const { colors, scheme } = useTheme()
+  const { colors } = useTheme()
   const styles = useThemedStyles(createProfileStyles)
   const appSessions = useAppStore(store => store.sessions)
 
@@ -434,8 +438,7 @@ export function BotProfilePage({
     return s.bots.usageSummary(formatCompactTokens(total), hit)
   })()
 
-  const canvasBg = scheme === 'light' ? '#F6F7F9' : colors.background
-  const cardBg = scheme === 'light' ? '#FFFFFF' : colors.cardOpaque
+  const BackIcon = Platform.OS === 'ios' ? ChevronLeft : ArrowLeft
 
   const memoryCountLabel =
     memoryCount === null ? '…' : memoryCount === 0 ? s.bots.memoryEmpty : s.bots.memoryCount(memoryCount)
@@ -446,47 +449,33 @@ export function BotProfilePage({
         <Animated.View
           style={[
             styles.page,
-            { backgroundColor: canvasBg, transform: [{ translateX: slideAnim }] },
+            { backgroundColor: colors.background, transform: [{ translateX: slideAnim }] },
           ]}
         >
-          {/* Top Action Bar (`<` on left, `⚙` Settings + `•••` More on right, matching Figure 1) */}
+          {/* Top Action Bar (`<` on left, `⚙` Settings + `•••` More on right) */}
           <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={s.common.back}
+            <IconButton
+              dense
+              label={s.common.back}
+              icon={BackIcon}
               onPress={onClose}
-              hitSlop={8}
-              style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
-            >
-              <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-            </Pressable>
+            />
 
             <View style={styles.topRightGroup}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={s.bots.botSettings}
+              <IconButton
+                dense
+                label={s.bots.botSettings}
+                icon={Settings}
                 disabled={busy || Boolean(state.readOnly)}
                 onPress={onEdit}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.circleBtn,
-                  { backgroundColor: cardBg },
-                  pressed && styles.btnPressed,
-                  (busy || Boolean(state.readOnly)) && { opacity: 0.45 },
-                ]}
-              >
-                <Settings size={19} color={colors.ink} strokeWidth={1.9} />
-              </Pressable>
+              />
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={s.sessions.moreActions}
+              <IconButton
+                dense
+                label={s.sessions.moreActions}
+                icon={MoreHorizontal}
                 onPress={() => setMoreOpen(true)}
-                hitSlop={8}
-                style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
-              >
-                <MoreHorizontal size={20} color={colors.ink} strokeWidth={2} />
-              </Pressable>
+              />
             </View>
           </View>
 
@@ -497,10 +486,10 @@ export function BotProfilePage({
                 bot={bot}
                 size={topTab === 'browser' ? 44 : 76}
                 showMainStar
-                badgeBorderColor={canvasBg}
+                badgeBorderColor={colors.background}
               />
             ) : room ? (
-              <View style={[styles.roomHeroAvatar, { backgroundColor: cardBg }]}>
+              <View style={styles.roomHeroAvatar}>
                 {room.members.slice(0, 3).map((id, idx) => {
                   const member = state.bots.find(b => b.id === id)
                   return member ? (
@@ -531,14 +520,9 @@ export function BotProfilePage({
               </Text>
             )}
 
-            {/* Figure 1 Segmented Tabs: `详情 | 浏览器` */}
+            {/* Segmented Tabs: `详情 | 浏览器` */}
             {bot && (
-              <View
-                style={[
-                  styles.segmentedWrap,
-                  { backgroundColor: scheme === 'light' ? '#EAECEF' : colors.grouped },
-                ]}
-              >
+              <View style={styles.segmentedWrap}>
                 {([
                   ['details', s.bots.details],
                   ['browser', s.bots.browser],
@@ -552,10 +536,7 @@ export function BotProfilePage({
                       onPress={() => setTopTab(key)}
                       style={[
                         styles.segmentedTab,
-                        active && [
-                          styles.segmentedTabActive,
-                          { backgroundColor: scheme === 'light' ? '#FFFFFF' : colors.surfaceStrong },
-                        ],
+                        active && styles.segmentedTabActive,
                       ]}
                     >
                       <Text style={[styles.segmentedTabText, active && styles.segmentedTabTextActive]}>
@@ -574,7 +555,7 @@ export function BotProfilePage({
             </Text>
           )}
 
-          {/* Browser Tab Content (Figure 2) */}
+          {/* Browser Tab Content */}
           {bot && topTab === 'browser' ? (
             <View style={{ flex: 1, marginTop: 4 }}>
               <BotBrowserPane bot={bot} perform={perform} />
@@ -587,7 +568,7 @@ export function BotProfilePage({
             >
               {bot ? (
                 <View style={{ gap: 18 }}>
-                  {/* 1. 模型 (Model Selector Box, matching Figure 1) */}
+                  {/* 1. 模型 */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.model}</Text>
                     <Pressable
@@ -596,7 +577,6 @@ export function BotProfilePage({
                       onPress={() => setModelPickerOpen(true)}
                       style={({ pressed }) => [
                         styles.selectorBox,
-                        { backgroundColor: cardBg },
                         pressed && styles.cardRowPressed,
                       ]}
                     >
@@ -625,15 +605,10 @@ export function BotProfilePage({
                     </Pressable>
                   </View>
 
-                  {/* 2. 权限 (3-Segment Pill: 仅可查看 | 工作区内修改 | 完全权限, matching Figure 1) */}
+                  {/* 2. 权限 */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.permissions}</Text>
-                    <View
-                      style={[
-                        styles.permSegmented,
-                        { backgroundColor: scheme === 'light' ? '#EAECEF' : colors.grouped },
-                      ]}
-                    >
+                    <View style={styles.permSegmented}>
                       {(
                         [
                           ['read-only', s.bots.permReadOnly, false],
@@ -655,10 +630,7 @@ export function BotProfilePage({
                             }}
                             style={[
                               styles.permOption,
-                              active && [
-                                styles.permOptionActive,
-                                { backgroundColor: scheme === 'light' ? '#FFFFFF' : colors.surfaceStrong },
-                              ],
+                              active && styles.permOptionActive,
                             ]}
                           >
                             <Text
@@ -677,7 +649,7 @@ export function BotProfilePage({
                     </View>
                   </View>
 
-                  {/* 3. 工作文件夹 (Working Folder Selector Box: `总工作区 ∨`, matching Figure 1) */}
+                  {/* 3. 工作文件夹 */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.workingFolder}</Text>
                     <Pressable
@@ -686,7 +658,6 @@ export function BotProfilePage({
                       onPress={() => setFolderPickerOpen(true)}
                       style={({ pressed }) => [
                         styles.selectorBox,
-                        { backgroundColor: cardBg },
                         pressed && styles.cardRowPressed,
                       ]}
                     >
@@ -704,14 +675,14 @@ export function BotProfilePage({
                     </Pressable>
                   </View>
 
-                  {/* 4. Instructions / `在 Bot 设置里添加说明` (matching Figure 1) */}
+                  {/* 4. Instructions */}
                   {bot.instructions.trim() ? (
                     <Pressable
                       onPress={() => {
                         onClose()
                         onEdit()
                       }}
-                      style={[styles.selectorBox, { backgroundColor: cardBg }]}
+                      style={styles.selectorBox}
                     >
                       <Text style={[styles.selectorSubText, { color: colors.ink, lineHeight: 19 }]} numberOfLines={3}>
                         {bot.instructions.trim()}
@@ -730,7 +701,7 @@ export function BotProfilePage({
                     </Pressable>
                   )}
 
-                  {/* 5. 记忆 (Memory: `📄 3 条    管理 >`, matching Figure 1) */}
+                  {/* 5. 记忆 */}
                   {state.memory !== false && (
                     <View style={styles.fieldSection}>
                       <Text style={styles.fieldSectionTitle}>{s.bots.memory}</Text>
@@ -739,7 +710,6 @@ export function BotProfilePage({
                         onPress={() => openSubPage('memory')}
                         style={({ pressed }) => [
                           styles.selectorBox,
-                          { backgroundColor: cardBg },
                           pressed && styles.cardRowPressed,
                         ]}
                       >
@@ -755,7 +725,7 @@ export function BotProfilePage({
                     </View>
                   )}
 
-                  {/* 6. 用量 (Usage: `Chief    600.9K tok · 缓存命中 74%`, matching Figure 1) */}
+                  {/* 6. 用量 */}
                   <View style={styles.fieldSection}>
                     <Text style={styles.fieldSectionTitle}>{s.bots.usage}</Text>
                     <Pressable
@@ -766,7 +736,6 @@ export function BotProfilePage({
                       }}
                       style={({ pressed }) => [
                         styles.selectorBox,
-                        { backgroundColor: cardBg },
                         pressed && styles.cardRowPressed,
                       ]}
                     >
@@ -780,7 +749,7 @@ export function BotProfilePage({
                     </Pressable>
                   </View>
 
-                  {/* 7. 定时任务 (Scheduled Tasks: `还没有定时任务，去添加` or task rows, matching Figure 1) */}
+                  {/* 7. 定时任务 */}
                   <View style={styles.fieldSection}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Text style={styles.fieldSectionTitle}>
@@ -796,7 +765,7 @@ export function BotProfilePage({
                     </View>
 
                     {schedulesLoading ? (
-                      <View style={[styles.selectorBox, { backgroundColor: cardBg, justifyContent: 'center' }]}>
+                      <View style={[styles.selectorBox, { justifyContent: 'center' }]}>
                         <ActivityIndicator size="small" color={colors.primary} />
                       </View>
                     ) : botSchedules.length === 0 ? (
@@ -805,7 +774,6 @@ export function BotProfilePage({
                         onPress={() => openSubPage('schedules', true)}
                         style={({ pressed }) => [
                           styles.selectorBox,
-                          { backgroundColor: cardBg },
                           pressed && styles.cardRowPressed,
                         ]}
                       >
@@ -818,7 +786,6 @@ export function BotProfilePage({
                         onPress={() => openSubPage('schedules', false)}
                         style={({ pressed }) => [
                           styles.groupCard,
-                          { backgroundColor: cardBg },
                           pressed && styles.cardRowPressed,
                         ]}
                       >
@@ -840,7 +807,7 @@ export function BotProfilePage({
                   </View>
 
                   {/* 会话分段快捷入口 + 置顶开关 */}
-                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                  <View style={styles.groupCard}>
                     <Pressable
                       accessibilityRole="button"
                       onPress={() => openSubPage('sessions')}
@@ -865,7 +832,7 @@ export function BotProfilePage({
                   </View>
 
                   {canDeleteBot(state, bot) && (
-                    <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                    <View style={styles.groupCard}>
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={s.bots.delete}
@@ -886,7 +853,7 @@ export function BotProfilePage({
               ) : room ? (
                 <View style={{ gap: 16 }}>
                   {room.goal && isNonEmptyObject(room.goal) && (
-                    <View style={[styles.groupCard, { backgroundColor: cardBg, padding: 16, gap: 10 }]}>
+                    <View style={[styles.groupCard, { padding: 16, gap: 10 }]}>
                       <Text style={styles.subCardTitle}>
                         {s.sessionActivity.goal}: {text(room.goal.title) || text(room.goal.status)}
                       </Text>
@@ -922,7 +889,7 @@ export function BotProfilePage({
                   {room.members.length > 0 && (
                     <View style={styles.fieldSection}>
                       <Text style={styles.fieldSectionTitle}>{s.bots.members}</Text>
-                      <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                      <View style={styles.groupCard}>
                         {room.members.map((memberId, index) => {
                           const memberBot = state.bots.find(entry => entry.id === memberId)
                           return (
@@ -958,7 +925,7 @@ export function BotProfilePage({
                       <Pressable
                         accessibilityRole="button"
                         onPress={() => openSubPage('memory')}
-                        style={({ pressed }) => [styles.selectorBox, { backgroundColor: cardBg }, pressed && styles.cardRowPressed]}
+                        style={({ pressed }) => [styles.selectorBox, pressed && styles.cardRowPressed]}
                       >
                         <FileText size={17} color={colors.muted} />
                         <Text style={[styles.selectorPrimaryText, { flex: 1, fontWeight: '400' }]}>{memoryCountLabel}</Text>
@@ -973,7 +940,7 @@ export function BotProfilePage({
                     <Pressable
                       accessibilityRole="button"
                       onPress={() => openSubPage('schedules', botSchedules.length === 0)}
-                      style={({ pressed }) => [styles.selectorBox, { backgroundColor: cardBg }, pressed && styles.cardRowPressed]}
+                      style={({ pressed }) => [styles.selectorBox, pressed && styles.cardRowPressed]}
                     >
                       <Text style={[styles.selectorSubText, { flex: 1 }]}>
                         {botSchedules.length > 0
@@ -984,7 +951,7 @@ export function BotProfilePage({
                     </Pressable>
                   </View>
 
-                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                  <View style={styles.groupCard}>
                     <View style={styles.toggleRow}>
                       <Text style={styles.rowLabel}>{s.bots.pinChat}</Text>
                       <Toggle
@@ -996,7 +963,7 @@ export function BotProfilePage({
                     </View>
                   </View>
 
-                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                  <View style={styles.groupCard}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={s.bots.delete}
@@ -1023,19 +990,16 @@ export function BotProfilePage({
               style={[
                 StyleSheet.absoluteFill,
                 styles.subPage,
-                { backgroundColor: canvasBg, transform: [{ translateX: subSlideAnim }] },
+                { backgroundColor: colors.background, transform: [{ translateX: subSlideAnim }] },
               ]}
             >
-              <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={s.common.back}
+              <View style={[styles.topBar, styles.subPageTopBar, { paddingTop: insets.top + 8 }]}>
+                <IconButton
+                  dense
+                  label={s.common.back}
+                  icon={BackIcon}
                   onPress={closeSubPage}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.circleBtn, { backgroundColor: cardBg }, pressed && styles.btnPressed]}
-                >
-                  <ChevronLeft size={22} color={colors.ink} strokeWidth={2.1} />
-                </Pressable>
+                />
 
                 <Text style={styles.subPageTitle} numberOfLines={1}>
                   {mountedSubPage === 'sessions'
@@ -1048,24 +1012,16 @@ export function BotProfilePage({
                 </Text>
 
                 {mountedSubPage === 'sessions' && bot ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={s.bots.newSession}
+                  <IconButton
+                    dense
+                    label={s.bots.newSession}
+                    icon={Plus}
                     disabled={busy || Boolean(state.readOnly)}
                     onPress={() => {
                       onClose()
                       void perform('bot-new-part', { botId: bot.id })
                     }}
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                      styles.circleBtn,
-                      { backgroundColor: cardBg },
-                      pressed && styles.btnPressed,
-                      (busy || Boolean(state.readOnly)) && { opacity: 0.4 },
-                    ]}
-                  >
-                    <Plus size={20} color={colors.ink} strokeWidth={2.1} />
-                  </Pressable>
+                  />
                 ) : (
                   <View style={styles.circlePlaceholder} />
                 )}
@@ -1076,7 +1032,7 @@ export function BotProfilePage({
                   style={styles.scroll}
                   contentContainerStyle={[styles.scrollContent, { paddingTop: 12, paddingBottom: insets.bottom + 28 }]}
                 >
-                  <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                  <View style={styles.groupCard}>
                     {allParts.map((partId, index) => {
                       const current = index === 0
                       const matched = appSessions.find(item => item.sessionId === partId)
@@ -1155,7 +1111,7 @@ export function BotProfilePage({
                     style={styles.scroll}
                     contentContainerStyle={[styles.scrollContent, { paddingTop: 12, paddingBottom: insets.bottom + 28 }]}
                   >
-                    <View style={[styles.groupCard, { backgroundColor: cardBg, padding: 16, marginBottom: 14, gap: 6 }]}>
+                    <View style={[styles.groupCard, { padding: 16, marginBottom: 14, gap: 6 }]}>
                       <Text style={styles.subCardTitle}>{bot?.name ?? room?.name ?? s.bots.usage}</Text>
                       <Text style={styles.memberRole}>{usageInlineText}</Text>
                     </View>
@@ -1163,7 +1119,7 @@ export function BotProfilePage({
                       const rows = Array.isArray(usageData?.rows) ? usageData!.rows.filter(Array.isArray) : []
                       if (rows.length === 0) return null
                       return (
-                        <View style={[styles.groupCard, { backgroundColor: cardBg }]}>
+                        <View style={styles.groupCard}>
                           {rows.map((row, i) => {
                             const cells = row as unknown[]
                             return (
@@ -1193,60 +1149,59 @@ export function BotProfilePage({
         </Animated.View>
 
         {/* Quick Model Picker Sheet */}
-        {bot && modelPickerOpen && (
-          <Modal transparent animationType="fade" visible onRequestClose={() => setModelPickerOpen(false)}>
-            <ModalSurface onClose={() => setModelPickerOpen(false)}>
-              <View style={{ gap: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.subCardTitle}>{s.bots.model}</Text>
-                  <Pressable onPress={() => setModelPickerOpen(false)} hitSlop={8}>
-                    <X size={20} color={colors.muted} />
-                  </Pressable>
-                </View>
-                <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-                  <Pressable
-                    onPress={() => {
-                      setModelPickerOpen(false)
-                      void perform('update-bot', { id: bot.id, model: '' })
-                    }}
-                    style={styles.partRow}
-                  >
-                    <Text style={[styles.rowLabel, { flex: 1 }]}>{s.bots.defaultModel}</Text>
-                    {!bot.model && <Check size={18} color={colors.primary} />}
-                  </Pressable>
-                  {groupBotModels(state.models).map(group => (
-                    <View key={group.provider} style={{ marginTop: 8 }}>
-                      <Text style={[styles.fieldSectionTitle, { paddingHorizontal: 14, marginBottom: 4 }]}>
-                        {group.label}
-                      </Text>
-                      {group.items.map(item => {
-                        const ref = text(item.ref)
-                        const label = text(item.name) || text(item.label) || ref
-                        const selected = bot.model === ref
-                        return (
-                          <Pressable
-                            key={ref}
-                            onPress={() => {
-                              setModelPickerOpen(false)
-                              void perform('update-bot', { id: bot.id, model: ref })
-                            }}
-                            style={styles.partRow}
-                          >
-                            <BotAgentBadge engine={engineOfModel(ref)} size={16} />
-                            <Text style={[styles.rowLabel, { flex: 1 }]} numberOfLines={1}>
-                              {label}
-                            </Text>
-                            {selected && <Check size={18} color={colors.primary} />}
-                          </Pressable>
-                        )
-                      })}
-                    </View>
-                  ))}
-                </ScrollView>
+        <SheetModal
+          visible={Boolean(bot && modelPickerOpen)}
+          onClose={() => setModelPickerOpen(false)}
+        >
+          {bot !== undefined && (
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.subCardTitle}>{s.bots.model}</Text>
+                <IconButton label={s.common.close} icon={X} dense onPress={() => setModelPickerOpen(false)} />
               </View>
-            </ModalSurface>
-          </Modal>
-        )}
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                <Pressable
+                  onPress={() => {
+                    setModelPickerOpen(false)
+                    void perform('update-bot', { id: bot.id, model: '' })
+                  }}
+                  style={({ pressed }) => [styles.partRow, pressed && styles.cardRowPressed]}
+                >
+                  <Text style={[styles.rowLabel, { flex: 1 }]}>{s.bots.defaultModel}</Text>
+                  {!bot.model && <Check size={18} color={colors.primary} />}
+                </Pressable>
+                {groupBotModels(state.models).map(group => (
+                  <View key={group.provider} style={{ marginTop: 8 }}>
+                    <Text style={[styles.fieldSectionTitle, { paddingHorizontal: 14, marginBottom: 4 }]}>
+                      {group.label}
+                    </Text>
+                    {group.items.map(item => {
+                      const ref = text(item.ref)
+                      const label = text(item.name) || text(item.label) || ref
+                      const selected = bot.model === ref
+                      return (
+                        <Pressable
+                          key={ref}
+                          onPress={() => {
+                            setModelPickerOpen(false)
+                            void perform('update-bot', { id: bot.id, model: ref })
+                          }}
+                          style={({ pressed }) => [styles.partRow, pressed && styles.cardRowPressed]}
+                        >
+                          <BotAgentBadge engine={engineOfModel(ref)} size={16} />
+                          <Text style={[styles.rowLabel, { flex: 1 }]} numberOfLines={1}>
+                            {label}
+                          </Text>
+                          {selected && <Check size={18} color={colors.primary} />}
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </SheetModal>
 
         {/* Working Folder Picker Sheet */}
         {bot && (
@@ -1265,7 +1220,7 @@ export function BotProfilePage({
           visible={moreOpen}
           actions={popoverActions}
           onClose={() => setMoreOpen(false)}
-          anchor="top-right"
+          title={bot?.name ?? room?.name}
         />
       </View>
     </Modal>
@@ -1276,7 +1231,7 @@ const createProfileStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     modalRoot: {
       flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.14)',
+      backgroundColor: colors.menuDismiss,
     },
     page: {
       flex: 1,
@@ -1291,35 +1246,26 @@ const createProfileStyles = (colors: ThemeColors) =>
       paddingHorizontal: 16,
       paddingBottom: 6,
     },
+    subPageTopBar: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+      paddingBottom: 8,
+    },
     topRightGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-    },
-    circleBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 2,
+      gap: 4,
     },
     circlePlaceholder: {
       width: 40,
       height: 40,
     },
-    btnPressed: {
-      opacity: 0.72,
-    },
     subPageTitle: {
       flex: 1,
       textAlign: 'center',
       fontSize: 17,
-      fontWeight: '600',
+      fontWeight: '700',
+      letterSpacing: -0.2,
       color: colors.ink,
       paddingHorizontal: 12,
     },
@@ -1339,7 +1285,10 @@ const createProfileStyles = (colors: ThemeColors) =>
     roomHeroAvatar: {
       width: 76,
       height: 76,
-      borderRadius: 24,
+      ...continuousRadius(radius.xl),
+      backgroundColor: colors.cardOpaque,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
@@ -1371,21 +1320,19 @@ const createProfileStyles = (colors: ThemeColors) =>
       alignSelf: 'stretch',
       marginTop: 14,
       padding: 3,
-      borderRadius: 999,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
     },
     segmentedTab: {
       flex: 1,
       height: 34,
-      borderRadius: 999,
+      borderRadius: radius.pill,
       alignItems: 'center',
       justifyContent: 'center',
     },
     segmentedTabActive: {
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 1,
+      backgroundColor: colors.surface,
+      ...elevationStyle(colors, 1),
     },
     segmentedTabText: {
       fontSize: 13.5,
@@ -1411,8 +1358,9 @@ const createProfileStyles = (colors: ThemeColors) =>
       minHeight: 48,
       paddingHorizontal: 14,
       paddingVertical: 10,
-      borderRadius: 14,
+      ...continuousRadius(radius.lg),
       gap: 10,
+      backgroundColor: colors.card,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
     },
@@ -1428,22 +1376,20 @@ const createProfileStyles = (colors: ThemeColors) =>
     permSegmented: {
       flexDirection: 'row',
       padding: 3,
-      borderRadius: 12,
+      ...continuousRadius(radius.md),
+      backgroundColor: colors.surfaceStrong,
     },
     permOption: {
       flex: 1,
       minHeight: 36,
       paddingHorizontal: 6,
-      borderRadius: 9,
+      ...continuousRadius(radius.sm),
       alignItems: 'center',
       justifyContent: 'center',
     },
     permOptionActive: {
-      shadowColor: '#000',
-      shadowOpacity: 0.06,
-      shadowRadius: 3,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 1,
+      backgroundColor: colors.surface,
+      ...elevationStyle(colors, 1),
     },
     permOptionText: {
       fontSize: 12.5,
@@ -1475,8 +1421,9 @@ const createProfileStyles = (colors: ThemeColors) =>
       paddingHorizontal: 12,
     },
     groupCard: {
-      borderRadius: 16,
+      ...continuousRadius(radius.xl),
       overflow: 'hidden',
+      backgroundColor: colors.card,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
     },
@@ -1493,7 +1440,7 @@ const createProfileStyles = (colors: ThemeColors) =>
       borderTopColor: colors.separator,
     },
     cardRowPressed: {
-      backgroundColor: colors.grouped,
+      backgroundColor: colors.surfaceStrong,
     },
     rowLabel: {
       flex: 1,

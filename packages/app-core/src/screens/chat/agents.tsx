@@ -17,6 +17,7 @@ import { strings } from '../../locales/i18n'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
 import * as theme from '../../ui/theme'
 import type { ThemeColors } from '../../ui/theme'
+import { continuousRadius, elevationStyle } from '../../ui/platform-style'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 
@@ -27,10 +28,22 @@ import { createStyles as createLegacyStyles } from './styles'
 
 function SimpleModalSurface({ onClose, colors, children }: { onClose: () => void; colors: ThemeColors; children: React.ReactNode }) {
   return (
-    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 }}>
+    <View style={{ flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'center', padding: 16 }}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View style={{ backgroundColor: colors.cardOpaque, borderRadius: 16, overflow: 'hidden', maxHeight: 480, borderWidth: 1, borderColor: colors.border }}>
-        {children}
+      <View
+        style={[
+          {
+            backgroundColor: colors.surface,
+            ...continuousRadius(radius.xl),
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.separator,
+          },
+          elevationStyle(colors, 3),
+        ]}
+      >
+        <View style={{ ...continuousRadius(radius.xl), overflow: 'hidden', maxHeight: 480 }}>
+          {children}
+        </View>
       </View>
     </View>
   )
@@ -693,7 +706,7 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
 const createCardStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     card: {
-      borderRadius: radius.xl,
+      ...continuousRadius(radius.xl),
       backgroundColor: colors.card,
       borderWidth: 1,
       borderColor: colors.border,

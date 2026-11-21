@@ -11,8 +11,9 @@ import {
   View,
 } from 'react-native'
 import { Alert } from '../ui/alert'
+import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
 import { Toggle } from '../ui/toggle'
-import { ArrowLeft, Check, ChevronRight, Copy, Download, Puzzle, RefreshCw, Smartphone, X } from 'lucide-react-native'
+import { Check, ChevronRight, Copy, Download, Puzzle, RefreshCw, Smartphone, X } from 'lucide-react-native'
 import { SvgXml } from 'react-native-svg'
 import * as Clipboard from 'expo-clipboard'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -30,7 +31,7 @@ import {
   type SchemaField,
 } from '../services/plugin-inventory'
 import { sessionToolsError } from './session-tools-error'
-import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { radius, spacing, type } from '../ui/theme'
 import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -94,28 +95,26 @@ export function PluginsModal({ visible, onClose }: PluginsModalProps) {
   }
 
   const header = (
-    <View style={styles.header}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={bundle === undefined ? strings.common.close : strings.common.back}
-        onPress={() => bundle === undefined ? onClose() : setSelected(undefined)}
-        hitSlop={8}
-        style={styles.headerBtn}
-      >
-        {bundle === undefined ? <X size={20} color={colors.ink} /> : <ArrowLeft size={20} color={colors.ink} />}
-      </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>{bundle?.title ?? strings.plugins.title}</Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={strings.plugins.retry}
-        onPress={() => void reload()}
-        disabled={loading}
-        hitSlop={8}
-        style={styles.headerBtn}
-      >
-        {loading ? <ActivityIndicator size="small" color={colors.muted} /> : <RefreshCw size={18} color={colors.ink} />}
-      </Pressable>
-    </View>
+    <TopBar
+      title={bundle?.title ?? strings.plugins.title}
+      centered
+      onBack={() => bundle === undefined ? onClose() : setSelected(undefined)}
+      backIcon={bundle === undefined ? X : undefined}
+      backLabel={bundle === undefined ? strings.common.close : strings.common.back}
+      action={
+        loading ? (
+          <View style={styles.headerActionSlot}>
+            <ActivityIndicator size="small" color={colors.muted} />
+          </View>
+        ) : (
+          <IconButton
+            label={strings.plugins.retry}
+            icon={RefreshCw}
+            onPress={() => void reload()}
+          />
+        )
+      }
+    />
   )
 
   let body
@@ -192,10 +191,13 @@ export function PluginsModal({ visible, onClose }: PluginsModalProps) {
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={() => bundle === undefined ? onClose() : setSelected(undefined)}>
-      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        {header}
-        {body}
+    <Modal visible={visible} animationType="slide" transparent={false} statusBarTranslucent onRequestClose={() => bundle === undefined ? onClose() : setSelected(undefined)}>
+      <View style={styles.container}>
+        <BlurHeaderFrame inset header={header}>
+          <View style={[styles.bodyWrap, { paddingBottom: insets.bottom }]}>
+            {body}
+          </View>
+        </BlurHeaderFrame>
       </View>
     </Modal>
   )
@@ -571,15 +573,8 @@ function SettingsForm({ settings, writable, onSaved }: {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.md,
-      height: 64,
-      backgroundColor: colors.background,
-    },
-    headerBtn: { width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
-    headerTitle: { ...type.heading, fontSize: 17, lineHeight: 22, fontWeight: '700', letterSpacing: -0.2, flex: 1, color: colors.ink, textAlign: 'center' },
+    bodyWrap: { flex: 1 },
+    headerActionSlot: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
     content: { padding: spacing.md, paddingBottom: spacing.xxl, gap: spacing.sm },
     subtitle: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, marginBottom: spacing.xs, paddingHorizontal: spacing.md },
     sectionTitle: { ...type.small, fontSize: 15, lineHeight: 20, fontWeight: '600', color: colors.muted, marginTop: spacing.md, paddingHorizontal: spacing.md },
@@ -704,6 +699,6 @@ function createStyles(colors: ThemeColors) {
       marginTop: spacing.xs,
     },
     saveBtnDisabled: { backgroundColor: colors.disabled },
-    saveBtnText: { ...type.bodyStrong, color: colors.white },
+    saveBtnText: { ...type.bodyStrong, color: colors.onPrimary ?? colors.white },
   })
 }

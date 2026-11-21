@@ -120,11 +120,13 @@ export function TopBar({
   backLabel,
   action,
   titleLines = 1,
+  titleLeading,
   titleAccessory,
   titleAlign = 'center',
   centered = false,
 }: {
   title: string
+  titleLeading?: ReactNode
   titleAccessory?: ReactNode
   titleAlign?: 'center' | 'left' | 'between'
   centered?: boolean | number
@@ -204,7 +206,24 @@ export function TopBar({
         ]}
       >
         {onTitlePress === undefined
-          ? <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+          ? (
+            titleLeading !== undefined || (titleAccessory !== undefined && titleAccessory !== null)
+              ? (
+                <View
+                  style={[
+                    compactHeader ? styles.topBarTitleRowCompact : styles.topBarTitleRow,
+                    betweenAligned && styles.topBarTitleRowBetween,
+                    compactHeader && !hasSubtitle && styles.topBarTitleRowCompactSingle,
+                    styles.topBarTitleRowWithAccessory,
+                  ]}
+                >
+                  {titleLeading}
+                  <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+                  {titleAccessory}
+                </View>
+              )
+              : <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+          )
           : (
             <Pressable
               accessibilityRole="button"
@@ -215,9 +234,11 @@ export function TopBar({
                 compactHeader ? styles.topBarTitleRowCompact : styles.topBarTitleRow,
                 betweenAligned && styles.topBarTitleRowBetween,
                 compactHeader && !hasSubtitle && styles.topBarTitleRowCompactSingle,
+                (titleLeading !== undefined || (titleAccessory !== undefined && titleAccessory !== null)) && styles.topBarTitleRowWithAccessory,
                 pressed && styles.iconButtonPressed,
               ]}
             >
+              {titleLeading}
               <Text style={[styles.topBarTitle, compactHeader && styles.topBarTitleCompact, leftAligned && styles.topBarTitleLeft, titleAccessory === undefined && styles.topBarTitleLink, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
               {titleAccessory}
             </Pressable>
@@ -630,6 +651,7 @@ function createStyles(colors: ThemeColors) {
     topBarTitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', borderRadius: radius.sm },
     topBarTitleRowBetween: { alignSelf: 'center', justifyContent: 'center' },
     topBarTitleRowCompactSingle: { minHeight: 40 },
+    topBarTitleRowWithAccessory: { gap: 6 },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitleRowCompact: { alignSelf: 'flex-start', maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 3, borderRadius: radius.sm },
     topBarSubtitleRowBetween: { alignSelf: 'center', justifyContent: 'center', paddingLeft: 13 },
