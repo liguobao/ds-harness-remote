@@ -1109,7 +1109,21 @@ const jaJP = {
   errors: {
     'session/writer-held': "この会話は別のクライアントによって行われています。そのクライアントで DeepSeek Harness を完全に終了してから、ここで再試行してください。会話を切り替えたり、ウィンドウを閉じたりしても、解放されない場合があります。メッセージは送信されていません。",
     ACCOUNT_AUTH_REQUIRED: "この電話を接続する前にサインインしてください。", AUTH_INVALID: "サインインは無効になりました。再度サインインします。", AUTH_REQUIRED: "続行するには、再度サインインしてください。", TOKEN_EXPIRED: "サインインの有効期限が切れました。再度サインインします。", TOKEN_REUSED: "この電話はアカウントを保護するためにサインアウトされました。再度サインインします。", DEVICE_NOT_FOUND: "このデバイスは見つかりませんでした。デバイスリストを更新します。", DEVICE_REVOKED: "この電話はアカウントから削除されました。再度サインインします。", DEVICE_OWNERSHIP_REQUIRED: "この電話のサインイン情報は無効になりました。再度サインインします。", MEMBERSHIP_REQUIRED: "このデバイスにはもうアクセスできません。両方のデバイスが同じアカウントを使用していることを確認してください。", HOST_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", DEVICE_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", PEER_IDENTITY_MISMATCH: "このデバイスの安全な ID が変更されました。デバイスを確認し、再度信頼します。", RATE_LIMITED: "操作が多すぎます。後でもう一度試してください。", CONNECTION_FAILED: "このデバイスに接続できませんでした。ネットワークを確認して、もう一度試してください。", P2P_FAILED: "直接接続に失敗しました。サーバーリレーに切り替えます。", RELAY_UNAVAILABLE: "サーバーリレーが一時的に利用できなくなりました。後でもう一度試してください。", TURN_UNAVAILABLE: "安定した接続を確立できませんでした。別の方法を試しています。", SECURE_CHANNEL_FAILED: "安全な接続を確立できませんでした。もう一度やり直してください。", STREAM_TIMEOUT: "セッション接続がタイムアウトしました。再試行してください。", RPC_TIMEOUT: "デバイスの応答に時間がかかりすぎました。もう一度やり直してください。", UNSUPPORTED_VERSION: "この DSH リモート バージョンには互換性がありません。アプリを更新して、もう一度お試しください。", METHOD_NOT_ALLOWED: "現在の設定では、携帯電話からこの操作を行うことはできません。", PERMISSION_NOT_PENDING: "このリクエストはすでに処理されているか、期限が切れています。", SESSION_NOT_FOUND: "この会話は見つかりませんでした。会話リストに戻って更新します。", HARNESS_UNAVAILABLE: "DeepSeek Harnessはこのデバイスでは一時的に利用できません。実行されていることを確認してください。", AGENT_BUSY: "DeepSeek Harnessは別の操作を処理しています。しばらくしてからもう一度お試しください。", FULL_RESYNC_REQUIRED: "会話はコンピュータ上で変わりました。続行するには再度開いてください。",
-    CODEX_UNAVAILABLE: "このデバイスでは Codex を利用できません。 Codex Remote が有効になっていて、Codex がコンピューターにサインインしていることを確認します。", CODEX_TURN_OWNED: "別のデバイスがこの Codex ターンを操作しています。後でもう一度試してください。", CODEX_APPROVAL_NOT_FOUND: "この Codex 承認はすでに処理されているか、期限が切れています。", CODEX_PATH_NOT_ALLOWED: "このディレクトリは、コンピューター上の Codex ワークスペース カタログには存在しません。", FEATURE_NOT_SUPPORTED: "コンピューターはこの機能をサポートしていません。 DSH リモート プラグインを更新します。", INVALID_MESSAGE: "サーバーは、アプリが認識できないデータを返しました。後でもう一度試してください。", serverUnreachable: "サーバーに接続できませんでした。サーバーアドレスとネットワークを確認してください。", unknown: "操作は完了していません。もう一度やり直してください。",
+    CODEX_UNAVAILABLE: "このデバイスでは Codex を利用できません。 Codex Remote が有効になっていて、Codex がコンピューターにサインインしていることを確認します。", CODEX_TURN_OWNED: "別のデバイスがこの Codex ターンを操作しています。後でもう一度試してください。", CODEX_APPROVAL_NOT_FOUND: "この Codex 承認はすでに処理されているか、期限が切れています。", CODEX_PATH_NOT_ALLOWED: "このディレクトリは、コンピューター上の Codex ワークスペース カタログには存在しません。",
+    OPENCODE_HISTORY_TOO_LARGE: "この OpenCode の会話履歴はリモート転送の上限を超えています。コンピューターで確認するか、新しい会話を開始してください。",
+    OPENCODE_HISTORY_BUSY: "別の OpenCode の会話履歴をまだ読み込み中です。しばらくしてからもう一度お試しください。",
+    OPENCODE_UPSTREAM_ERROR: "リクエストの処理中に OpenCode からエラーが返されました。コンピューターで OpenCode のステータスとサインイン状態を確認してから、もう一度お試しください。",
+    OPENCODE_REQUEST_TIMEOUT: "OpenCode の応答に時間がかかりすぎています。コンピューターで正常に動作していることを確認して、もう一度お試しください。",
+    OPENCODE_ACP_EXITED: "コンピューターで OpenCode が予期せず終了しました。会話を開き直すか、ホストプラグインを再起動してください。",
+    OPENCODE_CLOSED: "コンピューターで OpenCode が終了しています。再接続してからもう一度お試しください。",
+    OPENCODE_UNAVAILABLE: "このデバイスでは OpenCode を利用できません。コンピューターで OpenCode が有効になっており、実行中であることを確認してください。",
+    OPENCODE_BINARY_UNAVAILABLE: "コンピューターで OpenCode CLI を起動できませんでした。インストール状況と環境設定を確認してください。",
+    ACP_HISTORY_TOO_LARGE: "この会話履歴はリモート転送の上限を超えています。会話リストを更新するか、新しい会話を開始してください。",
+    ACP_PROCESS_LIMIT: "コンピューターで有効なエージェントセッションが多すぎます。いくつかのセッションを閉じてから、もう一度お試しください。",
+    ACP_SESSION_NOT_LOADED: "この会話はまだ読み込まれていません。開き直してからもう一度お試しください。",
+    ACP_SESSION_ARCHIVED: "この OpenCode の会話はアーカイブ済みのため、変更できなくなりました。",
+    INTERNAL_ERROR: "現在このリクエストを完了できませんでした。後でもう一度お試しください。",
+    FEATURE_NOT_SUPPORTED: "コンピューターはこの機能をサポートしていません。 DSH リモート プラグインを更新します。", INVALID_MESSAGE: "サーバーは、アプリが認識できないデータを返しました。後でもう一度試してください。", serverUnreachable: "サーバーに接続できませんでした。サーバーアドレスとネットワークを確認してください。", unknown: "操作は完了していません。もう一度やり直してください。",
   },
 } satisfies Messages
 

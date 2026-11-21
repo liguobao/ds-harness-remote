@@ -13,15 +13,23 @@ import { realpath } from 'node:fs/promises'
 import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
-import { acpHistoryEvents } from '../history-events.js'
+import { AcpHistoryAccumulator } from '../history-events.js'
 import { AcpSessionModelState } from './session-models.js'
 import { OpencodeNativeApi, opencodeHasNativeApi, opencodeLoopbackPort, opencodePrivateArgs } from './opencode-native-api.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
+/** Loading large `opencode.db` transcripts over `session/load` regularly exceeds 60s. */
+const ACP_HISTORY_LOAD_TIMEOUT_MS = 120_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
 const ACP_PROMPT_TIMEOUT_MS = 10 * 60_000
 const ACP_START_TIMEOUT_MS = 20_000
 const MAX_ACP_LINE_BYTES = 288 * 1024 * 1024
+const ACP_HISTORY_MAX_BYTES = 8 * 1024 * 1024
+const ACP_HISTORY_HARD_MAX_BYTES = 16 * 1024 * 1024
+const ACP_HISTORY_MAX_EVENTS = 10_000
+const ACP_HISTORY_HARD_MAX_EVENTS = 20_000
+const ACP_HISTORY_MAX_RAW_BYTES = 256 * 1024 * 1024
+const ACP_HISTORY_MAX_RAW_UPDATES = 500_000
 const MAX_STDERR_CAPTURE_BYTES = 4 * 1024
 const MAX_OPENCODE_SESSION_LIST = 1000
 
@@ -135,7 +143,8 @@ export class OpencodeAcpClient implements CursorAcpLike {
   /**
    * Replay a saved session in one temporary ACP process so a history read never
    * interrupts a live turn. OpenCode emits the transcript as `session/update`
-   * notifications before `session/load` resolves.
+   * notifications before `session/load` resolves; fold incrementally and keep
+   * a bounded trailing turn window within the transfer budget.
    */
   async history(sessionId: string, cwd: string): Promise<unknown[]> {
     if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'The OpenCode domain is closed.')
@@ -145,9 +154,14 @@ export class OpencodeAcpClient implements CursorAcpLike {
     let stopping: Promise<void> | undefined
     const stop = () => stopping ??= client.close()
     this.historyStop = stop
-    const updates: CursorAcpInbound[] = []
-    let bytes = 0
-    let count = 0
+    const accumulator = new AcpHistoryAccumulator(sessionId, 'opencode', {
+      maxBytes: ACP_HISTORY_MAX_BYTES,
+      hardMaxBytes: ACP_HISTORY_HARD_MAX_BYTES,
+      maxEvents: ACP_HISTORY_MAX_EVENTS,
+      hardMaxEvents: ACP_HISTORY_HARD_MAX_EVENTS,
+    })
+    let rawBytes = 0
+    let rawCount = 0
     let overflow = false
     const unsubscribe = client.onInbound(message => {
       // A history reader has no authority to run tools or wait for approval.
@@ -158,21 +172,27 @@ export class OpencodeAcpClient implements CursorAcpLike {
       if (message.method !== 'session/update'
         || (message.params as { sessionId?: string } | null)?.sessionId !== sessionId
         || overflow) return
-      count++
-      bytes += Buffer.byteLength(JSON.stringify(message))
-      if (bytes > 8 * 1024 * 1024 || count > 10_000) {
+      rawCount++
+      rawBytes += Buffer.byteLength(JSON.stringify(message))
+      if (rawBytes > ACP_HISTORY_MAX_RAW_BYTES || rawCount > ACP_HISTORY_MAX_RAW_UPDATES || !accumulator.push(message)) {
         overflow = true
         void stop().catch(() => undefined)
       }
-      else updates.push(message)
     })
     try {
       await client.start()
       if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
-      await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      await client.call('session/load', { sessionId, cwd, mcpServers: [] }, ACP_HISTORY_LOAD_TIMEOUT_MS)
       if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       if (overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
-      return acpHistoryEvents(updates, sessionId, 'opencode')
+      const folded = accumulator.finish()
+      if (folded.overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
+      if (folded.truncated) {
+        this.logger?.info('OpenCode history truncated to recent turns within transfer budget', {
+          retainedEvents: folded.events.length,
+        })
+      }
+      return folded.events
     } catch (error) {
       if (overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
       throw error
@@ -192,7 +212,9 @@ export class OpencodeAcpClient implements CursorAcpLike {
     const id = typeof p.sessionId === 'string' ? p.sessionId : undefined
     if (id && this.archivingSessions.has(id)) throw new OpencodeAcpError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
     if (id && this.archivedSessions.has(id) && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(method)) throw new OpencodeAcpError('ACP_SESSION_ARCHIVED', 'This OpenCode session is archived.')
-    const budget = timeoutMs ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
+    const budget = timeoutMs ?? (method === 'session/prompt'
+      ? ACP_PROMPT_TIMEOUT_MS
+      : method === 'session/load' ? ACP_HISTORY_LOAD_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
     if (method === 'session/load' && id) {
       // Re-reading models must never replay history into an active conversation.
       if (this.models.has(id)) return { sessionId: id }

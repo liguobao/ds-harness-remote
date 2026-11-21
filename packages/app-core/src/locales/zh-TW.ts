@@ -1116,7 +1116,21 @@ const zhTW = {
   errors: {
     'session/writer-held': '該會話被另一端佔用。請先在另一端完全退出 DeepSeek Harness，再在這裡重試；僅切換會話或關閉視窗可能不會解除佔用。你的訊息尚未傳送。',
     ACCOUNT_AUTH_REQUIRED: '請先登入，再連線這臺手機。', AUTH_INVALID: '登入狀態已失效，請重新登入。', AUTH_REQUIRED: '需要重新登入才能繼續。', TOKEN_EXPIRED: '登入已過期，請重新登入。', TOKEN_REUSED: '為了保護賬號安全，此手機已退出登入。請重新登入。', DEVICE_NOT_FOUND: '找不到這臺裝置，請重新整理裝置列表。', DEVICE_REVOKED: '此手機已被移出當前賬號，請重新登入。', DEVICE_OWNERSHIP_REQUIRED: '此手機的登入資訊已失效，請重新登入。', MEMBERSHIP_REQUIRED: '你已無權訪問這臺裝置。請確認兩端登入了同一賬號。', HOST_OFFLINE: '這臺裝置已離線。請確認 DeepSeek Harness 和 DSH Remote 外掛正在執行。', DEVICE_OFFLINE: '這臺裝置已離線。請確認 DeepSeek Harness 和 DSH Remote 外掛正在執行。', PEER_IDENTITY_MISMATCH: '這臺裝置的安全身份已變化。請先確認裝置安全，再重新信任。', RATE_LIMITED: '操作太頻繁，請稍後再試。', CONNECTION_FAILED: '無法連線這臺裝置。請檢查網路後重試。', P2P_FAILED: '直接連線失敗，正在改用伺服器轉發。', RELAY_UNAVAILABLE: '暫時無法透過伺服器連線，請稍後重試。', TURN_UNAVAILABLE: '暫時無法建立穩定連線，正在嘗試其他方式。', SECURE_CHANNEL_FAILED: '無法建立安全連線，請重試。', STREAM_TIMEOUT: '會話連線超時，請重試', RPC_TIMEOUT: '裝置響應超時，請重試。', UNSUPPORTED_VERSION: 'DSH Remote 版本不相容，請更新 App 後重試。', METHOD_NOT_ALLOWED: '當前設定不允許從手機執行此操作。', PERMISSION_NOT_PENDING: '這個請求已處理或已過期。', SESSION_NOT_FOUND: '找不到這段對話，請返回對話列表後重新整理。', HARNESS_UNAVAILABLE: '這臺裝置上的 DeepSeek Harness 暫時不可用。請確認它正在執行。', AGENT_BUSY: 'DeepSeek Harness 正在處理其他操作，請稍後再試。', FULL_RESYNC_REQUIRED: '電腦上的對話已更新，請重新開啟此對話。',
-    CODEX_UNAVAILABLE: '這臺裝置上的 Codex 當前不可用，請確認電腦端已啟用並登入 Codex。', CODEX_TURN_OWNED: '當前 Codex 回合正由另一臺裝置操作，請稍後再試。', CODEX_APPROVAL_NOT_FOUND: '這個 Codex 確認請求已處理或已過期。', CODEX_PATH_NOT_ALLOWED: '這個目錄不在電腦端 Codex 工作區目錄中。', FEATURE_NOT_SUPPORTED: '電腦端版本不支援此功能，請更新 DSH Remote 外掛。', INVALID_MESSAGE: '服務返回了無法識別的資料，請稍後重試。', serverUnreachable: '無法連線服務。請檢查服務地址和網路。', unknown: '操作未完成，請重試。',
+    CODEX_UNAVAILABLE: '這臺裝置上的 Codex 當前不可用，請確認電腦端已啟用並登入 Codex。', CODEX_TURN_OWNED: '當前 Codex 回合正由另一臺裝置操作，請稍後再試。', CODEX_APPROVAL_NOT_FOUND: '這個 Codex 確認請求已處理或已過期。', CODEX_PATH_NOT_ALLOWED: '這個目錄不在電腦端 Codex 工作區目錄中。',
+    OPENCODE_HISTORY_TOO_LARGE: '這段 OpenCode 對話歷史超出遠端傳輸上限。請在電腦端檢視，或開始新對話。',
+    OPENCODE_HISTORY_BUSY: '另一段 OpenCode 對話歷史仍在載入中，請稍候再試。',
+    OPENCODE_UPSTREAM_ERROR: 'OpenCode 處理請求時傳回錯誤。請檢查電腦端 OpenCode 的狀態與登入設定後重試。',
+    OPENCODE_REQUEST_TIMEOUT: 'OpenCode 回應超時。請確認它在電腦端正常執行後重試。',
+    OPENCODE_ACP_EXITED: '電腦端的 OpenCode 意外結束。請重新開啟對話，或重新啟動主機外掛。',
+    OPENCODE_CLOSED: '電腦端的 OpenCode 已關閉。請重新連線後重試。',
+    OPENCODE_UNAVAILABLE: '這臺裝置上的 OpenCode 當前不可用。請確認電腦端已啟用並正在執行 OpenCode。',
+    OPENCODE_BINARY_UNAVAILABLE: '無法在電腦端啟動 OpenCode CLI。請檢查安裝與環境設定。',
+    ACP_HISTORY_TOO_LARGE: '這段對話歷史超出遠端傳輸上限。請重新整理對話列表，或開始新對話。',
+    ACP_PROCESS_LIMIT: '電腦端同時執行的 Agent 會話過多。請關閉部分會話後重試。',
+    ACP_SESSION_NOT_LOADED: '這段對話尚未載入完成。請重新開啟後重試。',
+    ACP_SESSION_ARCHIVED: '這段 OpenCode 對話已封存，無法再進行修改。',
+    INTERNAL_ERROR: '暫無法完成此請求，請稍後重試。',
+    FEATURE_NOT_SUPPORTED: '電腦端版本不支援此功能，請更新 DSH Remote 外掛。', INVALID_MESSAGE: '服務返回了無法識別的資料，請稍後重試。', serverUnreachable: '無法連線服務。請檢查服務地址和網路。', unknown: '操作未完成，請重試。',
   },
 } as const
 

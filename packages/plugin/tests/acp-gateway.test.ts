@@ -5,9 +5,11 @@ import { randomUUID } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
+import { AntigravityAcpError } from '../src/acp/adapters/antigravity-process.js'
+import { CursorAcpError, type CursorAcpInbound, type CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
+import { OpencodeAcpError } from '../src/acp/adapters/opencode-process.js'
 import { resolveConfig } from '../src/config.js'
-import { RpcError } from '../src/safe-error.js'
-import type { CursorAcpInbound, CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
+import { RpcError, safeErrorCode } from '../src/safe-error.js'
 import type { SafeLogger } from '../src/logging.js'
 
 function silentLogger(): SafeLogger {
@@ -1908,6 +1910,97 @@ describe('AcpRemoteGateway', () => {
       resolvePrompt?.({ stopReason: 'end_turn' })
       await gateway.close()
     }
+  })
+
+  it('converts OpenCode and Cursor adapter failures into safe RpcErrors while keeping Antigravity errors fail-closed', async () => {
+    const cwd = await realpath(process.cwd())
+    await runScenarios([
+      {
+        name: 'OPENCODE_HISTORY_TOO_LARGE',
+        backend: 'opencode',
+        error: new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.'),
+        expectRpc: true,
+        expectedCode: 'OPENCODE_HISTORY_TOO_LARGE',
+      },
+      {
+        name: 'OPENCODE_HISTORY_BUSY',
+        backend: 'opencode',
+        error: new OpencodeAcpError('OPENCODE_HISTORY_BUSY', 'An OpenCode history read is already in progress.'),
+        expectRpc: true,
+        expectedCode: 'OPENCODE_HISTORY_BUSY',
+      },
+      {
+        name: 'OPENCODE_UPSTREAM_ERROR redacts raw guidance',
+        backend: 'opencode',
+        error: new OpencodeAcpError('OPENCODE_UPSTREAM_ERROR', 'secret:/opt/token/leak'),
+        expectRpc: true,
+        expectedCode: 'OPENCODE_UPSTREAM_ERROR',
+        forbiddenSubstring: '/opt/token/leak',
+      },
+      {
+        name: 'CURSOR_UPSTREAM_ERROR auth redacts raw guidance',
+        backend: 'cursor',
+        error: new CursorAcpError('CURSOR_UPSTREAM_ERROR', 'custom-upstream-text:/srv/secret', {
+          authDiagnostic: { authStatus: 'auth_required', errorCode: 'ACP_AUTH_REQUIRED' },
+        }),
+        expectRpc: true,
+        expectedCode: 'CURSOR_UPSTREAM_ERROR',
+        forbiddenSubstring: '/srv/secret',
+      },
+      {
+        name: 'AntigravityAcpError stays internal',
+        backend: 'antigravity',
+        error: new AntigravityAcpError('ANTIGRAVITY_TURN_FAILED', 'RAW_SECRET_PATH'),
+        expectRpc: false,
+        expectedCode: 'INTERNAL_ERROR',
+        forbiddenSubstring: 'RAW_SECRET_PATH',
+      },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const acp = readyAcp() as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
+        acp.call = vi.fn(async (method: string) => {
+          if (method === 'session/list') {
+            if (scenario.backend === 'cursor') throw scenario.error
+            return { sessions: [{ sessionId: 'sess-1', cwd, updatedAt: new Date().toISOString() }], nextCursor: null }
+          }
+          if (method === 'session/new') {
+            if (scenario.backend === 'antigravity') throw scenario.error
+            return { sessionId: 'sess-1' }
+          }
+          return {}
+        })
+        acp.history = vi.fn(async () => { throw scenario.error })
+        const gateway = new AcpRemoteGateway(
+          { enabled: true, backends: [{ id: scenario.backend, enabled: true, command: 'agent', args: [] }] },
+          silentLogger(),
+          () => acp,
+        )
+        await gateway.start()
+        try {
+          const peer = gateway.createPeer({ connectionId: 'conn-1', peerDeviceId: 'dev-1' } as never, async () => undefined)!
+          const rpcCall = scenario.backend === 'opencode'
+            ? { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:sess-1' } }
+            : scenario.backend === 'cursor'
+              ? { method: 'dsh/workspaceList', params: { backend: 'cursor' } }
+              : { method: 'session/new', params: { backend: 'antigravity', cwd } }
+          let caught: unknown
+          try {
+            await peer.call(rpcCall)
+          } catch (error) {
+            caught = error
+          }
+          expect(caught).toBeInstanceOf(Error)
+          expect(caught instanceof RpcError).toBe(scenario.expectRpc)
+          expect(safeErrorCode(caught)).toBe(scenario.expectedCode)
+          if (scenario.forbiddenSubstring && caught instanceof RpcError) {
+            expect(caught.message).not.toContain(scenario.forbiddenSubstring)
+          }
+        } finally {
+          await gateway.close()
+        }
+      },
+    })))
   })
 })
 

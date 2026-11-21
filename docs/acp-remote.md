@@ -58,6 +58,8 @@ HTTP 目标与认证不接受 Client 输入，禁止重定向，响应最多 64 
 
 不提供解除归档或已归档列表；其他后端不能仅移除本地列表就返回归档成功。上游参考：[v1 原生归档](https://github.com/anomalyco/opencode/blob/v1.19.3/packages/app/src/pages/session/session-archive.ts)、[v2 ACP](https://opencode.ai/v2/docs/cli/acp/)。
 
+OpenCode 历史回放通过独立临时进程执行，采用 120s `session/load` 预算并流式合并 `session/update`；多轮长会话按完整轮次从头部淘汰较早轮次，保留 8 MiB / 10,000 条折叠事件内的最近对话，单轮超 16 MiB（或 20,000 折叠事件 / 256 MiB / 500,000 原始更新防线）fail-closed 返回 `OPENCODE_HISTORY_TOO_LARGE`。网关将已识别的 OpenCode/Cursor 适配器错误转换为静态文案的 `RpcError`（保留错误码且不透传原始引导路径），Client 对 `dsh/sessionHistory` 与 `session/load` 采用 150s RPC 超时并映射本地化提示。
+
 ### Pi Agent（Issue #97，实验性）
 
 在 Host 运行 `npm install -g @earendil-works/pi-coding-agent pi-acp`。先通过 `pi` 配置模型与授权并完成本机对话；Remote 默认自动检测并初始化 Pi Agent，成功后开放工作区。未安装或初始化失败时不可用，不影响其他后端；明确设置 `enabled: false` 或关闭 ACP 总开关时不启动。Remote 设置 → Agent 后端可关闭 Pi Agent。默认命令为 `pi-acp`，参数为空；`pi` 本身的 RPC 模式不是 ACP，不能将命令直接替换为 `pi`。
