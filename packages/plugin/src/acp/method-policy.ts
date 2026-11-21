@@ -141,6 +141,13 @@ const schemas = {
   'dsh/sessionHistory': z.object({
     sessionId: id,
     backend: backendId.optional(),
+    // Read-only paging for the Antigravity transcript window; ignored by other backends.
+    beforeSeq: z.number().int().optional(),
+    maxMessages: z.number().int().positive().optional(),
+    turnWindow: z.union([z.number().int().positive(), z.object({
+      minMessages: z.number().int().positive().optional(),
+      minTurns: z.number().int().positive().optional(),
+    }).strict()]).optional(),
   }).strict(),
 } as const
 

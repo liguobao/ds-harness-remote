@@ -35,7 +35,14 @@ import {
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
-import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents, type HydratedSessionEvent } from './adapters/antigravity/transcript-loader.js'
+import {
+  normalizeVirtualHistoryTurnWindow,
+  selectVirtualHistorySlice,
+  utf8JsonByteLength,
+  VirtualHistoryResponseTooLargeError,
+  type VirtualHistorySliceResult,
+} from '../virtual-history-pagination.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 import { AcpWorkspaceStore } from './workspace-store.js'
 
@@ -660,14 +667,50 @@ export class AcpRemoteGateway {
         }
       }
       if (backend !== 'antigravity') return { events: [], running: this.hasTurnInFlight(conversationId) }
-      const events = await loadTranscriptEvents(conversationId, rawSessionId)
+      const allEvents = await loadTranscriptEvents(conversationId, rawSessionId)
+      const beforeSeq = typeof call.params.beforeSeq === 'number' && Number.isSafeInteger(call.params.beforeSeq)
+        ? call.params.beforeSeq
+        : undefined
+      const turnWindow = normalizeVirtualHistoryTurnWindow(call.params.turnWindow)
+      const window = beforeSeq === undefined
+        ? allEvents
+        : allEvents.filter(entry => entry.event.seq < beforeSeq)
+      const envelopeBytes = utf8JsonByteLength({
+        events: [],
+        running: false,
+        hasMore: false,
+        cursor: 0,
+        ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
+      })
+      let slice: VirtualHistorySliceResult<HydratedSessionEvent>
+      try {
+        slice = selectVirtualHistorySlice(window, {
+          maxMessages: typeof call.params.maxMessages === 'number' && Number.isSafeInteger(call.params.maxMessages)
+            ? call.params.maxMessages
+            : undefined,
+          turnWindow,
+          countSurfaceMessages: false,
+          envelopeBytes,
+          measureRecordBytes: entry => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1,
+        })
+      } catch (error) {
+        if (error instanceof VirtualHistoryResponseTooLargeError) {
+          throw new RpcError('RESPONSE_TOO_LARGE', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+        }
+        throw error
+      }
+      const events = slice.records.map(entry => ({ event: entry.event }))
       this.logger.info('ACP session history fetched', {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length,
+        totalCount: allEvents.length,
+        hasMore: slice.hasMore,
       })
       return {
         events,
         running: this.hasTurnInFlight(conversationId),
+        hasMore: slice.hasMore,
+        cursor: slice.records.at(-1)?.event.seq ?? -1,
         ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
       }
     }

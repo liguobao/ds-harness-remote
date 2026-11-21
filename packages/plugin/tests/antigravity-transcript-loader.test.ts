@@ -370,4 +370,45 @@ describe('TranscriptLoader', () => {
     expect(dbSessions[0]?.title).toBe(longPrefix.slice(0, 40))
   })
 
+  it('caches parsed transcripts per file version and isolates transcripts by brain root', async () => {
+    await writeTranscript('cached-conversation', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'first' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, content: 'first reply' },
+    ])
+    const first = await loadTranscriptEvents('cached-conversation', 'acp:cached-conversation', base)
+    expect(first.find((e) => e.event.type === 'assistant/message')).toBeDefined()
+    // Same file version: cached projection is returned unchanged.
+    expect(await loadTranscriptEvents('cached-conversation', 'acp:cached-conversation', base)).toEqual(first)
+
+    // Appending a record changes (mtime, size): the cache must invalidate.
+    const path = await writeTranscript('cached-conversation', [
+      { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'first' },
+      { type: 'PLANNER_RESPONSE', step_index: 2, created_at: createdAt, content: 'first reply' },
+      { type: 'USER_INPUT', step_index: 3, created_at: createdAt, content: 'second' },
+    ])
+    await utimes(path, new Date(), new Date(Date.now() + 5000))
+    const second = await loadTranscriptEvents('cached-conversation', 'acp:cached-conversation', base)
+    expect(second.length).toBeGreaterThan(first.length)
+    const prompts = second
+      .filter((e) => e.event.type === 'user/message')
+      .map((e) => (e.event.data as { content: Array<{ type: string; text: string }> }).content[0]?.text)
+    expect(prompts).toEqual(['first', 'second'])
+
+    // Same conversationId under a different brain root is a distinct entry.
+    const otherBase = await mkdtemp(join(tmpdir(), 'agy-transcript-test-'))
+    try {
+      const otherLogs = join(otherBase, 'cached-conversation', '.system_generated', 'logs')
+      await mkdir(otherLogs, { recursive: true })
+      await writeFile(join(otherLogs, 'transcript.jsonl'), `${JSON.stringify({ type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'other brain' })}\n`)
+      const other = await loadTranscriptEvents('cached-conversation', 'acp:cached-conversation', otherBase)
+      expect(other.find((e) => e.event.type === 'user/message')).toMatchObject({
+        event: { data: { content: [{ type: 'text', text: 'other brain' }] } },
+      })
+      // The original entry is untouched by the other brain root.
+      expect(await loadTranscriptEvents('cached-conversation', 'acp:cached-conversation', base)).toEqual(second)
+    } finally {
+      await rm(otherBase, { recursive: true, force: true })
+    }
+  })
+
 })

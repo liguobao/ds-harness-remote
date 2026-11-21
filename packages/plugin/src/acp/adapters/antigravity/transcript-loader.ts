@@ -47,6 +47,39 @@ export interface HydratedSessionEvent {
   }
 }
 
+interface TranscriptCacheEntry {
+  baseDir: string
+  mtimeMs: number
+  size: number
+  events: HydratedSessionEvent[]
+}
+
+/**
+ * Host-process memory cache of parsed Antigravity transcripts. Entries are
+ * invalidated by (mtime, size) of the transcript file and never persisted to
+ * disk, matching the ACP memory-projection boundary. Bounded LRU so one Host
+ * serving many long conversations cannot grow without limit.
+ */
+const transcriptCache = new Map<string, TranscriptCacheEntry>()
+const TRANSCRIPT_CACHE_MAX_SESSIONS = 32
+const TRANSCRIPT_CACHE_MAX_EVENTS = 100_000
+
+function rememberTranscript(conversationId: string, entry: TranscriptCacheEntry): void {
+  const previous = transcriptCache.get(conversationId)
+  if (previous !== entry) transcriptCache.set(conversationId, entry)
+  let sessions = transcriptCache.size
+  let totalEvents = 0
+  for (const cached of transcriptCache.values()) totalEvents += cached.events.length
+  while (transcriptCache.size > 0
+    && (sessions > TRANSCRIPT_CACHE_MAX_SESSIONS || totalEvents > TRANSCRIPT_CACHE_MAX_EVENTS)) {
+    const oldest = transcriptCache.keys().next().value
+    if (oldest === undefined) break
+    totalEvents -= transcriptCache.get(oldest)!.events.length
+    transcriptCache.delete(oldest)
+    sessions -= 1
+  }
+}
+
 export function cleanUserPrompt(raw?: string): string {
   if (!raw) return ''
   raw = stripAgyImageReferences(raw)
@@ -63,12 +96,23 @@ export async function loadTranscriptEvents(
   baseDir: string = join(homedir(), '.gemini/antigravity-cli/brain'),
 ): Promise<HydratedSessionEvent[]> {
   let content = ''
+  let mtimeMs = 0
+  let sizeBytes = 0
   try {
     const filePath = await transcriptPath(baseDir, conversationId)
     if (filePath === undefined) return []
     const info = await fs.stat(filePath)
+    mtimeMs = info.mtimeMs
+    sizeBytes = info.size
     if (info.size > MAX_AGENT_ACP_TRANSFER_BYTES) {
       throw new RpcError('ACP_HISTORY_TOO_LARGE', 'Antigravity history exceeds the transfer limit.')
+    }
+    const cached = transcriptCache.get(conversationId)
+    if (cached !== undefined && cached.baseDir === baseDir
+      && cached.mtimeMs === info.mtimeMs && cached.size === info.size) {
+      // Refresh LRU recency; seq assignment is deterministic per file version.
+      rememberTranscript(conversationId, cached)
+      return cached.events
     }
     content = await fs.readFile(filePath, 'utf-8')
   } catch (error) {
@@ -213,6 +257,7 @@ export async function loadTranscriptEvents(
     push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, settledAt)
   }
 
+  rememberTranscript(conversationId, { baseDir, mtimeMs, size: sizeBytes, events })
   return events
 }
 

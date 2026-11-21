@@ -2,7 +2,9 @@ import { AGENT_ACP_TRANSFER_CHUNK_BYTES, createEvent, encodeMessage, MAX_SECURE_
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
 import { resolveConfig } from '../src/config.js'
@@ -1907,6 +1909,58 @@ describe('AcpRemoteGateway', () => {
     } finally {
       resolvePrompt?.({ stopReason: 'end_turn' })
       await gateway.close()
+    }
+  })
+
+  it('windows Antigravity transcript history by default and pages older events via beforeSeq', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agy-gateway-home-'))
+    const previousHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      const logs = join(home, '.gemini', 'antigravity-cli', 'brain', 'windowed', '.system_generated', 'logs')
+      await mkdir(logs, { recursive: true })
+      const records: unknown[] = []
+      for (let turn = 1; turn <= 40; turn += 1) {
+        records.push({ type: 'USER_INPUT', step_index: turn * 2 - 1, created_at: '2026-10-07T00:00:00Z', content: `prompt ${turn}` })
+        records.push({ type: 'PLANNER_RESPONSE', step_index: turn * 2, created_at: '2026-10-07T00:00:01Z', content: `reply ${turn}` })
+      }
+      await writeFile(join(logs, 'transcript.jsonl'), records.map(record => JSON.stringify(record)).join('\n') + '\n')
+
+      const gateway = new AcpRemoteGateway(
+        { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: [] }] },
+        silentLogger(),
+        () => readyAcp(),
+      )
+      await gateway.start()
+      try {
+        const history = (params: Record<string, unknown>) => gateway.call('reader', {
+          method: 'dsh/sessionHistory',
+          params: { backend: 'antigravity', sessionId: 'windowed', ...params },
+        }) as Promise<{ events: Array<{ event: { seq: number; type: string } }>; hasMore: boolean; cursor: number; running: boolean }>
+
+        const first = await history({})
+        // 40 turns hydrate to well over 200 events; the default window is the recent 50.
+        expect(first.events).toHaveLength(50)
+        expect(first.hasMore).toBe(true)
+        expect(first.cursor).toBe(first.events.at(-1)!.event.seq)
+        expect(first.running).toBe(false)
+
+        const second = await history({ beforeSeq: first.events[0]!.event.seq })
+        expect(second.events.length).toBeGreaterThan(0)
+        expect(second.events.at(-1)!.event.seq).toBeLessThan(first.events[0]!.event.seq)
+        expect(second.hasMore).toBe(true)
+
+        const tail = await history({ maxMessages: 1000, beforeSeq: second.events[0]!.event.seq })
+        // Everything older than the second page fits one bounded response and reaches the transcript start.
+        expect(tail.hasMore).toBe(false)
+        expect(tail.events[0]!.event.seq).toBe(0)
+      } finally {
+        await gateway.close()
+      }
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      await rm(home, { recursive: true, force: true })
     }
   })
 })

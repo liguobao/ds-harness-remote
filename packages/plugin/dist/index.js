@@ -100089,7 +100089,14 @@ var schemas2 = {
   }).strict(),
   "dsh/sessionHistory": external_exports.object({
     sessionId: id5,
-    backend: backendId.optional()
+    backend: backendId.optional(),
+    // Read-only paging for the Antigravity transcript window; ignored by other backends.
+    beforeSeq: external_exports.number().int().optional(),
+    maxMessages: external_exports.number().int().positive().optional(),
+    turnWindow: external_exports.union([external_exports.number().int().positive(), external_exports.object({
+      minMessages: external_exports.number().int().positive().optional(),
+      minTurns: external_exports.number().int().positive().optional()
+    }).strict()]).optional()
   }).strict()
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
@@ -100146,6 +100153,23 @@ async function readFirstLine(handle) {
   }
   return totalBytes > 0 ? Buffer.concat(chunks, totalBytes).toString("utf-8") : void 0;
 }
+var transcriptCache = /* @__PURE__ */ new Map();
+var TRANSCRIPT_CACHE_MAX_SESSIONS = 32;
+var TRANSCRIPT_CACHE_MAX_EVENTS = 1e5;
+function rememberTranscript(conversationId, entry) {
+  const previous = transcriptCache.get(conversationId);
+  if (previous !== entry) transcriptCache.set(conversationId, entry);
+  let sessions = transcriptCache.size;
+  let totalEvents = 0;
+  for (const cached2 of transcriptCache.values()) totalEvents += cached2.events.length;
+  while (transcriptCache.size > 0 && (sessions > TRANSCRIPT_CACHE_MAX_SESSIONS || totalEvents > TRANSCRIPT_CACHE_MAX_EVENTS)) {
+    const oldest = transcriptCache.keys().next().value;
+    if (oldest === void 0) break;
+    totalEvents -= transcriptCache.get(oldest).events.length;
+    transcriptCache.delete(oldest);
+    sessions -= 1;
+  }
+}
 function cleanUserPrompt(raw) {
   if (!raw) return "";
   raw = stripAgyImageReferences(raw);
@@ -100157,12 +100181,21 @@ function cleanUserPrompt(raw) {
 }
 async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(homedir5(), ".gemini/antigravity-cli/brain")) {
   let content = "";
+  let mtimeMs = 0;
+  let sizeBytes = 0;
   try {
     const filePath = await transcriptPath(baseDir, conversationId);
     if (filePath === void 0) return [];
     const info = await fs3.stat(filePath);
+    mtimeMs = info.mtimeMs;
+    sizeBytes = info.size;
     if (info.size > MAX_AGENT_ACP_TRANSFER_BYTES) {
       throw new RpcError("ACP_HISTORY_TOO_LARGE", "Antigravity history exceeds the transfer limit.");
+    }
+    const cached2 = transcriptCache.get(conversationId);
+    if (cached2 !== void 0 && cached2.baseDir === baseDir && cached2.mtimeMs === info.mtimeMs && cached2.size === info.size) {
+      rememberTranscript(conversationId, cached2);
+      return cached2.events;
     }
     content = await fs3.readFile(filePath, "utf-8");
   } catch (error62) {
@@ -100294,6 +100327,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
     push2("step/end", { turn: currentTurn, step: 1 }, settledAt);
     push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
+  rememberTranscript(conversationId, { baseDir, mtimeMs, size: sizeBytes, events });
   return events;
 }
 async function querySqliteJson(dbPath, sql, params = []) {
@@ -101538,14 +101572,44 @@ var AcpRemoteGateway = class {
         };
       }
       if (backend !== "antigravity") return { events: [], running: this.hasTurnInFlight(conversationId) };
-      const events = await loadTranscriptEvents(conversationId, rawSessionId);
+      const allEvents = await loadTranscriptEvents(conversationId, rawSessionId);
+      const beforeSeq = typeof call.params.beforeSeq === "number" && Number.isSafeInteger(call.params.beforeSeq) ? call.params.beforeSeq : void 0;
+      const turnWindow2 = normalizeVirtualHistoryTurnWindow(call.params.turnWindow);
+      const window2 = beforeSeq === void 0 ? allEvents : allEvents.filter((entry) => entry.event.seq < beforeSeq);
+      const envelopeBytes = utf8JsonByteLength({
+        events: [],
+        running: false,
+        hasMore: false,
+        cursor: 0,
+        ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+      });
+      let slice;
+      try {
+        slice = selectVirtualHistorySlice(window2, {
+          maxMessages: typeof call.params.maxMessages === "number" && Number.isSafeInteger(call.params.maxMessages) ? call.params.maxMessages : void 0,
+          turnWindow: turnWindow2,
+          countSurfaceMessages: false,
+          envelopeBytes,
+          measureRecordBytes: (entry) => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1
+        });
+      } catch (error62) {
+        if (error62 instanceof VirtualHistoryResponseTooLargeError) {
+          throw new RpcError("RESPONSE_TOO_LARGE", error62.message, { actualBytes: error62.actualBytes, maxBytes: error62.maxBytes });
+        }
+        throw error62;
+      }
+      const events = slice.records.map((entry) => ({ event: entry.event }));
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),
-        eventCount: events.length
+        eventCount: events.length,
+        totalCount: allEvents.length,
+        hasMore: slice.hasMore
       });
       return {
         events,
         running: this.hasTurnInFlight(conversationId),
+        hasMore: slice.hasMore,
+        cursor: slice.records.at(-1)?.event.seq ?? -1,
         ...persistedPreset ? { permissionPreset: persistedPreset } : {}
       };
     }
