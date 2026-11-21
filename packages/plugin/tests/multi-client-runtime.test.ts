@@ -126,8 +126,9 @@ describe('HostPluginRuntime multi-Client routing', () => {
                       'remote.compaction.async.v1',
                       'workspace.upload.binary.v1',
                       'workspace.upload.lan.v1',
+                      'workspace.git.read.v1',
                     ]
-                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1', 'workspace.upload.binary.v1', 'workspace.upload.lan.v1'],
+                  : ['workspace.upload.v1', 'remote.history.compact.v1', 'remote.compaction.async.v1', 'workspace.upload.binary.v1', 'workspace.upload.lan.v1', 'workspace.git.read.v1'],
               )
               expect(result.workspaceTypes).toEqual(
                 scenario === 'ready'
