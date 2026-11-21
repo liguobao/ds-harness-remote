@@ -69,6 +69,7 @@ pnpm --filter './packages/**' -r build
 pnpm install --frozen-lockfile
 pnpm --filter './packages/**' -r build
 pnpm -r check
+pnpm exec oxlint --type-aware --quiet packages apps scripts
 node scripts/verify-dsh-plugin.mjs
 pnpm -r test
 NODE_ENV=production pnpm --workspace-concurrency=1 -r build
@@ -77,6 +78,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 ```
 
 - 全仓生产构建必须附加 `--workspace-concurrency=1`，避免移动端构建步骤与插件打包并发竞争。
+- 如修改了受跟踪的 Shell 脚本（`*.sh`，不含 `apps/ios/ios/ci_scripts/ci_post_clone.sh` 等 `zsh` 脚本）且本机安装了 `shellcheck`，请运行 `shellcheck -S warning <script.sh>`（CI 会对全部受跟踪的非 `zsh` `*.sh` 脚本执行该检查）。
 - `node scripts/verify-packed-webrtc.mjs` 会在临时目录对根包与 `packages/plugin` 执行 `npm pack` 并生产安装，需在已构建 `./packages/**` 且可执行 `npm install` 的环境下运行。
 
 ### 受跟踪生成产物与忽略文件
@@ -114,14 +116,18 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 
 ## 代码风格与仓内约定
 
-本仓库**未配置** ESLint、Prettier、Biome、`.editorconfig`、`commitlint` 或 Husky Git hooks。静态检查主要依靠严格 TypeScript（`tsconfig.base.json` 启用 `strict: true`，`packages/app-core` 另启用 `noUncheckedIndexedAccess: true`）以及仓库自定义验证脚本。
+本仓库采用轻量级编辑器基线与静态检查，不额外引入格式化工具或 Git hooks：
+
+- **编辑器与换行约定**：[`.editorconfig`](.editorconfig) 统一 UTF-8、LF 换行、2 空格缩进、末尾换行与尾随空白清理，并对 `*.md`、`*.patch`、`packages/plugin/dist/*.js` 和 `Makefile` 设有专项覆盖。[`.gitattributes`](.gitattributes) 强制 `*.sh` 脚本保持 LF，并保留受跟踪插件产物与 `*.patch` 的空白豁免。
+- **TypeScript 与 React 静态检查**：[`.oxlintrc.json`](.oxlintrc.json) 配置了类型感知 **Oxlint**（`oxlint` + `oxlint-tsgolint`），通过 `pnpm exec oxlint --type-aware --quiet packages apps scripts` 运行。`error` 级规则阻断 `react/rules-of-hooks`、`typescript/no-floating-promises`、`typescript/no-misused-promises`（`checksVoidReturn.attributes: false`）与一组精选核心正确性规则（如 `no-debugger`、`no-unreachable`、`no-dupe-keys`）；`react/exhaustive-deps` 与 `eslint/no-unused-vars`（忽略 `_` 前缀）为 `warn`。检查会自动忽略生成产物、第三方与原生工程目录（如 `dist/`、`generated/`、`vendor/`、`apps/harmony/`、`examples/mock-host/`、`fixtures/` 等），并在 `**/tests/**`、`*.test.ts(x)` 与 `scripts/transport-bench/**` 中放宽 `react/rules-of-hooks` 与 `typescript/no-misused-promises`（完整配置见 [`.oxlintrc.json`](.oxlintrc.json)）。
+- **未配置的工具**：本仓库依然**未配置** ESLint、Prettier、Biome、`commitlint` 或 Husky Git hooks。静态检查由严格 TypeScript（`tsconfig.base.json` 启用 `strict: true`，`packages/app-core` 另启用 `noUncheckedIndexedAccess: true`）、Oxlint、ShellCheck（针对受跟踪的非 `zsh` `*.sh` 脚本）与仓库自定义校验脚本共同承担。
 
 修改代码时请保持与所在子树现有风格一致，避免顺带格式化无关文件：
 
 - **Node / ESM TypeScript**（`packages/{plugin,protocol,crypto,webrtc,client-core}`、`apps/{server,browser,vscode}`）：2 空格缩进、单引号、无行尾分号、尾随逗号、相对导入显式写 `.js` 扩展名（`NodeNext`）。
 - **移动端 TypeScript**（`packages/app-core`、`apps/{android,ios}`）：2 空格缩进、无行尾分号、省略相对导入扩展名（Expo TypeScript 解析规则）。
 - **HarmonyOS ArkTS**（`apps/harmony/entry/src/**/*.ets` 及配套 `.mjs` 脚本）：2 空格缩进、单引号、保留行尾分号、显式类型注解。
-- **编码与空白**：文本文件统一保存为无 BOM UTF-8；提交前可执行 `git diff --check` 检查行尾空白与冲突标记。
+- **编码与空白**：遵循 [`.editorconfig`](.editorconfig) 与 [`.gitattributes`](.gitattributes)（文本文件统一保存为无 BOM UTF-8），提交前可执行 `git diff --check` 检查行尾空白与冲突标记。
 
 涉及线协议变更时，请同步更新 [`docs/protocol.md`](docs/protocol.md)、`packages/protocol`、`fixtures/` 与相关消费端，不要另建平行契约。
 
@@ -154,7 +160,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 以下说明仓库 workflow 实际运行的任务（最终合入以维护者审查与检查结果为准）：
 
 - **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** 在 `push` 与 `pull_request` 时触发，并配置了 **`paths-ignore: ["**.md", "docs/**"]`**——纯 Markdown 或 `docs/**` 文档 PR 不会自动触发该工作流。
-  - 代码或配置变更会运行：`changes`（变更路径检测）、`quality`（构建、dist 差异校验、类型检查、`verify-dsh-plugin.mjs`、workspace 测试、HarmonyOS Node 契约/多语言/版本检查、生产构建及 `verify-packed-webrtc.mjs`）、`xfs-refresh`（Linux XFS 凭据刷新锁测试）以及 `plugin-package`（`.tgz` 与浏览器扩展打包）。
+  - 代码或配置变更会运行：`changes`（变更路径检测）、`quality`（构建、dist 差异校验、类型检查、Oxlint 类型感知检查、非 `zsh` `*.sh` 脚本 ShellCheck、`verify-dsh-plugin.mjs`、workspace 测试、HarmonyOS Node 契约/多语言/版本检查、生产构建及 `verify-packed-webrtc.mjs`）、`xfs-refresh`（Linux XFS 凭据刷新锁测试）以及 `plugin-package`（`.tgz` 与浏览器扩展打包）。
   - 路径触发任务：`android-apk`（PR 仅编译 `arm64-v8a`）与 `ios-build`（macOS 无签名编译，不依赖 Apple 签名凭据，fork PR 也可运行）。
 - **[`.github/workflows/harmony-hap.yml`](.github/workflows/harmony-hap.yml)** 仅在上游仓库的自托管 `harmonyos` runner 上通过手动触发或发布调用执行，不会自动在 fork PR 上运行。
 
