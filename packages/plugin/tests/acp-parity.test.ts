@@ -567,7 +567,7 @@ describe('Issue #469 ACP parity (plugin)', () => {
       expect(client1.modeCalls).toEqual(['bypassPermissions'])
       await gateway1.call('c1', { method: 'dsh/workspaceCreate', params: { backend: 'antigravity', path: repo, title: 'Created Repo' } })
       await gateway1.call('c1', { method: 'dsh/sessionPin', params: { backend: 'antigravity', sessionId: 'sess-1' } })
-      await expect(gateway1.call('c1', { method: 'dsh/workspaceList', params: { backend: 'cursor' } })).rejects.toThrow(/Login required/)
+      await expect(gateway1.call('c1', { method: 'dsh/workspaceList', params: { backend: 'cursor' } })).rejects.toMatchObject({ code: 'CURSOR_UPSTREAM_ERROR' })
     } finally {
       await gateway1.close()
     }
