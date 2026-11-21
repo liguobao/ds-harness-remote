@@ -27,6 +27,7 @@ import {
   finalizeAssistantLive,
   foldAcpHistory,
   mergeAcpHistoryAndLive,
+  oldestAcpEventSeq,
   readAcpHistory,
 } from '../services/cursor'
 import { forkMessage } from '../services/message-actions'
@@ -44,13 +45,16 @@ import type { SessionAccess } from './session-runtime'
 import { applyFeedback, latestHistoryLifecycle, record, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
 
+export const ACP_INITIAL_PAGE_SIZE = 16
 const ACP_PAGE_SIZE = 60
 const acpOlderHistory = new Map<string, import('../types').ChatItem[]>()
+const acpServerPagedSessions = new Set<string>()
 
 export function storeAcpPagedMessages(
   sessionId: string,
   merged: import('../types').ChatItem[],
 ): { tail: import('../types').ChatItem[]; historyHasMore: boolean; oldestLoadedSeq?: number } {
+  acpServerPagedSessions.delete(sessionId)
   const splitAt = Math.max(0, merged.length - ACP_PAGE_SIZE)
   const older = merged.slice(0, splitAt)
   const tail = merged.slice(splitAt)
@@ -61,6 +65,23 @@ export function storeAcpPagedMessages(
     historyHasMore: older.length > 0,
     oldestLoadedSeq: older.length > 0 ? older.length : undefined,
   }
+}
+
+export function applyAcpHistoryPage(
+  sessionId: string,
+  merged: import('../types').ChatItem[],
+  details: { events: unknown[]; hasMore?: boolean; paged?: boolean },
+): { tail: import('../types').ChatItem[]; historyHasMore: boolean; oldestLoadedSeq?: number } {
+  if (details.paged === true) {
+    acpOlderHistory.delete(sessionId)
+    acpServerPagedSessions.add(sessionId)
+    return {
+      tail: merged,
+      historyHasMore: details.hasMore === true,
+      oldestLoadedSeq: oldestAcpEventSeq(details.events),
+    }
+  }
+  return storeAcpPagedMessages(sessionId, merged)
 }
 
 export function hasAcpBackendFor(connection: SessionAccess['runtime']['connection'], backend: string): boolean {
@@ -522,8 +543,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }
         if (isAcpManagedBackend(session.backend)) {
           const acpBackend = session.backend
-          await runtime.closeActiveCodexStream()
-          await runtime.closeActiveCursorStream()
+          void runtime.closeActiveCodexStream()
           if (!current()) return
           const existingMessages = get().messages[session.sessionId] ?? []
           const priorSelected = get().selectedSession
@@ -550,7 +570,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             (async () => {
               if (typeof acpClient.loadSessionDetails === 'function') {
                 try {
-                  return await readAcpHistory(acpClient, cursorNativeId(session), acpBackend)
+                  return await readAcpHistory(acpClient, cursorNativeId(session), acpBackend, readAbort.signal, { maxMessages: ACP_INITIAL_PAGE_SIZE })
                 } catch (err) {
                   if (acpBackend !== 'cursor') throw err
                   return { events: [] as unknown[] }
@@ -588,7 +608,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const merged = details.events.length > 0 || acpBackend !== 'cursor'
               ? mergeAcpHistoryAndLive(items, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
-            const paged = storeAcpPagedMessages(session.sessionId, merged)
+            const paged = applyAcpHistoryPage(session.sessionId, merged, details)
             if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, paged.tail)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
@@ -1613,26 +1633,57 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const current = () => generation === runtime.sessionLoadGeneration && connectionGeneration === runtime.connectionGeneration
       if (isAcpManagedBackend(session.backend)) {
         const buffered = acpOlderHistory.get(session.sessionId) ?? []
-        if (buffered.length === 0) {
+        if (buffered.length > 0) {
+          const take = Math.max(0, buffered.length - ACP_PAGE_SIZE)
+          const nextChunk = buffered.slice(take)
+          const remaining = buffered.slice(0, take)
+          if (remaining.length > 0) acpOlderHistory.set(session.sessionId, remaining)
+          else acpOlderHistory.delete(session.sessionId)
+          set(state => ({
+            messages: {
+              ...state.messages,
+              [session.sessionId]: [...nextChunk, ...(state.messages[session.sessionId] ?? [])],
+            },
+            ...(state.selectedSession?.sessionId === session.sessionId ? {
+              historyHasMore: remaining.length > 0,
+              oldestLoadedSeq: remaining.length > 0 ? remaining.length : undefined,
+              historyLoadingOlder: false,
+            } : {}),
+          }))
+          return
+        }
+        if (!acpServerPagedSessions.has(session.sessionId)) {
           set({ historyHasMore: false, historyLoadingOlder: false })
           return
         }
-        const take = Math.max(0, buffered.length - ACP_PAGE_SIZE)
-        const nextChunk = buffered.slice(take)
-        const remaining = buffered.slice(0, take)
-        if (remaining.length > 0) acpOlderHistory.set(session.sessionId, remaining)
-        else acpOlderHistory.delete(session.sessionId)
-        set(state => ({
-          messages: {
-            ...state.messages,
-            [session.sessionId]: [...nextChunk, ...(state.messages[session.sessionId] ?? [])],
-          },
-          ...(state.selectedSession?.sessionId === session.sessionId ? {
-            historyHasMore: remaining.length > 0,
-            oldestLoadedSeq: remaining.length > 0 ? remaining.length : undefined,
-            historyLoadingOlder: false,
-          } : {}),
-        }))
+        set({ historyLoadingOlder: true })
+        try {
+          const page = await readAcpHistory(
+            acpClientForBackend(runtime.connection, session.backend),
+            cursorNativeId(session),
+            session.backend,
+            undefined,
+            { beforeSeq, maxMessages: ACP_PAGE_SIZE },
+          )
+          if (!current()) return
+          const items = foldAcpHistory(page.events, session.sessionId)
+          const older = oldestAcpEventSeq(page.events)
+          set(state => ({
+            messages: {
+              ...state.messages,
+              [session.sessionId]: prependHistory(items, state.messages[session.sessionId] ?? []),
+            },
+            ...(state.selectedSession?.sessionId === session.sessionId ? {
+              historyHasMore: page.paged === true ? page.hasMore === true : false,
+              oldestLoadedSeq: older ?? state.oldestLoadedSeq,
+              historyLoadingOlder: false,
+            } : {}),
+          }))
+        } catch (error) {
+          if (!current()) return
+          set(state => state.selectedSession?.sessionId === session.sessionId
+            ? { historyLoadingOlder: false, error: friendlyError(error) } : {})
+        }
         return
       }
       set({ historyLoadingOlder: true })

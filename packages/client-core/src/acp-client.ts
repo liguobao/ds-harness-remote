@@ -37,8 +37,27 @@ export interface AcpStream {
   close(): Promise<void>
 }
 
+export interface AcpSessionHistoryOptions {
+  beforeSeq?: number
+  maxMessages?: number
+  turnWindow?: number | { minMessages?: number; minTurns?: number }
+}
+
+export interface AcpSessionHistoryDetails {
+  events: unknown[]
+  permissionPreset?: string
+  modes?: AcpSessionModes
+  commands?: AcpAvailableCommand[]
+  running?: boolean
+  hasMore?: boolean
+  cursor?: number
+  paged?: boolean
+}
+
 /** Shared Web/Android client for the generic Agent ACP domain in Remote. */
 export class AgentAcpClient {
+  private historyPagingSupported = true
+
   constructor(private readonly core: RemoteClientCore, private readonly capabilities: readonly string[] = []) {}
 
   supportsArchive(backend: string): boolean {
@@ -245,28 +264,65 @@ export class AgentAcpClient {
     sessionId: string,
     backend?: AcpAgentBackend,
     signal?: AbortSignal,
-  ): Promise<{
-    events: unknown[]
-    permissionPreset?: string
-    modes?: AcpSessionModes
-    commands?: AcpAvailableCommand[]
-    running?: boolean
-  }> {
+    options?: AcpSessionHistoryOptions,
+  ): Promise<AcpSessionHistoryDetails> {
     const strictHistoryBackend = backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes' || backend === 'antigravity'
-    const result = await this.transferCall('dsh/sessionHistory', {
+    const wantsPaging = options !== undefined
+      && (options.beforeSeq !== undefined || options.maxMessages !== undefined || options.turnWindow !== undefined)
+    const baseParams = {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
-    }, signal).catch(error => {
+    }
+    if (wantsPaging && !this.historyPagingSupported && options?.beforeSeq !== undefined) {
+      return { events: [], hasMore: false, paged: false }
+    }
+    let usedPaging = false
+    let result: unknown
+    try {
+      if (wantsPaging && this.historyPagingSupported) {
+        const pagedParams = {
+          ...baseParams,
+          ...(options?.beforeSeq !== undefined ? { beforeSeq: options.beforeSeq } : {}),
+          ...(options?.maxMessages !== undefined ? { maxMessages: options.maxMessages } : {}),
+          ...(options?.turnWindow !== undefined ? { turnWindow: options.turnWindow } : {}),
+        }
+        try {
+          usedPaging = true
+          // Windowed pages fit inside one encrypted frame, avoiding the 4-RTT transfer handshake.
+          result = await this.call('dsh/sessionHistory', pagedParams, signal)
+        } catch (error) {
+          const code = isRecord(error) && typeof error.code === 'string' ? error.code : undefined
+          if (code === 'RESPONSE_TOO_LARGE' || code === 'FRAME_TOO_LARGE' || code === 'PAYLOAD_TOO_LARGE') {
+            result = await this.transferCall('dsh/sessionHistory', pagedParams, signal)
+          } else if (code === 'INVALID_MESSAGE') {
+            // Older Hosts validate dsh/sessionHistory with .strict() and reject paging fields.
+            this.historyPagingSupported = false
+            if (options?.beforeSeq !== undefined) {
+              return { events: [], hasMore: false, paged: false }
+            }
+            usedPaging = false
+            result = await this.transferCall('dsh/sessionHistory', baseParams, signal)
+          } else {
+            throw error
+          }
+        }
+      } else {
+        result = await this.transferCall('dsh/sessionHistory', baseParams, signal)
+      }
+    } catch (error) {
       if (strictHistoryBackend) throw error
-      return { events: [] }
-    })
+      result = { events: [] }
+    }
     if (strictHistoryBackend && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
-    if (!isRecord(result)) return { events: [] }
+    if (!isRecord(result)) return { events: [], ...(wantsPaging ? { paged: false } : {}) }
     const events = Array.isArray(result.events) ? result.events : []
     const permissionPreset = typeof result.permissionPreset === 'string' ? result.permissionPreset : undefined
     const running = typeof result.running === 'boolean' ? result.running : undefined
+    const hasMore = typeof result.hasMore === 'boolean' ? result.hasMore : undefined
+    const cursor = typeof result.cursor === 'number' && Number.isSafeInteger(result.cursor) ? result.cursor : undefined
+    const paged = usedPaging && hasMore !== undefined
     const modes = isRecord(result.modes) && Array.isArray(result.modes.availableModes)
       ? {
           ...(typeof result.modes.currentModeId === 'string' ? { currentModeId: result.modes.currentModeId } : {}),
@@ -294,6 +350,9 @@ export class AgentAcpClient {
       ...(modes ? { modes } : {}),
       ...(commands ? { commands } : {}),
       ...(running !== undefined ? { running } : {}),
+      ...(hasMore !== undefined ? { hasMore } : {}),
+      ...(cursor !== undefined ? { cursor } : {}),
+      ...(wantsPaging ? { paged } : {}),
     }
   }
 

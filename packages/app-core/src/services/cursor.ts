@@ -1,4 +1,4 @@
-import type { AgentAcpClient } from '@dsh-remote/client-core'
+import type { AcpSessionHistoryOptions, AgentAcpClient } from '@dsh-remote/client-core'
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import { loadAcpDirectoryCatalog, mergeAcpDirectoryCatalog, type AcpCatalogFilterOptions, type AcpManagedBackend } from '../lib/workspace-key'
 import type {
@@ -164,25 +164,47 @@ export async function readAcpHistory(
   sessionId: string,
   backend: AgentBackend,
   signal?: AbortSignal,
+  options?: AcpSessionHistoryOptions,
 ): Promise<{
   events: unknown[]
   modes?: { currentModeId?: string; availableModes?: Array<{ id: string; name?: string; description?: string }> }
   availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>
   permissionPreset?: string
   running?: boolean
+  hasMore?: boolean
+  cursor?: number
+  paged?: boolean
 }> {
   if (typeof client.loadSessionDetails === 'function') {
-    const details = await client.loadSessionDetails(sessionId, backend, signal)
+    const details = options === undefined
+      ? await client.loadSessionDetails(sessionId, backend, signal)
+      : await client.loadSessionDetails(sessionId, backend, signal, options)
     return {
       events: details.events,
       ...(details.modes !== undefined ? { modes: details.modes } : {}),
       ...(details.commands !== undefined ? { availableCommands: details.commands } : {}),
       ...(details.permissionPreset !== undefined ? { permissionPreset: details.permissionPreset } : {}),
       ...(details.running !== undefined ? { running: details.running } : {}),
+      ...(details.hasMore !== undefined ? { hasMore: details.hasMore } : {}),
+      ...(details.cursor !== undefined ? { cursor: details.cursor } : {}),
+      ...(details.paged !== undefined ? { paged: details.paged } : {}),
     }
   }
   const events = await client.loadSessionHistory(sessionId, backend, signal)
   return { events }
+}
+
+/** Smallest safe event seq in a raw ACP history page; drives the next `beforeSeq` read. */
+export function oldestAcpEventSeq(events: unknown[]): number | undefined {
+  let oldest: number | undefined
+  for (const value of events) {
+    if (!isRecord(value) || !isRecord(value.event)) continue
+    const seq = value.event.seq
+    if (typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0) {
+      oldest = oldest === undefined ? seq : Math.min(oldest, seq)
+    }
+  }
+  return oldest
 }
 
 export function cursorWorkspaceId(path: string): string {

@@ -1,4 +1,3 @@
-import { compactHistory } from '../compact-history.js'
 import { acpToolStreamSchema } from './method-policy.js'
 import { Buffer } from 'node:buffer'
 import type {
@@ -95,8 +94,9 @@ export class AcpPeerBridge {
   private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {
     this.requireOpen()
     try {
-      const result = await this.domain.call(this.context.connectionId, input)
-      return this.compactHistoryEnabled && safeMethod(input) === 'dsh/sessionHistory' ? compactHistory(result) : result
+      return await this.domain.call(this.context.connectionId, input, {
+        compactHistory: this.compactHistoryEnabled,
+      })
     } catch (error) {
       if (logFailure) {
         this.logger?.warn('Cursor call failed', {

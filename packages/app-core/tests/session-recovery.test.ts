@@ -2780,7 +2780,7 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
         acp.openStream.mockResolvedValueOnce({ streamId: 's-resume', close: async () => undefined })
         try {
           await useAppStore.getState().resumeConnection()
-          await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledWith('resume-1', 'antigravity', undefined))
+          await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledWith('resume-1', 'antigravity', expect.any(AbortSignal), { maxMessages: 16 }))
           await vi.waitFor(() => expect(useAppStore.getState().busyAction).toBeUndefined())
           expect(acp.openStream).toHaveBeenCalledTimes(1)
           expect(useAppStore.getState().selectedSession?.running).toBe(scenario.expectedRunning)
@@ -2790,5 +2790,106 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
         }
       },
     })), prepareScenario1)
+  })
+
+  it('pages ACP history on the server, preserves loaded pages across active-stream reconcile, and falls back for unpaged Hosts', async () => {
+    await runScenarios([
+      {
+        name: 'server-paged openSession + loadOlderHistory + active-stream reconcile',
+        run: async () => {
+          transport.hasAntigravity.mockReturnValue(true)
+          const selected: RemoteSession = { sessionId: 'antigravity:paged-1', nativeId: 'paged-1', backend: 'antigravity', updatedAt: 1, running: true, blank: false }
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, selectedSession: selected, sessions: [selected], messages: {}, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          const loadSessionDetails = vi.fn(async (_id: string, _backend: string, _signal?: AbortSignal, options?: { beforeSeq?: number; maxMessages?: number }) => {
+            if (options?.beforeSeq === 10) {
+              return {
+                events: [
+                  entry('user/message', 0, { id: 'u-old', source: { kind: 'user' }, content: [{ type: 'text', text: 'older q' }] }),
+                  entry('assistant/message', 1, { turn: 1, message: { id: 'a-old', content: [{ type: 'text', text: 'older a' }] } }),
+                ],
+                hasMore: false,
+                cursor: 1,
+                paged: true,
+                running: true,
+              }
+            }
+            return {
+              events: [
+                entry('user/message', 10, { id: 'u-new', source: { kind: 'user' }, content: [{ type: 'text', text: 'newer q' }] }),
+                entry('assistant/message', 11, { turn: 2, message: { id: 'a-new', content: [{ type: 'text', text: 'newer a' }] } }),
+              ],
+              hasMore: true,
+              cursor: 11,
+              paged: true,
+              running: true,
+            }
+          })
+          Object.assign(acp, { loadSessionDetails })
+          acp.openStream.mockResolvedValueOnce({ streamId: 'live-paged', close: async () => undefined })
+          try {
+            await useAppStore.getState().openSession(selected)
+            expect(loadSessionDetails).toHaveBeenCalledWith('paged-1', 'antigravity', expect.any(AbortSignal), { maxMessages: 16 })
+            expect(useAppStore.getState().historyHasMore).toBe(true)
+            expect(useAppStore.getState().oldestLoadedSeq).toBe(10)
+
+            await useAppStore.getState().loadOlderHistory()
+            expect(loadSessionDetails).toHaveBeenCalledWith('paged-1', 'antigravity', undefined, { beforeSeq: 10, maxMessages: 60 })
+            expect(useAppStore.getState().historyHasMore).toBe(false)
+            expect(useAppStore.getState().oldestLoadedSeq).toBe(0)
+            expect((useAppStore.getState().messages[selected.sessionId] ?? []).map(item => item.kind === 'message' ? item.text : item.id))
+              .toEqual(['older q', 'older a', 'newer q', 'newer a'])
+
+            // Active-stream reconcile fetches latest window and keeps already-loaded older page intact.
+            loadSessionDetails.mockResolvedValueOnce({
+              events: [
+                entry('user/message', 10, { id: 'u-new', source: { kind: 'user' }, content: [{ type: 'text', text: 'newer q' }] }),
+                entry('assistant/message', 11, { turn: 2, message: { id: 'a-new', content: [{ type: 'text', text: 'newer a settled' }] } }),
+              ],
+              hasMore: true,
+              cursor: 11,
+              paged: true,
+              running: false,
+            })
+            await useAppStore.getState().resumeConnection()
+            await vi.waitFor(() => expect(useAppStore.getState().selectedSession?.running).toBe(false))
+            expect((useAppStore.getState().messages[selected.sessionId] ?? []).map(item => item.kind === 'message' ? item.text : item.id))
+              .toEqual(['older q', 'older a', 'newer q', 'newer a settled'])
+            expect(useAppStore.getState().oldestLoadedSeq).toBe(0)
+          } finally {
+            await useAppStore.getState().setOffline()
+            delete (acp as Record<string, unknown>).loadSessionDetails
+          }
+        },
+      },
+      {
+        name: 'falls back to client-side ACP_PAGE_SIZE slicing when Host returns unpaged history',
+        run: async () => {
+          transport.hasAntigravity.mockReturnValue(true)
+          const selected: RemoteSession = { sessionId: 'antigravity:legacy-1', nativeId: 'legacy-1', backend: 'antigravity', updatedAt: 1, running: false, blank: false }
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, selectedSession: selected, sessions: [selected], messages: {}, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+          const events = Array.from({ length: 70 }, (_, idx) =>
+            entry('user/message', idx, { id: `u-${idx}`, source: { kind: 'user' }, content: [{ type: 'text', text: `msg-${idx}` }] }))
+          const loadSessionDetails = vi.fn(async () => ({ events, paged: false, running: false }))
+          Object.assign(acp, { loadSessionDetails })
+          acp.openStream.mockResolvedValueOnce({ streamId: 'live-legacy', close: async () => undefined })
+          try {
+            await useAppStore.getState().openSession(selected)
+            expect(useAppStore.getState().messages[selected.sessionId]).toHaveLength(60)
+            expect(useAppStore.getState().historyHasMore).toBe(true)
+            await useAppStore.getState().loadOlderHistory()
+            expect(loadSessionDetails).toHaveBeenCalledTimes(1)
+            expect(useAppStore.getState().messages[selected.sessionId]).toHaveLength(70)
+            expect(useAppStore.getState().historyHasMore).toBe(false)
+          } finally {
+            await useAppStore.getState().setOffline()
+            delete (acp as Record<string, unknown>).loadSessionDetails
+          }
+        },
+      },
+    ], async () => {
+      await prepareScenario1()
+      await useAppStore.getState().setOffline()
+      useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
+    })
   })
 })

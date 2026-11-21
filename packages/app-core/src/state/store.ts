@@ -127,6 +127,8 @@ export function sessionChatImageLoader(session: RemoteSession) {
     const pending = (async () => {
       let events: unknown[] = []
       if (typeof acpClient.loadSessionDetails === 'function') {
+        // Attachment lookup intentionally requests unpaged full history so images
+        // in older pages remain accessible until a dedicated dsh/sessionAttachment RPC exists.
         events = (await readAcpHistory(acpClient, nativeId, backend)).events
       } else {
         const result = await acpClient.transferCall('dsh/sessionHistory', { sessionId: nativeId, backend })

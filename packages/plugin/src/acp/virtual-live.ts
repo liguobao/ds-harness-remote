@@ -43,7 +43,11 @@ import {
 export interface AcpLiveProjectionContext {
   readonly lookupSession: (sessionId: string) => AcpSessionState | undefined
   readonly sessions: Map<string, AcpSessionState>
-  readonly hydrateSession: (session: AcpSessionState) => Promise<void>
+  readonly hydrateSession: (session: AcpSessionState, options?: {
+    maxMessages?: number
+    turnWindow?: VirtualHistoryTurnWindow
+    full?: boolean
+  }) => Promise<void>
   readonly historyPage: (session: AcpSessionState, options?: {
     beforeSeq?: number
     throughSeq?: number
@@ -164,7 +168,12 @@ export class AcpLiveProjection {
     const session = this.context.lookupSession(requestedId)
     if (session === undefined) throw new Error('The Session was not found.')
     const sessionId = session.sessionId
-    await this.context.hydrateSession(session)
+    const maxMessages = optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit)
+    const turnWindow = normalizeVirtualHistoryTurnWindow(request.turnWindow)
+    await this.context.hydrateSession(session, {
+      ...(maxMessages !== undefined ? { maxMessages } : {}),
+      ...(turnWindow !== undefined ? { turnWindow } : {}),
+    })
     this.context.rememberOpenedSession?.(sessionId)
     const existing = this.findFollow(sessionId)
     const step = this.context.backend === 'pi' ? existing?.piStep ?? 1 : 1
@@ -201,8 +210,8 @@ export class AcpLiveProjection {
     let history: ReturnType<AcpLiveProjectionContext['historyPage']>
     try {
       history = this.context.historyPage(session, {
-        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        limit: maxMessages,
+        turnWindow,
         extraEnvelopeBytes: projectionsOverhead,
       })
     } catch (error) {

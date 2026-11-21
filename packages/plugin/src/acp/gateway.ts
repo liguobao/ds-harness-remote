@@ -35,13 +35,17 @@ import {
   sessionIdFromParams,
   type AllowedAcpMethod,
 } from './method-policy.js'
-import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents, type HydratedSessionEvent } from './adapters/antigravity/transcript-loader.js'
+import { discoverAntigravitySessions, discoverAntigravityWorkspaces, loadTranscriptEvents } from './adapters/antigravity/transcript-loader.js'
+import { compactHistory } from '../compact-history.js'
 import {
+  boundedVirtualHistoryMaxMessages,
   normalizeVirtualHistoryTurnWindow,
   selectVirtualHistorySlice,
   utf8JsonByteLength,
   VirtualHistoryResponseTooLargeError,
+  type VirtualHistoryEntryLike,
   type VirtualHistorySliceResult,
+  type VirtualHistoryTurnWindow,
 } from '../virtual-history-pagination.js'
 import { AcpPeerBridge, type PublishAcpFrame } from './peer-bridge.js'
 import { AcpWorkspaceStore } from './workspace-store.js'
@@ -53,6 +57,9 @@ const BACKEND_STABLE_MS = 30_000
 const DEFAULT_RESTART_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
 const STRICT_CATALOG_BACKENDS: ReadonlySet<string> = new Set(['pi', 'claude', 'opencode', 'hermes'])
 const ACP_DIRECTORY_ENTRY_LIMIT = 500
+const MAX_CATALOG_HISTORY_SESSIONS = 32
+const MAX_CATALOG_HISTORY_BYTES = 32 * 1024 * 1024
+const CATALOG_HISTORY_TTL_MS = 10 * 60_000
 const MAX_BUFFERED_ACP_FRAMES = 200
 const ACP_FRAME_BUFFER_TTL_MS = 5 * 60_000
 const MAX_TURN_CATCH_UP_FRAMES = 120
@@ -86,6 +93,16 @@ interface BufferedAcpFrame {
 interface PromptTask {
   backend: string
   client: CursorAcpLike
+}
+
+interface CachedCatalogHistory {
+  client: CursorAcpLike
+  events: unknown[]
+  modes?: unknown
+  commands?: unknown[]
+  updatedAt?: string
+  bytes: number
+  cachedAt: number
 }
 
 interface AcpDirectoryEntry {
@@ -155,6 +172,8 @@ export class AcpRemoteGateway {
   private minValidHistoryEpoch = 0
   private readonly historyInvalidatedAt = new Map<string, number>()
   private readonly pendingHistoryReads = new Map<string, { client: CursorAcpLike; readEpoch: number; promise: Promise<unknown[]> }>()
+  private readonly catalogHistoryCache = new Map<string, CachedCatalogHistory>()
+  private readonly sessionUpdatedAt = new Map<string, string>()
   private readonly backendHistoryChains = new Map<string, Promise<void>>()
   private readonly backendDiagnostics = new Map<string, AcpAuthDiagnostic>()
   private readonly backendErrors = new Map<string, string>()
@@ -314,7 +333,7 @@ export class AcpRemoteGateway {
     return bridge
   }
 
-  async call(connectionId: string, input: unknown): Promise<unknown> {
+  async call(connectionId: string, input: unknown, options?: { compactHistory?: boolean }): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
     const call = parseAcpCall(envelope.method, envelope.params)
     const sessionId = sessionIdFromParams(call.method, call.params)
@@ -330,7 +349,7 @@ export class AcpRemoteGateway {
       this.opencodeOperations.set(sessionId!, (this.opencodeOperations.get(sessionId!) ?? 0) + 1)
     }
     try {
-      const result = await this.callInternal(connectionId, call, assertCurrent)
+      const result = await this.callInternal(connectionId, call, assertCurrent, options?.compactHistory === true)
       assertCurrent()
       return result
     }
@@ -374,7 +393,12 @@ export class AcpRemoteGateway {
     }
   }
 
-  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>, assertCurrent: () => void): Promise<unknown> {
+  private async callInternal(
+    connectionId: string,
+    call: ReturnType<typeof parseAcpCall>,
+    assertCurrent: () => void,
+    compactHistoryEnabled = false,
+  ): Promise<unknown> {
     assertCurrent()
     this.logger.info('ACP call received', {
       method: call.method,
@@ -516,6 +540,9 @@ export class AcpRemoteGateway {
         merged.set(canonical, { path: canonical, title: item.title ?? (basename(canonical) || 'workspace') })
       }
       if (this.isNativeCatalogBackend(requestedBackend)) {
+        if (requestedBackend === 'antigravity' && call.params.prewarm !== false) {
+          this.prewarmNativeHistoryReader('antigravity')
+        }
         const sessions = await this.listCatalogSessions(requestedBackend)
         for (const item of sessions) {
           if (deletedPaths.has(item.cwd)) continue
@@ -608,6 +635,9 @@ export class AcpRemoteGateway {
         return { items }
       }
       if (this.isNativeCatalogBackend(backend)) {
+        if (backend === 'antigravity' && call.params.prewarm !== false) {
+          this.prewarmNativeHistoryReader('antigravity')
+        }
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
         const sessions = await this.listCatalogSessions(backend, cwd)
         sessions.sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)
@@ -637,6 +667,14 @@ export class AcpRemoteGateway {
       const persistedPreset = this.sessionPermissions.get(conversationId)
         ?? await this.workspaceStore.getSessionPermission(conversationId)
       if (persistedPreset) this.sessionPermissions.set(conversationId, persistedPreset)
+      const beforeSeq = typeof call.params.beforeSeq === 'number' && Number.isSafeInteger(call.params.beforeSeq)
+        ? call.params.beforeSeq
+        : undefined
+      const turnWindow = normalizeVirtualHistoryTurnWindow(call.params.turnWindow)
+      const maxMessages = typeof call.params.maxMessages === 'number' && Number.isSafeInteger(call.params.maxMessages)
+        ? call.params.maxMessages
+        : undefined
+      const paging = { beforeSeq, turnWindow, maxMessages }
       if (this.isNativeCatalogBackend(backend)) {
         const cwd = await this.catalogSessionCwd(backend, conversationId)
         assertCurrent()
@@ -646,92 +684,94 @@ export class AcpRemoteGateway {
           history?: (sessionId: string, cwd: string) => Promise<unknown[]>
           lastHistoryMetadata?: (sessionId: string) => { models?: unknown; modes?: { availableModes?: unknown[] }; commands?: unknown[] } | undefined
         }
+        const wantsPaging = beforeSeq !== undefined || turnWindow !== undefined || maxMessages !== undefined
         if (!client.history) {
           return {
             events: [],
             running: this.hasTurnInFlight(conversationId),
+            ...(wantsPaging ? { hasMore: false, cursor: -1 } : {}),
             ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
           }
         }
-        const events = await this.readCatalogHistory(backend, client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> }, conversationId, cwd, assertCurrent)
-        const cachedMeta = client.lastHistoryMetadata?.(conversationId)
-        const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0
-          ? cachedMeta.modes
-          : undefined
-        return {
-          events,
+        const cacheKey = `${backend}:${conversationId}`
+        const turnInFlight = this.hasTurnInFlight(conversationId)
+        const latestUpdatedAt = this.sessionUpdatedAt.get(cacheKey)
+        const cached = !turnInFlight ? this.catalogHistoryCache.get(cacheKey) : undefined
+        const cacheValid = wantsPaging
+          && cached !== undefined
+          && cached.client === client
+          && (beforeSeq !== undefined
+            || (Date.now() - cached.cachedAt <= CATALOG_HISTORY_TTL_MS
+              && (latestUpdatedAt === undefined || cached.updatedAt === latestUpdatedAt)))
+        let allEvents: unknown[]
+        let modes: unknown
+        let commands: unknown[] | undefined
+        if (cacheValid) {
+          this.touchCatalogHistoryCache(cacheKey, cached)
+          allEvents = cached.events
+          modes = cached.modes
+          commands = cached.commands
+        } else {
+          const readEpoch = ++this.historyEpoch
+          const rawEvents = await this.readCatalogHistory(
+            backend,
+            client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> },
+            conversationId,
+            cwd,
+            assertCurrent,
+          )
+          const cachedMeta = client.lastHistoryMetadata?.(conversationId)
+          const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0
+            ? cachedMeta.modes
+            : undefined
+          const nonEmptyCommands = cachedMeta?.commands && cachedMeta.commands.length > 0
+            ? cachedMeta.commands
+            : undefined
+          if (!this.hasTurnInFlight(conversationId) && this.isHistoryEpochValid(conversationId, readEpoch)) {
+            this.setCatalogHistoryCache(cacheKey, {
+              client,
+              events: rawEvents,
+              ...(nonEmptyModes !== undefined ? { modes: nonEmptyModes } : {}),
+              ...(nonEmptyCommands !== undefined ? { commands: nonEmptyCommands } : {}),
+              ...(latestUpdatedAt !== undefined ? { updatedAt: latestUpdatedAt } : {}),
+              bytes: utf8JsonByteLength(rawEvents),
+              cachedAt: Date.now(),
+            })
+          }
+          allEvents = rawEvents
+          modes = nonEmptyModes
+          commands = nonEmptyCommands
+        }
+        const meta = {
           running: this.hasTurnInFlight(conversationId),
           ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
-          ...(nonEmptyModes ? { modes: nonEmptyModes } : {}),
-          ...(cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}),
+          ...(modes !== undefined ? { modes } : {}),
+          ...(commands !== undefined ? { commands } : {}),
         }
+        if (beforeSeq === undefined && turnWindow === undefined && maxMessages === undefined) {
+          return {
+            events: compactHistoryEnabled ? allEvents.map(entry => compactHistory(entry)) : allEvents,
+            ...meta,
+          }
+        }
+        return this.sliceAcpHistoryResponse(
+          normalizeVirtualHistoryEntries(allEvents),
+          meta,
+          paging,
+          { sessionId: rawSessionId, compactHistory: compactHistoryEnabled },
+        )
       }
-      if (backend !== 'antigravity') return { events: [], running: this.hasTurnInFlight(conversationId) }
+      if (backend !== 'antigravity') return { events: [], running: this.hasTurnInFlight(conversationId), hasMore: false, cursor: -1 }
       const allEvents = await loadTranscriptEvents(conversationId, rawSessionId)
-      const beforeSeq = typeof call.params.beforeSeq === 'number' && Number.isSafeInteger(call.params.beforeSeq)
-        ? call.params.beforeSeq
-        : undefined
-      const turnWindow = normalizeVirtualHistoryTurnWindow(call.params.turnWindow)
-      const maxMessages = typeof call.params.maxMessages === 'number' && Number.isSafeInteger(call.params.maxMessages)
-        ? call.params.maxMessages
-        : undefined
-      // Windowing is an explicit opt-in: clients that send none of the paging
-      // fields keep receiving the full transcript (still accelerated by the
-      // parse cache), so any client version benefits without negotiation.
-      if (beforeSeq === undefined && turnWindow === undefined && maxMessages === undefined) {
-        this.logger.info('ACP session history fetched', {
-          sessionId: shortSessionId(rawSessionId),
-          eventCount: allEvents.length,
-          totalCount: allEvents.length,
-          full: true,
-        })
-        return {
-          events: allEvents.map(entry => ({ event: entry.event })),
+      return this.sliceAcpHistoryResponse(
+        allEvents,
+        {
           running: this.hasTurnInFlight(conversationId),
-          hasMore: false,
-          cursor: allEvents.at(-1)?.event.seq ?? -1,
           ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
-        }
-      }
-      const window = beforeSeq === undefined
-        ? allEvents
-        : allEvents.filter(entry => entry.event.seq < beforeSeq)
-      const envelopeBytes = utf8JsonByteLength({
-        events: [],
-        running: false,
-        hasMore: false,
-        cursor: 0,
-        ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
-      })
-      let slice: VirtualHistorySliceResult<HydratedSessionEvent>
-      try {
-        slice = selectVirtualHistorySlice(window, {
-          maxMessages,
-          turnWindow,
-          countSurfaceMessages: false,
-          envelopeBytes,
-          measureRecordBytes: entry => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1,
-        })
-      } catch (error) {
-        if (error instanceof VirtualHistoryResponseTooLargeError) {
-          throw new RpcError('RESPONSE_TOO_LARGE', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
-        }
-        throw error
-      }
-      const events = slice.records.map(entry => ({ event: entry.event }))
-      this.logger.info('ACP session history fetched', {
-        sessionId: shortSessionId(rawSessionId),
-        eventCount: events.length,
-        totalCount: allEvents.length,
-        hasMore: slice.hasMore,
-      })
-      return {
-        events,
-        running: this.hasTurnInFlight(conversationId),
-        hasMore: slice.hasMore,
-        cursor: slice.records.at(-1)?.event.seq ?? -1,
-        ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
-      }
+        },
+        paging,
+        { sessionId: rawSessionId, compactHistory: compactHistoryEnabled },
+      )
     }
 
     if (call.method === 'session/new') {
@@ -1086,8 +1126,142 @@ export class AcpRemoteGateway {
         this.pendingHistoryReads.delete(key)
       }
     }
+    for (const key of this.catalogHistoryCache.keys()) {
+      if (key.endsWith(`:${sessionId}`)) {
+        this.catalogHistoryCache.delete(key)
+      }
+    }
     for (const instance of this.backendInstances.values()) {
       ;(instance.client as { invalidateHistoryMetadata?: (id: string) => void }).invalidateHistoryMetadata?.(sessionId)
+    }
+  }
+
+  private prewarmNativeHistoryReader(backend: string): void {
+    const client = this.backendInstances.get(backend)?.client as { prewarmHistory?: () => void } | undefined
+    client?.prewarmHistory?.()
+  }
+
+  private touchCatalogHistoryCache(cacheKey: string, entry: CachedCatalogHistory): void {
+    this.catalogHistoryCache.delete(cacheKey)
+    this.catalogHistoryCache.set(cacheKey, entry)
+  }
+
+  private setCatalogHistoryCache(cacheKey: string, entry: CachedCatalogHistory): void {
+    if (entry.bytes > MAX_CATALOG_HISTORY_BYTES) return
+    this.catalogHistoryCache.delete(cacheKey)
+    this.catalogHistoryCache.set(cacheKey, entry)
+    let totalBytes = 0
+    for (const cached of this.catalogHistoryCache.values()) totalBytes += cached.bytes
+    while (this.catalogHistoryCache.size > MAX_CATALOG_HISTORY_SESSIONS || totalBytes > MAX_CATALOG_HISTORY_BYTES) {
+      const oldest = this.catalogHistoryCache.keys().next().value
+      if (oldest === undefined) break
+      const evicted = this.catalogHistoryCache.get(oldest)!
+      totalBytes -= evicted.bytes
+      this.catalogHistoryCache.delete(oldest)
+    }
+  }
+
+  private sliceAcpHistoryResponse(
+    allEvents: readonly VirtualHistoryEntryLike[],
+    meta: {
+      running: boolean
+      permissionPreset?: string
+      modes?: unknown
+      commands?: unknown[]
+    },
+    paging: {
+      beforeSeq?: number
+      maxMessages?: number
+      turnWindow?: VirtualHistoryTurnWindow
+    },
+    options: {
+      sessionId: string
+      compactHistory: boolean
+    },
+  ): Record<string, unknown> {
+    const { beforeSeq, maxMessages, turnWindow } = paging
+    const metaFields = {
+      running: meta.running,
+      ...(meta.permissionPreset !== undefined ? { permissionPreset: meta.permissionPreset } : {}),
+      ...(meta.modes !== undefined ? { modes: meta.modes } : {}),
+      ...(meta.commands !== undefined ? { commands: meta.commands } : {}),
+    }
+    // Windowing is an explicit opt-in: clients that send none of the paging
+    // fields keep receiving the full transcript (still accelerated by the
+    // Host memory cache), so any client version benefits without negotiation.
+    if (beforeSeq === undefined && turnWindow === undefined && maxMessages === undefined) {
+      const events = options.compactHistory
+        ? allEvents.map(entry => ({ event: compactHistory(entry.event) }))
+        : allEvents.map(entry => ({ event: entry.event }))
+      this.logger.info('ACP session history fetched', {
+        sessionId: shortSessionId(options.sessionId),
+        eventCount: events.length,
+        totalCount: allEvents.length,
+        full: true,
+      })
+      return {
+        events,
+        ...metaFields,
+        hasMore: false,
+        cursor: allEvents.at(-1)?.event.seq ?? -1,
+      }
+    }
+    const window = beforeSeq === undefined
+      ? allEvents
+      : allEvents.filter(entry => entry.event.seq < beforeSeq)
+    let candidateWindow: readonly VirtualHistoryEntryLike[] = window
+    let hasLeadingFromPreSlice = false
+    if (options.compactHistory && window.length > 0) {
+      if (turnWindow === undefined) {
+        const maxSurface = boundedVirtualHistoryMaxMessages(maxMessages, false)
+        const preCutIndex = findSurfaceTailStartIndex(window, maxSurface)
+        hasLeadingFromPreSlice = preCutIndex > 0
+        candidateWindow = window.slice(preCutIndex).map(entry => ({
+          ...entry,
+          event: compactHistory(entry.event),
+        }))
+      } else {
+        candidateWindow = window.map(entry => ({
+          ...entry,
+          event: compactHistory(entry.event),
+        }))
+      }
+    }
+    const envelopeBytes = utf8JsonByteLength({
+      events: [],
+      ...metaFields,
+      hasMore: false,
+      cursor: 0,
+    })
+    let slice: VirtualHistorySliceResult<VirtualHistoryEntryLike>
+    try {
+      slice = selectVirtualHistorySlice(candidateWindow, {
+        maxMessages,
+        turnWindow,
+        countSurfaceMessages: true,
+        hasLeadingHistory: hasLeadingFromPreSlice,
+        envelopeBytes,
+        measureRecordBytes: entry => utf8JsonByteLength({ event: entry.event }) + 1,
+      })
+    } catch (error) {
+      if (error instanceof VirtualHistoryResponseTooLargeError) {
+        throw new RpcError('RESPONSE_TOO_LARGE', error.message, { actualBytes: error.actualBytes, maxBytes: error.maxBytes })
+      }
+      throw error
+    }
+    const events = slice.records.map(entry => ({ event: entry.event }))
+    const hasMore = slice.hasMore || hasLeadingFromPreSlice
+    this.logger.info('ACP session history fetched', {
+      sessionId: shortSessionId(options.sessionId),
+      eventCount: events.length,
+      totalCount: allEvents.length,
+      hasMore,
+    })
+    return {
+      events,
+      ...metaFields,
+      hasMore,
+      cursor: slice.records.at(-1)?.event.seq ?? -1,
     }
   }
 
@@ -1303,6 +1477,12 @@ export class AcpRemoteGateway {
       this.pendingReconfiguration.add(id)
       this.backendDiagnostics.delete(id)
       this.backendErrors.delete(id)
+      for (const key of this.sessionUpdatedAt.keys()) {
+        if (key.startsWith(`${id}:`)) this.sessionUpdatedAt.delete(key)
+      }
+      for (const key of this.catalogHistoryCache.keys()) {
+        if (key.startsWith(`${id}:`)) this.catalogHistoryCache.delete(key)
+      }
     }
     const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
     await this.startPromise?.catch(() => undefined)
@@ -1364,6 +1544,8 @@ export class AcpRemoteGateway {
     const terminals = this.workspaceState.dispose().then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped.'))
     this.sessionOwners.clear()
     this.sessionBackends.clear()
+    this.sessionUpdatedAt.clear()
+    this.catalogHistoryCache.clear()
     this.recentFrames.clear()
     this.turnCatchUp.clear()
     this.promptsInProgress.clear()
@@ -1959,6 +2141,9 @@ export class AcpRemoteGateway {
         if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue
         this.sessionCwds.set(item.sessionId, { backend, cwd: canonical })
         this.sessionBackends.set(item.sessionId, backend)
+        if (typeof item.updatedAt === 'string') {
+          this.sessionUpdatedAt.set(`${backend}:${item.sessionId}`, item.updatedAt)
+        }
         if (backend === 'opencode' && item.archived === true) continue
         items.push({ sessionId: item.sessionId, cwd: canonical,
           ...(typeof item.title === 'string' ? { title: item.title } : {}),
@@ -2040,6 +2225,9 @@ export class AcpRemoteGateway {
   }
 
   private async disposeInstance(inst: { client: CursorAcpLike; unsubscribeInbound: () => void; unsubscribeUnavailable: () => void }): Promise<void> {
+    for (const [key, entry] of this.catalogHistoryCache) {
+      if (entry.client === inst.client) this.catalogHistoryCache.delete(key)
+    }
     inst.unsubscribeInbound()
     inst.unsubscribeUnavailable()
     await inst.client.close()
@@ -2278,6 +2466,39 @@ function takeTurnCatchUp(
   const list = turnCatchUp.get(sessionId) ?? []
   turnCatchUp.delete(sessionId)
   return list
+}
+
+function normalizeVirtualHistoryEntries(rawEvents: unknown[]): VirtualHistoryEntryLike[] {
+  const normalized: VirtualHistoryEntryLike[] = []
+  for (const raw of rawEvents) {
+    if (!isRecord(raw) || !isRecord(raw.event)) continue
+    const event = raw.event
+    if (typeof event.type !== 'string' || typeof event.seq !== 'number') continue
+    normalized.push(raw as unknown as VirtualHistoryEntryLike)
+  }
+  return normalized
+}
+
+function findSurfaceTailStartIndex(window: readonly VirtualHistoryEntryLike[], maxSurfaceMessages: number): number {
+  let messages = 0
+  let cutSeq = -Infinity
+  for (let index = window.length - 1; index >= 0; index -= 1) {
+    const entry = window[index]!
+    const { type, surfaceOp } = entry.event
+    if (surfaceOp !== 'append' || (type !== 'user/message' && type !== 'assistant/message' && type !== 'tool/result')) {
+      continue
+    }
+    messages += 1
+    if (messages >= maxSurfaceMessages) {
+      cutSeq = Math.min(entry.event.seq, ...(entry.event.sourceEventSeqs ?? []))
+      break
+    }
+  }
+  if (cutSeq === -Infinity) return 0
+  for (let index = 0; index < window.length; index += 1) {
+    if (window[index]!.event.seq >= cutSeq) return index
+  }
+  return window.length
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

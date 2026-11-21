@@ -1,4 +1,4 @@
-import { cursorNativeId, finalizeAssistantLive, foldAcpHistory, mergeAcpHistoryAndLive, readAcpHistory } from '../services/cursor'
+import { cursorNativeId, finalizeAssistantLive, foldAcpHistory, mergeAcpHistoryAndLive, oldestAcpEventSeq, readAcpHistory } from '../services/cursor'
 import { browseScope, saveSessionMessagesSnapshot, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
@@ -7,8 +7,8 @@ import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
 import { saveLastConnectedDeviceId } from '../services/storage'
-import { isTerminalLocalMessage } from './message-helpers'
-import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
+import { isTerminalLocalMessage, prependHistory } from './message-helpers'
+import { ACP_INITIAL_PAGE_SIZE, acpClientForBackend, applyAcpHistoryPage } from './session-actions'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
@@ -303,7 +303,13 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           const frameRevision = runtime.acpFrameRevision
           const sessionGeneration = runtime.sessionLoadGeneration
           const messagesAtRead = get().messages[selected.sessionId]
-          void readAcpHistory(acpClientForBackend(runtime.connection, selected.backend), cursorNativeId(selected), selected.backend).then(details => {
+          void readAcpHistory(
+            acpClientForBackend(runtime.connection, selected.backend),
+            cursorNativeId(selected),
+            selected.backend,
+            undefined,
+            { maxMessages: ACP_INITIAL_PAGE_SIZE },
+          ).then(details => {
             // Settle only if Host explicitly ended the turn, nothing streamed or mutated
             // messages while reading, and the stream/connection/session generation is unchanged.
             if (details.running !== false || generation !== runtime.connectionGeneration || sessionGeneration !== runtime.sessionLoadGeneration
@@ -325,15 +331,32 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 // retain only terminal local rows and approval/question cards absent from history.
                 const preserved = existing.filter(item =>
                   isTerminalLocalMessage(item) || item.kind === 'approval' || item.kind === 'question')
-                const merged = mergeAcpHistoryAndLive(folded, preserved)
-                const paged = storeAcpPagedMessages(selected.sessionId, merged)
+                const incomingOldestSeq = oldestAcpEventSeq(details.events)
+                const olderPreserved = details.paged === true && incomingOldestSeq !== undefined
+                  ? existing.filter(item => {
+                      const seq = item.nativeOrderSeq ?? item.nativeSeq
+                      return seq !== undefined && seq < incomingOldestSeq
+                    })
+                  : []
+                const tailMerged = mergeAcpHistoryAndLive(folded, preserved)
+                const merged = olderPreserved.length > 0
+                  ? prependHistory(olderPreserved, tailMerged)
+                  : tailMerged
+                const paged = applyAcpHistoryPage(selected.sessionId, merged, details)
+                const oldestPreservedSeq = olderPreserved.reduce<number | undefined>((min, item) => {
+                  const seq = item.nativeOrderSeq ?? item.nativeSeq
+                  return seq === undefined ? min : (min === undefined ? seq : Math.min(min, seq))
+                }, undefined)
+                const keepOlderPaging = olderPreserved.length > 0
+                  && oldestPreservedSeq !== undefined
+                  && (incomingOldestSeq === undefined || oldestPreservedSeq < incomingOldestSeq)
                 if (canPersistSnapshot) saveSessionMessagesSnapshot(memoryScope, selected.sessionId, paged.tail)
                 return {
                   selectedSession: updated,
                   sessions: state.sessions.map(item => item.sessionId === selected.sessionId ? updated : item),
                   messages: { ...state.messages, [selected.sessionId]: paged.tail },
-                  historyHasMore: paged.historyHasMore,
-                  oldestLoadedSeq: paged.oldestLoadedSeq,
+                  historyHasMore: keepOlderPaging ? state.historyHasMore : paged.historyHasMore,
+                  oldestLoadedSeq: keepOlderPaging ? (state.oldestLoadedSeq ?? oldestPreservedSeq) : paged.oldestLoadedSeq,
                 }
               }
               // Backends without history replay (e.g. legacy Cursor) return empty events:

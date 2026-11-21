@@ -1922,7 +1922,13 @@ describe('AcpRemoteGateway', () => {
       const records: unknown[] = []
       for (let turn = 1; turn <= 40; turn += 1) {
         records.push({ type: 'USER_INPUT', step_index: turn * 2 - 1, created_at: '2026-10-07T00:00:00Z', content: `prompt ${turn}` })
-        records.push({ type: 'PLANNER_RESPONSE', step_index: turn * 2, created_at: '2026-10-07T00:00:01Z', content: `reply ${turn}` })
+        records.push({
+          type: 'PLANNER_RESPONSE',
+          step_index: turn * 2,
+          created_at: '2026-10-07T00:00:01Z',
+          content: `reply ${turn}`,
+          ...(turn === 39 ? { tool_calls: [{ name: 'read_file', args: { path: 'a.ts' }, result: 'ok', status: 'SUCCESS' }] } : {}),
+        })
       }
       await writeFile(join(logs, 'transcript.jsonl'), records.map(record => JSON.stringify(record)).join('\n') + '\n')
 
@@ -1945,13 +1951,21 @@ describe('AcpRemoteGateway', () => {
         expect(full.cursor).toBe(full.events.at(-1)!.event.seq)
         expect(full.running).toBe(false)
 
-        // Explicit maxMessages opts into the bounded recent window.
-        const first = await history({ maxMessages: 50 })
-        expect(first.events).toHaveLength(50)
+        // Explicit maxMessages opts into the bounded recent window (counted by surface messages).
+        const first = await history({ maxMessages: 16 })
+        const firstSurfaceCount = first.events.filter(e =>
+          ['user/message', 'assistant/message', 'tool/result'].includes(e.event.type),
+        ).length
+        expect(firstSurfaceCount).toBe(16)
         expect(first.hasMore).toBe(true)
         expect(first.cursor).toBe(first.events.at(-1)!.event.seq)
+        // Tool call + result pair on turn 39 stays atomic across the slice boundary.
+        const toolCallIdx = first.events.findIndex(e => e.event.type === 'tool/call')
+        const toolResultIdx = first.events.findIndex(e => e.event.type === 'tool/result')
+        expect(toolCallIdx).toBeGreaterThanOrEqual(0)
+        expect(toolResultIdx).toBeGreaterThan(toolCallIdx)
 
-        const second = await history({ beforeSeq: first.events[0]!.event.seq, maxMessages: 50 })
+        const second = await history({ beforeSeq: first.events[0]!.event.seq, maxMessages: 16 })
         expect(second.events.length).toBeGreaterThan(0)
         expect(second.events.at(-1)!.event.seq).toBeLessThan(first.events[0]!.event.seq)
         expect(second.hasMore).toBe(true)
@@ -1968,6 +1982,148 @@ describe('AcpRemoteGateway', () => {
       else process.env.HOME = previousHome
       await rm(home, { recursive: true, force: true })
     }
+  })
+
+  it('caches native ACP catalog histories, windows pages, compacts pre-slice, and invalidates cleanly', async () => {
+    await runScenarios([
+      {
+        name: 'caches native history across repeats/paging, preserves metadata, and invalidates on prompt/updatedAt',
+        run: async () => {
+          const cwd = await realpath(process.cwd())
+          let updatedAt = '2026-10-07T00:00:00Z'
+          const events: Array<{ type: 'event'; event: { type: string; seq: number; time: number; data: unknown; sourceEventSeqs?: number[]; surfaceOp?: 'append' } }> = []
+          let seq = 0
+          for (let turn = 1; turn <= 10; turn += 1) {
+            events.push({ type: 'event', event: { type: 'turn/start', seq: seq++, time: turn, data: { turn } } })
+            events.push({ type: 'event', event: { type: 'user/message', seq: seq++, time: turn, data: { id: `u-${turn}`, role: 'user', content: [{ type: 'text', text: `q-${turn}` }] }, surfaceOp: 'append' } })
+            if (turn === 9) {
+              const callSeq = seq
+              events.push({ type: 'event', event: { type: 'tool/call', seq: seq++, time: turn, data: { turn, step: 1, callId: 'c-9', name: 'bash', arguments: '{}' } } })
+              events.push({ type: 'event', event: { type: 'tool/result', seq: seq++, time: turn, data: { turn, step: 1, message: { id: 'tr-9', role: 'user', content: [{ type: 'tool-result', toolCallId: 'c-9', content: [{ type: 'text', text: 'x'.repeat(200) }] }] } }, sourceEventSeqs: [callSeq], surfaceOp: 'append' } })
+            }
+            events.push({ type: 'event', event: { type: 'assistant/message', seq: seq++, time: turn, data: { turn, step: 1, message: { id: `a-${turn}`, role: 'assistant', content: [{ type: 'text', text: `a-${turn}` }] } }, surfaceOp: 'append' } })
+            events.push({ type: 'event', event: { type: 'turn/end', seq: seq++, time: turn, data: { turn, reason: { kind: 'completed' } } } })
+          }
+          const prewarmHistory = vi.fn()
+          const history = vi.fn(async () => events)
+          const lastHistoryMetadata = vi.fn(() => ({
+            modes: { currentModeId: 'agent', availableModes: [{ id: 'agent', name: 'Agent' }] },
+            commands: [{ name: 'compact', description: 'Compact' }],
+          }))
+          const acp = {
+            ...readyAcp(),
+            call: vi.fn(async (method: string) => {
+              if (method === 'session/list') return { sessions: [{ sessionId: 'native-1', cwd, updatedAt }] }
+              if (method === 'session/load') return { sessionId: 'native-1' }
+              if (method === 'session/prompt') return { stopReason: 'end_turn' }
+              return {}
+            }),
+            prewarmHistory,
+            history,
+            lastHistoryMetadata,
+          }
+          const gateway = new AcpRemoteGateway(
+            { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+            silentLogger(),
+            () => acp,
+          )
+          await gateway.start()
+          try {
+            await gateway.call('owner', { method: 'dsh/sessionList', params: { backend: 'antigravity', path: cwd } })
+            expect(prewarmHistory).toHaveBeenCalledTimes(1)
+
+            // Ask for 4 surface messages ending across Turn 9's tool/result (turn 10 assistant + turn 10 user + turn 9 assistant + turn 9 tool/result => includes paired tool/call).
+            const page1 = await gateway.call('owner', {
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'native-1', maxMessages: 4 },
+            }) as { events: Array<{ event: { seq: number; type: string } }>; hasMore: boolean; cursor: number; modes?: unknown; commands?: unknown }
+            expect(history).toHaveBeenCalledTimes(1)
+            expect(page1.hasMore).toBe(true)
+            expect(page1.modes).toEqual({ currentModeId: 'agent', availableModes: [{ id: 'agent', name: 'Agent' }] })
+            expect(page1.commands).toEqual([{ name: 'compact', description: 'Compact' }])
+            const callIdx = page1.events.findIndex(e => e.event.type === 'tool/call')
+            const resultIdx = page1.events.findIndex(e => e.event.type === 'tool/result')
+            expect(callIdx).toBeGreaterThanOrEqual(0)
+            expect(resultIdx).toBeGreaterThan(callIdx)
+
+            // Repeat and beforeSeq page both hit Host catalogHistoryCache (0 extra history() calls).
+            const page1Repeat = await gateway.call('owner', {
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'native-1', maxMessages: 4 },
+            }) as typeof page1
+            expect(page1Repeat.events).toEqual(page1.events)
+            expect(page1Repeat.modes).toEqual(page1.modes)
+            const page2 = await gateway.call('owner', {
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'native-1', beforeSeq: page1.events[0]!.event.seq, maxMessages: 4 },
+            }) as typeof page1
+            expect(history).toHaveBeenCalledTimes(1)
+            expect(page2.events.at(-1)!.event.seq).toBeLessThan(page1.events[0]!.event.seq)
+
+            // Catalog updatedAt advance invalidates the head read cache.
+            updatedAt = '2026-10-07T00:01:00Z'
+            await gateway.call('owner', { method: 'dsh/sessionList', params: { backend: 'antigravity', path: cwd } })
+            await gateway.call('owner', {
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'native-1', maxMessages: 2 },
+            })
+            expect(history).toHaveBeenCalledTimes(2)
+
+            // session/prompt invalidates the cache as well.
+            await gateway.call('owner', {
+              method: 'session/prompt',
+              params: { backend: 'antigravity', sessionId: 'native-1', prompt: [{ type: 'text', text: 'next' }] },
+            })
+            await gateway.call('owner', {
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'native-1', maxMessages: 2 },
+            })
+            expect(history).toHaveBeenCalledTimes(3)
+          } finally {
+            await gateway.close()
+          }
+        },
+      },
+      {
+        name: 'applies compactHistory before slicing so oversized tool output keeps multiple messages in the 256 KiB window',
+        run: async () => {
+          const cwd = await realpath(process.cwd())
+          const bigOutput = 'Z'.repeat(180 * 1024)
+          const events = [
+            { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { id: 'u1', role: 'user', content: [{ type: 'text', text: 'one' }] }, surfaceOp: 'append' } },
+            { type: 'event', event: { type: 'tool/call', seq: 1, time: 1, data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: '{}' } } },
+            { type: 'event', event: { type: 'tool/result', seq: 2, time: 1, data: { turn: 1, step: 1, message: { id: 'tr1', role: 'user', content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: bigOutput }] }] } }, sourceEventSeqs: [1], surfaceOp: 'append' } },
+            { type: 'event', event: { type: 'tool/call', seq: 3, time: 2, data: { turn: 2, step: 1, callId: 'c2', name: 'bash', arguments: '{}' } } },
+            { type: 'event', event: { type: 'tool/result', seq: 4, time: 2, data: { turn: 2, step: 1, message: { id: 'tr2', role: 'user', content: [{ type: 'tool-result', toolCallId: 'c2', content: [{ type: 'text', text: bigOutput }] }] } }, sourceEventSeqs: [3], surfaceOp: 'append' } },
+          ]
+          const acp = {
+            ...readyAcp(),
+            call: vi.fn(async (method: string) => method === 'session/list' ? { sessions: [{ sessionId: 'compact-1', cwd }] } : {}),
+            history: vi.fn(async () => events),
+          }
+          const gateway = new AcpRemoteGateway(
+            { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+            silentLogger(),
+            () => acp,
+          )
+          await gateway.start()
+          const peer = gateway.createPeer({ connectionId: 'compact-peer', peerDeviceId: 'd1' } as never, async () => undefined)!
+          peer.compactHistoryEnabled = true
+          try {
+            const res = await peer.call({
+              method: 'dsh/sessionHistory',
+              params: { backend: 'antigravity', sessionId: 'compact-1', maxMessages: 10 },
+            }) as { events: Array<{ event: { seq: number; data: { message?: { content?: Array<{ content?: Array<{ text?: string }> }> } } } }>; hasMore: boolean }
+            // Without pre-slice compaction, two 180 KiB tool results would exceed 256 KiB and drop u1 + tr1.
+            expect(res.events.map(e => e.event.seq)).toEqual([0, 1, 2, 3, 4])
+            expect(res.hasMore).toBe(false)
+            expect(res.events[2]!.event.data.message!.content![0]!.content![0]!.text).toContain('[Compact history: output omitted]')
+          } finally {
+            await gateway.close()
+          }
+        },
+      },
+    ])
   })
 })
 

@@ -1859,3 +1859,57 @@ it.each(['claude', 'hermes'] as const)('%s routes direct files and terminal stre
       { backend, endpoint: 'terminal/follow', args: { agentId: scope, id: 'term', attachmentId: 'attachment' } })
   } finally { await target.close() }
 })
+
+it('hydrates windowed ACP pages incrementally on session/page and falls back to full hydrate for older attachments', async () => {
+  const olderAttachment = {
+    type: 'image',
+    mediaType: 'image/png',
+    attachment: { attachmentId: 'agy-image:old-1.png', mediaType: 'image/png', bytes: 4 },
+    data: 'QUJDRA==',
+  }
+  const olderEvents = [
+    { type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { id: 'u0', role: 'user', content: [olderAttachment] }, surfaceOp: 'append' } },
+    { type: 'event', event: { type: 'assistant/message', seq: 1, time: 1, data: { turn: 1, step: 1, message: { id: 'a0', role: 'assistant', content: [{ type: 'text', text: 'older reply' }] } }, surfaceOp: 'append' } },
+  ]
+  const newerEvents = [
+    { type: 'event', event: { type: 'user/message', seq: 2, time: 2, data: { id: 'u1', role: 'user', content: [{ type: 'text', text: 'latest' }] }, surfaceOp: 'append' } },
+    { type: 'event', event: { type: 'assistant/message', seq: 3, time: 2, data: { turn: 2, step: 1, message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'latest reply' }] } }, surfaceOp: 'append' } },
+  ]
+  const loadSessionDetails = vi.fn(async (_id: string, _backend?: string, _signal?: AbortSignal, options?: { beforeSeq?: number; maxMessages?: number }) => {
+    if (options === undefined) {
+      return { events: [...olderEvents, ...newerEvents], hasMore: false, cursor: 3, paged: false }
+    }
+    if (options.beforeSeq === 2) {
+      return { events: olderEvents, hasMore: false, cursor: 1, paged: true }
+    }
+    return { events: newerEvents, hasMore: true, cursor: 3, paged: true }
+  })
+  const client = { ...fakeAcp(), loadSessionDetails }
+  const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+  const signal = new AbortController().signal
+  try {
+    const workspace = await target.selectOrCreateWorkspace('/agy-paged')
+    const sessionId = workspace.sessionIds[0]!
+    const first = await target.dispatch('session/history', { args: { request: { sessionId, maxMessages: 2 } } }, signal)
+    expect(first).toMatchObject({ ok: true, value: { hasMore: true, cursor: 3 } })
+    expect(loadSessionDetails).toHaveBeenLastCalledWith(sessionId, 'antigravity', undefined, { maxMessages: 2 })
+
+    const olderPage = await target.dispatch('session/page', { args: { request: { sessionId, beforeSeq: 2, maxMessages: 2 } } }, signal)
+    expect(olderPage).toMatchObject({ ok: true, value: { hasMore: false, cursor: 1 } })
+    expect((olderPage as { value: { records: Array<{ event: { seq: number } }> } }).value.records.map(r => r.event.seq)).toEqual([0, 1])
+
+    // Re-test attachment fallback when starting from a windowed cache on a fresh harness.
+    const target2 = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'antigravity')
+    try {
+      const ws2 = await target2.selectOrCreateWorkspace('/agy-paged-attach')
+      const sid2 = ws2.sessionIds[0]!
+      await target2.dispatch('session/history', { args: { request: { sessionId: sid2, maxMessages: 2 } } }, signal)
+      const att = await target2.dispatch('session/attachment', { args: { request: { sessionId: sid2, attachmentId: 'agy-image:old-1.png' } } }, signal)
+      expect(att).toMatchObject({ ok: true, value: { data: 'QUJDRA==' } })
+    } finally {
+      await target2.close()
+    }
+  } finally {
+    await target.close()
+  }
+})

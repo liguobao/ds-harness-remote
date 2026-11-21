@@ -63,6 +63,7 @@ export interface AcpSessionState {
   titleFromPrompt?: boolean
   hydrated?: boolean
   staleHistory?: boolean
+  remoteHasMore?: boolean
   blank: boolean
   running: boolean
   projectionSeq?: number
@@ -151,7 +152,20 @@ export interface AcpClientLike {
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
   listSessions?(path: string, backend?: string, limit?: number, signal?: AbortSignal): Promise<Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number; pinned?: boolean }>>
   loadSessionHistory?(sessionId: string, backend?: string, signal?: AbortSignal): Promise<unknown[]>
-  loadSessionDetails?(sessionId: string, backend?: string, signal?: AbortSignal): Promise<{ events: unknown[]; modes?: AcpSessionModes; availableCommands?: AcpAvailableCommand[]; permissionPreset?: string }>
+  loadSessionDetails?(
+    sessionId: string,
+    backend?: string,
+    signal?: AbortSignal,
+    options?: { beforeSeq?: number; maxMessages?: number; turnWindow?: number | { minMessages?: number; minTurns?: number } },
+  ): Promise<{
+    events: unknown[]
+    modes?: AcpSessionModes
+    availableCommands?: AcpAvailableCommand[]
+    permissionPreset?: string
+    hasMore?: boolean
+    cursor?: number
+    paged?: boolean
+  }>
   openStream(
     sessionId: string,
     onFrame: (frame: AgentAcpFrameData) => void,

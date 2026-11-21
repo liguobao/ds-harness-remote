@@ -8,6 +8,13 @@ const DEFAULT_LOAD_TOMBSTONE_TTL_MS = 60_000
 const MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 60_000
 const MAX_LOAD_TOMBSTONES = 256
 const MAX_HISTORY_METADATA = 64
+const HISTORY_STANDBY_IDLE_MS = 5 * 60_000
+
+interface HistoryStandby {
+  client: CursorAcpClient
+  ready: Promise<CursorAcpClient>
+  idleTimer?: ReturnType<typeof setTimeout>
+}
 
 /** Host-local authentication; no interactive login or filesystem transcript reads.
  *
@@ -26,18 +33,23 @@ export class ClaudeAcpClient extends CursorAcpClient {
   private historyStop?: () => Promise<void>
   private historyReading = false
   private shuttingDown = false
+  private readonly prewarmHistoryReader: boolean
+  private historyStandby?: HistoryStandby
   private readonly historyMetadata = new Map<string, { models?: unknown; modes?: AcpSessionModes; commands?: AcpAvailableCommand[] }>()
   private readonly makeClient: () => CursorAcpClient
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
-    options: Pick<CursorAcpOptions, 'args' | 'cwd'> = {}, backend: string = 'claude') {
-    const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: backend, backend }
+    options: Pick<CursorAcpOptions, 'args' | 'cwd'> & { prewarmHistoryReader?: boolean } = {}, backend: string = 'claude') {
+    const { prewarmHistoryReader = false, ...processOptions } = options
+    const config = { ...processOptions, args: processOptions.args ?? [], authenticationMethod: null, modelBackend: backend, backend }
     super(binary, logger, spawnAcp, config)
+    this.prewarmHistoryReader = prewarmHistoryReader
     this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config)
     this.modelLabel = backend
     super.onUnavailable(() => {
       this.live.clear()
       this.clearAllLoadSuppressions()
+      void this.disposeHistoryStandby()
     })
     super.onInbound(message => {
       const id = isRecord(message.params) && typeof message.params.sessionId === 'string'
@@ -190,25 +202,77 @@ export class ClaudeAcpClient extends CursorAcpClient {
     return this.historyMetadata.get(sessionId)
   }
 
+  /** Prepare one clean initialized reader process in the background for fast first-open history reads. */
+  prewarmHistory(): void {
+    if (!this.prewarmHistoryReader || this.shuttingDown || !this.isReady() || this.historyStandby !== undefined) return
+    const client = this.makeClient()
+    const standby: HistoryStandby = {
+      client,
+      ready: Promise.resolve(client),
+    }
+    const clearStandby = () => {
+      if (this.historyStandby !== standby) return false
+      if (standby.idleTimer !== undefined) clearTimeout(standby.idleTimer)
+      this.historyStandby = undefined
+      return true
+    }
+    client.onUnavailable(() => {
+      clearStandby()
+    })
+    standby.idleTimer = setTimeout(() => {
+      if (clearStandby()) void client.close().catch(() => undefined)
+    }, HISTORY_STANDBY_IDLE_MS)
+    standby.idleTimer.unref?.()
+    standby.ready = client.start().then(
+      () => {
+        if (this.shuttingDown || !this.isReady()) {
+          clearStandby()
+          throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
+        }
+        return client
+      },
+      async error => {
+        clearStandby()
+        await client.close().catch(() => undefined)
+        throw error
+      },
+    )
+    void standby.ready.catch(() => undefined)
+    this.historyStandby = standby
+  }
+
+  private disposeHistoryStandby(): Promise<void> {
+    const standby = this.historyStandby
+    if (!standby) return Promise.resolve()
+    this.historyStandby = undefined
+    if (standby.idleTimer !== undefined) clearTimeout(standby.idleTimer)
+    return standby.client.close().catch(() => undefined)
+  }
+
   /** One temporary process, separate from all live sessions (including active prompts). */
   async history(sessionId: string, cwd: string): Promise<unknown[]> {
     if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
     if (this.historyReading) throw new CursorAcpError('ACP_PROCESS_LIMIT', `A ${this.label} history read is already in progress.`)
     this.historyReading = true
-    const client = this.makeClient()
+    let activeClient: CursorAcpClient | undefined
     let stopping: Promise<void> | undefined
-    const stop = () => stopping ??= client.close()
+    let stopRequested = false
+    const stop = () => {
+      stopRequested = true
+      return stopping ??= (activeClient ? activeClient.close() : Promise.resolve())
+    }
     this.historyStop = stop
     const updates: Parameters<typeof acpHistoryEvents>[0] = []
     let bytes = 0
     let count = 0
     let overflow = false
-    client.onInbound(message => {
+    let unsubscribeInbound: (() => void) | undefined
+    const attachHandlers = (target: CursorAcpClient) => target.onInbound(message => {
       // A history reader has no authority to run tools or wait for user approval.
       if (message.kind === 'request') {
         void (message.method === 'session/request_permission'
-          ? client.respond(message.id, { outcome: { outcome: 'cancelled' } })
-          : client.respondError(message.id, -32601, 'History reader does not support requests.')).catch(() => undefined)
+          ? target.respond(message.id, { outcome: { outcome: 'cancelled' } })
+          : target.respondError(message.id, -32601, 'History reader does not support requests.')).catch(() => undefined)
         return
       }
       if (message.method !== 'session/update' || (message.params as { sessionId?: string } | null)?.sessionId !== sessionId || overflow) return
@@ -219,9 +283,32 @@ export class ClaudeAcpClient extends CursorAcpClient {
         void stop().catch(() => undefined)
       } else updates.push(message)
     })
+    const takeHistoryClient = async (): Promise<CursorAcpClient> => {
+      const standby = this.historyStandby
+      if (standby !== undefined) {
+        this.historyStandby = undefined
+        if (standby.idleTimer !== undefined) clearTimeout(standby.idleTimer)
+        activeClient = standby.client
+        try {
+          const warmed = await standby.ready
+          if (!stopRequested && !this.shuttingDown && warmed.isReady()) return warmed
+          await warmed.close().catch(() => undefined)
+        } catch {
+          // Fall back to starting a fresh history reader.
+        }
+      }
+      if (stopRequested || this.shuttingDown) {
+        throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
+      }
+      const fresh = this.makeClient()
+      activeClient = fresh
+      await fresh.start()
+      return fresh
+    }
     try {
-      await client.start()
-      if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
+      const client = await takeHistoryClient()
+      if (stopRequested || this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
+      unsubscribeInbound = attachHandlers(client)
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       this.assertLoaded(result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
@@ -255,7 +342,9 @@ export class ClaudeAcpClient extends CursorAcpClient {
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       throw error
     } finally {
+      unsubscribeInbound?.()
       try { await stop() } finally { this.historyStop = undefined; this.historyReading = false }
+      if (!this.shuttingDown && this.isReady()) this.prewarmHistory()
     }
   }
 
@@ -263,7 +352,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
     this.shuttingDown = true
     this.clearAllLoadSuppressions()
     this.historyMetadata.clear()
-    await Promise.all([super.close(), this.historyStop?.()])
+    await Promise.all([super.close(), this.historyStop?.(), this.disposeHistoryStandby()])
     this.live.clear()
   }
 }

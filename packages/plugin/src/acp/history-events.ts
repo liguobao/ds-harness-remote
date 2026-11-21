@@ -13,20 +13,21 @@ export function acpHistoryEvents(
   provider: string,
 ): unknown[] {
   type Block = Record<string, unknown>
-  type Tool = { id: string; name: string; input: unknown; output: Array<{ type: string; text: string }>; failed: boolean; terminal: boolean; emitted: boolean }
+  type Tool = { id: string; callSeq: number; name: string; input: unknown; output: Array<{ type: string; text: string }>; failed: boolean; terminal: boolean; emitted: boolean }
   const events: any[] = []
   const tools = new Map<string, Tool>()
   let turn = 0
   let step = 1
   let afterTools = false
   let pending: { role: 'user' | 'assistant'; content: Block[] } | undefined
-  const push = (type: string, data: unknown, surface = false) => events.push({
+  const push = (type: string, data: unknown, surface = false, sourceEventSeqs?: number[]) => events.push({
     type: 'event',
     event: {
       type,
       seq: events.length,
       time: 0,
       data,
+      ...(sourceEventSeqs ? { sourceEventSeqs } : {}),
       ...(surface ? { surfaceOp: 'append' } : {}),
     },
   })
@@ -55,7 +56,7 @@ export function acpHistoryEvents(
           ...(tool.failed ? { isError: true } : {}),
         }],
       },
-    }, true)
+    }, true, [tool.callSeq])
   }
   const flushTools = () => { for (const tool of tools.values()) result(tool) }
   const endTurn = () => {
@@ -118,8 +119,10 @@ export function acpHistoryEvents(
       if (!turn) { turn++; push('turn/start', { turn }); push('step/start', { turn, step }) }
       let tool = tools.get(update.toolCallId)
       if (!tool) {
+        const callSeq = events.length
         tool = {
           id: update.toolCallId,
+          callSeq,
           name: typeof update.title === 'string' ? update.title : typeof update.name === 'string' ? update.name : 'tool',
           input: update.rawInput ?? update.args,
           output: [],

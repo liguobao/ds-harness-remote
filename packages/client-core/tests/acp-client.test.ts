@@ -82,6 +82,81 @@ describe('ACP image transfer', () => {
     expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
   })
 
+  it('uses 1-RTT paging for loadSessionDetails with RESPONSE_TOO_LARGE and legacy Host INVALID_MESSAGE fallbacks', async () => {
+    await runScenarios([
+      {
+        name: '1-RTT paged call passes paging options and preserves hasMore/cursor/paged',
+        run: async () => {
+          const rpc = vi.fn(async () => ({
+            events: [{ event: { type: 'user/message', seq: 10, time: 1, data: {} } }],
+            hasMore: true,
+            cursor: 10,
+            running: false,
+          }))
+          const client = new AgentAcpClient({ rpc } as never)
+          const details = await client.loadSessionDetails('ses_1', 'antigravity', undefined, { beforeSeq: 20, maxMessages: 16 })
+          expect(rpc).toHaveBeenCalledTimes(1)
+          expect(rpc).toHaveBeenCalledWith(
+            'agent.acp.call',
+            { method: 'dsh/sessionHistory', params: { sessionId: 'ses_1', backend: 'antigravity', beforeSeq: 20, maxMessages: 16 } },
+            undefined,
+            undefined,
+          )
+          expect(details).toEqual({
+            events: [{ event: { type: 'user/message', seq: 10, time: 1, data: {} } }],
+            hasMore: true,
+            cursor: 10,
+            running: false,
+            paged: true,
+          })
+        },
+      },
+      {
+        name: 'falls back to bounded transferCall when 1-RTT paged response exceeds RESPONSE_TOO_LARGE',
+        run: async () => {
+          const rpc = vi.fn(async (method: string) => {
+            if (method === 'agent.acp.call') {
+              throw Object.assign(new Error('Too large'), { code: 'RESPONSE_TOO_LARGE' })
+            }
+            if (method === 'agent.acp.transfer.commit') {
+              return { kind: 'inline', response: { events: [{ event: { type: 'user/message', seq: 0, time: 1, data: {} } }], hasMore: false, cursor: 0 } }
+            }
+            return {}
+          })
+          const client = new AgentAcpClient({ rpc } as never)
+          const details = await client.loadSessionDetails('ses_2', 'antigravity', undefined, { maxMessages: 16 })
+          expect(details.paged).toBe(true)
+          expect(details.hasMore).toBe(false)
+          expect(rpc.mock.calls.some(([m]) => m === 'agent.acp.transfer.commit')).toBe(true)
+        },
+      },
+      {
+        name: 'latches legacy unpaged fallback when Host rejects paging fields with INVALID_MESSAGE',
+        run: async () => {
+          const rpc = vi.fn(async (method: string) => {
+            if (method === 'agent.acp.call') {
+              throw Object.assign(new Error('Unrecognized keys'), { code: 'INVALID_MESSAGE' })
+            }
+            if (method === 'agent.acp.transfer.commit') {
+              return { kind: 'inline', response: { events: [{ event: { type: 'user/message', seq: 0, time: 1, data: {} } }] } }
+            }
+            return {}
+          })
+          const client = new AgentAcpClient({ rpc } as never)
+          const initial = await client.loadSessionDetails('ses_3', 'antigravity', undefined, { maxMessages: 16 })
+          expect(initial.paged).toBe(false)
+          expect(initial.events).toHaveLength(1)
+          // Subsequent beforeSeq page short-circuits locally; initial open goes straight to unpaged transfer.
+          const older = await client.loadSessionDetails('ses_3', 'antigravity', undefined, { beforeSeq: 0, maxMessages: 60 })
+          expect(older).toEqual({ events: [], hasMore: false, paged: false })
+          const callCountBeforeSecondOpen = rpc.mock.calls.filter(([m]) => m === 'agent.acp.call').length
+          await client.loadSessionDetails('ses_4', 'antigravity', undefined, { maxMessages: 16 })
+          expect(rpc.mock.calls.filter(([m]) => m === 'agent.acp.call')).toHaveLength(callCountBeforeSecondOpen)
+        },
+      },
+    ])
+  })
+
   it('releases failed or mismatched ACP response transfers', async () => {
     await runScenarios([
       {

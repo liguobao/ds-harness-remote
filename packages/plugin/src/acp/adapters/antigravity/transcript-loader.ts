@@ -43,6 +43,7 @@ export interface HydratedSessionEvent {
     seq: number
     time: number
     data: unknown
+    sourceEventSeqs?: number[]
     surfaceOp?: 'append'
   }
 }
@@ -51,6 +52,7 @@ interface TranscriptCacheEntry {
   baseDir: string
   mtimeMs: number
   size: number
+  bytes: number
   events: HydratedSessionEvent[]
 }
 
@@ -63,18 +65,28 @@ interface TranscriptCacheEntry {
 const transcriptCache = new Map<string, TranscriptCacheEntry>()
 const TRANSCRIPT_CACHE_MAX_SESSIONS = 32
 const TRANSCRIPT_CACHE_MAX_EVENTS = 100_000
+const TRANSCRIPT_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
 function rememberTranscript(conversationId: string, entry: TranscriptCacheEntry): void {
-  const previous = transcriptCache.get(conversationId)
-  if (previous !== entry) transcriptCache.set(conversationId, entry)
+  if (entry.bytes > TRANSCRIPT_CACHE_MAX_BYTES) return
+  transcriptCache.delete(conversationId)
+  transcriptCache.set(conversationId, entry)
   let sessions = transcriptCache.size
   let totalEvents = 0
-  for (const cached of transcriptCache.values()) totalEvents += cached.events.length
+  let totalBytes = 0
+  for (const cached of transcriptCache.values()) {
+    totalEvents += cached.events.length
+    totalBytes += cached.bytes
+  }
   while (transcriptCache.size > 0
-    && (sessions > TRANSCRIPT_CACHE_MAX_SESSIONS || totalEvents > TRANSCRIPT_CACHE_MAX_EVENTS)) {
+    && (sessions > TRANSCRIPT_CACHE_MAX_SESSIONS
+      || totalEvents > TRANSCRIPT_CACHE_MAX_EVENTS
+      || totalBytes > TRANSCRIPT_CACHE_MAX_BYTES)) {
     const oldest = transcriptCache.keys().next().value
     if (oldest === undefined) break
-    totalEvents -= transcriptCache.get(oldest)!.events.length
+    const evicted = transcriptCache.get(oldest)!
+    totalEvents -= evicted.events.length
+    totalBytes -= evicted.bytes
     transcriptCache.delete(oldest)
     sessions -= 1
   }
@@ -126,7 +138,7 @@ export async function loadTranscriptEvents(
   let currentTurn = 0
   let turnOpen = false
 
-  const push = (type: string, data: unknown, time: number, surface = false) => {
+  const push = (type: string, data: unknown, time: number, surface = false, sourceEventSeqs?: number[]) => {
     events.push({
       type: 'event',
       event: {
@@ -134,6 +146,7 @@ export async function loadTranscriptEvents(
         seq: currentSeq++,
         time,
         data,
+        ...(sourceEventSeqs ? { sourceEventSeqs } : {}),
         ...(surface ? { surfaceOp: 'append' } : {}),
       },
     })
@@ -187,6 +200,7 @@ export async function loadTranscriptEvents(
           seenNames.set(toolName, count + 1)
           const callId = count === 0 ? `${record.step_index}:${toolName}` : `${record.step_index}:${toolName}:${count}`
           const isError = call.status === 'ERROR'
+          const callSeq = currentSeq
           push('tool/call', {
             turn: currentTurn,
             step: 1,
@@ -222,7 +236,7 @@ export async function loadTranscriptEvents(
                   ...(isError ? { isError: true } : {}),
                 }],
               },
-            }, time, true)
+            }, time, true, [callSeq])
           }
         }
       }
@@ -257,7 +271,8 @@ export async function loadTranscriptEvents(
     push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, settledAt)
   }
 
-  rememberTranscript(conversationId, { baseDir, mtimeMs, size: sizeBytes, events })
+  const bytes = Buffer.byteLength(JSON.stringify(events), 'utf8')
+  rememberTranscript(conversationId, { baseDir, mtimeMs, size: sizeBytes, bytes, events })
   return events
 }
 

@@ -57,6 +57,7 @@ export class AntigravityNativeAcpClient extends ClaudeAcpClient {
       args: options.args && options.args.length > 0 && !isLegacyAntigravityStreamJsonArgs(options.args)
         ? options.args
         : ['acp'],
+      prewarmHistoryReader: true,
     }, 'antigravity')
   }
 }

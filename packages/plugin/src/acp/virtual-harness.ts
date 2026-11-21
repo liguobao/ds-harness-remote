@@ -7,6 +7,7 @@ import {
   normalizeVirtualHistoryTurnWindow,
   selectVirtualHistorySlice,
   utf8JsonByteLength,
+  VIRTUAL_HISTORY_DEFAULT_MAX_MESSAGES,
   VIRTUAL_HISTORY_MAX_BYTES,
   VirtualHistoryResponseTooLargeError,
   type VirtualHistoryTurnWindow,
@@ -70,6 +71,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly follows = new Set<FollowState>()
   private readonly pendingApprovals = new Map<string, PendingApproval>()
   private readonly pendingHistory = new Map<string, Promise<void>>()
+  private readonly pendingOlderHistory = new Map<string, Promise<void>>()
   private selectedWorkspaceId?: string
   private lastOpenedSessionId?: string
   private readonly openedWorkspaceSessions = new Map<string, string>()
@@ -839,30 +841,56 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const session = this.lookupSession(requestedId)
     if ((this.backend !== 'antigravity' && this.backend !== 'hermes') || session === undefined || !attachmentId?.startsWith('agy-image:')) return failure('attachment-error', 'The image is not referenced by this Session.')
     await this.hydrateSession(session)
-    const cached = this.imageAttachments.get(attachmentId)
+    let cached = this.imageAttachments.get(attachmentId)
+    if (cached?.sessionId !== session.sessionId && session.remoteHasMore) {
+      await this.hydrateSession(session, { full: true })
+      cached = this.imageAttachments.get(attachmentId)
+    }
     return cached?.sessionId === session.sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure('attachment-error', 'The image attachment is unavailable or expired.')
   }
 
-  private async hydrateSession(session: AcpSessionState): Promise<void> {
-    if (session.blank || (session.events.length > 0 && !session.staleHistory)) return
+  private async hydrateSession(
+    session: AcpSessionState,
+    options?: { maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow; full?: boolean },
+  ): Promise<void> {
+    if (session.blank) return
+    const needsFull = options?.full === true && session.remoteHasMore === true
+    if (session.events.length > 0 && !session.staleHistory && !needsFull) return
+    const existingPending = this.pendingHistory.get(session.sessionId)
+    if (existingPending) {
+      await existingPending
+      if (options?.full !== true || !session.remoteHasMore) return
+    }
     const cached = this.historyCache.getFresh(session.sessionId)
-    if (cached !== undefined && (!Number.isFinite(session.updatedAt) || session.updatedAt === cached.hostUpdatedAt)) {
+    if (cached !== undefined
+      && !(options?.full === true && cached.remoteHasMore === true)
+      && (!Number.isFinite(session.updatedAt) || session.updatedAt === cached.hostUpdatedAt)) {
       this.restoreCachedSession(session, cached, false)
       return
     }
-    const pending = this.pendingHistory.get(session.sessionId)
-    if (pending) return pending
-    const read = this.hydrateSessionOnce(session)
+    const read = this.hydrateSessionOnce(session, options)
     this.pendingHistory.set(session.sessionId, read)
     try { await read } finally { if (this.pendingHistory.get(session.sessionId) === read) this.pendingHistory.delete(session.sessionId) }
   }
 
-  private async hydrateSessionOnce(session: AcpSessionState): Promise<void> {
+  private async hydrateSessionOnce(
+    session: AcpSessionState,
+    options?: { maxMessages?: number; turnWindow?: VirtualHistoryTurnWindow; full?: boolean },
+  ): Promise<void> {
     let events: unknown[] = []
+    let remoteHasMore = false
     if (this.client.loadSessionDetails !== undefined) {
       try {
-        const details = await this.client.loadSessionDetails(session.sessionId, this.backend)
+        const pagingOptions = options?.full === true
+          ? undefined
+          : options?.turnWindow !== undefined
+            ? { turnWindow: options.turnWindow }
+            : { maxMessages: options?.maxMessages ?? VIRTUAL_HISTORY_DEFAULT_MAX_MESSAGES }
+        const details = pagingOptions === undefined
+          ? await this.client.loadSessionDetails(session.sessionId, this.backend)
+          : await this.client.loadSessionDetails(session.sessionId, this.backend, undefined, pagingOptions)
         events = details.events
+        remoteHasMore = details.paged === true && details.hasMore === true
         if (details.modes !== undefined) {
           session.modes = details.modes
           if (details.modes.currentModeId) session.agentPreset = details.modes.currentModeId
@@ -896,15 +924,77 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         // Preserve legacy AGY history availability behavior.
       }
     }
-    if (events.length > 0) {
+    const normalized = normalizeAcpHistoryEvents(events)
+    if (normalized.length > 0) {
       session.hydrated = true
       session.staleHistory = false
-      session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
+      session.remoteHasMore = options?.full === true ? false : remoteHasMore
+      session.events = normalized
       const firstUser = session.events.find(entry => entry.event.type === 'user/message')
       this.titles.applyPrompt(session, extractPromptText(array(record(firstUser?.event.data).content)))
       session.blank = false
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
       this.syncSessionCache(session)
+    } else if (options?.full === true) {
+      session.remoteHasMore = false
+    }
+  }
+
+  private async ensureOlderHistoryLoaded(
+    session: AcpSessionState,
+    beforeSeq: number,
+    options?: { limit?: number; turnWindow?: VirtualHistoryTurnWindow },
+  ): Promise<void> {
+    if (!session.remoteHasMore || this.client.loadSessionDetails === undefined) return
+    const pending = this.pendingOlderHistory.get(session.sessionId)
+    if (pending) {
+      await pending
+      if (!session.remoteHasMore) return
+    }
+    const pageLimit = options?.limit ?? VIRTUAL_HISTORY_DEFAULT_MAX_MESSAGES
+    const oldestSeq = session.events.at(0)?.event.seq
+    const beforeEvents = session.events.filter(entry => entry.event.seq < beforeSeq)
+    const hasEnoughBuffered = options?.turnWindow !== undefined
+      ? (() => {
+          const targetMinTurns = typeof options.turnWindow === 'number' ? options.turnWindow : (options.turnWindow.minTurns ?? 1)
+          const targetMinMessages = typeof options.turnWindow === 'number' ? 0 : (options.turnWindow.minMessages ?? 0)
+          const userTurnCount = beforeEvents.filter(entry => entry.event.type === 'user/message').length
+          return userTurnCount >= targetMinTurns && beforeEvents.length >= targetMinMessages
+        })()
+      : beforeEvents.length >= pageLimit
+    if (oldestSeq !== undefined && beforeSeq > oldestSeq && hasEnoughBuffered) {
+      return
+    }
+    const task = (async () => {
+      const cursorBefore = oldestSeq ?? beforeSeq
+      const details = await this.client.loadSessionDetails!(session.sessionId, this.backend, undefined, {
+        beforeSeq: cursorBefore,
+        ...(options?.turnWindow !== undefined ? { turnWindow: options.turnWindow } : { maxMessages: pageLimit }),
+      })
+      const incoming = normalizeAcpHistoryEvents(details.events)
+      if (incoming.length === 0) {
+        session.remoteHasMore = false
+        this.syncSessionCache(session)
+        return
+      }
+      const bySeq = new Map<number, { type: 'event'; event: NativeEvent }>()
+      for (const entry of [...incoming, ...session.events]) {
+        bySeq.set(entry.event.seq, entry)
+      }
+      session.events = [...bySeq.entries()].sort((a, b) => a[0] - b[0]).map(([, entry]) => entry)
+      session.remoteHasMore = details.paged === true && details.hasMore === true
+      for (const event of incoming) {
+        this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
+      }
+      this.syncSessionCache(session)
+    })()
+    this.pendingOlderHistory.set(session.sessionId, task)
+    try {
+      await task
+    } finally {
+      if (this.pendingOlderHistory.get(session.sessionId) === task) {
+        this.pendingOlderHistory.delete(session.sessionId)
+      }
     }
   }
 
@@ -912,6 +1002,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     session.events = cached.events
     session.hydrated = !staleFallback && !cached.stale && !cached.truncated
     session.staleHistory = staleFallback || Boolean(cached.stale) || Boolean(cached.truncated)
+    session.remoteHasMore = cached.remoteHasMore
     session.blank = cached.blank
     if (cached.title !== undefined && (!session.titleOverridden || cached.titleOverridden)) {
       session.title = cached.title
@@ -942,6 +1033,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       blank: session.blank && session.events.length === 0,
       hydrated: Boolean((session.hydrated || session.events.length > 0) && !session.staleHistory),
       stale: isStale,
+      ...(session.remoteHasMore ? { remoteHasMore: true } : {}),
       ...(session.title === undefined ? {} : { title: session.title }),
       ...(session.titleOverridden === undefined ? {} : { titleOverridden: session.titleOverridden }),
       ...(session.titleFromPrompt === undefined ? {} : { titleFromPrompt: session.titleFromPrompt }),
@@ -956,9 +1048,16 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const session = this.lookupSession(requestedId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
     const sessionId = session.sessionId
-    await this.hydrateSession(session)
     const beforeSeq = optionalInteger(request.beforeSeq)
-    if (beforeSeq === undefined) {
+    const limit = optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit)
+    const turnWindow = normalizeVirtualHistoryTurnWindow(request.turnWindow)
+    await this.hydrateSession(session, {
+      ...(limit !== undefined ? { maxMessages: limit } : {}),
+      ...(turnWindow !== undefined ? { turnWindow } : {}),
+    })
+    if (beforeSeq !== undefined) {
+      await this.ensureOlderHistoryLoaded(session, beforeSeq, { limit, turnWindow })
+    } else {
       this.rememberOpenedSession(sessionId)
     }
     const projections = {
@@ -979,8 +1078,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       page = this.historyPage(session, {
         beforeSeq,
         throughSeq: optionalInteger(request.throughSeq),
-        limit: optionalPositiveInteger(request.maxMessages) ?? optionalPositiveInteger(request.limit),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        limit,
+        turnWindow,
         extraEnvelopeBytes: utf8JsonByteLength({ events: [], projections }) + 16,
         measureRecordBytes: entry => utf8JsonByteLength(entry) + utf8JsonByteLength({ event: entry.event }) + 1,
       })
@@ -1009,13 +1108,22 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const requestedId = extractSessionId(request)
     const session = this.lookupSession(requestedId)
     if (session === undefined) return failure('session-not-found', 'The Session was not found.')
-    await this.hydrateSession(session)
+    const beforeSeq = optionalInteger(request.beforeSeq)
+    const limit = optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages)
+    const turnWindow = normalizeVirtualHistoryTurnWindow(request.turnWindow)
+    await this.hydrateSession(session, {
+      ...(limit !== undefined ? { maxMessages: limit } : {}),
+      ...(turnWindow !== undefined ? { turnWindow } : {}),
+    })
+    if (beforeSeq !== undefined) {
+      await this.ensureOlderHistoryLoaded(session, beforeSeq, { limit, turnWindow })
+    }
     try {
       const page = this.historyPage(session, {
-        beforeSeq: optionalInteger(request.beforeSeq),
+        beforeSeq,
         throughSeq: optionalInteger(request.throughSeq),
-        limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages),
-        turnWindow: normalizeVirtualHistoryTurnWindow(request.turnWindow),
+        limit,
+        turnWindow,
       })
       return success({ records: page.records, hasMore: page.hasMore, cursor: page.cursor })
     } catch (error) {
@@ -1069,6 +1177,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       maxMessages: options.limit,
       turnWindow: options.turnWindow,
       countSurfaceMessages: false,
+      hasLeadingHistory: Boolean(session.remoteHasMore),
       maxBytes: options.maxBytes ?? VIRTUAL_HISTORY_MAX_BYTES,
       hardMaxBytes: options.hardMaxBytes,
       envelopeBytes: baseEnvelopeBytes,
@@ -1080,7 +1189,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       cursor,
       nextTurn: maxTurn + 1,
       records: slice.records,
-      hasMore: slice.hasMore,
+      hasMore: slice.hasMore || Boolean(session.remoteHasMore),
       ...(session.running ? { activeTurnId: 'cursor-live' } : {}),
       assistantStream: { revision: 0 },
     }
@@ -1498,3 +1607,23 @@ export { acpCwdWorkspaceId, createAcpWorkspaceView, discoverAcpVirtualWorkspaces
 export { acpPermissionsProjection, isAcpPermissionPreset } from './virtual-contract.js'
 export type { AcpModelSelection, AcpModelView, AcpVirtualWorkspaceView } from './virtual-catalog.js'
 export type { AcpClientLike, AcpPermissionPreset } from './virtual-contract.js'
+
+function normalizeAcpHistoryEvents(events: unknown[]): Array<{ type: 'event'; event: NativeEvent }> {
+  const normalized: Array<{ type: 'event'; event: NativeEvent }> = []
+  for (const raw of events) {
+    if (!isRecord(raw) || !isRecord(raw.event)) continue
+    const event = raw.event
+    if (typeof event.type !== 'string' || typeof event.seq !== 'number') continue
+    normalized.push({
+      type: 'event',
+      event: {
+        ...event,
+        type: event.type,
+        seq: event.seq,
+        time: typeof event.time === 'number' ? event.time : 0,
+        data: event.data,
+      } as NativeEvent,
+    })
+  }
+  return normalized
+}

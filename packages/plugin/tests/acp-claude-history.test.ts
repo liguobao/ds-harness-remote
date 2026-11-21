@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
+import { AntigravityNativeAcpClient } from '../src/acp/adapters/antigravity-acp.js'
 
 type Wire = Record<string, any>
 function setup(handle?: (message: Wire, process: ReturnType<typeof fakeProcess>, index: number) => boolean) {
@@ -252,9 +253,51 @@ describe('Claude isolated history and live session recovery', () => {
 
       await client.history('saved-meta', '/tmp')
       expect(client.lastHistoryMetadata('saved-meta')).toBeDefined()
-      await client.call('session/load', { sessionId: 'saved-meta', cwd: '/tmp', mcpServers: [] })
+      await expect(client.call('session/load', { sessionId: 'saved-meta', cwd: '/tmp', mcpServers: [] })).resolves.toBeDefined()
       expect(client.isSessionLoaded('saved-meta')).toBe(true)
       expect(client.lastHistoryMetadata('saved-meta')).toBeUndefined()
     } finally { await client.close() }
+  })
+
+  it('reuses a prewarmed standby history reader on AntigravityNativeAcpClient and cleans it up on close', async () => {
+    const children: ReturnType<typeof fakeProcess>[] = []
+    const client = new AntigravityNativeAcpClient('agy-test', undefined, () => {
+      const child = fakeProcess()
+      children.push(child)
+      child.stdin.on('data', chunkData => {
+        for (const line of String(chunkData).trim().split('\n')) {
+          const message = JSON.parse(line)
+          child.sent.push(message)
+          if (message.id === undefined || !message.method) continue
+          if (message.method === 'session/load') {
+            child.update('saved-agy', chunk('user_message_chunk', 'from standby'))
+            queueMicrotask(() => child.reply(message, {}))
+          } else {
+            child.reply(message, {})
+          }
+        }
+      })
+      return child.child
+    })
+    try {
+      await client.start()
+      expect(children).toHaveLength(1)
+      client.prewarmHistory()
+      await vi.waitFor(() => expect(children).toHaveLength(2))
+      await vi.waitFor(() => expect(children[1]!.sent.some(m => m.method === 'initialize')).toBe(true))
+      // Standby is already initialized; calling history() consumes child[1] directly without spawning before load.
+      const events = await client.history('saved-agy', '/tmp') as Array<{ event: { type: string } }>
+      expect(events.some(e => e.event.type === 'user/message')).toBe(true)
+      expect(children[1]!.sent.filter(m => m.method === 'initialize')).toHaveLength(1)
+      expect(children[1]!.sent.some(m => m.method === 'session/load')).toBe(true)
+      expect(children[1]!.child.killed).toBe(true)
+      // A replacement standby is warmed after the read completes and cleaned up on close().
+      await vi.waitFor(() => expect(children).toHaveLength(3))
+      await client.close()
+      expect(children[0]!.child.killed).toBe(true)
+      expect(children[2]!.child.killed).toBe(true)
+    } finally {
+      await client.close()
+    }
   })
 })

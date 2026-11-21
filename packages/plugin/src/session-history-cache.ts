@@ -627,6 +627,7 @@ export interface CachedAcpSessionHistory {
   hydrated: boolean
   stale?: boolean
   truncated?: boolean
+  remoteHasMore?: boolean
   title?: string
   titleOverridden?: boolean
   titleFromPrompt?: boolean
