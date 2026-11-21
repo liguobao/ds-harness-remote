@@ -4,7 +4,8 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
 serial="${1:?Usage: build-device.sh adb-serial}"
-export EXPO_PUBLIC_DSH_BENCH_URL="$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/dsh-transport-bench-config.json","utf8")).url')"
+EXPO_PUBLIC_DSH_BENCH_URL="$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/dsh-transport-bench-config.json","utf8")).url')"
+export EXPO_PUBLIC_DSH_BENCH_URL
 export NODE_ENV=production
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 if [[ -z "${JAVA_HOME:-}" && -d '/Applications/Android Studio.app/Contents/jbr/Contents/Home' ]]; then

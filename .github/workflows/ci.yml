@@ -135,6 +135,22 @@ jobs:
       - name: Check types
         run: pnpm -r check
 
+      - name: Lint TypeScript and React
+        run: pnpm exec oxlint --type-aware --quiet packages apps scripts
+
+      - name: Lint shell scripts
+        run: |
+          sh_files=()
+          while IFS= read -r -d '' file_path; do
+            if head -n 1 "$file_path" | grep -q 'zsh'; then
+              continue
+            fi
+            sh_files+=("$file_path")
+          done < <(git ls-files -z '*.sh')
+          if [[ "${#sh_files[@]}" -gt 0 ]]; then
+            shellcheck -S warning "${sh_files[@]}"
+          fi
+
       - name: Verify GitHub plugin bundle
         run: |
           node scripts/verify-dsh-plugin.mjs
