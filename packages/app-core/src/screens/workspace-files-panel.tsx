@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, FlatList, Image, NativeModules, Platform, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
 import { Alert } from '../ui/alert'
@@ -40,7 +40,7 @@ function toast(message: string): void {
   else Alert.alert(message)
 }
 
-export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessionId: string; initialFile?: string; onClose: () => void }) {
+export function WorkspaceFilesPanel({ sessionId, initialFile, onClose, headerAccessory }: { sessionId: string; initialFile?: string; onClose: () => void; headerAccessory?: ReactNode }) {
   const { colors } = useTheme()
   const [path, setPath] = useState('')
   const [file, setFile] = useState<string | undefined>(initialFile)
@@ -255,7 +255,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
     else if (path !== '') setPath(path.split('/').slice(0, -1).join('/'))
     else onClose()
   }
-  return <BlurHeaderFrame inset header={<TopBar
+  return <BlurHeaderFrame inset header={<View><TopBar
     title={t.tools.files}
     onBack={back}
     action={<>
@@ -267,7 +267,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
         : <IconButton label={t.tools.download} icon={Download} onPress={() => void download()} disabled={tooLargeToSave} />)}
       <IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || downloading || uploading} />
     </>}
-  />}>
+  />{headerAccessory}</View>}>
     <View style={styles.toolbar}>
       <ScrollView style={styles.pathScroll} nestedScrollEnabled><Text selectable style={[styles.pathLabel, { color: colors.ink }]}>{file ?? (path || t.tools.root)}</Text></ScrollView>
     </View>

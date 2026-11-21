@@ -23,6 +23,7 @@ import {
 import { Alert } from '../ui/alert'
 import { shouldConfirmSwipeRightOpen, shouldStartSwipeRightToOpen } from '../lib/gesture-swipe-rules'
 import { isSubagentSession } from '../lib/session-kind'
+import { applyChangeQuoteDraft } from '../lib/unified-diff'
 import { isAcpManagedBackend, workspaceStableKey } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
 import { sessionPermissions } from '../services/session-permissions'
@@ -113,7 +114,7 @@ import { HostSessionsDrawer } from './host-sessions-drawer'
 import { PluginsModal } from './plugins-modal'
 import { ReferenceChatModal, ReferencedChatPills } from './bot/reference-chat-modal'
 import type { ReferenceChatCandidate } from './bot/at-menu'
-import { SessionToolsPanel } from './session-tools-panel'
+import { SessionToolsPanel, type SessionToolsMode } from './session-tools-panel'
 
 import { browseKey, browseScope, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
 import { formatQuoteText, QuotePreview } from '../ui/quote-preview'
@@ -172,6 +173,7 @@ export function ChatScreen({
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
+  const hostWorkspaceGit = useAppStore(state => state.hostWorkspaceGit)
   const imageGeneration = chatImageConnectionGeneration()
   const imageLoader = useMemo(() => session === undefined || connection.phase !== 'connected'
     ? undefined : sessionChatImageLoader(session), [session?.sessionId, session?.backend, hostId, imageGeneration, connection.phase])
@@ -346,6 +348,13 @@ export function ChatScreen({
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const plusMenuActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
   useEffect(() => () => plusMenuActions.cancel(), [plusMenuActions])
+  const quoteFocusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => {
+    if (quoteFocusTimerRef.current !== undefined) {
+      clearTimeout(quoteFocusTimerRef.current)
+      quoteFocusTimerRef.current = undefined
+    }
+  }, [])
   const [sheetAnchor, setSheetAnchor] = useState<Rect>()
   const composerAnchorRef = useRef<View>(null)
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
@@ -353,7 +362,7 @@ export function ChatScreen({
   const [modePickerOpen, setModePickerOpen] = useState(false)
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
-  const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  const [toolsMode, setToolsMode] = useState<SessionToolsMode>()
   const [fileLinkPath, setFileLinkPath] = useState<string>()
   const { promptsPickerOpen, setPromptsPickerOpen, customPrompts, promptEditing,
     setPromptEditing, promptsManagerOpen, setPromptsManagerOpen, promptsLoading, savePromptEdit, deletePrompt } = useChatPrompts(connection.phase)
@@ -1092,10 +1101,31 @@ export function ChatScreen({
     }
   }
 
-  const pickToolMode = (mode: 'files' | 'terminal') => {
+  const pickToolMode = (mode: SessionToolsMode) => {
     setToolPickerOpen(false)
     setFileLinkPath(undefined)
     setToolsMode(mode)
+  }
+
+  const quoteChangeToComposer = (reference: string) => {
+    const { draft: nextDraft, cursor } = applyChangeQuoteDraft(
+      draftRef.current,
+      reference,
+      strings.tools.changesQuotePrompt,
+    )
+    applyDraft(nextDraft)
+    mentionInput.setCursor(cursor)
+    setMentionType(null)
+    const generation = sessionGenerationRef.current
+    setToolsMode(undefined)
+    setFileLinkPath(undefined)
+    if (quoteFocusTimerRef.current !== undefined) clearTimeout(quoteFocusTimerRef.current)
+    quoteFocusTimerRef.current = setTimeout(() => {
+      quoteFocusTimerRef.current = undefined
+      if (sessionGenerationRef.current === generation) {
+        composerInputRef.current?.focus()
+      }
+    }, Platform.OS === 'ios' ? 280 : 80)
   }
 
   const sessionBlank = visibleMessages.length === 0 && session.blank !== false
@@ -1519,11 +1549,13 @@ export function ChatScreen({
       />
       {toolsMode !== undefined && connected && (
         <SessionToolsPanel
-          key={`${session.sessionId}:${toolsMode}:${fileLinkPath ?? ''}`}
+          key={`${session.sessionId}:${fileLinkPath ?? ''}`}
           mode={toolsMode}
           sessionId={session.sessionId}
           initialFile={toolsMode === 'files' ? fileLinkPath : undefined}
+          changesSupported={hostWorkspaceGit}
           onClose={() => { setToolsMode(undefined); setFileLinkPath(undefined) }}
+          onQuoteToComposer={quoteChangeToComposer}
         />
       )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
@@ -1541,7 +1573,7 @@ export function ChatScreen({
         }}
       />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); openSessionsDrawer() }} />
-      <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
+      <ToolAccessPicker visible={toolPickerOpen} supportsChanges={hostWorkspaceGit} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
         visible={promptsPickerOpen}
         prompts={customPrompts ?? BUILT_IN_PROMPTS}

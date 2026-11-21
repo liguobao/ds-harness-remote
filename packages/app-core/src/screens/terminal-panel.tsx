@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { CirclePlus } from 'lucide-react-native'
@@ -15,7 +15,7 @@ import { sessionToolsError } from './session-tools-error'
 
 const SOURCE = { html: terminalHtml, baseUrl: 'about:blank' }
 
-export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+export function TerminalPanel({ sessionId, onClose, headerAccessory }: { sessionId: string; onClose: () => void; headerAccessory?: ReactNode }) {
   const { colors } = useTheme()
   const web = useRef<WebView>(null)
   const attachment = useRef<TerminalAttachment | undefined>(undefined)
@@ -149,11 +149,11 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     else if (!writable) status = info.state === 'running' ? t.tools.controlDenied : t.tools.exited
   }
   const statusBusy = pending || (error === undefined && active !== undefined && info === undefined)
-  return <BlurHeaderFrame inset header={<TopBar
+  return <BlurHeaderFrame inset header={<View><TopBar
     title={t.tools.terminal}
     onBack={onClose}
     action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
-  />}>
+  />{headerAccessory}</View>}>
     <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
       {items.map(item => <Button key={item.id} label={terminalLabel(item)} variant={active === item.id ? 'primary' : 'quiet'} onPress={() => setActive(item.id)} disabled={busy} />)}
       {active && <Button label={t.tools.closeTerminal} variant="danger" disabled={busy} onPress={close} />}
