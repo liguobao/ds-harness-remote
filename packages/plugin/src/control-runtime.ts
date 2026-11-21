@@ -329,9 +329,11 @@ export class PluginControlRuntime {
     const flight = (async () => {
       await this.logoutFlight
       try {
-        const runtimes = await switchServer(this.config)
+        const targetConfig = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
+        const runtimes = await switchServer(targetConfig)
         this.client = runtimes.client
         this.host = runtimes.host
+        this.config = targetConfig
         this.clearStartupFailure()
       } catch (error) {
         this.setStartupFailure(error)
@@ -356,8 +358,7 @@ export class PluginControlRuntime {
     if (typeof value.serverUrl !== 'string') {
       throw new ClientModeError('INVALID_MESSAGE', 'Server URL is required.')
     }
-    const current = editableConfig(resolveConfig(this.settings.get()))
-    const next = resolveConfig({ ...current, serverUrl: value.serverUrl })
+    const next = resolveConfig({ ...this.settings.get(), serverUrl: value.serverUrl })
     await this.settings.replace(editableConfig(next))
     if (this.switchServer !== undefined) {
       if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== undefined) {
@@ -399,6 +400,11 @@ export class PluginControlRuntime {
       throw new ClientModeError('INVALID_MESSAGE', 'Role must be host, client, or all.')
     }
     const roles: RemoteDeviceRole[] = roleArg === 'client' ? ['client'] : roleArg === 'host' ? ['host'] : ['host', 'client']
+    if (this.switchServer === undefined && !this.storageAvailable) {
+      throw this.startupFailure instanceof Error
+        ? this.startupFailure
+        : new ClientModeError('SETTINGS_UNAVAILABLE', 'Remote storage is unavailable in this profile.')
+    }
     const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
     const nextDirectory = await resetDefaultIdentityRoles(
       roles,
@@ -420,8 +426,7 @@ export class PluginControlRuntime {
       }
       return { ...await this.settingsView(), applies: 'live' }
     }
-    this.clearStartupFailure()
-    return { ...await this.settingsView(), applies: 'live' }
+    return { ...await this.settingsView(), applies: this.startupFailure === undefined ? 'live' : 'restart' }
   }
 
   private async setRole(payload: unknown): Promise<PluginSettingsView> {
@@ -717,8 +722,18 @@ export class PluginControlRuntime {
     return this.settingsView()
   }
 
+  private currentEditableConfig(): Config {
+    if (this.settings === undefined) return editableConfig(this.config)
+    try {
+      return editableConfig(resolveConfig(this.settings.get()))
+    } catch {
+      // Keep settings and log views readable even when persisted config caused startup validation to fail.
+      return editableConfig(this.config)
+    }
+  }
+
   private async settingsView(): Promise<PluginSettingsView> {
-    const config = this.settings === undefined ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()))
+    const config = this.currentEditableConfig()
     const associations = await this.associations(config)
     const role = config.role === 'client' ? 'client' : 'host'
     const association = associations[role]

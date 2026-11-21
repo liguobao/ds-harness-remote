@@ -84783,10 +84783,11 @@ var STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 var ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
 var INVALID_REQUEST_RPC_ID = "invalid-request";
 function registerControlRoute(connection, handler, webServer, statusStream) {
-  if (webServer !== void 0 && connection.requestRejection !== void 0) {
+  if (webServer !== void 0) {
     const dispose = webServer.register({
       kind: "prefix",
       path: CONTROL_RPC_PREFIX,
+      auth: "required",
       handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream)
     });
     return async () => {
@@ -84801,7 +84802,7 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
   });
 }
 async function handleControlRequest(connection, handler, req, res, statusStream) {
-  const rejection = connection.requestRejection?.(req);
+  const rejection = requestRejectionStatus(connection, req);
   if (rejection !== void 0) {
     res.writeHead(rejection);
     res.end(rejection === 401 ? "unauthorized" : "forbidden");
@@ -84896,6 +84897,22 @@ function fullResponse(rpcId2, result) {
 function writeJson(res, status2, body) {
   res.writeHead(status2, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+function requestRejectionStatus(connection, req) {
+  if (typeof connection.requestRejection === "function") {
+    const rejection = connection.requestRejection(req);
+    return rejection === void 0 ? void 0 : normalizeRejectionStatus(rejection);
+  }
+  if (typeof connection.admit === "function") {
+    const admission = connection.admit(req);
+    if (typeof admission !== "object" || admission === null) return 403;
+    if (typeof admission.rejection === "number") return normalizeRejectionStatus(admission.rejection);
+    return admission.peer != null ? void 0 : 403;
+  }
+  return 403;
+}
+function normalizeRejectionStatus(code) {
+  return typeof code === "number" && Number.isInteger(code) && code >= 400 && code <= 599 ? code : 403;
 }
 function writeText(res, status2, body) {
   res.writeHead(status2);
@@ -103376,9 +103393,11 @@ var PluginControlRuntime = class {
     const flight = (async () => {
       await this.logoutFlight;
       try {
-        const runtimes = await switchServer(this.config);
+        const targetConfig = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
+        const runtimes = await switchServer(targetConfig);
         this.client = runtimes.client;
         this.host = runtimes.host;
+        this.config = targetConfig;
         this.clearStartupFailure();
       } catch (error62) {
         this.setStartupFailure(error62);
@@ -103402,8 +103421,7 @@ var PluginControlRuntime = class {
     if (typeof value.serverUrl !== "string") {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
-    const current = editableConfig(resolveConfig(this.settings.get()));
-    const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
+    const next = resolveConfig({ ...this.settings.get(), serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
     if (this.switchServer !== void 0) {
       if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== void 0) {
@@ -103443,6 +103461,9 @@ var PluginControlRuntime = class {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be host, client, or all.");
     }
     const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+    if (this.switchServer === void 0 && !this.storageAvailable) {
+      throw this.startupFailure instanceof Error ? this.startupFailure : new ClientModeError("SETTINGS_UNAVAILABLE", "Remote storage is unavailable in this profile.");
+    }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     const nextDirectory = await resetDefaultIdentityRoles(
       roles,
@@ -103464,8 +103485,7 @@ var PluginControlRuntime = class {
       }
       return { ...await this.settingsView(), applies: "live" };
     }
-    this.clearStartupFailure();
-    return { ...await this.settingsView(), applies: "live" };
+    return { ...await this.settingsView(), applies: this.startupFailure === void 0 ? "live" : "restart" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {
@@ -103732,8 +103752,16 @@ var PluginControlRuntime = class {
     }
     return this.settingsView();
   }
+  currentEditableConfig() {
+    if (this.settings === void 0) return editableConfig(this.config);
+    try {
+      return editableConfig(resolveConfig(this.settings.get()));
+    } catch {
+      return editableConfig(this.config);
+    }
+  }
   async settingsView() {
-    const config2 = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
+    const config2 = this.currentEditableConfig();
     const associations = await this.associations(config2);
     const role2 = config2.role === "client" ? "client" : "host";
     const association = associations[role2];
@@ -112766,7 +112794,6 @@ function apply(ctx, entry = void 0) {
   const activateWhenCarrierReady = async (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
-    const webServer = runtimeContext.get("webServer");
     let disposePendingControl;
     const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
@@ -112777,10 +112804,20 @@ function apply(ctx, entry = void 0) {
       } catch (error62) {
         storageError = error62;
       }
-      const pendingLogStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(runtimeContext) }) });
+      if (!isFiberActive(runtimeContext)) return;
+      const pendingLogStore = createHostLogStore(runtimeContext);
+      const pendingLogger = createSafeLogger(runtimeContext, pendingLogStore, () => readSafeLogLevel(readConfig, "info"));
+      let configError;
+      let pendingConfig;
+      try {
+        pendingConfig = resolveConfig(readConfig());
+      } catch (error62) {
+        configError = error62;
+        pendingConfig = resolveFallbackConfig(readConfig);
+      }
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
-          resolveConfig(readConfig()),
+          pendingConfig,
           identityDirectory,
           void 0,
           void 0,
@@ -112790,10 +112827,14 @@ function apply(ctx, entry = void 0) {
           true,
           pendingLogStore
         );
-        if (storageError !== void 0) {
-          control.setStartupFailure(storageError, { storageAvailable: false });
+        const failure5 = storageError ?? configError;
+        if (failure5 !== void 0) {
+          pendingLogger.error("Remote plugin startup failed", safeStartupError(failure5));
+          control.setStartupFailure(failure5, { storageAvailable: storageError === void 0 });
         }
-        const dispose = control.register(connection, webServer);
+        const dispose = mountControlRoute(runtimeContext, control, connection, (error62) => {
+          pendingLogger.error("Remote control route registration failed", safeStartupError(error62));
+        });
         return async () => {
           await dispose();
           await pendingLogStore.flush();
@@ -112825,50 +112866,57 @@ function applyTuiHost(ctx, entry) {
 }
 async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const settings = ctx.get("settings");
-  const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
   const connection = ctx.get("connection");
-  const webServer = ctx.get("webServer");
-  const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
-  const readSafeLogLevel = () => {
-    try {
-      const raw = (settingsBinding?.get() ?? readConfig()).logLevel;
-      if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
-    } catch {
-    }
-    return config2.logLevel;
-  };
-  const logger2 = new SafeLogger({
-    debug: (message) => {
-      logStore.record("debug", message);
-      ctx.logger.debug(message);
-      console.debug(message);
-    },
-    info: (message) => {
-      logStore.record("info", message);
-      ctx.logger.info(message);
-      console.info(message);
-    },
-    warn: (message) => {
-      logStore.record("warn", message);
-      ctx.logger.warn(message);
-      console.warn(message);
-    },
-    error: (message) => {
-      logStore.record("error", message);
-      ctx.logger.error(message);
-      console.error(message);
-    }
-  }, readSafeLogLevel);
+  const logStore = createHostLogStore(ctx);
+  let settingsBinding;
+  let fallbackLogLevel = "info";
+  const logger2 = createSafeLogger(ctx, logStore, () => readSafeLogLevel(
+    () => settingsBinding?.get() ?? readConfig(),
+    fallbackLogLevel
+  ));
   let defaultIdentityDirectory = new IdentityStore().directory;
+  let storageAvailable = false;
+  const handleEarlyFailure = async (failure5) => {
+    logger2.error("Remote plugin startup failed", safeStartupError(failure5));
+    if (connection === void 0) {
+      await logStore.flush();
+      throw failure5;
+    }
+    if (!isFiberActive(ctx)) {
+      await logStore.flush();
+      return;
+    }
+    const control = new PluginControlRuntime(
+      resolveFallbackConfig(() => settingsBinding?.get() ?? readConfig()),
+      defaultIdentityDirectory,
+      settingsBinding,
+      void 0,
+      void 0,
+      void 0,
+      void 0,
+      storageAvailable,
+      logStore
+    );
+    control.setStartupFailure(failure5, { storageAvailable });
+    mountControlEffect(ctx, control, connection, logStore, logger2, "ds-harness-remote startup failure control");
+  };
+  let config2;
   let initialStorageError;
   try {
-    defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+    settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
+    config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
+    fallbackLogLevel = config2.logLevel;
+    try {
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+      storageAvailable = true;
+    } catch (error62) {
+      initialStorageError = error62;
+    }
   } catch (error62) {
-    initialStorageError = error62;
+    return handleEarlyFailure(error62);
   }
   if (!config2.enabled) {
-    if (connection !== void 0) {
+    if (connection !== void 0 && isFiberActive(ctx)) {
       const controlRuntime2 = new PluginControlRuntime(
         config2,
         defaultIdentityDirectory,
@@ -112884,13 +112932,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
         controlRuntime2.setStartupFailure(initialStorageError, { storageAvailable: false });
       }
-      ctx.effect(() => {
-        const dispose = controlRuntime2.register(connection, webServer);
-        return async () => {
-          await dispose();
-          await logStore.flush();
-        };
-      }, "ds-harness-remote disabled control");
+      mountControlEffect(ctx, controlRuntime2, connection, logStore, logger2, "ds-harness-remote disabled control");
     }
     return;
   }
@@ -112899,191 +112941,204 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     updateChecker,
     () => readPluginManager(ctx),
     (listener) => {
-      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events];
+      const root2 = rootContext(ctx);
+      const buses = root2 === void 0 || ctx.events === root2.events ? [ctx.events] : [root2.events, ctx.events];
       const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
       return () => {
         for (const stop of dispose) stop();
       };
     }
   );
-  const nativeTypertGateway = ctx.get("typertGateway");
-  const connectionExports = DshConnection;
-  const connectionService = ctx.get("connection", false);
-  const createOwnerPeer = createOwnerPeerFactory(
-    ctx,
-    ownerPeerConstructor(connectionExports),
-    connectionService
-  );
-  const hostConnectionPeer = createOwnerPeer();
-  let fallbackPeer = hostConnectionPeer;
-  ctx.effect(() => () => {
-    const peer = fallbackPeer;
-    fallbackPeer = void 0;
-    return peer?.dispose?.();
-  }, "ds-harness-remote fallback owner peer");
-  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
-  const localTypertGateway = hostGateway.local();
-  localTypertGateway.createPeer = () => {
-    const peer = createOwnerPeer();
-    if (peer === void 0) return localTypertGateway;
-    return {
-      ...hostGateway.local(peer),
-      dispose: async () => {
-        await peer.dispose?.();
-      }
-    };
-  };
-  if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
-  const subprocess = ctx.get("subprocess", false);
-  const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
-  const createRuntimes = (config3) => {
-    const hostIdentities = new IdentityStore({
-      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
-      role: "host"
-    });
-    const runtime2 = new HostPluginRuntime(
-      config3,
-      hostIdentities,
-      logger2,
-      localTypertGateway,
-      () => ctx.get("fileViewerHost"),
-      subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
-      (peer) => createPluginRouteDispatcher(
-        () => ctx.get("connection"),
-        () => ctx.get("webServer")?.port,
-        peer
-      ),
-      schedule,
-      () => ({
-        query: ctx.get("sessionQuery", false),
-        sessions: ctx.get("sessions", false),
-        persistence: ctx.get("sessionPersistence", false),
-        workspaces: ctx.get("workspaceRegistry", false)
-      }),
-      () => {
-        if (!ctx.get("webApp", false)) return;
-        const listener = ctx.get("webServer", false);
-        const auth = ctx.get("connection", false);
-        if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
-        try {
-          const origin = new URL(listener.getOrigin());
-          if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
-        } catch {
-        }
-      },
-      void 0,
-      (ref) => {
-        const attachments = ctx.get("attachments", false) ?? ctx.root?.get("attachments", false);
-        return attachments?.fileHostPath?.(ref);
-      }
-    );
-    let clientRuntime2;
-    if (config3.serverUrl !== void 0 && connection !== void 0) {
-      const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client"),
-        role: "client"
-      });
-      clientRuntime2 = new ClientModeRuntime(
-        config3,
-        clientIdentities,
-        new ClientServerApi(config3.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, config3.httpServerAllowlist),
-        nativeTypertGateway,
-        logger2,
-        runtime2
-      );
-    }
-    return { runtime: runtime2, clientRuntime: clientRuntime2 };
-  };
+  let localTypertGateway;
   let runtime;
   let clientRuntime;
   let hostServiceProvided = false;
   let clientServiceProvided = false;
   let clientActive = false;
-  if (initialStorageError === void 0) {
-    ;
-    ({ runtime, clientRuntime } = createRuntimes(config2));
-  }
   let closed = false;
   let startup;
   let replacement;
-  const syncOptionalService = (serviceName, value, owned) => {
-    try {
-      if (serviceName === "dshRemote") {
-        if (owned) ctx.dshRemote = value;
-        else ctx.provide("dshRemote", value);
-      } else if (owned) {
-        ctx.dshRemoteClient = value;
-      } else {
-        ctx.provide("dshRemoteClient", value);
-      }
-      return true;
-    } catch {
-      logger2.warn("failed to provide remote service", {
-        service: serviceName,
-        code: "SERVICE_PROVIDE_CONFLICT"
-      });
-      return false;
-    }
-  };
-  const replaceServer = (next) => {
-    const previousReplacement = replacement;
-    const operation = async () => {
-      await startup?.catch(() => void 0);
-      await previousReplacement?.catch(() => void 0);
-      if (closed) throw new Error("Remote plugin is closed");
-      clientActive = false;
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
-      const failure5 = shutdown.find((result) => result.status === "rejected");
-      if (failure5?.status === "rejected") throw failure5.reason;
-      if (closed) throw new Error("Remote plugin is closed");
-      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
-      controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
-      const fresh = createRuntimes(next);
-      try {
-        await fresh.runtime.start();
-        await fresh.clientRuntime?.start();
-        if (closed) throw new Error("Remote plugin is closed");
-      } catch (error62) {
-        await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()]);
-        throw error62;
-      }
-      runtime = fresh.runtime;
-      clientRuntime = fresh.clientRuntime;
-      clientActive = clientRuntime !== void 0;
-      controlRuntime?.clearStartupFailure();
-      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
-      if (clientRuntime !== void 0) {
-        clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
-      }
-      if (connection !== void 0) updateChecker.start();
-      return { client: clientRuntime, host: runtime };
+  let controlRuntime;
+  try {
+    const nativeTypertGateway = ctx.get("typertGateway");
+    const connectionExports = DshConnection;
+    const connectionService = ctx.get("connection", false);
+    const createOwnerPeer = createOwnerPeerFactory(
+      ctx,
+      ownerPeerConstructor(connectionExports),
+      connectionService
+    );
+    const hostConnectionPeer = createOwnerPeer();
+    let fallbackPeer = hostConnectionPeer;
+    ctx.effect(() => () => {
+      const peer = fallbackPeer;
+      fallbackPeer = void 0;
+      return peer?.dispose?.();
+    }, "ds-harness-remote fallback owner peer");
+    const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
+    localTypertGateway = hostGateway.local();
+    localTypertGateway.createPeer = () => {
+      const peer = createOwnerPeer();
+      if (peer === void 0) return localTypertGateway;
+      return {
+        ...hostGateway.local(peer),
+        dispose: async () => {
+          await peer.dispose?.();
+        }
+      };
     };
-    replacement = operation();
-    return replacement;
-  };
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
-    config2,
-    defaultIdentityDirectory,
-    settingsBinding,
-    clientRuntime,
-    runtime,
-    replaceServer,
-    pluginUpgrade,
-    true,
-    logStore
-  );
-  if (initialStorageError !== void 0) {
-    controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+    if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
+    const subprocess = ctx.get("subprocess", false);
+    const schedule = safeGetService(ctx, "schedule") ?? safeGetService(rootContext(ctx), "schedule");
+    const createRuntimes = (nextConfig) => {
+      const hostIdentities = new IdentityStore({
+        directory: nextConfig.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, nextConfig.serverUrl, "host"),
+        role: "host"
+      });
+      const nextRuntime = new HostPluginRuntime(
+        nextConfig,
+        hostIdentities,
+        logger2,
+        localTypertGateway,
+        () => ctx.get("fileViewerHost"),
+        subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
+        (peer) => createPluginRouteDispatcher(
+          () => ctx.get("connection"),
+          () => ctx.get("webServer")?.port,
+          peer
+        ),
+        schedule,
+        () => ({
+          query: ctx.get("sessionQuery", false),
+          sessions: ctx.get("sessions", false),
+          persistence: ctx.get("sessionPersistence", false),
+          workspaces: ctx.get("workspaceRegistry", false)
+        }),
+        () => {
+          if (!ctx.get("webApp", false)) return;
+          const listener = ctx.get("webServer", false);
+          const auth = ctx.get("connection", false);
+          if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
+          try {
+            const origin = new URL(listener.getOrigin());
+            if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
+          } catch {
+          }
+        },
+        void 0,
+        (ref) => {
+          const attachments = safeGetService(ctx, "attachments") ?? safeGetService(rootContext(ctx), "attachments");
+          return attachments?.fileHostPath?.(ref);
+        }
+      );
+      let nextClientRuntime;
+      if (nextConfig.serverUrl !== void 0 && connection !== void 0) {
+        const clientIdentities = new IdentityStore({
+          directory: serverStorageDirectory(defaultIdentityDirectory, nextConfig.serverUrl, "client"),
+          role: "client"
+        });
+        nextClientRuntime = new ClientModeRuntime(
+          nextConfig,
+          clientIdentities,
+          new ClientServerApi(nextConfig.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, nextConfig.httpServerAllowlist),
+          nativeTypertGateway,
+          logger2,
+          nextRuntime
+        );
+      }
+      return { runtime: nextRuntime, clientRuntime: nextClientRuntime };
+    };
+    if (initialStorageError === void 0) {
+      ;
+      ({ runtime, clientRuntime } = createRuntimes(config2));
+    }
+    const syncOptionalService = (serviceName, value, owned) => {
+      try {
+        if (serviceName === "dshRemote") {
+          if (owned) ctx.dshRemote = value;
+          else ctx.provide("dshRemote", value);
+        } else if (owned) {
+          ctx.dshRemoteClient = value;
+        } else {
+          ctx.provide("dshRemoteClient", value);
+        }
+        return true;
+      } catch {
+        logger2.warn("failed to provide remote service", {
+          service: serviceName,
+          code: "SERVICE_PROVIDE_CONFLICT"
+        });
+        return false;
+      }
+    };
+    const replaceServer = (next) => {
+      const previousReplacement = replacement;
+      const operation = async () => {
+        await startup?.catch(() => void 0);
+        await previousReplacement?.catch(() => void 0);
+        if (closed) throw new Error("Remote plugin is closed");
+        clientActive = false;
+        const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
+        const failure5 = shutdown.find((result) => result.status === "rejected");
+        if (failure5?.status === "rejected") throw failure5.reason;
+        if (closed) throw new Error("Remote plugin is closed");
+        defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+        controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
+        const fresh = createRuntimes(next);
+        try {
+          await fresh.runtime.start();
+          await fresh.clientRuntime?.start();
+          if (closed) throw new Error("Remote plugin is closed");
+        } catch (error62) {
+          await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()]);
+          throw error62;
+        }
+        runtime = fresh.runtime;
+        clientRuntime = fresh.clientRuntime;
+        clientActive = clientRuntime !== void 0;
+        controlRuntime?.clearStartupFailure();
+        hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+        if (clientRuntime !== void 0) {
+          clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+        }
+        if (connection !== void 0) updateChecker.start();
+        return { client: clientRuntime, host: runtime };
+      };
+      replacement = operation();
+      return replacement;
+    };
+    controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
+      config2,
+      defaultIdentityDirectory,
+      settingsBinding,
+      clientRuntime,
+      runtime,
+      replaceServer,
+      pluginUpgrade,
+      true,
+      logStore
+    );
+    if (initialStorageError !== void 0) {
+      controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+    }
+    if (runtime !== void 0) {
+      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+    }
+    if (clientRuntime !== void 0) {
+      clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+    }
+    await disableLegacyLoaderEntries(ctx, logger2);
+  } catch (error62) {
+    return handleEarlyFailure(error62);
   }
-  if (runtime !== void 0) {
-    hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  if (!isFiberActive(ctx)) {
+    await logStore.flush();
+    return;
   }
-  if (clientRuntime !== void 0) {
-    clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
-  }
-  await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection, webServer);
+    const disposeControl = controlRuntime === void 0 || connection === void 0 ? void 0 : mountControlRoute(ctx, controlRuntime, connection, (error62) => {
+      logger2.error("Remote control route registration failed", safeStartupError(error62));
+    });
     if (initialStorageError !== void 0) {
       logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
     } else {
@@ -113114,8 +113169,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       closed = true;
       clientActive = false;
       updateChecker.stop();
-      await replacement?.catch(() => void 0);
       await disposeControl?.();
+      await replacement?.catch(() => void 0);
       await clientRuntime?.close();
       await runtime?.close();
       await logStore.flush();
@@ -113123,16 +113178,155 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   }, "ds-harness-remote lifecycle");
   if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
 }
+function mountControlEffect(ctx, control, connection, logStore, logger2, label) {
+  ctx.effect(() => {
+    const disposeRoute = mountControlRoute(ctx, control, connection, (error62) => {
+      logger2.error("Remote control route registration failed", safeStartupError(error62));
+    });
+    return async () => {
+      await disposeRoute();
+      await logStore.flush();
+    };
+  }, label);
+}
+function mountControlRoute(ctx, controlRuntime, connection, onError) {
+  let disposed = false;
+  let hasRegistered = false;
+  let pendingTransitions = 0;
+  let disposeRoute;
+  let transition = Promise.resolve();
+  const swapRoute = (nextWebServer) => {
+    hasRegistered = true;
+    if (pendingTransitions === 0 && disposeRoute === void 0) {
+      if (!disposed) {
+        try {
+          disposeRoute = controlRuntime.register(connection, nextWebServer);
+        } catch (error62) {
+          onError?.(error62);
+        }
+      }
+      return;
+    }
+    pendingTransitions += 1;
+    transition = transition.then(async () => {
+      const previous = disposeRoute;
+      disposeRoute = void 0;
+      if (previous !== void 0) {
+        try {
+          await previous();
+        } catch (error62) {
+          onError?.(error62);
+        }
+      }
+      if (disposed) return;
+      disposeRoute = controlRuntime.register(connection, nextWebServer);
+    }).catch((error62) => {
+      onError?.(error62);
+    }).finally(() => {
+      pendingTransitions -= 1;
+    });
+  };
+  if (safeGetService(ctx, "webServer") === void 0) {
+    swapRoute(void 0);
+  } else {
+    void Promise.resolve().then(() => Promise.resolve()).then(() => {
+      if (!disposed && !hasRegistered && safeGetService(ctx, "webServer") === void 0) {
+        swapRoute(void 0);
+      }
+    });
+  }
+  const webInjectFiber = ctx.inject(["webServer"], (webCtx) => {
+    const nextWebServer = safeGetService(webCtx, "webServer");
+    if (nextWebServer === void 0) return;
+    webCtx.effect(() => {
+      swapRoute(nextWebServer);
+      return () => {
+        if (!disposed) swapRoute(void 0);
+      };
+    }, "ds-harness-remote http control route");
+  });
+  return async () => {
+    disposed = true;
+    await Promise.resolve(webInjectFiber.dispose()).catch(() => void 0);
+    await transition;
+    const remaining = disposeRoute;
+    disposeRoute = void 0;
+    await remaining?.();
+  };
+}
+function createHostLogStore(ctx) {
+  return new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
+}
+function createSafeLogger(ctx, logStore, threshold) {
+  return new SafeLogger({
+    debug: (message) => {
+      logStore.record("debug", message);
+      ctx.logger.debug(message);
+      console.debug(message);
+    },
+    info: (message) => {
+      logStore.record("info", message);
+      ctx.logger.info(message);
+      console.info(message);
+    },
+    warn: (message) => {
+      logStore.record("warn", message);
+      ctx.logger.warn(message);
+      console.warn(message);
+    },
+    error: (message) => {
+      logStore.record("error", message);
+      ctx.logger.error(message);
+      console.error(message);
+    }
+  }, threshold);
+}
+function readSafeLogLevel(readInput, fallback) {
+  try {
+    const raw = readInput().logLevel;
+    if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+  } catch {
+  }
+  return fallback;
+}
+function resolveFallbackConfig(readInput) {
+  try {
+    return resolveConfig(readInput());
+  } catch {
+    return resolveConfig({});
+  }
+}
 function resolveLogProfileName(ctx) {
   const envProfile = process.env.DSH_PROFILE?.trim();
   if (envProfile) return envProfile;
-  const baseDir = ctx.root?.baseDir;
-  if (typeof baseDir === "string" && baseDir.trim().length > 0) {
-    const trimmed = baseDir.trim();
-    if (basename9(dirname10(trimmed)) === "profiles") {
-      const segment = basename9(trimmed);
-      if (segment.length > 0) return segment;
+  const root2 = rootContext(ctx);
+  const profileContext = safeGetService(ctx, "profileContext") ?? safeGetService(root2, "profileContext");
+  if (typeof profileContext?.name === "string" && profileContext.name.trim().length > 0) {
+    return profileContext.name.trim();
+  }
+  return extractProfileFromDirectoryPath(readOptionalProperty(root2, "baseDir")) ?? extractProfileFromDirectoryPath(readOptionalProperty(ctx, "baseDir")) ?? extractProfileFromBaseUrl(readOptionalProperty(ctx, "baseUrl")) ?? extractProfileFromBaseUrl(readOptionalProperty(root2, "baseUrl"));
+}
+function extractProfileFromDirectoryPath(candidate) {
+  if (typeof candidate !== "string") return void 0;
+  const trimmed = candidate.trim().replace(/[\\/]+$/, "");
+  if (trimmed.length === 0) return void 0;
+  if (basename9(dirname10(trimmed)) === "profiles") {
+    const segment = basename9(trimmed);
+    if (segment.length > 0) return segment;
+  }
+  return void 0;
+}
+function extractProfileFromBaseUrl(candidate) {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) return void 0;
+  try {
+    const url2 = new URL(candidate.trim());
+    if (url2.protocol !== "file:") return void 0;
+    const segments = decodeURIComponent(url2.pathname).split("/").filter(Boolean);
+    if (segments.length >= 2 && segments.at(-2) === "profiles") {
+      const segment = segments.at(-1)?.trim();
+      return segment && segment.length > 0 ? segment : void 0;
     }
+  } catch {
   }
   return void 0;
 }
@@ -113143,8 +113337,33 @@ function readEntryConfig(entry) {
 function isEntryConfig(value) {
   return typeof value.get === "function";
 }
+function isFiberActive(ctx) {
+  const fiber = readOptionalProperty(ctx, "fiber");
+  return fiber !== void 0 && fiber.uid !== null && fiber.state !== 5;
+}
+function rootContext(ctx) {
+  const bySymbol = readOptionalProperty(ctx, Symbol.for("cordis.root"));
+  if (bySymbol !== void 0) return bySymbol;
+  return readOptionalProperty(ctx, "root");
+}
+function safeGetService(ctx, name2) {
+  if (ctx === void 0) return void 0;
+  try {
+    return ctx.get(name2, false);
+  } catch {
+    return void 0;
+  }
+}
+function readOptionalProperty(target3, key) {
+  if (typeof target3 !== "object" || target3 === null) return void 0;
+  try {
+    return target3[key];
+  } catch {
+    return void 0;
+  }
+}
 function readPluginManager(ctx) {
-  const candidate = ctx.get("pluginManager", false) ?? ctx.root.get("pluginManager", false);
+  const candidate = safeGetService(ctx, "pluginManager") ?? safeGetService(rootContext(ctx), "pluginManager");
   if (typeof candidate !== "object" || candidate === null || typeof candidate.listBundles !== "function" || typeof candidate.updateBundle !== "function") return void 0;
   return candidate;
 }
