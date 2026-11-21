@@ -19,9 +19,11 @@ import type { WorkspaceDirectory, WorkspaceText } from '../services/session-tool
 import { classifyWorkspaceFile, loadWorkspaceDownload, loadWorkspacePreview, MAX_DOWNLOAD_BYTES, PREVIEW_CHUNK_BYTES } from '../services/workspace-file-preview'
 import { strings as t } from '../locales/i18n'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../ui/theme-context'
 import { MarkdownLinkProvider, NativeMarkdown } from '../ui/markdown'
-import { spacing, type } from '../ui/theme'
+import { elevationStyle, monoFontFamily } from '../ui/platform-style'
+import { radius, spacing, type } from '../ui/theme'
 import { sessionToolsError } from './session-tools-error'
 import { PdfPreview } from './pdf-preview'
 
@@ -31,17 +33,11 @@ const downloads = NativeModules.DshRemoteDownloads as {
   finish(uri: string, publish: boolean): Promise<void>
 } | undefined
 
-/**
- * Transient success confirmation. `ToastAndroid` is a no-op on iOS (it only
- * `console.warn`s), so iOS shows the themed alert instead.
- */
-function toast(message: string): void {
-  if (Platform.OS === 'android') ToastAndroid.show(message, ToastAndroid.SHORT)
-  else Alert.alert(message)
-}
+const NOTICE_DISMISS_MS = 2500
 
 export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessionId: string; initialFile?: string; onClose: () => void }) {
   const { colors } = useTheme()
+  const insets = useSafeAreaInsets()
   const [path, setPath] = useState('')
   const [file, setFile] = useState<string | undefined>(initialFile)
   const [offset, setOffset] = useState(1)
@@ -50,6 +46,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
   const [binary, setBinary] = useState<Awaited<ReturnType<typeof loadWorkspacePreview>>>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [notice, setNotice] = useState<string>()
   const [revision, setRevision] = useState(0)
   const [fileBytes, setFileBytes] = useState<number>()
   const tooLargeToSave = fileBytes !== undefined && fileBytes > MAX_DOWNLOAD_BYTES
@@ -57,6 +54,25 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
   const [uploading, setUploading] = useState(false)
   const downloadController = useRef<AbortController | undefined>(undefined)
   const uploadController = useRef<AbortController | undefined>(undefined)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const toast = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT)
+      return
+    }
+    setNotice(message)
+    if (noticeTimerRef.current !== undefined) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = setTimeout(() => {
+      noticeTimerRef.current = undefined
+      setNotice(undefined)
+    }, NOTICE_DISMISS_MS)
+  }
+  useEffect(() => () => {
+    if (noticeTimerRef.current !== undefined) {
+      clearTimeout(noticeTimerRef.current)
+      noticeTimerRef.current = undefined
+    }
+  }, [])
   useEffect(() => {
     setDownloading(false)
     return () => { downloadController.current?.abort(); downloadController.current = undefined }
@@ -306,6 +322,19 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
         ? <PdfPreview key={`${file}:${revision}`} data={binary.data} label={file ?? t.tools.files} />
         : <Image accessibilityLabel={file} source={{ uri: `data:${binary.mimeType};base64,${binary.data}` }} style={styles.image} resizeMode="contain" onError={() => setError(t.tools.previewFailed)} />}
     </>}
+    {notice !== undefined && (
+      <View
+        pointerEvents="none"
+        accessibilityLiveRegion="polite"
+        style={[
+          styles.toastPill,
+          elevationStyle(colors, 2),
+          { backgroundColor: colors.inverse, bottom: Math.max(spacing.lg, insets.bottom + spacing.sm) },
+        ]}
+      >
+        <Text style={[styles.toastText, { color: colors.onInverse }]}>{notice}</Text>
+      </View>
+    )}
   </BlurHeaderFrame>
 }
 const styles = StyleSheet.create({
@@ -315,6 +344,8 @@ const styles = StyleSheet.create({
   path: { ...type.body, flex: 1 }, row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
   notice: { padding: spacing.md, gap: spacing.md }, caption: { ...type.caption, paddingHorizontal: spacing.md },
   markdown: { padding: spacing.md },
-  code: { fontFamily: 'monospace', fontSize: 14, lineHeight: 21, padding: spacing.md },
+  code: { fontFamily: monoFontFamily, fontSize: 14, lineHeight: 21, padding: spacing.md },
   image: { flex: 1, width: '100%', minHeight: 120 },
+  toastPill: { position: 'absolute', alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.md, borderRadius: radius.pill },
+  toastText: { ...type.small, fontWeight: '500' },
 })

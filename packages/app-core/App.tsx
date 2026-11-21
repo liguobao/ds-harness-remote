@@ -711,7 +711,6 @@ function RouteLayer({
         {
           backgroundColor: colors.background,
           zIndex: index + 1,
-          elevation: (index + 1) * 16,
           transform: [{ translateX }],
         },
       ]}
@@ -755,7 +754,7 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  globalError: { position: 'absolute', left: 0, right: 0, zIndex: 1000, elevation: 1000 },
+  globalError: { position: 'absolute', left: 0, right: 0, zIndex: 1000 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, backgroundColor: colors.background },
   loadingTitle: { ...type.title, color: colors.ink, textAlign: 'center' },
   loadingBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },

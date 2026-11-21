@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Animated, Easing, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { nextSheetPhase, type SheetPhase } from '../../ui/motion'
-import { type ThemeColors } from '../../ui/theme-context'
+import { androidRipple, continuousRadius, elevationStyle } from '../../ui/platform-style'
+import { radius } from '../../ui/theme'
+import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useReduceMotion } from '../../ui/use-reduce-motion'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 
 export interface ConfirmDialogButton {
   label: string
   onPress?: () => void
-  /** Destructive actions render as a filled red pill; cancel renders plain. */
+  /** Destructive actions render as a filled red pill; cancel renders neutral. */
   danger?: boolean
+  role?: 'cancel' | 'default' | 'destructive'
 }
 
 /**
@@ -37,8 +40,10 @@ export function ConfirmDialog({
   buttons: ConfirmDialogButton[]
   onClose: (cause: ConfirmDialogCloseCause) => void
 }) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const reduceMotion = useReduceMotion()
+  const hasDestructive = buttons.some(button => button.danger || button.role === 'destructive')
   // iOS runs handlers after its dismiss fade. Android does not emit
   // Modal.onDismiss, so it must run the action when requesting the close.
   const pendingRef = useRef<(() => void) | undefined>(undefined)
@@ -127,31 +132,51 @@ export function ConfirmDialog({
           <Text style={styles.title}>{title}</Text>
           {message ? <Text style={styles.message}>{message}</Text> : null}
           <View style={styles.buttons}>
-            {buttons.map(button => (
-              <Pressable
-                key={button.label}
-                accessibilityRole="button"
-                accessibilityLabel={button.label}
-                onPress={() => {
-                  if (!visible) return
-                  pendingRef.current = button.onPress
-                  onClose('action')
-                  if (Platform.OS !== 'ios') runPending()
-                }}
-                style={({ pressed }) => [
-                  styles.button,
-                  button.danger ? styles.buttonDanger : styles.buttonPlain,
-                  pressed && styles.buttonPressed,
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[styles.buttonLabel, button.danger ? styles.buttonLabelDanger : styles.buttonLabelPlain]}
+            {buttons.map(button => {
+              const role =
+                button.danger || button.role === 'destructive'
+                  ? 'destructive'
+                  : button.role === 'cancel' || (button.role === undefined && hasDestructive)
+                    ? 'cancel'
+                    : 'default'
+              return (
+                <Pressable
+                  key={button.label}
+                  accessibilityRole="button"
+                  accessibilityLabel={button.label}
+                  android_ripple={androidRipple(colors)}
+                  onPress={() => {
+                    if (!visible) return
+                    pendingRef.current = button.onPress
+                    onClose('action')
+                    if (Platform.OS !== 'ios') runPending()
+                  }}
+                  style={({ pressed }) => [
+                    styles.button,
+                    role === 'destructive'
+                      ? styles.buttonDanger
+                      : role === 'cancel'
+                        ? styles.buttonCancel
+                        : styles.buttonDefault,
+                    pressed && styles.buttonPressed,
+                  ]}
                 >
-                  {button.label}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.buttonLabel,
+                      role === 'destructive'
+                        ? styles.buttonLabelDanger
+                        : role === 'cancel'
+                          ? styles.buttonLabelCancel
+                          : styles.buttonLabelDefault,
+                    ]}
+                  >
+                    {button.label}
+                  </Text>
+                </Pressable>
+              )
+            })}
           </View>
         </View>
       </Animated.View>
@@ -171,18 +196,14 @@ const createStyles = (colors: ThemeColors) =>
     card: {
       width: '100%',
       maxWidth: 340,
-      borderRadius: 24,
+      ...continuousRadius(radius.xl),
       backgroundColor: colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       paddingHorizontal: 20,
       paddingTop: 20,
       paddingBottom: 16,
-      shadowColor: colors.shadow,
-      shadowOpacity: 0.18,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 12,
+      ...elevationStyle(colors, 3),
     },
     title: {
       fontSize: 17,
@@ -202,13 +223,16 @@ const createStyles = (colors: ThemeColors) =>
       marginTop: 18,
     },
     button: {
-      borderRadius: 14,
+      ...continuousRadius(14),
       minHeight: 40,
       paddingHorizontal: 16,
       justifyContent: 'center',
     },
-    buttonPlain: {
-      backgroundColor: colors.grouped,
+    buttonCancel: {
+      backgroundColor: colors.surfaceMuted ?? colors.surfaceStrong,
+    },
+    buttonDefault: {
+      backgroundColor: colors.primarySoft,
     },
     buttonDanger: {
       backgroundColor: colors.dangerSoft,
@@ -220,8 +244,11 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 15,
       fontWeight: '600',
     },
-    buttonLabelPlain: {
+    buttonLabelCancel: {
       color: colors.ink,
+    },
+    buttonLabelDefault: {
+      color: colors.primary,
     },
     buttonLabelDanger: {
       color: colors.danger,

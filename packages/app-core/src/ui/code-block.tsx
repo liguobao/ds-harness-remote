@@ -11,6 +11,7 @@ import {
 import * as Clipboard from 'expo-clipboard'
 import { useTheme } from './theme-context'
 import { resolveChatMetrics } from './theme'
+import { monoFontFamily } from './platform-style'
 import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from './syntax-highlight'
 import { IconWrapFill, IconNowrapFill, IconCopyOutline, IconCheckOutline } from './dsh-icons'
 
@@ -20,7 +21,6 @@ export interface CodeBlockProps {
   style?: StyleProp<ViewStyle>
 }
 
-const MONOSPACE_FONT = 'monospace'
 const COPY_RESET_MS = 2000
 
 export const CodeBlockView = memo(function CodeBlockView({ code, language, style }: CodeBlockProps) {
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
   },
   wrapBody: {},
   codeText: {
-    fontFamily: MONOSPACE_FONT,
+    fontFamily: monoFontFamily,
     includeFontPadding: false,
   },
   commentToken: {

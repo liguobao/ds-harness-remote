@@ -260,6 +260,16 @@ vi.mock('react-native', () => {
     Animated: {
       Value: MockAnimatedValue,
       View: 'Animated.View',
+      add: (a: unknown, b: unknown) => ({ add: [a, b] }),
+      spring(value: MockAnimatedValue, config: { toValue: number }) {
+        return {
+          start(cb?: (result: { finished: boolean }) => void) {
+            value.setValue(config.toValue)
+            cb?.({ finished: true })
+          },
+          stop() {},
+        }
+      },
       timing(value: MockAnimatedValue, config: { toValue: number; duration: number }) {
         let timer: ReturnType<typeof setTimeout> | undefined
         let callback: ((result: { finished: boolean }) => void) | undefined
@@ -294,6 +304,9 @@ vi.mock('react-native', () => {
     },
     KeyboardAvoidingView: 'KeyboardAvoidingView',
     Modal: 'Modal',
+    PanResponder: {
+      create: (config: Record<string, unknown>) => ({ panHandlers: config }),
+    },
     Platform: mockEnv.platform,
     Pressable: 'Pressable',
     StyleSheet: {
@@ -313,6 +326,8 @@ vi.mock('../src/ui/theme-context', () => ({
   useTheme: () => ({
     colors: {
       background: '#ffffff',
+      surface: '#ffffff',
+      subtle: '#7C8492',
       modalBackdrop: 'rgba(15, 15, 15, 0.42)',
     },
     scheme: 'light',

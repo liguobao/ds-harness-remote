@@ -45,6 +45,7 @@ import type {
 } from '../types'
 import { strings } from '../locales/i18n'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 
@@ -1871,7 +1872,7 @@ function createStyles(colors: ThemeColors) {
     fieldSubLabel: { ...type.caption, color: colors.muted, marginBottom: spacing.xs, fontWeight: '600' },
     fieldValue: { ...type.body, color: colors.ink },
     fieldValueMuted: { ...type.caption, color: colors.muted },
-    fieldValueCode: { ...type.caption, color: colors.muted, fontFamily: 'monospace' },
+    fieldValueCode: { ...type.caption, color: colors.muted, fontFamily: monoFontFamily },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: spacing.xs },
     linkedSessionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
     linkedSessionTitle: { ...type.body, color: colors.ink, flex: 1 },

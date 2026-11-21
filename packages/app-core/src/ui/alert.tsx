@@ -1,10 +1,10 @@
 import { useRef, useSyncExternalStore } from 'react'
+import { Alert as RNAlert, Platform } from 'react-native'
 import { ConfirmDialog, type ConfirmDialogCloseCause } from '../screens/chat/confirm-dialog'
 
 /**
- * Drop-in replacement for React Native's `Alert.alert`: same call signature,
- * but the dialog renders through the app-themed `ConfirmDialog` instead of the
- * system AlertDialog, so colors, button styling and wording follow the theme.
+ * Drop-in replacement for React Native's `Alert.alert`: uses the native system
+ * alert on iOS and renders through the app-themed `ConfirmDialog` on Android.
  * `AlertHost` must be mounted once near the app root.
  */
 
@@ -36,6 +36,10 @@ export const Alert = {
     buttons?: AlertButton[],
     options?: { cancelable?: boolean; onDismiss?: () => void },
   ): void {
+    if (Platform.OS === 'ios') {
+      RNAlert.alert(title, message, buttons, options)
+      return
+    }
     store.request = {
       title,
       ...(message !== undefined ? { message } : {}),
@@ -47,6 +51,11 @@ export const Alert = {
 }
 
 export function AlertHost() {
+  if (Platform.OS === 'ios') return null
+  return <AndroidAlertHost />
+}
+
+function AndroidAlertHost() {
   const request = useSyncExternalStore(subscribe, () => store.request)
   // Keep the last request around so the dialog fades out with its content
   // instead of blanking the moment the request is cleared.
@@ -71,6 +80,7 @@ export function AlertHost() {
       buttons={(shown?.buttons ?? []).map(button => ({
         label: button.text,
         danger: button.style === 'destructive',
+        role: button.style,
         onPress: button.onPress,
       }))}
     />

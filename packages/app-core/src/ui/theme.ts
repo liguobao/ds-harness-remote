@@ -31,6 +31,8 @@ export interface ThemeColors {
   cardOpaque: string
   /** Pills, pressed rows and other fills drawn on a surface. */
   surfaceStrong: string
+  /** Secondary fills inside cards (neutral buttons, input wells). */
+  surfaceMuted?: string
   /** Inset grouped lists (settings-style sections) drawn on the canvas. */
   grouped: string
   /** Floating header chips and other controls that hover over content. */
@@ -79,11 +81,12 @@ export const lightColors: ThemeColors = {
   card: '#FFFFFF',
   cardOpaque: '#FFFFFF',
   surfaceStrong: '#ECEFF4',
+  surfaceMuted: '#F1F3F7',
   grouped: '#FFFFFF',
   elevated: '#FFFFFF',
   ink: '#0F0F0F',
   muted: '#59606D',
-  subtle: '#B9B9BB',
+  subtle: '#7C8492',
   primary: '#4D6BFE',
   primaryPressed: '#3A56E6',
   primarySoft: '#EBEFFF',
@@ -118,6 +121,7 @@ export const darkColors: ThemeColors = {
   card: 'rgba(255, 255, 255, 0.05)',
   cardOpaque: '#17191D',
   surfaceStrong: '#232832',
+  surfaceMuted: '#1E232D',
   grouped: 'rgba(255, 255, 255, 0.05)',
   elevated: '#1D222B',
   ink: '#F2F4F7',
@@ -174,7 +178,7 @@ export interface ChatAppearance {
 export const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
   fontScale: 'md',
   spacingScale: 'balanced',
-  letterSpacing: 'wide',
+  letterSpacing: 'normal',
   accent: 'deepseek',
   bubbleStyle: 'soft',
   codeTheme: 'auto',
@@ -376,8 +380,8 @@ export const radius = {
 /** Soft lift for floating controls (header chips, cards, composer). */
 export function floatingShadow(colors: { shadow: string }, strength: 'low' | 'high' = 'low') {
   return strength === 'high'
-    ? { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 6 }
-    : { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 }
+    ? { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 8 }
+    : { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 1 }
 }
 
 /** Soft brand glow for prominent floating call-to-action pills (e.g. create session). */

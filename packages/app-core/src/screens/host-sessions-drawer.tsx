@@ -55,6 +55,7 @@ import { strings } from '../locales/i18n'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { elevationStyle } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
@@ -2168,7 +2169,7 @@ export function HostSessionsDrawer({
 
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
-    drawerHost: { zIndex: 20, elevation: 20 },
+    drawerHost: { zIndex: 20 },
     overlayContainer: { flex: 1 },
     overlay: { flex: 1, backgroundColor: colors.scrim },
     overlayCappedLight: { backgroundColor: 'rgba(15, 15, 15, 0.50)' },
@@ -2180,9 +2181,9 @@ const createStyles = (colors: ThemeColors) =>
       borderBottomRightRadius: radius.xl,
       shadowColor: colors.shadow,
       shadowOffset: { width: 4, height: 0 },
-      shadowOpacity: 0.16,
+      shadowOpacity: 0.14,
       shadowRadius: 16,
-      elevation: 12,
+      elevation: 8,
     },
     drawerCappedDark: { backgroundColor: colors.surface },
     drawerClip: { flex: 1, overflow: 'hidden' },
@@ -2472,7 +2473,6 @@ const createStyles = (colors: ThemeColors) =>
     popoverLayer: {
       ...StyleSheet.absoluteFill,
       zIndex: 999,
-      elevation: 999,
     },
     configPopover: {
       position: 'absolute',
@@ -2628,7 +2628,7 @@ const createStyles = (colors: ThemeColors) =>
       paddingHorizontal: 18,
       borderRadius: radius.pill,
       zIndex: 9999,
-      elevation: 9999,
+      ...elevationStyle(colors, 3),
     },
     toastText: {
       ...type.small,

@@ -8,6 +8,7 @@ import { IconJobOutline } from '../../ui/dsh-icons'
 import { requireSessionTools, useAppStore } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ActivityDockMode, type ThemeColors } from '../../ui/theme'
+import { monoFontFamily } from '../../ui/platform-style'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { TaskProgressChecklist } from './task-progress-checklist'
@@ -435,7 +436,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   jobHeader: { minHeight: 48, padding: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   jobCopy: { flex: 1, gap: spacing.xxs },
   output: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
-  outputText: { ...typography.small, color: colors.ink, fontFamily: 'monospace' },
+  outputText: { ...typography.small, color: colors.ink, fontFamily: monoFontFamily },
   empty: { ...typography.small, color: colors.muted, padding: spacing.sm },
   jobActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   retry: { minHeight: 44, paddingHorizontal: spacing.sm, justifyContent: 'center' },

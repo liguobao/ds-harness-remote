@@ -29,6 +29,7 @@ import Svg, { Path, Polygon } from 'react-native-svg'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { GithubIcon, GoogleIcon, ZhihuIcon } from '../ui/brand-icons'
 import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -499,7 +500,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
         style={({ pressed }) => [styles.emailSubmit, canSubmit && styles.emailSubmitReady, pressed && styles.providerButtonPressed]}
       >
         {busy
-          ? <ActivityIndicator color={colors.white} />
+          ? <ActivityIndicator color={colors.onPrimary ?? colors.white} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
       </Pressable>
       {challenge === undefined ? <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text> :
@@ -617,7 +618,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
               onPress={() => void Linking.openURL('https://github.com/liguobao').catch(() => {
                 Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
               })} style={styles.loginCreditLink}>
-              <Text style={styles.loginCredit}>Power by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
+              <Text style={styles.loginCredit}>Powered by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
             </Pressable>
           </View>
         </Screen>
@@ -1326,17 +1327,17 @@ export function SettingsScreen({
       </SheetModal>
       </View>
       {diagnosticsOpen && !onOpenDiagnostics && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
         </View>
       )}
       {aboutOpen && !onOpenAbout && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <AboutScreen onBack={() => setAboutOpen(false)} />
         </View>
       )}
       {appearanceOpen && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <ChatAppearanceScreen active={active && appearanceOpen} onBack={() => setAppearanceOpen(false)} />
         </View>
       )}
@@ -1995,7 +1996,7 @@ function createStyles(colors: ThemeColors) {
   emailSubmit: { minHeight: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xxs, backgroundColor: colors.surfaceStrong },
   emailSubmitReady: { backgroundColor: colors.primary },
   emailSubmitText: { ...type.smallStrong, fontSize: 16, color: colors.muted },
-  emailSubmitTextReady: { color: colors.white },
+  emailSubmitTextReady: { color: colors.onPrimary ?? colors.white },
   textLink: { minHeight: 40, justifyContent: 'center', paddingHorizontal: spacing.sm },
   textLinkLabel: { ...type.smallStrong, color: colors.primary },
   textLinkDisabled: { opacity: 0.5 },
@@ -2069,7 +2070,7 @@ function createStyles(colors: ThemeColors) {
   settingsLinkCopy: { flex: 1, gap: 3 },
   settingsLinkLabel: { ...type.smallStrong, color: colors.ink },
   settingsLinkUrl: { ...type.caption, color: colors.primary },
-  homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
+  homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
   homeMenuCard: { position: 'absolute', right: spacing.md, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, zIndex: 1, ...floatingShadow(colors, 'high') },
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
@@ -2093,14 +2094,9 @@ function createStyles(colors: ThemeColors) {
   resetGap: { height: spacing.sm },
   languageBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   languageDialog: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radius.xxl,
-    borderTopRightRadius: radius.xxl,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
+    paddingTop: 0,
     gap: spacing.md,
-    ...floatingShadow(colors, 'high'),
   },
   languageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: spacing.xs },
   languageTitle: { ...type.heading, fontSize: 18, color: colors.ink, fontWeight: '700' },
@@ -2129,8 +2125,8 @@ function createStyles(colors: ThemeColors) {
   terminalIconBtnPressed: { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
   terminalScroll: { maxHeight: 320 },
   terminalScrollContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
-  terminalLine: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  terminalLine: { fontFamily: monoFontFamily, fontSize: 12, lineHeight: 18 },
   terminalEmpty: { height: 160, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
-  terminalEmptyText: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
+  terminalEmptyText: { fontFamily: monoFontFamily, fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
   })
 }
