@@ -220,4 +220,41 @@ describe('Claude isolated history and live session recovery', () => {
       }))
     } finally { await client.close() }
   })
+
+  it('caches models and modes from history() without marking the session live, and clears cache on load or invalidation', async () => {
+    const { client } = setup((message, child, index) => {
+      if (message.method === 'session/load' && index === 1) {
+        child.reply(message, {
+          models: {
+            currentModelId: 'gemini-3-pro',
+            availableModels: [{ modelId: 'gemini-3-pro', name: 'Gemini 3 Pro' }],
+          },
+          modes: {
+            currentModeId: 'agent',
+            availableModes: [{ id: 'agent', name: 'Agent' }],
+          },
+        })
+        return true
+      }
+      return false
+    })
+    try {
+      await client.start()
+      expect(client.isSessionLoaded('saved-meta')).toBe(false)
+      await client.history('saved-meta', '/tmp')
+      expect(client.isSessionLoaded('saved-meta')).toBe(false)
+      expect(client.lastHistoryMetadata('saved-meta')).toMatchObject({
+        models: { current: { model: 'gemini-3-pro' } },
+        modes: { currentModeId: 'agent', availableModes: [{ id: 'agent', name: 'Agent' }] },
+      })
+      client.invalidateHistoryMetadata('saved-meta')
+      expect(client.lastHistoryMetadata('saved-meta')).toBeUndefined()
+
+      await client.history('saved-meta', '/tmp')
+      expect(client.lastHistoryMetadata('saved-meta')).toBeDefined()
+      await client.call('session/load', { sessionId: 'saved-meta', cwd: '/tmp', mcpServers: [] })
+      expect(client.isSessionLoaded('saved-meta')).toBe(true)
+      expect(client.lastHistoryMetadata('saved-meta')).toBeUndefined()
+    } finally { await client.close() }
+  })
 })

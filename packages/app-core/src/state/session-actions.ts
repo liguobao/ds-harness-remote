@@ -47,6 +47,22 @@ import type { AppState } from './store-state'
 const ACP_PAGE_SIZE = 60
 const acpOlderHistory = new Map<string, import('../types').ChatItem[]>()
 
+export function storeAcpPagedMessages(
+  sessionId: string,
+  merged: import('../types').ChatItem[],
+): { tail: import('../types').ChatItem[]; historyHasMore: boolean; oldestLoadedSeq?: number } {
+  const splitAt = Math.max(0, merged.length - ACP_PAGE_SIZE)
+  const older = merged.slice(0, splitAt)
+  const tail = merged.slice(splitAt)
+  if (older.length > 0) acpOlderHistory.set(sessionId, older)
+  else acpOlderHistory.delete(sessionId)
+  return {
+    tail,
+    historyHasMore: older.length > 0,
+    oldestLoadedSeq: older.length > 0 ? older.length : undefined,
+  }
+}
+
 export function hasAcpBackendFor(connection: SessionAccess['runtime']['connection'], backend: string): boolean {
   if (backend === 'claude') return connection.hasClaude()
   if (backend === 'hermes') return connection.hasHermes()
@@ -510,6 +526,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           await runtime.closeActiveCursorStream()
           if (!current()) return
           const existingMessages = get().messages[session.sessionId] ?? []
+          const priorSelected = get().selectedSession
+          const terminalRevision = runtime.acpTerminalRevisions.get(session.sessionId) ?? 0
+          const preOpenRunning = session.running || (priorSelected?.sessionId === session.sessionId && priorSelected.running)
           // Retire or drop dead in-flight streaming chunks from the prior connection
           const cleanExisting = existingMessages.filter(item => !(item.kind === 'message' && (item.streaming || item.id === 'cursor-assistant-live' || item.id === 'cursor-user-live')))
           const initialAcpIds = new Set(cleanExisting.map(item => item.id))
@@ -569,12 +588,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             const merged = details.events.length > 0 || acpBackend !== 'cursor'
               ? mergeAcpHistoryAndLive(items, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
-            const splitAt = Math.max(0, merged.length - ACP_PAGE_SIZE)
-            const older = merged.slice(0, splitAt)
-            const tail = merged.slice(splitAt)
-            if (older.length > 0) acpOlderHistory.set(session.sessionId, older)
-            else acpOlderHistory.delete(session.sessionId)
-            if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, tail)
+            const paged = storeAcpPagedMessages(session.sessionId, merged)
+            if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, paged.tail)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
               : state.sessions.find(item => item.sessionId === session.sessionId)
@@ -582,7 +597,16 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               (item.kind === 'message' && item.streaming === true)
               || ((item.kind === 'message' || item.kind === 'tool') && item.turn?.startsWith('acp-live:') && item.turnEnd === undefined),
             )
-            const resolvedRunning = hasLiveTurnInFlight ? true : (currentSession?.running ?? session.running)
+            const liveTurnSettled = liveDeltas.some(item =>
+              (item.kind === 'message' || item.kind === 'tool') && item.turn?.startsWith('acp-live:') && item.turnEnd !== undefined,
+            )
+            const resolvedRunning = hasLiveTurnInFlight
+              ? true
+              : details.running === false
+                ? false
+                : details.running === true
+                  ? (liveTurnSettled || (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) !== terminalRevision || (preOpenRunning && currentSession?.running === false) ? false : true)
+                  : (currentSession?.running ?? session.running)
             const active = state.selectedSession?.sessionId === session.sessionId
               ? { ...state.selectedSession, ...enrichedSession, running: resolvedRunning }
               : { ...enrichedSession, running: resolvedRunning }
@@ -594,11 +618,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 : [active, ...state.sessions],
               messages: {
                 ...state.messages,
-                [session.sessionId]: tail,
+                [session.sessionId]: paged.tail,
               },
               sessionModels: undefined,
-              historyHasMore: older.length > 0,
-              oldestLoadedSeq: older.length > 0 ? older.length : undefined,
+              historyHasMore: paged.historyHasMore,
+              oldestLoadedSeq: paged.oldestLoadedSeq,
               busyAction: undefined,
               ...(details.modes?.availableModes
                 ? {

@@ -164,12 +164,12 @@ describe('AcpRemoteGateway', () => {
       expect(publishArchive).toHaveBeenCalledWith('agent.acp.catalog.changed', { backend: 'opencode', sessionId: 'saved', archived: true })
       await expect(gateway.call('owner', prompt)).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
       await expect(gateway.call('reader', { method: 'dsh/sessionList', params: { backend: 'opencode', path: cwd } })).resolves.toEqual({ items: [] })
-      await expect(gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [] })
+      await expect(gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [], running: false })
       const restarted = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'opencode', enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => Object.assign(readyAcp(), { call: acp.call, history: acp.history, isSessionArchived: acp.isSessionArchived }))
       await restarted.start()
       try {
         await expect(restarted.call('new-reader', { method: 'session/prompt', params: { sessionId: 'saved', prompt: [{ type: 'text', text: 'blocked' }] } })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
-        await expect(restarted.call('new-reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [] })
+        await expect(restarted.call('new-reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [], running: false })
       } finally { await restarted.close() }
       archiveSession.mockRejectedValueOnce(new Error('native failed'))
       await expect(gateway.call('reader', archive)).rejects.toThrow('native failed')
@@ -457,9 +457,9 @@ describe('AcpRemoteGateway', () => {
         await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
       }
       await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
-      await expect(gateway.call('other', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history() })
+      await expect(gateway.call('other', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history(), running: false })
       await gateway.call('owner', { method: 'session/prompt', params: { backend: 'claude', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } })
-      await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history() })
+      await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history(), running: true })
       expect(history).toHaveBeenCalledWith('saved', cwd)
       gateway.dropPeer('owner')
       await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
@@ -482,13 +482,13 @@ describe('AcpRemoteGateway', () => {
       const read = { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } }
       const prompt = { method: 'session/prompt', params: { backend, sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } }
       try {
-        await expect(gateway.call('reader', read)).resolves.toEqual({ events })
+        await expect(gateway.call('reader', read)).resolves.toEqual({ events, running: false })
         expect(history).toHaveBeenCalledWith('saved', cwd)
         expect(vi.mocked(acp.call).mock.calls.map(([method]) => method)).toEqual(['session/list'])
         // Reading first must not reserve ownership and prevent a different peer loading.
         await expect(gateway.call('owner', { method: 'session/load', params: { backend, sessionId: 'saved' } })).resolves.toBeDefined()
         await expect(gateway.call('owner', prompt)).resolves.toMatchObject({ accepted: true })
-        await expect(gateway.call('reader', read)).resolves.toEqual({ events })
+        await expect(gateway.call('reader', read)).resolves.toEqual({ events, running: true })
         for (const mutation of [prompt,
           { method: 'session/cancel', params: { sessionId: 'saved' } },
           { method: 'dsh/selectModel', params: { backend, sessionId: 'saved', model: 'other' } },
@@ -555,7 +555,7 @@ describe('AcpRemoteGateway', () => {
               expect((await pending).error).toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
               expect(previous.history).not.toHaveBeenCalled()
               if (transition === 'replace') {
-                await expect(gateway.call('next-owner', { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } })).resolves.toEqual({ events: [] })
+                await expect(gateway.call('next-owner', { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } })).resolves.toEqual({ events: [], running: false })
                 expect(next.call).toHaveBeenCalledWith('session/list', {})
                 expect(next.history).toHaveBeenCalledWith('saved', nextCwd)
               } else expect(next.history).not.toHaveBeenCalled()
@@ -788,7 +788,7 @@ describe('AcpRemoteGateway', () => {
       await expect(gateway.call('owner', { method: 'session/prompt', params: { sessionId: 'cursor-image-session', backend: 'antigravity', prompt } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
       await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'acp:cursor-image-session', backend: 'antigravity' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
       await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'acp:cursor-image-session', backend: 'cursor' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
-      expect(await gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'cursor:cursor-image-session', backend: 'cursor' } })).toEqual({ events: [] })
+      expect(await gateway.call('owner', { method: 'dsh/sessionHistory', params: { sessionId: 'cursor:cursor-image-session', backend: 'cursor' } })).toEqual({ events: [], running: false })
       expect(acp.call).toHaveBeenCalledTimes(1)
     } finally { await gateway.close() }
   })
@@ -832,7 +832,7 @@ describe('AcpRemoteGateway', () => {
       ])
       expect(maxConcurrentHistoryReads).toBe(1)
       expect(first).toEqual(duplicateFirst)
-      expect(second).toEqual({ events: [{ method: 'session/update', params: { sessionId: 's2' } }] })
+      expect(second).toEqual({ events: [{ method: 'session/update', params: { sessionId: 's2' } }], running: false })
       expect(history).toHaveBeenCalledTimes(2)
     } finally {
       await gateway.close()
@@ -1600,7 +1600,7 @@ describe('AcpRemoteGateway', () => {
       await expect(gateway.call('reader', {
         method: 'dsh/sessionHistory',
         params: { sessionId: 'claude:saved' },
-      })).resolves.toEqual({ events: historyEvents })
+      })).resolves.toEqual({ events: historyEvents, running: false })
       expect(claudeHistory).toHaveBeenCalledWith('saved', cwd)
       expect(cursor.call).not.toHaveBeenCalled()
 
@@ -1818,6 +1818,92 @@ describe('AcpRemoteGateway', () => {
       expect(completedData.frame.params.update.catchUp).toHaveLength(2)
       expect(completedData.frame.params.update.catchUp?.[0]?.params.update.content.text.startsWith('chunk-2:')).toBe(true)
       expect(completedData.frame.params.update.catchUp?.[1]?.params.update.content.text.startsWith('chunk-3:')).toBe(true)
+    } finally {
+      resolvePrompt?.({ stopReason: 'end_turn' })
+      await gateway.close()
+    }
+  })
+
+  it('serves cached read-only models/modes from history without loading the live session and reports running authority', async () => {
+    const cwd = await realpath(process.cwd())
+    let loaded = false
+    let cachedMeta: { models?: unknown; modes?: { currentModeId?: string; availableModes: Array<{ id: string; name: string }> }; commands?: unknown[] } | undefined
+    const cachedModels = {
+      providers: [{ id: 'antigravity', name: 'Antigravity', models: [{ id: 'gemini-3-pro', name: 'Gemini 3 Pro' }] }],
+      selected: { provider: 'antigravity', model: 'gemini-3-pro' },
+    }
+    const cachedModes = {
+      currentModeId: 'agent',
+      availableModes: [{ id: 'agent', name: 'Agent' }],
+    }
+    const history = vi.fn(async () => {
+      cachedMeta = { models: cachedModels, modes: cachedModes }
+      return []
+    })
+    let resolvePrompt!: (value: unknown) => void
+    const acp = Object.assign(readyAcp(), {
+      history,
+      isSessionLoaded: vi.fn(() => loaded),
+      lastHistoryMetadata: vi.fn(() => cachedMeta),
+      invalidateHistoryMetadata: vi.fn(() => { cachedMeta = undefined }),
+    })
+    acp.call = vi.fn(async (method: string) => {
+      if (method === 'session/list') return { sessions: [{ sessionId: 'saved-agy', cwd }] }
+      if (method === 'session/load') { loaded = true; cachedMeta = undefined; return { sessionId: 'saved-agy' } }
+      if (method === 'session/prompt') return new Promise(resolve => { resolvePrompt = resolve })
+      if (method === 'dsh/selectModel') return { selected: { provider: 'antigravity', model: 'gemini-3-pro' } }
+      return {}
+    })
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+      silentLogger(),
+      () => acp,
+    )
+    await gateway.start()
+    try {
+      const historyResult = await gateway.call('owner', {
+        method: 'dsh/sessionHistory',
+        params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+      }) as { events: unknown[]; running?: boolean; modes?: unknown }
+      expect(historyResult).toMatchObject({ events: [], running: false, modes: cachedModes })
+
+      // Read-only model & mode queries after history must reuse cached metadata without triggering live session/load.
+      await expect(gateway.call('owner', {
+        method: 'dsh/sessionModels',
+        params: { backend: 'antigravity', sessionId: 'saved-agy' },
+      })).resolves.toEqual(cachedModels)
+      await expect(gateway.call('owner', {
+        method: 'dsh/sessionModes',
+        params: { backend: 'antigravity', sessionId: 'saved-agy' },
+      })).resolves.toEqual(cachedModes)
+      expect(acp.call).not.toHaveBeenCalledWith('session/load', expect.anything())
+
+      // Mutating calls still load the live session and invalidate cached metadata.
+      await expect(gateway.call('owner', {
+        method: 'dsh/selectModel',
+        params: { backend: 'antigravity', sessionId: 'saved-agy', model: 'gemini-3-pro' },
+      })).resolves.toBeDefined()
+      expect(acp.call).toHaveBeenCalledWith('session/load', { sessionId: 'saved-agy', cwd, mcpServers: [] })
+
+      // Active prompt makes dsh/sessionHistory report running: true until the turn settles.
+      await gateway.call('owner', {
+        method: 'session/prompt',
+        params: { backend: 'antigravity', sessionId: 'saved-agy', prompt: [{ type: 'text', text: 'hi' }] },
+      })
+      const runningHistory = await gateway.call('owner', {
+        method: 'dsh/sessionHistory',
+        params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+      }) as { running?: boolean }
+      expect(runningHistory.running).toBe(true)
+
+      resolvePrompt({ stopReason: 'end_turn' })
+      await vi.waitFor(async () => {
+        const doneHistory = await gateway.call('owner', {
+          method: 'dsh/sessionHistory',
+          params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+        }) as { running?: boolean }
+        expect(doneHistory.running).toBe(false)
+      })
     } finally {
       resolvePrompt?.({ stopReason: 'end_turn' })
       await gateway.close()

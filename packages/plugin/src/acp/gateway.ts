@@ -637,27 +637,39 @@ export class AcpRemoteGateway {
         // the live session's control ownership.
         const client = this.requireAcp(backend) as CursorAcpLike & {
           history?: (sessionId: string, cwd: string) => Promise<unknown[]>
-          lastHistoryMetadata?: (sessionId: string) => { modes?: unknown; commands?: unknown[] } | undefined
+          lastHistoryMetadata?: (sessionId: string) => { models?: unknown; modes?: { availableModes?: unknown[] }; commands?: unknown[] } | undefined
         }
         if (!client.history) {
-          return { events: [], ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
+          return {
+            events: [],
+            running: this.hasTurnInFlight(conversationId),
+            ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
+          }
         }
         const events = await this.readCatalogHistory(backend, client as CursorAcpLike & { history: (sessionId: string, cwd: string) => Promise<unknown[]> }, conversationId, cwd, assertCurrent)
         const cachedMeta = client.lastHistoryMetadata?.(conversationId)
+        const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0
+          ? cachedMeta.modes
+          : undefined
         return {
           events,
+          running: this.hasTurnInFlight(conversationId),
           ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
-          ...(cachedMeta?.modes ? { modes: cachedMeta.modes } : {}),
+          ...(nonEmptyModes ? { modes: nonEmptyModes } : {}),
           ...(cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}),
         }
       }
-      if (backend !== 'antigravity') return { events: [] }
+      if (backend !== 'antigravity') return { events: [], running: this.hasTurnInFlight(conversationId) }
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
       this.logger.info('ACP session history fetched', {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length,
       })
-      return { events, ...(persistedPreset ? { permissionPreset: persistedPreset } : {}) }
+      return {
+        events,
+        running: this.hasTurnInFlight(conversationId),
+        ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
+      }
     }
 
     if (call.method === 'session/new') {
@@ -780,7 +792,16 @@ export class AcpRemoteGateway {
         this.requireSessionOwner(connectionId, sessionId)
         const cwd = await this.catalogSessionCwd(preloadBackend, sessionId)
         assertCurrent()
-        await this.requireAcp(preloadBackend).call('session/load', { sessionId, cwd, mcpServers: [] })
+        const acp = this.requireAcp(preloadBackend) as CursorAcpLike & {
+          isSessionLoaded?: (id: string) => boolean
+          lastHistoryMetadata?: (id: string) => { models?: unknown; modes?: unknown; commands?: unknown[] } | undefined
+        }
+        if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/sessionModes') && acp.isSessionLoaded?.(sessionId) === false) {
+          const cachedMeta = acp.lastHistoryMetadata?.(sessionId)
+          if (call.method === 'dsh/sessionModels' && cachedMeta?.models !== undefined) return cachedMeta.models
+          if (call.method === 'dsh/sessionModes' && cachedMeta?.modes !== undefined) return cachedMeta.modes
+        }
+        await acp.call('session/load', { sessionId, cwd, mcpServers: [] })
         assertCurrent()
       } else if (preloadBackend === 'cursor' && sessionId !== undefined) {
         if (!this.sessionCwds.has(sessionId) && this.isNativeCatalogBackend('cursor')) {
@@ -1002,6 +1023,9 @@ export class AcpRemoteGateway {
       if (key.endsWith(`:${sessionId}`)) {
         this.pendingHistoryReads.delete(key)
       }
+    }
+    for (const instance of this.backendInstances.values()) {
+      ;(instance.client as { invalidateHistoryMetadata?: (id: string) => void }).invalidateHistoryMetadata?.(sessionId)
     }
   }
 

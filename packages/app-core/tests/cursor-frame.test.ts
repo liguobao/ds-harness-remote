@@ -210,4 +210,56 @@ describe('applyCursorFrame', () => {
       [{ kind: 'message', id: 'l-ok', sessionId: sid, role: 'assistant', text: 'OK', createdAt: 2 }],
     )).toHaveLength(2)
   })
+
+  it('decodes structured ACP tool_call_update content, diffs, rawOutput text, and error flags', () => {
+    const sid = 'antigravity:acp-tools'
+    const frame = (update: Record<string, unknown>) => ({
+      streamId: 's1',
+      frame: { method: 'session/update', params: { sessionId: 'acp-tools', update } },
+    })
+    let messages = applyCursorFrame([], sid, frame({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-1',
+      title: 'Edit file',
+      status: 'in_progress',
+      content: [],
+    }))
+    expect(messages[0]).toMatchObject({ kind: 'tool', state: 'running' })
+    expect((messages[0] as { resultDetail?: unknown }).resultDetail).toBeUndefined()
+
+    messages = applyCursorFrame(messages, sid, frame({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call-1',
+      status: 'completed',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Updated successfully' } },
+        { type: 'diff', path: 'src/app.ts', oldText: 'old()', newText: 'new()' },
+      ],
+    }))
+    expect(messages[0]).toMatchObject({
+      kind: 'tool',
+      state: 'finished',
+      resultDetail: {
+        text: 'Updated successfully\n\nFile: src/app.ts\n--- before\nold()\n+++ after\nnew()',
+      },
+    })
+
+    messages = applyCursorFrame(messages, sid, frame({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-2',
+      title: 'Run check',
+      status: 'in_progress',
+    }))
+    messages = applyCursorFrame(messages, sid, frame({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call-2',
+      status: 'completed',
+      rawOutput: { isError: true, content: [{ type: 'text', text: 'exit code 1' }] },
+    }))
+    expect(messages[1]).toMatchObject({
+      kind: 'tool',
+      state: 'failed',
+      resultDetail: { text: 'exit code 1' },
+    })
+  })
 })

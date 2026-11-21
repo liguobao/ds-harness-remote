@@ -30,6 +30,9 @@ export class SessionRuntime {
   activeCodexStream: CodexStream | undefined
   activeCodexTimeline: CodexTimelineState | undefined
   activeCursorStream: AcpStream | undefined
+  acpFrameRevision = 0
+  /** Last terminal (`prompt_completed` / `prompt_failed`) frame ordinal per session. */
+  readonly acpTerminalRevisions = new Map<string, number>()
   readonly codexModelSelections = new Map<string, ModelSelection>()
   connectionGeneration = 0
   /** Rows created before this instant predate the current connection (reconcile scope). */
