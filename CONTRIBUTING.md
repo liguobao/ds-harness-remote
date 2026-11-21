@@ -69,6 +69,7 @@ For full local verification aligned with CI's `quality` job:
 pnpm install --frozen-lockfile
 pnpm --filter './packages/**' -r build
 pnpm -r check
+pnpm exec oxlint --type-aware --quiet packages apps scripts
 node scripts/verify-dsh-plugin.mjs
 pnpm -r test
 NODE_ENV=production pnpm --workspace-concurrency=1 -r build
@@ -77,6 +78,7 @@ git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/clien
 ```
 
 - Always pass `--workspace-concurrency=1` for a full production build so mobile build steps and plugin bundling do not contend with each other.
+- If you modify tracked shell scripts (`*.sh`, excluding `zsh` scripts such as `apps/ios/ios/ci_scripts/ci_post_clone.sh`) and have `shellcheck` installed locally, run `shellcheck -S warning <script.sh>` (CI runs this across all tracked non-`zsh` `*.sh` files).
 - `node scripts/verify-packed-webrtc.mjs` packs and production-installs both the root package and `packages/plugin` into temporary directories; run it after `./packages/**` is built in an environment that can run `npm install`.
 
 ### Committed generated artifacts vs. ignored outputs
@@ -114,14 +116,18 @@ Avoid brittle unit tests for static copy, icons, colors, layout, or source-text 
 
 ## Code style and local conventions
 
-This repository does **not** configure ESLint, Prettier, Biome, `.editorconfig`, `commitlint`, or Husky Git hooks. Static enforcement comes from strict TypeScript (`strict: true` in `tsconfig.base.json`, plus `noUncheckedIndexedAccess: true` in `packages/app-core`) and the repository's verification scripts.
+This repository uses lightweight static checks and editor defaults without a dedicated formatter or Git hooks:
+
+- **Editor and line endings**: [`.editorconfig`](.editorconfig) sets UTF-8, LF line endings, 2-space indentation, final newlines, and trailing-whitespace trimming, with per-file overrides for `*.md`, `*.patch`, `packages/plugin/dist/*.js`, and `Makefile`. [`.gitattributes`](.gitattributes) enforces LF for `*.sh` scripts and preserves whitespace exemptions for generated plugin bundles and `*.patch` files.
+- **TypeScript and React linting**: [`.oxlintrc.json`](.oxlintrc.json) configures type-aware **Oxlint** (`oxlint` + `oxlint-tsgolint`), run via `pnpm exec oxlint --type-aware --quiet packages apps scripts`. Error-level rules enforce `react/rules-of-hooks`, `typescript/no-floating-promises`, `typescript/no-misused-promises` (with `checksVoidReturn.attributes: false`), and a curated set of core correctness rules (such as `no-debugger`, `no-unreachable`, and `no-dupe-keys`); `react/exhaustive-deps` and `eslint/no-unused-vars` (`_` prefix ignored) are warnings. Generated/vendored/native directories (such as `dist/`, `generated/`, `vendor/`, `apps/harmony/`, `examples/mock-host/`, and `fixtures/`) are ignored, and overrides for `**/tests/**`, `*.test.ts(x)`, and `scripts/transport-bench/**` relax `react/rules-of-hooks` and `typescript/no-misused-promises` (see [`.oxlintrc.json`](.oxlintrc.json) for the full list).
+- **What is not configured**: The repository does **not** configure ESLint, Prettier, Biome, `commitlint`, or Husky Git hooks. Strict TypeScript (`strict: true` in `tsconfig.base.json`, plus `noUncheckedIndexedAccess: true` in `packages/app-core`), Oxlint, ShellCheck (for tracked non-`zsh` `*.sh` scripts), and repository verification scripts form the static checks.
 
 Match the conventions of the subtree you edit rather than reformatting unrelated code:
 
 - **Node / ESM TypeScript** (`packages/{plugin,protocol,crypto,webrtc,client-core}`, `apps/{server,browser,vscode}`): 2-space indentation, single quotes, no trailing semicolons, trailing commas, and explicit `.js` extensions on relative imports (`NodeNext`).
 - **Mobile TypeScript** (`packages/app-core`, `apps/{android,ios}`): 2-space indentation, no trailing semicolons, extensionless relative imports (Expo TypeScript resolution).
 - **HarmonyOS ArkTS** (`apps/harmony/entry/src/**/*.ets` and companion `.mjs` scripts): 2-space indentation, single quotes, trailing semicolons, and explicit type annotations.
-- **Encoding and whitespace**: Save text files as UTF-8 without BOM and run `git diff --check` before committing.
+- **Encoding and whitespace**: Follow [`.editorconfig`](.editorconfig) and [`.gitattributes`](.gitattributes) (save text files as UTF-8 without BOM), and run `git diff --check` before committing.
 
 For wire protocol changes, update [`docs/protocol.md`](docs/protocol.md), `packages/protocol`, `fixtures/`, and affected consumers together rather than inventing parallel contracts.
 
@@ -154,7 +160,7 @@ For wire protocol changes, update [`docs/protocol.md`](docs/protocol.md), `packa
 The workflows below describe what automation executes in this repository; final merge decisions rest with maintainers and check outcomes:
 
 - **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** runs on `push` and `pull_request`, with **`paths-ignore: ["**.md", "docs/**"]`** (Markdown-only and `docs/**` PRs do not automatically trigger CI).
-  - For code or config changes, it runs `changes` (path detection), `quality` (workspace build, dist diff check, typecheck, `verify-dsh-plugin.mjs`, workspace tests, HarmonyOS Node contract/i18n/version checks, production build, and `verify-packed-webrtc.mjs`), `xfs-refresh` (Linux XFS credential lock tests), and `plugin-package` (`.tgz` and browser extension packaging).
+  - For code or config changes, it runs `changes` (path detection), `quality` (workspace build, dist diff check, typecheck, type-aware Oxlint, ShellCheck on non-`zsh` `*.sh` scripts, `verify-dsh-plugin.mjs`, workspace tests, HarmonyOS Node contract/i18n/version checks, production build, and `verify-packed-webrtc.mjs`), `xfs-refresh` (Linux XFS credential lock tests), and `plugin-package` (`.tgz` and browser extension packaging).
   - Path-gated jobs run conditionally: `android-apk` (PR builds target `arm64-v8a` only) and `ios-build` (unsigned compilation on macOS; requires no Apple credentials, so fork PRs can run it).
 - **[`.github/workflows/harmony-hap.yml`](.github/workflows/harmony-hap.yml)** runs only on the upstream repository's self-hosted `harmonyos` runner via manual dispatch or release invocation; it does not run automatically on fork PRs.
 
