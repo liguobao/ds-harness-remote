@@ -165,6 +165,7 @@ export type SchemaFieldKind = 'boolean' | 'number' | 'string' | 'string-list' | 
 export interface SchemaField {
   key: string
   kind: SchemaFieldKind
+  label?: string
   description?: string
   defaultValue?: unknown
   min?: number
@@ -206,8 +207,10 @@ function describeField(
   if (node === undefined) return undefined
   const meta = isRecord(node.meta) ? node.meta : {}
   if (meta.hidden === true) return undefined
+  const label = localized(meta.title) ?? localized(meta.label)
   const base = {
     key,
+    ...(label === undefined ? {} : { label }),
     ...(localized(meta.description) === undefined ? {} : { description: localized(meta.description) }),
     ...(meta.default === undefined ? {} : { defaultValue: meta.default }),
     ...(meta.role === 'secret' ? { secret: true } : {}),

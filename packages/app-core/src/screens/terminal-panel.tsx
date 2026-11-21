@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { CirclePlus } from 'lucide-react-native'
 import { requireSessionTools } from '../state/store'
@@ -8,15 +8,65 @@ import { TerminalAttachment } from '../services/terminal-attachment'
 import type { TerminalInfo } from '../services/session-tools'
 import { terminalHtml } from '../generated/terminal-html'
 import { strings as t } from '../locales/i18n'
-import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
-import { useTheme } from '../ui/theme-context'
-import { spacing, type } from '../ui/theme'
+import { BlurHeaderFrame, IconButton, TopBar } from '../ui/components'
+import { androidRipple, continuousRadius } from '../ui/platform-style'
+import { useTheme, type ThemeColors } from '../ui/theme-context'
+import { radius, spacing, type } from '../ui/theme'
+import { useThemedStyles } from '../ui/use-themed-styles'
 import { sessionToolsError } from './session-tools-error'
 
 const SOURCE = { html: terminalHtml, baseUrl: 'about:blank' }
 
+function TerminalChip({
+  label,
+  variant = 'key',
+  disabled = false,
+  selected = false,
+  onPress,
+}: {
+  label: string
+  variant?: 'primary' | 'quiet' | 'danger' | 'key'
+  disabled?: boolean
+  selected?: boolean
+  onPress: () => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
+      android_ripple={androidRipple(colors)}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.chip,
+        variant === 'primary' && styles.chipPrimary,
+        variant === 'quiet' && styles.chipQuiet,
+        variant === 'danger' && styles.chipDanger,
+        variant === 'key' && styles.chipKey,
+        pressed && !disabled && styles.chipPressed,
+        disabled && styles.chipDisabled,
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.chipText,
+          variant === 'primary' && styles.chipTextPrimary,
+          variant === 'danger' && styles.chipTextDanger,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  )
+}
+
 export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
   const web = useRef<WebView>(null)
   const attachment = useRef<TerminalAttachment | undefined>(undefined)
   const pendingAck = useRef<{ id: number; resolve: () => void; reject: () => void } | undefined>(undefined)
@@ -154,11 +204,33 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     onBack={onClose}
     action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
   />}>
-    <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
-      {items.map(item => <Button key={item.id} label={terminalLabel(item)} variant={active === item.id ? 'primary' : 'quiet'} onPress={() => setActive(item.id)} disabled={busy} />)}
-      {active && <Button label={t.tools.closeTerminal} variant="danger" disabled={busy} onPress={close} />}
-    </ScrollView>
-    {error && <View style={styles.notice}><Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text><Button label={t.tools.retry} variant="secondary" disabled={busy} onPress={() => setRevision(v => v + 1)} /></View>}
+    {(items.length > 0 || active !== undefined) && (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
+        style={[styles.controls, styles.controlsTop]}
+        contentContainerStyle={styles.row}
+      >
+        {items.map(item => (
+          <TerminalChip
+            key={item.id}
+            label={terminalLabel(item)}
+            variant={active === item.id ? 'primary' : 'quiet'}
+            selected={active === item.id}
+            onPress={() => setActive(item.id)}
+            disabled={busy}
+          />
+        ))}
+        {active && <TerminalChip label={t.tools.closeTerminal} variant="danger" disabled={busy} onPress={close} />}
+      </ScrollView>
+    )}
+    {error && (
+      <View style={styles.notice}>
+        <Text accessibilityRole="alert" style={styles.noticeText}>{error}</Text>
+        <TerminalChip label={t.tools.retry} variant="key" disabled={busy} onPress={() => setRevision(v => v + 1)} />
+      </View>
+    )}
     <View style={styles.terminal}>
       <WebView accessibilityLabel={t.tools.terminal} ref={web} source={SOURCE} style={styles.container} originWhitelist={['*']} javaScriptEnabled
         allowFileAccess={false} allowUniversalAccessFromFileURLs={false} mixedContentMode="never" setSupportMultipleWindows
@@ -180,13 +252,21 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
           } catch { /* Ignore malformed renderer messages. */ }
         }} />
       {status.length > 0 && <View pointerEvents="none" style={styles.status}>
-        {statusBusy && <ActivityIndicator size="small" color={colors.primary} />}
-        <Text numberOfLines={1} style={[styles.statusText, { color: colors.muted }]}>{status}</Text>
+        {statusBusy && <ActivityIndicator size="small" color="#F2F4F7" />}
+        <Text numberOfLines={1} style={styles.statusText}>{status}</Text>
       </View>}
     </View>
-    <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
-      <Button label={t.tools.keyboard} variant="secondary" disabled={!writable} onPress={() => send({ type: 'focus' })} />
-      {([[t.tools.interrupt, '\x03'], [t.tools.tab, '\t'], [t.tools.escape, '\x1b'], [t.tools.up, '\x1b[A'], [t.tools.down, '\x1b[B'], [t.tools.left, '\x1b[D'], [t.tools.right, '\x1b[C'], [t.tools.backspace, '\x7f'], [t.tools.enter, '\r']] as const).map(([label, data]) => <Button key={label} label={label} variant="secondary" disabled={!writable} onPress={() => input(data)} />)}
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      keyboardShouldPersistTaps="always"
+      style={[styles.controls, styles.controlsBottom]}
+      contentContainerStyle={styles.row}
+    >
+      <TerminalChip label={t.tools.keyboard} variant="key" disabled={!writable} onPress={() => send({ type: 'focus' })} />
+      {([[t.tools.interrupt, '\x03'], [t.tools.tab, '\t'], [t.tools.escape, '\x1b'], [t.tools.up, '\x1b[A'], [t.tools.down, '\x1b[B'], [t.tools.left, '\x1b[D'], [t.tools.right, '\x1b[C'], [t.tools.backspace, '\x7f'], [t.tools.enter, '\r']] as const).map(([label, data]) => (
+        <TerminalChip key={label} label={label} variant="key" disabled={!writable} onPress={() => input(data)} />
+      ))}
     </ScrollView>
   </BlurHeaderFrame>
 }
@@ -202,13 +282,59 @@ function folderName(cwd: unknown): string {
   const trimmed = cwd.replace(/[\\/]+$/u, '')
   return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1)
 }
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  terminal: { flex: 1 },
-  // Overlaid on the terminal background, so a status never adds layout height.
-  status: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, backgroundColor: 'rgba(16, 20, 24, 0.92)' },
-  statusText: { ...type.caption, flexShrink: 1 },
-  controls: { flexGrow: 0 },
-  row: { gap: spacing.sm, padding: spacing.sm, alignItems: 'center' },
-  notice: { padding: spacing.sm, gap: spacing.sm },
-})
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1 },
+    terminal: { flex: 1 },
+    // Overlaid on the terminal background, so a status never adds layout height.
+    status: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      backgroundColor: 'rgba(16, 20, 24, 0.92)',
+    },
+    statusText: { ...type.caption, color: 'rgba(242, 244, 247, 0.82)', flexShrink: 1 },
+    controls: { flexGrow: 0, backgroundColor: colors.background },
+    controlsTop: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
+    controlsBottom: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+    row: { gap: 6, paddingHorizontal: spacing.sm, paddingVertical: 6, alignItems: 'center' },
+    chip: {
+      height: 34,
+      minWidth: 40,
+      paddingHorizontal: 12,
+      ...continuousRadius(radius.sm),
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    chipPrimary: { backgroundColor: colors.primary },
+    chipQuiet: { backgroundColor: colors.surfaceStrong },
+    chipDanger: { backgroundColor: colors.dangerSoft },
+    chipKey: {
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+    },
+    chipPressed: { opacity: 0.72 },
+    chipDisabled: { opacity: 0.45 },
+    chipText: { ...type.small, fontSize: 13, fontWeight: '500', color: colors.ink },
+    chipTextPrimary: { color: colors.onPrimary ?? colors.white, fontWeight: '600' },
+    chipTextDanger: { color: colors.danger, fontWeight: '600' },
+    notice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      gap: spacing.sm,
+      backgroundColor: colors.dangerSoft,
+    },
+    noticeText: { ...type.small, color: colors.danger, flex: 1 },
+  })
+}

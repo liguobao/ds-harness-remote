@@ -3,8 +3,9 @@ import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'reac
 import { Check, RotateCcw } from 'lucide-react-native'
 import { strings as zhCN } from '../locales/i18n'
 import { useAppStore } from '../state/store'
-import { BlurHeaderFrame, GroupCard, IconButton, SectionTitle, TopBar, useHeaderInset } from '../ui/components'
+import { BlurHeaderFrame, GroupCard, IconButton, SectionTitle, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
+import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useResponsiveLayout } from '../ui/responsive'
 import {
   CHAT_ACCENT_SWATCHES,
@@ -35,6 +36,7 @@ function OptionSegments<T extends string>({
   value: T
   onChange: (next: T) => void
 }) {
+  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
     <View style={styles.segmentRow} accessibilityRole="radiogroup">
@@ -46,8 +48,13 @@ function OptionSegments<T extends string>({
             accessibilityRole="radio"
             accessibilityState={{ selected: active }}
             accessibilityLabel={option.label}
+            android_ripple={androidRipple(colors)}
             onPress={() => onChange(option.value)}
-            style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+            style={({ pressed }) => [
+              styles.segmentBtn,
+              active && styles.segmentBtnActive,
+              pressed && !active && styles.segmentBtnPressed,
+            ]}
           >
             <Text
               numberOfLines={1}
@@ -68,7 +75,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
   const resetChatAppearance = useAppStore(state => state.resetChatAppearance)
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const { contentMaxWidth, landscape } = useResponsiveLayout()
+  const { contentMaxWidth, landscape, compactHeight } = useResponsiveLayout()
   const backStateRef = useRef({ active, onBack })
   backStateRef.current = { active, onBack }
 
@@ -151,6 +158,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame
+        inset
         header={(
           <TopBar
             title={zhCN.settings.chatAppearance}
@@ -168,133 +176,135 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
           />
         )}
       >
-        <AppearanceBody
-          landscape={landscape}
-          contentMaxWidth={contentMaxWidth}
-          bottomInset={insets.bottom}
-        >
-          <SectionTitle>{zhCN.settings.chatAppearancePreviewTitle}</SectionTitle>
-          <View style={styles.previewCanvas}>
-            <View style={[styles.previewUserWrap, { marginBottom: metrics.turnBottomGap }]}>
-              <View style={[styles.previewUserBubble, bubbleContainerStyle]}>
-                <View style={{ marginBottom: -metrics.paragraphGap }}>
-                  <NativeMarkdown text={zhCN.settings.chatAppearancePreviewUser} colors={bubblePalette} />
+        <View style={styles.stickyPreviewArea}>
+          <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
+            <Text style={styles.previewLabel}>{zhCN.settings.chatAppearancePreviewTitle}</Text>
+            <View style={styles.previewCanvas}>
+              <ScrollView
+                style={(landscape || compactHeight) ? styles.previewScrollCompact : styles.previewScroll}
+                contentContainerStyle={styles.previewScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={[styles.previewUserWrap, { marginBottom: metrics.turnBottomGap }]}>
+                  <View style={[styles.previewUserBubble, bubbleContainerStyle]}>
+                    <View style={{ marginBottom: -metrics.paragraphGap }}>
+                      <NativeMarkdown text={zhCN.settings.chatAppearancePreviewUser} colors={bubblePalette} />
+                    </View>
+                  </View>
                 </View>
-              </View>
-            </View>
-            <View style={styles.previewAssistantWrap}>
-              <NativeMarkdown text={zhCN.settings.chatAppearancePreviewAssistant} />
+                <View style={styles.previewAssistantWrap}>
+                  <NativeMarkdown text={zhCN.settings.chatAppearancePreviewAssistant} />
+                </View>
+              </ScrollView>
             </View>
           </View>
+        </View>
 
-          <SectionTitle>{zhCN.settings.accentColor}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <View style={styles.swatchRow} accessibilityRole="radiogroup">
-              {accentOptions.map(option => {
-                const chosen = appearance.accent === option.value
-                const swatch = CHAT_ACCENT_SWATCHES[option.value][scheme]
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: chosen }}
-                    accessibilityLabel={option.label}
-                    onPress={() => update({ accent: option.value })}
-                    style={styles.swatchItem}
-                  >
-                    <View style={[styles.swatchRing, chosen && { borderColor: swatch.primary }]}>
-                      <View style={[styles.swatchDot, { backgroundColor: swatch.primary }]}>
-                        {chosen && <Check size={15} color={swatch.onPrimary} strokeWidth={2.6} />}
-                      </View>
-                    </View>
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.swatchLabel, chosen && { color: colors.ink, fontWeight: '600' }]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                )
-              })}
-            </View>
-          </GroupCard>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: spacing.xs, paddingBottom: spacing.xxxl + insets.bottom },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
+            <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
+            <GroupCard style={styles.cardBody}>
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.accentColor}</Text>
+                <View style={styles.swatchRow} accessibilityRole="radiogroup">
+                  {accentOptions.map(option => {
+                    const chosen = appearance.accent === option.value
+                    const swatch = CHAT_ACCENT_SWATCHES[option.value][scheme]
+                    return (
+                      <Pressable
+                        key={option.value}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: chosen }}
+                        accessibilityLabel={option.label}
+                        android_ripple={androidRipple(colors, true)}
+                        onPress={() => update({ accent: option.value })}
+                        style={({ pressed }) => [styles.swatchItem, pressed && styles.swatchItemPressed]}
+                      >
+                        <View style={[styles.swatchRing, chosen && { borderColor: swatch.primary }]}>
+                          <View style={[styles.swatchDot, { backgroundColor: swatch.primary }]}>
+                            {chosen && <Check size={15} color={swatch.onPrimary} strokeWidth={2.6} />}
+                          </View>
+                        </View>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.swatchLabel, chosen && { color: colors.ink, fontWeight: '600' }]}
+                        >
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+              </View>
 
-          <SectionTitle>{zhCN.settings.bubbleStyle}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <OptionSegments
-              options={bubbleOptions}
-              value={appearance.bubbleStyle}
-              onChange={bubbleStyle => update({ bubbleStyle })}
-            />
-          </GroupCard>
+              <View style={styles.controlDivider} />
 
-          <SectionTitle>{zhCN.settings.fontSize}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <OptionSegments
-              options={fontSizeOptions}
-              value={appearance.fontScale}
-              onChange={fontScale => update({ fontScale })}
-            />
-          </GroupCard>
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.bubbleStyle}</Text>
+                <OptionSegments
+                  options={bubbleOptions}
+                  value={appearance.bubbleStyle}
+                  onChange={bubbleStyle => update({ bubbleStyle })}
+                />
+              </View>
 
-          <SectionTitle>{zhCN.settings.lineSpacing}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <OptionSegments
-              options={lineSpacingOptions}
-              value={appearance.spacingScale}
-              onChange={spacingScale => update({ spacingScale })}
-            />
-          </GroupCard>
+              <View style={styles.controlDivider} />
 
-          <SectionTitle>{zhCN.settings.letterSpacing}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <OptionSegments
-              options={letterSpacingOptions}
-              value={appearance.letterSpacing}
-              onChange={letterSpacing => update({ letterSpacing })}
-            />
-          </GroupCard>
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.codeTheme}</Text>
+                <OptionSegments
+                  options={codeThemeOptions}
+                  value={appearance.codeTheme}
+                  onChange={codeTheme => update({ codeTheme })}
+                />
+              </View>
+            </GroupCard>
 
-          <SectionTitle>{zhCN.settings.codeTheme}</SectionTitle>
-          <GroupCard style={styles.groupPadding}>
-            <OptionSegments
-              options={codeThemeOptions}
-              value={appearance.codeTheme}
-              onChange={codeTheme => update({ codeTheme })}
-            />
-          </GroupCard>
-        </AppearanceBody>
+            <SectionTitle>{zhCN.bots.layoutLabel}</SectionTitle>
+            <GroupCard style={styles.cardBody}>
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.fontSize}</Text>
+                <OptionSegments
+                  options={fontSizeOptions}
+                  value={appearance.fontScale}
+                  onChange={fontScale => update({ fontScale })}
+                />
+              </View>
+
+              <View style={styles.controlDivider} />
+
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.lineSpacing}</Text>
+                <OptionSegments
+                  options={lineSpacingOptions}
+                  value={appearance.spacingScale}
+                  onChange={spacingScale => update({ spacingScale })}
+                />
+              </View>
+
+              <View style={styles.controlDivider} />
+
+              <View style={styles.controlBlock}>
+                <Text style={styles.controlLabel}>{zhCN.settings.letterSpacing}</Text>
+                <OptionSegments
+                  options={letterSpacingOptions}
+                  value={appearance.letterSpacing}
+                  onChange={letterSpacing => update({ letterSpacing })}
+                />
+              </View>
+            </GroupCard>
+          </View>
+        </ScrollView>
       </BlurHeaderFrame>
     </View>
-  )
-}
-
-function AppearanceBody({
-  landscape,
-  contentMaxWidth,
-  bottomInset,
-  children,
-}: {
-  landscape: boolean
-  contentMaxWidth: number
-  bottomInset: number
-  children: React.ReactNode
-}) {
-  const headerInset = useHeaderInset()
-  const styles = useThemedStyles(createStyles)
-  return (
-    <ScrollView
-      style={styles.flex}
-      contentContainerStyle={[
-        styles.scrollContent,
-        { paddingTop: headerInset + spacing.xs, paddingBottom: spacing.xxxl + bottomInset },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
-        {children}
-      </View>
-    </ScrollView>
   )
 }
 
@@ -303,13 +313,38 @@ function createStyles(colors: ThemeColors) {
     flex: { flex: 1, backgroundColor: colors.background },
     scrollContent: { paddingHorizontal: spacing.lg },
     column: { width: '100%', alignSelf: 'center' },
+    stickyPreviewArea: {
+      backgroundColor: colors.background,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.xs,
+      paddingBottom: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+    },
+    previewLabel: {
+      ...type.caption,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: colors.muted,
+      marginBottom: spacing.xs,
+      paddingLeft: spacing.xs,
+    },
     previewCanvas: {
-      borderRadius: radius.xl,
+      ...continuousRadius(radius.xl),
       backgroundColor: colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
-      padding: spacing.md,
+      overflow: 'hidden',
       ...floatingShadow(colors, 'low'),
+    },
+    previewScroll: {
+      maxHeight: 256,
+    },
+    previewScrollCompact: {
+      maxHeight: 156,
+    },
+    previewScrollContent: {
+      padding: spacing.md,
     },
     previewUserWrap: {
       alignSelf: 'flex-end',
@@ -340,8 +375,22 @@ function createStyles(colors: ThemeColors) {
     previewAssistantWrap: {
       alignSelf: 'stretch',
     },
-    groupPadding: {
-      padding: spacing.sm,
+    cardBody: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+    },
+    controlBlock: {
+      paddingVertical: spacing.sm,
+      gap: spacing.xs,
+    },
+    controlLabel: {
+      ...type.smallStrong,
+      fontSize: 13.5,
+      color: colors.ink,
+    },
+    controlDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.separator,
     },
     swatchRow: {
       flexDirection: 'row',
@@ -354,6 +403,10 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       gap: 6,
       paddingVertical: 4,
+      borderRadius: radius.md,
+    },
+    swatchItemPressed: {
+      opacity: 0.72,
     },
     swatchRing: {
       width: 38,
@@ -387,6 +440,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       minHeight: 36,
       borderRadius: radius.pill,
+      overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 6,
@@ -394,6 +448,9 @@ function createStyles(colors: ThemeColors) {
     segmentBtnActive: {
       backgroundColor: colors.surface,
       ...floatingShadow(colors, 'low'),
+    },
+    segmentBtnPressed: {
+      opacity: 0.72,
     },
     segmentText: {
       ...type.small,

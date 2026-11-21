@@ -64,6 +64,7 @@ import {
   TopBar,
 } from '../../ui/components'
 import { useResponsiveLayout } from '../../ui/responsive'
+import { androidRipple } from '../../ui/platform-style'
 import { radius, spacing, type } from '../../ui/theme'
 import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { Toggle } from '../../ui/toggle'
@@ -517,6 +518,15 @@ export function DsBotSettingsModal({
     return null
   }
 
+  const indexGroups: Array<{ key: string; title: string; ids: readonly DsBotSettingsTab[] }> = [
+    { key: 'basics', title: s.dsBotSettings.sectionBasics, ids: ['general', 'models', 'local-agents'] },
+    { key: 'team', title: s.dsBotSettings.sectionTeam, ids: ['bots', 'groups'] },
+    { key: 'channels', title: s.dsBotSettings.sectionChannels, ids: ['connectors', 'im'] },
+    { key: 'permissions', title: s.dsBotSettings.sectionPermissions, ids: ['capabilities', 'browser', 'computer'] },
+    { key: 'tasks', title: s.dsBotSettings.sectionTasks, ids: ['schedules', 'usage', 'secrets'] },
+  ]
+  const tabById = new Map(tabs.map(item => [item.id, item]))
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleBack} statusBarTranslucent>
       <View style={styles.root}>
@@ -530,7 +540,7 @@ export function DsBotSettingsModal({
           }
         >
           <Screen key={subpage ?? 'index'}>
-            <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <View style={[styles.contentColumn, subpage !== null && styles.subpageColumn, landscape && { maxWidth: contentMaxWidth }]}>
               {isLiveState && visibleError !== undefined && (
                 <Text accessibilityRole="alert" style={styles.errorBanner}>{visibleError}</Text>
               )}
@@ -539,85 +549,29 @@ export function DsBotSettingsModal({
                 <>
                   {renderPrerequisiteNotice()}
 
-                  <SectionTitle>{s.dsBotSettings.sectionBasics}</SectionTitle>
-                  <GroupCard>
-                    {tabs.slice(0, 3).map((item, idx) => (
-                      <GroupRow
-                        key={item.id}
-                        first={idx === 0}
-                        icon={item.icon}
-                        label={item.label}
-                        detail={item.detail}
-                        value={summaryForTab(item.id)}
-                        chevron
-                        onPress={() => setSubpage(item.id)}
-                      />
-                    ))}
-                  </GroupCard>
-
-                  <SectionTitle>{s.dsBotSettings.sectionTeam}</SectionTitle>
-                  <GroupCard>
-                    {tabs.slice(3, 5).map((item, idx) => (
-                      <GroupRow
-                        key={item.id}
-                        first={idx === 0}
-                        icon={item.icon}
-                        label={item.label}
-                        detail={item.detail}
-                        value={summaryForTab(item.id)}
-                        chevron
-                        onPress={() => setSubpage(item.id)}
-                      />
-                    ))}
-                  </GroupCard>
-
-                  <SectionTitle>{s.dsBotSettings.sectionChannels}</SectionTitle>
-                  <GroupCard>
-                    {tabs.slice(5, 7).map((item, idx) => (
-                      <GroupRow
-                        key={item.id}
-                        first={idx === 0}
-                        icon={item.icon}
-                        label={item.label}
-                        detail={item.detail}
-                        value={summaryForTab(item.id)}
-                        chevron
-                        onPress={() => setSubpage(item.id)}
-                      />
-                    ))}
-                  </GroupCard>
-
-                  <SectionTitle>{s.dsBotSettings.sectionPermissions}</SectionTitle>
-                  <GroupCard>
-                    {tabs.slice(7, 10).map((item, idx) => (
-                      <GroupRow
-                        key={item.id}
-                        first={idx === 0}
-                        icon={item.icon}
-                        label={item.label}
-                        detail={item.detail}
-                        value={summaryForTab(item.id)}
-                        chevron
-                        onPress={() => setSubpage(item.id)}
-                      />
-                    ))}
-                  </GroupCard>
-
-                  <SectionTitle>{s.dsBotSettings.sectionTasks}</SectionTitle>
-                  <GroupCard>
-                    {tabs.slice(10, 13).map((item, idx) => (
-                      <GroupRow
-                        key={item.id}
-                        first={idx === 0}
-                        icon={item.icon}
-                        label={item.label}
-                        detail={item.detail}
-                        value={summaryForTab(item.id)}
-                        chevron
-                        onPress={() => setSubpage(item.id)}
-                      />
-                    ))}
-                  </GroupCard>
+                  {indexGroups.map(group => (
+                    <View key={group.key}>
+                      <SectionTitle>{group.title}</SectionTitle>
+                      <GroupCard>
+                        {group.ids.map((id, idx) => {
+                          const item = tabById.get(id)
+                          if (!item) return null
+                          return (
+                            <GroupRow
+                              key={item.id}
+                              first={idx === 0}
+                              icon={item.icon}
+                              label={item.label}
+                              detail={item.detail}
+                              value={summaryForTab(item.id)}
+                              chevron
+                              onPress={() => setSubpage(item.id)}
+                            />
+                          )
+                        })}
+                      </GroupCard>
+                    </View>
+                  ))}
                 </>
               )}
 
@@ -637,7 +591,7 @@ export function DsBotSettingsModal({
               {/* 1. 通用 (General — excludes computer window appearance & keep-awake) */}
               {subpage === 'general' && (
                 <>
-                  <SectionTitle>{s.bots.defaultModel}</SectionTitle>
+                  <SectionTitle>{s.dsBotSettings.sectionBasics}</SectionTitle>
                   <GroupCard>
                     <GroupRow
                       first
@@ -648,12 +602,7 @@ export function DsBotSettingsModal({
                       chevron
                       onPress={() => setDefaultModelPickerOpen(true)}
                     />
-                  </GroupCard>
-
-                  <SectionTitle>{s.dsBotSettings.sectionConversation}</SectionTitle>
-                  <GroupCard>
                     <GroupRow
-                      first
                       icon={Sparkles}
                       label={s.bots.showThinking}
                       detail={s.dsBotSettings.showThinkingDetail}
@@ -970,9 +919,10 @@ export function DsBotSettingsModal({
                       >
                         <Pressable
                           disabled={!isLiveState}
+                          android_ripple={androidRipple(colors)}
                           onPress={() => setEditorTarget({ kind: 'bot', bot })}
                           style={({ pressed }) => [
-                            { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 },
+                            styles.botListMain,
                             pressed && { opacity: 0.75 },
                           ]}
                         >
@@ -1006,29 +956,33 @@ export function DsBotSettingsModal({
                           <ChevronRight size={18} color={colors.subtle} />
                         </Pressable>
                         {isLiveState && canDeleteBot(effectiveState, bot) && (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`${s.bots.delete} ${bot.name}`}
-                            disabled={busy}
-                            hitSlop={8}
-                            onPress={() => {
-                              Alert.alert(s.bots.delete, s.bots.deleteHint, [
-                                { text: s.bots.cancel, style: 'cancel' },
-                                {
-                                  text: s.bots.delete,
-                                  style: 'destructive',
-                                  onPress: () => void perform('delete-bot', { id: bot.id }),
-                                },
-                              ])
-                            }}
-                            style={({ pressed }) => [
-                              { padding: 6 },
-                              pressed && { opacity: 0.65 },
-                              busy && { opacity: 0.4 },
-                            ]}
-                          >
-                            <Trash2 size={17} color={colors.danger} />
-                          </Pressable>
+                          <View style={styles.rowActionWrap}>
+                            <View style={styles.rowActionDivider} />
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`${s.bots.delete} ${bot.name}`}
+                              disabled={busy}
+                              android_ripple={androidRipple(colors, true)}
+                              hitSlop={6}
+                              onPress={() => {
+                                Alert.alert(s.bots.delete, s.bots.deleteHint, [
+                                  { text: s.bots.cancel, style: 'cancel' },
+                                  {
+                                    text: s.bots.delete,
+                                    style: 'destructive',
+                                    onPress: () => void perform('delete-bot', { id: bot.id }),
+                                  },
+                                ])
+                              }}
+                              style={({ pressed }) => [
+                                styles.rowDeleteBtn,
+                                pressed && styles.rowDeleteBtnPressed,
+                                busy && { opacity: 0.4 },
+                              ]}
+                            >
+                              <Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
+                            </Pressable>
+                          </View>
                         )}
                       </View>
                     ))}
@@ -1080,9 +1034,10 @@ export function DsBotSettingsModal({
                           >
                             <Pressable
                               disabled={!isLiveState}
+                              android_ripple={androidRipple(colors)}
                               onPress={() => setEditorTarget({ kind: 'room', room })}
                               style={({ pressed }) => [
-                                { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 },
+                                styles.botListMain,
                                 pressed && { opacity: 0.75 },
                               ]}
                             >
@@ -1097,29 +1052,33 @@ export function DsBotSettingsModal({
                               <ChevronRight size={18} color={colors.subtle} />
                             </Pressable>
                             {isLiveState && !effectiveState.readOnly && (
-                              <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={`${s.bots.delete} ${room.name}`}
-                                disabled={busy}
-                                hitSlop={8}
-                                onPress={() => {
-                                  Alert.alert(s.bots.delete, s.bots.deleteHint, [
-                                    { text: s.bots.cancel, style: 'cancel' },
-                                    {
-                                      text: s.bots.delete,
-                                      style: 'destructive',
-                                      onPress: () => void perform('delete-room', { id: room.id }),
-                                    },
-                                  ])
-                                }}
-                                style={({ pressed }) => [
-                                  { padding: 6 },
-                                  pressed && { opacity: 0.65 },
-                                  busy && { opacity: 0.4 },
-                                ]}
-                              >
-                                <Trash2 size={17} color={colors.danger} />
-                              </Pressable>
+                              <View style={styles.rowActionWrap}>
+                                <View style={styles.rowActionDivider} />
+                                <Pressable
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${s.bots.delete} ${room.name}`}
+                                  disabled={busy}
+                                  android_ripple={androidRipple(colors, true)}
+                                  hitSlop={6}
+                                  onPress={() => {
+                                    Alert.alert(s.bots.delete, s.bots.deleteHint, [
+                                      { text: s.bots.cancel, style: 'cancel' },
+                                      {
+                                        text: s.bots.delete,
+                                        style: 'destructive',
+                                        onPress: () => void perform('delete-room', { id: room.id }),
+                                      },
+                                    ])
+                                  }}
+                                  style={({ pressed }) => [
+                                    styles.rowDeleteBtn,
+                                    pressed && styles.rowDeleteBtnPressed,
+                                    busy && { opacity: 0.4 },
+                                  ]}
+                                >
+                                  <Trash2 size={16} color={colors.muted} strokeWidth={1.8} />
+                                </Pressable>
+                              </View>
                             )}
                           </View>
                         )
@@ -1333,6 +1292,8 @@ const createStyles = (colors: ThemeColors) =>
     contentColumn: {
       width: '100%',
       alignSelf: 'center',
+    },
+    subpageColumn: {
       gap: spacing.sm,
     },
     loadingCardRow: {
@@ -1400,9 +1361,38 @@ const createStyles = (colors: ThemeColors) =>
     botListRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
-      paddingHorizontal: spacing.md,
+      paddingLeft: spacing.md,
+      paddingRight: spacing.xs,
       paddingVertical: 12,
+    },
+    botListMain: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      minWidth: 0,
+      paddingRight: spacing.xs,
+    },
+    rowActionWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      marginLeft: spacing.xs,
+    },
+    rowActionDivider: {
+      width: StyleSheet.hairlineWidth,
+      height: 22,
+      backgroundColor: colors.separator,
+    },
+    rowDeleteBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rowDeleteBtnPressed: {
+      backgroundColor: colors.surfaceStrong,
     },
     tagChip: {
       paddingHorizontal: 9,

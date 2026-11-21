@@ -34,7 +34,6 @@ import {
   Laptop,
   LayoutGrid,
   Monitor,
-  MoreHorizontal,
   Plus,
   MoreVertical,
   Search,
@@ -42,7 +41,6 @@ import {
   Settings,
   Sliders,
   Star,
-  Users,
   X,
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -55,7 +53,7 @@ import { strings } from '../locales/i18n'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { ErrorBanner, GroupCard, GroupRow, IconButton, SectionTitle } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
-import { elevationStyle } from '../ui/platform-style'
+import { androidRipple, continuousRadius, elevationStyle, tabularNumsStyle } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { easingCurve, indicatorGeometry, motionTokens, resolveMotion } from '../ui/motion'
@@ -1108,12 +1106,13 @@ export function HostSessionsDrawer({
         accessibilityRole="button"
         accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.devices.openInfo}`}
         disabled={connectionPhase !== 'connected' || onOpenDeviceInfo === undefined}
+        android_ripple={androidRipple(colors)}
         onPress={() => {
           Keyboard.dismiss()
           onOpenDeviceInfo?.()
         }}
-        hitSlop={6}
-        style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedFade]}
+        hitSlop={4}
+        style={({ pressed }) => [styles.hostFooterIcon, pressed && styles.pressedBg]}
       >
         <FooterHostIcon size={17} color={colors.ink} strokeWidth={1.8} />
       </Pressable>
@@ -1121,8 +1120,9 @@ export function HostSessionsDrawer({
         accessibilityRole="button"
         accessibilityLabel={`${deviceName ?? strings.devices.title} · ${strings.remoteHosts.switchTitle}`}
         disabled={onOpenHostSwitcher === undefined}
+        android_ripple={androidRipple(colors)}
         onPress={() => { Keyboard.dismiss(); onOpenHostSwitcher?.() }}
-        hitSlop={6}
+        hitSlop={4}
         style={({ pressed }) => [styles.hostFooterInfo, pressed && styles.pressedBg]}
       >
         <View style={styles.hostFooterNameRow}>
@@ -1393,14 +1393,11 @@ export function HostSessionsDrawer({
               const matchedWorkspace = section.workspaceId && section.workspaceId !== 'default'
                 ? backendWorkspaces.find(w => w.workspaceId === section.workspaceId)
                 : undefined
-              const isFavorited = Boolean(
-                deviceId && matchedWorkspace && favoriteWorkspaces.some(
-                  f => f.deviceId === deviceId && f.workspaceId === matchedWorkspace.workspaceId && f.backend === (matchedWorkspace.backend ?? backend),
-                ),
-              )
               return (
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityHint={matchedWorkspace ? strings.workspaces.options : undefined}
+                  android_ripple={androidRipple(colors)}
                   onPress={() => toggleWorkspace(section.id)}
                   onLongPress={() => {
                     if (!matchedWorkspace) return
@@ -1421,41 +1418,25 @@ export function HostSessionsDrawer({
                     <Text style={styles.workspaceRowTitle} numberOfLines={1}>
                       {section.title}
                     </Text>
-                    {isFavorited && (
-                      <Star size={12} color={colors.primary} fill={colors.primary} />
-                    )}
                     {section.total > 0 && (
                       <Text style={styles.workspaceCountText}>{section.total}</Text>
                     )}
                   </View>
                   <View style={styles.workspaceRowRight}>
                     {matchedWorkspace !== undefined && (
-                      <>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={strings.workspaces.newSessionIn(section.title)}
-                          hitSlop={6}
-                          onPress={e => {
-                            e.stopPropagation()
-                            void handleCreateSessionInWorkspace(matchedWorkspace)
-                          }}
-                          style={styles.workspaceSmallBtn}
-                        >
-                          <Plus size={15} color={colors.muted} />
-                        </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`${section.title} · ${strings.workspaces.options}`}
-                          hitSlop={6}
-                          onPress={e => {
-                            e.stopPropagation()
-                            setWorkspaceActionTarget(matchedWorkspace)
-                          }}
-                          style={styles.workspaceSmallBtn}
-                        >
-                          <MoreHorizontal size={15} color={colors.muted} />
-                        </Pressable>
-                      </>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={strings.workspaces.newSessionIn(section.title)}
+                        android_ripple={androidRipple(colors, true)}
+                        hitSlop={8}
+                        onPress={e => {
+                          e.stopPropagation()
+                          void handleCreateSessionInWorkspace(matchedWorkspace)
+                        }}
+                        style={({ pressed }) => [styles.workspaceSmallBtn, pressed && styles.pressedBg]}
+                      >
+                        <Plus size={16} color={colors.muted} strokeWidth={2} />
+                      </Pressable>
                     )}
                     {isExp ? <ChevronDown size={16} color={colors.subtle} /> : <ChevronRight size={16} color={colors.subtle} />}
                   </View>
@@ -1656,6 +1637,7 @@ export function HostSessionsDrawer({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.settings.title}
+            android_ripple={androidRipple(colors, true)}
             onPress={() => {
               Keyboard.dismiss()
               onOpenSettings()
@@ -2204,19 +2186,6 @@ const createStyles = (colors: ThemeColors) =>
     },
     brandLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginRight: spacing.sm, gap: 8 },
     brandTitle: { ...type.heading, fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.2, color: colors.ink, flexShrink: 1 },
-    brandBadge: {
-      backgroundColor: colors.ink,
-      paddingHorizontal: 5,
-      paddingVertical: 1.5,
-      borderRadius: 4,
-    },
-    brandBadgeText: {
-      color: colors.background,
-      fontSize: 10,
-      lineHeight: 12,
-      fontWeight: '800',
-      letterSpacing: 0.5,
-    },
     brandRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     iconBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconBtnRound: { width: 36, height: 36, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
@@ -2333,28 +2302,48 @@ const createStyles = (colors: ThemeColors) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.separator,
       backgroundColor: 'transparent',
-      paddingLeft: spacing.sm,
-      paddingRight: spacing.sm,
-      paddingVertical: 5,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
     },
     hostFooterLeft: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
       flex: 1,
       minWidth: 0,
-      paddingHorizontal: spacing.xs,
-      paddingVertical: 2,
-      borderRadius: radius.md,
+      backgroundColor: colors.card,
+      ...continuousRadius(radius.lg),
+      overflow: 'hidden',
     },
-    hostFooterIcon: { width: 30, height: 32, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-    hostFooterInfo: { flexShrink: 1, minWidth: 0, minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.xs, borderRadius: radius.md },
+    hostFooterIcon: {
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: colors.separator,
+    },
+    hostFooterInfo: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: spacing.sm,
+    },
     hostFooterNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0, flexShrink: 1 },
     hostFooterName: { ...type.bodyStrong, fontSize: 13.5, lineHeight: 18, color: colors.ink, flexShrink: 1 },
     hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
     hostFooterStatusText: { ...type.caption, fontSize: 12, color: colors.muted },
-    footerSettingsBtn: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+    footerSettingsBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.card,
+    },
     sectionList: { flex: 1 },
 
     workspaceRow: {
@@ -2366,18 +2355,15 @@ const createStyles = (colors: ThemeColors) =>
       marginHorizontal: spacing.md,
       marginTop: spacing.xs,
       backgroundColor: colors.card,
-      borderColor: colors.separator,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderLeftWidth: StyleSheet.hairlineWidth,
-      borderRightWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
     },
     workspaceRowCardSingle: {
-      borderRadius: radius.xl,
-      borderBottomWidth: StyleSheet.hairlineWidth,
+      ...continuousRadius(radius.xl),
     },
     workspaceRowCardTop: {
       borderTopLeftRadius: radius.xl,
       borderTopRightRadius: radius.xl,
+      ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     },
     workspaceRowLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flex: 1, minWidth: 0 },
     workspaceRowTitle: { ...type.bodyStrong, fontSize: 15, color: colors.ink, flexShrink: 1 },
@@ -2385,20 +2371,17 @@ const createStyles = (colors: ThemeColors) =>
       ...type.caption,
       fontSize: 12,
       color: colors.muted,
-      backgroundColor: colors.surfaceStrong,
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-      borderRadius: radius.pill,
+      ...tabularNumsStyle,
     },
     workspaceRowRight: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 2,
+      gap: 4,
       flexShrink: 0,
     },
     workspaceSmallBtn: {
-      width: 28,
-      height: 28,
+      width: 32,
+      height: 32,
       borderRadius: radius.pill,
       alignItems: 'center',
       justifyContent: 'center',
@@ -2412,20 +2395,21 @@ const createStyles = (colors: ThemeColors) =>
       minHeight: 46,
       marginHorizontal: spacing.md,
       backgroundColor: colors.card,
-      borderColor: colors.separator,
+      borderTopColor: colors.separator,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderLeftWidth: StyleSheet.hairlineWidth,
-      borderRightWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
     },
     sessionRowCardTop: {
       marginTop: spacing.xs,
+      borderTopWidth: 0,
       borderTopLeftRadius: radius.xl,
       borderTopRightRadius: radius.xl,
+      ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     },
     sessionRowCardBottom: {
       borderBottomLeftRadius: radius.xl,
       borderBottomRightRadius: radius.xl,
-      borderBottomWidth: StyleSheet.hairlineWidth,
+      ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     },
     sessionRowSelected: { backgroundColor: colors.primarySoft },
     sessionRowDragging: {
@@ -2447,7 +2431,7 @@ const createStyles = (colors: ThemeColors) =>
     runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
     sessionText: { ...type.body, fontSize: 15, color: colors.ink, flex: 1, marginRight: spacing.xs },
     sessionTextSelected: { fontWeight: '600', color: colors.primary },
-    timeText: { ...type.caption, color: colors.subtle },
+    timeText: { ...type.caption, color: colors.muted, ...tabularNumsStyle },
 
     showMoreRow: {
       paddingLeft: spacing.md + 14,
@@ -2456,13 +2440,11 @@ const createStyles = (colors: ThemeColors) =>
       justifyContent: 'center',
       marginHorizontal: spacing.md,
       backgroundColor: colors.card,
-      borderColor: colors.separator,
+      borderTopColor: colors.separator,
       borderTopWidth: StyleSheet.hairlineWidth,
-      borderLeftWidth: StyleSheet.hairlineWidth,
-      borderRightWidth: StyleSheet.hairlineWidth,
-      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomLeftRadius: radius.xl,
       borderBottomRightRadius: radius.xl,
+      ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     },
     showMoreText: { ...type.caption, color: colors.primary, fontWeight: '500' },
 

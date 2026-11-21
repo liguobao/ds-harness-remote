@@ -31,7 +31,7 @@ import {
 } from '../services/plugin-inventory'
 import { sessionToolsError } from './session-tools-error'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
-import { monoFontFamily } from '../ui/platform-style'
+import { androidRipple, continuousRadius, monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 
@@ -243,11 +243,17 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
   const status = !bundle.available
     ? strings.plugins.installOnDesktop
     : bundle.readOnly ? strings.plugins.readOnly : undefined
+  const detailMeta = [
+    status,
+    detail && bundle.version !== undefined ? `${strings.plugins.version} ${bundle.version}` : undefined,
+    detail ? bundle.name : undefined,
+  ].filter(Boolean).join(' · ')
   return (
     <View style={[styles.item, first !== true && styles.itemDivider]}>
       <Pressable
         accessibilityRole={detail ? undefined : 'button'}
         accessibilityLabel={bundle.title}
+        android_ripple={detail ? undefined : androidRipple(colors)}
         onPress={onOpen}
         disabled={detail}
         style={({ pressed }) => [styles.itemMain, pressed && !detail && styles.pressed]}
@@ -256,11 +262,11 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
         <View style={styles.cardText}>
           <View style={styles.titleRow}>
             <Text style={styles.cardTitle} numberOfLines={1}>{bundle.title}</Text>
-            {bundle.category === 'experimental' && <Text style={styles.badge}>{strings.plugins.experimental}</Text>}
-            {bundle.category === 'remote' && <Text style={[styles.badge, styles.badgeRemote]}>{strings.plugins.remoteBadge}</Text>}
+            {detail && bundle.category === 'experimental' && <Text style={styles.badge}>{strings.plugins.experimental}</Text>}
+            {detail && bundle.category === 'remote' && <Text style={[styles.badge, styles.badgeRemote]}>{strings.plugins.remoteBadge}</Text>}
           </View>
           {bundle.description !== undefined && (
-            <Text style={styles.cardDescription} numberOfLines={detail ? undefined : 2}>{bundle.description}</Text>
+            <Text style={styles.cardDescription} numberOfLines={detail ? undefined : 1}>{bundle.description}</Text>
           )}
           {detail && bundle.remoteFeature !== undefined && (
             <View style={styles.featureBox}>
@@ -268,13 +274,12 @@ function BundleCard({ bundle, busy, first, onToggle, onOpen }: {
               <Text style={styles.featureText}>{bundle.remoteFeature}</Text>
             </View>
           )}
-          {(detail || status !== undefined) && (
-            <Text style={[styles.meta, !bundle.available && styles.metaWarning]} numberOfLines={2}>
-              {[status, detail && bundle.version !== undefined ? `${strings.plugins.version} ${bundle.version}` : undefined,
-                detail ? bundle.name : undefined].filter(Boolean).join(' · ')}
+          {detailMeta.length > 0 && (
+            <Text style={[styles.meta, !bundle.available && styles.metaWarning]} numberOfLines={detail ? 2 : 1}>
+              {detailMeta}
             </Text>
           )}
-          {bundle.error !== undefined && <Text style={styles.errorText}>{bundle.error}</Text>}
+          {bundle.error !== undefined && <Text style={styles.errorText} numberOfLines={detail ? undefined : 1}>{bundle.error}</Text>}
         </View>
       </Pressable>
       <View style={styles.itemAction}>
@@ -374,8 +379,9 @@ function RowCard({ row, bundleEnabled, single, busy, writable, onToggle, onSaved
       {!single && <View style={styles.cardRow}>
         <View style={styles.cardText}>
           <Text style={styles.cardTitle} numberOfLines={1}>{row.title}</Text>
-          {row.description !== undefined && <Text style={styles.cardDescription}>{row.description}</Text>}
-          <Text style={styles.meta} numberOfLines={1}>{row.moduleName}</Text>
+          {row.description !== undefined
+            ? <Text style={styles.cardDescription} numberOfLines={2}>{row.description}</Text>
+            : row.moduleName !== row.title && <Text style={styles.meta} numberOfLines={1}>{row.moduleName}</Text>}
         </View>
         {busy ? <ActivityIndicator size="small" color={colors.muted} /> : (
           <Toggle
@@ -497,53 +503,59 @@ function SettingsForm({ settings, writable, onSaved }: {
     <View style={styles.form}>
       <Text style={styles.sectionTitle}>{strings.plugins.settings}</Text>
       <Text style={styles.sectionHint}>{writable ? strings.plugins.liveHint : strings.plugins.settingsReadOnly}</Text>
-      {fields.map(field => (
-        <View key={field.key} style={styles.field}>
-          <View style={styles.fieldHeader}>
-            <View style={styles.cardText}>
-              <Text style={styles.fieldLabel}>{field.description ?? field.key}</Text>
-              <Text style={styles.fieldKey}>{field.key}</Text>
+      {fields.map(field => {
+        const fieldTitle = field.label ?? field.description ?? field.key
+        const fieldSubtitle = field.label !== undefined && field.description !== undefined && field.description !== field.label
+          ? field.description
+          : undefined
+        return (
+          <View key={field.key} style={styles.field}>
+            <View style={styles.fieldHeader}>
+              <View style={styles.cardText}>
+                <Text style={styles.fieldLabel}>{fieldTitle}</Text>
+                {fieldSubtitle !== undefined && <Text style={styles.fieldDescription}>{fieldSubtitle}</Text>}
+              </View>
+              {field.kind === 'boolean' && (
+                <Toggle
+                  accessibilityLabel={fieldTitle}
+                  value={draft[field.key] === true}
+                  disabled={!editable}
+                  onValueChange={value => setDraft(current => ({ ...current, [field.key]: value }))}
+                  trackColor={{ true: colors.primary, false: colors.border }}
+                  thumbColor={colors.white}
+                />
+              )}
             </View>
-            {field.kind === 'boolean' && (
-              <Toggle
-                accessibilityLabel={field.key}
-                value={draft[field.key] === true}
-                disabled={!editable}
-                onValueChange={value => setDraft(current => ({ ...current, [field.key]: value }))}
-                trackColor={{ true: colors.primary, false: colors.border }}
-            thumbColor={colors.white}
+            {(field.kind === 'number' || field.kind === 'string' || field.kind === 'string-list') && (
+              <TextInput
+                accessibilityLabel={fieldTitle}
+                value={String(draft[field.key] ?? '')}
+                editable={editable}
+                onChangeText={text => {
+                  setDraft(current => ({ ...current, [field.key]: text }))
+                  if (invalid === field.key) setInvalid(undefined)
+                }}
+                keyboardType={field.kind === 'number' ? 'numeric' : 'default'}
+                multiline={field.kind === 'string-list'}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder={field.kind === 'string-list' ? strings.plugins.listHint : undefined}
+                placeholderTextColor={colors.subtle}
+                style={[styles.input, field.kind === 'string-list' && styles.inputMultiline, invalid === field.key && styles.inputInvalid]}
               />
             )}
+            {field.kind === 'number' && (
+              <Text style={[styles.fieldHint, invalid === field.key && styles.errorHint]}>
+                {invalid === field.key ? `${strings.plugins.invalidNumber} ` : ''}
+                {[field.min === undefined ? undefined : `≥ ${field.min}`, field.max === undefined ? undefined : `≤ ${field.max}`,
+                  field.defaultValue === undefined ? undefined : `${strings.plugins.defaultValue} ${String(field.defaultValue)}`]
+                  .filter(Boolean).join(' · ')}
+              </Text>
+            )}
+            {(field.kind === 'unsupported' || field.secret === true) && <Text style={styles.fieldHint}>{strings.plugins.unsupportedField}</Text>}
           </View>
-          {(field.kind === 'number' || field.kind === 'string' || field.kind === 'string-list') && (
-            <TextInput
-              accessibilityLabel={field.key}
-              value={String(draft[field.key] ?? '')}
-              editable={editable}
-              onChangeText={text => {
-                setDraft(current => ({ ...current, [field.key]: text }))
-                if (invalid === field.key) setInvalid(undefined)
-              }}
-              keyboardType={field.kind === 'number' ? 'numeric' : 'default'}
-              multiline={field.kind === 'string-list'}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder={field.kind === 'string-list' ? strings.plugins.listHint : undefined}
-              placeholderTextColor={colors.subtle}
-              style={[styles.input, field.kind === 'string-list' && styles.inputMultiline, invalid === field.key && styles.inputInvalid]}
-            />
-          )}
-          {field.kind === 'number' && (
-            <Text style={[styles.fieldHint, invalid === field.key && styles.errorHint]}>
-              {invalid === field.key ? `${strings.plugins.invalidNumber} ` : ''}
-              {[field.min === undefined ? undefined : `≥ ${field.min}`, field.max === undefined ? undefined : `≤ ${field.max}`,
-                field.defaultValue === undefined ? undefined : `${strings.plugins.defaultValue} ${String(field.defaultValue)}`]
-                .filter(Boolean).join(' · ')}
-            </Text>
-          )}
-          {(field.kind === 'unsupported' || field.secret === true) && <Text style={styles.fieldHint}>{strings.plugins.unsupportedField}</Text>}
-        </View>
-      ))}
+        )
+      })}
       {writable && (
         <Pressable
           accessibilityRole="button"
@@ -587,7 +599,7 @@ function createStyles(colors: ThemeColors) {
     sectionHint: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, paddingHorizontal: spacing.md },
     group: {
       backgroundColor: colors.card,
-      borderRadius: radius.xl,
+      ...continuousRadius(radius.xl),
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
       overflow: 'hidden',
@@ -680,7 +692,6 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.separator,
     },
     fieldHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    fieldKey: { fontFamily: monoFontFamily, fontSize: 12, color: colors.subtle },
     fieldDescription: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     fieldHint: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     errorHint: { color: colors.danger },
