@@ -31,6 +31,12 @@ const WELCOME_NOTICE_NAMESPACE = 'ui-settings-general'
 const WELCOME_NOTICE_FIELD = 'welcomeNoticeVersion'
 const WELCOME_NOTICE_VERSION = '2026-08-13.1'
 
+export const WORKSPACE_BINARY_ENDPOINTS = new Set([
+  'workspaceFiles/readBytes',
+  'officeToPdf/render',
+  'officeKit/render',
+])
+
 /** Client-side alpha Gateway carrier over the authenticated Remote channel. */
 export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
   private frameTransfers?: boolean
@@ -704,7 +710,7 @@ function base64ToBytes(value: string): Uint8Array {
 
 /** Restore binary fields after the JSON-only Remote carrier. */
 function normalizeWorkspaceBinaryResult(endpoint: string, value: unknown): unknown {
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return value
   if (!isRecord(value) || typeof value.data !== 'string') return value
   return { ...value, data: base64ToBytes(value.data) }
 }

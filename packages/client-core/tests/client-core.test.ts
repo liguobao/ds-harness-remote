@@ -455,25 +455,34 @@ describe('RemoteTypertGateway', () => {
   })
 
   it('restores binary workspace preview fields for the native Client API codec', async () => {
-    const rpc = vi.fn(async () => ({
-      ok: true,
-      value: {
-        absolutePath: '/tmp/image.png',
-        version: 'v1',
-        bytes: 3,
-        offset: 0,
-        data: 'AP8Q',
-        eof: true,
-      },
-    }))
-    const client = { rpc } as unknown as RemoteClientCore
+    await runScenarios(
+      (['workspaceFiles/readBytes', 'officeKit/render', 'officeToPdf/render'] as const).map(endpoint => ({
+        name: endpoint,
+        run: async () => {
+          const rpc = vi.fn(async () => ({
+            ok: true,
+            value: {
+              absolutePath: endpoint === 'workspaceFiles/readBytes' ? '/tmp/image.png' : '/tmp/report.docx',
+              version: 'v1',
+              bytes: 3,
+              offset: 0,
+              data: 'AP8Q',
+              eof: true,
+            },
+          }))
+          const client = { rpc } as unknown as RemoteClientCore
 
-    const result = await new RemoteTypertGateway(client).dispatch(
-      'workspaceFiles/readBytes',
-      { args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } } },
+          const result = await new RemoteTypertGateway(client).dispatch(
+            endpoint,
+            endpoint === 'workspaceFiles/readBytes'
+              ? { args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } } }
+              : { args: { path: '/tmp/report.docx', priority: 'foreground' } },
+          )
+          expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
+          expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual([0, 255, 16])
+        },
+      })),
     )
-    expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
-    expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual([0, 255, 16])
   })
 
   it('keeps a transfer deadline across upload and commit and bounds the cleanup close', async () => {
