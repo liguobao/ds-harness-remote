@@ -243,7 +243,11 @@ export function createMarkdownStyles(
     list: { gap: m.listGap, marginBottom: m.paragraphGap },
     listItem: { flexDirection: 'row', alignItems: 'flex-start' },
     listMarker: { ...t.body, fontSize: m.bodyFontSize, lineHeight: m.bodyLineHeight, color: colors.muted, width: 22 },
-    listContent: { flex: 1 },
+    // `flex: 1` sets flexBasis to 0%, which collapses to zero width when the
+    // bubble around it sizes itself to its content (user bubbles are
+    // alignSelf: 'flex-end' + maxWidth percentage). Keep an auto basis so the
+    // column reports its own content width while still filling wide parents.
+    listContent: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
     checkboxChecked: { width: 16, height: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center' as const, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
     checkboxUnchecked: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
     rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: m.headingTopGap },
