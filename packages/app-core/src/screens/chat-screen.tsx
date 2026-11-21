@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, FileText, Film, ListTree, Menu, MessageSquare, RefreshCw, X } from 'lucide-react-native'
+import { ArrowDown, ArrowLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AccessibilityInfo,
@@ -194,6 +194,7 @@ export function ChatScreen({
   const selectAgentPreset = useAppStore(state => state.selectAgentPreset)
   const createSession = useAppStore(state => state.createSession)
   const archiveSession = useAppStore(state => state.archiveSession)
+  const unarchiveSession = useAppStore(state => state.unarchiveSession)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
   const agentPresetOptions = useAppStore(state => state.agentPresetOptions)
@@ -346,6 +347,8 @@ export function ChatScreen({
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const plusMenuActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
   useEffect(() => () => plusMenuActions.cancel(), [plusMenuActions])
+  const sessionInfoActions = useRef(createModalActionQueue(Platform.OS === 'ios')).current
+  useEffect(() => () => sessionInfoActions.cancel(), [sessionInfoActions])
   const [sheetAnchor, setSheetAnchor] = useState<Rect>()
   const composerAnchorRef = useRef<View>(null)
   const [referenceChatOpen, setReferenceChatOpen] = useState(false)
@@ -1002,6 +1005,17 @@ export function ChatScreen({
     })
   }
 
+  const closeSessionInfo = () => {
+    setSessionInfoOpen(false)
+  }
+
+  const runAfterSessionInfo = (action: () => void) => {
+    const generation = sessionGenerationRef.current
+    sessionInfoActions.run(closeSessionInfo, () => {
+      if (sessionGenerationRef.current === generation) action()
+    })
+  }
+
   const openPromptsPicker = () => {
     Keyboard.dismiss()
     setMentionType(null)
@@ -1220,6 +1234,128 @@ export function ChatScreen({
     } else apply()
   }
 
+  const sessionBackend = session.backend ?? 'harness'
+  const canArchiveSession = !isSubagentSession(session)
+    && (sessionBackend === 'harness' || sessionBackend === 'codex' || sessionBackend === 'opencode')
+  const sessionArchived = sessionBackend === 'harness' && archivedSessionIds.includes(session.sessionId)
+
+  const toggleArchiveCurrentSession = () => {
+    if (!connected || busy !== undefined) return
+    const targetId = session.sessionId
+    const targetBackend = session.backend
+    if (sessionArchived) {
+      void unarchiveSession(targetId, targetBackend).then(ok => {
+        if (!ok && useAppStore.getState().error === undefined) {
+          Alert.alert(strings.sessions.unarchiveSession, strings.sessions.unarchiveFailed)
+        }
+      })
+      return
+    }
+    Alert.alert(
+      strings.sessions.archiveTitle,
+      strings.sessions.archiveBody,
+      [
+        { text: strings.common.cancel, style: 'cancel' },
+        {
+          text: strings.sessions.archive,
+          style: 'destructive',
+          onPress: () => {
+            const state = useAppStore.getState()
+            if (state.busyAction !== undefined) return
+            void archiveSession(targetId).then(ok => {
+              if (ok) {
+                const selectedId = useAppStore.getState().selectedSession?.sessionId
+                if (selectedId === undefined || selectedId === targetId) setTrajectory(false)
+              } else if (useAppStore.getState().error === undefined) {
+                Alert.alert(strings.sessions.archiveSession, strings.sessions.archiveFailed)
+              }
+            })
+          },
+        },
+      ],
+    )
+  }
+
+  const hasComposerTray = images.length > 0 || stagedFiles.length > 0 || uploadingFiles || stagedReferences.length > 0
+  const composerHeaderSlot = hasComposerTray ? (
+    <>
+      {images.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
+          {images.map((image, index) => (
+            <View key={`${image.uri}:${index}`} style={styles.imagePreviewWrap}>
+              <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.chat.removeImage(image.name ?? `${index + 1}`)}
+                onPress={() => setImages(current => current.filter((_, imageIndex) => imageIndex !== index))}
+                style={styles.removeImageButton}
+              >
+                <X size={12} color={colors.white} />
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+      {stagedFiles.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.fileTray}>
+          {stagedFiles.map((file, index) => {
+            const video = isVideoFile(file.name, file.mimeType)
+            const sizeLine = file.durationMs !== undefined
+              ? `${formatFileBytes(file.size)} · ${formatDurationMs(file.durationMs)}`
+              : formatFileBytes(file.size)
+            return (
+              <View key={`${file.id}:${index}`} style={styles.fileCard}>
+                {video ? <Film size={16} color={colors.primary} /> : <FileText size={16} color={colors.primary} />}
+                <View style={styles.fileCardMeta}>
+                  <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
+                  <Text style={styles.fileCardSize}>{sizeLine}</Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={file.name ? strings.chat.removeFile(file.name) : strings.chat.unnamedFile}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
+                  style={styles.removeFileButton}
+                >
+                  <X size={13} color={colors.muted} />
+                </Pressable>
+              </View>
+            )
+          })}
+        </ScrollView>
+      )}
+      {uploadingFiles && (
+        <View style={styles.uploadStatusRow}>
+          <Text style={[styles.fileCardSize, { flexShrink: 1 }]} numberOfLines={1}>
+            {uploadProgress && uploadProgress.totalBytes > 0
+              ? strings.chat.uploadingFileProgress(
+                  uploadProgress.fileCount > 1
+                    ? `(${uploadProgress.fileIndex + 1}/${uploadProgress.fileCount}) ${uploadProgress.fileName}`
+                    : uploadProgress.fileName,
+                  Math.min(100, Math.round((uploadProgress.bytesSent / uploadProgress.totalBytes) * 100)),
+                )
+              : strings.chat.uploadingFile(uploadProgress?.fileName ?? stagedFiles[0]?.name ?? '')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.cancelUpload}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => {
+              triggerLightHaptic()
+              uploadControllerRef.current?.abort()
+            }}
+          >
+            <Text style={[styles.fileCardSize, { color: colors.primary, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
+          </Pressable>
+        </View>
+      )}
+      <ReferencedChatPills
+        items={stagedReferences}
+        onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
+      />
+    </>
+  ) : undefined
+
   const header = <>
       <TopBar
         title={sessionTitle(session)}
@@ -1229,17 +1365,37 @@ export function ChatScreen({
           ? <View style={{ width: 13, height: 13, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="small" color={colors.muted} style={{ transform: [{ scale: 0.65 }] }} /></View>
           : undefined}
         onSubtitlePress={sessionModels !== undefined ? () => { Keyboard.dismiss(); setMentionType(null); setModelPickerOpen(true) } : undefined}
-        onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
         titleAlign="between"
-        onBack={splitNav ? undefined : trajectory ? handleBack : openSessionsDrawer}
+        onBack={trajectory ? handleBack : (splitNav ? undefined : openSessionsDrawer)}
         backIcon={trajectory ? ArrowLeft : Menu}
         backLabel={trajectory ? strings.common.back : strings.chat.openHostSessions}
         action={<>
-          <IconButton label={trajectory ? strings.trajectory.close : strings.trajectory.open}
-            icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
-            onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
-          <IconButton label={strings.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={(sessionBlank && !hasComposerContent) || newSessionPending || busy !== undefined} />
+          {trajectory
+            ? (
+              <IconButton
+                label={strings.trajectory.close}
+                icon={MessageSquare}
+                dense
+                tint={colors.primary}
+                onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(false) }}
+              />
+            )
+            : (
+              <IconButton
+                label={strings.chat.newChat}
+                icon={OfficialMenuIcons.newChat}
+                dense
+                onPress={() => void startNewSession()}
+                disabled={(sessionBlank && !hasComposerContent) || newSessionPending || busy !== undefined}
+              />
+            )}
+          <IconButton
+            label={strings.sessions.moreActions}
+            icon={MoreHorizontal}
+            dense
+            onPress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
+          />
         </>}
       />
       {!connected && (
@@ -1276,10 +1432,17 @@ export function ChatScreen({
           <X size={14} color={colors.danger} />
         </Pressable>
       )}
+      {memoryError !== undefined && (
+        <View style={styles.errorBanner} accessibilityRole="alert">
+          <View style={styles.errorDot} />
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {memoryError}
+          </Text>
+        </View>
+      )}
     </>
   return wrapChatShell(
     <View style={styles.splitMain} {...swipeRightTouchProps}>
-      {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}><Animated.View style={[{ flex: 1 }, { opacity: trajectoryMotion, transform: [{ translateY: trajectoryMotion.interpolate({ inputRange: [0, 1], outputRange: [resolveMotion('fullscreen', reduceMotion).translate, 0] }) }] }]}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
@@ -1375,84 +1538,10 @@ export function ChatScreen({
           />
         )}
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
-
-        {images.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
-            {images.map((image, index) => (
-              <View key={`${image.uri}:${index}`} style={styles.imagePreviewWrap}>
-                <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="cover" />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.chat.removeImage(image.name ?? `${index + 1}`)}
-                  onPress={() => setImages(current => current.filter((_, imageIndex) => imageIndex !== index))}
-                  style={styles.removeImageButton}
-                >
-                  <X size={13} color={colors.white} />
-                </Pressable>
-              </View>
-            ))}
-          </ScrollView>
-        )}
-        {stagedFiles.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.fileTray}>
-            {stagedFiles.map((file, index) => {
-              const video = isVideoFile(file.name, file.mimeType)
-              const sizeLine = file.durationMs !== undefined
-                ? `${formatFileBytes(file.size)} · ${formatDurationMs(file.durationMs)}`
-                : formatFileBytes(file.size)
-              return (
-                <View key={`${file.id}:${index}`} style={styles.fileCard}>
-                  {video ? <Film size={16} color={colors.primary} /> : <FileText size={16} color={colors.primary} />}
-                  <View style={styles.fileCardMeta}>
-                    <Text style={styles.fileCardName} numberOfLines={1}>{file.name}</Text>
-                    <Text style={styles.fileCardSize}>{sizeLine}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={file.name ? strings.chat.removeFile(file.name) : strings.chat.unnamedFile}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    onPress={() => setStagedFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}
-                    style={styles.removeFileButton}
-                  >
-                    <X size={13} color={colors.muted} />
-                  </Pressable>
-                </View>
-              )
-            })}
-          </ScrollView>
-        )}
-        {uploadingFiles && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingBottom: spacing.xs, gap: spacing.sm }}>
-            <Text style={[styles.fileCardSize, { flexShrink: 1 }]} numberOfLines={1}>
-              {uploadProgress && uploadProgress.totalBytes > 0
-                ? strings.chat.uploadingFileProgress(
-                    uploadProgress.fileCount > 1
-                      ? `(${uploadProgress.fileIndex + 1}/${uploadProgress.fileCount}) ${uploadProgress.fileName}`
-                      : uploadProgress.fileName,
-                    Math.min(100, Math.round((uploadProgress.bytesSent / uploadProgress.totalBytes) * 100)),
-                  )
-                : strings.chat.uploadingFile(uploadProgress?.fileName ?? stagedFiles[0]?.name ?? '')}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.cancelUpload}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              onPress={() => {
-                triggerLightHaptic()
-                uploadControllerRef.current?.abort()
-              }}
-            >
-              <Text style={[styles.fileCardSize, { color: colors.primary, fontWeight: '600' }]}>{strings.chat.cancelUpload}</Text>
-            </Pressable>
-          </View>
-        )}
-        <ReferencedChatPills
-          items={stagedReferences}
-          onRemove={sid => setStagedReferences(current => current.filter(item => item.sessionId !== sid))}
-        />
         <ChatComposer
           backend={session.backend} draft={draft} input={mentionInput}
           quotes={quotes} onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
+          headerSlot={composerHeaderSlot}
           replyActive={replyActive} stopping={stopping} commandRunning={commandRunning}
           hasComposerContent={hasComposerContent} connected={connected} editable={inputEditable}
           composerDisabled={composerDisabled} sendDisabled={sendDisabled}
@@ -1471,6 +1560,7 @@ export function ChatScreen({
         draft={draft}
         quotes={quotes}
         onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
+        hasAttachments={images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0}
         input={mentionInput}
         replyActive={replyActive}
         stopping={stopping}
@@ -1533,12 +1623,22 @@ export function ChatScreen({
         visible={sessionInfoOpen}
         session={session}
         workspace={currentWorkspace}
-        onClose={() => setSessionInfoOpen(false)}
+        trajectory={trajectory}
+        archived={sessionArchived}
+        archiveDisabled={!connected || busy !== undefined}
+        onClose={closeSessionInfo}
+        onDismiss={sessionInfoActions.onDismiss}
+        runAfterClose={runAfterSessionInfo}
         onOpenWorkspace={() => {
-          setSessionInfoOpen(false)
           if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
           else openSessionsDrawer()
         }}
+        onToggleTrajectory={() => {
+          Keyboard.dismiss()
+          setMentionType(null)
+          setTrajectory(value => !value)
+        }}
+        onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
       />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); openSessionsDrawer() }} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />

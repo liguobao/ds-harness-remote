@@ -1,6 +1,7 @@
-import { ArrowUp, CircleStop } from 'lucide-react-native'
+import { ArrowUp, CircleStop, X } from 'lucide-react-native'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
 import { CollapseCornerIcon } from '../../ui/composer-expand-icons'
@@ -8,6 +9,7 @@ import { triggerLightHaptic } from '../../ui/haptics'
 import { splitDraftSegments } from '../../ui/mention-popover'
 import { formatQuoteDraftSnippet } from '../../ui/quote-helpers'
 import { QuoteMarkIcon } from '../../ui/quote-preview'
+import { spacing } from '../../ui/theme'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { easingCurve } from '../../ui/motion'
@@ -38,6 +40,7 @@ export type ExpandedComposerProps = {
   draft: string
   quotes?: string[]
   onRemoveQuote?: (index: number) => void
+  hasAttachments?: boolean
   input: Pick<ComposerInputBridge, 'selection' | 'onChangeText' | 'onSelectionChange'>
   accessibilityLabel?: string
   placeholder?: string
@@ -57,6 +60,7 @@ export function ExpandedComposer({
   draft,
   quotes,
   onRemoveQuote,
+  hasAttachments,
   input,
   accessibilityLabel,
   placeholder,
@@ -70,6 +74,8 @@ export function ExpandedComposer({
 }: ExpandedComposerProps) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const insets = useSafeAreaInsets()
+  const hasContent = draft.trim().length > 0 || (quotes?.length ?? 0) > 0 || Boolean(hasAttachments)
   const { selection, onChangeText, onSelectionChange } = input
   const showTokenHighlight = highlightMentionTokens !== false
   const draftSegments = useMemo(() => (showTokenHighlight ? splitDraftSegments(draft) : []), [draft, showTokenHighlight])
@@ -124,6 +130,8 @@ export function ExpandedComposer({
       </Animated.View>
       <Animated.View
         style={[styles.expandedComposerCard, {
+          marginTop: insets.top + spacing.md,
+          paddingBottom: Math.max(spacing.sm, insets.bottom),
           opacity: entrance,
           transform: [
             {
@@ -154,13 +162,16 @@ export function ExpandedComposer({
                 key={`expanded-quote-${index}`}
                 accessibilityRole="button"
                 accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
+                disabled={onRemoveQuote === undefined}
                 onPress={() => onRemoveQuote?.(index)}
-                style={styles.composerInlineQuoteBadge}
+                hitSlop={4}
+                style={styles.composerQuotePill}
               >
-                <QuoteMarkIcon size={14} color={colors.primary} />
-                <Text numberOfLines={1} style={[styles.composerInlineQuoteText, { color: colors.primary, maxWidth: 220 }]}>
+                <QuoteMarkIcon size={12} color={colors.primary} />
+                <Text numberOfLines={1} style={styles.composerQuotePillText}>
                   “{formatQuoteDraftSnippet(quoteText, 18)}”
                 </Text>
+                {onRemoveQuote !== undefined && <X size={12} color={colors.primary} />}
               </Pressable>
             ))}
           </View>
@@ -194,7 +205,7 @@ export function ExpandedComposer({
         </View>
 
         <View style={styles.expandedFooter}>
-          {replyActive && draft.trim().length === 0 ? (
+          {replyActive && !hasContent ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={strings.chat.stop}
