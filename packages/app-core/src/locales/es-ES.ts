@@ -1124,7 +1124,7 @@ const esES = {
     notifyQuestion: 'Esperando tu respuesta',
     notifyCompleted: 'Tarea completada',
     notifyFailed: 'La tarea falló',
-    filterAll: 'Todo',
+    filterAllPlatforms: 'Todas las plataformas',
     hostCurrent: 'Actual',
     hostOnlineDigest: 'En línea · conteo en vivo',
     hostOffline: 'Host sin conexión',

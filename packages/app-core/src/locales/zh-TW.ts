@@ -1131,7 +1131,7 @@ const zhTW = {
     notifyQuestion: '等待你的回答',
     notifyCompleted: '任務已完成',
     notifyFailed: '任務失敗',
-    filterAll: '全部',
+    filterAllPlatforms: '全部平台',
     hostCurrent: '目前',
     hostOnlineDigest: '即時脫敏彙總',
     hostOffline: '主機目前離線',

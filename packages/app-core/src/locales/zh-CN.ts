@@ -1131,7 +1131,7 @@ const zhCN = {
     notifyQuestion: '等待你的回答',
     notifyCompleted: '任务已完成',
     notifyFailed: '任务执行失败',
-    filterAll: '全部',
+    filterAllPlatforms: '全部平台',
     hostCurrent: '当前',
     hostOnlineDigest: '实时脱敏汇总',
     hostOffline: '主机当前离线',

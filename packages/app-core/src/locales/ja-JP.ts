@@ -1124,7 +1124,7 @@ const jaJP = {
     notifyQuestion: '回答を待っています',
     notifyCompleted: 'タスクが完了しました',
     notifyFailed: 'タスクが失敗しました',
-    filterAll: 'すべて',
+    filterAllPlatforms: '全プラットフォーム',
     hostCurrent: '現在',
     hostOnlineDigest: 'オンライン · 件数のみ',
     hostOffline: 'オフライン',

@@ -1124,7 +1124,7 @@ const deDE = {
     notifyQuestion: 'Wartet auf Ihre Antwort',
     notifyCompleted: 'Aufgabe abgeschlossen',
     notifyFailed: 'Aufgabe fehlgeschlagen',
-    filterAll: 'Alle',
+    filterAllPlatforms: 'Alle Plattformen',
     hostCurrent: 'Aktiv',
     hostOnlineDigest: 'Online · Live-Zähler',
     hostOffline: 'Host offline',

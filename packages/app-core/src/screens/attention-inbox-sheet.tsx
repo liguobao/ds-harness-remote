@@ -12,9 +12,13 @@ import {
   AlertCircle,
   ArrowRightLeft,
   Bell,
+  Bot,
+  Check,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   HelpCircle,
   Inbox,
@@ -39,7 +43,7 @@ import {
 import { useAppStore } from '../state/store'
 import type { RemoteDevice } from '../types'
 import { IconButton } from '../ui/components'
-import { useResponsiveLayout } from '../ui/responsive'
+import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
 import { radius, spacing, type, type ColorScheme, type ThemeColors } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
@@ -278,7 +282,7 @@ export function AttentionInboxSheet({
   const { colors, scheme } = useTheme()
   const palette = useMemo(() => attentionSurfacePalette(colors, scheme), [colors, scheme])
   const styles = useThemedStyles(createStyles)
-  const { sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
+  const { width, sheetMaxHeight, sheetAsDialog } = useResponsiveLayout()
   const insets = useSafeAreaInsets()
 
   const connectedHostId = connectionPhase === 'connected' ? selectedDevice?.deviceId : undefined
@@ -322,8 +326,10 @@ export function AttentionInboxSheet({
   const defaultHostId = connectedHostId ?? selectedDevice?.deviceId ?? hostEntries[0]?.device.deviceId
   const [inspectedHostId, setInspectedHostId] = useState<string | undefined>(defaultHostId)
   const [backendFilter, setBackendFilter] = useState<string>('all')
+  const [openDropdown, setOpenDropdown] = useState<'host' | 'backend' | null>(null)
 
   useEffect(() => {
+    setOpenDropdown(null)
     if (!visible) return
     setInspectedHostId(connectedHostId ?? selectedDevice?.deviceId ?? hostEntries[0]?.device.deviceId)
     setBackendFilter('all')
@@ -356,6 +362,25 @@ export function AttentionInboxSheet({
       setBackendFilter('all')
     }
   }, [backendFilter, backendFilters])
+
+  useEffect(() => {
+    if (openDropdown === 'host' && hostEntries.length === 0) {
+      setOpenDropdown(null)
+    } else if (openDropdown === 'backend' && backendFilters.length === 0) {
+      setOpenDropdown(null)
+    }
+  }, [openDropdown, hostEntries.length, backendFilters.length])
+
+  const selectedBackendOption = useMemo(
+    () => (backendFilter === 'all' ? undefined : backendFilters.find(option => option.key === backendFilter)),
+    [backendFilter, backendFilters],
+  )
+  const inspectedTone = useMemo(
+    () => (activeOverview && inspectedHost
+      ? hostToneFromOverview(activeOverview, inspectedHost.online, colors, palette)
+      : undefined),
+    [activeOverview, inspectedHost, colors, palette],
+  )
 
   const filteredItems = useMemo(
     () => filterAttentionItemsByBackend(displayItems, backendFilter),
@@ -416,17 +441,37 @@ export function AttentionInboxSheet({
   }, [activeOverview, inspectedHost, isConnectedHostView])
 
   const steadySheetHeight = sheetAsDialog ? Math.min(sheetMaxHeight, 560) : sheetMaxHeight
+  const sheetWidth = sheetAsDialog ? Math.min(width - spacing.xl, DIALOG_SHEET_MAX_WIDTH) : width
+  const dropdownMaxWidth = Math.max(200, Math.min(316, sheetWidth - spacing.lg * 2))
+  const dropdownMaxHeight = Math.max(160, Math.min(300, steadySheetHeight - 136))
+  const inspectedTotal = activeOverview?.totalActive ?? 0
+  const backendSelectorDisabled = backendFilters.length === 0
+  const activeBackendLabel = selectedBackendOption?.label ?? strings.attention.filterAllPlatforms
+  const activeBackendCount = selectedBackendOption?.count ?? displayItems.length
 
   return (
     <SheetModal
       visible={visible}
       onClose={onClose}
+      onRequestClose={() => {
+        if (openDropdown !== null) {
+          setOpenDropdown(null)
+          return
+        }
+        onClose()
+      }}
       backdropStyle={styles.backdrop}
       sheetStyle={[
         styles.sheet,
         sheetAsDialog
-          ? { height: steadySheetHeight, maxHeight: sheetMaxHeight, paddingTop: spacing.lg, paddingBottom: spacing.lg }
-          : { height: steadySheetHeight, maxHeight: sheetMaxHeight, paddingBottom: spacing.xl + insets.bottom },
+          ? { height: steadySheetHeight, maxHeight: sheetMaxHeight, paddingHorizontal: 0, paddingTop: spacing.lg, paddingBottom: spacing.lg }
+          : {
+              height: steadySheetHeight,
+              maxHeight: sheetMaxHeight,
+              paddingLeft: insets.left,
+              paddingRight: insets.right,
+              paddingBottom: spacing.xl + insets.bottom,
+            },
       ]}
     >
       {!sheetAsDialog && <View style={styles.grabber} />}
@@ -442,7 +487,10 @@ export function AttentionInboxSheet({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={strings.attention.markAllRead}
-              onPress={() => void ackAllUnread()}
+              onPress={() => {
+                setOpenDropdown(null)
+                void ackAllUnread()
+              }}
               hitSlop={6}
               style={({ pressed }) => [styles.markReadBtn, pressed && styles.pressed]}
             >
@@ -450,272 +498,426 @@ export function AttentionInboxSheet({
               <Text style={styles.markReadText} numberOfLines={1}>{strings.attention.markAllRead}</Text>
             </Pressable>
           )}
-          <IconButton label={strings.common.close} icon={X} onPress={onClose} />
+          <IconButton
+            label={strings.common.close}
+            icon={X}
+            onPress={() => {
+              setOpenDropdown(null)
+              onClose()
+            }}
+          />
         </View>
       </View>
 
-      {hostEntries.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterStrip}
-          contentContainerStyle={styles.filterStripContent}
-        >
-          {hostEntries.map(entry => {
-            const selected = entry.device.deviceId === inspectedHost?.deviceId
-            const tone = hostToneFromOverview(entry.overview, entry.device.online, colors, palette)
-            const total = entry.overview.totalActive
-            return (
-              <Pressable
-                key={entry.device.deviceId}
-                accessibilityRole="tab"
-                accessibilityState={{ selected }}
-                accessibilityLabel={total > 0 ? `${entry.device.name}, ${total}` : entry.device.name}
-                onPress={() => {
-                  setInspectedHostId(entry.device.deviceId)
-                  setBackendFilter('all')
-                }}
-                style={({ pressed }) => [
-                  styles.hostTab,
-                  selected && styles.hostTabSelected,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <View style={[styles.hostTabDot, { backgroundColor: tone.dotColor }]} />
-                <Text
-                  style={[styles.hostTabName, selected && styles.hostTabNameSelected]}
-                  numberOfLines={1}
-                >
-                  {entry.device.name}
-                </Text>
-                {entry.overview.isConnectedHost && (
-                  <Text style={styles.hostCurrentTag} numberOfLines={1}>
-                    {strings.attention.hostCurrent}
-                  </Text>
-                )}
-                {total > 0 && (
-                  <View
-                    style={[
-                      styles.hostTabCountBadge,
-                      { backgroundColor: tone.pillBg, borderColor: tone.pillBorder },
-                    ]}
-                  >
-                    <Text style={[styles.hostTabCountText, { color: tone.pillText }]}>
-                      {total > 99 ? '99+' : total}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      )}
-
-      {backendFilters.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterStrip}
-          contentContainerStyle={styles.filterStripContent}
-        >
+      {hostEntries.length > 0 && inspectedHost !== undefined && (
+        <View style={styles.dropdownBar}>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ selected: backendFilter === 'all' }}
-            onPress={() => setBackendFilter('all')}
+            accessibilityState={{ expanded: openDropdown === 'host' }}
+            accessibilityLabel={[
+              inspectedHost.name,
+              isConnectedHostView ? strings.attention.hostCurrent : undefined,
+              inspectedTotal > 0 ? String(inspectedTotal) : undefined,
+            ].filter(Boolean).join(', ')}
+            onPress={() => setOpenDropdown(prev => (prev === 'host' ? null : 'host'))}
             style={({ pressed }) => [
-              styles.backendFilterChip,
-              backendFilter === 'all' && styles.backendFilterChipSelected,
+              styles.dropdownTrigger,
+              styles.dropdownTriggerHost,
+              openDropdown === 'host' && styles.dropdownTriggerOpen,
               pressed && styles.pressed,
             ]}
           >
+            <View style={[styles.dropdownDot, { backgroundColor: inspectedTone?.dotColor ?? colors.muted }]} />
+            <Text style={[styles.dropdownTriggerText, styles.dropdownTriggerTextActive]} numberOfLines={1}>
+              {inspectedHost.name}
+            </Text>
+            {inspectedTotal > 0 && inspectedTone !== undefined && (
+              <View
+                style={[
+                  styles.dropdownCountBadge,
+                  { backgroundColor: inspectedTone.pillBg, borderColor: inspectedTone.pillBorder },
+                ]}
+              >
+                <Text style={[styles.dropdownCountText, { color: inspectedTone.pillText }]}>
+                  {inspectedTotal > 99 ? '99+' : inspectedTotal}
+                </Text>
+              </View>
+            )}
+            {openDropdown === 'host'
+              ? <ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
+              : <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: openDropdown === 'backend', disabled: backendSelectorDisabled }}
+            accessibilityLabel={
+              activeBackendCount > 0
+                ? `${strings.sessions.agentPlatform}, ${activeBackendLabel}, ${activeBackendCount}`
+                : `${strings.sessions.agentPlatform}, ${activeBackendLabel}`
+            }
+            disabled={backendSelectorDisabled}
+            onPress={() => setOpenDropdown(prev => (prev === 'backend' ? null : 'backend'))}
+            style={({ pressed }) => [
+              styles.dropdownTrigger,
+              openDropdown === 'backend' && styles.dropdownTriggerOpen,
+              backendSelectorDisabled && styles.dropdownTriggerDisabled,
+              pressed && !backendSelectorDisabled && styles.pressed,
+            ]}
+          >
+            {selectedBackendOption !== undefined ? (
+              <BackendGlyphBadge
+                accent={scheme === 'dark' ? selectedBackendOption.accentDark : selectedBackendOption.accentLight}
+                shortBadge={selectedBackendOption.shortBadge}
+                styles={styles}
+              />
+            ) : (
+              <View style={styles.platformAllGlyph}>
+                <Bot size={12.5} color={backendSelectorDisabled ? colors.muted : colors.ink} strokeWidth={2} />
+              </View>
+            )}
             <Text
               style={[
-                styles.backendFilterText,
-                backendFilter === 'all' && styles.backendFilterTextSelected,
+                styles.dropdownTriggerText,
+                !backendSelectorDisabled && styles.dropdownTriggerTextActive,
               ]}
               numberOfLines={1}
             >
-              {strings.attention.filterAll}
+              {activeBackendLabel}
             </Text>
-            <Text
-              style={[
-                styles.backendFilterCount,
-                backendFilter === 'all' && styles.backendFilterTextSelected,
-              ]}
-            >
-              {displayItems.length}
-            </Text>
-          </Pressable>
-          {backendFilters.map(option => {
-            const selected = backendFilter === option.key
-            const accent = scheme === 'dark' ? option.accentDark : option.accentLight
-            return (
-              <Pressable
-                key={option.key}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => setBackendFilter(option.key)}
-                style={({ pressed }) => [
-                  styles.backendFilterChip,
-                  selected && styles.backendFilterChipSelected,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <View style={[styles.backendGlyphMini, { borderColor: `${accent}55` }]}>
-                  <Text style={[styles.backendGlyphMiniText, { color: accent }]}>
-                    {option.shortBadge}
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.backendFilterText,
-                    selected && styles.backendFilterTextSelected,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {option.label}
+            {activeBackendCount > 0 && (
+              <View style={styles.dropdownNeutralCountBadge}>
+                <Text style={styles.dropdownNeutralCountText}>
+                  {activeBackendCount > 99 ? '99+' : activeBackendCount}
                 </Text>
-                <Text
-                  style={[
-                    styles.backendFilterCount,
-                    selected && styles.backendFilterTextSelected,
-                  ]}
-                >
-                  {option.count}
-                </Text>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      )}
-
-      {isConnectedHostView && loading && displayItems.length === 0 ? (
-        <View style={styles.emptyState}>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      ) : !isConnectedHostView && inspectedHost !== undefined ? (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.hostBridgeCard}>
-            <View style={styles.hostBridgeTop}>
-              <View style={styles.hostBridgeMeta}>
-                <Text style={styles.hostBridgeName} numberOfLines={1}>{inspectedHost.name}</Text>
-                <Text style={styles.hostBridgeStatus} numberOfLines={1}>
-                  {!inspectedHost.trusted
-                    ? strings.attention.hostUntrusted
-                    : inspectedHost.online
-                      ? strings.attention.hostOnlineDigest
-                      : strings.attention.hostOffline}
-                </Text>
-              </View>
-              {canSwitchToInspected && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.attention.hostSwitch}
-                  onPress={() => onSwitchHost?.(inspectedHost)}
-                  style={({ pressed }) => [styles.switchHostBtn, pressed && styles.pressed]}
-                >
-                  <ArrowRightLeft size={13} color={colors.onInverse} strokeWidth={2.2} />
-                  <Text style={styles.switchHostBtnText} numberOfLines={1}>
-                    {strings.attention.hostSwitch}
-                  </Text>
-                </Pressable>
-              )}
-              {!inspectedHost.trusted && onOpenRemoteHosts !== undefined && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={strings.attention.hostManage}
-                  onPress={onOpenRemoteHosts}
-                  style={({ pressed }) => [styles.switchHostSecondaryBtn, pressed && styles.pressed]}
-                >
-                  <Text style={styles.switchHostSecondaryText} numberOfLines={1}>
-                    {strings.attention.hostManage}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-
-            {digestBreakdown.length > 0 && (
-              <View style={styles.digestChipsRow}>
-                {digestBreakdown.map(chip => (
-                  <View
-                    key={chip.key}
-                    style={[
-                      styles.digestChip,
-                      { backgroundColor: chip.tone.bg, borderColor: chip.tone.border },
-                    ]}
-                  >
-                    <View style={[styles.digestChipDot, { backgroundColor: chip.tone.dot }]} />
-                    <Text style={[styles.digestChipText, { color: chip.tone.fg }]}>
-                      {`${chip.label} ${chip.count}`}
-                    </Text>
-                  </View>
-                ))}
               </View>
             )}
-
-            <Text style={styles.hostBridgeHint}>{remoteHintText}</Text>
-          </View>
-
-          {sections.map(section => (
-            <View key={section.key} style={styles.sectionBlock}>
-              <Text style={styles.sectionHeader}>{section.title}</Text>
-              <View style={[styles.sectionCard, !canSwitchToInspected && styles.sectionCardMuted]}>
-                {section.data.map((item, idx) => (
-                  <AttentionInboxItemRow
-                    key={item.id}
-                    item={item}
-                    first={idx === 0}
-                    disabled={!canSwitchToInspected}
-                    onPress={() => onSwitchHost?.(inspectedHost, item)}
-                    colors={colors}
-                    scheme={scheme}
-                    palette={palette}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-      ) : sections.length === 0 ? (
-        <View style={styles.emptyState}>
-          <View style={styles.emptyIconWrap}>
-            <Inbox size={24} color={colors.muted} strokeWidth={1.8} />
-          </View>
-          <Text style={styles.emptyTitle}>{strings.attention.emptyTitle}</Text>
-          <Text style={styles.emptyBody}>{strings.attention.emptyBody}</Text>
+            {openDropdown === 'backend'
+              ? <ChevronUp size={14} color={colors.ink} strokeWidth={2.2} />
+              : <ChevronDown size={14} color={colors.muted} strokeWidth={2.1} />}
+          </Pressable>
         </View>
-      ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {sections.map(section => (
-            <View key={section.key} style={styles.sectionBlock}>
-              <Text style={styles.sectionHeader}>{section.title}</Text>
-              <View style={styles.sectionCard}>
-                {section.data.map((item, idx) => (
-                  <AttentionInboxItemRow
-                    key={item.id}
-                    item={item}
-                    first={idx === 0}
-                    onPress={() => onSelectItem(item)}
-                    colors={colors}
-                    scheme={scheme}
-                    palette={palette}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
       )}
+
+      <View style={styles.bodyStage}>
+        {isConnectedHostView && loading && displayItems.length === 0 ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : !isConnectedHostView && inspectedHost !== undefined ? (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.hostBridgeCard}>
+              <View style={styles.hostBridgeTop}>
+                <View style={styles.hostBridgeMeta}>
+                  <Text style={styles.hostBridgeName} numberOfLines={1}>{inspectedHost.name}</Text>
+                  <Text style={styles.hostBridgeStatus} numberOfLines={1}>
+                    {!inspectedHost.trusted
+                      ? strings.attention.hostUntrusted
+                      : inspectedHost.online
+                        ? strings.attention.hostOnlineDigest
+                        : strings.attention.hostOffline}
+                  </Text>
+                </View>
+                {canSwitchToInspected && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={strings.attention.hostSwitch}
+                    onPress={() => onSwitchHost?.(inspectedHost)}
+                    style={({ pressed }) => [styles.switchHostBtn, pressed && styles.pressed]}
+                  >
+                    <ArrowRightLeft size={13} color={colors.onInverse} strokeWidth={2.2} />
+                    <Text style={styles.switchHostBtnText} numberOfLines={1}>
+                      {strings.attention.hostSwitch}
+                    </Text>
+                  </Pressable>
+                )}
+                {!inspectedHost.trusted && onOpenRemoteHosts !== undefined && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={strings.attention.hostManage}
+                    onPress={onOpenRemoteHosts}
+                    style={({ pressed }) => [styles.switchHostSecondaryBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.switchHostSecondaryText} numberOfLines={1}>
+                      {strings.attention.hostManage}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {digestBreakdown.length > 0 && (
+                <View style={styles.digestChipsRow}>
+                  {digestBreakdown.map(chip => (
+                    <View
+                      key={chip.key}
+                      style={[
+                        styles.digestChip,
+                        { backgroundColor: chip.tone.bg, borderColor: chip.tone.border },
+                      ]}
+                    >
+                      <View style={[styles.digestChipDot, { backgroundColor: chip.tone.dot }]} />
+                      <Text style={[styles.digestChipText, { color: chip.tone.fg }]}>
+                        {`${chip.label} ${chip.count}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <Text style={styles.hostBridgeHint}>{remoteHintText}</Text>
+            </View>
+
+            {sections.map(section => (
+              <View key={section.key} style={styles.sectionBlock}>
+                <Text style={styles.sectionHeader}>{section.title}</Text>
+                <View style={[styles.sectionCard, !canSwitchToInspected && styles.sectionCardMuted]}>
+                  {section.data.map((item, idx) => (
+                    <AttentionInboxItemRow
+                      key={item.id}
+                      item={item}
+                      first={idx === 0}
+                      disabled={!canSwitchToInspected}
+                      onPress={() => onSwitchHost?.(inspectedHost, item)}
+                      colors={colors}
+                      scheme={scheme}
+                      palette={palette}
+                      styles={styles}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        ) : sections.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconWrap}>
+              <Inbox size={24} color={colors.muted} strokeWidth={1.8} />
+            </View>
+            <Text style={styles.emptyTitle}>{strings.attention.emptyTitle}</Text>
+            <Text style={styles.emptyBody}>{strings.attention.emptyBody}</Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {sections.map(section => (
+              <View key={section.key} style={styles.sectionBlock}>
+                <Text style={styles.sectionHeader}>{section.title}</Text>
+                <View style={styles.sectionCard}>
+                  {section.data.map((item, idx) => (
+                    <AttentionInboxItemRow
+                      key={item.id}
+                      item={item}
+                      first={idx === 0}
+                      onPress={() => onSelectItem(item)}
+                      colors={colors}
+                      scheme={scheme}
+                      palette={palette}
+                      styles={styles}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        {openDropdown !== null && (
+          <View style={styles.dropdownOverlay} collapsable={false}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.common.close}
+              onPress={() => setOpenDropdown(null)}
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: scheme === 'dark' ? 'rgba(0, 0, 0, 0.36)' : 'rgba(15, 23, 42, 0.1)' },
+              ]}
+            />
+            <View
+              style={[
+                styles.dropdownMenuCard,
+                openDropdown === 'host' ? styles.dropdownMenuLeft : styles.dropdownMenuRight,
+                { maxWidth: dropdownMaxWidth },
+              ]}
+            >
+              <ScrollView
+                style={{ maxHeight: dropdownMaxHeight }}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {openDropdown === 'host' ? (
+                  hostEntries.map((entry, index) => {
+                    const selected = entry.device.deviceId === inspectedHost?.deviceId
+                    const tone = hostToneFromOverview(entry.overview, entry.device.online, colors, palette)
+                    const total = entry.overview.totalActive
+                    const statusDetail = entry.overview.isConnectedHost
+                      ? undefined
+                      : !entry.device.trusted
+                        ? strings.attention.hostUntrusted
+                        : !entry.device.online
+                          ? strings.attention.hostOffline
+                          : strings.attention.hostOnlineDigest
+                    return (
+                      <Pressable
+                        key={entry.device.deviceId}
+                        accessibilityRole="menuitem"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={[
+                          entry.device.name,
+                          entry.overview.isConnectedHost ? strings.attention.hostCurrent : statusDetail,
+                          total > 0 ? String(total) : undefined,
+                        ].filter(Boolean).join(', ')}
+                        onPress={() => {
+                          setInspectedHostId(entry.device.deviceId)
+                          setBackendFilter('all')
+                          setOpenDropdown(null)
+                        }}
+                        style={({ pressed }) => [
+                          styles.dropdownOptionRow,
+                          index > 0 && styles.dropdownOptionBorder,
+                          selected && styles.dropdownOptionSelected,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <View style={[styles.dropdownMenuDot, { backgroundColor: tone.dotColor }]} />
+                        <View style={styles.dropdownOptionTextCol}>
+                          <View style={styles.dropdownOptionTitleRow}>
+                            <Text
+                              style={[styles.dropdownOptionTitle, selected && styles.dropdownOptionTitleSelected]}
+                              numberOfLines={1}
+                            >
+                              {entry.device.name}
+                            </Text>
+                            {entry.overview.isConnectedHost && (
+                              <View style={styles.dropdownCurrentBadge}>
+                                <Text style={styles.dropdownCurrentBadgeText} numberOfLines={1}>
+                                  {strings.attention.hostCurrent}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          {statusDetail !== undefined && (
+                            <Text style={styles.dropdownOptionDetail} numberOfLines={1}>
+                              {statusDetail}
+                            </Text>
+                          )}
+                        </View>
+                        {total > 0 && (
+                          <View
+                            style={[
+                              styles.dropdownCountBadge,
+                              { backgroundColor: tone.pillBg, borderColor: tone.pillBorder },
+                            ]}
+                          >
+                            <Text style={[styles.dropdownCountText, { color: tone.pillText }]}>
+                              {total > 99 ? '99+' : total}
+                            </Text>
+                          </View>
+                        )}
+                        <View style={styles.dropdownCheckSlot}>
+                          {selected && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                        </View>
+                      </Pressable>
+                    )
+                  })
+                ) : (
+                  <>
+                    <Pressable
+                      accessibilityRole="menuitem"
+                      accessibilityState={{ selected: backendFilter === 'all' }}
+                      accessibilityLabel={`${strings.attention.filterAllPlatforms}, ${displayItems.length}`}
+                      onPress={() => {
+                        setBackendFilter('all')
+                        setOpenDropdown(null)
+                      }}
+                      style={({ pressed }) => [
+                        styles.dropdownOptionRow,
+                        backendFilter === 'all' && styles.dropdownOptionSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <View style={styles.platformAllGlyphMd}>
+                        <Bot size={13.5} color={colors.ink} strokeWidth={2} />
+                      </View>
+                      <View style={styles.dropdownOptionTextCol}>
+                        <Text
+                          style={[
+                            styles.dropdownOptionTitle,
+                            backendFilter === 'all' && styles.dropdownOptionTitleSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {strings.attention.filterAllPlatforms}
+                        </Text>
+                      </View>
+                      <View style={styles.dropdownNeutralCountBadge}>
+                        <Text style={styles.dropdownNeutralCountText}>
+                          {displayItems.length > 99 ? '99+' : displayItems.length}
+                        </Text>
+                      </View>
+                      <View style={styles.dropdownCheckSlot}>
+                        {backendFilter === 'all' && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                      </View>
+                    </Pressable>
+                    {backendFilters.map(option => {
+                      const selected = backendFilter === option.key
+                      const accent = scheme === 'dark' ? option.accentDark : option.accentLight
+                      return (
+                        <Pressable
+                          key={option.key}
+                          accessibilityRole="menuitem"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={`${option.label}, ${option.count}`}
+                          onPress={() => {
+                            setBackendFilter(option.key)
+                            setOpenDropdown(null)
+                          }}
+                          style={({ pressed }) => [
+                            styles.dropdownOptionRow,
+                            styles.dropdownOptionBorder,
+                            selected && styles.dropdownOptionSelected,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <BackendGlyphBadge
+                            accent={accent}
+                            shortBadge={option.shortBadge}
+                            size="md"
+                            styles={styles}
+                          />
+                          <View style={styles.dropdownOptionTextCol}>
+                            <Text
+                              style={[styles.dropdownOptionTitle, selected && styles.dropdownOptionTitleSelected]}
+                              numberOfLines={1}
+                            >
+                              {option.label}
+                            </Text>
+                          </View>
+                          <View style={styles.dropdownNeutralCountBadge}>
+                            <Text style={styles.dropdownNeutralCountText}>
+                              {option.count > 99 ? '99+' : option.count}
+                            </Text>
+                          </View>
+                          <View style={styles.dropdownCheckSlot}>
+                            {selected && <Check size={16} color={colors.primary} strokeWidth={2.3} />}
+                          </View>
+                        </Pressable>
+                      )
+                    })}
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
+      </View>
     </SheetModal>
   )
 }
@@ -767,6 +969,38 @@ function DetachedCountdownChip({
       <Clock size={11} color={tone.fg} strokeWidth={2.0} />
       <Text style={[styles.countdownText, { color: tone.fg }]}>
         {strings.attention.expiresIn(countdown)}
+      </Text>
+    </View>
+  )
+}
+
+function BackendGlyphBadge({
+  accent,
+  shortBadge,
+  size = 'sm',
+  styles,
+}: {
+  accent: string
+  shortBadge: string
+  size?: 'sm' | 'md'
+  styles: ReturnType<typeof createStyles>
+}) {
+  return (
+    <View
+      style={[
+        styles.backendGlyphMini,
+        size === 'md' && styles.backendGlyphMd,
+        { borderColor: `${accent}55` },
+      ]}
+    >
+      <Text
+        style={[
+          styles.backendGlyphMiniText,
+          size === 'md' && styles.backendGlyphMdText,
+          { color: accent },
+        ]}
+      >
+        {shortBadge}
       </Text>
     </View>
   )
@@ -833,11 +1067,11 @@ function AttentionInboxItemRow({
             <Text style={[styles.statusPillText, { color: visual.fg }]}>{visual.label}</Text>
           </View>
           <View style={styles.backendPill}>
-            <View style={[styles.backendGlyphMini, { borderColor: `${backendAccent}55` }]}>
-              <Text style={[styles.backendGlyphMiniText, { color: backendAccent }]}>
-                {backendMeta.shortBadge}
-              </Text>
-            </View>
+            <BackendGlyphBadge
+              accent={backendAccent}
+              shortBadge={backendMeta.shortBadge}
+              styles={styles}
+            />
             <Text style={styles.backendText} numberOfLines={1}>{backendMeta.label}</Text>
           </View>
           {item.detachedExpiresAt !== undefined && (
@@ -984,94 +1218,208 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
     },
     markReadText: { ...type.caption, color: colors.ink, fontWeight: '600' },
-    filterStrip: { flexGrow: 0, flexShrink: 0 },
-    filterStripContent: {
-      paddingHorizontal: spacing.lg,
-      paddingVertical: 2,
-      gap: spacing.xs,
-      alignItems: 'center',
-    },
-    hostTab: {
+    dropdownBar: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      minHeight: 32,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surfaceStrong,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
+      gap: spacing.xs,
+      paddingHorizontal: spacing.lg,
+      paddingTop: 2,
+      paddingBottom: 4,
     },
-    hostTabSelected: {
-      backgroundColor: colors.elevated,
-      borderColor: colors.ink,
-    },
-    hostTabDot: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-    },
-    hostTabName: {
-      ...type.caption,
-      fontSize: 12,
-      fontWeight: '500',
-      color: colors.muted,
-      maxWidth: 140,
-    },
-    hostTabNameSelected: {
-      color: colors.ink,
-      fontWeight: '700',
-    },
-    hostCurrentTag: {
-      ...type.caption,
-      fontSize: 10,
-      color: colors.subtle,
-      fontWeight: '600',
-    },
-    hostTabCountBadge: {
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-    },
-    hostTabCountText: {
-      ...type.caption,
-      fontSize: 10,
-      fontWeight: '700',
-      fontVariant: ['tabular-nums'],
-    },
-    backendFilterChip: {
+    dropdownTrigger: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 36,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      minHeight: 28,
       paddingHorizontal: 9,
-      paddingVertical: 3.5,
-      borderRadius: radius.pill,
-      backgroundColor: colors.grouped,
+      paddingVertical: 6,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surfaceStrong,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },
-    backendFilterChipSelected: {
-      backgroundColor: colors.surfaceStrong,
-      borderColor: colors.muted,
+    dropdownTriggerHost: {
+      flex: 1.08,
     },
-    backendFilterText: {
+    dropdownTriggerOpen: {
+      backgroundColor: colors.elevated,
+      borderColor: colors.ink,
+    },
+    dropdownTriggerDisabled: {
+      opacity: 0.52,
+    },
+    dropdownDot: {
+      width: 6.5,
+      height: 6.5,
+      borderRadius: 3.5,
+      flexShrink: 0,
+    },
+    dropdownTriggerText: {
       ...type.caption,
-      fontSize: 11.5,
-      fontWeight: '500',
+      fontSize: 12.5,
+      fontWeight: '600',
       color: colors.muted,
+      flex: 1,
+      minWidth: 0,
     },
-    backendFilterTextSelected: {
+    dropdownTriggerTextActive: {
       color: colors.ink,
+    },
+    dropdownCountBadge: {
+      paddingHorizontal: 5.5,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      flexShrink: 0,
+    },
+    dropdownCountText: {
+      ...type.caption,
+      fontSize: 10.5,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    dropdownNeutralCountBadge: {
+      paddingHorizontal: 5.5,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      backgroundColor: colors.cardOpaque,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      flexShrink: 0,
+    },
+    dropdownNeutralCountText: {
+      ...type.caption,
+      fontSize: 10.5,
+      fontWeight: '700',
+      color: colors.muted,
+      fontVariant: ['tabular-nums'],
+    },
+    platformAllGlyph: {
+      width: 15,
+      height: 15,
+      borderRadius: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    platformAllGlyphMd: {
+      width: 20,
+      height: 20,
+      borderRadius: 6,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    bodyStage: {
+      flex: 1,
+      minHeight: 0,
+      position: 'relative',
+    },
+    dropdownOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 20,
+      elevation: 12,
+    },
+    dropdownMenuCard: {
+      position: 'absolute',
+      top: 4,
+      backgroundColor: colors.elevated,
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      overflow: 'hidden',
+      shadowColor: colors.shadow,
+      shadowOpacity: 0.2,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 14,
+    },
+    dropdownMenuLeft: {
+      left: spacing.lg,
+      width: '80%',
+      minWidth: 224,
+    },
+    dropdownMenuRight: {
+      right: spacing.lg,
+      width: '78%',
+      minWidth: 214,
+    },
+    dropdownOptionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs + 2,
+    },
+    dropdownOptionBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
+    dropdownOptionSelected: {
+      backgroundColor: colors.surfaceStrong,
+    },
+    dropdownMenuDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      flexShrink: 0,
+    },
+    dropdownOptionTextCol: {
+      flex: 1,
+      minWidth: 0,
+      gap: 1,
+    },
+    dropdownOptionTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      minWidth: 0,
+    },
+    dropdownOptionTitle: {
+      ...type.small,
+      fontSize: 13.5,
+      fontWeight: '500',
+      color: colors.ink,
+      flexShrink: 1,
+    },
+    dropdownOptionTitleSelected: {
       fontWeight: '700',
     },
-    backendFilterCount: {
+    dropdownOptionDetail: {
       ...type.caption,
-      fontSize: 11,
-      color: colors.subtle,
-      fontVariant: ['tabular-nums'],
+      fontSize: 11.5,
+      color: colors.muted,
+    },
+    dropdownCurrentBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceStrong,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      flexShrink: 0,
+    },
+    dropdownCurrentBadgeText: {
+      ...type.caption,
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.muted,
+    },
+    dropdownCheckSlot: {
+      width: 18,
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+      flexShrink: 0,
     },
     hostBridgeCard: {
       backgroundColor: colors.grouped,
@@ -1226,11 +1574,21 @@ function createStyles(colors: ThemeColors) {
       borderWidth: StyleSheet.hairlineWidth,
       alignItems: 'center',
       justifyContent: 'center',
+      flexShrink: 0,
     },
     backendGlyphMiniText: {
       fontSize: 9,
       lineHeight: 11,
       fontWeight: '800',
+    },
+    backendGlyphMd: {
+      width: 20,
+      height: 20,
+      borderRadius: 6,
+    },
+    backendGlyphMdText: {
+      fontSize: 11,
+      lineHeight: 13,
     },
     backendText: {
       ...type.caption,

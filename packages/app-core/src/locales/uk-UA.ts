@@ -1145,7 +1145,7 @@ const ukUA = {
     notifyQuestion: 'Очікує вашої відповіді',
     notifyCompleted: 'Завдання завершено',
     notifyFailed: 'Збій виконання завдання',
-    filterAll: 'Усі',
+    filterAllPlatforms: 'Усі платформи',
     hostCurrent: 'Поточний',
     hostOnlineDigest: 'У мережі · лише лічильники',
     hostOffline: 'Хост офлайн',

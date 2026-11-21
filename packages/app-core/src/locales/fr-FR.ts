@@ -1124,7 +1124,7 @@ const frFR = {
     notifyQuestion: 'En attente de votre réponse',
     notifyCompleted: 'Tâche terminée',
     notifyFailed: 'Échec de la tâche',
-    filterAll: 'Tout',
+    filterAllPlatforms: 'Toutes les plateformes',
     hostCurrent: 'Actuel',
     hostOnlineDigest: 'En ligne · compteurs en direct',
     hostOffline: 'Hôte hors ligne',

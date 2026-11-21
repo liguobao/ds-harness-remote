@@ -1142,7 +1142,7 @@ const ruRU = {
     notifyQuestion: 'Ожидает вашего ответа',
     notifyCompleted: 'Задача завершена',
     notifyFailed: 'Ошибка выполнения задачи',
-    filterAll: 'Все',
+    filterAllPlatforms: 'Все платформы',
     hostCurrent: 'Текущий',
     hostOnlineDigest: 'В сети · только счётчики',
     hostOffline: 'Хост не в сети',

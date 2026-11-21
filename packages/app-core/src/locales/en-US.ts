@@ -1133,7 +1133,7 @@ const enUS = {
     notifyQuestion: 'Waiting for your answer',
     notifyCompleted: 'Task completed',
     notifyFailed: 'Task failed',
-    filterAll: 'All',
+    filterAllPlatforms: 'All platforms',
     hostCurrent: 'Current',
     hostOnlineDigest: 'Online · live counts',
     hostOffline: 'Host offline',
