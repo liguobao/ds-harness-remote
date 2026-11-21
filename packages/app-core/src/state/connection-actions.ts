@@ -1,5 +1,5 @@
 import { cursorNativeId, finalizeAssistantLive, foldAcpHistory, mergeAcpHistoryAndLive, readAcpHistory } from '../services/cursor'
-import { browseScope, useBrowseMemory } from '../services/browse-memory'
+import { browseScope, saveSessionMessagesSnapshot, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
 import { isAcpManagedBackend } from '../lib/workspace-key'
@@ -7,7 +7,8 @@ import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
 import { saveLastConnectedDeviceId } from '../services/storage'
-import { acpClientForBackend } from './session-actions'
+import { isTerminalLocalMessage } from './message-helpers'
+import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
@@ -294,39 +295,56 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ) {
           void get().openSession(selected)
         } else if (selected && isAcpManagedBackend(selected.backend) && selected.running && runtime.activeCursorStream !== undefined
-          && !get().busyAction?.startsWith('session:')) {
+          && !get().busyAction?.startsWith('session:') && get().busyAction !== 'send-message') {
           // The live subscription is still open. Closing it via openSession drops
           // in-flight deltas, approvals and prompt_completed, and the reopen would
           // discard the already streamed reply. Reconcile read-only with Host truth.
           const stream = runtime.activeCursorStream
           const frameRevision = runtime.acpFrameRevision
           const sessionGeneration = runtime.sessionLoadGeneration
+          const messagesAtRead = get().messages[selected.sessionId]
           void readAcpHistory(acpClientForBackend(runtime.connection, selected.backend), cursorNativeId(selected), selected.backend).then(details => {
-            // Settle only if Host explicitly ended the turn, nothing streamed while
-            // reading, and the stream/connection/session generation is unchanged.
+            // Settle only if Host explicitly ended the turn, nothing streamed or mutated
+            // messages while reading, and the stream/connection/session generation is unchanged.
             if (details.running !== false || generation !== runtime.connectionGeneration || sessionGeneration !== runtime.sessionLoadGeneration
               || stream !== runtime.activeCursorStream || frameRevision !== runtime.acpFrameRevision
+              || get().busyAction?.startsWith('session:') || get().busyAction === 'send-message'
+              || get().messages[selected.sessionId] !== messagesAtRead
               || get().selectedSession?.sessionId !== selected.sessionId || get().connection.phase !== 'connected') return
+            const folded = foldAcpHistory(details.events, selected.sessionId)
+            const canPersistSnapshot = Boolean(get().config?.baseUrl && get().selectedDevice?.identityKey)
+            const memoryScope = browseScope(get())
             set(state => {
               const active = state.selectedSession
-              if (!active || active.sessionId !== selected.sessionId) return {}
+              if (!active || active.sessionId !== selected.sessionId || state.messages[selected.sessionId] !== messagesAtRead) return {}
               const updated = { ...active, running: false }
-              // Persisted turns come from the transcript; only rows produced by the
-              // live subscription are kept. Approvals/questions never appear there.
-              const live = (state.messages[selected.sessionId] ?? []).filter(item => item.turn?.startsWith('acp-live:')
-                || item.id === 'cursor-user-live'
-                || item.id.startsWith('local:')
-                || item.kind === 'approval'
-                || item.kind === 'question')
-              const settled = finalizeAssistantLive(live).map(item =>
+              const existing = state.messages[selected.sessionId] ?? []
+              if (folded.length > 0) {
+                // Host confirmed the turn ended and no live frames arrived while reading,
+                // so the persisted transcript supersedes stale partial live/optimistic rows;
+                // retain only terminal local rows and approval/question cards absent from history.
+                const preserved = existing.filter(item =>
+                  isTerminalLocalMessage(item) || item.kind === 'approval' || item.kind === 'question')
+                const merged = mergeAcpHistoryAndLive(folded, preserved)
+                const paged = storeAcpPagedMessages(selected.sessionId, merged)
+                if (canPersistSnapshot) saveSessionMessagesSnapshot(memoryScope, selected.sessionId, paged.tail)
+                return {
+                  selectedSession: updated,
+                  sessions: state.sessions.map(item => item.sessionId === selected.sessionId ? updated : item),
+                  messages: { ...state.messages, [selected.sessionId]: paged.tail },
+                  historyHasMore: paged.historyHasMore,
+                  oldestLoadedSeq: paged.oldestLoadedSeq,
+                }
+              }
+              // Backends without history replay (e.g. legacy Cursor) return empty events:
+              // settle the active live rows in place instead of dropping earlier messages.
+              const settled = finalizeAssistantLive(existing).map(item =>
                 item.kind === 'tool' && item.state === 'running' ? { ...item, state: 'finished' as const } : item)
+              if (canPersistSnapshot) saveSessionMessagesSnapshot(memoryScope, selected.sessionId, settled)
               return {
                 selectedSession: updated,
                 sessions: state.sessions.map(item => item.sessionId === selected.sessionId ? updated : item),
-                messages: {
-                  ...state.messages,
-                  [selected.sessionId]: mergeAcpHistoryAndLive(foldAcpHistory(details.events, selected.sessionId), settled),
-                },
+                messages: { ...state.messages, [selected.sessionId]: settled },
               }
             })
           }).catch(() => undefined)
