@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { CirclePlus } from 'lucide-react-native'
@@ -64,7 +64,7 @@ function TerminalChip({
   )
 }
 
-export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+export function TerminalPanel({ sessionId, onClose, headerAccessory }: { sessionId: string; onClose: () => void; headerAccessory?: ReactNode }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const web = useRef<WebView>(null)
@@ -199,11 +199,11 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     else if (!writable) status = info.state === 'running' ? t.tools.controlDenied : t.tools.exited
   }
   const statusBusy = pending || (error === undefined && active !== undefined && info === undefined)
-  return <BlurHeaderFrame inset header={<TopBar
+  return <BlurHeaderFrame inset header={<View><TopBar
     title={t.tools.terminal}
     onBack={onClose}
     action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
-  />}>
+  />{headerAccessory}</View>}>
     {(items.length > 0 || active !== undefined) && (
       <ScrollView
         horizontal
