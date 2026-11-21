@@ -85062,6 +85062,18 @@ function uuidV7(now = Date.now()) {
   return `${hex3.slice(0, 8)}-${hex3.slice(8, 12)}-${hex3.slice(12, 16)}-${hex3.slice(16, 20)}-${hex3.slice(20)}`;
 }
 
+// packages/plugin/src/office-endpoints.ts
+var OFFICE_RENDER_ENDPOINTS = /* @__PURE__ */ new Set([
+  "officeToPdf/render",
+  "officeKit/render"
+]);
+function isOfficeRenderEndpoint(endpoint) {
+  return OFFICE_RENDER_ENDPOINTS.has(endpoint);
+}
+function isWorkspaceBinaryEndpoint(endpoint) {
+  return endpoint === "workspaceFiles/readBytes" || isOfficeRenderEndpoint(endpoint);
+}
+
 // packages/plugin/src/session-format-compat.ts
 function normalizeLegacySessionGatewayValue(endpoint, value) {
   if (endpoint === "session/page") return normalizePage(value);
@@ -85810,7 +85822,7 @@ function base64ToBytes2(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
+  if (!isWorkspaceBinaryEndpoint(endpoint)) return value;
   if (!isRecord9(value) || typeof value.data !== "string") return value;
   return { ...value, data: base64ToBytes2(value.data) };
 }
@@ -88938,7 +88950,7 @@ var TypertGatewaySwitch = class {
 };
 function workspaceConnectionResult(endpoint, result) {
   if (endpoint === "terminal/environment" && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) };
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (!isWorkspaceBinaryEndpoint(endpoint)) return result;
   if (!result.ok || !isRecord11(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
@@ -109520,6 +109532,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspaceFiles/changes",
   "officeToPdf/render",
   "officeToPdf/generation",
+  "officeKit/render",
+  "officeKit/generation",
   "toolResults/watch",
   "workspace/archiveSession",
   "workspace/create",
@@ -109647,7 +109661,7 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
         }
         nativePayload = search;
-      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === "officeToPdf/render") && isMessageFilePath(requestArgs(nativePayload).path)) {
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || isOfficeRenderEndpoint(params.endpoint)) && isMessageFilePath(requestArgs(nativePayload).path)) {
         nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal);
       } else if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
@@ -110462,7 +110476,7 @@ function decodeCanonicalBase643(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult2(endpoint, result) {
-  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (result.ok !== true || !isWorkspaceBinaryEndpoint(endpoint)) return result;
   if (!isJsonRecord(result.value)) return result;
   const directBytes = isBinary(result.value.data) ? result.value.data : void 0;
   const attachmentBytes = directBytes === void 0 ? attachmentAt(result, ["data"]) : void 0;

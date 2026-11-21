@@ -9,6 +9,7 @@ import {
   type HarnessRemoteStreamClosedData,
 } from '@dsh-remote/protocol'
 import { uuidV7 } from './ids.js'
+import { isWorkspaceBinaryEndpoint } from './office-endpoints.js'
 import {
   canonicalUnaryHistoryKey,
   extractSessionIdFromGatewayPayload,
@@ -704,7 +705,7 @@ function base64ToBytes(value: string): Uint8Array {
 
 /** Restore binary fields after the JSON-only Remote carrier. */
 function normalizeWorkspaceBinaryResult(endpoint: string, value: unknown): unknown {
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (!isWorkspaceBinaryEndpoint(endpoint)) return value
   if (!isRecord(value) || typeof value.data !== 'string') return value
   return { ...value, data: base64ToBytes(value.data) }
 }

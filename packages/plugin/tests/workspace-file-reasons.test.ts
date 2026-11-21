@@ -162,7 +162,14 @@ describe('native message attachment preview authorization', () => {
     await vi.waitFor(() => expect(publish).toHaveBeenCalled())
     await expect(call('workspaceFiles/stat', { ...args, path: path.replace(attachment.attachmentId, liveAttachment.attachmentId) }))
       .resolves.toMatchObject({ ok: true })
-    await expect(call('officeToPdf/render', { ...args, priority: 'foreground' })).resolves.toMatchObject({ ok: true })
+    for (const endpoint of ['officeToPdf/render', 'officeKit/render']) {
+      await expect(call(endpoint, { ...args, priority: 'foreground' })).resolves.toMatchObject({ ok: true })
+      expect(dispatch).toHaveBeenLastCalledWith(
+        endpoint,
+        { args: { ...args, priority: 'foreground', path: await realpath(stored) } },
+        expect.any(AbortSignal),
+      )
+    }
     await expect(bridge.openStream({
       streamId: 'attachment-watch', endpoint: 'workspaceFiles/changes', payload: { args },
     })).resolves.toEqual({ opened: true, streamId: 'attachment-watch' })

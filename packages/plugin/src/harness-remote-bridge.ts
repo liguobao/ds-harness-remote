@@ -34,6 +34,7 @@ import { RpcError } from './rpc-router.js'
 import { workspaceFileFailure, workspaceFileFailureReason } from './safe-error.js'
 import type { LocalTypertGateway, TypertRpcResult } from './typert-gateway-contract.js'
 import { isMessageFilePath, MessageFileAttachments, type MessageFileAttachment } from './message-file-attachment.js'
+import { isOfficeRenderEndpoint, isWorkspaceBinaryEndpoint } from './office-endpoints.js'
 import { CodexWorkspaceBridge } from './codex-workspace-bridge.js'
 
 type PublishRemoteFrame = (
@@ -216,6 +217,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspaceFiles/changes',
   'officeToPdf/render',
   'officeToPdf/generation',
+  'officeKit/render',
+  'officeKit/generation',
   'toolResults/watch',
   'workspace/archiveSession',
   'workspace/create',
@@ -378,7 +381,7 @@ export class HarnessRemoteBridge {
           throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'authority-unavailable')
         }
         nativePayload = search
-      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === 'officeToPdf/render')
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || isOfficeRenderEndpoint(params.endpoint))
         && isMessageFilePath(requestArgs(nativePayload).path)) {
         nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal)
       } else if (this.resolveWorkspaceRoot !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
@@ -1359,7 +1362,7 @@ function decodeCanonicalBase64(value: string): Uint8Array {
 }
 
 function normalizeWorkspaceBinaryResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
-  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render')) return result
+  if (result.ok !== true || !isWorkspaceBinaryEndpoint(endpoint)) return result
   if (!isJsonRecord(result.value)) return result
   const directBytes = isBinary(result.value.data) ? result.value.data : undefined
   const attachmentBytes = directBytes === undefined ? attachmentAt(result, ['data']) : undefined

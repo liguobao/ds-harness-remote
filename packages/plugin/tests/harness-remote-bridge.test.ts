@@ -794,6 +794,29 @@ describe('HarnessRemoteBridge', () => {
       .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
   })
 
+  it('accepts the DSH 0.2.2-alpha.3 officeKit endpoint family', async () => {
+    await runScenarios(['officeToPdf', 'officeKit'].map(prefix => ({ name: prefix, run: async () => {
+      const dispatch = vi.fn(async (endpoint: string) => ({
+        ok: true as const,
+        value: endpoint === `${prefix}/generation`
+          ? { generation: 'g1' }
+          : { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
+      }))
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.2')
+
+      await expect(bridge.call({ endpoint: `${prefix}/generation`, payload: { args: {} } }))
+        .resolves.toMatchObject({ ok: true, value: { generation: 'g1' } })
+      await expect(bridge.call({ endpoint: `${prefix}/render`, payload: { args: { path: '/tmp/a.docx' } } }))
+        .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
+      expect(dispatch).toHaveBeenCalledTimes(2)
+
+      dispatch.mockClear()
+      await expect(bridge.call({ endpoint: `${prefix}/delete`, payload: { args: {} } }))
+        .rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      expect(dispatch).not.toHaveBeenCalled()
+    } })))
+  })
+
   it('materializes official Gateway binary attachments before crossing the JSON carrier', async () => {
     const dispatch = vi.fn(async () => ({
       ok: true as const,
