@@ -244,7 +244,7 @@ describe('Claude isolated history and live session recovery', () => {
       await client.history('saved-meta', '/tmp')
       expect(client.isSessionLoaded('saved-meta')).toBe(false)
       expect(client.lastHistoryMetadata('saved-meta')).toMatchObject({
-        models: { selected: { model: 'gemini-3-pro' } },
+        models: { current: { model: 'gemini-3-pro' } },
         modes: { currentModeId: 'agent', availableModes: [{ id: 'agent', name: 'Agent' }] },
       })
       client.invalidateHistoryMetadata('saved-meta')
