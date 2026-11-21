@@ -254,9 +254,10 @@ export const SubagentsCard = memo(function SubagentsCard({
     onToggle?.()
   }
 
+  const { totalCount, statsText } = useMemo(() => formatSubagentStats(sessions ?? []), [sessions])
+
   if (!sessions || sessions.length === 0) return null
 
-  const { totalCount, statsText } = useMemo(() => formatSubagentStats(sessions), [sessions])
   const listMaxHeight = maxHeight ?? Math.min(260, height * 0.32)
   const title = copy.subagents || strings.chat.subagentsTitle(totalCount).split(' · ')[0]
 
@@ -389,12 +390,13 @@ export const AgentTeamCard = memo(function AgentTeamCard({
     onToggle?.()
   }
 
-  if (!members || members.length === 0) return null
-
   const { totalCount, statsText } = useMemo(
-    () => formatTeamStats(members, sessions),
+    () => formatTeamStats(members ?? [], sessions),
     [members, sessions],
   )
+
+  if (!members || members.length === 0) return null
+
   const listMaxHeight = maxHeight ?? Math.min(260, height * 0.32)
   const title = copy.team || strings.chat.teamTitle(totalCount).split(' · ')[0]
 

@@ -759,19 +759,23 @@ export function AutomationTasksModal({
         {
           text: strings.automation.deleteConfirm,
           style: 'destructive',
-          onPress: async () => {
-            setDeleting(true)
-            try {
-              const ok = await deleteTask(selectedTask.sessionId, selectedTask.id)
-              if (ok) {
-                setSelectedTaskId(null)
-                await loadTasks()
-              } else {
+          onPress: () => {
+            void (async () => {
+              setDeleting(true)
+              try {
+                const ok = await deleteTask(selectedTask.sessionId, selectedTask.id)
+                if (ok) {
+                  setSelectedTaskId(null)
+                  await loadTasks()
+                } else {
+                  Alert.alert(strings.common.unknown, strings.automation.deleteFailed)
+                }
+              } catch {
                 Alert.alert(strings.common.unknown, strings.automation.deleteFailed)
+              } finally {
+                setDeleting(false)
               }
-            } finally {
-              setDeleting(false)
-            }
+            })()
           },
         },
       ]

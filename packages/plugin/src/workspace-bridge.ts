@@ -165,7 +165,7 @@ export class WorkspaceBridge {
     const queue = new AsyncQueue<unknown>()
     signal.throwIfAborted()
     const watcher = watch(target, { recursive: false })
-    const abort = () => { watcher.return?.(); queue.end() }
+    const abort = () => { void watcher.return?.().catch(() => undefined); queue.end() }
     signal.addEventListener('abort', abort, { once: true })
     void (async () => {
       try { for await (const event of watcher) queue.push({ kind: 'change', type: event.eventType, path: event.filename ?? '' }) }

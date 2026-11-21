@@ -46,7 +46,7 @@ export class TranscriptWatcher extends EventEmitter {
         // 文件可能尚未创建或临时锁占用，静默重试
       }
       if (!this.closed) {
-        this.pollTimer = setTimeout(poll, intervalMs)
+        this.pollTimer = setTimeout(() => { void poll() }, intervalMs)
         this.pollTimer.unref?.()
       }
     }

@@ -6,16 +6,19 @@ vi.mock('react', async (importOriginal) => {
   // a small registry keyed by hook call order. `beginPass` restarts the call order
   // (a re-render) while keeping the stored values (state updates).
   const stores = new Map<string, any>()
+  const hookOrder: string[] = []
   const ctx = { order: 0 }
   ;(globalThis as any).__dshReactMock = {
-    beginPass: () => { ctx.order = 0 },
-    reset: () => { stores.clear(); ctx.order = 0 },
+    beginPass: () => { ctx.order = 0; hookOrder.length = 0 },
+    reset: () => { stores.clear(); ctx.order = 0; hookOrder.length = 0 },
+    hooks: () => [...hookOrder],
   }
   return {
     ...actual,
-    useRef: (v: any) => ({ current: v }),
-    useEffect: () => {},
+    useRef: (v: any) => { hookOrder.push('useRef'); return { current: v } },
+    useEffect: () => { hookOrder.push('useEffect') },
     useState: (v: any) => {
+      hookOrder.push('useState')
       const key = `s${ctx.order++}`
       if (!stores.has(key)) stores.set(key, typeof v === 'function' ? v() : v)
       const set = (next: any) => {
@@ -24,8 +27,8 @@ vi.mock('react', async (importOriginal) => {
       }
       return [stores.get(key), set]
     },
-    useMemo: (fn: any) => fn(),
-    useCallback: (fn: any) => fn,
+    useMemo: (fn: any) => { hookOrder.push('useMemo'); return fn() },
+    useCallback: (fn: any) => { hookOrder.push('useCallback'); return fn },
   }
 })
 
@@ -284,8 +287,16 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
     ]
 
     it('returns null when sessions list is empty', () => {
+      const reactMock = (globalThis as any).__dshReactMock
+      reactMock.reset()
       const el = renderSubagentsCard({ sessions: [] })
+      const emptyHooks = reactMock.hooks()
       expect(el).toBeNull()
+
+      reactMock.beginPass()
+      const populated = renderSubagentsCard({ sessions: mockSessions })
+      expect(populated).not.toBeNull()
+      expect(emptyHooks).toEqual(reactMock.hooks())
     })
 
     it('renders collapsed state by default and expands on click', () => {
@@ -383,8 +394,16 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
     ]
 
     it('returns null when members array is empty', () => {
+      const reactMock = (globalThis as any).__dshReactMock
+      reactMock.reset()
       const el = renderAgentTeamCard({ members: [] })
+      const emptyHooks = reactMock.hooks()
       expect(el).toBeNull()
+
+      reactMock.beginPass()
+      const populated = renderAgentTeamCard({ members: mockMembers, sessions: mockSessions })
+      expect(populated).not.toBeNull()
+      expect(emptyHooks).toEqual(reactMock.hooks())
     })
 
     it('renders expanded list with claimed tasks, more tasks badge, error message, and onOpen', () => {
