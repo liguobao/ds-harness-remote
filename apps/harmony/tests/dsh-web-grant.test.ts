@@ -1,9 +1,10 @@
 import { build } from 'esbuild'
-import { dshWebGrantSchema } from '../../../packages/protocol/src/dsh-web'
+import { dshWebGrantSchema, dshWebLanGrantSchema } from '../../../packages/protocol/src/dsh-web'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 type Grant = { url: string; origin: string; browserGrant: string }
 let harmony: {
+  parseDshWebLanGrant(value: unknown, now: number): Grant
   parseDshWebGrant(value: unknown, now: number): Grant
   isDshWebOrigin(target: string, origin: string): boolean
   isFatalDshWebHttpError(target: string, status: number, grantUrl: string, origin: string): boolean
@@ -56,6 +57,24 @@ describe('Harmony DSH Web protocol parity', () => {
       })
     } else {
       expect(() => harmony.parseDshWebGrant(value, now)).toThrow()
+    }
+  })
+
+  it.each([
+    'http://192.168.31.225:8080/',
+    'http://127.0.0.1:8080/',
+    'http://127.0.0.2:8080/',
+    'http://192.168.01.2:8080/',
+    'http://192.168.1.2:80/',
+    'http://192.168.1.2:65536/',
+    'http://8.8.8.8:8080/',
+  ])('matches shared IPv4 grant validation for %s', (url) => {
+    const value = { ...grant, url, sessionId: '01900000-0000-7000-8000-000000000000' }
+    if (URL.canParse(url) && dshWebLanGrantSchema.safeParse(value).success) {
+      expect(harmony.parseDshWebLanGrant(value, now).url).toBe(url)
+      expect(() => harmony.parseDshWebLanGrant({ ...value, expiresAt: now }, now)).toThrow()
+    } else {
+      expect(() => harmony.parseDshWebLanGrant(value, now)).toThrow()
     }
   })
 

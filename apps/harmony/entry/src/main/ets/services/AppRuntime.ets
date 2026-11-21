@@ -1941,7 +1941,18 @@ export class AppRuntime {
       if (this.canOpenLanWeb()) {
         const lease = new DshWebLan(core, () => core === this.core && this.canOpenLanWeb());
         this.lanWebLease = lease;
-        return await lease.open();
+        try {
+          return await lease.open();
+        } catch (error) {
+          await this.releaseDshWebLease();
+          if (!(error instanceof RemoteClientError) || error.code !== 'FEATURE_NOT_SUPPORTED') {
+            throw new Error('DSH_WEB_UNAVAILABLE');
+          }
+        }
+      }
+      if (core !== this.core || deviceId !== this.connectedDeviceId || this.reconnecting
+        || this.featuresCacheValue?.capabilities.includes('dsh.web.v1') !== true) {
+        throw new Error('DSH_WEB_UNAVAILABLE');
       }
       this.webLeaseCore = core;
       try {

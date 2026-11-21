@@ -92903,7 +92903,7 @@ var CodexAppServerClient = class {
     if (!this.closed) this.notifyUnavailable(code);
   }
   terminateChild(child) {
-    if (child === void 0 || this.hasChildExited(child)) return Promise.resolve();
+    if (child?.pid === void 0 || child.pid <= 0 || this.hasChildExited(child)) return Promise.resolve();
     const existing = this.terminatingChildren.get(child);
     if (existing !== void 0) return existing;
     const exitPromise = this.childExitPromises.get(child);
@@ -104618,8 +104618,13 @@ var DshWebLanPeer = class {
   available() {
     return !this.disposed && !!this.runtime();
   }
+  async listenAddress(pair) {
+    const address2 = await this.address(pair).catch(() => void 0);
+    if (!address2 || (pair ? address2 !== pair.hostAddress : this.mode() !== "LAN" || !isDshWebLanAddress(address2))) return;
+    return Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1")) ? address2 : void 0;
+  }
   async onLan() {
-    return this.available() && await this.address() !== void 0 && this.mode() === "LAN";
+    return this.available() && await this.listenAddress() !== void 0;
   }
   async open(params) {
     const { sameLinkIpv6Pair } = dshWebLanOpenSchema.parse(params);
@@ -104695,11 +104700,9 @@ var DshWebLanPeer = class {
         else req.pipe(outgoing);
       };
       var track = track2, proxy = proxy2;
-      const address2 = await this.address(sameLinkIpv6Pair);
-      if (sameLinkIpv6Pair ? address2 !== sameLinkIpv6Pair.hostAddress : this.mode() !== "LAN") {
-        throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
-      }
-      if (!address2 || !sameLinkIpv6Pair && !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
+      const address2 = await this.listenAddress(sameLinkIpv6Pair);
+      signal.throwIfAborted();
+      if (!address2) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
       const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname;
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
       signal.throwIfAborted();
@@ -104815,7 +104818,9 @@ var DshWebLanPeer = class {
       await new Promise((resolve10, reject) => {
         const cancelled = () => reject(new Error("LAN Web closed"));
         signal.addEventListener("abort", cancelled, { once: true });
-        server.once("error", reject);
+        server.once("error", (error62) => {
+          reject(error62.code === "EADDRNOTAVAIL" ? new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.") : error62);
+        });
         server.listen({ host: address2, port: 0, signal }, () => {
           signal.removeEventListener("abort", cancelled);
           resolve10();

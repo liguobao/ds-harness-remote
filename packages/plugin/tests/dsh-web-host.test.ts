@@ -830,6 +830,23 @@ describe('DSH Web connector establishment', () => {
 })
 
 describe('LAN Web connection ownership', () => {
+  it.each([
+    ['missing candidate', async (): Promise<string | undefined> => undefined],
+    ['ineligible address', async (): Promise<string | undefined> => '192.0.2.1'],
+    ['unavailable ICE stats', async (): Promise<string | undefined> => { throw new Error('RTC path unavailable') }],
+  ] as const)('allows tunnel fallback for %s even while mode is LAN', async (_, address) => {
+    const { DshWebLanPeer } = await import('../src/dsh-web-lan.js')
+    const auth = { authenticatedUrl: vi.fn(), authorizeIndex: vi.fn(), requestRejection: vi.fn() }
+    const peer = new DshWebLanPeer(() => ({ origin: new URL('http://127.0.0.1'), auth }), () => 'LAN', address)
+    try {
+      expect(await peer.onLan()).toBe(false)
+      await expect(peer.open({})).rejects.toMatchObject({ code: 'FEATURE_NOT_SUPPORTED' })
+      expect(auth.authorizeIndex).not.toHaveBeenCalled()
+    } finally {
+      peer.dispose()
+    }
+  })
+
   it.each(['private IPv4', 'loopback'])('requires a one-time Noise grant and retires the %s lease', async scope => {
     const { DshWebLanPeer } = await import('../src/dsh-web-lan.js')
     const { networkInterfaces } = await import('node:os')

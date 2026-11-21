@@ -32,7 +32,14 @@ export class DshWebLanPeer {
 
   available() { return !this.disposed && !!this.runtime() }
 
-  async onLan() { return this.available() && await this.address() !== undefined && this.mode() === 'LAN' }
+  private async listenAddress(pair?: SameLinkIpv6Pair) {
+    const address = await this.address(pair).catch(() => undefined)
+    if (!address || (pair ? address !== pair.hostAddress : this.mode() !== 'LAN' || !isDshWebLanAddress(address))) return
+    return Object.values(networkInterfaces()).flat().some(iface =>
+      iface?.address === address && (!iface.internal || address === '127.0.0.1')) ? address : undefined
+  }
+
+  async onLan() { return this.available() && await this.listenAddress() !== undefined }
 
   async open(params: unknown) {
     const { sameLinkIpv6Pair } = dshWebLanOpenSchema.parse(params)
@@ -42,12 +49,9 @@ export class DshWebLanPeer {
     this.lease = lease
     const signal = lease.abort.signal
     try {
-      const address = await this.address(sameLinkIpv6Pair)
-      if (sameLinkIpv6Pair ? address !== sameLinkIpv6Pair.hostAddress : this.mode() !== 'LAN') {
-        throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
-      }
-      if (!address || (!sameLinkIpv6Pair && !isDshWebLanAddress(address)) || !Object.values(networkInterfaces()).flat()
-        .some(iface => iface?.address === address && (!iface.internal || address === '127.0.0.1'))) throw new Error('LAN interface unavailable')
+      const address = await this.listenAddress(sameLinkIpv6Pair)
+      signal.throwIfAborted()
+      if (!address) throw new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.')
       const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5000)]))
       signal.throwIfAborted()
@@ -182,7 +186,10 @@ export class DshWebLanPeer {
       await new Promise<void>((resolve, reject) => {
         const cancelled = () => reject(new Error('LAN Web closed'))
         signal.addEventListener('abort', cancelled, { once: true })
-        server.once('error', reject)
+        server.once('error', (error: NodeJS.ErrnoException) => {
+          // The selected interface can disappear between ICE validation and bind.
+          reject(error.code === 'EADDRNOTAVAIL' ? new RpcError('FEATURE_NOT_SUPPORTED', 'LAN Web is unavailable.') : error)
+        })
         server.listen({ host: address, port: 0, signal }, () => {
           signal.removeEventListener('abort', cancelled)
           resolve()

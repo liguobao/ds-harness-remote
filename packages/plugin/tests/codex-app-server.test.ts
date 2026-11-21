@@ -245,6 +245,18 @@ describe('CodexAppServerClient', () => {
         },
       },
       {
+        name: 'close-before-spawn-error-does-not-signal-a-child-without-a-pid',
+        run: async () => {
+          const fake = fakeProcess({ pid: undefined })
+          const client = new CodexAppServerClient('missing-codex', logger(), () => fake.child)
+          const rejection = expect(client.start()).rejects.toMatchObject({ code: 'CODEX_CLOSED' })
+          const closing = client.close()
+          fake.child.emit('error', Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+          await Promise.all([closing, rejection])
+          expect(fake.kill).not.toHaveBeenCalled()
+        },
+      },
+      {
         name: 'unspawned-enoent-does-not-wait-for-sigkill',
         run: async () => {
           const fake = fakeProcess({ pid: undefined })

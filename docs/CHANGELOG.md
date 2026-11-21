@@ -2,6 +2,26 @@
 
 版本条目保留发布时的功能和验证范围；当前使用方式与限制见[文档入口](README.md)和[版本兼容](compatibility.zh.md)。
 
+## 0.6.7
+
+Android versionCode **75** · iOS buildNumber floor **75**
+
+### 中文
+
+- 在主机详情打开 DSH Web 时，客户端可通过局域网直连。打开时若 Host 找不到可用的本机监听地址，支持隧道的客户端会通过 Host 提供的隧道继续打开。
+- 支持需要二次验证的密码登录，可输入验证码或恢复码。Android 和 iOS 改善了平板抽屉和弹窗的布局。
+- Codex 会话重连后可恢复消息流并补齐截断的回复。移动端改善 Antigravity 权限选择、历史图片和命令菜单，Desktop 可预览会话消息中的文件附件。
+
+### English
+
+- Open DSH Web directly over the LAN from the Host details screen. If the Host loses its local listening address during opening, clients can continue through the tunnel advertised by the Host.
+- Password sign-in supports verification and recovery codes. Android and iOS improve drawer and dialog sizing on tablets.
+- Codex sessions recover streams and fill in truncated replies after reconnecting. Mobile clients improve Antigravity permission selection, historical images, and command menus. Desktop can preview files attached to chat messages.
+
+### 贡献者 / Contributors
+
+gcnyin、liguobao、luo jiyin、vcd、择梦舟。
+
 ## 0.6.6 — 2026-11-20
 
 Android versionCode 74 · iOS buildNumber floor 74
