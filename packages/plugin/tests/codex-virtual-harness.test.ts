@@ -1326,7 +1326,7 @@ describe('CodexVirtualHarness', () => {
       {
         name: 'clamps maxMessages=500 and enforces 256 KiB budget across follow and page with lossless cursor walk',
         run: async () => {
-          const largeThread = makeLargeThread('thr_large', 60, 6 * 1024, true)
+          const largeThread = makeLargeThread('thr_large', 80, 6 * 1024, true)
           const fullHistory = projectCodexNativeHistory(largeThread, 'codex:thr_large')
           const client = fakeCodex([largeThread])
           const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })

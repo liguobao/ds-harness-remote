@@ -82,6 +82,7 @@ export interface NativeEvent {
   seq: number
   time: number
   data: unknown
+  sourceEventSeqs?: number[]
   surfaceOp?: 'append' | { op: 'replace'; start: number; end: number }
 }
 
@@ -109,6 +110,7 @@ export interface FollowState {
   accumulatedText: string
   accumulatedReasoning?: string
   activeToolCalls: Set<string>
+  callSeqs?: Map<string, number>
   piToolOutputs: Map<string, { text: string; overflow: boolean }>
   piToolCalls: Map<string, { name: string; input?: unknown }>
   piStep?: number

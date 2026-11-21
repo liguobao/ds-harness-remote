@@ -137,6 +137,7 @@ export async function loadTranscriptEvents(
   let currentSeq = 0
   let currentTurn = 0
   let turnOpen = false
+  const pendingGenericToolResults: Array<{ callSeq: number; callId: string; stepIndex: number }> = []
 
   const push = (type: string, data: unknown, time: number, surface = false, sourceEventSeqs?: number[]) => {
     events.push({
@@ -152,6 +153,25 @@ export async function loadTranscriptEvents(
     })
   }
 
+  const flushPendingGenericToolResults = (time: number) => {
+    for (const pending of pendingGenericToolResults.splice(0)) {
+      push('tool/result', {
+        turn: currentTurn,
+        step: 1,
+        message: {
+          id: `${sessionId}:${pending.stepIndex}:tool-result:${pending.callId}`,
+          role: 'user',
+          source: { kind: 'tool', callId: pending.callId },
+          content: [{
+            type: 'tool-result',
+            toolCallId: pending.callId,
+            content: [],
+          }],
+        },
+      }, time, true, [pending.callSeq])
+    }
+  }
+
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -165,6 +185,7 @@ export async function loadTranscriptEvents(
     const time = record.created_at ? new Date(record.created_at).getTime() : Date.now()
 
     if (record.type === 'USER_INPUT') {
+      flushPendingGenericToolResults(time)
       if (turnOpen) {
         push('step/end', { turn: currentTurn, step: 1 }, time)
         push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, time)
@@ -185,6 +206,7 @@ export async function loadTranscriptEvents(
         source: { kind: 'user' },
       }, time, true)
     } else if (record.type === 'PLANNER_RESPONSE') {
+      flushPendingGenericToolResults(time)
       if (!turnOpen) {
         currentTurn += 1
         turnOpen = true
@@ -213,30 +235,37 @@ export async function loadTranscriptEvents(
           }, time, false)
           if (call.status !== 'CALLING' && call.status !== 'EXECUTING') {
             let resultText = ''
+            let hasInlineResult = false
             if (typeof call.result === 'string') {
               resultText = call.result
+              hasInlineResult = true
             } else if (call.result !== undefined && call.result !== null) {
               try {
                 resultText = JSON.stringify(call.result)
+                hasInlineResult = true
               } catch {
                 resultText = ''
               }
             }
-            push('tool/result', {
-              turn: currentTurn,
-              step: 1,
-              message: {
-                id: `${sessionId}:${record.step_index}:tool-result:${callId}`,
-                role: 'user',
-                source: { kind: 'tool', callId },
-                content: [{
-                  type: 'tool-result',
-                  toolCallId: callId,
-                  content: resultText.length > 0 ? [{ type: 'text', text: resultText }] : [],
-                  ...(isError ? { isError: true } : {}),
-                }],
-              },
-            }, time, true, [callSeq])
+            if (hasInlineResult || isError) {
+              push('tool/result', {
+                turn: currentTurn,
+                step: 1,
+                message: {
+                  id: `${sessionId}:${record.step_index}:tool-result:${callId}`,
+                  role: 'user',
+                  source: { kind: 'tool', callId },
+                  content: [{
+                    type: 'tool-result',
+                    toolCallId: callId,
+                    content: resultText.length > 0 ? [{ type: 'text', text: resultText }] : [],
+                    ...(isError ? { isError: true } : {}),
+                  }],
+                },
+              }, time, true, [callSeq])
+            } else {
+              pendingGenericToolResults.push({ callSeq, callId, stepIndex: record.step_index })
+            }
           }
         }
       }
@@ -261,12 +290,42 @@ export async function loadTranscriptEvents(
         stream: [],
       }, time, true)
       }
+    } else if (record.type === 'GENERIC' && pendingGenericToolResults.length > 0) {
+      const pending = pendingGenericToolResults.shift()!
+      const isError = record.status === 'ERROR' || (typeof record.error === 'string' && record.error.length > 0)
+      const resultText = typeof record.content === 'string' && record.content.length > 0
+        ? record.content
+        : typeof record.error === 'string'
+          ? record.error
+          : ''
+      if (isError) {
+        const callEntry = events.find(entry => entry.event.seq === pending.callSeq)
+        if (callEntry && typeof callEntry.event.data === 'object' && callEntry.event.data !== null) {
+          (callEntry.event.data as Record<string, unknown>).status = 'failed'
+        }
+      }
+      push('tool/result', {
+        turn: currentTurn,
+        step: 1,
+        message: {
+          id: `${sessionId}:${pending.stepIndex}:tool-result:${pending.callId}`,
+          role: 'user',
+          source: { kind: 'tool', callId: pending.callId },
+          content: [{
+            type: 'tool-result',
+            toolCallId: pending.callId,
+            content: resultText.length > 0 ? [{ type: 'text', text: resultText }] : [],
+            ...(isError ? { isError: true } : {}),
+          }],
+        },
+      }, time, true, [pending.callSeq])
     }
   }
 
   if (turnOpen) {
     // Hydration must not extend a settled turn until the time of the read.
     const settledAt = events.at(-1)?.event.time ?? Date.now()
+    flushPendingGenericToolResults(settledAt)
     push('step/end', { turn: currentTurn, step: 1 }, settledAt)
     push('turn/end', { turn: currentTurn, reason: { kind: 'completed' } }, settledAt)
   }

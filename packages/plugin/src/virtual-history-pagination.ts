@@ -465,6 +465,47 @@ function compactOversizedVirtualHistoryEntry<T extends VirtualHistoryEntryLike>(
   return undefined
 }
 
+const TOOL_EVENT_TYPES = new Set([
+  'tool/call',
+  'tool/result',
+  'tool/ptc-dispatch',
+  'tool/ptc-dispatch-start',
+  'tool/code-dispatch',
+  'tool/code-dispatch-start',
+])
+
+const WINDOW_TOOL_RECORD_SOFT_MAX_BYTES = 3 * 1024
+const WINDOW_TOOL_STRING_BYTE_LIMITS = [2 * 1024, 1024, 512] as const
+
+function isToolHistoryEntry(entry: VirtualHistoryEntryLike): boolean {
+  return TOOL_EVENT_TYPES.has(entry.event.type)
+}
+
+function compactWindowToolEntry<T extends VirtualHistoryEntryLike>(
+  entry: T,
+  availableBytes: number,
+  measureRecordBytes: (candidate: T) => number,
+): T | undefined {
+  if (!isToolHistoryEntry(entry) || availableBytes <= 0) return undefined
+  const targetBytes = Math.min(availableBytes, WINDOW_TOOL_RECORD_SOFT_MAX_BYTES)
+  const stageAState = { changed: false }
+  const stageAData = stripInlineImagePayloads(entry.event.data, stageAState)
+  const stageAView = entry.view === undefined ? undefined : stripInlineImagePayloads(entry.view, stageAState)
+  for (const maxStringBytes of WINDOW_TOOL_STRING_BYTE_LIMITS) {
+    const stageBState = { changed: false }
+    const stageBData = compactValueForBudget(stageAData, maxStringBytes, stageBState)
+    const stageBView = stageAView === undefined
+      ? undefined
+      : compactValueForBudget(stageAView, maxStringBytes, stageBState)
+    if (!stageAState.changed && !stageBState.changed) continue
+    const candidate = withCompactedEventFields(entry, stageBData, stageBView, true)
+    if (measureRecordBytes(candidate) <= targetBytes) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
 function positiveSafeInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     ? value
@@ -475,6 +516,26 @@ function isSurfaceAppendEvent(entry: VirtualHistoryEntryLike): boolean {
   const { type, surfaceOp } = entry.event
   return surfaceOp === 'append'
     && (type === 'user/message' || type === 'assistant/message' || type === 'tool/result')
+}
+
+function hasSpokenAssistantContent(data: unknown): boolean {
+  if (!isPlainRecord(data)) return false
+  const message = isPlainRecord(data.message) ? data.message : data
+  if (typeof message.text === 'string' && message.text.trim().length > 0) return true
+  if (!Array.isArray(message.content)) return false
+  return message.content.some(block => {
+    if (!isPlainRecord(block)) return false
+    if (block.type === 'reasoning') return false
+    if (block.type === 'image' || block.type === 'input_image') return true
+    return typeof block.text === 'string' && block.text.trim().length > 0
+  })
+}
+
+function isDialogueTurnBoundaryMessage(entry: VirtualHistoryEntryLike): boolean {
+  const { type, data } = entry.event
+  if (type === 'user/message') return true
+  if (type === 'assistant/message') return hasSpokenAssistantContent(data)
+  return false
 }
 
 export function utf8JsonByteLength(value: unknown): number {
@@ -530,7 +591,44 @@ function findTurnStartIndices<T extends VirtualHistoryEntryLike>(
   return turnStarts
 }
 
-function selectMessageLimitCutIndex<T extends VirtualHistoryEntryLike>(
+function expandForSourceEventDependencies<T extends VirtualHistoryEntryLike>(
+  window: readonly T[],
+  startIndex: number,
+): number {
+  if (startIndex <= 0 || startIndex >= window.length) return startIndex
+  let minSeq = window[startIndex]!.event.seq
+  for (let index = startIndex; index < window.length; index += 1) {
+    const sourceSeqs = window[index]!.event.sourceEventSeqs
+    if (sourceSeqs !== undefined) {
+      for (const sourceSeq of sourceSeqs) {
+        if (sourceSeq < minSeq) minSeq = sourceSeq
+      }
+    }
+  }
+  if (minSeq >= window[startIndex]!.event.seq) return startIndex
+  for (let index = 0; index < startIndex; index += 1) {
+    if (window[index]!.event.seq >= minSeq) return index
+  }
+  return startIndex
+}
+
+function advancePastIncompleteSourceDependencies<T extends VirtualHistoryEntryLike>(
+  window: readonly T[],
+  startIndex: number,
+): number {
+  if (startIndex <= 0 || startIndex >= window.length) return startIndex
+  let cut = startIndex
+  while (cut < window.length - 1) {
+    const cutSeq = window[cut]!.event.seq
+    const entry = window[cut]!
+    const missingDependency = entry.event.sourceEventSeqs?.some(seq => seq < cutSeq) === true
+    if (!missingDependency) break
+    cut += 1
+  }
+  return cut
+}
+
+export function selectMessageLimitCutIndex<T extends VirtualHistoryEntryLike>(
   window: readonly T[],
   maxMessages: number,
   countSurfaceMessages: boolean,
@@ -538,20 +636,28 @@ function selectMessageLimitCutIndex<T extends VirtualHistoryEntryLike>(
   if (!countSurfaceMessages) {
     return Math.max(0, window.length - maxMessages)
   }
-  let messages = 0
+  let surfaceUnits = 0
+  let dialogueMessages = 0
   let cutSeq = -Infinity
+  const minDialogueTarget = maxMessages >= 8 ? 2 : 0
+  const maxToolExtensionUnits = Math.max(maxMessages, Math.min(VIRTUAL_HISTORY_MAX_MESSAGES, maxMessages * 10))
   for (let index = window.length - 1; index >= 0; index -= 1) {
     const entry = window[index]!
     if (!isSurfaceAppendEvent(entry)) continue
-    messages += 1
-    if (messages >= maxMessages) {
+    surfaceUnits += 1
+    if (isDialogueTurnBoundaryMessage(entry)) {
+      dialogueMessages += 1
+    }
+    if (surfaceUnits >= maxMessages && (dialogueMessages >= minDialogueTarget || surfaceUnits >= maxToolExtensionUnits)) {
       cutSeq = Math.min(entry.event.seq, ...(entry.event.sourceEventSeqs ?? []))
       break
     }
   }
   if (cutSeq === -Infinity) return 0
   for (let index = 0; index < window.length; index += 1) {
-    if (window[index]!.event.seq >= cutSeq) return index
+    if (window[index]!.event.seq >= cutSeq) {
+      return expandForSourceEventDependencies(window, index)
+    }
   }
   return window.length
 }
@@ -637,13 +743,42 @@ export function selectVirtualHistorySlice<T extends VirtualHistoryEntryLike>(
   let totalBytes = envelopeBytes
   let byteCutIndex = window.length
   let trimmedByBytes = false
+  let workingWindow: T[] | undefined
 
   for (let index = window.length - 1; index >= cutIndex; index -= 1) {
-    const entry = window[index]!
-    const entryBytes = measureRecordBytes(entry) + (byteCutIndex < window.length ? 1 : 0)
+    let entry = (workingWindow ?? window)[index]!
+    const separatorBytes = byteCutIndex < window.length ? 1 : 0
+    let rawRecordBytes = measureRecordBytes(entry)
+    if (
+      isToolHistoryEntry(entry)
+      && rawRecordBytes > WINDOW_TOOL_RECORD_SOFT_MAX_BYTES
+      && rawRecordBytes <= hardMaxBytes
+    ) {
+      const remainingSoftBytes = maxBytes - totalBytes - separatorBytes
+      const toolBudget = byteCutIndex === window.length
+        ? Math.max(WINDOW_TOOL_RECORD_SOFT_MAX_BYTES, remainingSoftBytes)
+        : remainingSoftBytes
+      const compactedTool = compactWindowToolEntry(entry, toolBudget, measureRecordBytes)
+      if (compactedTool !== undefined) {
+        workingWindow ??= [...window]
+        workingWindow[index] = compactedTool
+        entry = compactedTool
+        rawRecordBytes = measureRecordBytes(entry)
+      }
+    }
+    let entryBytes = rawRecordBytes + separatorBytes
     if (byteCutIndex < window.length && totalBytes + entryBytes > maxBytes) {
-      trimmedByBytes = true
-      break
+      const remainingSoftBytes = maxBytes - totalBytes - separatorBytes
+      const compactedTool = compactWindowToolEntry(entry, remainingSoftBytes, measureRecordBytes)
+      if (compactedTool !== undefined) {
+        workingWindow ??= [...window]
+        workingWindow[index] = compactedTool
+        entry = compactedTool
+        entryBytes = measureRecordBytes(entry) + separatorBytes
+      } else {
+        trimmedByBytes = true
+        break
+      }
     }
     if (byteCutIndex === window.length && totalBytes + entryBytes > hardMaxBytes) {
       const availableRecordBytes = hardMaxBytes - totalBytes
@@ -663,18 +798,21 @@ export function selectVirtualHistorySlice<T extends VirtualHistoryEntryLike>(
     byteCutIndex = index
   }
 
+  const activeWindow = workingWindow ?? window
   if (trimmedByBytes) {
     cutIndex = byteCutIndex
     if (turnWindow !== undefined && turnStarts.length > 0 && !turnStarts.includes(cutIndex)) {
-      const nextTurnStart = turnStarts.find(start => start > cutIndex && start < window.length)
+      const nextTurnStart = turnStarts.find(start => start > cutIndex && start < activeWindow.length)
       if (nextTurnStart !== undefined) {
         cutIndex = nextTurnStart
       }
+    } else if (turnWindow === undefined) {
+      cutIndex = advancePastIncompleteSourceDependencies(activeWindow, cutIndex)
     }
   }
 
   return {
-    records: window.slice(cutIndex),
+    records: activeWindow.slice(cutIndex),
     hasMore: cutIndex > 0,
     cutIndex,
   }

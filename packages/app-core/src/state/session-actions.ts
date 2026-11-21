@@ -605,10 +605,34 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set(state => {
             const currentMessages = state.messages[session.sessionId] ?? []
             const liveDeltas = currentMessages.filter(item => !initialAcpIds.has(item.id) || item.id.startsWith('local:') || item.kind === 'approval' || item.kind === 'question')
-            const merged = details.events.length > 0 || acpBackend !== 'cursor'
+            const incomingOldestSeq = oldestAcpEventSeq(details.events)
+            const olderCached = details.paged === true && incomingOldestSeq !== undefined
+              ? cleanExisting.filter(item => {
+                  const seq = item.nativeOrderSeq ?? item.nativeSeq
+                  return seq !== undefined && seq < incomingOldestSeq
+                })
+              : []
+            const tailMerged = details.events.length > 0 || acpBackend !== 'cursor'
               ? mergeAcpHistoryAndLive(items, liveDeltas)
               : mergeHistoryAndLive(items, liveDeltas)
+            const merged = olderCached.length > 0 && items.some(item => initialAcpIds.has(item.id))
+              ? prependHistory(olderCached, tailMerged)
+              : tailMerged
             const paged = applyAcpHistoryPage(session.sessionId, merged, details)
+            const oldestCachedSeq = olderCached.reduce<number | undefined>((min, item) => {
+              const seq = item.nativeOrderSeq ?? item.nativeSeq
+              return seq === undefined ? min : (min === undefined ? seq : Math.min(min, seq))
+            }, undefined)
+            const keepOlderPaging = olderCached.length > 0
+              && items.some(item => initialAcpIds.has(item.id))
+              && oldestCachedSeq !== undefined
+              && (incomingOldestSeq === undefined || oldestCachedSeq < incomingOldestSeq)
+            const nextHasMore = keepOlderPaging
+              ? (cachedPage?.historyHasMore ?? paged.historyHasMore)
+              : paged.historyHasMore
+            const nextOldestSeq = keepOlderPaging
+              ? (cachedPage?.oldestLoadedSeq !== undefined ? Math.min(cachedPage.oldestLoadedSeq, oldestCachedSeq) : oldestCachedSeq)
+              : paged.oldestLoadedSeq
             if (canPersistSnapshot()) saveSessionMessagesSnapshot(memoryScope, session.sessionId, paged.tail)
             const currentSession = state.selectedSession?.sessionId === session.sessionId
               ? state.selectedSession
@@ -641,8 +665,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
                 [session.sessionId]: paged.tail,
               },
               sessionModels: undefined,
-              historyHasMore: paged.historyHasMore,
-              oldestLoadedSeq: paged.oldestLoadedSeq,
+              historyHasMore: nextHasMore,
+              oldestLoadedSeq: nextOldestSeq,
               busyAction: undefined,
               ...(details.modes?.availableModes
                 ? {

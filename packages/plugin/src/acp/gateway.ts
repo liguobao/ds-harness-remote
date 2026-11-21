@@ -40,6 +40,7 @@ import { compactHistory } from '../compact-history.js'
 import {
   boundedVirtualHistoryMaxMessages,
   normalizeVirtualHistoryTurnWindow,
+  selectMessageLimitCutIndex,
   selectVirtualHistorySlice,
   utf8JsonByteLength,
   VirtualHistoryResponseTooLargeError,
@@ -1214,7 +1215,7 @@ export class AcpRemoteGateway {
     if (options.compactHistory && window.length > 0) {
       if (turnWindow === undefined) {
         const maxSurface = boundedVirtualHistoryMaxMessages(maxMessages, false)
-        const preCutIndex = findSurfaceTailStartIndex(window, maxSurface)
+        const preCutIndex = selectMessageLimitCutIndex(window, maxSurface, true)
         hasLeadingFromPreSlice = preCutIndex > 0
         candidateWindow = window.slice(preCutIndex).map(entry => ({
           ...entry,
@@ -2477,28 +2478,6 @@ function normalizeVirtualHistoryEntries(rawEvents: unknown[]): VirtualHistoryEnt
     normalized.push(raw as unknown as VirtualHistoryEntryLike)
   }
   return normalized
-}
-
-function findSurfaceTailStartIndex(window: readonly VirtualHistoryEntryLike[], maxSurfaceMessages: number): number {
-  let messages = 0
-  let cutSeq = -Infinity
-  for (let index = window.length - 1; index >= 0; index -= 1) {
-    const entry = window[index]!
-    const { type, surfaceOp } = entry.event
-    if (surfaceOp !== 'append' || (type !== 'user/message' && type !== 'assistant/message' && type !== 'tool/result')) {
-      continue
-    }
-    messages += 1
-    if (messages >= maxSurfaceMessages) {
-      cutSeq = Math.min(entry.event.seq, ...(entry.event.sourceEventSeqs ?? []))
-      break
-    }
-  }
-  if (cutSeq === -Infinity) return 0
-  for (let index = 0; index < window.length; index += 1) {
-    if (window[index]!.event.seq >= cutSeq) return index
-  }
-  return window.length
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

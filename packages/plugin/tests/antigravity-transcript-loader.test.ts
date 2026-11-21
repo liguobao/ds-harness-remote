@@ -157,6 +157,51 @@ describe('TranscriptLoader', () => {
           },
         },
         {
+          name: 'pairs PLANNER_RESPONSE tool calls with subsequent GENERIC step records and flushes remaining calls before next step',
+          run: async () => {
+            await writeTranscript('generic-tool-results', [
+              { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Inspect repo' },
+              {
+                type: 'PLANNER_RESPONSE',
+                step_index: 2,
+                created_at: createdAt,
+                thinking: 'Checking files',
+                tool_calls: [
+                  { name: 'read_file', args: { Path: '/repo/a.ts' } },
+                  { name: 'run_command', args: { CommandLine: 'false' } },
+                  { name: 'read_file', args: { Path: '/repo/b.ts' } },
+                ],
+              },
+              { type: 'GENERIC', step_index: 3, created_at: createdAt, content: 'const a = 1' },
+              { type: 'GENERIC', step_index: 4, created_at: createdAt, status: 'ERROR', error: 'exit status 1' },
+              { type: 'PLANNER_RESPONSE', step_index: 5, created_at: createdAt, content: 'Done inspecting.' },
+            ])
+            const events = await loadTranscriptEvents('generic-tool-results', 'antigravity:generic-tool-results', base)
+            const results = events.filter(e => e.event.type === 'tool/result')
+            expect(results).toHaveLength(3)
+            expect(results.map(e => e.event.data)).toMatchObject([
+              {
+                message: {
+                  source: { kind: 'tool', callId: '2:read_file' },
+                  content: [{ type: 'tool-result', toolCallId: '2:read_file', content: [{ type: 'text', text: 'const a = 1' }] }],
+                },
+              },
+              {
+                message: {
+                  source: { kind: 'tool', callId: '2:run_command' },
+                  content: [{ type: 'tool-result', toolCallId: '2:run_command', content: [{ type: 'text', text: 'exit status 1' }], isError: true }],
+                },
+              },
+              {
+                message: {
+                  source: { kind: 'tool', callId: '2:read_file:1' },
+                  content: [{ type: 'tool-result', toolCallId: '2:read_file:1', content: [] }],
+                },
+              },
+            ])
+          },
+        },
+        {
           name: 'rejects oversized transcripts with ACP_HISTORY_TOO_LARGE instead of returning empty',
           run: async () => {
             const path = await writeTranscript('oversized-conversation', [

@@ -76,10 +76,10 @@ describe('Claude isolated history and live session recovery', () => {
       if (message.method === 'session/load' && index === 1) {
         child.update('foreign', chunk('user_message_chunk', 'ignore'))
         child.update('saved', chunk('user_message_chunk', 'question'))
-        child.update('saved', chunk('agent_thought_chunk', 'thinking'))
-        child.update('saved', chunk('agent_message_chunk', 'answer'))
-        child.update('saved', { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read', rawInput: { path: 'a' }, status: 'in_progress' })
-        child.update('saved', { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'result' } }] })
+        child.update('saved', { sessionUpdate: 'agent_thought', content: { text: 'thinking' } })
+        child.update('saved', { sessionUpdate: 'agent_message', content: [{ type: 'text', text: 'ans' }, { text: 'wer' }] })
+        child.update('saved', { sessionUpdate: 'tool_call', callId: 'tool-1', toolName: 'Read', parameters: { path: 'a' }, status: 'in_progress' })
+        child.update('saved', { sessionUpdate: 'tool_call_update', callId: 'tool-1', status: 'completed', output: 'result' })
         child.send({ id: 'permission', method: 'session/request_permission', params: { sessionId: 'saved', options: [] } })
         return true
       }
@@ -271,7 +271,10 @@ describe('Claude isolated history and live session recovery', () => {
           if (message.id === undefined || !message.method) continue
           if (message.method === 'session/load') {
             child.update('saved-agy', chunk('user_message_chunk', 'from standby'))
-            queueMicrotask(() => child.reply(message, {}))
+            queueMicrotask(() => {
+              child.reply(message, {})
+              setTimeout(() => child.update('saved-agy', chunk('agent_message_chunk', 'post-response tail')), 5)
+            })
           } else {
             child.reply(message, {})
           }
@@ -288,6 +291,7 @@ describe('Claude isolated history and live session recovery', () => {
       // Standby is already initialized; calling history() consumes child[1] directly without spawning before load.
       const events = await client.history('saved-agy', '/tmp') as Array<{ event: { type: string } }>
       expect(events.some(e => e.event.type === 'user/message')).toBe(true)
+      expect(events.some(e => e.event.type === 'assistant/message')).toBe(true)
       expect(children[1]!.sent.filter(m => m.method === 'initialize')).toHaveLength(1)
       expect(children[1]!.sent.some(m => m.method === 'session/load')).toBe(true)
       expect(children[1]!.child.killed).toBe(true)

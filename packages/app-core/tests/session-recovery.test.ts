@@ -2855,6 +2855,24 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
             expect((useAppStore.getState().messages[selected.sessionId] ?? []).map(item => item.kind === 'message' ? item.text : item.id))
               .toEqual(['older q', 'older a', 'newer q', 'newer a settled'])
             expect(useAppStore.getState().oldestLoadedSeq).toBe(0)
+
+            // Re-opening the same session when the latest tail page overlaps preserves the older loaded history pages.
+            loadSessionDetails.mockResolvedValueOnce({
+              events: [
+                entry('user/message', 10, { id: 'u-new', source: { kind: 'user' }, content: [{ type: 'text', text: 'newer q' }] }),
+                entry('assistant/message', 11, { turn: 2, message: { id: 'a-new', content: [{ type: 'text', text: 'newer a settled' }] } }),
+              ],
+              hasMore: true,
+              cursor: 11,
+              paged: true,
+              running: false,
+            })
+            acp.openStream.mockResolvedValueOnce({ streamId: 'live-paged-reopen', close: async () => undefined })
+            expect(await useAppStore.getState().openSession(useAppStore.getState().selectedSession!)).toBe(true)
+            expect((useAppStore.getState().messages[selected.sessionId] ?? []).map(item => item.kind === 'message' ? item.text : item.id))
+              .toEqual(['older q', 'older a', 'newer q', 'newer a settled'])
+            expect(useAppStore.getState().oldestLoadedSeq).toBe(0)
+            expect(useAppStore.getState().historyHasMore).toBe(false)
           } finally {
             await useAppStore.getState().setOffline()
             delete (acp as Record<string, unknown>).loadSessionDetails

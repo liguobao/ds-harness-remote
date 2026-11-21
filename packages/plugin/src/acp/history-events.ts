@@ -1,6 +1,7 @@
 import type { CursorAcpInbound } from './adapters/cursor-process.js'
 import { acpImageContent, parseAcpImage } from './image-content.js'
 import { piToolResult } from './pi-tool-result.js'
+import { extractText, isRecord } from './virtual-contract.js'
 
 /**
  * Convert replayed ACP `session/update` notifications into DSH history events.
@@ -68,15 +69,30 @@ export function acpHistoryEvents(
   for (const message of messages) {
     const params = message.params as { sessionId?: string; update?: Record<string, any> } | undefined
     if (message.kind !== 'notification' || message.method !== 'session/update' || params?.sessionId !== sessionId) continue
-    const update = params.update
+    const update: Record<string, any> | undefined = isRecord(params.update)
+      ? params.update
+      : (isRecord(params) ? (params as Record<string, any>) : undefined)
     if (!update) continue
-    const kind = update.sessionUpdate
-    if (kind === 'user_message_chunk' || kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
+    const kind = typeof update.sessionUpdate === 'string'
+      ? update.sessionUpdate
+      : typeof update.type === 'string'
+        ? update.type
+        : undefined
+    if (
+      kind === 'user_message_chunk'
+      || kind === 'user_message'
+      || kind === 'agent_message_chunk'
+      || kind === 'agent_message'
+      || kind === 'agent_thought_chunk'
+      || kind === 'agent_thought'
+    ) {
       const content = update.content
-      const isText = content?.type === 'text' && typeof content.text === 'string'
-      const isImage = kind === 'user_message_chunk' && content?.type === 'image' && typeof content.mimeType === 'string' && typeof content.data === 'string'
+      const isUser = kind === 'user_message_chunk' || kind === 'user_message'
+      const isImage = isUser && isRecord(content) && content.type === 'image' && typeof content.mimeType === 'string' && typeof content.data === 'string'
+      const text = isImage ? undefined : extractText(update)
+      const isText = typeof text === 'string'
       if (!isText && !isImage) continue
-      const role = kind === 'user_message_chunk' ? 'user' : 'assistant'
+      const role = isUser ? 'user' : 'assistant'
       if (role === 'user' && pending?.role !== 'user') {
         endTurn(); turn++; step = 1
         push('turn/start', { turn }); push('step/start', { turn, step })
@@ -108,23 +124,36 @@ export function acpHistoryEvents(
           })
         }
       } else {
-        const type = kind === 'agent_thought_chunk' ? 'reasoning' : 'text'
+        const type = (kind === 'agent_thought_chunk' || kind === 'agent_thought') ? 'reasoning' : 'text'
         const previous = pending.content.at(-1)
-        if (previous?.type === type && typeof previous.text === 'string') previous.text += content.text
-        else pending.content.push({ type, text: content.text })
+        if (previous?.type === type && typeof previous.text === 'string') previous.text += text
+        else pending.content.push({ type, text })
       }
-    } else if ((kind === 'tool_call' || kind === 'tool_call_update') && typeof update.toolCallId === 'string') {
+    } else if (kind === 'tool_call' || kind === 'tool_call_update') {
+      const rawToolId = typeof update.toolCallId === 'string' && update.toolCallId.length > 0
+        ? update.toolCallId
+        : typeof update.callId === 'string' && update.callId.length > 0
+          ? update.callId
+          : undefined
+      if (rawToolId === undefined) continue
       flushMessage()
       afterTools = true
       if (!turn) { turn++; push('turn/start', { turn }); push('step/start', { turn, step }) }
-      let tool = tools.get(update.toolCallId)
+      let tool = tools.get(rawToolId)
       if (!tool) {
         const callSeq = events.length
+        const name = typeof update.title === 'string' && update.title.length > 0
+          ? update.title
+          : typeof update.toolName === 'string' && update.toolName.length > 0
+            ? update.toolName
+            : typeof update.name === 'string' && update.name.length > 0
+              ? update.name
+              : 'tool'
         tool = {
-          id: update.toolCallId,
+          id: rawToolId,
           callSeq,
-          name: typeof update.title === 'string' ? update.title : typeof update.name === 'string' ? update.name : 'tool',
-          input: update.rawInput ?? update.args,
+          name,
+          input: update.rawInput ?? update.parameters ?? update.args,
           output: [],
           failed: false,
           terminal: false,
@@ -138,17 +167,33 @@ export function acpHistoryEvents(
           name: tool.name,
           arguments: typeof tool.input === 'string' ? tool.input : JSON.stringify(tool.input ?? {}),
         })
+      } else {
+        if (typeof update.title === 'string' && update.title.length > 0 && tool.name === 'tool') {
+          tool.name = update.title
+        }
+        if (tool.input === undefined && (update.rawInput !== undefined || update.parameters !== undefined || update.args !== undefined)) {
+          tool.input = update.rawInput ?? update.parameters ?? update.args
+        }
       }
       const decoded = piToolResult(update)
-      if (!decoded.content.length && update.rawOutput !== undefined) {
+      if (!decoded.content.length && update.rawOutput !== undefined && update.rawOutput !== null) {
         decoded.content.push({
           type: 'text',
           text: typeof update.rawOutput === 'string' ? update.rawOutput : JSON.stringify(update.rawOutput),
         })
       }
+      if (!decoded.content.length && update.output !== undefined && update.output !== null) {
+        decoded.content.push({
+          type: 'text',
+          text: typeof update.output === 'string' ? update.output : JSON.stringify(update.output),
+        })
+      }
       if (decoded.content.length) tool.output = decoded.content
-      tool.failed ||= decoded.isError || update.status === 'failed'
-      tool.terminal ||= update.status === 'completed' || update.status === 'failed'
+      const exitCode = isRecord(update._meta) && isRecord(update._meta.terminal_exit) && typeof update._meta.terminal_exit.exit_code === 'number'
+        ? update._meta.terminal_exit.exit_code
+        : undefined
+      tool.failed ||= decoded.isError || update.status === 'failed' || (exitCode !== undefined && exitCode !== 0)
+      tool.terminal ||= update.status === 'completed' || update.status === 'failed' || exitCode !== undefined || (kind === 'tool_call_update' && update.output !== undefined)
       // Emit once a tool_call_update completes, or let flushTools emit a completed tool_call.
       if (kind === 'tool_call_update' && tool.terminal) result(tool)
     }

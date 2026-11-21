@@ -9,6 +9,69 @@ const MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 60_000
 const MAX_LOAD_TOMBSTONES = 256
 const MAX_HISTORY_METADATA = 64
 const HISTORY_STANDBY_IDLE_MS = 5 * 60_000
+const MAX_HISTORY_REPLAY_BYTES = 8 * 1024 * 1024
+const MAX_HISTORY_REPLAY_COUNT = 10_000
+const MAX_REPLAY_TOOL_FIELD_CHARS = 8 * 1024
+
+function truncateReplayString(value: string): string {
+  return value.length > MAX_REPLAY_TOOL_FIELD_CHARS
+    ? `${value.slice(0, MAX_REPLAY_TOOL_FIELD_CHARS)}\n[Truncated]`
+    : value
+}
+
+function compactHistoryReplayUpdate(update: Record<string, unknown>): Record<string, unknown> {
+  const kind = update.sessionUpdate
+  if (kind !== 'tool_call' && kind !== 'tool_call_update') return update
+  let next: Record<string, unknown> | undefined
+  const ensureCopy = () => (next ??= { ...update })
+  if (update.rawInput !== undefined && update.args !== undefined) {
+    delete ensureCopy().args
+  }
+  if (Array.isArray(update.content) && update.content.length > 0 && update.rawOutput !== undefined) {
+    if (!isRecord(update.rawOutput) || update.rawOutput.isError !== true) {
+      delete ensureCopy().rawOutput
+    }
+  }
+  const target = next ?? update
+  if (typeof target.rawOutput === 'string' && target.rawOutput.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+    ensureCopy().rawOutput = truncateReplayString(target.rawOutput)
+  }
+  if (Array.isArray(target.content)) {
+    let contentChanged = false
+    const compactContent = target.content.map(item => {
+      if (!isRecord(item)) return item
+      if (typeof item.text === 'string' && item.text.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+        contentChanged = true
+        return { ...item, text: truncateReplayString(item.text) }
+      }
+      if (isRecord(item.content) && typeof item.content.text === 'string' && item.content.text.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+        contentChanged = true
+        return {
+          ...item,
+          content: {
+            ...item.content,
+            text: truncateReplayString(item.content.text),
+          },
+        }
+      }
+      if (item.type === 'diff') {
+        const oldLong = typeof item.oldText === 'string' && item.oldText.length > MAX_REPLAY_TOOL_FIELD_CHARS
+        const newLong = typeof item.newText === 'string' && item.newText.length > MAX_REPLAY_TOOL_FIELD_CHARS
+        if (oldLong || newLong) {
+          contentChanged = true
+          return {
+            ...item,
+            ...(oldLong ? { oldText: truncateReplayString(item.oldText as string) } : {}),
+            ...(newLong ? { newText: truncateReplayString(item.newText as string) } : {}),
+          }
+        }
+      }
+      return item
+    })
+    if (contentChanged) ensureCopy().content = compactContent
+  }
+  return next ?? update
+}
 
 interface HistoryStandby {
   client: CursorAcpClient
@@ -98,7 +161,11 @@ export class ClaudeAcpClient extends CursorAcpClient {
         this.assertLoaded(result, id)
         this.live.set(id, result)
         this.historyMetadata.delete(id)
-        this.clearLoadSuppression(id, gen)
+        if (this.modelLabel === 'antigravity') {
+          this.armLoadTombstone(id, gen, 1_500)
+        } else {
+          this.clearLoadSuppression(id, gen)
+        }
         return result
       })
       this.loads.set(id, load)
@@ -131,6 +198,9 @@ export class ClaudeAcpClient extends CursorAcpClient {
     if ((method === 'dsh/selectModel' || method === 'session/set_mode') && typeof id === 'string') {
       this.historyMetadata.delete(id)
     }
+    if (method === 'session/prompt' && typeof id === 'string') {
+      this.clearLoadSuppression(id)
+    }
     return super.call(method, params, timeoutMs)
   }
 
@@ -158,7 +228,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
       if (evictKey === undefined) break
       this.clearLoadSuppression(evictKey)
     }
-    const ttl = Math.min(Math.max(timeoutMs ?? DEFAULT_LOAD_TOMBSTONE_TTL_MS, DEFAULT_LOAD_TOMBSTONE_TTL_MS), MAX_LOAD_TOMBSTONE_TTL_MS)
+    const ttl = Math.min(Math.max(timeoutMs ?? DEFAULT_LOAD_TOMBSTONE_TTL_MS, 250), MAX_LOAD_TOMBSTONE_TTL_MS)
     const timer = setTimeout(() => {
       this.clearLoadSuppression(sessionId, gen)
     }, ttl)
@@ -188,6 +258,31 @@ export class ClaudeAcpClient extends CursorAcpClient {
     const id = (result as { sessionId?: unknown } | null)?.sessionId
     if (this.shuttingDown) throw new CursorAcpError('ACP_CLOSED', `${this.label} ACP is closed.`)
     if (id !== undefined && id !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid history session.`)
+  }
+
+  /**
+   * Native `agy acp` resolves the `session/load` JSON-RPC response before its
+   * asynchronous `session/update` replay finishes flushing over stdout. Drain
+   * post-response replay frames until a short quiet window elapses.
+   */
+  private async awaitReplayQuiescence(
+    getCount: () => number,
+    shouldStop: () => boolean,
+  ): Promise<void> {
+    if (this.modelLabel !== 'antigravity' || shouldStop()) return
+    const quietWindowMs = 35
+    const maxDrainMs = 2_000
+    const deadline = Date.now() + maxDrainMs
+    let previous = getCount()
+    while (!shouldStop() && Date.now() < deadline) {
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, quietWindowMs)
+        timer.unref?.()
+      })
+      const current = getCount()
+      if (current === previous) break
+      previous = current
+    }
   }
 
   isSessionLoaded(sessionId: string): boolean {
@@ -276,12 +371,16 @@ export class ClaudeAcpClient extends CursorAcpClient {
         return
       }
       if (message.method !== 'session/update' || (message.params as { sessionId?: string } | null)?.sessionId !== sessionId || overflow) return
-      bytes += Buffer.byteLength(JSON.stringify(message))
+      const params = message.params as { sessionId?: string; update?: unknown }
+      const compactedMessage = isRecord(params.update)
+        ? { ...message, params: { ...params, update: compactHistoryReplayUpdate(params.update) } }
+        : message
+      bytes += Buffer.byteLength(JSON.stringify(compactedMessage))
       count++
-      if (bytes > 8 * 1024 * 1024 || count > 10000) {
+      if (bytes > MAX_HISTORY_REPLAY_BYTES || count > MAX_HISTORY_REPLAY_COUNT) {
         overflow = true
         void stop().catch(() => undefined)
-      } else updates.push(message)
+      } else updates.push(compactedMessage)
     })
     const takeHistoryClient = async (): Promise<CursorAcpClient> => {
       const standby = this.historyStandby
@@ -311,6 +410,11 @@ export class ClaudeAcpClient extends CursorAcpClient {
       unsubscribeInbound = attachHandlers(client)
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       this.assertLoaded(result, sessionId)
+      if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
+      await this.awaitReplayQuiescence(
+        () => count,
+        () => overflow || stopRequested || this.shuttingDown,
+      )
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
       const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
         client.call('dsh/sessionModels', { sessionId }).catch(() => undefined),

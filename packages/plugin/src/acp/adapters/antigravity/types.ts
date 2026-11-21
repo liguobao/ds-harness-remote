@@ -1,4 +1,4 @@
-export type StepType = 'USER_INPUT' | 'PLANNER_RESPONSE' | 'SYSTEM'
+export type StepType = 'USER_INPUT' | 'PLANNER_RESPONSE' | 'GENERIC' | 'SYSTEM'
 export type StepStatus = 'RUNNING' | 'DONE' | 'ERROR'
 
 export interface ToolCallPayload {
@@ -16,6 +16,7 @@ export interface StepLogRecord {
   created_at: string
   content?: string
   thinking?: string
+  error?: string
   tool_calls?: ToolCallPayload[]
   truncated_fields?: string[]
 }

@@ -371,6 +371,126 @@ describe('virtual-history-pagination transport hard cap', () => {
           expect(utf8JsonByteLength(protoSlice.records[0])).toBeLessThanOrEqual(VIRTUAL_HISTORY_HARD_MAX_BYTES)
         },
       },
+      {
+        name: 'extends surface-message windows past tool-only streaks to include dialogue prose and compacts oversized tool outputs inside the 256 KiB page without splitting tool call/result pairs',
+        run: () => {
+          const events: TestEntry[] = []
+          let seq = 0
+          events.push({
+            type: 'event',
+            event: {
+              type: 'user/message',
+              seq: seq++,
+              time: 1000,
+              surfaceOp: 'append',
+              data: { id: 'u-1', role: 'user', content: [{ type: 'text', text: 'Investigate the bug' }] },
+            },
+          })
+          events.push({
+            type: 'event',
+            event: {
+              type: 'assistant/message',
+              seq: seq++,
+              time: 1001,
+              surfaceOp: 'append',
+              data: {
+                turn: 1,
+                step: 1,
+                message: {
+                  id: 'a-1',
+                  role: 'assistant',
+                  source: { kind: 'model', provider: 'test', model: 'm1' },
+                  content: [{ type: 'text', text: 'Let me check the files.' }],
+                },
+              },
+            },
+          })
+          // 22 tool calls interspersed with reasoning-only assistant steps, several with 90 KiB outputs (>256 KiB total uncompacted).
+          for (let toolIdx = 1; toolIdx <= 22; toolIdx += 1) {
+            if (toolIdx % 4 === 0) {
+              events.push({
+                type: 'event',
+                event: {
+                  type: 'assistant/message',
+                  seq: seq++,
+                  time: 1001 + toolIdx,
+                  surfaceOp: 'append',
+                  data: {
+                    turn: 1,
+                    step: toolIdx,
+                    message: {
+                      id: `a-reason-${toolIdx}`,
+                      role: 'assistant',
+                      source: { kind: 'model', provider: 'test', model: 'm1' },
+                      content: [{ type: 'reasoning', text: `Thinking before tool ${toolIdx}` }],
+                    },
+                  },
+                },
+              })
+            }
+            const callSeq = seq++
+            events.push({
+              type: 'event',
+              event: {
+                type: 'tool/call',
+                seq: callSeq,
+                time: 1001 + toolIdx,
+                data: { turn: 1, step: toolIdx, callId: `tc-${toolIdx}`, name: 'read_file', arguments: '{}' },
+              },
+            })
+            const bigResult = toolIdx >= 18 ? 'R'.repeat(90 * 1024) : `small-${toolIdx}`
+            events.push({
+              type: 'event',
+              event: {
+                type: 'tool/result',
+                seq: seq++,
+                time: 1001 + toolIdx,
+                surfaceOp: 'append',
+                sourceEventSeqs: [callSeq],
+                data: {
+                  turn: 1,
+                  step: toolIdx,
+                  message: {
+                    id: `tr-${toolIdx}`,
+                    role: 'user',
+                    content: [{ type: 'tool-result', toolCallId: `tc-${toolIdx}`, content: [{ type: 'text', text: bigResult }] }],
+                  },
+                },
+              },
+            })
+          }
+
+          // Initial open (maxMessages: 16, countSurfaceMessages: true) extends past the 22 tool calls
+          // to include both a-1 and u-1, and compacts the five 90 KiB tool outputs to fit inside 256 KiB.
+          const slice = selectVirtualHistorySlice(events, {
+            maxMessages: 16,
+            countSurfaceMessages: true,
+          })
+          expect(slice.hasMore).toBe(false)
+          expect(slice.records[0]!.event.type).toBe('user/message')
+          expect(slice.records[1]!.event.type).toBe('assistant/message')
+          const totalSliceBytes = slice.records.reduce((sum, item) => sum + utf8JsonByteLength(item), 0)
+          expect(totalSliceBytes).toBeLessThanOrEqual(VIRTUAL_HISTORY_MAX_BYTES)
+          // Source events remain unmutated.
+          const lastSourceResult = events.at(-1)!.event.data.message as { content: Array<{ content: Array<{ text: string }> }> }
+          expect(lastSourceResult.content[0]!.content[0]!.text).toHaveLength(90 * 1024)
+
+          // When byte budget forces a cut across a tool pair, advancePastIncompleteSourceDependencies
+          // never leaves an orphaned tool/result without its tool/call at the head of the slice.
+          const tightSlice = selectVirtualHistorySlice(events, {
+            maxMessages: 60,
+            countSurfaceMessages: true,
+            maxBytes: 10 * 1024,
+          })
+          expect(tightSlice.hasMore).toBe(true)
+          const minIncludedSeq = tightSlice.records[0]!.event.seq
+          for (const rec of tightSlice.records) {
+            for (const depSeq of rec.event.sourceEventSeqs ?? []) {
+              expect(depSeq).toBeGreaterThanOrEqual(minIncludedSeq)
+            }
+          }
+        },
+      },
     ])
   })
 })

@@ -415,12 +415,14 @@ export class AcpLiveProjection {
           this.ensurePiStep(follow, false)
           this.finishPiAssistant(follow)
           follow.piAfterTools = true
-          this.pushEvent(follow, 'tool/call', {
+          const callSeq = this.pushEvent(follow, 'tool/call', {
             turn: follow.turn, step: follow.piStep ?? 1, callId, toolCallId: callId, name: call.name, toolName: call.name,
             arguments: typeof call.input === 'string' ? call.input
               : call.input != null ? JSON.stringify(call.input) : '{}',
             status: terminal ? status === 'failed' ? 'failed' : 'finished' : 'running',
           })
+          follow.callSeqs ??= new Map()
+          follow.callSeqs.set(callId, callSeq)
           follow.activeToolCalls.add(callId)
         }
         if (terminal) {
@@ -430,6 +432,7 @@ export class AcpLiveProjection {
               ? '[Pi tool output exceeds the live preview limit; reload history to read the bounded persisted result.]' : buffered.text
           }]
             : output.content
+          const callSeq = follow.callSeqs?.get(callId)
           this.pushEvent(follow, 'tool/result', {
             turn: follow.turn, step: follow.piStep ?? 1, message: {
               id: `${callId}:result`, role: 'user', content: [{
@@ -437,7 +440,8 @@ export class AcpLiveProjection {
                 content, ...(output.isError ? { isError: true } : {})
               }], source: { kind: 'tool', callId },
             }
-          })
+          }, callSeq !== undefined ? [callSeq] : undefined)
+          follow.callSeqs?.delete(callId)
           follow.piToolOutputs.delete(callId)
           follow.piToolCalls.delete(callId)
           follow.activeToolCalls.delete(callId)
@@ -470,7 +474,7 @@ export class AcpLiveProjection {
           this.pushEvent(follow, 'turn/start', { turn: follow.turn })
           this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
         }
-        this.pushEvent(follow, 'tool/call', {
+        const callSeq = this.pushEvent(follow, 'tool/call', {
           turn: follow.turn,
           step: 1,
           callId,
@@ -484,6 +488,8 @@ export class AcpLiveProjection {
           toolName: call.name,
           status: status === 'completed' ? 'finished' : status === 'failed' ? 'failed' : 'running',
         })
+        follow.callSeqs ??= new Map()
+        follow.callSeqs.set(callId, callSeq)
         if (!terminal) follow.activeToolCalls.add(callId)
       } else if (!terminal) {
         if (session !== undefined) session.updatedAt = Date.now()
@@ -506,6 +512,7 @@ export class AcpLiveProjection {
               : update.rawOutput !== undefined && update.rawOutput !== null
                 ? [{ type: 'text' as const, text: JSON.stringify(update.rawOutput) }]
                 : []
+        const callSeq = follow.callSeqs?.get(callId)
         this.pushEvent(follow, 'tool/result', {
           turn: follow.turn,
           step: 1,
@@ -520,7 +527,8 @@ export class AcpLiveProjection {
             }],
             source: { kind: 'tool', callId },
           },
-        })
+        }, callSeq !== undefined ? [callSeq] : undefined)
+        follow.callSeqs?.delete(callId)
         follow.piToolOutputs.delete(callId)
         follow.piToolCalls.delete(callId)
         follow.activeToolCalls.delete(callId)
@@ -789,6 +797,7 @@ export class AcpLiveProjection {
       follow.piStep = 1
       follow.piAfterTools = false
     }
+    follow.callSeqs?.clear()
     follow.piToolOutputs.clear()
     follow.piToolCalls.clear()
     follow.activeToolCalls.clear()
@@ -801,7 +810,7 @@ export class AcpLiveProjection {
     }
   }
 
-  pushEvent(follow: FollowState, type: string, data: unknown): number {
+  pushEvent(follow: FollowState, type: string, data: unknown, sourceEventSeqs?: number[]): number {
     const session = this.context.sessions.get(follow.sessionId)
     const seq = session !== undefined ? session.events.length : follow.nextSeq++
     const event: NativeEvent = {
@@ -809,6 +818,7 @@ export class AcpLiveProjection {
       seq,
       time: Date.now(),
       data,
+      ...(sourceEventSeqs !== undefined ? { sourceEventSeqs } : {}),
       ...(isSurfaceEvent(type) ? { surfaceOp: 'append' as const } : {}),
     }
     if (session !== undefined) {

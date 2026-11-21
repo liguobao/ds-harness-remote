@@ -70109,12 +70109,61 @@ function compactOversizedVirtualHistoryEntry(entry, availableRecordBytes, measur
   }
   return void 0;
 }
+var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set([
+  "tool/call",
+  "tool/result",
+  "tool/ptc-dispatch",
+  "tool/ptc-dispatch-start",
+  "tool/code-dispatch",
+  "tool/code-dispatch-start"
+]);
+var WINDOW_TOOL_RECORD_SOFT_MAX_BYTES = 3 * 1024;
+var WINDOW_TOOL_STRING_BYTE_LIMITS = [2 * 1024, 1024, 512];
+function isToolHistoryEntry(entry) {
+  return TOOL_EVENT_TYPES.has(entry.event.type);
+}
+function compactWindowToolEntry(entry, availableBytes, measureRecordBytes) {
+  if (!isToolHistoryEntry(entry) || availableBytes <= 0) return void 0;
+  const targetBytes = Math.min(availableBytes, WINDOW_TOOL_RECORD_SOFT_MAX_BYTES);
+  const stageAState = { changed: false };
+  const stageAData = stripInlineImagePayloads(entry.event.data, stageAState);
+  const stageAView = entry.view === void 0 ? void 0 : stripInlineImagePayloads(entry.view, stageAState);
+  for (const maxStringBytes of WINDOW_TOOL_STRING_BYTE_LIMITS) {
+    const stageBState = { changed: false };
+    const stageBData = compactValueForBudget(stageAData, maxStringBytes, stageBState);
+    const stageBView = stageAView === void 0 ? void 0 : compactValueForBudget(stageAView, maxStringBytes, stageBState);
+    if (!stageAState.changed && !stageBState.changed) continue;
+    const candidate = withCompactedEventFields(entry, stageBData, stageBView, true);
+    if (measureRecordBytes(candidate) <= targetBytes) {
+      return candidate;
+    }
+  }
+  return void 0;
+}
 function positiveSafeInt(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
 }
 function isSurfaceAppendEvent(entry) {
   const { type, surfaceOp } = entry.event;
   return surfaceOp === "append" && (type === "user/message" || type === "assistant/message" || type === "tool/result");
+}
+function hasSpokenAssistantContent(data2) {
+  if (!isPlainRecord(data2)) return false;
+  const message = isPlainRecord(data2.message) ? data2.message : data2;
+  if (typeof message.text === "string" && message.text.trim().length > 0) return true;
+  if (!Array.isArray(message.content)) return false;
+  return message.content.some((block) => {
+    if (!isPlainRecord(block)) return false;
+    if (block.type === "reasoning") return false;
+    if (block.type === "image" || block.type === "input_image") return true;
+    return typeof block.text === "string" && block.text.trim().length > 0;
+  });
+}
+function isDialogueTurnBoundaryMessage(entry) {
+  const { type, data: data2 } = entry.event;
+  if (type === "user/message") return true;
+  if (type === "assistant/message") return hasSpokenAssistantContent(data2);
+  return false;
 }
 function utf8JsonByteLength(value) {
   const serialized = JSON.stringify(value);
@@ -70159,24 +70208,61 @@ function findTurnStartIndices(window2, hasLeadingHistory) {
   }
   return turnStarts;
 }
+function expandForSourceEventDependencies(window2, startIndex) {
+  if (startIndex <= 0 || startIndex >= window2.length) return startIndex;
+  let minSeq = window2[startIndex].event.seq;
+  for (let index = startIndex; index < window2.length; index += 1) {
+    const sourceSeqs = window2[index].event.sourceEventSeqs;
+    if (sourceSeqs !== void 0) {
+      for (const sourceSeq of sourceSeqs) {
+        if (sourceSeq < minSeq) minSeq = sourceSeq;
+      }
+    }
+  }
+  if (minSeq >= window2[startIndex].event.seq) return startIndex;
+  for (let index = 0; index < startIndex; index += 1) {
+    if (window2[index].event.seq >= minSeq) return index;
+  }
+  return startIndex;
+}
+function advancePastIncompleteSourceDependencies(window2, startIndex) {
+  if (startIndex <= 0 || startIndex >= window2.length) return startIndex;
+  let cut = startIndex;
+  while (cut < window2.length - 1) {
+    const cutSeq = window2[cut].event.seq;
+    const entry = window2[cut];
+    const missingDependency = entry.event.sourceEventSeqs?.some((seq) => seq < cutSeq) === true;
+    if (!missingDependency) break;
+    cut += 1;
+  }
+  return cut;
+}
 function selectMessageLimitCutIndex(window2, maxMessages, countSurfaceMessages) {
   if (!countSurfaceMessages) {
     return Math.max(0, window2.length - maxMessages);
   }
-  let messages = 0;
+  let surfaceUnits = 0;
+  let dialogueMessages = 0;
   let cutSeq = -Infinity;
+  const minDialogueTarget = maxMessages >= 8 ? 2 : 0;
+  const maxToolExtensionUnits = Math.max(maxMessages, Math.min(VIRTUAL_HISTORY_MAX_MESSAGES, maxMessages * 10));
   for (let index = window2.length - 1; index >= 0; index -= 1) {
     const entry = window2[index];
     if (!isSurfaceAppendEvent(entry)) continue;
-    messages += 1;
-    if (messages >= maxMessages) {
+    surfaceUnits += 1;
+    if (isDialogueTurnBoundaryMessage(entry)) {
+      dialogueMessages += 1;
+    }
+    if (surfaceUnits >= maxMessages && (dialogueMessages >= minDialogueTarget || surfaceUnits >= maxToolExtensionUnits)) {
       cutSeq = Math.min(entry.event.seq, ...entry.event.sourceEventSeqs ?? []);
       break;
     }
   }
   if (cutSeq === -Infinity) return 0;
   for (let index = 0; index < window2.length; index += 1) {
-    if (window2[index].event.seq >= cutSeq) return index;
+    if (window2[index].event.seq >= cutSeq) {
+      return expandForSourceEventDependencies(window2, index);
+    }
   }
   return window2.length;
 }
@@ -70237,12 +70323,35 @@ function selectVirtualHistorySlice(window2, options = {}) {
   let totalBytes = envelopeBytes;
   let byteCutIndex = window2.length;
   let trimmedByBytes = false;
+  let workingWindow;
   for (let index = window2.length - 1; index >= cutIndex; index -= 1) {
-    const entry = window2[index];
-    const entryBytes = measureRecordBytes(entry) + (byteCutIndex < window2.length ? 1 : 0);
+    let entry = (workingWindow ?? window2)[index];
+    const separatorBytes = byteCutIndex < window2.length ? 1 : 0;
+    let rawRecordBytes = measureRecordBytes(entry);
+    if (isToolHistoryEntry(entry) && rawRecordBytes > WINDOW_TOOL_RECORD_SOFT_MAX_BYTES && rawRecordBytes <= hardMaxBytes) {
+      const remainingSoftBytes = maxBytes2 - totalBytes - separatorBytes;
+      const toolBudget = byteCutIndex === window2.length ? Math.max(WINDOW_TOOL_RECORD_SOFT_MAX_BYTES, remainingSoftBytes) : remainingSoftBytes;
+      const compactedTool = compactWindowToolEntry(entry, toolBudget, measureRecordBytes);
+      if (compactedTool !== void 0) {
+        workingWindow ??= [...window2];
+        workingWindow[index] = compactedTool;
+        entry = compactedTool;
+        rawRecordBytes = measureRecordBytes(entry);
+      }
+    }
+    let entryBytes = rawRecordBytes + separatorBytes;
     if (byteCutIndex < window2.length && totalBytes + entryBytes > maxBytes2) {
-      trimmedByBytes = true;
-      break;
+      const remainingSoftBytes = maxBytes2 - totalBytes - separatorBytes;
+      const compactedTool = compactWindowToolEntry(entry, remainingSoftBytes, measureRecordBytes);
+      if (compactedTool !== void 0) {
+        workingWindow ??= [...window2];
+        workingWindow[index] = compactedTool;
+        entry = compactedTool;
+        entryBytes = measureRecordBytes(entry) + separatorBytes;
+      } else {
+        trimmedByBytes = true;
+        break;
+      }
     }
     if (byteCutIndex === window2.length && totalBytes + entryBytes > hardMaxBytes) {
       const availableRecordBytes = hardMaxBytes - totalBytes;
@@ -70259,17 +70368,20 @@ function selectVirtualHistorySlice(window2, options = {}) {
     totalBytes += entryBytes;
     byteCutIndex = index;
   }
+  const activeWindow = workingWindow ?? window2;
   if (trimmedByBytes) {
     cutIndex = byteCutIndex;
     if (turnWindow2 !== void 0 && turnStarts.length > 0 && !turnStarts.includes(cutIndex)) {
-      const nextTurnStart = turnStarts.find((start) => start > cutIndex && start < window2.length);
+      const nextTurnStart = turnStarts.find((start) => start > cutIndex && start < activeWindow.length);
       if (nextTurnStart !== void 0) {
         cutIndex = nextTurnStart;
       }
+    } else if (turnWindow2 === void 0) {
+      cutIndex = advancePastIncompleteSourceDependencies(activeWindow, cutIndex);
     }
   }
   return {
-    records: window2.slice(cutIndex),
+    records: activeWindow.slice(cutIndex),
     hasMore: cutIndex > 0,
     cutIndex
   };
@@ -71078,7 +71190,7 @@ var AcpLiveProjection = class {
           this.ensurePiStep(follow, false);
           this.finishPiAssistant(follow);
           follow.piAfterTools = true;
-          this.pushEvent(follow, "tool/call", {
+          const callSeq = this.pushEvent(follow, "tool/call", {
             turn: follow.turn,
             step: follow.piStep ?? 1,
             callId,
@@ -71088,6 +71200,8 @@ var AcpLiveProjection = class {
             arguments: typeof call2.input === "string" ? call2.input : call2.input != null ? JSON.stringify(call2.input) : "{}",
             status: terminal ? status2 === "failed" ? "failed" : "finished" : "running"
           });
+          follow.callSeqs ??= /* @__PURE__ */ new Map();
+          follow.callSeqs.set(callId, callSeq);
           follow.activeToolCalls.add(callId);
         }
         if (terminal) {
@@ -71096,6 +71210,7 @@ var AcpLiveProjection = class {
             type: "text",
             text: buffered.overflow ? "[Pi tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
           }] : output2.content;
+          const callSeq = follow.callSeqs?.get(callId);
           this.pushEvent(follow, "tool/result", {
             turn: follow.turn,
             step: follow.piStep ?? 1,
@@ -71110,7 +71225,8 @@ var AcpLiveProjection = class {
               }],
               source: { kind: "tool", callId }
             }
-          });
+          }, callSeq !== void 0 ? [callSeq] : void 0);
+          follow.callSeqs?.delete(callId);
           follow.piToolOutputs.delete(callId);
           follow.piToolCalls.delete(callId);
           follow.activeToolCalls.delete(callId);
@@ -71145,7 +71261,7 @@ var AcpLiveProjection = class {
           this.pushEvent(follow, "turn/start", { turn: follow.turn });
           this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
         }
-        this.pushEvent(follow, "tool/call", {
+        const callSeq = this.pushEvent(follow, "tool/call", {
           turn: follow.turn,
           step: 1,
           callId,
@@ -71155,6 +71271,8 @@ var AcpLiveProjection = class {
           toolName: call.name,
           status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
         });
+        follow.callSeqs ??= /* @__PURE__ */ new Map();
+        follow.callSeqs.set(callId, callSeq);
         if (!terminal) follow.activeToolCalls.add(callId);
       } else if (!terminal) {
         if (session2 !== void 0) session2.updatedAt = Date.now();
@@ -71167,6 +71285,7 @@ var AcpLiveProjection = class {
           type: "text",
           text: buffered.overflow ? "[Tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
         }] : typeof update.rawOutput === "string" && update.rawOutput.length > 0 ? [{ type: "text", text: update.rawOutput }] : update.rawOutput !== void 0 && update.rawOutput !== null ? [{ type: "text", text: JSON.stringify(update.rawOutput) }] : [];
+        const callSeq = follow.callSeqs?.get(callId);
         this.pushEvent(follow, "tool/result", {
           turn: follow.turn,
           step: 1,
@@ -71181,7 +71300,8 @@ var AcpLiveProjection = class {
             }],
             source: { kind: "tool", callId }
           }
-        });
+        }, callSeq !== void 0 ? [callSeq] : void 0);
+        follow.callSeqs?.delete(callId);
         follow.piToolOutputs.delete(callId);
         follow.piToolCalls.delete(callId);
         follow.activeToolCalls.delete(callId);
@@ -71412,6 +71532,7 @@ var AcpLiveProjection = class {
       follow.piStep = 1;
       follow.piAfterTools = false;
     }
+    follow.callSeqs?.clear();
     follow.piToolOutputs.clear();
     follow.piToolCalls.clear();
     follow.activeToolCalls.clear();
@@ -71423,7 +71544,7 @@ var AcpLiveProjection = class {
       void follow.close?.().catch(() => void 0);
     }
   }
-  pushEvent(follow, type, data2) {
+  pushEvent(follow, type, data2, sourceEventSeqs) {
     const session2 = this.context.sessions.get(follow.sessionId);
     const seq = session2 !== void 0 ? session2.events.length : follow.nextSeq++;
     const event2 = {
@@ -71431,6 +71552,7 @@ var AcpLiveProjection = class {
       seq,
       time: Date.now(),
       data: data2,
+      ...sourceEventSeqs !== void 0 ? { sourceEventSeqs } : {},
       ...isSurfaceEvent(type) ? { surfaceOp: "append" } : {}
     };
     if (session2 !== void 0) {
@@ -93360,7 +93482,7 @@ function compactBotRound(text) {
 var LIMIT = 512;
 var MARKER = "\n[Compact history: output omitted]";
 var ROUND_BUDGET = 128 * 1024;
-var TOOL_EVENT_TYPES = /* @__PURE__ */ new Set([
+var TOOL_EVENT_TYPES2 = /* @__PURE__ */ new Set([
   "tool/call",
   "tool/result",
   "tool/ptc-dispatch",
@@ -93463,7 +93585,7 @@ function project(value, budget) {
   if (!object3(value)) return value;
   if (object3(value.event)) {
     const eventType = String(value.event.type);
-    if (TOOL_EVENT_TYPES.has(eventType)) {
+    if (TOOL_EVENT_TYPES2.has(eventType)) {
       const { view, ...rest } = value;
       const event2 = toolValue(value.event, budget);
       const data2 = object3(event2.data) ? event2.data : {};
@@ -93475,7 +93597,7 @@ function project(value, budget) {
     if (eventType === "user/message") return { ...value, event: messageValue(value.event, budget, isInjectedUserEvent(value.event)) };
   }
   if (typeof value.type === "string") {
-    if (TOOL_EVENT_TYPES.has(value.type)) return toolValue(value, budget);
+    if (TOOL_EVENT_TYPES2.has(value.type)) return toolValue(value, budget);
     if (value.type === "request/header") return requestHeaderEvent(value);
     if (value.type === "assistant/message") return messageValue(value, budget, false);
     if (value.type === "user/message") return messageValue(value, budget, isInjectedUserEvent(value));
@@ -96701,15 +96823,17 @@ function acpHistoryEvents(messages, sessionId, provider) {
   for (const message of messages) {
     const params = message.params;
     if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
-    const update = params.update;
+    const update = isRecord4(params.update) ? params.update : isRecord4(params) ? params : void 0;
     if (!update) continue;
-    const kind = update.sessionUpdate;
-    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
+    const kind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : typeof update.type === "string" ? update.type : void 0;
+    if (kind === "user_message_chunk" || kind === "user_message" || kind === "agent_message_chunk" || kind === "agent_message" || kind === "agent_thought_chunk" || kind === "agent_thought") {
       const content = update.content;
-      const isText = content?.type === "text" && typeof content.text === "string";
-      const isImage = kind === "user_message_chunk" && content?.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
+      const isUser = kind === "user_message_chunk" || kind === "user_message";
+      const isImage = isUser && isRecord4(content) && content.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
+      const text = isImage ? void 0 : extractText(update);
+      const isText = typeof text === "string";
       if (!isText && !isImage) continue;
-      const role2 = kind === "user_message_chunk" ? "user" : "assistant";
+      const role2 = isUser ? "user" : "assistant";
       if (role2 === "user" && pending?.role !== "user") {
         endTurn();
         turn++;
@@ -96748,12 +96872,14 @@ function acpHistoryEvents(messages, sessionId, provider) {
           });
         }
       } else {
-        const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
+        const type = kind === "agent_thought_chunk" || kind === "agent_thought" ? "reasoning" : "text";
         const previous = pending.content.at(-1);
-        if (previous?.type === type && typeof previous.text === "string") previous.text += content.text;
-        else pending.content.push({ type, text: content.text });
+        if (previous?.type === type && typeof previous.text === "string") previous.text += text;
+        else pending.content.push({ type, text });
       }
-    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+    } else if (kind === "tool_call" || kind === "tool_call_update") {
+      const rawToolId = typeof update.toolCallId === "string" && update.toolCallId.length > 0 ? update.toolCallId : typeof update.callId === "string" && update.callId.length > 0 ? update.callId : void 0;
+      if (rawToolId === void 0) continue;
       flushMessage();
       afterTools = true;
       if (!turn) {
@@ -96761,14 +96887,15 @@ function acpHistoryEvents(messages, sessionId, provider) {
         push2("turn/start", { turn });
         push2("step/start", { turn, step });
       }
-      let tool = tools.get(update.toolCallId);
+      let tool = tools.get(rawToolId);
       if (!tool) {
         const callSeq = events.length;
+        const name2 = typeof update.title === "string" && update.title.length > 0 ? update.title : typeof update.toolName === "string" && update.toolName.length > 0 ? update.toolName : typeof update.name === "string" && update.name.length > 0 ? update.name : "tool";
         tool = {
-          id: update.toolCallId,
+          id: rawToolId,
           callSeq,
-          name: typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "tool",
-          input: update.rawInput ?? update.args,
+          name: name2,
+          input: update.rawInput ?? update.parameters ?? update.args,
           output: [],
           failed: false,
           terminal: false,
@@ -96782,17 +96909,31 @@ function acpHistoryEvents(messages, sessionId, provider) {
           name: tool.name,
           arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
         });
+      } else {
+        if (typeof update.title === "string" && update.title.length > 0 && tool.name === "tool") {
+          tool.name = update.title;
+        }
+        if (tool.input === void 0 && (update.rawInput !== void 0 || update.parameters !== void 0 || update.args !== void 0)) {
+          tool.input = update.rawInput ?? update.parameters ?? update.args;
+        }
       }
       const decoded = piToolResult(update);
-      if (!decoded.content.length && update.rawOutput !== void 0) {
+      if (!decoded.content.length && update.rawOutput !== void 0 && update.rawOutput !== null) {
         decoded.content.push({
           type: "text",
           text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
         });
       }
+      if (!decoded.content.length && update.output !== void 0 && update.output !== null) {
+        decoded.content.push({
+          type: "text",
+          text: typeof update.output === "string" ? update.output : JSON.stringify(update.output)
+        });
+      }
       if (decoded.content.length) tool.output = decoded.content;
-      tool.failed ||= decoded.isError || update.status === "failed";
-      tool.terminal ||= update.status === "completed" || update.status === "failed";
+      const exitCode = isRecord4(update._meta) && isRecord4(update._meta.terminal_exit) && typeof update._meta.terminal_exit.exit_code === "number" ? update._meta.terminal_exit.exit_code : void 0;
+      tool.failed ||= decoded.isError || update.status === "failed" || exitCode !== void 0 && exitCode !== 0;
+      tool.terminal ||= update.status === "completed" || update.status === "failed" || exitCode !== void 0 || kind === "tool_call_update" && update.output !== void 0;
       if (kind === "tool_call_update" && tool.terminal) result(tool);
     }
   }
@@ -98160,6 +98301,66 @@ var MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 6e4;
 var MAX_LOAD_TOMBSTONES = 256;
 var MAX_HISTORY_METADATA = 64;
 var HISTORY_STANDBY_IDLE_MS = 5 * 6e4;
+var MAX_HISTORY_REPLAY_BYTES = 8 * 1024 * 1024;
+var MAX_HISTORY_REPLAY_COUNT = 1e4;
+var MAX_REPLAY_TOOL_FIELD_CHARS = 8 * 1024;
+function truncateReplayString(value) {
+  return value.length > MAX_REPLAY_TOOL_FIELD_CHARS ? `${value.slice(0, MAX_REPLAY_TOOL_FIELD_CHARS)}
+[Truncated]` : value;
+}
+function compactHistoryReplayUpdate(update) {
+  const kind = update.sessionUpdate;
+  if (kind !== "tool_call" && kind !== "tool_call_update") return update;
+  let next;
+  const ensureCopy = () => next ??= { ...update };
+  if (update.rawInput !== void 0 && update.args !== void 0) {
+    delete ensureCopy().args;
+  }
+  if (Array.isArray(update.content) && update.content.length > 0 && update.rawOutput !== void 0) {
+    if (!isRecord18(update.rawOutput) || update.rawOutput.isError !== true) {
+      delete ensureCopy().rawOutput;
+    }
+  }
+  const target3 = next ?? update;
+  if (typeof target3.rawOutput === "string" && target3.rawOutput.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+    ensureCopy().rawOutput = truncateReplayString(target3.rawOutput);
+  }
+  if (Array.isArray(target3.content)) {
+    let contentChanged = false;
+    const compactContent = target3.content.map((item) => {
+      if (!isRecord18(item)) return item;
+      if (typeof item.text === "string" && item.text.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+        contentChanged = true;
+        return { ...item, text: truncateReplayString(item.text) };
+      }
+      if (isRecord18(item.content) && typeof item.content.text === "string" && item.content.text.length > MAX_REPLAY_TOOL_FIELD_CHARS) {
+        contentChanged = true;
+        return {
+          ...item,
+          content: {
+            ...item.content,
+            text: truncateReplayString(item.content.text)
+          }
+        };
+      }
+      if (item.type === "diff") {
+        const oldLong = typeof item.oldText === "string" && item.oldText.length > MAX_REPLAY_TOOL_FIELD_CHARS;
+        const newLong = typeof item.newText === "string" && item.newText.length > MAX_REPLAY_TOOL_FIELD_CHARS;
+        if (oldLong || newLong) {
+          contentChanged = true;
+          return {
+            ...item,
+            ...oldLong ? { oldText: truncateReplayString(item.oldText) } : {},
+            ...newLong ? { newText: truncateReplayString(item.newText) } : {}
+          };
+        }
+      }
+      return item;
+    });
+    if (contentChanged) ensureCopy().content = compactContent;
+  }
+  return next ?? update;
+}
 var ClaudeAcpClient = class extends CursorAcpClient {
   live = /* @__PURE__ */ new Map();
   loads = /* @__PURE__ */ new Map();
@@ -98221,7 +98422,11 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         this.assertLoaded(result, id7);
         this.live.set(id7, result);
         this.historyMetadata.delete(id7);
-        this.clearLoadSuppression(id7, gen);
+        if (this.modelLabel === "antigravity") {
+          this.armLoadTombstone(id7, gen, 1500);
+        } else {
+          this.clearLoadSuppression(id7, gen);
+        }
         return result;
       });
       this.loads.set(id7, load);
@@ -98256,6 +98461,9 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if ((method === "dsh/selectModel" || method === "session/set_mode") && typeof id7 === "string") {
       this.historyMetadata.delete(id7);
     }
+    if (method === "session/prompt" && typeof id7 === "string") {
+      this.clearLoadSuppression(id7);
+    }
     return super.call(method, params, timeoutMs);
   }
   beginLoadSuppression(sessionId) {
@@ -98287,7 +98495,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       if (evictKey === void 0) break;
       this.clearLoadSuppression(evictKey);
     }
-    const ttl = Math.min(Math.max(timeoutMs ?? DEFAULT_LOAD_TOMBSTONE_TTL_MS, DEFAULT_LOAD_TOMBSTONE_TTL_MS), MAX_LOAD_TOMBSTONE_TTL_MS);
+    const ttl = Math.min(Math.max(timeoutMs ?? DEFAULT_LOAD_TOMBSTONE_TTL_MS, 250), MAX_LOAD_TOMBSTONE_TTL_MS);
     const timer2 = setTimeout(() => {
       this.clearLoadSuppression(sessionId, gen);
     }, ttl);
@@ -98314,6 +98522,27 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     const id7 = result?.sessionId;
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     if (id7 !== void 0 && id7 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
+  }
+  /**
+   * Native `agy acp` resolves the `session/load` JSON-RPC response before its
+   * asynchronous `session/update` replay finishes flushing over stdout. Drain
+   * post-response replay frames until a short quiet window elapses.
+   */
+  async awaitReplayQuiescence(getCount, shouldStop) {
+    if (this.modelLabel !== "antigravity" || shouldStop()) return;
+    const quietWindowMs = 35;
+    const maxDrainMs = 2e3;
+    const deadline = Date.now() + maxDrainMs;
+    let previous = getCount();
+    while (!shouldStop() && Date.now() < deadline) {
+      await new Promise((resolve10) => {
+        const timer2 = setTimeout(resolve10, quietWindowMs);
+        timer2.unref?.();
+      });
+      const current = getCount();
+      if (current === previous) break;
+      previous = current;
+    }
   }
   isSessionLoaded(sessionId) {
     return this.live.has(sessionId);
@@ -98393,12 +98622,14 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         return;
       }
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
-      bytes += Buffer5.byteLength(JSON.stringify(message));
+      const params = message.params;
+      const compactedMessage = isRecord18(params.update) ? { ...message, params: { ...params, update: compactHistoryReplayUpdate(params.update) } } : message;
+      bytes += Buffer5.byteLength(JSON.stringify(compactedMessage));
       count++;
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) {
+      if (bytes > MAX_HISTORY_REPLAY_BYTES || count > MAX_HISTORY_REPLAY_COUNT) {
         overflow = true;
         void stop().catch(() => void 0);
-      } else updates.push(message);
+      } else updates.push(compactedMessage);
     });
     const takeHistoryClient = async () => {
       const standby = this.historyStandby;
@@ -98427,6 +98658,11 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       unsubscribeInbound = attachHandlers(client);
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       this.assertLoaded(result, sessionId);
+      if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
+      await this.awaitReplayQuiescence(
+        () => count,
+        () => overflow || stopRequested || this.shuttingDown
+      );
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
       const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
         client.call("dsh/sessionModels", { sessionId }).catch(() => void 0),
@@ -100453,6 +100689,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   let currentSeq = 0;
   let currentTurn = 0;
   let turnOpen = false;
+  const pendingGenericToolResults = [];
   const push2 = (type, data2, time3, surface = false, sourceEventSeqs) => {
     events.push({
       type: "event",
@@ -100466,6 +100703,24 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
       }
     });
   };
+  const flushPendingGenericToolResults = (time3) => {
+    for (const pending of pendingGenericToolResults.splice(0)) {
+      push2("tool/result", {
+        turn: currentTurn,
+        step: 1,
+        message: {
+          id: `${sessionId}:${pending.stepIndex}:tool-result:${pending.callId}`,
+          role: "user",
+          source: { kind: "tool", callId: pending.callId },
+          content: [{
+            type: "tool-result",
+            toolCallId: pending.callId,
+            content: []
+          }]
+        }
+      }, time3, true, [pending.callSeq]);
+    }
+  };
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -100477,6 +100732,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
     }
     const time3 = record12.created_at ? new Date(record12.created_at).getTime() : Date.now();
     if (record12.type === "USER_INPUT") {
+      flushPendingGenericToolResults(time3);
       if (turnOpen) {
         push2("step/end", { turn: currentTurn, step: 1 }, time3);
         push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time3);
@@ -100495,6 +100751,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
         source: { kind: "user" }
       }, time3, true);
     } else if (record12.type === "PLANNER_RESPONSE") {
+      flushPendingGenericToolResults(time3);
       if (!turnOpen) {
         currentTurn += 1;
         turnOpen = true;
@@ -100522,30 +100779,37 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
           }, time3, false);
           if (call.status !== "CALLING" && call.status !== "EXECUTING") {
             let resultText = "";
+            let hasInlineResult = false;
             if (typeof call.result === "string") {
               resultText = call.result;
+              hasInlineResult = true;
             } else if (call.result !== void 0 && call.result !== null) {
               try {
                 resultText = JSON.stringify(call.result);
+                hasInlineResult = true;
               } catch {
                 resultText = "";
               }
             }
-            push2("tool/result", {
-              turn: currentTurn,
-              step: 1,
-              message: {
-                id: `${sessionId}:${record12.step_index}:tool-result:${callId}`,
-                role: "user",
-                source: { kind: "tool", callId },
-                content: [{
-                  type: "tool-result",
-                  toolCallId: callId,
-                  content: resultText.length > 0 ? [{ type: "text", text: resultText }] : [],
-                  ...isError ? { isError: true } : {}
-                }]
-              }
-            }, time3, true, [callSeq]);
+            if (hasInlineResult || isError) {
+              push2("tool/result", {
+                turn: currentTurn,
+                step: 1,
+                message: {
+                  id: `${sessionId}:${record12.step_index}:tool-result:${callId}`,
+                  role: "user",
+                  source: { kind: "tool", callId },
+                  content: [{
+                    type: "tool-result",
+                    toolCallId: callId,
+                    content: resultText.length > 0 ? [{ type: "text", text: resultText }] : [],
+                    ...isError ? { isError: true } : {}
+                  }]
+                }
+              }, time3, true, [callSeq]);
+            } else {
+              pendingGenericToolResults.push({ callSeq, callId, stepIndex: record12.step_index });
+            }
           }
         }
       }
@@ -100568,10 +100832,36 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
           stream: []
         }, time3, true);
       }
+    } else if (record12.type === "GENERIC" && pendingGenericToolResults.length > 0) {
+      const pending = pendingGenericToolResults.shift();
+      const isError = record12.status === "ERROR" || typeof record12.error === "string" && record12.error.length > 0;
+      const resultText = typeof record12.content === "string" && record12.content.length > 0 ? record12.content : typeof record12.error === "string" ? record12.error : "";
+      if (isError) {
+        const callEntry = events.find((entry) => entry.event.seq === pending.callSeq);
+        if (callEntry && typeof callEntry.event.data === "object" && callEntry.event.data !== null) {
+          callEntry.event.data.status = "failed";
+        }
+      }
+      push2("tool/result", {
+        turn: currentTurn,
+        step: 1,
+        message: {
+          id: `${sessionId}:${pending.stepIndex}:tool-result:${pending.callId}`,
+          role: "user",
+          source: { kind: "tool", callId: pending.callId },
+          content: [{
+            type: "tool-result",
+            toolCallId: pending.callId,
+            content: resultText.length > 0 ? [{ type: "text", text: resultText }] : [],
+            ...isError ? { isError: true } : {}
+          }]
+        }
+      }, time3, true, [pending.callSeq]);
     }
   }
   if (turnOpen) {
     const settledAt = events.at(-1)?.event.time ?? Date.now();
+    flushPendingGenericToolResults(settledAt);
     push2("step/end", { turn: currentTurn, step: 1 }, settledAt);
     push2("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, settledAt);
   }
@@ -102264,7 +102554,7 @@ var AcpRemoteGateway = class {
     if (options.compactHistory && window2.length > 0) {
       if (turnWindow2 === void 0) {
         const maxSurface = boundedVirtualHistoryMaxMessages(maxMessages, false);
-        const preCutIndex = findSurfaceTailStartIndex(window2, maxSurface);
+        const preCutIndex = selectMessageLimitCutIndex(window2, maxSurface, true);
         hasLeadingFromPreSlice = preCutIndex > 0;
         candidateWindow = window2.slice(preCutIndex).map((entry) => ({
           ...entry,
@@ -103383,27 +103673,6 @@ function normalizeVirtualHistoryEntries(rawEvents) {
     normalized.push(raw);
   }
   return normalized;
-}
-function findSurfaceTailStartIndex(window2, maxSurfaceMessages) {
-  let messages = 0;
-  let cutSeq = -Infinity;
-  for (let index = window2.length - 1; index >= 0; index -= 1) {
-    const entry = window2[index];
-    const { type, surfaceOp } = entry.event;
-    if (surfaceOp !== "append" || type !== "user/message" && type !== "assistant/message" && type !== "tool/result") {
-      continue;
-    }
-    messages += 1;
-    if (messages >= maxSurfaceMessages) {
-      cutSeq = Math.min(entry.event.seq, ...entry.event.sourceEventSeqs ?? []);
-      break;
-    }
-  }
-  if (cutSeq === -Infinity) return 0;
-  for (let index = 0; index < window2.length; index += 1) {
-    if (window2[index].event.seq >= cutSeq) return index;
-  }
-  return window2.length;
 }
 function isRecord22(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
