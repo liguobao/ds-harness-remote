@@ -652,7 +652,6 @@ const ukUA = {
   },
   settings: {
     membership: { plan: "План підписки", title: "Підписка", expiresAt: "Дата завершення", loading: "Завантаження…", none: "Немає підписки", active: "Активна", expired: "Завершилася", revoked: "Відкликана" },
-    drawerLayoutMode: 'Макет бічної панелі', drawerLayoutCompact: 'Компактний', drawerLayoutClassic: 'Розгорнуті картки', drawerLayoutModeSaveFailed: 'Не вдалося зберегти макет бічної панелі',
     quickPromptActionMode: 'Натискання на швидкий запит', quickPromptActionFill: 'Вставити в поле введення', quickPromptActionSend: 'Надіслати відразу', quickPromptActionSaveFailed: 'Не вдалося зберегти налаштування швидких запитів',
     busySendMode: 'Надсилання під час генерації', busySendQueue: 'У чергу', busySendQueueNote: 'Відкласти над полем введення; торкніться, щоб вставити будь-коли', busySendSteer: 'Поза чергою', busySendSteerNote: 'Одразу вставити в поточний хід відповіді', busySendModeSaveFailed: 'Не вдалося зберегти налаштування режиму надсилання',
     identityHint: "Торкніться поля, щоб переглянути й скопіювати повне значення.",

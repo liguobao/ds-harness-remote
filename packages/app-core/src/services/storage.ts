@@ -7,7 +7,7 @@ import { Platform } from 'react-native'
 import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
-import { isActivityDockMode, isDrawerLayoutMode, isThemePreference, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type DrawerLayoutMode, type ThemePreference } from '../ui/theme'
+import { isActivityDockMode, isThemePreference, normalizeChatAppearance, type ActivityDockMode, type ChatAppearance, type ThemePreference } from '../ui/theme'
 import { isBusySendMode, isQuickPromptActionMode, type BusySendMode, type QuickPromptActionMode } from '../screens/chat/composer-gate'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
@@ -32,7 +32,6 @@ const KEYS = {
   themePreference: 'dshremote.theme-preference.v1',
   chatAppearance: 'dshremote.chat-appearance.v1',
   activityDockMode: 'dshremote.activity-dock-mode.v1',
-  drawerLayoutMode: 'dshremote.drawer-layout-mode.v1',
   quickPromptActionMode: 'dshremote.quick-prompt-action-mode.v1',
   busySendMode: 'dshremote.busy-send-mode.v1',
   compactHistory: 'dshremote.compact-history.v1',
@@ -413,6 +412,7 @@ export async function clearCodexPermissionPresets(hostDeviceId: string): Promise
 
 const LEGACY_KEYS = [
   'dshremote.typography-density.v1',
+  'dshremote.drawer-layout-mode.v1',
 ] as const
 
 export async function clearLocalData(): Promise<void> {
@@ -606,15 +606,6 @@ export async function loadActivityDockMode(): Promise<ActivityDockMode> {
 
 export async function saveActivityDockMode(value: ActivityDockMode): Promise<void> {
   await writeJson(KEYS.activityDockMode, { value })
-}
-
-export async function loadDrawerLayoutMode(): Promise<DrawerLayoutMode> {
-  const stored = await readJson<{ value: unknown }>(KEYS.drawerLayoutMode)
-  return isDrawerLayoutMode(stored?.value) ? stored.value : 'compact'
-}
-
-export async function saveDrawerLayoutMode(value: DrawerLayoutMode): Promise<void> {
-  await writeJson(KEYS.drawerLayoutMode, { value })
 }
 
 export { isQuickPromptActionMode, type QuickPromptActionMode }

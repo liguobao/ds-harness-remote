@@ -678,7 +678,6 @@ const zhTW = {
     codeThemeAuto: '跟隨主題', codeThemeDark: '深邃暗色', codeThemeLight: '明亮淺色',
     activityDockMode: '活動組件展示', activityDockModeNote: '控制對話輸入框上方背景工作、子任務與智能體團隊的展示方式',
     activityDockCompact: '緊湊膠囊列', activityDockCards: '獨立摺疊卡片', activityDockHidden: '始終隱藏', activityDockModeSaveFailed: '無法儲存活動組件展示設定',
-    drawerLayoutMode: '側邊欄版面', drawerLayoutCompact: '精簡', drawerLayoutClassic: '展開卡片', drawerLayoutModeSaveFailed: '無法儲存側邊欄版面設定',
     quickPromptActionMode: '快捷提示詞點擊', quickPromptActionFill: '填入輸入框', quickPromptActionSend: '直接傳送', quickPromptActionSaveFailed: '無法儲存快捷提示詞設定',
     busySendMode: '執行中傳送方式', busySendQueue: '排隊傳送', busySendQueueNote: '先在輸入框上方暫存，可點擊插隊', busySendSteer: '插話傳送', busySendSteerNote: '直接插入目前對話，不進入佇列', busySendModeSaveFailed: '無法儲存執行中傳送方式設定',
     statusBar: '顯示狀態列', statusBarNote: '顯示螢幕頂部的時間、電量和網路狀態。關閉後隱藏系統狀態列。', statusBarSaveFailed: '無法儲存狀態列設定', statusBarSaveFailedBody: '本地儲存寫入失敗，請重試。',

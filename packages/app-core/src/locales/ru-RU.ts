@@ -649,7 +649,6 @@ const ruRU = {
   },
   settings: {
     membership: { plan: "План подписки", title: "Подписка", expiresAt: "Дата окончания", loading: "Загрузка…", none: "Нет подписки", active: "Активна", expired: "Истекла", revoked: "Отозвана" },
-    drawerLayoutMode: 'Макет боковой панели', drawerLayoutCompact: 'Компактный', drawerLayoutClassic: 'Развёрнутые карточки', drawerLayoutModeSaveFailed: 'Не удалось сохранить макет боковой панели',
     quickPromptActionMode: 'Нажатие на быстрый запрос', quickPromptActionFill: 'Вставить в поле ввода', quickPromptActionSend: 'Отправить сразу', quickPromptActionSaveFailed: 'Не удалось сохранить настройку быстрых запросов',
     busySendMode: 'Отправка во время генерации', busySendQueue: 'В очередь', busySendQueueNote: 'Отложить над полем ввода; нажмите, чтобы вставить в любой момент', busySendSteer: 'Вне очереди', busySendSteerNote: 'Сразу вставить в текущий ход ответа', busySendModeSaveFailed: 'Не удалось сохранить настройку режима отправки',
     identityHint: "Нажмите на поле, чтобы посмотреть и скопировать полное значение.",

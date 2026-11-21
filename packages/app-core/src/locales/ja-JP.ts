@@ -680,7 +680,6 @@ const jaJP = {
     codeThemeAuto: "テーマに合わせる", codeThemeDark: "常にダーク", codeThemeLight: "常にライト",
     activityDockMode: "アクティビティ ウィジェット", activityDockModeNote: "入力欄の上部に表示されるバックグラウンドタスク、サブエージェント、エージェントチームの表示方法を制御します",
     activityDockCompact: "コンパクト ピルバー", activityDockCards: "スタック カード", activityDockHidden: "常に非表示", activityDockModeSaveFailed: "アクティビティ ウィジェットの設定を保存できませんでした",
-    drawerLayoutMode: "サイドバーレイアウト", drawerLayoutCompact: "コンパクト", drawerLayoutClassic: "展開カード", drawerLayoutModeSaveFailed: "サイドバーレイアウトの設定を保存できませんでした",
     quickPromptActionMode: "クイックプロンプトのタップ", quickPromptActionFill: "入力欄に挿入", quickPromptActionSend: "すぐに送信", quickPromptActionSaveFailed: "クイックプロンプトの設定を保存できませんでした",
     busySendMode: "生成中の送信方法", busySendQueue: "キュー", busySendQueueNote: "入力欄の上に一時保存し、いつでもタップで割り込み送信", busySendSteer: "割り込み", busySendSteerNote: "現在のターンにすぐ挿入", busySendModeSaveFailed: "送信方法の設定を保存できませんでした",
     statusBar: "ステータスバーを表示する", statusBarNote: "画面上部に時刻、バッテリー、ネットワークのステータスを表示します。オフにすると、システム ステータス バーが非表示になります。", statusBarSaveFailed: "ステータスバーの設定を保存できませんでした", statusBarSaveFailedBody: "ローカルストレージに書き込めませんでした。もう一度試してください。",

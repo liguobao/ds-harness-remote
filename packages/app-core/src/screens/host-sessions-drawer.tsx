@@ -28,7 +28,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  Clock,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -37,7 +36,6 @@ import {
   Monitor,
   MoreHorizontal,
   Plus,
-  Puzzle,
   MoreVertical,
   Search,
   Server,
@@ -258,8 +256,6 @@ export function HostSessionsDrawer({
   const moveWorkspace = useAppStore(state => state.workspaceMove)
   const deleteWorkspace = useAppStore(state => state.workspaceDelete)
   const busy = useAppStore(state => state.busyAction)
-  const drawerLayoutMode = useAppStore(state => state.drawerLayoutMode)
-  const isClassicDrawer = drawerLayoutMode === 'classic'
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const error = useAppStore(state => state.error)
   const clearError = useAppStore(state => state.clearError)
@@ -1267,57 +1263,21 @@ export function HostSessionsDrawer({
         />
       ) : (
         <>
-          {isClassicDrawer && (
-            <View style={styles.navGroupWrap}>
-              <GroupCard>
-                <GroupRow
-                  first
-                  icon={Bot}
-                  label={strings.sessions.agentPlatform}
-                  value={harnessDisplayName(backend)}
-                  onPress={() => setHarnessPickerOpen(true)}
-                />
-                <GroupRow
-                  icon={Puzzle}
-                  label={strings.plugins.nav}
-                  detail={!connected || onOpenPlugins === undefined ? strings.plugins.connectHostFirst : undefined}
-                  disabled={!connected || onOpenPlugins === undefined}
-                  onPress={() => {
-                    onOpenPlugins?.()
-                  }}
-                />
-                <GroupRow
-                  icon={Clock}
-                  label={strings.automation.nav}
-                  onPress={() => {
-                    if (onOpenAutomationTasks) {
-                      onOpenAutomationTasks()
-                    } else {
-                      Alert.alert(strings.automation.title, strings.automation.empty)
-                    }
-                  }}
-                />
-              </GroupCard>
-            </View>
-          )}
-
           {/* Workspaces 标题栏与平台筛选、工具栏 */}
           <View ref={toolbarRef} style={styles.workspacesToolbarArea} collapsable={false}>
             <View style={styles.workspacesToolbar}>
               <View style={styles.workspacesTitleGroup}>
                 <Text style={styles.workspacesTitle} numberOfLines={1}>{strings.sessions.workspaces}</Text>
-                {!isClassicDrawer && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${strings.sessions.agentPlatform} · ${harnessDisplayName(backend)}`}
-                    hitSlop={6}
-                    onPress={() => setHarnessPickerOpen(true)}
-                    style={({ pressed }) => [styles.platformChip, pressed && styles.pressedFade]}
-                  >
-                    <Text style={styles.platformChipText} numberOfLines={1}>{harnessDisplayName(backend)}</Text>
-                    <ChevronDown size={13} color={colors.muted} strokeWidth={2.1} />
-                  </Pressable>
-                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${strings.sessions.agentPlatform} · ${harnessDisplayName(backend)}`}
+                  hitSlop={6}
+                  onPress={() => setHarnessPickerOpen(true)}
+                  style={({ pressed }) => [styles.platformChip, pressed && styles.pressedFade]}
+                >
+                  <Text style={styles.platformChipText} numberOfLines={1}>{harnessDisplayName(backend)}</Text>
+                  <ChevronDown size={13} color={colors.muted} strokeWidth={2.1} />
+                </Pressable>
               </View>
               <View style={styles.toolbarActions}>
                 <Pressable
@@ -2126,19 +2086,19 @@ export function HostSessionsDrawer({
           <HomeActionsMenu
             visible={appMenuOpen}
             onClose={() => setAppMenuOpen(false)}
-            onPlugins={!isClassicDrawer ? () => {
+            onPlugins={() => {
               setAppMenuOpen(false)
               onOpenPlugins?.()
-            } : undefined}
+            }}
             pluginsDisabled={!connected || onOpenPlugins === undefined}
-            onAutomationTasks={!isClassicDrawer ? () => {
+            onAutomationTasks={() => {
               setAppMenuOpen(false)
               if (onOpenAutomationTasks) {
                 onOpenAutomationTasks()
               } else {
                 Alert.alert(strings.automation.title, strings.automation.empty)
               }
-            } : undefined}
+            }}
             onSettings={() => {
               setAppMenuOpen(false)
               onOpenSettings?.()
@@ -2303,10 +2263,6 @@ const createStyles = (colors: ThemeColors) =>
     modeSwitcherTextActive: {
       color: colors.ink,
       fontWeight: '700',
-    },
-    navGroupWrap: {
-      paddingHorizontal: spacing.md,
-      marginBottom: spacing.xs,
     },
     favoritesWrap: {
       paddingHorizontal: spacing.md,
