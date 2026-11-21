@@ -524,6 +524,306 @@ describe('Cordis plugin lifecycle', () => {
       await ctx.fiber.dispose()
     }
   })
+
+  it('surfaces pre-registration startup failures on control status, settings, and HostLogStore', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-prereg-failure-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubEnv('DSH_PROFILE', 'pre-fail')
+
+    let registeredRoute: {
+      path: string
+      auth?: string
+      handler(req: unknown, res: unknown): Promise<void> | void
+    } | undefined
+    const ctx = new Context()
+    ctx.provide('settings', settings({}))
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', { admit: () => ({ peer: {} }), rpc: {} } as never)
+    ctx.provide('webServer', {
+      register: (route: typeof registeredRoute) => {
+        registeredRoute = route
+        return async () => undefined
+      },
+    } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, {
+      ...disabledAgentDomains,
+      httpServerAllowlist: ['http://invalid-entry'],
+    })
+    const callHttp = async (method: string) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
+        type: 'client-request', rpcId: 'req-1', method, payload: {},
+      }))]), {
+        method: 'POST',
+        url: `/ds-harness-remote/${method}`,
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      await registeredRoute!.handler(req, {
+        writeHead: (code: number) => { status = code },
+        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+      })
+      return { status, body: JSON.parse(text) }
+    }
+
+    try {
+      await vi.waitFor(() => expect(registeredRoute?.path).toBe('/ds-harness-remote'))
+      expect(registeredRoute?.auth).toBe('required')
+      await expect(callHttp('status')).resolves.toMatchObject({
+        status: 200,
+        body: {
+          result: {
+            ok: true,
+            value: {
+              available: false,
+              controlUnavailable: false,
+              startupError: { code: 'INTERNAL_ERROR' },
+            },
+          },
+        },
+      })
+      await expect(callHttp('settings.get')).resolves.toMatchObject({
+        status: 200,
+        body: {
+          result: {
+            ok: true,
+            value: {
+              startupError: { code: 'INTERNAL_ERROR' },
+            },
+          },
+        },
+      })
+      const logsRes = await callHttp('settings.logs.get')
+      expect(logsRes.body.result).toMatchObject({ ok: true })
+      expect(logsRes.body.result.value.entries.some((entry: { line: string }) =>
+        entry.line.includes('Remote plugin startup failed'))).toBe(true)
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('mounts late webServer and survives webServer reloads without restarting Host runtime', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    await runScenarios([true, false].map(enabled => ({
+      name: enabled ? 'enabled' : 'disabled',
+      run: async () => {
+        const dshHome = await mkdtemp(join(tmpdir(), `dsh-remote-late-ws-${enabled ? 'on' : 'off'}-`))
+        directories.push(dshHome)
+        vi.stubEnv('DSH_HOME', dshHome)
+
+        let rpcMounts = 0
+        let rpcDisposals = 0
+        const ctx = new Context()
+        ctx.provide('settings', settings({ enabled, deviceName: 'Late WebServer Host' }))
+        ctx.provide('typertGateway', typertGateway())
+        ctx.provide('connection', {
+          rpc: {
+            handle: vi.fn(() => {
+              rpcMounts += 1
+              return async () => { rpcDisposals += 1 }
+            }),
+          },
+        } as never)
+
+        const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, enabled })
+        try {
+          await vi.waitFor(() => {
+            expect(rpcMounts).toBe(1)
+            if (enabled) expect(ctx.dshRemote.currentIdentity()).toBeDefined()
+          })
+          const initialHost = enabled ? ctx.dshRemote : undefined
+          const initialDeviceId = initialHost?.currentIdentity().deviceId
+
+          const ws1Disposed = vi.fn()
+          let ws1Route: { handler(req: unknown, res: unknown): Promise<void> | void } | undefined
+          const ws1Fiber = await ctx.plugin({
+            name: 'mock-ws-1',
+            apply(peerCtx: Context) {
+              peerCtx.provide('webServer', {
+                register: (route: typeof ws1Route) => {
+                  ws1Route = route
+                  return async () => { ws1Disposed() }
+                },
+              } as never)
+            },
+          })
+
+          await vi.waitFor(() => {
+            expect(ws1Route).toBeDefined()
+            expect(rpcDisposals).toBe(1)
+          })
+          if (enabled) {
+            expect(ctx.dshRemote).toBe(initialHost)
+            expect(ctx.dshRemote.currentIdentity().deviceId).toBe(initialDeviceId)
+          }
+
+          await ws1Fiber.dispose()
+          await vi.waitFor(() => {
+            expect(ws1Disposed).toHaveBeenCalledOnce()
+            expect(rpcMounts).toBe(2)
+          })
+
+          const ws2Disposed = vi.fn()
+          let ws2RouteRegistered = false
+          const ws2Fiber = await ctx.plugin({
+            name: 'mock-ws-2',
+            apply(peerCtx: Context) {
+              peerCtx.provide('webServer', {
+                register: () => {
+                  ws2RouteRegistered = true
+                  return async () => { ws2Disposed() }
+                },
+              } as never)
+            },
+          })
+
+          await vi.waitFor(() => {
+            expect(ws2RouteRegistered).toBe(true)
+            expect(rpcDisposals).toBe(2)
+          })
+
+          await fiber.dispose()
+          expect(ws2Disposed).toHaveBeenCalledOnce()
+          await ws2Fiber.dispose()
+        } finally {
+          await ctx.fiber.dispose()
+        }
+      },
+    })))
+  })
+
+  it('resolves log profile name from profileContext, baseUrl, and Symbol.for(cordis.root)', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    await runScenarios(['profileContext', 'baseUrl', 'nonProfileCtxBaseUrl', 'symbolRoot', 'throwingSymbolRoot'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const dshHome = await mkdtemp(join(tmpdir(), `dsh-remote-profile-${mode}-`))
+        directories.push(dshHome)
+        vi.stubEnv('DSH_HOME', dshHome)
+        vi.stubEnv('DSH_PROFILE', '')
+
+        let handler!: ControlRouteHandler
+        const ctx = new Context()
+        ctx.provide('settings', settings({ deviceName: 'Profile Resolve Host' }))
+        ctx.provide('typertGateway', typertGateway())
+        ctx.provide('connection', {
+          rpc: {
+            handle: (_ch: string, fn: ControlRouteHandler) => {
+              handler = fn
+              return async () => undefined
+            },
+          },
+        } as never)
+
+        if (mode === 'profileContext') {
+          ctx.provide('profileContext', { name: 'desktop-ctx' } as never)
+        } else if (mode === 'baseUrl') {
+          (ctx as { baseUrl?: string }).baseUrl = 'file:///tmp/user/.dsh/profiles/desktop-url/'
+        } else if (mode === 'nonProfileCtxBaseUrl') {
+          const fakeRoot = Object.assign(new Context(), {
+            baseUrl: 'file:///C:/Users/Alice%20Smith/.dsh/profiles/root-url/',
+          })
+          Reflect.set(ctx, Symbol.for('cordis.root'), fakeRoot)
+          ;(ctx as { baseUrl?: string }).baseUrl = 'file:///C:/app/plugins/ds-harness-remote/index.js'
+        } else if (mode === 'symbolRoot') {
+          const fakeRoot = Object.assign(new Context(), {
+            baseDir: '/tmp/user/.dsh/profiles/sym-prof',
+          })
+          Reflect.set(ctx, Symbol.for('cordis.root'), fakeRoot)
+          Object.defineProperty(ctx, 'root', {
+            configurable: true,
+            get() { throw new Error('cannot get property "root" without inject') },
+          })
+        } else {
+          Object.defineProperty(ctx, Symbol.for('cordis.root'), {
+            configurable: true,
+            get() { throw new Error('throwing cordis.root symbol getter') },
+          })
+          ;(ctx as { baseUrl?: string }).baseUrl = 'file:///tmp/user/.dsh/profiles/sym-fallback/'
+        }
+
+        const expectedFile = mode === 'profileContext'
+          ? 'desktop-ctx.log'
+          : mode === 'baseUrl'
+            ? 'desktop-url.log'
+            : mode === 'nonProfileCtxBaseUrl'
+              ? 'root-url.log'
+              : mode === 'symbolRoot'
+                ? 'sym-prof.log'
+                : 'sym-fallback.log'
+
+        const fiber = await ctx.plugin(remotePlugin, disabledAgentDomains)
+        try {
+          await vi.waitFor(() => expect(handler).toBeDefined())
+          const logs = await handler('settings.logs.get', {}, new AbortController().signal) as {
+            ok: boolean
+            value?: { filePath?: string }
+          }
+          expect(logs.ok).toBe(true)
+          expect(logs.value?.filePath).toBe(join(dshHome, 'logs', 'ds-harness-remote', expectedFile))
+        } finally {
+          await fiber.dispose()
+          await ctx.fiber.dispose()
+        }
+      },
+    })))
+  })
+
+  it('recovers RPC fallback route when webServer disappears pre-reload or its disposer throws', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    await runScenarios(['vanishingWebServer', 'throwingDisposer'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const dshHome = await mkdtemp(join(tmpdir(), `dsh-remote-ws-edge-${mode}-`))
+        directories.push(dshHome)
+        vi.stubEnv('DSH_HOME', dshHome)
+
+        let rpcMounts = 0
+        const ctx = new Context()
+        ctx.provide('settings', settings({ enabled: false }))
+        ctx.provide('typertGateway', typertGateway())
+        ctx.provide('connection', {
+          rpc: {
+            handle: vi.fn(() => {
+              rpcMounts += 1
+              return async () => undefined
+            }),
+          },
+        } as never)
+
+        const wsFiber = await ctx.plugin({
+          name: 'mock-ws-edge',
+          apply(peerCtx: Context) {
+            peerCtx.provide('webServer', {
+              register: () => async () => {
+                if (mode === 'throwingDisposer') throw new Error('ws dispose boom')
+              },
+            } as never)
+          },
+        })
+
+        const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, enabled: false })
+        try {
+          if (mode === 'vanishingWebServer') {
+            await wsFiber.dispose()
+            await vi.waitFor(() => expect(rpcMounts).toBe(1))
+          } else {
+            await vi.waitFor(() => expect(rpcMounts).toBe(0))
+            await new Promise(resolve => setTimeout(resolve, 25))
+            await wsFiber.dispose()
+            await vi.waitFor(() => expect(rpcMounts).toBe(1))
+          }
+        } finally {
+          await fiber.dispose()
+          await ctx.fiber.dispose()
+        }
+      },
+    })))
+  })
 })
 
 function settings(value: Record<string, unknown>) {

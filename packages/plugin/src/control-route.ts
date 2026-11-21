@@ -15,6 +15,7 @@ const INVALID_REQUEST_RPC_ID = 'invalid-request'
 
 interface HostConnectionHandleLike {
   requestRejection?(request: { headers: IncomingHttpHeaders }): number | undefined
+  admit?(request: { headers: IncomingHttpHeaders }): { rejection?: number; peer?: unknown } | undefined
   rpc: {
     handle?(
       channel: string,
@@ -28,6 +29,7 @@ export interface HostWebServerLike {
   register(route: {
     kind: 'prefix'
     path: string
+    auth?: 'required'
     handler(req: IncomingMessage, res: ServerResponse): void | Promise<void>
   }): () => void | Promise<void>
 }
@@ -50,10 +52,14 @@ export function registerControlRoute(
   webServer?: HostWebServerLike,
   statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
-  if (webServer !== undefined && connection.requestRejection !== undefined) {
+  if (webServer !== undefined) {
+    // Newer DSH builds dropped `connection.requestRejection` and enforce `auth`
+    // in `webServer`; keep passing `auth: 'required'` while still checking
+    // `requestRejection` / `admit` inside `handleControlRequest` when present.
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
+      auth: 'required',
       handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream),
     })
     return async () => {
@@ -82,7 +88,7 @@ async function handleControlRequest(
   res: ServerResponse,
   statusStream?: ControlStatusStreamLike,
 ): Promise<void> {
-  const rejection = connection.requestRejection?.(req)
+  const rejection = requestRejectionStatus(connection, req)
   if (rejection !== undefined) {
     res.writeHead(rejection)
     res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
@@ -197,6 +203,24 @@ function fullResponse(rpcId: string, result: unknown): Record<string, unknown> {
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+function requestRejectionStatus(connection: HostConnectionHandleLike, req: IncomingMessage): number | undefined {
+  if (typeof connection.requestRejection === 'function') {
+    const rejection = connection.requestRejection(req)
+    return rejection === undefined ? undefined : normalizeRejectionStatus(rejection)
+  }
+  if (typeof connection.admit === 'function') {
+    const admission = connection.admit(req)
+    if (typeof admission !== 'object' || admission === null) return 403
+    if (typeof admission.rejection === 'number') return normalizeRejectionStatus(admission.rejection)
+    return admission.peer != null ? undefined : 403
+  }
+  return 403
+}
+
+function normalizeRejectionStatus(code: unknown): number {
+  return typeof code === 'number' && Number.isInteger(code) && code >= 400 && code <= 599 ? code : 403
 }
 
 function writeText(res: ServerResponse, status: number, body: string): void {

@@ -113,8 +113,14 @@ export interface HostConnectionRpc {
   ): () => Promise<void>
 }
 
+export interface HostConnectionAdmission {
+  rejection?: number
+  peer?: unknown
+}
+
 export interface HostConnectionHandle {
   requestRejection?(request: { headers: Record<string, string | string[] | undefined> }): number | undefined
+  admit?(request: { headers: Record<string, string | string[] | undefined> }): HostConnectionAdmission | undefined
   rpc: HostConnectionRpc
 }
 
