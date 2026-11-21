@@ -19,7 +19,7 @@ Host、随包 Remote Client 和 Android 只使用官方 Typert carrier。缺少 
 
 - Harness 0.2.2 的图片附件请求使用完整 `ImageAttachmentRef`；Android 保留字节数与尺寸。Host 桥对旧 Harness 降级为 attachmentId；旧客户端不能为新 Host 补齐引用时，由官方 Gateway 明确拒绝。
 - `session/control` 内存投影同时携带旧 key/value 与新 changes；虚拟 `session/page` 提供 cursor，并接受 `session/events`。
-- DSH Desktop 0.2.2-rc.5 的 `terminal/watch` 只返回当前设备拥有的会话终端。`workspaceFiles/search` 由原生 Harness 在经过验证的会话工作区内执行。
+- DSH Desktop 0.2.2-rc.5 的 `terminal/watch` 只返回当前设备拥有的会话终端。`workspaceFiles/search` 由原生 Harness 在经过验证的会话工作区内执行。Office 文档预览同时支持 `officeKit/generation|render`（DSH ≥ 0.2.2-rc.2）与旧版 `officeToPdf/generation|render`。
 - 本地 carrier 使用存活的官方 owner Peer；缺少 Peer 或事件服务的组合必须明确失败。独立 TUI 包负责装配官方 Remote API。
 - `workspaceTypes.available` 与协商 capability 均成立才开放对应后端。命令可发现、开关开启或版本范围匹配不表示后端已登录或就绪。
 

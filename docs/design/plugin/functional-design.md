@@ -58,7 +58,7 @@ Client 先调用 `harness.transport.describe`。缺少能力发现或仅提供 A
 
 ## 4. 原生文件与终端
 
-Harness 复用官方 `workspaceFiles` / `officeToPdf` 固定 allowlist，并保留 dsh-file-viewer 的 stat/readRange/list 桥。
+Harness 复用官方 `workspaceFiles` / `officeKit`（兼容旧 `officeToPdf`）固定 allowlist，并保留 dsh-file-viewer 的 stat/readRange/list 桥。
 CodeX `codex:<threadId>` 由 Host 解析成独立 Thread cwd scope，不当作 Harness agent ID。
 共享工作区桥对路径、realpath、符号链接、读取大小与终端操作执行有界校验。
 
