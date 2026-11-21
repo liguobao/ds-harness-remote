@@ -157,7 +157,7 @@ export async function loadTranscriptEvents(
             let resultText = ''
             if (typeof call.result === 'string') {
               resultText = call.result
-            } else if (call.result !== undefined) {
+            } else if (call.result !== undefined && call.result !== null) {
               try {
                 resultText = JSON.stringify(call.result)
               } catch {

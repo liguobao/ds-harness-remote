@@ -70,6 +70,7 @@ import {
 } from './chat-files'
 import { ChatTrajectory } from './chat-trajectory'
 import { ChatActionMenu } from './chat/action-menu'
+import { shouldLoadAgentPresets } from './chat/agent-presets-gate'
 import { createModalActionQueue } from './chat/modal-action-queue'
 import { BACKEND_CHAT_TEXT_KEYS, ChatComposer } from './chat/composer'
 import { applyQuickPromptDraft, composerEditable, submitIntent } from './chat/composer-gate'
@@ -383,13 +384,19 @@ export function ChatScreen({
   // Fetch mode options only when a non-Codex session is active.
   // ACP sessions already receive modes from dsh/sessionHistory during openSession,
   // so avoid racing openSession or re-querying once populated.
+  const hasAgentPresets = agentPresetOptions !== undefined
+  const isOpeningAcpSession = session !== undefined && isAcpManagedBackend(session.backend) && busy === `session:${session.sessionId}`
   useEffect(() => {
-    if (connection.phase !== 'connected' || session === undefined || session.backend === 'codex') return
-    if (isAcpManagedBackend(session.backend) && (busy === `session:${session.sessionId}` || agentPresetOptions !== undefined)) {
-      return
-    }
+    if (!shouldLoadAgentPresets({
+      phase: connection.phase,
+      sessionId: session?.sessionId,
+      backend: session?.backend,
+      hasPresets: hasAgentPresets,
+      isOpeningAcpSession,
+      storeError: useAppStore.getState().error,
+    })) return
     void loadAgentPresets()
-  }, [connection.phase, session?.sessionId, session?.backend, busy, agentPresetOptions, loadAgentPresets])
+  }, [connection.phase, session?.sessionId, session?.backend, hasAgentPresets, isOpeningAcpSession, loadAgentPresets])
   const [composerExpanded, setComposerExpanded] = useState(false)
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)

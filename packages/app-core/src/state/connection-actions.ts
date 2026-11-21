@@ -1,3 +1,4 @@
+import { cursorNativeId, finalizeAssistantLive, foldAcpHistory, mergeAcpHistoryAndLive, readAcpHistory } from '../services/cursor'
 import { browseScope, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports, type PreferredTransport } from '../lib/network-route'
@@ -6,6 +7,7 @@ import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
 import { saveLastConnectedDeviceId } from '../services/storage'
+import { acpClientForBackend } from './session-actions'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
@@ -288,9 +290,46 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         } else if (
           isAcpManagedBackend(selected?.backend)
           && !get().busyAction?.startsWith('session:')
-          && (runtime.activeCursorStream === undefined || selected.running === true)
+          && runtime.activeCursorStream === undefined
         ) {
           void get().openSession(selected)
+        } else if (selected && isAcpManagedBackend(selected.backend) && selected.running && runtime.activeCursorStream !== undefined
+          && !get().busyAction?.startsWith('session:')) {
+          // The live subscription is still open. Closing it via openSession drops
+          // in-flight deltas, approvals and prompt_completed, and the reopen would
+          // discard the already streamed reply. Reconcile read-only with Host truth.
+          const stream = runtime.activeCursorStream
+          const frameRevision = runtime.acpFrameRevision
+          const sessionGeneration = runtime.sessionLoadGeneration
+          void readAcpHistory(acpClientForBackend(runtime.connection, selected.backend), cursorNativeId(selected), selected.backend).then(details => {
+            // Settle only if Host explicitly ended the turn, nothing streamed while
+            // reading, and the stream/connection/session generation is unchanged.
+            if (details.running !== false || generation !== runtime.connectionGeneration || sessionGeneration !== runtime.sessionLoadGeneration
+              || stream !== runtime.activeCursorStream || frameRevision !== runtime.acpFrameRevision
+              || get().selectedSession?.sessionId !== selected.sessionId || get().connection.phase !== 'connected') return
+            set(state => {
+              const active = state.selectedSession
+              if (!active || active.sessionId !== selected.sessionId) return {}
+              const updated = { ...active, running: false }
+              // Persisted turns come from the transcript; only rows produced by the
+              // live subscription are kept. Approvals/questions never appear there.
+              const live = (state.messages[selected.sessionId] ?? []).filter(item => item.turn?.startsWith('acp-live:')
+                || item.id === 'cursor-user-live'
+                || item.id.startsWith('local:')
+                || item.kind === 'approval'
+                || item.kind === 'question')
+              const settled = finalizeAssistantLive(live).map(item =>
+                item.kind === 'tool' && item.state === 'running' ? { ...item, state: 'finished' as const } : item)
+              return {
+                selectedSession: updated,
+                sessions: state.sessions.map(item => item.sessionId === selected.sessionId ? updated : item),
+                messages: {
+                  ...state.messages,
+                  [selected.sessionId]: mergeAcpHistoryAndLive(foldAcpHistory(details.events, selected.sessionId), settled),
+                },
+              }
+            })
+          }).catch(() => undefined)
         }
         if (get().transportPreference === 'auto') {
           const nextPreferred: readonly string[] = await resolveAutomaticPreferredTransports().catch(() => [])

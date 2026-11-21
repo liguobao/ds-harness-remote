@@ -2537,6 +2537,63 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     expect(useAppStore.getState().workspaces[0]?.sessionIds).toContain(opc.sessionId)
   })
 
+  it('keeps the active ACP stream and live text during healthy resume', async () => {
+    await prepareScenario1()
+    transport.hasAntigravity.mockReturnValue(true)
+    const selected: RemoteSession = { sessionId: 'antigravity:live', nativeId: 'live', backend: 'antigravity', updatedAt: 1, running: true, blank: false }
+    useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never, selectedSession: selected, sessions: [selected], messages: {}, config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+    const loadSessionDetails = vi.fn(async () => ({ events: [] as HistoryEntry[], running: true }))
+    Object.assign(acp, { loadSessionDetails })
+    const close = vi.fn(async () => undefined)
+    acp.openStream.mockResolvedValueOnce({ streamId: 'live-stream', close })
+    try {
+      await useAppStore.getState().openSession(selected)
+      const receive = acp.openStream.mock.calls[0]![1]
+      receive({ streamId: 'live-stream', frame: { method: 'session/update', params: { sessionId: 'live', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'hi' } } } } })
+      receive({ streamId: 'live-stream', frame: { method: 'session/update', params: { sessionId: 'live', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first half' } } } } })
+      await useAppStore.getState().resumeConnection()
+      await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledTimes(2))
+      expect(close).not.toHaveBeenCalled()
+      expect(acp.openStream).toHaveBeenCalledTimes(1)
+      expect(useAppStore.getState().messages[selected.sessionId]?.some(item => item.kind === 'message' && item.text.includes('first half'))).toBe(true)
+      // A frame that arrives while the read is in flight retires the read: running stays true.
+      let finish!: (value: { events: HistoryEntry[], running: boolean }) => void
+      loadSessionDetails.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      await useAppStore.getState().resumeConnection()
+      await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledTimes(3))
+      receive({ streamId: 'live-stream', frame: { method: 'session/update', params: { sessionId: 'live', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' second half' } } } } })
+      finish({ events: [], running: false })
+      await vi.waitFor(() => expect(useAppStore.getState().messages[selected.sessionId]?.some(item => item.kind === 'message' && item.text.includes('second half'))).toBe(true))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(useAppStore.getState().selectedSession?.running).toBe(true)
+      expect(close).not.toHaveBeenCalled()
+      expect(acp.openStream).toHaveBeenCalledTimes(1)
+      // Host authority settles the stale running state without closing the stream or
+      // dropping the streamed reply, and the transcript merge does not duplicate it.
+      let settle!: (value: { events: HistoryEntry[], running: boolean }) => void
+      loadSessionDetails.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+      await useAppStore.getState().resumeConnection()
+      await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledTimes(4))
+      settle({
+        events: [
+          entry('user/message', 0, { id: 'u-live', source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }),
+          entry('assistant/message', 1, { turn: 1, message: { id: 'a-live', content: [{ type: 'text', text: 'first half second half' }] } }),
+          entry('turn/end', 2, { turn: 1, reason: { kind: 'completed' } }),
+        ],
+        running: false,
+      })
+      await vi.waitFor(() => expect(useAppStore.getState().selectedSession?.running).toBe(false))
+      expect(close).not.toHaveBeenCalled()
+      expect(acp.openStream).toHaveBeenCalledTimes(1)
+      const settled = useAppStore.getState().messages[selected.sessionId] ?? []
+      expect(settled.flatMap(item => item.kind === 'message' && item.role === 'assistant' ? [item.text] : []))
+        .toEqual(['first half second half'])
+    } finally {
+      await useAppStore.getState().setOffline()
+      delete (acp as Record<string, unknown>).loadSessionDetails
+    }
+  })
+
   it('recovers Antigravity sessions on healthy resumeConnection and clears stale running via Host authority', async () => {
     await runScenarios([
       { name: 'reopens running AGY session on resumeConnection and clears stale running when Host reports running: false', hostRunning: false, expectedRunning: false },
@@ -2544,6 +2601,9 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     ].map(scenario => ({
       name: scenario.name,
       run: async () => {
+        // Drop the live stream left by the previous scenario while staying on the healthy carrier.
+        useAppStore.getState().setOffline()
+        useAppStore.setState({ connection: { phase: 'connected', stats: { mode: 'Relay', connected: true } } })
         transport.hasAntigravity.mockReturnValue(true)
         const agy: RemoteSession = {
           sessionId: 'antigravity:resume-1',

@@ -511,6 +511,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (!current()) return
           const existingMessages = get().messages[session.sessionId] ?? []
           const priorSelected = get().selectedSession
+          const terminalRevision = runtime.acpTerminalRevisions.get(session.sessionId) ?? 0
           const preOpenRunning = session.running || (priorSelected?.sessionId === session.sessionId && priorSelected.running)
           // Retire or drop dead in-flight streaming chunks from the prior connection
           const cleanExisting = existingMessages.filter(item => !(item.kind === 'message' && (item.streaming || item.id === 'cursor-assistant-live' || item.id === 'cursor-user-live')))
@@ -592,7 +593,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               : details.running === false
                 ? false
                 : details.running === true
-                  ? (liveTurnSettled || (preOpenRunning && currentSession?.running === false) ? false : true)
+                  ? (liveTurnSettled || (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) !== terminalRevision || (preOpenRunning && currentSession?.running === false) ? false : true)
                   : (currentSession?.running ?? session.running)
             const active = state.selectedSession?.sessionId === session.sessionId
               ? { ...state.selectedSession, ...enrichedSession, running: resolvedRunning }
