@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
+  ATTENTION_SIGNAL_CAPABILITY,
   createControlFrame,
   decodeControlFrame,
+  hostAttentionSignalPayloadSchema,
   MAX_CONTROL_FRAME_BYTES,
   MAX_RELAY_FRAME_BYTES,
   SERVER_SHUTDOWN_CLOSE_CODE,
   SERVER_SHUTDOWN_CLOSE_REASON,
+  type AttentionDigest,
   type ControlFrame,
   type HelloPayload,
   type ConnectRequestPayload,
@@ -25,6 +28,10 @@ export interface GatewayOptions extends GatewayTimingOptions {
   logger?: Logger
   /** Advertise `transport.turn` (and accept TURN credential requests). */
   turnEnabled?: boolean
+  /** Called when an online Host updates its accepted `AttentionDigest`. */
+  onAttentionSignal?: (hostId: string, hostName: string, digest: AttentionDigest) => void
+  /** Called when a Host disconnects, is replaced, or is invalidated. */
+  onAttentionClear?: (hostId: string) => void
 }
 
 /**
@@ -38,11 +45,16 @@ type ConnectionState = 'awaiting_hello' | 'authenticated' | 'closing' | 'closed'
 type Peer = { ws: WebSocket; id: string; role: 'host' | 'client'; capabilities: string[]; version: string; lastPong: number; pendingNonces: string[]; evictedTombstoneUntil?: number }
 type Link = { id: string; host: string; client: string; stage: 'pending' | 'accepted' | 'handshake' | 'ready'; created: number; counters: Map<string, number>; preferredTransports: TransportName[]; iceCandidates: number }
 type DroppedLink = { host: string; client: string; expiresAt: number; droppedFrames: number }
+type HostAttentionState = { digest?: AttentionDigest; lastRevision: number; tokens: number; lastRefillAt: number }
 
 /** Keep tombstones long enough for late in-flight frames to drain without CONNECTION_NOT_FOUND storms. */
 const DROPPED_LINK_TTL_MS = 300_000
 const MAX_DROPPED_LINKS_PER_HOST = 64
 const MAX_DROPPED_LINKS = 16_384
+
+/** Per-host silent token-bucket throttle for `host.attention.signal` (never disconnects Host). */
+const ATTENTION_SIGNAL_BURST = 5
+const ATTENTION_SIGNAL_REFILL_PER_SEC = 1
 
 /** Protocol v1 default: at most 256 ICE candidates per logical connection. */
 export const MAX_ICE_CANDIDATES_PER_CONNECTION = 256
@@ -111,9 +123,12 @@ export class Gateway {
   readonly peers = new Map<string, Peer>()
   private links = new Map<string, Link>()
   private droppedLinks = new Map<string, DroppedLink>()
+  private attentionStates = new Map<string, HostAttentionState>()
   private wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_FRAME_BYTES, perMessageDeflate: false })
   private heartbeat: ReturnType<typeof setInterval>
   private closed = false
+  private readonly onAttentionSignal?: (hostId: string, hostName: string, digest: AttentionDigest) => void
+  private readonly onAttentionClear?: (hostId: string) => void
   readonly turnEnabled: boolean
   readonly helloTimeoutMs: number
   readonly heartbeatIntervalMs: number
@@ -134,6 +149,8 @@ export class Gateway {
     this.maxFramesPerSec = normalizeMaxFramesPerSec(options.maxFramesPerSec)
     this.logger = options.logger ?? new Logger('gateway', options.logLevel ?? 'info')
     this.turnEnabled = options.turnEnabled === true
+    this.onAttentionSignal = options.onAttentionSignal
+    this.onAttentionClear = options.onAttentionClear
     const publicUrl = new URL(origin)
     const portlessOrigin = publicUrl.port === '' ? undefined : `${publicUrl.protocol}//${publicUrl.hostname}`
 
@@ -238,7 +255,7 @@ export class Gateway {
   }
 
   private isDroppedLinkFrame(peer: Peer, frame: ControlFrame): boolean {
-    if (frame.type === 'ping' || frame.type === 'pong' || frame.type === 'connect.request') return false
+    if (frame.type === 'ping' || frame.type === 'pong' || frame.type === 'connect.request' || frame.type === 'host.attention.signal') return false
     const p = frame.payload as Record<string, unknown>
     const id = p.connectionId
     if (typeof id !== 'string' || this.links.has(id)) return false
@@ -283,6 +300,8 @@ export class Gateway {
   disconnect(id: string, code: string): void {
     const peer = this.peers.get(id)
     this.peers.delete(id)
+    this.attentionStates.delete(id)
+    this.onAttentionClear?.(id)
     for (const link of this.links.values()) if (link.host === id || link.client === id) this.drop(link, code)
     if (!peer) return
     this.logger.info('ws_peer_disconnected', { peerId: id, code })
@@ -314,8 +333,16 @@ export class Gateway {
     }
     return this.peers.has(link.host) && this.peers.has(link.client)
   }
+  attentionDigest(deviceId: string): AttentionDigest | undefined {
+    if (!this.peers.has(deviceId)) return undefined
+    const digest = this.attentionStates.get(deviceId)?.digest
+    return digest ? { ...digest } : undefined
+  }
   private supportedCapabilities(): string[] {
-    return SUPPORTED_TRANSPORTS.filter(capability => capability !== 'transport.turn' || this.turnEnabled)
+    return [
+      ...SUPPORTED_TRANSPORTS.filter(capability => capability !== 'transport.turn' || this.turnEnabled),
+      ATTENTION_SIGNAL_CAPABILITY,
+    ]
   }
   private negotiatedCapabilities(offered: readonly string[]): string[] {
     return this.supportedCapabilities().filter(capability => offered.includes(capability))
@@ -572,6 +599,10 @@ export class Gateway {
       }))
       return
     }
+    if (frame.type === 'host.attention.signal') {
+      this.handleAttentionSignal(peer, frame.payload)
+      return
+    }
     const id = p.connectionId
     const link = typeof id === 'string' ? this.links.get(id) : undefined
     if (!link || (peer.id !== link.host && peer.id !== link.client)) throw new ApiError('CONNECTION_NOT_FOUND')
@@ -609,6 +640,54 @@ export class Gateway {
       link.counters.set(peer.id, counter)
     } else throw new ApiError('INVALID_MESSAGE')
     this.send(other, frame)
+  }
+  /**
+   * Handle zero-plaintext `host.attention.signal` from an authenticated Host
+   * that negotiated `attention.signal.v1`. Monotonic revisions always refresh
+   * the cached `AttentionDigest` (so `/api/v1/devices` and `/presence` never
+   * serve stale counts), while excess non-priority updates have their
+   * downstream notification fan-out (`onAttentionSignal` / webhook) silently
+   * throttled by a per-host token bucket instead of throwing `RATE_LIMITED`
+   * (which would tear down the entire Host Control WebSocket).
+   */
+  private handleAttentionSignal(peer: Peer, rawPayload: unknown): void {
+    if (peer.role !== 'host') throw new ApiError('MEMBERSHIP_REQUIRED')
+    if (!peer.capabilities.includes(ATTENTION_SIGNAL_CAPABILITY)) throw new ApiError('CAPABILITY_NOT_SUPPORTED')
+    const { digest } = hostAttentionSignalPayloadSchema.parse(rawPayload)
+    const now = Date.now()
+    let state = this.attentionStates.get(peer.id)
+    if (state === undefined) {
+      state = {
+        lastRevision: -1,
+        tokens: ATTENTION_SIGNAL_BURST,
+        lastRefillAt: now,
+      }
+      this.attentionStates.set(peer.id, state)
+    }
+    if (digest.revision <= state.lastRevision) return
+
+    state.lastRevision = digest.revision
+    state.digest = digest
+
+    const elapsedMs = Math.max(0, now - state.lastRefillAt)
+    state.tokens = Math.min(
+      ATTENTION_SIGNAL_BURST,
+      state.tokens + (elapsedMs / 1000) * ATTENTION_SIGNAL_REFILL_PER_SEC,
+    )
+    state.lastRefillAt = now
+
+    const isPriority = digest.urgency === 'critical' || digest.urgentKind === 'clear'
+    if (state.tokens < 1 && !isPriority) {
+      this.logger.debug('ws_attention_signal_throttled', {
+        peerId: safeText(peer.id),
+        revision: digest.revision,
+      })
+      return
+    }
+
+    state.tokens = Math.max(0, state.tokens - 1)
+    const hostName = this.store.get(peer.id).descriptor.name
+    this.onAttentionSignal?.(peer.id, hostName, digest)
   }
   /**
    * Forward WebRTC signaling only while the logical connection is being
@@ -665,6 +744,8 @@ export class Gateway {
     clearInterval(this.heartbeat)
     this.logger.info('ws_gateway_closing', { clientCount: this.wss.clients.size })
     // A planned shutdown must not report each closing peer as CONNECTION_FAILED.
+    for (const id of this.attentionStates.keys()) this.onAttentionClear?.(id)
+    this.attentionStates.clear()
     this.peers.clear()
     this.links.clear()
     this.droppedLinks.clear()

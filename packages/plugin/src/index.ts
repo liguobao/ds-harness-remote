@@ -307,9 +307,12 @@ async function activate(
   }, 'ds-harness-remote fallback owner peer')
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer)
   const localTypertGateway = hostGateway.local()
-  localTypertGateway.createPeer = () => {
-    const peer = createOwnerPeer()
-    if (peer === undefined) return localTypertGateway
+  localTypertGateway.createPeer = (options) => {
+    const peer = createOwnerPeer(options)
+    if (peer === undefined) {
+      if (options?.interactions === 'none') return undefined
+      return localTypertGateway
+    }
     return {
       ...hostGateway.local(peer),
       dispose: async () => {
@@ -701,6 +704,7 @@ export type { WebSocketFactory } from './server-connection.js'
 export { ServerCredentialStore, ServerCredentialsInvalidError } from './server-credentials.js'
 export type { ServerCredentials } from './server-credentials.js'
 export { HOST_CAPABILITIES, RpcError, RpcRouter } from './rpc-router.js'
+export { HostAttentionTracker } from './attention-tracker.js'
 export { HostPluginRuntime } from './service.js'
 export { ClientModeError, ClientModeRuntime } from './client-runtime.js'
 export { PluginControlRuntime } from './control-runtime.js'

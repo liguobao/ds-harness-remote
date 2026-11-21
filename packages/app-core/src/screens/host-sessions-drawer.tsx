@@ -48,6 +48,9 @@ import {
   X,
 } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { compareAttentionItems, type AttentionStatus } from '@dsh-remote/protocol'
+import { AttentionInboxPill, attentionStatusVisual } from './attention-inbox-sheet'
+import { useAttentionStore } from '../state/attention-store'
 import { useAppStore } from '../state/store'
 import { selectCustomAcpBackends } from '../state/store-state'
 import { dispatchSessionCatalogCommand } from '../state/session-catalog-commands'
@@ -192,6 +195,7 @@ export function HostSessionsDrawer({
   onOpenHostSwitcher,
   onOpenSettings,
   onOpenAbout,
+  onOpenAttentionInbox,
   botMode,
   onBotModeChange,
   onSelectBot,
@@ -212,6 +216,7 @@ export function HostSessionsDrawer({
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
+  onOpenAttentionInbox?: () => void
   botMode?: boolean
   onBotModeChange?: (botMode: boolean) => void
   onSelectBot?: (botId: string) => void
@@ -229,6 +234,7 @@ export function HostSessionsDrawer({
   const deviceName = useAppStore(state => state.selectedDevice?.name)
   const platform = useAppStore(state => state.selectedDevice?.platform)
   const connectionPhase = useAppStore(state => state.connection.phase)
+  const hasTrustedHost = useAppStore(state => state.devices.some(d => d.trusted))
   const sessions = useAppStore(state => state.sessions)
   const recentIds = useAppStore(state => state.currentWorkSessionIds)
   const codexAvailable = useAppStore(state => state.codexAvailable)
@@ -246,6 +252,17 @@ export function HostSessionsDrawer({
     state.hermesAvailable && 'hermes', ...selectCustomAcpBackends(state),
   ].filter(Boolean).join(','))
   const lifecycles = useAppStore(state => state.sessionLifecycles)
+  const attentionItems = useAttentionStore(state => state.items)
+  const attentionStatusBySession = useMemo(() => {
+    const map = new Map<string, AttentionStatus>()
+    const sorted = [...attentionItems].sort(compareAttentionItems)
+    for (const entry of sorted) {
+      if (!map.has(entry.sessionId)) {
+        map.set(entry.sessionId, entry.status)
+      }
+    }
+    return map
+  }, [attentionItems])
   const selected = useAppStore(state => state.selectedSession)
   const archivedIds = useAppStore(state => state.archivedSessionIds)
   const pinnedSessionIds = useAppStore(state => state.pinnedSessionIds)
@@ -1530,15 +1547,25 @@ export function HostSessionsDrawer({
           const isFirstInList = groupBy === 'list' && index === 0
           const isLastInCard = index === section.data.length - 1 && !hasFooter
           const isRunning = browseStatus(item, lifecycles[item.sessionId]) === 'running'
+          const attentionStatus: AttentionStatus | undefined = attentionStatusBySession.get(item.sessionId)
+            ?? (isRunning ? 'running' : undefined)
+          const statusVisual = attentionStatus === undefined
+            ? undefined
+            : attentionStatusVisual(attentionStatus, colors, scheme)
+          const statusBadge = statusVisual === undefined
+            ? undefined
+            : { Icon: statusVisual.Icon, color: statusVisual.fg, label: statusVisual.label }
           const isHarness = (item.backend ?? 'harness') === 'harness'
           const canPin = isHarness || isAcpManagedBackend(item.backend ?? 'harness')
           const isPinned = canPin && pinnedSessionIds.includes(item.sessionId) && !archivedIds.includes(item.sessionId)
           const isArchived = isHarness && archivedIds.includes(item.sessionId)
           const timeStr = formatRelativeTime(item.updatedAt)
           const displayTitle = resolveSessionDisplayTitle(item) ?? strings.sessions.untitled
-          const accessibilityLabel = isPinned
-            ? `${displayTitle}, ${strings.sessions.pinned}`
-            : displayTitle
+          const accessibilityLabel = [
+            displayTitle,
+            statusBadge?.label,
+            isPinned ? strings.sessions.pinned : undefined,
+          ].filter(Boolean).join(', ')
           const depth = section.depth ?? 0
           const accountKey = section.workspaceId ? `workspace:${backend}:${section.workspaceId}` : section.id
           const isDragging = dragState?.sessionId === item.sessionId && dragState.sectionId === section.id
@@ -1649,8 +1676,13 @@ export function HostSessionsDrawer({
                 dropBelow && styles.dropTargetBelow,
               ]}
             >
-              <View style={styles.statusIndicatorSlot}>
-                {isRunning && <View style={styles.runningDot} />}
+              <View
+                style={styles.statusIndicatorSlot}
+                accessibilityLabel={statusBadge?.label}
+              >
+                {statusBadge !== undefined && (
+                  <statusBadge.Icon size={13} color={statusBadge.color} strokeWidth={2.2} />
+                )}
               </View>
               <Text
                 style={[
@@ -1688,22 +1720,34 @@ export function HostSessionsDrawer({
         </>
       )}
 
-      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧轻量设置按钮 */}
+      {/* 底部常驻栏：左侧当前远程主机状态与切换入口，右侧收件箱入口与设置按钮 */}
       <View style={styles.hostFooterBar}>
         <View style={styles.hostFooterLeft}>{hostFooterDeviceInfo}</View>
-        {onOpenSettings !== undefined && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={strings.settings.title}
-            onPress={() => {
-              Keyboard.dismiss()
-              onOpenSettings()
-            }}
-            hitSlop={8}
-            style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
-          >
-            <Settings size={17} color={colors.ink} strokeWidth={1.9} />
-          </Pressable>
+        {(((connected || hasTrustedHost) && onOpenAttentionInbox !== undefined) || onOpenSettings !== undefined) && (
+          <View style={styles.hostFooterRight}>
+            {(connected || hasTrustedHost) && onOpenAttentionInbox !== undefined && (
+              <AttentionInboxPill
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenAttentionInbox()
+                }}
+              />
+            )}
+            {onOpenSettings !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={strings.settings.title}
+                onPress={() => {
+                  Keyboard.dismiss()
+                  onOpenSettings()
+                }}
+                hitSlop={8}
+                style={({ pressed }) => [styles.footerSettingsBtn, pressed && styles.pressedBg]}
+              >
+                <Settings size={17} color={colors.ink} strokeWidth={1.9} />
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
       </View>
@@ -2397,6 +2441,7 @@ const createStyles = (colors: ThemeColors) =>
     hostFooterStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
     hostFooterDot: { width: 6, height: 6, borderRadius: 3 },
     hostFooterStatusText: { ...type.caption, fontSize: 12, color: colors.muted },
+    hostFooterRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
     footerSettingsBtn: { width: 32, height: 32, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     sectionList: { flex: 1 },
 
@@ -2486,8 +2531,7 @@ const createStyles = (colors: ThemeColors) =>
       borderBottomWidth: 2,
       borderBottomColor: colors.primary,
     },
-    statusIndicatorSlot: { width: 14, alignItems: 'flex-start', justifyContent: 'center' },
-    runningDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.success },
+    statusIndicatorSlot: { width: 18, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
     sessionText: { ...type.body, fontSize: 15, color: colors.ink, flex: 1, marginRight: spacing.xs },
     sessionTextSelected: { fontWeight: '600', color: colors.primary },
     timeText: { ...type.caption, color: colors.subtle },

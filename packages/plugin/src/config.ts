@@ -4,6 +4,13 @@ import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 
 export const DEFAULT_REMOTE_SERVER_URL = 'https://dsh.r2049.cn'
+export const DEFAULT_DETACHED_APPROVAL_GRACE_SEC = 300
+export const MAX_DETACHED_APPROVAL_GRACE_SEC = 600
+
+export function clampDetachedApprovalGraceSec(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_DETACHED_APPROVAL_GRACE_SEC
+  return Math.min(MAX_DETACHED_APPROVAL_GRACE_SEC, Math.max(0, Math.floor(value)))
+}
 
 export interface Config {
   enabled?: boolean
@@ -19,6 +26,11 @@ export interface Config {
   hostControl?: { enabled?: boolean }
   loopback?: { ports?: number[] }
   forceRelay?: boolean
+  /**
+   * Seconds to hold pending CodeX/ACP approvals after the initiating client disconnects
+   * before automatically declining them. 0 disables detached approval hold; clamped to 0..600.
+   */
+  detachedApprovalGraceSec?: number
   /**
    * When a known peer device presents a NEW identity key after re-authorizing with the
    * same account membership (e.g. the peer reinstalled the Harness), rotate the pinned
@@ -75,6 +87,7 @@ export interface ResolvedConfig {
   httpServerAllowlist: string[]
   deviceName: string
   forceRelay: boolean
+  detachedApprovalGraceSec?: number
   rotatePinnedPeerKey: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   reconnect: {
@@ -119,6 +132,7 @@ export const entryConfigSchema = s.object({
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
   forceRelay: s.boolean(),
+  detachedApprovalGraceSec: s.number(),
   rotatePinnedPeerKey: s.boolean(),
   logLevel: s.union(['debug', 'info', 'warn', 'error'] as const),
   reconnect: s.union([
@@ -176,6 +190,7 @@ const configSchema = z.object({
   hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   loopback: z.object({ ports: z.array(z.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
   forceRelay: z.boolean().optional(),
+  detachedApprovalGraceSec: z.number().finite().optional(),
   rotatePinnedPeerKey: z.boolean().optional(),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   reconnect: reconnectSchema.optional(),
@@ -224,6 +239,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     sidebar: { entry: parsed.sidebar?.entry === 'compact' ? 'compact' : 'standard' },
     loopback: { ports: [...new Set(parsed.loopback?.ports ?? [])] },
     forceRelay: parsed.forceRelay ?? false,
+    detachedApprovalGraceSec: clampDetachedApprovalGraceSec(parsed.detachedApprovalGraceSec),
     rotatePinnedPeerKey: parsed.rotatePinnedPeerKey ?? false,
     logLevel: parsed.logLevel ?? 'info',
     reconnect: {

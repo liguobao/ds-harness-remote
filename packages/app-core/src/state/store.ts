@@ -29,6 +29,7 @@ export const requireSessionTools = (sessionId?: string) => runtime.connection.re
 export const requireBotClient = () => runtime.connection.requireBotClient()
 export const requireConnectionRpc = () => runtime.connection.createRpcCaller()
 export const getConnectionGeneration = () => runtime.connectionGeneration
+export const supportsPushWake = () => runtime.connection.supportsPushWake?.() === true
 
 export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
 

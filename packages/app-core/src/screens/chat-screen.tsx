@@ -30,6 +30,7 @@ import type { CustomPrompt } from '../services/storage'
 import { BUILT_IN_PROMPTS } from '../services/storage'
 import type { ChatSection } from '../state/message-helpers'
 import { isKnownBotSessionId, useBotTeamStore } from '../state/bot-store'
+import { useAttentionStore } from '../state/attention-store'
 import { chatImageConnectionGeneration, requireConnectionRpc, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
 import { type UiArtifact } from '../state/ui-artifacts'
 import type {
@@ -135,6 +136,7 @@ export function ChatScreen({
   onOpenHostSwitcher,
   onOpenSettings,
   onOpenAbout,
+  onOpenAttentionInbox,
   botMode = false,
   externalOpenRevision,
   botConversationId,
@@ -151,6 +153,7 @@ export function ChatScreen({
   onOpenHostSwitcher?: () => void
   onOpenSettings?: () => void
   onOpenAbout?: () => void
+  onOpenAttentionInbox?: () => void
   botMode?: boolean
   externalOpenRevision?: number
   botConversationId?: string
@@ -657,6 +660,7 @@ export function ChatScreen({
         onOpenHostSwitcher()
       } : undefined}
       onOpenAbout={onOpenAbout}
+      onOpenAttentionInbox={openAttentionInbox}
       onOpenSettings={() => {
         Keyboard.dismiss()
         onOpenSettings?.()
@@ -723,6 +727,12 @@ export function ChatScreen({
       </MarkdownLinkProvider>
     </ChatImageProvider>
   )
+
+  const openAttentionInbox = () => {
+    Keyboard.dismiss()
+    if (onOpenAttentionInbox) onOpenAttentionInbox()
+    else useAttentionStore.getState().setInboxOpen(true)
+  }
 
   if (botMode) {
     return wrapChatShell(

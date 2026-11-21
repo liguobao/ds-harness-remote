@@ -6,10 +6,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.Promise
+import java.util.concurrent.atomic.AtomicBoolean
 
 class RemoteForegroundServiceModule(
   private val context: ReactApplicationContext,
@@ -24,6 +26,30 @@ class RemoteForegroundServiceModule(
   @ReactMethod
   fun notifyTask(hostId: String, sessionId: String, title: String, body: String) {
     RemoteForegroundService.notifyTask(context, hostId, sessionId, title, body)
+  }
+
+  @ReactMethod
+  fun notifyAttention(
+    hostId: String,
+    deepLinkUrl: String,
+    tag: String,
+    title: String,
+    body: String,
+  ) {
+    try {
+      RemoteForegroundService.notifyAttention(context, hostId, deepLinkUrl, tag, title, body)
+    } catch (e: Throwable) {
+      Log.w("RemoteForegroundService", "notifyAttention failed: ${e.javaClass.simpleName}")
+    }
+  }
+
+  @ReactMethod
+  fun clearAttentionAlerts(hostId: String) {
+    try {
+      RemoteForegroundService.clearAttentionAlerts(context, hostId)
+    } catch (e: Throwable) {
+      Log.w("RemoteForegroundService", "clearAttentionAlerts failed: ${e.javaClass.simpleName}")
+    }
   }
 
   @ReactMethod
@@ -68,6 +94,56 @@ class RemoteForegroundServiceModule(
       } catch (e: Exception) {
         promise.reject("UPDATE_LIVE_TASK_FAILED", e.message, e)
       }
+    }
+  }
+
+  @ReactMethod
+  fun updateLiveTaskV2(
+    hostId: String,
+    deepLinkUrl: String,
+    badge: String,
+    title: String,
+    statusText: String,
+    isWaitingInput: Boolean,
+    updatedAtMs: Double,
+    summary: String,
+    extraCount: Int,
+    promise: Promise,
+  ) {
+    val settled = AtomicBoolean(false)
+    fun resolveOnce() {
+      if (settled.compareAndSet(false, true)) promise.resolve(null)
+    }
+    fun rejectOnce(code: String, error: Throwable) {
+      if (settled.compareAndSet(false, true)) promise.reject(code, error.message ?: code, error)
+    }
+    try {
+      context.runOnUiQueueThread {
+        try {
+          val boundedTitle = title.take(150)
+          val boundedBadge = badge.take(10)
+          val boundedStatus = statusText.take(50)
+          val safeTime = if (updatedAtMs.isFinite() && updatedAtMs > 0) updatedAtMs.toLong() else 0L
+          val boundedSummary = summary.take(400)
+          val safeExtraCount = extraCount.coerceAtLeast(0)
+          RemoteForegroundService.updateLiveTaskV2(
+            hostId,
+            deepLinkUrl,
+            boundedBadge,
+            boundedTitle,
+            boundedStatus,
+            isWaitingInput,
+            safeTime,
+            boundedSummary,
+            safeExtraCount,
+          )
+          resolveOnce()
+        } catch (e: Throwable) {
+          rejectOnce("UPDATE_LIVE_TASK_V2_FAILED", e)
+        }
+      }
+    } catch (e: Throwable) {
+      rejectOnce("UPDATE_LIVE_TASK_V2_FAILED", e)
     }
   }
 

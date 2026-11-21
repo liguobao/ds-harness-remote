@@ -1,10 +1,12 @@
 import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
 import { AppState } from 'react-native'
+import { useAttentionStore } from '../state/attention-store'
+import { useBotTeamStore } from '../state/bot-store'
 import { useAppStore } from '../state/store'
 import type { AgentBackend } from '../types'
 import { browseKey, browseScope, useBrowseMemory, updateBrowseEntry, saveBrowseCatalog, browsePreference, flushBrowseMemory } from './browse-memory'
-import { foregroundService } from './foreground-service'
+import { createLiveSurfaceController } from './live-surface'
 
 function isItemWaitingInput(session: { backend?: AgentBackend }, item: any): boolean {
   if (!item || item.outcome !== undefined) return false
@@ -29,6 +31,7 @@ export function backendBadge(backend?: string): string {
     case 'pi': return 'P'
     case 'cursor': return 'U'
     case 'antigravity': return 'A'
+    case 'ds-bot': return 'B'
     default: return 'D'
   }
 }
@@ -140,100 +143,139 @@ export function pickActiveLiveTask(state: LiveTaskEvaluationState): LiveTaskSumm
   }
 }
 
-/** Observe display state only; this never submits, resumes or interrupts a turn. */
+/**
+ * Observes display state for browse memory and drives the single-owner
+ * `LiveSurfaceController` from `useAttentionStore` (with automatic legacy Host
+ * fallback projection). Never submits, resumes, or interrupts a turn.
+ */
 export function startBrowseTracking(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined
   let previousCatalog: unknown, previousSessions: unknown, previousMessages: unknown, previousSelected: string | undefined
   let previousUpdated = 0
-  let lastLiveTaskKey: string | undefined = undefined
-  let liveTaskSyncTail: Promise<void> = Promise.resolve()
   let disposed = false
+  let observing = false
   const running = new Map<string, boolean>()
-  const questions = new Set<string>()
+  const completedSessionIds = new Set<string>()
+  const liveSurface = createLiveSurfaceController()
 
   const observe = () => {
-    const state = useAppStore.getState(), memory = useBrowseMemory.getState()
+    if (observing) return
+    observing = true
+    try {
+      observeInner()
+    } finally {
+      observing = false
+    }
+  }
+
+  const observeInner = () => {
+    const state = useAppStore.getState()
+    const memory = useBrowseMemory.getState()
     const device = state.selectedDevice
-    if (device === undefined || state.connection.phase !== 'connected' || !memory.ready) {
-      if (lastLiveTaskKey !== undefined) {
-        lastLiveTaskKey = undefined
-        void foregroundService.clearLiveTask()
-      }
+    const connected = device !== undefined && state.connection.phase === 'connected'
+
+    if (!connected || !memory.ready) {
+      completedSessionIds.clear()
+      running.clear()
+      void liveSurface.sync({
+        hostId: device?.deviceId,
+        connected: false,
+        appState: AppState.currentState,
+        notificationsEnabled: memory.notifications,
+        items: [],
+        digest: null,
+      })
       return
     }
+
     const scope = browseScope(state)
     if (previousCatalog !== state.workspaces || previousSessions !== state.sessions) {
-      previousCatalog = state.workspaces; previousSessions = state.sessions
+      previousCatalog = state.workspaces
+      previousSessions = state.sessions
       saveBrowseCatalog(scope, state.workspaces, state.sessions)
     }
+
     const selected = state.selectedSession
     const selectedKey = selected === undefined ? undefined : browseKey(scope, selected.sessionId)
     const messages = selected === undefined ? undefined : state.messages[selected.sessionId]
-    if (selected !== undefined && !state.busyAction?.startsWith('session:') && (previousSelected !== selectedKey || previousMessages !== messages || previousUpdated !== selected.updatedAt)) {
-      previousSelected = selectedKey; previousMessages = messages; previousUpdated = selected.updatedAt
+    if (
+      selected !== undefined
+      && !state.busyAction?.startsWith('session:')
+      && (previousSelected !== selectedKey || previousMessages !== messages || previousUpdated !== selected.updatedAt)
+    ) {
+      previousSelected = selectedKey
+      previousMessages = messages
+      previousUpdated = selected.updatedAt
       const entry = memory.entries[browseKey(scope, selected.sessionId)]
-      updateBrowseEntry(scope, selected.sessionId, {session: selected,
-        visitedAt: Date.now(), ...(entry?.position?.atBottom !== false && AppState.currentState === 'active' ? {seenAt: selected.updatedAt} : {}),
-        ...(messages && messages.length > 0 ? { messages } : {})})
-      browsePreference({last: {scope, deviceId: device.deviceId, sessionId: selected.sessionId}})
+      updateBrowseEntry(scope, selected.sessionId, {
+        session: selected,
+        visitedAt: Date.now(),
+        ...(entry?.position?.atBottom !== false && AppState.currentState === 'active' ? { seenAt: selected.updatedAt } : {}),
+        ...(messages && messages.length > 0 ? { messages } : {}),
+      })
+      browsePreference({ last: { scope, deviceId: device.deviceId, sessionId: selected.sessionId } })
     }
-    for (const session of state.sessions) {
-      const id = browseKey(scope, session.sessionId), entry = memory.entries[id]
+
+    // Track confirmed running -> idle transitions for legacy Hosts without attention.inbox.v1.
+    const watchedSessions = new Set<string>()
+    for (const session of state.sessions ?? []) {
+      const id = browseKey(scope, session.sessionId)
+      const entry = memory.entries[id]
       const known = session.backend !== 'codex' || state.sessionLifecycles?.[session.sessionId] !== undefined
-      const active = state.sessionLifecycles?.[session.sessionId]?.running ?? session.running
-      const watched = entry?.starred || entry?.visitedAt !== undefined || selected?.sessionId === session.sessionId
-      const notify = memory.notifications && watched && (AppState.currentState !== 'active' || selected?.sessionId !== session.sessionId)
+      const active = Boolean(state.sessionLifecycles?.[session.sessionId]?.running ?? session.running)
+      const watched = Boolean(entry?.starred || entry?.visitedAt !== undefined || selected?.sessionId === session.sessionId)
+      if (watched) watchedSessions.add(session.sessionId)
       if (known) {
-        if (running.get(id) === true && !active && notify) foregroundService.notifyTask(device.deviceId, session.sessionId, session.title ?? 'Remote 对话', strings.comfort.taskEnded)
-        running.set(id, active)
-      }
-      for (const item of state.messages[session.sessionId] ?? []) {
-        const needsInput = isItemWaitingInput(session, item)
-        const questionKey = id + ':' + item.id
-        if (needsInput && !questions.has(questionKey)) {
-          questions.add(questionKey)
-          if (notify) foregroundService.notifyTask(device.deviceId, session.sessionId, session.title ?? 'Remote 对话', strings.comfort.taskInput)
+        if (running.get(id) === true && !active) {
+          completedSessionIds.add(session.sessionId)
+        } else if (active) {
+          completedSessionIds.delete(session.sessionId)
         }
+        running.set(id, active)
       }
     }
 
     if (disposed) return
 
-    // Sync active live task lock screen notification
-    const liveTask = pickActiveLiveTask(state)
-    const taskKey = liveTask === undefined ? '' : JSON.stringify({
-      h: liveTask.hostId,
-      s: liveTask.sessionId,
-      b: liveTask.badge,
-      t: liveTask.title,
-      st: liveTask.statusText,
-      w: liveTask.isWaitingInput,
-      u: liveTask.updatedAtMs,
-      m: liveTask.summary,
-    })
-
-    if (taskKey !== lastLiveTaskKey) {
-      const targetKey = taskKey
-      liveTaskSyncTail = liveTaskSyncTail.then(async () => {
-        if (targetKey !== '') {
-          await foregroundService.updateLiveTask(
-            liveTask!.hostId,
-            liveTask!.sessionId,
-            liveTask!.badge,
-            liveTask!.title,
-            liveTask!.statusText,
-            liveTask!.isWaitingInput,
-            liveTask!.updatedAtMs,
-            liveTask!.summary,
-          )
-        } else {
-          await foregroundService.clearLiveTask()
-        }
-        lastLiveTaskKey = targetKey
-      }).catch(() => {
-        // Allow retry on next observation if native bridge failed
+    const attentionStore = useAttentionStore.getState()
+    if (!attentionStore.supported) {
+      attentionStore.syncLegacyFallback({
+        sessions: state.sessions,
+        sessionLifecycles: state.sessionLifecycles,
+        messages: state.messages,
+        workspaces: state.workspaces,
+        botState: useBotTeamStore.getState().state,
+        completedSessionIds,
       })
     }
+
+    const latestAttention = useAttentionStore.getState()
+    const activeMode = memory.hostModes?.[scope] === 'bot' ? 'bot' : 'agent'
+    const activeSessionId = activeMode === 'bot'
+      ? useBotTeamStore.getState().session?.sessionId ?? selected?.sessionId
+      : selected?.sessionId
+
+    void liveSurface.sync({
+      hostId: device.deviceId,
+      connected: true,
+      appState: AppState.currentState,
+      notificationsEnabled: memory.notifications,
+      activeSessionId,
+      activeMode,
+      items: latestAttention.items,
+      digest: latestAttention.digest,
+      shouldNotifyItem: latestAttention.supported
+        ? undefined
+        : item => item.mode === 'bot' || watchedSessions.has(item.sessionId),
+    })
+  }
+
+  const scheduleObserve = () => {
+    if (timer !== undefined) return
+    timer = setTimeout(() => {
+      timer = undefined
+      observe()
+    }, 800)
   }
 
   const flushPendingObserve = () => {
@@ -242,26 +284,34 @@ export function startBrowseTracking(): () => void {
     timer = undefined
     observe()
   }
-  const unsubscribe = useAppStore.subscribe(() => {
-    if (timer !== undefined) return
-    timer = setTimeout(() => {timer = undefined; observe()}, 800)
+
+  const unsubscribeApp = useAppStore.subscribe(scheduleObserve)
+  const unsubscribeBot = useBotTeamStore.subscribe(scheduleObserve)
+  const unsubscribeAttention = useAttentionStore.subscribe((next, prev) => {
+    if (next.items !== prev.items || next.digest !== prev.digest || next.supported !== prev.supported) {
+      if (!disposed) observe()
+    }
   })
+
   const background = AppState.addEventListener('change', phase => {
     if (phase !== 'active') {
       flushPendingObserve()
       void flushBrowseMemory()
     }
   })
+
   observe()
+
   return () => {
     disposed = true
-    unsubscribe()
+    unsubscribeApp()
+    unsubscribeBot()
+    unsubscribeAttention()
     background.remove()
     flushPendingObserve()
     void flushBrowseMemory()
-    lastLiveTaskKey = undefined
-    liveTaskSyncTail = liveTaskSyncTail
-      .then(() => foregroundService.clearLiveTask())
-      .catch(() => undefined)
+    completedSessionIds.clear()
+    running.clear()
+    void liveSurface.dispose()
   }
 }

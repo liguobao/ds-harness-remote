@@ -10,23 +10,9 @@ import {
   type RpcResponsePayload,
 } from '@dsh-remote/protocol'
 import type { RemoteTransport } from '@dsh-remote/webrtc'
+import { RemoteClientError, type RemoteClientErrorCode } from './errors.js'
 
-export type RemoteClientErrorCode =
-  | 'RPC_TIMEOUT'
-  | 'RPC_ABORTED'
-  | 'TRANSPORT_CLOSED'
-  | 'CLIENT_CLOSED'
-
-export class RemoteClientError extends Error {
-  constructor(
-    readonly code: RemoteClientErrorCode,
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(message, options)
-    this.name = 'RemoteClientError'
-  }
-}
+export { RemoteClientError, type RemoteClientErrorCode }
 
 interface PendingCall {
   method: string
@@ -240,3 +226,5 @@ export * from './harness-alpha-client.js'
 export * from './codex-client.js'
 export * from './acp-client.js'
 export * from './transport-upgrader.js'
+export * from './attention-client.js'
+export * from './push-target-client.js'

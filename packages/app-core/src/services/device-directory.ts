@@ -72,14 +72,19 @@ export async function reconcileTrustedDevices(
         continue
       }
       const presence = await api.getPresence(membership.deviceId).catch(() => undefined)
+      const online = presence?.online ?? membership.online === true
+      const attentionDigest = online
+        ? (presence?.attentionDigest ?? descriptor?.attentionDigest ?? membership.attentionDigest)
+        : undefined
       devices.push({
         ...local,
         ...membership,
         identityKey: local.identityKey,
         fingerprint: local.fingerprint ?? formatFingerprint(identityFingerprint(local.identityKey)),
-        online: presence?.online ?? membership.online === true,
+        online,
         lastSeenAt: presence?.lastSeenAt ?? local.lastSeenAt ?? membership.lastSeenAt,
         trusted: true,
+        attentionDigest,
       })
       continue
     }
@@ -89,13 +94,18 @@ export async function reconcileTrustedDevices(
       continue
     }
     const presence = await api.getPresence(membership.deviceId).catch(() => undefined)
+    const online = presence?.online ?? membership.online === true
+    const attentionDigest = online
+      ? (presence?.attentionDigest ?? descriptor.attentionDigest ?? membership.attentionDigest)
+      : undefined
     devices.push({
       ...membership,
       identityKey: descriptor.identityKey,
       fingerprint: formatFingerprint(identityFingerprint(descriptor.identityKey)),
-      online: presence?.online ?? membership.online === true,
+      online,
       lastSeenAt: presence?.lastSeenAt ?? membership.lastSeenAt,
       trusted: false,
+      ...(attentionDigest !== undefined ? { attentionDigest } : {}),
     })
   }
   connectionLog('devices', {

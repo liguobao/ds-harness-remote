@@ -110,3 +110,35 @@ export function normalizeGatewayOptions(options?: GatewayTimingOptions | null): 
     forceTerminateGraceMs: normalizeForceTerminateGraceMs(source.forceTerminateGraceMs),
   }
 }
+
+const LOCAL_ATTENTION_WEBHOOK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/**
+ * Validate the optional `DSH_SERVER_ATTENTION_WEBHOOK_URL` at startup.
+ * Empty/unset disables the webhook. Configured URLs must use `https:`, or
+ * explicitly loopback `http://127.0.0.1`, `http://localhost`, or `http://[::1]`,
+ * and must never carry embedded username/password credentials. Error messages
+ * intentionally omit the offending value so query secrets cannot leak to logs.
+ */
+export function parseAttentionWebhookUrl(value: unknown): URL | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') {
+    throw new Error('Invalid DSH_SERVER_ATTENTION_WEBHOOK_URL: expected a URL string.')
+  }
+  const trimmed = value.trim()
+  if (trimmed === '') return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    throw new Error('Invalid DSH_SERVER_ATTENTION_WEBHOOK_URL: malformed URL.')
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new Error('Invalid DSH_SERVER_ATTENTION_WEBHOOK_URL: embedded credentials are not allowed.')
+  }
+  if (parsed.protocol === 'https:') return parsed
+  if (parsed.protocol === 'http:' && LOCAL_ATTENTION_WEBHOOK_HOSTS.has(parsed.hostname)) return parsed
+  throw new Error(
+    'Invalid DSH_SERVER_ATTENTION_WEBHOOK_URL: must use https: (or http://127.0.0.1, http://localhost, or http://[::1]).',
+  )
+}
