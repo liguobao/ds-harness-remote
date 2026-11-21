@@ -10,7 +10,7 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -36,7 +36,7 @@ import { easingCurve, resolveMotion } from '../ui/motion'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ActivityDockMode, DrawerLayoutMode, ThemePreference } from '../ui/theme'
+import type { ActivityDockMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
@@ -755,13 +755,6 @@ export function SettingsScreen({
     : activityDockMode === 'hidden'
       ? zhCN.settings.activityDockHidden
       : zhCN.settings.activityDockCompact
-  const drawerLayoutMode = useAppStore(state => state.drawerLayoutMode)
-  const setDrawerLayoutMode = useAppStore(state => state.setDrawerLayoutMode)
-  const [drawerLayoutSaving, setDrawerLayoutSaving] = useState(false)
-  const [drawerLayoutPickerOpen, setDrawerLayoutPickerOpen] = useState(false)
-  const currentDrawerLayoutLabel = drawerLayoutMode === 'classic'
-    ? zhCN.settings.drawerLayoutClassic
-    : zhCN.settings.drawerLayoutCompact
   const quickPromptActionMode = useAppStore(state => state.quickPromptActionMode)
   const setQuickPromptActionMode = useAppStore(state => state.setQuickPromptActionMode)
   const [quickPromptActionSaving, setQuickPromptActionSaving] = useState(false)
@@ -822,14 +815,6 @@ export function SettingsScreen({
     try { await setActivityDockMode(value) }
     catch { Alert.alert(zhCN.settings.activityDockModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setActivityDockSaving(false) }
-  }
-
-  const toggleDrawerLayoutMode = async (value: DrawerLayoutMode) => {
-    if (drawerLayoutSaving || value === drawerLayoutMode) return
-    setDrawerLayoutSaving(true)
-    try { await setDrawerLayoutMode(value) }
-    catch { Alert.alert(zhCN.settings.drawerLayoutModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
-    finally { setDrawerLayoutSaving(false) }
   }
 
   const toggleQuickPromptActionMode = async (value: QuickPromptActionMode) => {
@@ -964,13 +949,6 @@ export function SettingsScreen({
                 value={currentActivityDockLabel}
                 chevron
                 onPress={() => setActivityDockPickerOpen(true)}
-              />
-              <GroupRow
-                icon={PanelLeft}
-                label={zhCN.settings.drawerLayoutMode}
-                value={currentDrawerLayoutLabel}
-                chevron
-                onPress={() => setDrawerLayoutPickerOpen(true)}
               />
               <GroupRow
                 icon={Zap}
@@ -1270,40 +1248,6 @@ export function SettingsScreen({
                       onPress={() => {
                         setActivityDockPickerOpen(false)
                         void toggleActivityDockMode(option.value)
-                      }}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-      </SheetModal>
-      <SheetModal
-        visible={drawerLayoutPickerOpen}
-        onClose={() => setDrawerLayoutPickerOpen(false)}
-        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
-      >
-            <View style={styles.languageHeader}>
-              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.drawerLayoutMode}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setDrawerLayoutPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
-              <GroupCard>
-                {([
-                  { value: 'compact' as const, name: zhCN.settings.drawerLayoutCompact },
-                  { value: 'classic' as const, name: zhCN.settings.drawerLayoutClassic },
-                ]).map((option, index) => {
-                  const chosen = option.value === drawerLayoutMode
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => {
-                        setDrawerLayoutPickerOpen(false)
-                        void toggleDrawerLayoutMode(option.value)
                       }}
                     />
                   )

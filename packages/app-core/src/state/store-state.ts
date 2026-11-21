@@ -33,7 +33,7 @@ import type {
   WorkspaceShortcut,
   WorkspaceView,
 } from '../types'
-import type { ActivityDockMode, ChatAppearance, DrawerLayoutMode, ThemePreference } from '../ui/theme'
+import type { ActivityDockMode, ChatAppearance, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 type BootPhase = 'loading' | 'ready' | 'error'
@@ -117,7 +117,6 @@ export interface AppState {
   themePreference: ThemePreference
   chatAppearance: ChatAppearance
   activityDockMode: ActivityDockMode
-  drawerLayoutMode: DrawerLayoutMode
   quickPromptActionMode: QuickPromptActionMode
   busySendMode: BusySendMode
   defaultPermissionPreset: DefaultPermissionPreset
@@ -214,7 +213,6 @@ export interface AppState {
   setChatAppearance(appearance: Partial<ChatAppearance>): Promise<void>
   resetChatAppearance(): Promise<void>
   setActivityDockMode(mode: ActivityDockMode): Promise<void>
-  setDrawerLayoutMode(mode: DrawerLayoutMode): Promise<void>
   setQuickPromptActionMode(mode: QuickPromptActionMode): Promise<void>
   setBusySendMode(mode: BusySendMode): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>

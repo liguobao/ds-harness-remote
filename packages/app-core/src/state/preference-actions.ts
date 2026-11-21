@@ -5,7 +5,6 @@ import {
   saveBusySendMode,
   saveChatAppearance,
   saveDefaultPermissionPreset,
-  saveDrawerLayoutMode,
   saveQuickPromptActionMode,
   saveCompactHistory,
   saveLanguagePreference,
@@ -17,7 +16,7 @@ import type { AppState } from './store-state'
 import type { SessionAccess } from './session-runtime'
 
 export function createPreferenceActions({ set, get, runtime }: SessionAccess): Pick<AppState,
-  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setDrawerLayoutMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
+  'setCompactHistory' | 'setTransportPreference' | 'setLanguagePreference' | 'setThemePreference' | 'setChatAppearance' | 'resetChatAppearance' | 'setActivityDockMode' | 'setQuickPromptActionMode' | 'setBusySendMode' | 'setStatusBarVisible' | 'setDefaultPermissionPreset' | 'syncSystemLocales'> {
   return {
     async setCompactHistory(compactHistory) {
       await saveCompactHistory(compactHistory)
@@ -26,10 +25,6 @@ export function createPreferenceActions({ set, get, runtime }: SessionAccess): P
     async setActivityDockMode(activityDockMode) {
       await saveActivityDockMode(activityDockMode)
       set({ activityDockMode })
-    },
-    async setDrawerLayoutMode(drawerLayoutMode) {
-      await saveDrawerLayoutMode(drawerLayoutMode)
-      set({ drawerLayoutMode })
     },
     async setQuickPromptActionMode(quickPromptActionMode) {
       await saveQuickPromptActionMode(quickPromptActionMode)

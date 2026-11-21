@@ -4,14 +4,8 @@ export type ThemePreference = 'system' | ColorScheme
 
 export type ActivityDockMode = 'compact' | 'cards' | 'hidden'
 
-export type DrawerLayoutMode = 'compact' | 'classic'
-
 export function isActivityDockMode(value: unknown): value is ActivityDockMode {
   return value === 'compact' || value === 'cards' || value === 'hidden'
-}
-
-export function isDrawerLayoutMode(value: unknown): value is DrawerLayoutMode {
-  return value === 'compact' || value === 'classic'
 }
 
 export function isThemePreference(value: unknown): value is ThemePreference {
