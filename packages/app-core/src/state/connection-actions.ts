@@ -285,6 +285,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           && (runtime.activeCodexStream === undefined || get().codexReadySessionId !== selected.sessionId)
         ) {
           void get().openSession(selected)
+        } else if (
+          isAcpManagedBackend(selected?.backend)
+          && !get().busyAction?.startsWith('session:')
+          && (runtime.activeCursorStream === undefined || selected.running === true)
+        ) {
+          void get().openSession(selected)
         }
         if (get().transportPreference === 'auto') {
           const nextPreferred: readonly string[] = await resolveAutomaticPreferredTransports().catch(() => [])

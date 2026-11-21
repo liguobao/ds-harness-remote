@@ -1,7 +1,8 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm, utimes, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, utimes, symlink, truncate } from 'node:fs/promises'
+import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -108,6 +109,63 @@ describe('TranscriptLoader', () => {
               { name: 'view_file', callId: '2:view_file' },
               { name: 'tool', callId: '2:tool' },
             ])
+            const toolResults = events.filter((e) => e.event.type === 'tool/result')
+            expect(toolResults.map((e) => e.event.data)).toMatchObject([
+              { message: { source: { kind: 'tool', callId: '2:view_file' }, content: [{ type: 'tool-result', toolCallId: '2:view_file' }] } },
+              { message: { source: { kind: 'tool', callId: '2:tool' }, content: [{ type: 'tool-result', toolCallId: '2:tool' }] } },
+            ])
+          },
+        },
+        {
+          name: 'hydrates settled tool results, error status, and disambiguates duplicate tool names per step',
+          run: async () => {
+            await writeTranscript('tool-results', [
+              { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'Run tools' },
+              {
+                type: 'PLANNER_RESPONSE',
+                step_index: 2,
+                created_at: createdAt,
+                tool_calls: [
+                  { name: 'run_command', args: { cmd: 'ls' }, status: 'SUCCESS', result: 'ok.txt' },
+                  { name: 'run_command', args: { cmd: 'false' }, status: 'ERROR', result: { code: 1 } },
+                  { name: 'read_file', args: {}, status: 'EXECUTING' },
+                ],
+              },
+            ])
+            const events = await loadTranscriptEvents('tool-results', 'antigravity:tool-results', base)
+            const calls = events.filter((e) => e.event.type === 'tool/call')
+            const results = events.filter((e) => e.event.type === 'tool/result')
+            expect(calls.map((e) => (e.event.data as { callId: string }).callId)).toEqual([
+              '2:run_command',
+              '2:run_command:1',
+              '2:read_file',
+            ])
+            expect(results.map((e) => e.event.data)).toMatchObject([
+              {
+                message: {
+                  source: { kind: 'tool', callId: '2:run_command' },
+                  content: [{ type: 'tool-result', toolCallId: '2:run_command', content: [{ type: 'text', text: 'ok.txt' }] }],
+                },
+              },
+              {
+                message: {
+                  source: { kind: 'tool', callId: '2:run_command:1' },
+                  content: [{ type: 'tool-result', toolCallId: '2:run_command:1', content: [{ type: 'text', text: '{"code":1}' }], isError: true }],
+                },
+              },
+            ])
+          },
+        },
+        {
+          name: 'rejects oversized transcripts with ACP_HISTORY_TOO_LARGE instead of returning empty',
+          run: async () => {
+            const path = await writeTranscript('oversized-conversation', [
+              { type: 'USER_INPUT', step_index: 1, created_at: createdAt, content: 'big' },
+            ])
+            await truncate(path, MAX_AGENT_ACP_TRANSFER_BYTES + 1)
+            await expect(
+              loadTranscriptEvents('oversized-conversation', 'antigravity:oversized-conversation', base),
+            ).rejects.toMatchObject({ code: 'ACP_HISTORY_TOO_LARGE' })
           },
         },
       ],

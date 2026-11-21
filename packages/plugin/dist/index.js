@@ -66553,21 +66553,23 @@ var AgentAcpClient = class {
     return details2.events;
   }
   async loadSessionDetails(sessionId, backend, signal) {
+    const strictHistoryBackend = backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes" || backend === "antigravity";
     const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes")
+      if (strictHistoryBackend)
         throw error62;
       return { events: [] };
     });
-    if ((backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes") && (!isRecord2(result) || !Array.isArray(result.events))) {
+    if (strictHistoryBackend && (!isRecord2(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
     if (!isRecord2(result))
       return { events: [] };
     const events = Array.isArray(result.events) ? result.events : [];
     const permissionPreset2 = typeof result.permissionPreset === "string" ? result.permissionPreset : void 0;
+    const running = typeof result.running === "boolean" ? result.running : void 0;
     const modes = isRecord2(result.modes) && Array.isArray(result.modes.availableModes) ? {
       ...typeof result.modes.currentModeId === "string" ? { currentModeId: result.modes.currentModeId } : {},
       availableModes: result.modes.availableModes.flatMap((item) => isRecord2(item) && typeof item.id === "string" && typeof item.name === "string" ? [{ id: item.id, name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : [])
@@ -66581,7 +66583,8 @@ var AgentAcpClient = class {
       events,
       ...permissionPreset2 ? { permissionPreset: permissionPreset2 } : {},
       ...modes ? { modes } : {},
-      ...commands ? { commands } : {}
+      ...commands ? { commands } : {},
+      ...running !== void 0 ? { running } : {}
     };
   }
   async createSession(cwd2, mode2, backend, signal) {
@@ -98037,6 +98040,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         responded = true;
         this.assertLoaded(result, id7);
         this.live.set(id7, result);
+        this.historyMetadata.delete(id7);
         this.clearLoadSuppression(id7, gen);
         return result;
       });
@@ -98062,11 +98066,15 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         const newId = result?.sessionId;
         if (typeof newId !== "string" || this.shuttingDown) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
         this.live.set(newId, result);
+        this.historyMetadata.delete(newId);
         this.clearLoadSuppression(newId);
         return result;
       } finally {
         this.pendingNew--;
       }
+    }
+    if ((method === "dsh/selectModel" || method === "session/set_mode") && typeof id7 === "string") {
+      this.historyMetadata.delete(id7);
     }
     return super.call(method, params, timeoutMs);
   }
@@ -98127,6 +98135,12 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     if (id7 !== void 0 && id7 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
   }
+  isSessionLoaded(sessionId) {
+    return this.live.has(sessionId);
+  }
+  invalidateHistoryMetadata(sessionId) {
+    this.historyMetadata.delete(sessionId);
+  }
   lastHistoryMetadata(sessionId) {
     return this.historyMetadata.get(sessionId);
   }
@@ -98162,15 +98176,21 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
-      const [modesRaw, commandsRaw] = await Promise.all([
+      const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
+        client.call("dsh/sessionModels", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
       ]);
-      const modes = isRecord18(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0 ? modesRaw : void 0;
+      const models = isRecord18(modelsRaw) ? modelsRaw : void 0;
+      const modes = isRecord18(modesRaw) && Array.isArray(modesRaw.availableModes) ? modesRaw : void 0;
       const commands = isRecord18(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
-      if (modes !== void 0 || commands !== void 0) {
+      if (models !== void 0 || modes !== void 0 || commands !== void 0) {
         this.historyMetadata.delete(sessionId);
-        this.historyMetadata.set(sessionId, { ...modes ? { modes } : {}, ...commands ? { commands } : {} });
+        this.historyMetadata.set(sessionId, {
+          ...models !== void 0 ? { models } : {},
+          ...modes !== void 0 ? { modes } : {},
+          ...commands !== void 0 ? { commands } : {}
+        });
         while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
           const oldest = this.historyMetadata.keys().next().value;
           if (oldest === void 0) break;
@@ -100122,9 +100142,14 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   let content = "";
   try {
     const filePath = await transcriptPath(baseDir, conversationId);
-    if (filePath === void 0 || (await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
+    if (filePath === void 0) return [];
+    const info = await fs3.stat(filePath);
+    if (info.size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError("ACP_HISTORY_TOO_LARGE", "Antigravity history exceeds the transfer limit.");
+    }
     content = await fs3.readFile(filePath, "utf-8");
-  } catch {
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
     return [];
   }
   const lines = content.split("\n");
@@ -100180,9 +100205,13 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
         push2("step/start", { turn: currentTurn, step: 1 }, time3);
       }
       if (Array.isArray(record12.tool_calls)) {
+        const seenNames = /* @__PURE__ */ new Map();
         for (const call of record12.tool_calls) {
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record12.step_index}:${toolName}`;
+          const count = seenNames.get(toolName) ?? 0;
+          seenNames.set(toolName, count + 1);
+          const callId = count === 0 ? `${record12.step_index}:${toolName}` : `${record12.step_index}:${toolName}:${count}`;
+          const isError = call.status === "ERROR";
           push2("tool/call", {
             turn: currentTurn,
             step: 1,
@@ -100191,8 +100220,35 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
             arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
             toolCallId: callId,
             toolName,
-            status: call.status === "ERROR" ? "failed" : "finished"
+            status: isError ? "failed" : "finished"
           }, time3, false);
+          if (call.status !== "CALLING" && call.status !== "EXECUTING") {
+            let resultText = "";
+            if (typeof call.result === "string") {
+              resultText = call.result;
+            } else if (call.result !== void 0) {
+              try {
+                resultText = JSON.stringify(call.result);
+              } catch {
+                resultText = "";
+              }
+            }
+            push2("tool/result", {
+              turn: currentTurn,
+              step: 1,
+              message: {
+                id: `${sessionId}:${record12.step_index}:tool-result:${callId}`,
+                role: "user",
+                source: { kind: "tool", callId },
+                content: [{
+                  type: "tool-result",
+                  toolCallId: callId,
+                  content: resultText.length > 0 ? [{ type: "text", text: resultText }] : [],
+                  ...isError ? { isError: true } : {}
+                }]
+              }
+            }, time3, true);
+          }
         }
       }
       if (record12.content && record12.content.trim() !== "") {
@@ -101447,24 +101503,34 @@ var AcpRemoteGateway = class {
         assertCurrent();
         const client = this.requireAcp(backend);
         if (!client.history) {
-          return { events: [], ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+          return {
+            events: [],
+            running: this.hasTurnInFlight(conversationId),
+            ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+          };
         }
         const events2 = await this.readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent);
         const cachedMeta = client.lastHistoryMetadata?.(conversationId);
+        const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0 ? cachedMeta.modes : void 0;
         return {
           events: events2,
+          running: this.hasTurnInFlight(conversationId),
           ...persistedPreset ? { permissionPreset: persistedPreset } : {},
-          ...cachedMeta?.modes ? { modes: cachedMeta.modes } : {},
+          ...nonEmptyModes ? { modes: nonEmptyModes } : {},
           ...cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}
         };
       }
-      if (backend !== "antigravity") return { events: [] };
+      if (backend !== "antigravity") return { events: [], running: this.hasTurnInFlight(conversationId) };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length
       });
-      return { events, ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+      return {
+        events,
+        running: this.hasTurnInFlight(conversationId),
+        ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+      };
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
@@ -101571,7 +101637,13 @@ var AcpRemoteGateway = class {
         this.requireSessionOwner(connectionId, sessionId);
         const cwd2 = await this.catalogSessionCwd(preloadBackend, sessionId);
         assertCurrent();
-        await this.requireAcp(preloadBackend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+        const acp = this.requireAcp(preloadBackend);
+        if ((call.method === "dsh/sessionModels" || call.method === "dsh/sessionModes") && acp.isSessionLoaded?.(sessionId) === false) {
+          const cachedMeta = acp.lastHistoryMetadata?.(sessionId);
+          if (call.method === "dsh/sessionModels" && cachedMeta?.models !== void 0) return cachedMeta.models;
+          if (call.method === "dsh/sessionModes" && cachedMeta?.modes !== void 0) return cachedMeta.modes;
+        }
+        await acp.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
         assertCurrent();
       } else if (preloadBackend === "cursor" && sessionId !== void 0) {
         if (!this.sessionCwds.has(sessionId) && this.isNativeCatalogBackend("cursor")) {
@@ -101764,6 +101836,10 @@ var AcpRemoteGateway = class {
       if (key.endsWith(`:${sessionId}`)) {
         this.pendingHistoryReads.delete(key);
       }
+    }
+    for (const instance of this.backendInstances.values()) {
+      ;
+      instance.client.invalidateHistoryMetadata?.(sessionId);
     }
   }
   isHistoryEpochValid(sessionId, readEpoch) {

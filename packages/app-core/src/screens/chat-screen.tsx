@@ -23,7 +23,7 @@ import {
 import { Alert } from '../ui/alert'
 import { shouldConfirmSwipeRightOpen, shouldStartSwipeRightToOpen } from '../lib/gesture-swipe-rules'
 import { isSubagentSession } from '../lib/session-kind'
-import { workspaceStableKey } from '../lib/workspace-key'
+import { isAcpManagedBackend, workspaceStableKey } from '../lib/workspace-key'
 import { strings } from '../locales/i18n'
 import { sessionPermissions } from '../services/session-permissions'
 import type { CustomPrompt } from '../services/storage'
@@ -381,10 +381,15 @@ export function ChatScreen({
   useEffect(() => { setToolsMode(undefined) }, [session?.sessionId, connection.phase])
   useEffect(() => { setComposerExpanded(false) }, [session?.sessionId])
   // Fetch mode options only when a non-Codex session is active.
+  // ACP sessions already receive modes from dsh/sessionHistory during openSession,
+  // so avoid racing openSession or re-querying once populated.
   useEffect(() => {
     if (connection.phase !== 'connected' || session === undefined || session.backend === 'codex') return
+    if (isAcpManagedBackend(session.backend) && (busy === `session:${session.sessionId}` || agentPresetOptions !== undefined)) {
+      return
+    }
     void loadAgentPresets()
-  }, [connection.phase, session?.sessionId, session?.backend, loadAgentPresets])
+  }, [connection.phase, session?.sessionId, session?.backend, busy, agentPresetOptions, loadAgentPresets])
   const [composerExpanded, setComposerExpanded] = useState(false)
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)
@@ -1152,8 +1157,24 @@ export function ChatScreen({
       return
     }
     // A blank conversation carries nothing to lose: recreate it inside the
-    // chosen workspace and archive the old placeholder so it reads as a move.
-    if (sessionBlank && useAppStore.getState().selectedSession?.sessionId !== previousId) await archiveSession(previousId)
+    // chosen workspace and archive or drop the old placeholder so it reads as a move.
+    if (sessionBlank && useAppStore.getState().selectedSession?.sessionId !== previousId) {
+      const supportsNativeArchive = session.backend === undefined
+        || session.backend === 'harness'
+        || session.backend === 'codex'
+        || session.backend === 'opencode'
+      if (supportsNativeArchive) {
+        await archiveSession(previousId)
+      } else {
+        useAppStore.setState(state => ({
+          sessions: state.sessions.filter(item => item.sessionId !== previousId),
+          workspaces: state.workspaces.map(item => ({
+            ...item,
+            sessionIds: item.sessionIds.filter(id => id !== previousId),
+          })),
+        }))
+      }
+    }
   }
 
   const pickWorkspace = (workspace: WorkspaceView) => {

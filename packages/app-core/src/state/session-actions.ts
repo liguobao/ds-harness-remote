@@ -510,6 +510,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           await runtime.closeActiveCursorStream()
           if (!current()) return
           const existingMessages = get().messages[session.sessionId] ?? []
+          const priorSelected = get().selectedSession
+          const preOpenRunning = session.running || (priorSelected?.sessionId === session.sessionId && priorSelected.running)
           // Retire or drop dead in-flight streaming chunks from the prior connection
           const cleanExisting = existingMessages.filter(item => !(item.kind === 'message' && (item.streaming || item.id === 'cursor-assistant-live' || item.id === 'cursor-user-live')))
           const initialAcpIds = new Set(cleanExisting.map(item => item.id))
@@ -582,7 +584,16 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               (item.kind === 'message' && item.streaming === true)
               || ((item.kind === 'message' || item.kind === 'tool') && item.turn?.startsWith('acp-live:') && item.turnEnd === undefined),
             )
-            const resolvedRunning = hasLiveTurnInFlight ? true : (currentSession?.running ?? session.running)
+            const liveTurnSettled = liveDeltas.some(item =>
+              (item.kind === 'message' || item.kind === 'tool') && item.turn?.startsWith('acp-live:') && item.turnEnd !== undefined,
+            )
+            const resolvedRunning = hasLiveTurnInFlight
+              ? true
+              : details.running === false
+                ? false
+                : details.running === true
+                  ? (liveTurnSettled || (preOpenRunning && currentSession?.running === false) ? false : true)
+                  : (currentSession?.running ?? session.running)
             const active = state.selectedSession?.sessionId === session.sessionId
               ? { ...state.selectedSession, ...enrichedSession, running: resolvedRunning }
               : { ...enrichedSession, running: resolvedRunning }

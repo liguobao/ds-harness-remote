@@ -26,7 +26,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
   private historyStop?: () => Promise<void>
   private historyReading = false
   private shuttingDown = false
-  private readonly historyMetadata = new Map<string, { modes?: AcpSessionModes; commands?: AcpAvailableCommand[] }>()
+  private readonly historyMetadata = new Map<string, { models?: unknown; modes?: AcpSessionModes; commands?: AcpAvailableCommand[] }>()
   private readonly makeClient: () => CursorAcpClient
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
@@ -85,6 +85,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
         responded = true
         this.assertLoaded(result, id)
         this.live.set(id, result)
+        this.historyMetadata.delete(id)
         this.clearLoadSuppression(id, gen)
         return result
       })
@@ -110,9 +111,13 @@ export class ClaudeAcpClient extends CursorAcpClient {
         const newId = (result as { sessionId?: string } | null)?.sessionId
         if (typeof newId !== 'string' || this.shuttingDown) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid session.`)
         this.live.set(newId, result)
+        this.historyMetadata.delete(newId)
         this.clearLoadSuppression(newId)
         return result
       } finally { this.pendingNew-- }
+    }
+    if ((method === 'dsh/selectModel' || method === 'session/set_mode') && typeof id === 'string') {
+      this.historyMetadata.delete(id)
     }
     return super.call(method, params, timeoutMs)
   }
@@ -173,7 +178,15 @@ export class ClaudeAcpClient extends CursorAcpClient {
     if (id !== undefined && id !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid history session.`)
   }
 
-  lastHistoryMetadata(sessionId: string): { modes?: AcpSessionModes; commands?: AcpAvailableCommand[] } | undefined {
+  isSessionLoaded(sessionId: string): boolean {
+    return this.live.has(sessionId)
+  }
+
+  invalidateHistoryMetadata(sessionId: string): void {
+    this.historyMetadata.delete(sessionId)
+  }
+
+  lastHistoryMetadata(sessionId: string): { models?: unknown; modes?: AcpSessionModes; commands?: AcpAvailableCommand[] } | undefined {
     return this.historyMetadata.get(sessionId)
   }
 
@@ -212,19 +225,25 @@ export class ClaudeAcpClient extends CursorAcpClient {
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       this.assertLoaded(result, sessionId)
       if (overflow) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', `${this.label} history exceeds the transfer limit.`)
-      const [modesRaw, commandsRaw] = await Promise.all([
+      const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
+        client.call('dsh/sessionModels', { sessionId }).catch(() => undefined),
         client.call('dsh/sessionModes', { sessionId }).catch(() => undefined),
         client.call('dsh/sessionCommands', { sessionId }).catch(() => undefined),
       ])
-      const modes = isRecord(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0
+      const models = isRecord(modelsRaw) ? modelsRaw : undefined
+      const modes = isRecord(modesRaw) && Array.isArray(modesRaw.availableModes)
         ? modesRaw as unknown as AcpSessionModes
         : undefined
       const commands = isRecord(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0
         ? commandsRaw.commands as AcpAvailableCommand[]
         : undefined
-      if (modes !== undefined || commands !== undefined) {
+      if (models !== undefined || modes !== undefined || commands !== undefined) {
         this.historyMetadata.delete(sessionId)
-        this.historyMetadata.set(sessionId, { ...(modes ? { modes } : {}), ...(commands ? { commands } : {}) })
+        this.historyMetadata.set(sessionId, {
+          ...(models !== undefined ? { models } : {}),
+          ...(modes !== undefined ? { modes } : {}),
+          ...(commands !== undefined ? { commands } : {}),
+        })
         while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
           const oldest = this.historyMetadata.keys().next().value
           if (oldest === undefined) break

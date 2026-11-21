@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
+import { RpcError } from '../../../safe-error.js'
 import type { StepLogRecord } from './types.js'
 
 // Load prefix-only Node builtins natively, including under older Vite runners.
@@ -64,9 +65,14 @@ export async function loadTranscriptEvents(
   let content = ''
   try {
     const filePath = await transcriptPath(baseDir, conversationId)
-    if (filePath === undefined || (await fs.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return []
+    if (filePath === undefined) return []
+    const info = await fs.stat(filePath)
+    if (info.size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError('ACP_HISTORY_TOO_LARGE', 'Antigravity history exceeds the transfer limit.')
+    }
     content = await fs.readFile(filePath, 'utf-8')
-  } catch {
+  } catch (error) {
+    if (error instanceof RpcError) throw error
     return []
   }
 
@@ -130,9 +136,13 @@ export async function loadTranscriptEvents(
       }
 
       if (Array.isArray(record.tool_calls)) {
+        const seenNames = new Map<string, number>()
         for (const call of record.tool_calls) {
           const toolName = (typeof call.name === 'string' && call.name.length > 0) ? call.name : 'tool'
-          const callId = `${record.step_index}:${toolName}`
+          const count = seenNames.get(toolName) ?? 0
+          seenNames.set(toolName, count + 1)
+          const callId = count === 0 ? `${record.step_index}:${toolName}` : `${record.step_index}:${toolName}:${count}`
+          const isError = call.status === 'ERROR'
           push('tool/call', {
             turn: currentTurn,
             step: 1,
@@ -141,8 +151,35 @@ export async function loadTranscriptEvents(
             arguments: typeof call.args === 'object' && call.args !== null ? JSON.stringify(call.args) : '{}',
             toolCallId: callId,
             toolName,
-            status: call.status === 'ERROR' ? 'failed' : 'finished',
+            status: isError ? 'failed' : 'finished',
           }, time, false)
+          if (call.status !== 'CALLING' && call.status !== 'EXECUTING') {
+            let resultText = ''
+            if (typeof call.result === 'string') {
+              resultText = call.result
+            } else if (call.result !== undefined) {
+              try {
+                resultText = JSON.stringify(call.result)
+              } catch {
+                resultText = ''
+              }
+            }
+            push('tool/result', {
+              turn: currentTurn,
+              step: 1,
+              message: {
+                id: `${sessionId}:${record.step_index}:tool-result:${callId}`,
+                role: 'user',
+                source: { kind: 'tool', callId },
+                content: [{
+                  type: 'tool-result',
+                  toolCallId: callId,
+                  content: resultText.length > 0 ? [{ type: 'text', text: resultText }] : [],
+                  ...(isError ? { isError: true } : {}),
+                }],
+              },
+            }, time, true)
+          }
         }
       }
 

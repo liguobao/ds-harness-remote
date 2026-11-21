@@ -1823,6 +1823,92 @@ describe('AcpRemoteGateway', () => {
       await gateway.close()
     }
   })
+
+  it('serves cached read-only models/modes from history without loading the live session and reports running authority', async () => {
+    const cwd = await realpath(process.cwd())
+    let loaded = false
+    let cachedMeta: { models?: unknown; modes?: { currentModeId?: string; availableModes: Array<{ id: string; name: string }> }; commands?: unknown[] } | undefined
+    const cachedModels = {
+      providers: [{ id: 'antigravity', name: 'Antigravity', models: [{ id: 'gemini-3-pro', name: 'Gemini 3 Pro' }] }],
+      selected: { provider: 'antigravity', model: 'gemini-3-pro' },
+    }
+    const cachedModes = {
+      currentModeId: 'agent',
+      availableModes: [{ id: 'agent', name: 'Agent' }],
+    }
+    const history = vi.fn(async () => {
+      cachedMeta = { models: cachedModels, modes: cachedModes }
+      return []
+    })
+    let resolvePrompt!: (value: unknown) => void
+    const acp = Object.assign(readyAcp(), {
+      history,
+      isSessionLoaded: vi.fn(() => loaded),
+      lastHistoryMetadata: vi.fn(() => cachedMeta),
+      invalidateHistoryMetadata: vi.fn(() => { cachedMeta = undefined }),
+    })
+    acp.call = vi.fn(async (method: string) => {
+      if (method === 'session/list') return { sessions: [{ sessionId: 'saved-agy', cwd }] }
+      if (method === 'session/load') { loaded = true; cachedMeta = undefined; return { sessionId: 'saved-agy' } }
+      if (method === 'session/prompt') return new Promise(resolve => { resolvePrompt = resolve })
+      if (method === 'dsh/selectModel') return { selected: { provider: 'antigravity', model: 'gemini-3-pro' } }
+      return {}
+    })
+    const gateway = new AcpRemoteGateway(
+      { enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: ['acp'] }] },
+      silentLogger(),
+      () => acp,
+    )
+    await gateway.start()
+    try {
+      const historyResult = await gateway.call('owner', {
+        method: 'dsh/sessionHistory',
+        params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+      }) as { events: unknown[]; running?: boolean; modes?: unknown }
+      expect(historyResult).toMatchObject({ events: [], running: false, modes: cachedModes })
+
+      // Read-only model & mode queries after history must reuse cached metadata without triggering live session/load.
+      await expect(gateway.call('owner', {
+        method: 'dsh/sessionModels',
+        params: { backend: 'antigravity', sessionId: 'saved-agy' },
+      })).resolves.toEqual(cachedModels)
+      await expect(gateway.call('owner', {
+        method: 'dsh/sessionModes',
+        params: { backend: 'antigravity', sessionId: 'saved-agy' },
+      })).resolves.toEqual(cachedModes)
+      expect(acp.call).not.toHaveBeenCalledWith('session/load', expect.anything())
+
+      // Mutating calls still load the live session and invalidate cached metadata.
+      await expect(gateway.call('owner', {
+        method: 'dsh/selectModel',
+        params: { backend: 'antigravity', sessionId: 'saved-agy', model: 'gemini-3-pro' },
+      })).resolves.toBeDefined()
+      expect(acp.call).toHaveBeenCalledWith('session/load', { sessionId: 'saved-agy', cwd, mcpServers: [] })
+
+      // Active prompt makes dsh/sessionHistory report running: true until the turn settles.
+      await gateway.call('owner', {
+        method: 'session/prompt',
+        params: { backend: 'antigravity', sessionId: 'saved-agy', prompt: [{ type: 'text', text: 'hi' }] },
+      })
+      const runningHistory = await gateway.call('owner', {
+        method: 'dsh/sessionHistory',
+        params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+      }) as { running?: boolean }
+      expect(runningHistory.running).toBe(true)
+
+      resolvePrompt({ stopReason: 'end_turn' })
+      await vi.waitFor(async () => {
+        const doneHistory = await gateway.call('owner', {
+          method: 'dsh/sessionHistory',
+          params: { backend: 'antigravity', sessionId: 'antigravity:saved-agy' },
+        }) as { running?: boolean }
+        expect(doneHistory.running).toBe(false)
+      })
+    } finally {
+      resolvePrompt?.({ stopReason: 'end_turn' })
+      await gateway.close()
+    }
+  })
 })
 
 async function approvalFixture(backend = 'cursor') {

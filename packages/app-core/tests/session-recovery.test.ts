@@ -2536,4 +2536,52 @@ describe('Issue #468 remaining fixes (image loader, cursor blank session, ACP re
     expect(useAppStore.getState().sessions.find(s => s.sessionId === opc.sessionId)?.running).toBe(false)
     expect(useAppStore.getState().workspaces[0]?.sessionIds).toContain(opc.sessionId)
   })
+
+  it('recovers Antigravity sessions on healthy resumeConnection and clears stale running via Host authority', async () => {
+    await runScenarios([
+      { name: 'reopens running AGY session on resumeConnection and clears stale running when Host reports running: false', hostRunning: false, expectedRunning: false },
+      { name: 'keeps running: true when Host reports running: true on resumeConnection', hostRunning: true, expectedRunning: true },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        transport.hasAntigravity.mockReturnValue(true)
+        const agy: RemoteSession = {
+          sessionId: 'antigravity:resume-1',
+          nativeId: 'resume-1',
+          backend: 'antigravity',
+          updatedAt: 1,
+          running: true,
+          blank: false,
+        }
+        useAppStore.setState({
+          selectedDevice: { deviceId: 'host' } as never,
+          selectedSession: agy,
+          sessions: [agy],
+          messages: {},
+          config: { baseUrl: 'https://example.invalid' } as never,
+          identity: {} as never,
+        })
+        const loadSessionDetails = vi.fn(async () => ({
+          events: [
+            entry('user/message', 0, { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }),
+            entry('assistant/message', 1, { turn: 1, message: { id: 'a1', content: [{ type: 'text', text: 'done' }] } }),
+            entry('turn/end', 2, { turn: 1, reason: { kind: 'completed' } }),
+          ],
+          running: scenario.hostRunning,
+        }))
+        Object.assign(acp, { loadSessionDetails })
+        acp.openStream.mockResolvedValueOnce({ streamId: 's-resume', close: async () => undefined })
+        try {
+          await useAppStore.getState().resumeConnection()
+          await vi.waitFor(() => expect(loadSessionDetails).toHaveBeenCalledWith('resume-1', 'antigravity', undefined))
+          await vi.waitFor(() => expect(useAppStore.getState().busyAction).toBeUndefined())
+          expect(acp.openStream).toHaveBeenCalledTimes(1)
+          expect(useAppStore.getState().selectedSession?.running).toBe(scenario.expectedRunning)
+          expect(useAppStore.getState().sessions.find(s => s.sessionId === agy.sessionId)?.running).toBe(scenario.expectedRunning)
+        } finally {
+          delete (acp as Record<string, unknown>).loadSessionDetails
+        }
+      },
+    })), prepareScenario1)
+  })
 })

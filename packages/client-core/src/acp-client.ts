@@ -250,20 +250,23 @@ export class AgentAcpClient {
     permissionPreset?: string
     modes?: AcpSessionModes
     commands?: AcpAvailableCommand[]
+    running?: boolean
   }> {
+    const strictHistoryBackend = backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes' || backend === 'antigravity'
     const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') throw error
+      if (strictHistoryBackend) throw error
       return { events: [] }
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.events))) {
+    if (strictHistoryBackend && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
     if (!isRecord(result)) return { events: [] }
     const events = Array.isArray(result.events) ? result.events : []
     const permissionPreset = typeof result.permissionPreset === 'string' ? result.permissionPreset : undefined
+    const running = typeof result.running === 'boolean' ? result.running : undefined
     const modes = isRecord(result.modes) && Array.isArray(result.modes.availableModes)
       ? {
           ...(typeof result.modes.currentModeId === 'string' ? { currentModeId: result.modes.currentModeId } : {}),
@@ -290,6 +293,7 @@ export class AgentAcpClient {
       ...(permissionPreset ? { permissionPreset } : {}),
       ...(modes ? { modes } : {}),
       ...(commands ? { commands } : {}),
+      ...(running !== undefined ? { running } : {}),
     }
   }
 
