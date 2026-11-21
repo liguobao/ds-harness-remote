@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Folder, Pencil, Plus, Terminal, Trash2, X, Zap } from 'lucide-react-native'
+import { Check, ChevronLeft, ChevronRight, Folder, GitCompareArrows, Pencil, Plus, Terminal, Trash2, X, Zap } from 'lucide-react-native'
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { strings as zhCN } from '../../locales/i18n'
@@ -15,6 +15,7 @@ import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { usePickerListMaxHeight } from './modal'
 import { SheetModal } from '../../ui/sheet'
+import type { SessionToolsMode } from '../session-tools-panel'
 import { createStyles } from './styles'
 
 export function ModePicker({ visible, options, current, loading, selecting, onClose, onPick }: {
@@ -160,17 +161,21 @@ export function WorkspacePicker({ visible, workspaces, currentSessionId, session
   )
 }
 
-export function ToolAccessPicker({ visible, onClose, onPick }: {
+export function ToolAccessPicker({ visible, supportsChanges = true, onClose, onPick }: {
   visible: boolean
+  supportsChanges?: boolean
   onClose: () => void
-  onPick: (mode: 'files' | 'terminal') => void
+  onPick: (mode: SessionToolsMode) => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
-  const options = [
-    { id: 'files' as const, icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
-    { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
+  const options: Array<{ id: SessionToolsMode; icon: typeof Folder; name: string; description: string }> = [
+    { id: 'files', icon: Folder, name: zhCN.tools.files, description: zhCN.chat.toolFilesDescription },
+    ...(supportsChanges
+      ? [{ id: 'changes' as const, icon: GitCompareArrows, name: zhCN.tools.changes, description: zhCN.chat.toolChangesDescription }]
+      : []),
+    { id: 'terminal', icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
   ]
   return (
     <SheetModal visible={visible} onClose={onClose}>

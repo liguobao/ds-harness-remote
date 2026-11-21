@@ -912,7 +912,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     />
     {fileLinkPath !== undefined && connected && ready && <SessionToolsPanel
       key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}
-      initialFile={fileLinkPath} onClose={() => setFileLinkPath(undefined)} />}
+      initialFile={fileLinkPath} showTabs={false} onClose={() => setFileLinkPath(undefined)} />}
   </View></MarkdownLinkProvider></BotMessageActionsContext.Provider>
 }
 
