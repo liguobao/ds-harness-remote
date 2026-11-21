@@ -1938,14 +1938,20 @@ describe('AcpRemoteGateway', () => {
           params: { backend: 'antigravity', sessionId: 'windowed', ...params },
         }) as Promise<{ events: Array<{ event: { seq: number; type: string } }>; hasMore: boolean; cursor: number; running: boolean }>
 
-        const first = await history({})
-        // 40 turns hydrate to well over 200 events; the default window is the recent 50.
+        // No paging params: legacy clients keep receiving the full transcript.
+        const full = await history({})
+        expect(full.events.length).toBeGreaterThan(200)
+        expect(full.hasMore).toBe(false)
+        expect(full.cursor).toBe(full.events.at(-1)!.event.seq)
+        expect(full.running).toBe(false)
+
+        // Explicit maxMessages opts into the bounded recent window.
+        const first = await history({ maxMessages: 50 })
         expect(first.events).toHaveLength(50)
         expect(first.hasMore).toBe(true)
         expect(first.cursor).toBe(first.events.at(-1)!.event.seq)
-        expect(first.running).toBe(false)
 
-        const second = await history({ beforeSeq: first.events[0]!.event.seq })
+        const second = await history({ beforeSeq: first.events[0]!.event.seq, maxMessages: 50 })
         expect(second.events.length).toBeGreaterThan(0)
         expect(second.events.at(-1)!.event.seq).toBeLessThan(first.events[0]!.event.seq)
         expect(second.hasMore).toBe(true)

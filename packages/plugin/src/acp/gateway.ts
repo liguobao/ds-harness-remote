@@ -672,6 +672,27 @@ export class AcpRemoteGateway {
         ? call.params.beforeSeq
         : undefined
       const turnWindow = normalizeVirtualHistoryTurnWindow(call.params.turnWindow)
+      const maxMessages = typeof call.params.maxMessages === 'number' && Number.isSafeInteger(call.params.maxMessages)
+        ? call.params.maxMessages
+        : undefined
+      // Windowing is an explicit opt-in: clients that send none of the paging
+      // fields keep receiving the full transcript (still accelerated by the
+      // parse cache), so any client version benefits without negotiation.
+      if (beforeSeq === undefined && turnWindow === undefined && maxMessages === undefined) {
+        this.logger.info('ACP session history fetched', {
+          sessionId: shortSessionId(rawSessionId),
+          eventCount: allEvents.length,
+          totalCount: allEvents.length,
+          full: true,
+        })
+        return {
+          events: allEvents.map(entry => ({ event: entry.event })),
+          running: this.hasTurnInFlight(conversationId),
+          hasMore: false,
+          cursor: allEvents.at(-1)?.event.seq ?? -1,
+          ...(persistedPreset ? { permissionPreset: persistedPreset } : {}),
+        }
+      }
       const window = beforeSeq === undefined
         ? allEvents
         : allEvents.filter(entry => entry.event.seq < beforeSeq)
@@ -685,9 +706,7 @@ export class AcpRemoteGateway {
       let slice: VirtualHistorySliceResult<HydratedSessionEvent>
       try {
         slice = selectVirtualHistorySlice(window, {
-          maxMessages: typeof call.params.maxMessages === 'number' && Number.isSafeInteger(call.params.maxMessages)
-            ? call.params.maxMessages
-            : undefined,
+          maxMessages,
           turnWindow,
           countSurfaceMessages: false,
           envelopeBytes,

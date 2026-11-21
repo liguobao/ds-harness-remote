@@ -101575,6 +101575,22 @@ var AcpRemoteGateway = class {
       const allEvents = await loadTranscriptEvents(conversationId, rawSessionId);
       const beforeSeq = typeof call.params.beforeSeq === "number" && Number.isSafeInteger(call.params.beforeSeq) ? call.params.beforeSeq : void 0;
       const turnWindow2 = normalizeVirtualHistoryTurnWindow(call.params.turnWindow);
+      const maxMessages = typeof call.params.maxMessages === "number" && Number.isSafeInteger(call.params.maxMessages) ? call.params.maxMessages : void 0;
+      if (beforeSeq === void 0 && turnWindow2 === void 0 && maxMessages === void 0) {
+        this.logger.info("ACP session history fetched", {
+          sessionId: shortSessionId(rawSessionId),
+          eventCount: allEvents.length,
+          totalCount: allEvents.length,
+          full: true
+        });
+        return {
+          events: allEvents.map((entry) => ({ event: entry.event })),
+          running: this.hasTurnInFlight(conversationId),
+          hasMore: false,
+          cursor: allEvents.at(-1)?.event.seq ?? -1,
+          ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+        };
+      }
       const window2 = beforeSeq === void 0 ? allEvents : allEvents.filter((entry) => entry.event.seq < beforeSeq);
       const envelopeBytes = utf8JsonByteLength({
         events: [],
@@ -101586,7 +101602,7 @@ var AcpRemoteGateway = class {
       let slice;
       try {
         slice = selectVirtualHistorySlice(window2, {
-          maxMessages: typeof call.params.maxMessages === "number" && Number.isSafeInteger(call.params.maxMessages) ? call.params.maxMessages : void 0,
+          maxMessages,
           turnWindow: turnWindow2,
           countSurfaceMessages: false,
           envelopeBytes,
