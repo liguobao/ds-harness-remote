@@ -59,7 +59,7 @@ describe('PI ACP client isolation and recovery', () => {
     })))
   })
 
-  it('keeps PI permission handles and bounded terminal deltas across tool updates without changing other backends', async () => {
+  it('keeps ACP permission handles and bounded terminal deltas across tool updates', async () => {
     await runScenarios(['pi', 'cursor', 'antigravity'].flatMap(backend => [0, 2].map(exitCode => ({ name: `${backend}: exit ${exitCode}`, run: () => {
       const sessionId = `${backend}:native`
       const frame = (update: Record<string, unknown>) => ({ streamId: 's', frame: { method: 'session/update', params: { update } } })
@@ -77,14 +77,12 @@ describe('PI ACP client isolation and recovery', () => {
       expect(tool?.kind).toBe('tool')
       if (tool?.kind !== 'tool') throw new Error('Missing tool')
       expect(tool.state).toBe('running')
-      expect(tool.resultDetail?.text).toBe(backend === 'pi' ? `${'a'.repeat(15_996)}tail` : undefined)
+      expect(tool.resultDetail?.text).toBe(`${'a'.repeat(15_996)}tail`)
       messages = applyCursorFrame(messages, sessionId, frame({ sessionUpdate: 'tool_call_update', toolCallId: 'bash', _meta: { terminal_exit: { exit_code: exitCode } } }))
-      expect(messages[1]).toMatchObject({ state: backend === 'pi' ? exitCode === 0 ? 'finished' : 'failed' : 'running' })
-      if (backend === 'pi') {
-        messages = applyCursorFrame(messages, sessionId, frame({ sessionUpdate: 'tool_call_update', toolCallId: 'bash', status: 'completed' }))
-        // A later generic completion must not erase terminal failure or output.
-        expect(messages[1]).toMatchObject({ state: exitCode === 0 ? 'finished' : 'failed', resultDetail: { text: tool.resultDetail?.text } })
-      }
+      expect(messages[1]).toMatchObject({ state: exitCode === 0 ? 'finished' : 'failed' })
+      messages = applyCursorFrame(messages, sessionId, frame({ sessionUpdate: 'tool_call_update', toolCallId: 'bash', status: 'completed' }))
+      // A later generic completion must not erase terminal failure or output.
+      expect(messages[1]).toMatchObject({ state: exitCode === 0 ? 'finished' : 'failed', resultDetail: { text: tool.resultDetail?.text } })
     } }))))
   })
 
