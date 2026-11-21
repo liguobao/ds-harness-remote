@@ -5,6 +5,7 @@ export type AppRoute =
   | { name: 'connecting'; deviceId: string; sheet?: boolean; focusWorkspaceKey?: string; sessionId?: string }
   | { name: 'chat'; botConversationId?: string; externalOpenRevision?: number }
   | { name: 'settings' }
+  | { name: 'appearance' }
   | { name: 'diagnostics' }
   | { name: 'about' }
 

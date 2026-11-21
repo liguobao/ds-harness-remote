@@ -705,6 +705,7 @@ export function SettingsScreen({
   onBack,
   onReset,
   onSigningOutChange,
+  onOpenAppearance,
   onOpenDiagnostics,
   onOpenAbout,
 }: {
@@ -712,6 +713,7 @@ export function SettingsScreen({
   onBack: () => void
   onReset: () => void
   onSigningOutChange?: (busy: boolean) => void
+  onOpenAppearance?: () => void
   onOpenDiagnostics?: () => void
   onOpenAbout?: () => void
 }) {
@@ -901,7 +903,7 @@ export function SettingsScreen({
   )
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
-  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || appearanceOpen
+  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || (appearanceOpen && !onOpenAppearance)
 
   const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
     : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
@@ -945,7 +947,10 @@ export function SettingsScreen({
                 label={zhCN.settings.chatAppearance}
                 value={chatAppearanceSummary}
                 chevron
-                onPress={() => setAppearanceOpen(true)}
+                onPress={() => {
+                  if (onOpenAppearance) onOpenAppearance()
+                  else setAppearanceOpen(true)
+                }}
               />
               <GroupRow
                 icon={Languages}
@@ -1344,7 +1349,7 @@ export function SettingsScreen({
           <AboutScreen onBack={() => setAboutOpen(false)} />
         </View>
       )}
-      {appearanceOpen && (
+      {appearanceOpen && !onOpenAppearance && (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <ChatAppearanceScreen active={active && appearanceOpen} onBack={() => setAppearanceOpen(false)} />
         </View>

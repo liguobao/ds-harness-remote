@@ -172,3 +172,45 @@ export function indicatorGeometry(index: 0 | 1, trackWidth: number, inset: numbe
     : 0
   return { x: safeInset + (index === 1 ? width : 0), width }
 }
+
+/**
+ * Claims an iOS left-edge swipe-back gesture only when the touch starts within
+ * the left edge strip and moves decisively rightward rather than vertically.
+ */
+export function shouldStartEdgeSwipeBack(
+  startX: number,
+  dx: number,
+  dy: number,
+  edgeWidth = 28,
+): boolean {
+  if (
+    !Number.isFinite(startX)
+    || !Number.isFinite(dx)
+    || !Number.isFinite(dy)
+    || !Number.isFinite(edgeWidth)
+    || edgeWidth <= 0
+  ) {
+    return false
+  }
+  return startX >= 0 && startX <= edgeWidth && dx > 10 && Math.abs(dx) > Math.abs(dy) * 1.5
+}
+
+/**
+ * Commits an in-progress edge swipe-back once drag distance clears the screen
+ * fraction threshold or a short drag carries sufficient rightward velocity.
+ */
+export function shouldCommitEdgeSwipeBack(
+  dx: number,
+  vx: number,
+  screenWidth: number,
+): boolean {
+  if (
+    !Number.isFinite(dx)
+    || !Number.isFinite(vx)
+    || !Number.isFinite(screenWidth)
+    || screenWidth <= 0
+  ) {
+    return false
+  }
+  return dx > Math.max(72, screenWidth * 0.28) || (dx > 24 && vx > 0.55)
+}

@@ -6,6 +6,8 @@ import {
   motionTokens,
   resolveMotion,
   sharedFrame,
+  shouldCommitEdgeSwipeBack,
+  shouldStartEdgeSwipeBack,
   type MotionKind,
   type Rect,
 } from '../src/ui/motion'
@@ -108,5 +110,46 @@ describe('segmented indicator geometry (pattern g)', () => {
     expect(indicatorGeometry(0, 0, 3)).toEqual({ x: 3, width: 0 })
     expect(indicatorGeometry(1, Number.NaN, 3).width).toBe(0)
     expect(indicatorGeometry(0, 4, 3).width).toBe(0)
+  })
+})
+
+describe('iOS left-edge swipe-back gesture thresholds', () => {
+  it('claims only horizontal rightward drags originating inside the left edge strip', () => {
+    expect(shouldStartEdgeSwipeBack(0, 11, 0)).toBe(true)
+    expect(shouldStartEdgeSwipeBack(28, 16, 10)).toBe(true)
+    expect(shouldStartEdgeSwipeBack(35, 16, 4, 40)).toBe(true)
+
+    expect(shouldStartEdgeSwipeBack(29, 24, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(-1, 24, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(12, 10, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(12, -20, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(12, 15, 10)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(12, 20, -20)).toBe(false)
+  })
+
+  it('commits when drag distance clears the screen threshold or carries enough velocity', () => {
+    expect(shouldCommitEdgeSwipeBack(110, 0, 390)).toBe(true)
+    expect(shouldCommitEdgeSwipeBack(109, 0, 390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(73, 0, 200)).toBe(true)
+    expect(shouldCommitEdgeSwipeBack(72, 0, 200)).toBe(false)
+
+    expect(shouldCommitEdgeSwipeBack(25, 0.56, 390)).toBe(true)
+    expect(shouldCommitEdgeSwipeBack(24, 1.2, 390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(60, 0.55, 390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(-10, 1.5, 390)).toBe(false)
+  })
+
+  it('fails safe on non-finite or non-positive geometry inputs', () => {
+    expect(shouldStartEdgeSwipeBack(Number.NaN, 20, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(10, Number.POSITIVE_INFINITY, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(10, 20, Number.NaN)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(0, 20, 0, 0)).toBe(false)
+    expect(shouldStartEdgeSwipeBack(0, 20, 0, Number.NaN)).toBe(false)
+
+    expect(shouldCommitEdgeSwipeBack(Number.NaN, 1, 390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(200, Number.NaN, 390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(200, 1, 0)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(200, 1, -390)).toBe(false)
+    expect(shouldCommitEdgeSwipeBack(200, 1, Number.POSITIVE_INFINITY)).toBe(false)
   })
 })
