@@ -449,6 +449,20 @@ jobs:
         working-directory: apps/ios/ios
         run: pod install
 
+      # Reuse the ExpoModulesJSI build artifacts (xcframework + its SPM/DerivedData
+      # state) across runs; the script's internal per-slice hash cache alone does
+      # not survive between CI runs. Keyed on the resolved package version, so a
+      # pnpm-lock bump of expo-modules-jsi invalidates it.
+      - name: Cache ExpoModulesJSI xcframework
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules/expo-modules-jsi/Products
+            node_modules/expo-modules-jsi/.DerivedData
+            node_modules/expo-modules-jsi/.build
+            node_modules/expo-modules-jsi/.swiftpm
+          key: ios-expo-modules-jsi-${{ hashFiles('node_modules/expo-modules-jsi/package.json') }}
+
       # The "[CP-User] Build ExpoModulesJSI xcframework" build phase compiles an
       # SPM package through a nested `xcodebuild -quiet`, which swallows the real
       # compiler error on failure. Building the slices here surfaces it, and the
@@ -458,6 +472,19 @@ jobs:
         run: |
           JSI_PACKAGE="$(node -p "require('path').dirname(require.resolve('expo-modules-jsi/package.json', { paths: [require('path').dirname(require.resolve('expo/package.json'))] }))")"
           PODS_ROOT="$PWD/ios/Pods" "${JSI_PACKAGE}/apple/scripts/build-xcframework.sh"
+
+      # Reuse xcodebuild object files across runs. The prebuild step regenerates
+      # the Xcode project, but derived module hashes stay stable as long as the
+      # pods (Podfile.lock) and JS/native sources (lockfile covers versions)
+      # are unchanged; restore-keys let Xcode's incremental build reuse what it
+      # can even on partial input changes.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: apps/ios/ios/build
+          key: ios-derived-${{ hashFiles('apps/ios/ios/Podfile.lock', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            ios-derived-
 
       - name: Build unsigned
         working-directory: apps/ios/ios
