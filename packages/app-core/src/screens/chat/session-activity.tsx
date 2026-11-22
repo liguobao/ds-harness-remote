@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
-import { ChevronDown, ChevronUp, Flag, Layers, PauseCircle, Users } from 'lucide-react-native'
+import { ChevronDown, ChevronUp, Flag, Layers, PauseCircle, Users, X } from 'lucide-react-native'
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import type { BackgroundJob } from '../../services/session-tools'
 import type { RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot } from '../../types'
-import { IconJobOutline } from '../../ui/dsh-icons'
+import { IconChecklistOutline, IconJobOutline } from '../../ui/dsh-icons'
 import { requireSessionTools, useAppStore } from '../../state/store'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ActivityDockMode, type ThemeColors } from '../../ui/theme'
-import { monoFontFamily } from '../../ui/platform-style'
+import { continuousRadius, monoFontFamily } from '../../ui/platform-style'
+import { SheetModal } from '../../ui/sheet'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import { TaskProgressChecklist } from './task-progress-checklist'
+import { formatTaskProgress, TaskProgressChecklist, TaskStatusGlyph } from './task-progress-checklist'
 import { BackgroundJobsCard, JobStatusGlyph, formatJobStats } from './background-jobs-card'
 import { AgentStatusGlyph, AgentTeamCard, SubagentsCard, formatSubagentStats, formatTeamStats } from './agents'
 
@@ -64,7 +65,7 @@ export function SessionActivityDock({
   const goal = record(projection?.goal) && typeof projection.goal.objective === 'string' ? projection.goal : undefined
   const [expanded, setExpanded] = useState<'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined>()
   const toggle = (section: 'todos' | 'goal' | 'jobs' | 'subagents' | 'team') => setExpanded(value => value === section ? undefined : section)
-  const [activeModal, setActiveModal] = useState<'jobs' | 'subagents' | 'team' | undefined>()
+  const [activeModal, setActiveModal] = useState<'todos' | 'goal' | 'jobs' | 'subagents' | 'team' | undefined>()
   const { height } = useWindowDimensions()
   const detailsHeight = Math.min(180, height * 0.24)
   const modalDetailsHeight = Math.min(380, height * 0.52)
@@ -111,10 +112,13 @@ export function SessionActivityDock({
     return () => { controller.abort(); void stream?.close?.().catch(() => {}) }
   }, [session.sessionId, attempt])
 
+  const hasTodos = todos.length > 0
+  const hasGoal = goal !== undefined
   const hasJobs = jobs.length > 0
   const hasSubagents = Boolean(childSessions && childSessions.length > 0)
   const hasTeam = Boolean(teamState !== undefined && teamState.members && teamState.members.length > 0)
 
+  const todoStats = useMemo(() => formatTaskProgress(todos), [todos])
   const jobStats = useMemo(() => formatJobStats(jobs), [jobs])
   const subagentStats = useMemo(() => formatSubagentStats(childSessions ?? []), [childSessions])
   const teamStats = useMemo(
@@ -122,6 +126,8 @@ export function SessionActivityDock({
     [teamState?.members, sessions],
   )
 
+  const isTodosActive = todoStats.activeItem !== null
+  const isGoalActive = hasGoal && !['complete', 'completed', 'paused', 'killed', 'failed'].includes(String(goal.phase ?? ''))
   const isJobsActive = jobStats.runningCount > 0
   const isSubagentsActive = subagentStats.runningCount > 0
   const isTeamActive = teamStats.activeCount > 0
@@ -132,18 +138,23 @@ export function SessionActivityDock({
   const teamActiveGlyphStatus = hasRunningTeamMember ? 'running' : 'provisioning'
 
   const openModal = effectiveMode === 'compact'
-    && ((activeModal === 'jobs' && hasJobs)
+    && ((activeModal === 'todos' && hasTodos)
+      || (activeModal === 'goal' && hasGoal)
+      || (activeModal === 'jobs' && hasJobs)
       || (activeModal === 'subagents' && hasSubagents)
       || (activeModal === 'team' && hasTeam))
     ? activeModal
     : undefined
 
+  const todosTitle = copy.taskChecklist || copy.todos
   const jobsTitle = copy.backgroundJobs || copy.jobs
   const subagentsTitle = copy.subagents || strings.chat.subagentsTitle(subagentStats.totalCount).split(' · ')[0]
   const teamTitle = copy.team || strings.chat.teamTitle(teamStats.totalCount).split(' · ')[0]
+  const sheetOpen = openModal === 'todos' || openModal === 'goal'
+  const cardModalOpen = openModal === 'jobs' || openModal === 'subagents' || openModal === 'team'
 
   return <View style={styles.dock}>
-    {todos.length > 0 && (
+    {effectiveMode !== 'compact' && hasTodos && (
       <TaskProgressChecklist
         todos={todos}
         expanded={expanded === 'todos'}
@@ -151,7 +162,7 @@ export function SessionActivityDock({
         maxHeight={detailsHeight}
       />
     )}
-    {goal && <Disclosure title={`${copy.goal} · ${goal.objective}`} trailing={<Text style={styles.status}>{phase(goal.phase)}</Text>}
+    {effectiveMode !== 'compact' && goal && <Disclosure title={`${copy.goal} · ${goal.objective}`} trailing={<Text style={styles.status}>{phase(goal.phase)}</Text>}
       icon={goal.phase === 'paused' ? <PauseCircle size={18} color={colors.muted} /> : <Flag size={18} color={colors.muted} />}
       open={expanded === 'goal'} onPress={() => toggle('goal')}>
       <ScrollView style={[styles.details, { maxHeight: detailsHeight }]} nestedScrollEnabled>
@@ -161,7 +172,7 @@ export function SessionActivityDock({
       </ScrollView>
     </Disclosure>}
 
-    {effectiveMode === 'compact' && (hasJobs || hasSubagents || hasTeam) && (
+    {effectiveMode === 'compact' && (hasTodos || hasGoal || hasJobs || hasSubagents || hasTeam) && (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -170,6 +181,58 @@ export function SessionActivityDock({
         keyboardShouldPersistTaps="handled"
         testID="activity-pill-bar"
       >
+        {hasTodos && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${todosTitle} · ${todoStats.progressText}`}
+            onPress={() => setActiveModal('todos')}
+            style={({ pressed }) => [
+              styles.pill,
+              isTodosActive && styles.pillActive,
+              pressed && styles.pressed,
+            ]}
+            testID="activity-pill-todos"
+          >
+            {isTodosActive ? (
+              <TaskStatusGlyph status="in_progress" colors={colors} size={14} />
+            ) : (
+              <IconChecklistOutline size={14} color={colors.muted} />
+            )}
+            <Text style={[styles.pillText, isTodosActive && styles.pillTextActive]} numberOfLines={1}>
+              {todosTitle}
+            </Text>
+            <Text style={[styles.pillBadge, isTodosActive && styles.pillBadgeActive]} testID="activity-pill-todos-badge">
+              {todoStats.progressText}
+            </Text>
+          </Pressable>
+        )}
+
+        {hasGoal && goal && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${copy.goal} · ${String(goal.objective)}`}
+            onPress={() => setActiveModal('goal')}
+            style={({ pressed }) => [
+              styles.pill,
+              isGoalActive && styles.pillActive,
+              pressed && styles.pressed,
+            ]}
+            testID="activity-pill-goal"
+          >
+            {goal.phase === 'paused' ? (
+              <PauseCircle size={14} color={colors.muted} />
+            ) : (
+              <Flag size={14} color={isGoalActive ? colors.primary : colors.muted} />
+            )}
+            <Text style={[styles.pillText, isGoalActive && styles.pillTextActive]} numberOfLines={1}>
+              {copy.goal}
+            </Text>
+            <Text style={[styles.pillBadge, isGoalActive && styles.pillBadgeActive]} testID="activity-pill-goal-badge">
+              {phase(goal.phase)}
+            </Text>
+          </Pressable>
+        )}
+
         {hasJobs && (
           <Pressable
             accessibilityRole="button"
@@ -288,7 +351,67 @@ export function SessionActivityDock({
       </>
     )}
 
-    {openModal !== undefined && (
+    <SheetModal
+      visible={sheetOpen}
+      onClose={() => setActiveModal(undefined)}
+      presentation="sheet"
+    >
+      {openModal === 'todos' && (
+        <View style={styles.sheetBody} testID="activity-todos-sheet">
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{todosTitle}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.common.close}
+              hitSlop={8}
+              onPress={() => setActiveModal(undefined)}
+              style={({ pressed }) => [styles.sheetClose, pressed && styles.pressed]}
+            >
+              <X size={18} color={colors.muted} />
+            </Pressable>
+          </View>
+          <TaskProgressChecklist
+            todos={todos}
+            expanded
+            onToggle={() => setActiveModal(undefined)}
+            maxHeight={modalDetailsHeight}
+          />
+        </View>
+      )}
+      {openModal === 'goal' && goal && (
+        <View style={styles.sheetBody} testID="activity-goal-sheet">
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetTitleGroup}>
+              {goal.phase === 'paused' ? <PauseCircle size={18} color={colors.muted} /> : <Flag size={18} color={colors.primary} />}
+              <Text style={styles.sheetTitle}>{copy.goal}</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.common.close}
+              hitSlop={8}
+              onPress={() => setActiveModal(undefined)}
+              style={({ pressed }) => [styles.sheetClose, pressed && styles.pressed]}
+            >
+              <X size={18} color={colors.muted} />
+            </Pressable>
+          </View>
+          <ScrollView style={{ maxHeight: modalDetailsHeight }} nestedScrollEnabled>
+            <Text selectable style={styles.goalObjective}>{String(goal.objective)}</Text>
+            <Text style={styles.muted}>
+              {phase(goal.phase)}
+              {typeof projection?.roundsStarted === 'number' && typeof goal.maxGoalRounds === 'number'
+                ? ` · ${projection.roundsStarted}/${goal.maxGoalRounds}`
+                : ''}
+            </Text>
+            {record(goal.blockedReason) && typeof goal.blockedReason.message === 'string' && (
+              <Text selectable style={styles.goalBlocked}>{goal.blockedReason.message}</Text>
+            )}
+          </ScrollView>
+        </View>
+      )}
+    </SheetModal>
+
+    {cardModalOpen && (
       <Modal
         visible
         transparent
@@ -369,13 +492,13 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   pillBarScroll: { flexGrow: 0, flexShrink: 0 },
   pillBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: 2 },
   pill: {
-    minHeight: 34,
+    minHeight: 32,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 5,
+    ...continuousRadius(radius.pill),
+    backgroundColor: colors.surfaceMuted ?? colors.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separator,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -400,6 +523,44 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   pillBadgeActive: {
     color: colors.primary,
     fontWeight: '600',
+  },
+  sheetBody: {
+    gap: spacing.sm,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  sheetTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flex: 1,
+    minWidth: 0,
+  },
+  sheetTitle: {
+    ...typography.heading,
+    color: colors.ink,
+    flexShrink: 1,
+  },
+  sheetClose: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalObjective: {
+    ...typography.body,
+    color: colors.ink,
+    marginBottom: spacing.xs,
+  },
+  goalBlocked: {
+    ...typography.small,
+    color: colors.danger,
+    marginTop: spacing.xs,
   },
   modalOverlay: {
     flex: 1,

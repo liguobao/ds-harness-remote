@@ -117,6 +117,13 @@ vi.mock('../src/ui/theme-context', () => ({
   }),
 }))
 
+vi.mock('../src/ui/sheet', () => {
+  const React = require('react')
+  return {
+    SheetModal: (props: any) => (props.visible ? React.createElement('SheetModal', props, props.children) : null),
+  }
+})
+
 import React from 'react'
 import { X as XIcon } from 'lucide-react-native'
 import {
@@ -678,12 +685,57 @@ describe('SessionActivityDock', () => {
       const closed = renderDock(props)
       expect(findByTestId(closed, 'activity-card-modal')).toBeUndefined()
     })
+
+    it('folds todos and goal into the compact pill bar and opens them in SheetModal', () => {
+      const props = {
+        session: baseSession({
+          projections: {
+            values: {
+              todos: [
+                { content: '步骤一', status: 'completed' },
+                { content: '步骤二', status: 'in_progress' },
+              ],
+              goal: {
+                goal: { objective: '完成主聊天页减负', phase: 'active', maxGoalRounds: 5 },
+                roundsStarted: 2,
+              },
+            },
+          },
+        }),
+        initialJobs: [],
+        childSessions: [],
+        teamState: { members: [], tasks: [] },
+      }
+
+      const initial = renderDock(props)
+      expect(findByTestId(initial, 'activity-pill-bar')).toBeTruthy()
+      expect(findByTestId(initial, 'activity-pill-todos')).toBeTruthy()
+      expect(findByTestId(initial, 'activity-pill-goal')).toBeTruthy()
+      // Compact mode must not render inline TaskProgressChecklist above the pill bar.
+      expect(findByComponent(initial, TaskProgressChecklist)).toBeUndefined()
+
+      // Tap todos pill -> opens SheetModal with expanded TaskProgressChecklist.
+      findByTestId(initial, 'activity-pill-todos').props.onPress()
+      const todosOpen = renderDock(props)
+      expect(findByTestId(todosOpen, 'activity-todos-sheet')).toBeTruthy()
+      const checklist = findByComponent(todosOpen, TaskProgressChecklist)
+      expect(checklist).toBeTruthy()
+      expect(checklist.props.expanded).toBe(true)
+
+      // Tap goal pill -> switches SheetModal to goal details.
+      findByTestId(todosOpen, 'activity-pill-goal').props.onPress()
+      const goalOpen = renderDock(props)
+      expect(findByTestId(goalOpen, 'activity-goal-sheet')).toBeTruthy()
+      expect(findByTestId(goalOpen, 'activity-todos-sheet')).toBeUndefined()
+    })
   })
 
   describe('cards mode', () => {
     it('renders the three activity cards inline instead of the pill bar', () => {
       const el = renderDock({
-        session: baseSession(),
+        session: baseSession({
+          projections: { values: { todos: [{ content: '保留卡片态', status: 'pending' }] } },
+        }),
         mode: 'cards',
         initialJobs: [runningJob],
         childSessions: [childSession],
@@ -692,6 +744,7 @@ describe('SessionActivityDock', () => {
       })
 
       expect(findByTestId(el, 'activity-pill-bar')).toBeUndefined()
+      expect(findByComponent(el, TaskProgressChecklist)).toBeTruthy()
       expect(findByComponent(el, BackgroundJobsCard)).toBeTruthy()
       expect(findByComponent(el, SubagentsCard)).toBeTruthy()
       expect(findByComponent(el, AgentTeamCard)).toBeTruthy()
