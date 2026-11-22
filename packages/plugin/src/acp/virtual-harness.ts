@@ -1490,6 +1490,7 @@ function isAllowedHostCarrierDispatch(endpoint: string): boolean {
 
 function isAllowedHostCarrierOpen(endpoint: string): boolean {
   return endpoint === 'remoteAccess/follow'
+    || endpoint === 'speech/follow'
     || endpoint.startsWith('account/')
     || endpoint.startsWith('settings/')
 }

@@ -764,6 +764,15 @@ Harness Remote 固定白名单允许官方 CoT 翻译插件的 `cotTranslation/l
 `cotTranslation/translate` unary 调用；不开放该命名空间的其他方法或 stream。
 Host 必须启用对应官方插件，原生 Gateway 的不可用或翻译失败结果原样返回。
 
+Harness Remote 固定白名单允许官方语音输入插件的 `speech/catalog`、`speech/transcribe`、
+`speech/prepare`、`speech/configure`、`speech/cancelPreparation` unary 调用与 `speech/follow`
+stream 订阅；不开放 `speech/*` 命名空间的其他方法，且严格区分 unary 与 stream（通过
+`harness.remote.call` 调用 `speech/follow` 或通过 `harness.remote.stream.open` 打开非
+`speech/follow` 的 `speech/*` 端点均以 `METHOD_NOT_ALLOWED` 拒绝）。Host 必须启用对应官方插件，
+原生 Gateway 的不可用或执行失败结果原样返回。`speech/prepare` 因首次模型下载与加载使用
+10 分钟超时预算（其余 unary 调用保持默认 60 秒）；超过 2 MiB 的请求（如较长 `speech/transcribe`
+音频）由客户端自动切换至 `harness.remote.transfer.*` 分片传输（受有界传输上限约束）。
+
 ### 16.1 Request
 
 ```json

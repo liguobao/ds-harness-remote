@@ -119,6 +119,8 @@ const workspaceSearchPayloadSchema = z.object({ args: z.object({
 const MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION
 const MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION
 const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
+const DEFAULT_CALL_TIMEOUT_MS = 60_000
+const SPEECH_PREPARE_TIMEOUT_MS = 10 * 60_000
 
 /** Fixed Typert Remote subset exposed to authenticated peers. */
 export const HARNESS_REMOTE_ALLOWLIST = [
@@ -206,6 +208,10 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'claudeCodeMods/pressBand',
   'speech/catalog',
   'speech/transcribe',
+  'speech/follow',
+  'speech/prepare',
+  'speech/configure',
+  'speech/cancelPreparation',
   'workspaceFiles/list',
   'workspaceFiles/stat',
   'workspaceFiles/read',
@@ -335,6 +341,7 @@ export class HarnessRemoteBridge {
     }
     this.assertAllowed(params.endpoint)
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this terminal endpoint.')
+    if (params.endpoint === 'speech/follow') throw new RpcError('METHOD_NOT_ALLOWED', 'Use a stream for this speech endpoint.')
     if (['settings/update', 'settings/replace', 'settings/mutate'].includes(params.endpoint)) {
       const args = requestArgs(params.payload)
       if (args.ns === 'ds-harness-remote' || args.ns === 'dsh-remote') {
@@ -368,7 +375,13 @@ export class HarnessRemoteBridge {
       await ensureHostWorkspaceDirectory(folder)
     }
     const startedAt = performance.now()
-    const signal = AbortSignal.timeout(60_000)
+    const timeoutMs = params.endpoint === 'speech/prepare' ? SPEECH_PREPARE_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    }, timeoutMs)
+    timer.unref?.()
+    const { signal } = controller
     try {
       let nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
       nativePayload = await normalizeSessionAttachmentPayload(params.endpoint, nativePayload, this.harnessVersion, this.gateway, signal)
@@ -429,6 +442,8 @@ export class HarnessRemoteBridge {
         ...(reason === undefined ? {} : { reason }),
       })
       throw error
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -602,6 +617,9 @@ export class HarnessRemoteBridge {
     if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
     if (params.endpoint === 'workspaceFiles/search') throw new RpcError('METHOD_NOT_ALLOWED', 'Workspace search is not a stream.')
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
+    if (params.endpoint.startsWith('speech/') && params.endpoint !== 'speech/follow') {
+      throw new RpcError('METHOD_NOT_ALLOWED', 'This speech endpoint is not a stream.')
+    }
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)
     if (this.streams.has(params.streamId)) throw new RpcError('REQUEST_CONFLICT', 'The Harness Remote stream is already open.')
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {

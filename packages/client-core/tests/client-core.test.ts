@@ -862,6 +862,91 @@ describe('RemoteTypertGateway', () => {
     transport.push(encodeMessage(createRpcResponse(close.id, {})))
     await closing
   })
+
+  it('applies a 10-minute default timeout to speech/prepare while honoring explicit overrides', async () => {
+    await runScenarios(
+      [
+        {
+          name: 'defaults speech/prepare direct calls to 600_000ms',
+          run: async () => {
+            const rpc = vi.fn(async () => ({ ok: true, value: { ready: true } }))
+            const client = { rpc } as unknown as RemoteClientCore
+            await expect(new RemoteTypertGateway(client).dispatch('speech/prepare', { args: {} }))
+              .resolves.toEqual({ ok: true, value: { ready: true } })
+            expect(rpc).toHaveBeenCalledWith(
+              'harness.remote.call',
+              { endpoint: 'speech/prepare', payload: { args: {} } },
+              expect.any(AbortSignal),
+              { timeoutMs: 600_000 },
+            )
+          },
+        },
+        {
+          name: 'preserves explicit timeoutMs override and additional options on speech/prepare',
+          run: async () => {
+            const rpc = vi.fn(async () => ({ ok: true, value: { ready: true } }))
+            const gateway = new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore)
+            await gateway.dispatch('speech/prepare', { args: {} }, undefined, {
+              timeoutMs: 120_000,
+              maxResponseBytes: 4096,
+            })
+            expect(rpc).toHaveBeenLastCalledWith(
+              'harness.remote.call',
+              { endpoint: 'speech/prepare', payload: { args: {} } },
+              expect.any(AbortSignal),
+              { timeoutMs: 120_000, maxResponseBytes: 4096 },
+            )
+            await gateway.dispatch('speech/prepare', { args: {} }, undefined, {
+              maxResponseBytes: 4096,
+            })
+            expect(rpc).toHaveBeenLastCalledWith(
+              'harness.remote.call',
+              { endpoint: 'speech/prepare', payload: { args: {} } },
+              expect.any(AbortSignal),
+              { maxResponseBytes: 4096, timeoutMs: 600_000 },
+            )
+          },
+        },
+        {
+          name: 'applies 600_000ms deadline to transferred speech/prepare commit',
+          run: async () => {
+            vi.spyOn(performance, 'now').mockReturnValue(0)
+            const calls: Array<{ method: string; options?: unknown }> = []
+            const rpc = vi.fn(async (method: string, _params: unknown, _signal?: unknown, options?: unknown) => {
+              calls.push({ method, options })
+              if (method === 'harness.remote.call') {
+                throw Object.assign(new Error('too large'), { code: 'RESPONSE_TOO_LARGE' })
+              }
+              if (method === 'harness.remote.transfer.commit') {
+                return { kind: 'inline', response: { ok: true, value: { ready: true } } }
+              }
+              if (method === 'harness.remote.transfer.close') return { closed: true }
+              return { accepted: true }
+            })
+            await expect(new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).call('speech/prepare', { args: {} }))
+              .resolves.toEqual({ ready: true })
+            expect(calls.find(call => call.method === 'harness.remote.transfer.commit')?.options).toEqual({ timeoutMs: 600_000 })
+          },
+        },
+        {
+          name: 'leaves non-prepare endpoints unchanged',
+          run: async () => {
+            const rpc = vi.fn(async () => ({ ok: true, value: { engines: [] } }))
+            await new RemoteTypertGateway({ rpc } as unknown as RemoteClientCore).dispatch('speech/catalog', { args: {} })
+            expect(rpc).toHaveBeenCalledWith(
+              'harness.remote.call',
+              { endpoint: 'speech/catalog', payload: { args: {} } },
+              expect.any(AbortSignal),
+              undefined,
+            )
+          },
+        },
+      ],
+      async () => {
+        await cleanupContract1()
+      },
+    )
+  })
 })
 
 describe('CodexRemoteClient', () => {
