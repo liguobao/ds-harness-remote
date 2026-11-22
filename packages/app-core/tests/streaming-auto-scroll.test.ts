@@ -118,10 +118,10 @@ describe('streaming auto-scroll and smart scroll mechanics', () => {
       state: 'running',
     }
     const sigRunning = computeStreamingSignature([baseTool])
-    expect(sigRunning).toBe('tool-1:tool:running:0:0:0')
+    expect(sigRunning).toBe('tool-1:tool:running:0:0:0:0::')
 
     const sigFailed = computeStreamingSignature([{ ...baseTool, state: 'failed' }])
-    expect(sigFailed).toBe('tool-1:tool:failed:0:0:0')
+    expect(sigFailed).toBe('tool-1:tool:failed:0:0:0:0::')
     expect(sigFailed).not.toBe(sigRunning)
 
     // Running tools stream into callDetail without a state transition.
@@ -132,6 +132,47 @@ describe('streaming auto-scroll and smart scroll mechanics', () => {
 
     const sigSummary = computeStreamingSignature([{ ...baseTool, summary: 'Installing…' }])
     expect(sigSummary).not.toBe(sigRunning)
+
+    // ACP terminal output streams into resultDetail while still running, and a
+    // >16k sliding window keeps its length constant — sample the tail too.
+    const sigResult = computeStreamingSignature([
+      { ...baseTool, resultDetail: { text: 'progress', format: 'code' } },
+    ])
+    expect(sigResult).not.toBe(sigRunning)
+    const slid = `${'x'.repeat(16_000)}new tail`
+    const sigWindow = computeStreamingSignature([
+      { ...baseTool, resultDetail: { text: slid, format: 'code' } },
+    ])
+    const sigWindowAfter = computeStreamingSignature([
+      { ...baseTool, resultDetail: { text: `${slid.slice(-16_000 + 8)}more`, format: 'code' } },
+    ])
+    expect(sigWindowAfter).not.toBe(sigWindow)
+  })
+
+  it('detects turnEnd stamps on non-message last items', () => {
+    const baseTool: ToolActivity = {
+      id: 'tool-te-1',
+      sessionId: 'session-1',
+      createdAt: 1000,
+      kind: 'tool',
+      toolName: 'Bash',
+      state: 'finished',
+    }
+    const sigOpen = computeStreamingSignature([baseTool])
+    const sigEnded = computeStreamingSignature([{ ...baseTool, turnEnd: { reason: 'failed', time: 2000 } }])
+    expect(sigEnded).not.toBe(sigOpen)
+
+    const baseApproval: ApprovalActivity = {
+      id: 'approval-te-1',
+      sessionId: 'session-1',
+      createdAt: 1000,
+      kind: 'approval',
+      approvalId: 'approval-te-1',
+      toolName: 'Bash',
+    }
+    const sigApprovalOpen = computeStreamingSignature([baseApproval])
+    const sigApprovalEnded = computeStreamingSignature([{ ...baseApproval, turnEnd: { reason: 'stopped', time: 2000 } }])
+    expect(sigApprovalEnded).not.toBe(sigApprovalOpen)
   })
 
   it('detects approval outcome and question state/outcome transitions', () => {
