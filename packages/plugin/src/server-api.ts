@@ -114,19 +114,22 @@ export class HostServerApi {
     const identity = this.requireIdentity()
     if (this.role !== 'host' || result.device.role !== 'host' || result.device.deviceId !== identity.deviceId || result.device.identityKey !== identity.publicKey)
       throw new ServerApiError('PAIRING_IDENTITY_INVALID', 'Pairing identity mismatch.', false)
-    if (result.pairingRestricted) {
-      if (!result.inboundOnly) throw new ServerApiError('DEVICE_SCOPE_REQUIRED', 'Paired Host must remain inbound only.', false)
-      this.hostOnly = true
-      await this.store.restrictPairingHostOnly()
-    }
+    if (result.pairingRestricted && !result.inboundOnly)
+      throw new ServerApiError('DEVICE_SCOPE_REQUIRED', 'Paired Host must remain inbound only.', false)
+    const tokens = validateTokens(result.tokens)
     this.credentials = await this.withRefreshLock(async () => {
       const existing = await this.store.load(this.baseUrl, identity.deviceId)
       if (existing?.account !== undefined && existing.account !== result.account)
         throw new ServerApiError('PAIRING_ACCOUNT_CONFLICT', 'Pairing cannot replace the current account.', false)
+      if (result.pairingRestricted) {
+        await this.store.restrictPairingHostOnly()
+        this.hostOnly = true
+      }
       if (existing !== undefined && existing.refreshTokenExpiresAt > Date.now() + 30_000) return existing
       return this.store.save({ serverUrl: this.baseUrl, deviceId: identity.deviceId,
-        authorizationMethod: 'device_pairing', account: result.account, accountKind: result.accountKind,
-        pairingRestricted: result.pairingRestricted, inboundOnly: result.inboundOnly, ...validateTokens(result.tokens) })
+        authorizationMethod: result.pairingRestricted ? 'device_pairing' : (existing?.authorizationMethod ?? 'device_pairing'),
+        account: result.account, accountKind: result.accountKind,
+        pairingRestricted: result.pairingRestricted, inboundOnly: result.inboundOnly, ...tokens })
     })
   }
 

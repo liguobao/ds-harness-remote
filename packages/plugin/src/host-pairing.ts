@@ -115,6 +115,7 @@ export class HostPairing {
                 throw e;
             s.state = 'expired';
             delete s.submission;
+            delete s.failureReason;
             await this.save(s);
             return this.view(s);
         }
@@ -151,6 +152,10 @@ export class HostPairing {
             }
         }
         s.state = r.state;
+        if (r.failureReason)
+            s.failureReason = r.failureReason.slice(0, 128);
+        else
+            delete s.failureReason;
         if (!active.has(s.state))
             delete s.submission;
         if (s.state === 'completed' && s.localSaved) {
@@ -161,10 +166,11 @@ export class HostPairing {
         return this.view(s, r.failureReason);
     }
     private view(s: Saved, reason?: string | null): HostPairingView {
+        const failureReason = reason || s.failureReason;
         return { sessionId: s.session.sessionId, state: s.state, expiresAt: s.session.expiresAt, serverUrl: this.serverUrl, hostFingerprint: fullFingerprint(this.identity.publicKey),
             ...(s.state === 'created' ? { qrPayload: s.qrFormat === 'fragment-ticket-v1' ? `${this.serverUrl}/pair#v1.${s.session.scanSecret}` : JSON.stringify({ type: 'dsh.remote.pairing', ...s.session, serverUrl: this.serverUrl }) } : {}),
             ...(s.mobile ? { mobile: { deviceId: s.mobile.deviceId, name: s.mobile.name, fingerprint: fullFingerprint(s.mobile.identityKey) } } : {}),
-            ...(reason ? { failureReason: reason } : {}), canRetry: s.submission !== undefined && active.has(s.state), localSaved: s.localSaved };
+            ...(failureReason ? { failureReason } : {}), canRetry: s.submission !== undefined && active.has(s.state), localSaved: s.localSaved };
     }
     private send(s: Saved, action: string, raw: string): Promise<unknown> {
         const path = `${root}/${s.session.sessionId}/${action}`;

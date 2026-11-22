@@ -5,7 +5,7 @@ import type { RtcConnectionDiagnostics, RtcIceServer } from '@dsh-remote/webrtc'
 import { AdaptiveTransport, stunOnlyIceServers } from '@dsh-remote/webrtc'
 import type { ResolvedConfig } from './config.js'
 import type { TrustedPeer } from './identity-store.js'
-import type { AccountVerification, AuthorizedPeerDevice, ServerHostDevice } from './server-api.js'
+import type { AccountVerification, AuthorizedPeerDevice, OAuthProviderInfo, ServerHostDevice } from './server-api.js'
 import { AccountTwoFactorRequired } from './account-two-factor-required.js'
 
 export interface ConnectedRemote {
@@ -129,6 +129,7 @@ export interface HostAuthorizationControl {
   setTerminalEnabled?(enabled: boolean): void
   setLoopbackPorts?(ports: readonly number[]): void
   pairingControl?(action: 'start' | 'status' | 'confirm' | 'cancel', input: { sessionId?: string; verificationCode?: string }): Promise<import('./pairing-contract.js').HostPairingView | undefined>
+  hostOAuthProviders?(): Promise<OAuthProviderInfo[]>
   hostStatus(): {
     deviceId?: string
     configured: boolean

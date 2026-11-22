@@ -1040,4 +1040,373 @@ describe('HostPairingPanel completion and polling lifecycle', () => {
       unmount()
     }
   })
+
+  it('surfaces explicit error alerts for failureReason and pairing error codes, and handles add mode + onDone', async () => {
+    vi.useFakeTimers()
+    const { React, resetRender, unmount } = createTestHarness()
+    let mode: 'sign-in' | 'add' = 'add'
+    let statusResponse: any
+    let startError: any
+    let completeError: Error | undefined
+    const onDone = vi.fn()
+    const onComplete = vi.fn(async () => {
+      if (completeError) throw completeError
+    })
+    const baseSession = {
+      sessionId: '019a0000-0000-7000-8000-000000000200',
+      expiresAt: Date.now() + 180_000,
+      serverUrl: 'https://dsh.r2049.cn',
+      hostFingerprint: 'host-fp',
+      canRetry: false,
+      localSaved: false,
+    }
+    const control = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'host.pairing.status') return statusResponse
+      if (endpoint === 'host.pairing.start') {
+        if (startError) throw startError
+        return { ...baseSession, state: 'created', qrPayload: 'https://dsh.r2049.cn/pair#v1.xyz' }
+      }
+      if (endpoint === 'host.pairing.confirm') {
+        return { ...baseSession, state: 'completed', localSaved: true, mobile: { deviceId: 'phone-2', name: 'Phone 2', fingerprint: 'fp-2' } }
+      }
+      return undefined
+    })
+
+    const Panel = createHostPairingPanel(React) as any
+    const render = () => {
+      resetRender()
+      return Panel({
+        control,
+        serverUrl: 'https://dsh.r2049.cn',
+        disabled: false,
+        mode,
+        t: (k: string) => k,
+        onComplete,
+        onDone,
+      })
+    }
+
+    try {
+      for (const [failureReason, expectedKey] of [
+        ['PAIRING_ACCOUNT_CONFLICT', 'pairingAccountConflict'],
+        ['HOST_DEVICE_LIMIT_REACHED', 'pairingHostDeviceLimitReached'],
+        ['verification_failed', 'pairingVerificationFailed'],
+      ] as const) {
+        statusResponse = { ...baseSession, state: 'failed', failureReason }
+        const harness = createTestHarness()
+        const LocalPanel = createHostPairingPanel(harness.React) as any
+        const renderLocal = () => {
+          harness.resetRender()
+          return LocalPanel({ control, serverUrl: 'https://dsh.r2049.cn', disabled: false, mode: 'add', t: (k: string) => k, onComplete })
+        }
+        renderLocal()
+        await vi.advanceTimersByTimeAsync(0)
+        const failedTree = renderLocal()
+        expect(findElement(failedTree, (n: any) => n.props?.role === 'alert')?.children).toContain(expectedKey)
+        harness.unmount()
+      }
+
+      statusResponse = undefined
+      let tree = render()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddHint')
+
+      for (const [errorObj, expectedKey] of [
+        [Object.assign(new Error('unsupported'), { code: 'PAIRING_UNSUPPORTED' }), 'pairingUnsupported'],
+        [Object.assign(new Error('conflict'), { details: { remoteCode: 'PAIRING_ACCOUNT_CONFLICT' } }), 'pairingAccountConflict'],
+        [Object.assign(new Error('limit'), { code: 'HOST_DEVICE_LIMIT_REACHED' }), 'pairingHostDeviceLimitReached'],
+        [Object.assign(new Error('device conflict'), { details: { remoteCode: 'PAIRING_DEVICE_CONFLICT' } }), 'pairingDeviceConflict'],
+      ] as const) {
+        startError = errorObj
+        findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart')).props.onClick()
+        await vi.advanceTimersByTimeAsync(0)
+        tree = render()
+        expect(findElement(tree, (n: any) => n.props?.role === 'alert')?.children).toContain(expectedKey)
+      }
+
+      startError = undefined
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart')).props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddScan')
+
+      statusResponse = { ...baseSession, state: 'claimed', mobile: { deviceId: 'phone-2', name: 'Phone 2', fingerprint: 'fp-2' } }
+      await vi.advanceTimersByTimeAsync(2500)
+      tree = render()
+      findElement(tree, (n: any) => n.type === 'input' && n.props?.maxLength === 8).props.onChange({ target: { value: '87654321' } })
+      tree = render()
+      completeError = new Error('transient refresh error')
+      findElement(tree, (n: any) => n.type === 'form' && n.props?.className === 'dshRemotePairingCodeForm').props.onSubmit({
+        preventDefault() {}, nativeEvent: { isTrusted: true },
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      tree = render()
+      expect(findElement(tree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddComplete')
+      expect(onDone).not.toHaveBeenCalled()
+
+      // Failing finish must not invoke onDone; succeeding finish invokes onDone.
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onDone).not.toHaveBeenCalled()
+
+      completeError = undefined
+      findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onDone).toHaveBeenCalledTimes(1)
+    } finally {
+      unmount()
+    }
+  })
+})
+
+describe.each(['settings', 'workspace'] as const)('%s signed-in DSH Go device pairing', entrance => {
+  const cleanups: Array<() => void> = []
+  afterEach(() => {
+    cleanups.splice(0).forEach(cleanup => cleanup())
+    vi.unstubAllGlobals()
+  })
+
+  async function openSignedIn(options: {
+    pairingHostOnly?: boolean
+    authorized?: boolean
+    accountRequired?: boolean
+    providers?: ReturnType<typeof vi.fn>
+    serverUrl?: string
+  } = {}) {
+    const { React, resetRender, unmount } = createTestHarness()
+    cleanups.push(unmount)
+    vi.stubGlobal('window', {
+      requestAnimationFrame: vi.fn(), cancelAnimationFrame: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      setInterval: vi.fn(), clearInterval: vi.fn(),
+    })
+    vi.stubGlobal('document', { documentElement: { classList: { toggle: vi.fn(), remove: vi.fn() } } })
+
+    const pairingHostOnly = options.pairingHostOnly ?? true
+    const authorized = options.authorized ?? true
+    const accountRequired = options.accountRequired ?? false
+    let serverUrl = options.serverUrl ?? 'https://dsh.r2049.cn'
+    const providers = options.providers ?? vi.fn(async () => [{ id: 'dsh-go-pairing-v1', devicePairing: true }])
+    const listeners = new Set<(status: any) => void>()
+
+    const makeSettings = (): PluginSettingsView => ({
+      config: { serverUrl },
+      deviceName: 'test-host',
+      writable: true,
+      applies: 'restart',
+      associations: {
+        ...(pairingHostOnly ? {} : { client: { method: 'account', account: 'user@example.com' } }),
+        host: { method: pairingHostOnly ? 'device_pairing' : 'account', account: pairingHostOnly ? 'dsh-device:1' : 'user@example.com' },
+      },
+    })
+    const makeStatus = () => ({
+      mode: 'local',
+      available: true,
+      serverUrl,
+      hostAuthorizationAvailable: true,
+      host: {
+        deviceId: 'host-1',
+        configured: true,
+        online: true,
+        reconnecting: false,
+        authorized,
+        accountRequired,
+        pairingHostOnly,
+        connectedClients: [],
+      },
+    })
+
+    let pairingState: 'idle' | 'created' | 'claimed' | 'completed' = 'idle'
+    const session = {
+      sessionId: '019a0000-0000-7000-8000-000000000300',
+      expiresAt: Date.now() + 180_000,
+      serverUrl,
+      hostFingerprint: 'host-fp',
+      canRetry: false,
+      localSaved: false,
+    }
+    const control = vi.fn(async (endpoint: string) => {
+      if (endpoint === 'settings.get') return makeSettings()
+      if (endpoint === 'status') return makeStatus()
+      if (endpoint === 'client.authorization.status') return { hasCredentials: true }
+      if (endpoint === 'devices') return []
+      if (endpoint === 'client.account.providers') return providers()
+      if (endpoint === 'host.pairing.status') {
+        if (pairingState === 'created') return { ...session, state: 'created', qrPayload: `${serverUrl}/pair#v1.abc` }
+        if (pairingState === 'claimed') return { ...session, state: 'claimed', mobile: { deviceId: 'phone-2', name: 'Phone 2', fingerprint: 'fp-2' } }
+        return undefined
+      }
+      if (endpoint === 'host.pairing.start') {
+        pairingState = 'created'
+        return { ...session, state: 'created', qrPayload: `${serverUrl}/pair#v1.abc` }
+      }
+      if (endpoint === 'host.pairing.confirm') {
+        pairingState = 'completed'
+        return {
+          ...session,
+          state: 'completed',
+          localSaved: true,
+          mobile: { deviceId: 'phone-2', name: 'Phone 2', fingerprint: 'fp-2' },
+        }
+      }
+      return {}
+    })
+
+    const Component = (entrance === 'settings' ? createRemotePluginOptions(React) : createRemoteWorkspaceAction(React)) as any
+    const props = {
+      control,
+      statusFeed: {
+        subscribe: (listener: (next: any) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+        getSnapshot: () => undefined,
+      },
+      t: (key: string) => key,
+      view: 'page',
+      wide: true,
+      preferredQrProvider: 'zhihu',
+      subscribeOpen: () => () => {},
+      sidebarEntry: { read: () => 'standard', subscribe: () => () => {}, publish: () => {} },
+    }
+    const render = () => { resetRender(); return Component(props) }
+    const settle = async () => { await new Promise(resolve => setTimeout(resolve, 10)); return render() }
+
+    render()
+    let tree = await settle()
+    if (entrance === 'workspace') {
+      findElement(tree, (n: any) => n.props?.className === 'dshRemoteModeButton').props.onClick()
+      render()
+      tree = await settle()
+      tree = await settle()
+    } else {
+      tree = await settle()
+    }
+
+    return {
+      render,
+      settle,
+      tree,
+      control,
+      providers,
+      claimPhone: () => { pairingState = 'claimed' },
+      pushServer: (nextServerUrl: string) => {
+        serverUrl = nextServerUrl
+        listeners.forEach(listener => listener(makeStatus()))
+      },
+    }
+  }
+
+  it.each([
+    { label: 'pairingHostOnly', pairingHostOnly: true },
+    { label: 'standard authorized host', pairingHostOnly: false },
+  ])('discovers devicePairing once and pairs another device without logout ($label)', async ({ pairingHostOnly }) => {
+    const providers = vi.fn(async () => [{ id: 'dsh-go-pairing-v1', devicePairing: true }])
+    const view = await openSignedIn({ pairingHostOnly, providers })
+
+    let tree = view.render()
+    tree = await view.settle()
+    expect(providers).toHaveBeenCalledTimes(1)
+
+    const addButton = findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton'))
+    expect(addButton).not.toBeNull()
+    expect(addButton.props['aria-expanded']).toBe(false)
+
+    addButton.props.onClick()
+    tree = view.render()
+    tree = await view.settle()
+    const addPanelContainer = findElement(tree, (n: any) => n.props?.id?.endsWith('-add-pairing'))
+    expect(addPanelContainer).not.toBeNull()
+    const addPanel = findElement(addPanelContainer, (n: any) => typeof n.type === 'function' && n.props?.mode === 'add')
+    expect(addPanel).not.toBeNull()
+    expect(addPanel.props).toMatchObject({
+      serverUrl: 'https://dsh.r2049.cn',
+      disabled: false,
+      mode: 'add',
+    })
+
+    const panelHarness = createTestHarness()
+    cleanups.push(panelHarness.unmount)
+    const MountedPanel = createHostPairingPanel(panelHarness.React) as any
+    const renderPanel = () => {
+      panelHarness.resetRender()
+      const currentProps = findElement(view.render(), (n: any) => typeof n.type === 'function' && n.props?.mode === 'add')?.props ?? addPanel.props
+      return MountedPanel(currentProps)
+    }
+
+    renderPanel()
+    let panelTree = await (async () => { await new Promise(resolve => setTimeout(resolve, 10)); return renderPanel() })()
+    expect(findElement(panelTree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddHint')
+
+    findElement(panelTree, (n: any) => n.type === 'button' && n.children?.includes('pairingStart')).props.onClick()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    panelTree = renderPanel()
+    expect(findElement(panelTree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddScan')
+
+    const statusCallsBefore = view.control.mock.calls.filter(([ep]) => ep === 'settings.get' || ep === 'status').length
+    view.claimPhone()
+    const { el: codeInput } = await waitForElement(renderPanel, (n: any) => n.type === 'input' && n.props?.maxLength === 8, 4000)
+    expect(codeInput).not.toBeNull()
+    codeInput.props.onChange({ target: { value: '12345678' } })
+    panelTree = renderPanel()
+    findElement(panelTree, (n: any) => n.type === 'form' && n.props?.className === 'dshRemotePairingCodeForm').props.onSubmit({
+      preventDefault() {}, nativeEvent: { isTrusted: true },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    panelTree = renderPanel()
+    tree = await view.settle()
+
+    expect(view.control).toHaveBeenCalledWith('host.pairing.confirm', {
+      sessionId: '019a0000-0000-7000-8000-000000000300',
+      verificationCode: '12345678',
+    })
+    expect(view.control).not.toHaveBeenCalledWith('settings.logout', expect.anything())
+    expect(findElement(panelTree, (n: any) => n.props?.className === 'dshRemotePairingInstructionPrimary')?.children).toContain('pairingAddComplete')
+    expect(findElement(tree, (n: any) => n.props?.className === 'dshRemoteNotice' && n.children?.includes('pairingAddSuccessNotice'))).not.toBeNull()
+    const statusCallsAfter = view.control.mock.calls.filter(([ep]) => ep === 'settings.get' || ep === 'status').length
+    expect(statusCallsAfter).toBeGreaterThan(statusCallsBefore)
+
+    findElement(panelTree, (n: any) => n.type === 'button' && n.children?.includes('pairingDone')).props.onClick()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    tree = await view.settle()
+    expect(findElement(tree, (n: any) => n.props?.id?.endsWith('-add-pairing'))).toBeNull()
+    expect(findElement(tree, (n: any) => n.props?.['aria-controls']?.endsWith('-add-pairing'))?.props['aria-expanded']).toBe(false)
+  }, 10_000)
+
+  it('hides add-pairing entry when capability is missing, discovery fails, or Host is unauthorized, and resets on server switch', async () => {
+    // 1. Missing devicePairing capability
+    const missingProviders = vi.fn(async () => [{ id: 'github', displayName: 'GitHub', qrStartUrl: 'https://example.com/qr' }])
+    const missingView = await openSignedIn({ providers: missingProviders })
+    expect(findElement(missingView.tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton'))).toBeNull()
+    expect(missingProviders).toHaveBeenCalledTimes(1)
+
+    // 2. Discovery fails (no retry loop)
+    const failingProviders = vi.fn(async () => { throw new Error('network failed') })
+    const failingView = await openSignedIn({ providers: failingProviders })
+    await failingView.settle()
+    expect(findElement(failingView.tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton'))).toBeNull()
+    expect(failingProviders).toHaveBeenCalledTimes(1)
+
+    // 3. Client signed in but Host is unauthorized or requires account
+    for (const hostState of [{ authorized: false, accountRequired: false }, { authorized: true, accountRequired: true }]) {
+      const hostProviders = vi.fn(async () => [{ id: 'dsh-go-pairing-v1', devicePairing: true }])
+      const unauthorizedView = await openSignedIn({ pairingHostOnly: false, ...hostState, providers: hostProviders })
+      expect(findElement(unauthorizedView.tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton'))).toBeNull()
+      expect(hostProviders).not.toHaveBeenCalled()
+    }
+
+    // 4. Server switch via statusFeed clears capability and collapses open add-pairing panel
+    const switchProviders = vi.fn()
+      .mockResolvedValueOnce([{ id: 'dsh-go-pairing-v1', devicePairing: true }])
+      .mockResolvedValueOnce([])
+    const switchView = await openSignedIn({ providers: switchProviders })
+    findElement(switchView.tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton')).props.onClick()
+    let tree = await switchView.settle()
+    expect(findElement(tree, (n: any) => n.props?.id?.endsWith('-add-pairing'))).not.toBeNull()
+
+    switchView.pushServer('https://other.example.com')
+    await switchView.settle()
+    tree = await switchView.settle()
+    expect(switchProviders).toHaveBeenCalledTimes(2)
+    expect(findElement(tree, (n: any) => n.props?.id?.endsWith('-add-pairing'))).toBeNull()
+    expect(findElement(tree, (n: any) => n.type === 'button' && n.children?.includes('pairingAddButton'))).toBeNull()
+  })
 })

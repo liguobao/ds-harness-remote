@@ -164,7 +164,6 @@ export class PluginControlRuntime {
         if (Object.keys(input).some(key => key !== 'sessionId' && key !== 'verificationCode')
           || input.sessionId !== undefined && typeof input.sessionId !== 'string'
           || input.verificationCode !== undefined && typeof input.verificationCode !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'Invalid pairing request.')
-        if (action === 'start') await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
         const view = await this.host.pairingControl(action, input as { sessionId?: string; verificationCode?: string })
         if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl('mode.set', { mode: 'local' }, signal)
         return ok(view)
@@ -226,6 +225,9 @@ export class PluginControlRuntime {
       if (this.client !== undefined) return this.client.handleControl(endpoint, payload, signal)
 
       if (endpoint === 'devices') return ok([])
+      if (endpoint === 'client.account.providers' && this.host?.hostOAuthProviders !== undefined) {
+        return ok(await this.host.hostOAuthProviders())
+      }
       if (endpoint === 'host.account.login') {
         if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
         const value = record(payload)
@@ -812,6 +814,7 @@ export class PluginControlRuntime {
       mode: 'local',
       available: false,
       deviceName: hostname(),
+      ...(this.config.serverUrl === undefined ? {} : { serverUrl: this.config.serverUrl }),
       hostAuthorizationAvailable: this.host !== undefined,
       ...(this.host === undefined ? {} : { host: this.host.hostStatus() }),
     }

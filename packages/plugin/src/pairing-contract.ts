@@ -32,4 +32,4 @@ export interface HostPairingView {
     localSaved: boolean;
 }
 export const savedPairingSchema = z.object({ serverUrl: z.string().url(), deviceId: z.string(), session: pairingCreatedSchema, qrFormat: z.literal('fragment-ticket-v1').optional(),
-    state: pairingStatusSchema.shape.state, mobile: pairingDeviceSchema.optional(), submission: z.string().optional(), localSaved: z.boolean() }).strict();
+    state: pairingStatusSchema.shape.state, mobile: pairingDeviceSchema.optional(), submission: z.string().optional(), failureReason: z.string().max(128).optional(), localSaved: z.boolean() }).strict();

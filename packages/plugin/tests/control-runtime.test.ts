@@ -32,19 +32,71 @@ describe('PluginControlRuntime settings setup', () => {
     expect(settings.get().logLevel).toBe('info')
   })
 
-  it('keeps pairing on local Host control and refuses Host-only role escalation', async () => {
+  it('keeps pairing on local Host control without disconnecting remote mode prematurely and refuses Host-only role escalation', async () => {
     const directory = await temporaryDirectory()
     const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
-    const pairingControl = vi.fn(async () => ({ state: 'claimed', localSaved: false }))
+    let pairingHostOnly = false
+    const pairingControl = vi.fn(async (action: string) => ({
+      state: action === 'confirm' ? 'completed' : 'created',
+      localSaved: action === 'confirm',
+    }))
     const clientControl = vi.fn(async () => ({ ok: true, value: {} }))
-    const host = { hostStatus: () => ({ pairingHostOnly: true }), pairingControl } as unknown as HostAuthorizationControl
+    const host = { hostStatus: () => ({ pairingHostOnly }), pairingControl } as unknown as HostAuthorizationControl
     const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings,
       { handleControl: clientControl } as unknown as ClientModeRuntime, host))
+
+    await expect(handler('host.pairing.start', {}, signal())).resolves.toMatchObject({ ok: true })
+    expect(clientControl).not.toHaveBeenCalled()
+
     await expect(handler('host.pairing.confirm', { sessionId: 'specific-session', verificationCode: '00123456' }, signal())).resolves.toMatchObject({ ok: true })
     expect(pairingControl).toHaveBeenCalledWith('confirm', { sessionId: 'specific-session', verificationCode: '00123456' })
     expect(clientControl).not.toHaveBeenCalled()
+
+    pairingHostOnly = true
+    await expect(handler('host.pairing.confirm', { sessionId: 'specific-session', verificationCode: '00123456' }, signal())).resolves.toMatchObject({ ok: true })
+    expect(clientControl).toHaveBeenCalledWith('mode.set', { mode: 'local' }, expect.any(Object))
+
     await expect(handler('settings.role.set', { role: 'client' }, signal())).resolves.toMatchObject({ ok: false, error: { details: { remoteCode: 'DEVICE_SCOPE_REQUIRED' } } })
     await expect(handler('settings.configure', { role: 'client', serverUrl: 'https://dsh.r2049.cn', email: 'test@example.test', password: 'password' }, signal())).resolves.toMatchObject({ ok: false })
+  })
+
+  it('falls back to hostOAuthProviders and exposes serverUrl in host-only status when client runtime is absent', async () => {
+    const directory = await temporaryDirectory()
+    const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+    const hostOAuthProviders = vi.fn(async () => [{
+      id: 'dsh-go-pairing-v1',
+      displayName: 'DSH-Go',
+      startUrl: '/api/v1/device-pairing',
+      devicePairing: true as const,
+    }])
+    const host = {
+      hostStatus: () => ({ configured: true, online: true, reconnecting: false, authorized: true, accountRequired: false, pairingHostOnly: true }),
+      hostOAuthProviders,
+    } as unknown as HostAuthorizationControl
+    const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, host))
+
+    await expect(handler('client.account.providers', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: [{ id: 'dsh-go-pairing-v1', devicePairing: true }],
+    })
+    expect(hostOAuthProviders).toHaveBeenCalledOnce()
+
+    await expect(handler('status', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: {
+        mode: 'local',
+        serverUrl: 'https://dsh.r2049.cn',
+        hostAuthorizationAvailable: true,
+      },
+    })
+
+    const noProviderHandler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings, undefined, {
+      hostStatus: () => ({ configured: true, online: false, reconnecting: false, authorized: false, accountRequired: false }),
+    } as unknown as HostAuthorizationControl))
+    await expect(noProviderHandler('client.account.providers', {}, signal())).resolves.toMatchObject({
+      ok: false,
+      error: { details: { remoteCode: 'METHOD_NOT_ALLOWED' } },
+    })
   })
 
   it('holds login discovery until Server replacement settles and rejects overlapping saves', async () => {

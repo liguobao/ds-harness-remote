@@ -3,13 +3,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { generateKeyPair } from '@dsh-remote/crypto';
+import { runScenarios } from '../../../scripts/test-scenarios.mjs';
+import { resolveConfig } from '../src/config.js';
 import { HostPairing, pairingProof } from '../src/host-pairing.js';
 import { IdentityStore, assertOwnedRemoteStorage } from '../src/identity-store.js';
+import type { SafeLogger } from '../src/logging.js';
 import { HostServerApi } from '../src/server-api.js';
+import { HostServerConnection } from '../src/server-connection.js';
 import { ServerCredentialStore } from '../src/server-credentials.js';
+import { HostPluginRuntime } from '../src/service.js';
+import type { AuthenticatedPeerChannel } from '../src/types.js';
 import vectors from '../../../fixtures/pairing/v1/proof.json' with { type: 'json' };
 const directories: string[] = [];
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { vi.unstubAllGlobals(); vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function setup(compactQr = false) {
     const directory = await mkdtemp(join(tmpdir(), 'remote-pairing-'));
     directories.push(directory);
@@ -185,4 +191,366 @@ it('preserves full JSON QR compatibility when compact discovery is absent', asyn
     const pairing = f.create();
     expect(JSON.parse((await pairing.start()).qrPayload!)).toMatchObject({ type: 'dsh.remote.pairing', ...f.session });
     pairing.close();
+});
+
+it('preserves existing valid tokens and policy on same-account second pairing and rejects conflicts without polluting standard Hosts', async () => {
+    await runScenarios([
+        { name: 'existing device_pairing host', method: 'device_pairing' as const, accountKind: 'device_only' as const, pairingRestricted: true, inboundOnly: true, account: 'device:test' },
+        { name: 'existing standard account host', method: 'account' as const, accountKind: 'standard' as const, pairingRestricted: false, inboundOnly: false, account: 'user@example.com' },
+    ].map(row => ({
+        name: row.name,
+        run: async () => {
+            const f = await setup();
+            const store = new ServerCredentialStore(f.directory);
+            const originalTokens = {
+                accessToken: 'existing-access-token-0123456789',
+                accessTokenExpiresAt: Date.now() + 600_000,
+                refreshToken: 'existing-refresh-token-0123456789',
+                refreshTokenExpiresAt: Date.now() + 86_400_000,
+            };
+            await store.save({
+                serverUrl: 'http://127.0.0.1:8081',
+                deviceId: f.identity.deviceId,
+                authorizationMethod: row.method,
+                account: row.account,
+                accountKind: row.accountKind,
+                pairingRestricted: row.pairingRestricted,
+                inboundOnly: row.inboundOnly,
+                ...originalTokens,
+            });
+            if (row.pairingRestricted) await store.restrictPairingHostOnly();
+
+            const api = new HostServerApi('http://127.0.0.1:8081', store);
+            api.bindIdentity(f.identity);
+            await api.loadStoredPolicy();
+
+            await api.adoptPairing({
+                ...f.credentials,
+                account: row.account,
+                accountKind: row.accountKind,
+                pairingRestricted: row.pairingRestricted,
+                inboundOnly: row.inboundOnly,
+                tokens: {
+                    accessToken: 'new-pairing-access-token-9876543210',
+                    accessTokenExpiresAt: Date.now() + 600_000,
+                    refreshToken: 'new-pairing-refresh-token-9876543210',
+                    refreshTokenExpiresAt: Date.now() + 86_400_000,
+                },
+            });
+
+            expect(api.pairingHostOnly()).toBe(row.pairingRestricted);
+            expect(api.currentAuthorization()).toEqual({ method: row.method, account: row.account });
+            expect(await store.load(api.baseUrl, f.identity.deviceId)).toMatchObject({
+                authorizationMethod: row.method,
+                account: row.account,
+                ...originalTokens,
+            });
+            if (!row.pairingRestricted) {
+                await expect(readFile(join(f.directory, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+            }
+
+            // Account conflict and invalid tokens must fail before touching pairing-host-only.json.
+            await expect(api.adoptPairing({
+                ...f.credentials,
+                account: 'other-account@example.com',
+                pairingRestricted: true,
+                inboundOnly: true,
+            })).rejects.toMatchObject({ code: 'PAIRING_ACCOUNT_CONFLICT' });
+            await expect(api.adoptPairing({
+                ...f.credentials,
+                account: row.account,
+                pairingRestricted: true,
+                inboundOnly: true,
+                tokens: { ...f.credentials.tokens, accessToken: 'short' },
+            })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' });
+            expect(api.pairingHostOnly()).toBe(row.pairingRestricted);
+            if (!row.pairingRestricted) {
+                await expect(readFile(join(f.directory, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+            }
+            expect(await store.load(api.baseUrl, f.identity.deviceId)).toMatchObject({
+                authorizationMethod: row.method,
+                account: row.account,
+                ...originalTokens,
+            });
+            if (!row.pairingRestricted) {
+                await store.save({
+                    serverUrl: 'http://127.0.0.1:8081',
+                    deviceId: f.identity.deviceId,
+                    authorizationMethod: 'account',
+                    account: row.account,
+                    accountKind: 'standard',
+                    pairingRestricted: false,
+                    inboundOnly: false,
+                    accessToken: 'expiring-access-token-0123456789',
+                    accessTokenExpiresAt: Date.now() + 10_000,
+                    refreshToken: 'expiring-refresh-token-0123456789',
+                    refreshTokenExpiresAt: Date.now() + 10_000,
+                });
+                const refreshedTokens = {
+                    accessToken: 'refreshed-pairing-access-token-0123',
+                    accessTokenExpiresAt: Date.now() + 600_000,
+                    refreshToken: 'refreshed-pairing-refresh-token-0123',
+                    refreshTokenExpiresAt: Date.now() + 86_400_000,
+                };
+                await api.adoptPairing({
+                    ...f.credentials,
+                    account: row.account,
+                    accountKind: 'standard',
+                    pairingRestricted: false,
+                    inboundOnly: false,
+                    tokens: refreshedTokens,
+                });
+                expect(api.pairingHostOnly()).toBe(false);
+                expect(api.currentAuthorization()).toEqual({ method: 'account', account: row.account });
+                expect(await store.load(api.baseUrl, f.identity.deviceId)).toMatchObject({
+                    authorizationMethod: 'account',
+                    account: row.account,
+                    ...refreshedTokens,
+                });
+                await expect(readFile(join(f.directory, 'pairing-host-only.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+            }
+            api.close();
+        },
+    })));
+});
+
+it('supports pairing a second phone after completion and persists terminal failureReason across status reads', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-pairing-multi-'));
+    directories.push(directory);
+    const identity = await new IdentityStore({ directory }).loadOrCreate('Host');
+    const host = { deviceId: identity.deviceId, name: identity.name, role: 'host' as const, platform: 'desktop', identityKey: identity.publicKey };
+    const phone1 = { ...host, deviceId: 'phone-1', name: 'Phone 1', role: 'client' as const, identityKey: generateKeyPair().publicKey };
+    const phone2 = { ...host, deviceId: 'phone-2', name: 'Phone 2', role: 'client' as const, identityKey: generateKeyPair().publicKey };
+    let sessionIndex = 0;
+    let currentMobile = phone1;
+    let currentState = 'claimed';
+    let failureReason: string | null = null;
+    const adopted: unknown[] = [];
+
+    const createSession = () => {
+        sessionIndex += 1;
+        return {
+            v: 1 as const,
+            sessionId: `019a0000-0000-7000-8000-00000000000${sessionIndex}`,
+            expiresAt: Date.now() + 180_000,
+            serverPublicKey: generateKeyPair().publicKey,
+            scanSecret: generateKeyPair().publicKey,
+            host,
+        };
+    };
+    let activeSession = createSession();
+    const credentials = {
+        account: 'device:test',
+        accountKind: 'device_only' as const,
+        device: host,
+        inboundOnly: true,
+        pairingRestricted: true,
+        tokens: {
+            accessToken: 'access-token-0123456789',
+            accessTokenExpiresAt: Date.now() + 600_000,
+            refreshToken: 'refresh-token-0123456789',
+            refreshTokenExpiresAt: Date.now() + 86_400_000,
+        },
+    };
+
+    const fetcher = vi.fn<typeof fetch>(async url => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith('/oauth/providers')) return Response.json({ capabilities: { devicePairingQr: 'fragment-ticket-v1' } });
+        if (path.endsWith('/sessions')) {
+            activeSession = createSession();
+            return Response.json(activeSession);
+        }
+        if (path.endsWith('/confirm')) {
+            currentState = failureReason ? 'failed' : 'completed';
+        }
+        return Response.json({
+            v: 1,
+            sessionId: activeSession.sessionId,
+            state: currentState,
+            expiresAt: activeSession.expiresAt,
+            recoverUntil: activeSession.expiresAt + 300_000,
+            failureReason,
+            attemptConsumed: currentState === 'completed' || currentState === 'failed',
+            submissionId: null,
+            host,
+            mobile: currentMobile,
+            credentials: currentState === 'completed' ? credentials : null,
+        });
+    });
+
+    const pairing = new HostPairing('http://127.0.0.1:8081', directory, identity, host, async value => { adopted.push(value); }, fetcher);
+    const first = await pairing.start();
+    await pairing.status();
+    await pairing.confirm(first.sessionId, '00123456');
+
+    currentMobile = phone2;
+    currentState = 'claimed';
+    const second = await pairing.start();
+    const claimedSecond = await pairing.status();
+    expect(claimedSecond?.mobile?.deviceId).toBe('phone-2');
+    const completedSecond = await pairing.confirm(second.sessionId, '65432100');
+    expect(completedSecond).toMatchObject({ state: 'completed', localSaved: true, mobile: { deviceId: 'phone-2' } });
+    expect(adopted).toHaveLength(2);
+    pairing.close();
+
+    await runScenarios(['verification_failed', 'PAIRING_ACCOUNT_CONFLICT', 'HOST_DEVICE_LIMIT_REACHED'].map(reason => ({
+        name: reason,
+        run: async () => {
+            failureReason = reason;
+            currentState = 'claimed';
+            const subDir = await mkdtemp(join(tmpdir(), 'remote-pairing-fail-'));
+            directories.push(subDir);
+            const subIdentity = await new IdentityStore({ directory: subDir }).loadOrCreate('Host');
+            const subHost = { ...host, deviceId: subIdentity.deviceId, identityKey: subIdentity.publicKey };
+            let subSession = createSession();
+            const subFetcher = vi.fn<typeof fetch>(async url => {
+                const path = new URL(String(url)).pathname;
+                if (path.endsWith('/oauth/providers')) return Response.json({ capabilities: { devicePairingQr: 'fragment-ticket-v1' } });
+                if (path.endsWith('/sessions')) {
+                    subSession = { ...createSession(), host: subHost };
+                    return Response.json(subSession);
+                }
+                if (path.endsWith('/confirm')) currentState = 'failed';
+                return Response.json({
+                    v: 1,
+                    sessionId: subSession.sessionId,
+                    state: currentState,
+                    expiresAt: subSession.expiresAt,
+                    recoverUntil: subSession.expiresAt + 300_000,
+                    failureReason,
+                    attemptConsumed: currentState === 'failed',
+                    submissionId: null,
+                    host: subHost,
+                    mobile: phone1,
+                    credentials: null,
+                });
+            });
+            const failPairing = new HostPairing('http://127.0.0.1:8081', subDir, subIdentity, subHost, async () => { }, subFetcher);
+            const started = await failPairing.start();
+            await failPairing.status();
+            const failed = await failPairing.confirm(started.sessionId, '00000001');
+            expect(failed).toMatchObject({ state: 'failed', failureReason: reason, localSaved: false });
+            await assertOwnedRemoteStorage(subDir);
+            const callsAtFailure = subFetcher.mock.calls.length;
+            expect(await failPairing.status()).toMatchObject({ state: 'failed', failureReason: reason });
+            failPairing.close();
+            const reopened = new HostPairing('http://127.0.0.1:8081', subDir, subIdentity, subHost, async () => { }, subFetcher);
+            expect(await reopened.status()).toMatchObject({ state: 'failed', failureReason: reason });
+            expect(subFetcher.mock.calls.length).toBe(callsAtFailure);
+            reopened.close();
+        },
+    })));
+});
+
+it('resumes offline Hosts on first pairing adoption and preserves active tunnels on already-online second pairing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-pairing-runtime-'));
+    directories.push(directory);
+    const serverUrl = 'http://127.0.0.1:8081';
+    const config = resolveConfig({
+        serverUrl,
+        httpServerAllowlist: ['127.0.0.1'],
+        codex: { enabled: false },
+        acp: { enabled: false },
+        deviceName: 'TestHost',
+    });
+    const identities = new IdentityStore({ directory, role: 'host' });
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger;
+    let serverOnline = false;
+    vi.spyOn(HostServerConnection.prototype, 'start').mockImplementation(() => undefined);
+    vi.spyOn(HostServerConnection.prototype, 'isOnline').mockImplementation(() => serverOnline);
+    const reconnectSpy = vi.spyOn(HostServerConnection.prototype, 'reconnect').mockImplementation(() => undefined);
+    const resumeSpy = vi.spyOn(HostServerConnection.prototype, 'resume').mockImplementation(() => undefined);
+
+    const identity = await identities.loadOrCreate('TestHost');
+    const host = { deviceId: identity.deviceId, name: identity.name, role: 'host' as const, platform: process.platform, identityKey: identity.publicKey };
+    const phone1Key = generateKeyPair().publicKey;
+    const phone2Key = generateKeyPair().publicKey;
+    let sessionSeq = 0;
+    let activeSessionId = '';
+    let activeExpiresAt = Date.now() + 180_000;
+    let activeMobile = { ...host, deviceId: 'phone-1', name: 'Phone 1', role: 'client' as const, identityKey: phone1Key };
+    let state = 'claimed';
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path.endsWith('/oauth/providers')) return Response.json({ capabilities: { devicePairingQr: 'fragment-ticket-v1' } });
+        if (path.endsWith('/sessions')) {
+            sessionSeq += 1;
+            activeSessionId = `019a0000-0000-7000-8000-00000000001${sessionSeq}`;
+            activeExpiresAt = Date.now() + 180_000;
+            return Response.json({ v: 1, sessionId: activeSessionId, expiresAt: activeExpiresAt, serverPublicKey: generateKeyPair().publicKey, scanSecret: generateKeyPair().publicKey, host });
+        }
+        if (path.endsWith('/confirm')) state = 'completed';
+        return Response.json({
+            v: 1,
+            sessionId: activeSessionId,
+            state,
+            expiresAt: activeExpiresAt,
+            recoverUntil: activeExpiresAt + 300_000,
+            failureReason: null,
+            attemptConsumed: state === 'completed',
+            submissionId: null,
+            host,
+            mobile: activeMobile,
+            credentials: state === 'completed' ? {
+                account: 'device:runtime-account',
+                accountKind: 'device_only',
+                device: host,
+                inboundOnly: true,
+                pairingRestricted: true,
+                tokens: {
+                    accessToken: 'runtime-access-token-0123456789',
+                    accessTokenExpiresAt: Date.now() + 600_000,
+                    refreshToken: 'runtime-refresh-token-0123456789',
+                    refreshTokenExpiresAt: Date.now() + 86_400_000,
+                },
+            } : null,
+        });
+    }));
+
+    const runtime = new HostPluginRuntime(config, identities, logger);
+    await runtime.start();
+
+    const makeChannel = (connectionId: string, peerDeviceId: string, peerIdentityKey: string): AuthenticatedPeerChannel => ({
+        security: { protocol: 'Noise_IK_25519_ChaChaPoly_SHA256', connectionId, membershipId: 'member-1' },
+        peerDeviceId,
+        peerIdentityKey,
+        mode: 'LAN',
+        send: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        onMessage: vi.fn(() => () => undefined),
+    });
+
+    try {
+        // Offline first pairing calls resume(), never reconnect().
+        const first = await runtime.pairingControl('start', {});
+        await runtime.pairingControl('status', {});
+        await runtime.pairingControl('confirm', { sessionId: first!.sessionId, verificationCode: '00123456' });
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+        expect(reconnectSpy).not.toHaveBeenCalled();
+
+        // Phone 1 connects and stays online.
+        serverOnline = true;
+        await identities.trustPeer({ deviceId: 'phone-1', name: 'Phone 1', platform: 'android', publicKey: phone1Key, membershipId: 'member-1' });
+        const channel1 = makeChannel('conn-1', 'phone-1', phone1Key);
+        await runtime.acceptAuthenticatedPeer(channel1);
+
+        // Online second pairing neither reconnects nor resumes, keeping Phone 1 connected.
+        activeMobile = { ...host, deviceId: 'phone-2', name: 'Phone 2', role: 'client' as const, identityKey: phone2Key };
+        state = 'claimed';
+        const second = await runtime.pairingControl('start', {});
+        await runtime.pairingControl('status', {});
+        await runtime.pairingControl('confirm', { sessionId: second!.sessionId, verificationCode: '65432100' });
+        expect(reconnectSpy).not.toHaveBeenCalled();
+        expect(resumeSpy).toHaveBeenCalledTimes(1);
+        expect(channel1.close).not.toHaveBeenCalled();
+
+        await identities.trustPeer({ deviceId: 'phone-2', name: 'Phone 2', platform: 'ios', publicKey: phone2Key, membershipId: 'member-1' });
+        const channel2 = makeChannel('conn-2', 'phone-2', phone2Key);
+        await runtime.acceptAuthenticatedPeer(channel2);
+        expect(identities.listTrustedPeers().map(peer => peer.deviceId).sort()).toEqual(['phone-1', 'phone-2']);
+        expect(runtime.hostStatus().connectedClients.map(client => client.deviceId).sort()).toEqual(['phone-1', 'phone-2']);
+    } finally {
+        await runtime.close();
+    }
 });

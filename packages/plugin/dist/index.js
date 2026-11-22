@@ -87944,25 +87944,27 @@ var HostServerApi = class {
     const identity3 = this.requireIdentity();
     if (this.role !== "host" || result.device.role !== "host" || result.device.deviceId !== identity3.deviceId || result.device.identityKey !== identity3.publicKey)
       throw new ServerApiError("PAIRING_IDENTITY_INVALID", "Pairing identity mismatch.", false);
-    if (result.pairingRestricted) {
-      if (!result.inboundOnly) throw new ServerApiError("DEVICE_SCOPE_REQUIRED", "Paired Host must remain inbound only.", false);
-      this.hostOnly = true;
-      await this.store.restrictPairingHostOnly();
-    }
+    if (result.pairingRestricted && !result.inboundOnly)
+      throw new ServerApiError("DEVICE_SCOPE_REQUIRED", "Paired Host must remain inbound only.", false);
+    const tokens = validateTokens(result.tokens);
     this.credentials = await this.withRefreshLock(async () => {
       const existing = await this.store.load(this.baseUrl, identity3.deviceId);
       if (existing?.account !== void 0 && existing.account !== result.account)
         throw new ServerApiError("PAIRING_ACCOUNT_CONFLICT", "Pairing cannot replace the current account.", false);
+      if (result.pairingRestricted) {
+        await this.store.restrictPairingHostOnly();
+        this.hostOnly = true;
+      }
       if (existing !== void 0 && existing.refreshTokenExpiresAt > Date.now() + 3e4) return existing;
       return this.store.save({
         serverUrl: this.baseUrl,
         deviceId: identity3.deviceId,
-        authorizationMethod: "device_pairing",
+        authorizationMethod: result.pairingRestricted ? "device_pairing" : existing?.authorizationMethod ?? "device_pairing",
         account: result.account,
         accountKind: result.accountKind,
         pairingRestricted: result.pairingRestricted,
         inboundOnly: result.inboundOnly,
-        ...validateTokens(result.tokens)
+        ...tokens
       });
     });
   }
@@ -91442,6 +91444,7 @@ var savedPairingSchema = external_exports.object({
   state: pairingStatusSchema.shape.state,
   mobile: pairingDeviceSchema.optional(),
   submission: external_exports.string().optional(),
+  failureReason: external_exports.string().max(128).optional(),
   localSaved: external_exports.boolean()
 }).strict();
 
@@ -103508,7 +103511,6 @@ var PluginControlRuntime = class {
         if (action !== "start" && action !== "status" && action !== "confirm" && action !== "cancel") throw new ClientModeError("METHOD_NOT_ALLOWED", "Unknown pairing action.");
         const input4 = record9(payload);
         if (Object.keys(input4).some((key) => key !== "sessionId" && key !== "verificationCode") || input4.sessionId !== void 0 && typeof input4.sessionId !== "string" || input4.verificationCode !== void 0 && typeof input4.verificationCode !== "string") throw new ClientModeError("INVALID_MESSAGE", "Invalid pairing request.");
-        if (action === "start") await this.client?.handleControl("mode.set", { mode: "local" }, signal);
         const view = await this.host.pairingControl(action, input4);
         if (view?.localSaved && this.host.hostStatus().pairingHostOnly) await this.client?.handleControl("mode.set", { mode: "local" }, signal);
         return ok3(view);
@@ -103565,6 +103567,9 @@ var PluginControlRuntime = class {
       }
       if (this.client !== void 0) return this.client.handleControl(endpoint, payload, signal);
       if (endpoint === "devices") return ok3([]);
+      if (endpoint === "client.account.providers" && this.host?.hostOAuthProviders !== void 0) {
+        return ok3(await this.host.hostOAuthProviders());
+      }
       if (endpoint === "host.account.login") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
         const value = record9(payload);
@@ -104105,6 +104110,7 @@ var PluginControlRuntime = class {
       mode: "local",
       available: false,
       deviceName: hostname4(),
+      ...this.config.serverUrl === void 0 ? {} : { serverUrl: this.config.serverUrl },
       hostAuthorizationAvailable: this.host !== void 0,
       ...this.host === void 0 ? {} : { host: this.host.hostStatus() }
     };
@@ -106444,6 +106450,7 @@ var HostPairing = class {
         throw e;
       s.state = "expired";
       delete s.submission;
+      delete s.failureReason;
       await this.save(s);
       return this.view(s);
     }
@@ -106475,6 +106482,10 @@ var HostPairing = class {
       }
     }
     s.state = r.state;
+    if (r.failureReason)
+      s.failureReason = r.failureReason.slice(0, 128);
+    else
+      delete s.failureReason;
     if (!active.has(s.state))
       delete s.submission;
     if (s.state === "completed" && s.localSaved) {
@@ -106485,6 +106496,7 @@ var HostPairing = class {
     return this.view(s, r.failureReason);
   }
   view(s, reason) {
+    const failureReason = reason || s.failureReason;
     return {
       sessionId: s.session.sessionId,
       state: s.state,
@@ -106493,7 +106505,7 @@ var HostPairing = class {
       hostFingerprint: fullFingerprint(this.identity.publicKey),
       ...s.state === "created" ? { qrPayload: s.qrFormat === "fragment-ticket-v1" ? `${this.serverUrl}/pair#v1.${s.session.scanSecret}` : JSON.stringify({ type: "dsh.remote.pairing", ...s.session, serverUrl: this.serverUrl }) } : {},
       ...s.mobile ? { mobile: { deviceId: s.mobile.deviceId, name: s.mobile.name, fingerprint: fullFingerprint(s.mobile.identityKey) } } : {},
-      ...reason ? { failureReason: reason } : {},
+      ...failureReason ? { failureReason } : {},
       canRetry: s.submission !== void 0 && active.has(s.state),
       localSaved: s.localSaved
     };
@@ -111687,7 +111699,7 @@ var HostPluginRuntime = class {
       ...this.harnessVersion === void 0 ? {} : { harnessVersion: this.harnessVersion }
     }, async (result) => {
       await this.serverApi.adoptPairing(result);
-      if (!this.closed) this.serverConnection?.reconnect();
+      if (!this.closed && !this.serverConnection?.isOnline()) this.serverConnection?.resume();
     }, fetch, this.config.httpServerAllowlist);
   }
   async pairingControl(action, input4) {

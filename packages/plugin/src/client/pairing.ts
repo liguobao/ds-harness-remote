@@ -1,15 +1,44 @@
 import QRCode from 'qrcode'
 import type { ClientReact } from './types.js'
-import type { Translate } from '../client-locale.js'
+import type { LocaleKey, Translate } from '../client-locale.js'
 import type { HostPairingView } from '../pairing-contract.js'
 import { messageOf } from './presentation.js'
+
+function errorCodeOf(reason: unknown): string | undefined {
+  if (typeof reason !== 'object' || reason === null) return undefined
+  const e = reason as { code?: unknown; details?: { remoteCode?: unknown } }
+  if (typeof e.details?.remoteCode === 'string') return e.details.remoteCode
+  return typeof e.code === 'string' ? e.code : undefined
+}
+
+function pairingErrorKey(code: string | undefined): LocaleKey {
+  if (code === 'PAIRING_UNSUPPORTED') return 'pairingUnsupported'
+  if (code === 'PAIRING_ACCOUNT_CONFLICT') return 'pairingAccountConflict'
+  if (code === 'HOST_DEVICE_LIMIT_REACHED') return 'pairingHostDeviceLimitReached'
+  if (code === 'PAIRING_DEVICE_CONFLICT') return 'pairingDeviceConflict'
+  return 'pairingError'
+}
+
+function pairingFailureKey(reason: string | undefined): LocaleKey | undefined {
+  if (reason === 'PAIRING_ACCOUNT_CONFLICT') return 'pairingAccountConflict'
+  if (reason === 'HOST_DEVICE_LIMIT_REACHED') return 'pairingHostDeviceLimitReached'
+  if (reason === 'verification_failed') return 'pairingVerificationFailed'
+  if (reason === 'PAIRING_DEVICE_CONFLICT') return 'pairingDeviceConflict'
+  return undefined
+}
 
 export function createHostPairingPanel(React: ClientReact) {
   return function HostPairingPanel(props: {
     control: <T>(endpoint: string, payload?: unknown) => Promise<T>
-    serverUrl: string; disabled: boolean; t: Translate; onComplete(): void | Promise<void>
+    serverUrl: string
+    disabled: boolean
+    mode?: 'sign-in' | 'add'
+    t: Translate
+    onComplete(): void | Promise<void>
+    onDone?: () => void
   }): unknown {
     const { t } = props
+    const addMode = props.mode === 'add'
     const [view, setView] = React.useState<HostPairingView | undefined>(undefined)
     const [image, setImage] = React.useState<string | undefined>(undefined)
     const [now, setNow] = React.useState(Date.now())
@@ -27,6 +56,8 @@ export function createHostPairingPanel(React: ClientReact) {
     const completing = React.useRef<Promise<void> | undefined>(undefined)
     const completion = React.useRef(props.onComplete)
     completion.current = props.onComplete
+    const doneCallback = React.useRef(props.onDone)
+    doneCallback.current = props.onDone
     const runComplete = async (): Promise<void> => {
       const pending = completing.current ?? (async () => completion.current())()
       completing.current = pending
@@ -132,8 +163,7 @@ export function createHostPairingPanel(React: ClientReact) {
         hydratedServer.current = props.serverUrl
         apply(next)
       } catch (reason) {
-        if (mounted.current && currentEpoch === epoch.current) { const e = reason as { code?: string; details?: { remoteCode?: string } }
-          setError(t(e.code === 'PAIRING_UNSUPPORTED' || e.details?.remoteCode === 'PAIRING_UNSUPPORTED' ? 'pairingUnsupported' : 'pairingError')) }
+        if (mounted.current && currentEpoch === epoch.current) setError(t(pairingErrorKey(errorCodeOf(reason))))
       } finally { flight.current = false; if (mounted.current) setBusy(false) }
     }
     const finish = async (): Promise<void> => {
@@ -148,6 +178,7 @@ export function createHostPairingPanel(React: ClientReact) {
         setView(undefined)
         setLocked(false)
         setCode('')
+        doneCallback.current?.()
       } catch (reason) {
         if (mounted.current && currentEpoch === epoch.current) setError(messageOf(reason, t))
       } finally {
@@ -164,12 +195,16 @@ export function createHostPairingPanel(React: ClientReact) {
     const remaining = view === undefined ? 0 : Math.max(0, Math.ceil((new Date(view.expiresAt).getTime() - now) / 1000))
     const remainingText = `${Math.floor(remaining / 60).toString().padStart(2, '0')}:${(remaining % 60).toString().padStart(2, '0')}`
     const retry = locked || view?.canRetry || view?.state === 'approved'
-    const status = view === undefined ? 'pairingHint' : view.state === 'created' ? 'pairingScan'
-      : view.state === 'claimed' ? 'pairingEnter' : view.state === 'completed' ? 'pairingComplete'
-        : view.state === 'approved' ? 'pairingPending' : 'pairingClosed'
+    const status: LocaleKey = view === undefined ? (addMode ? 'pairingAddHint' : 'pairingHint')
+      : view.state === 'created' ? (addMode ? 'pairingAddScan' : 'pairingScan')
+        : view.state === 'claimed' ? 'pairingEnter'
+          : view.state === 'completed' ? (addMode ? 'pairingAddComplete' : 'pairingComplete')
+            : view.state === 'approved' ? 'pairingPending' : 'pairingClosed'
+    const failureKey = view?.state === 'failed' ? pairingFailureKey(view.failureReason) : undefined
+    const alertMessage = error ?? (failureKey === undefined ? undefined : t(failureKey))
     const instructionLines = t(status).split('\n')
     const countdown = !active ? null : React.createElement('span', { className: 'dshRemotePairingCountdown', role: 'timer' }, remaining > 0 ? t('pairingExpires', { time: remainingText }) : t('pairingExpired'))
-    return React.createElement('section', { className: 'dshRemotePairing', 'aria-label': t('pairingTitle') },
+    return React.createElement('section', { className: 'dshRemotePairing', 'aria-label': t(addMode ? 'pairingAddTitle' : 'pairingTitle') },
       React.createElement('div', { className: 'dshRemotePairingHeading' },
       React.createElement('p', { role: 'status', 'aria-live': 'polite', className: 'dshRemotePairingInstructions' }, ...instructionLines.flatMap((line, lineIndex) => [React.createElement('span', { key: lineIndex, className: lineIndex === 0 ? 'dshRemotePairingInstructionPrimary' : 'dshRemotePairingInstructionSecondary' }, ...line.split('DSH Go').flatMap((part, index) => index === 0 ? [part] : [React.createElement('a', { key: index, href: 'https://github.com/ccch1mneyyy/dsh-go', target: '_blank', rel: 'noopener noreferrer' }, 'DSH Go'), part])), lineIndex < instructionLines.length - 1 ? React.createElement('br', { key: `break-${lineIndex}` }) : null])),
         active && view?.state !== 'created' ? countdown : null),
@@ -189,7 +224,7 @@ export function createHostPairingPanel(React: ClientReact) {
         onChange: (event: Event) => setCode((event.target as HTMLInputElement).value.replace(/[^0-9]/g, '').slice(0, 8)),
       })), React.createElement('p', { className: 'dshRemotePairingCodeWarning' }, t('pairingWarning')),
       React.createElement('div', { className: 'dshRemotePairingCodeActions' }, React.createElement('button', { type: 'submit', className: 'dshRemoteSave', disabled: busy || props.disabled || !/^[0-9]{8}$/.test(code) }, t('pairingConfirm')), React.createElement('button', { type: 'button', className: 'dshRemoteDiscard', disabled: busy || props.disabled, onClick: () => void run('cancel') }, t('pairingCancel')))),
-      error === undefined ? null : React.createElement('p', { role: 'alert', className: 'dshRemoteError' }, error),
+      alertMessage === undefined ? null : React.createElement('p', { role: 'alert', className: 'dshRemoteError' }, alertMessage),
       React.createElement('div', { className: 'dshRemotePairingActions' },
         active && retry ? React.createElement('button', { type: 'button', disabled: busy || props.disabled, className: 'dshRemoteSave',
           onClick: (event: { nativeEvent?: Event }) => { if (event.nativeEvent?.isTrusted) void run('confirm', true) } }, t('pairingRetry')) : null,

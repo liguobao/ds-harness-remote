@@ -139,6 +139,11 @@ export function createRemotePluginOptions(React: ClientReact) {
     const qrFlowRun = React.useRef(0)
     const providerRequestRun = React.useRef(0)
     const loginMethodManuallySelected = React.useRef(false)
+    const [addPairingOpen, setAddPairingOpen] = React.useState(false)
+    const [signedInPairingServerUrl, setSignedInPairingServerUrl] = React.useState<string | undefined>(undefined)
+    const signedInPairingProbedServer = React.useRef<string | undefined>(undefined)
+    const signedInPairingConfirmedServer = React.useRef<string | undefined>(undefined)
+    const signedInPairingRequestRun = React.useRef(0)
 
     const associationReadRun = React.useRef(0)
     const association = associations.client ?? associations.host
@@ -146,9 +151,26 @@ export function createRemotePluginOptions(React: ClientReact) {
     const savedServerUrl = settingsView?.config.serverUrl
     const pairingAvailable = pairingServerUrl !== undefined && pairingServerUrl === savedServerUrl
     const serverDirty = savedServerUrl === undefined || serverUrl.trim() !== savedServerUrl
+    const hostPairingEligible = association !== undefined
+      && savedServerUrl !== undefined
+      && !savingServer
+      && !serverDirty
+      && settingsView?.startupError === undefined
+      && hostStatus?.authorized === true
+      && !hostStatus.accountRequired
+    const addPairingAvailable = hostPairingEligible
+      && signedInPairingServerUrl !== undefined
+      && signedInPairingServerUrl === savedServerUrl
     React.useEffect(() => {
       setPairingServerUrl(undefined)
       setLoginMethod(current => current === 'device_pairing' ? 'password' : current)
+    }, [savedServerUrl])
+    React.useEffect(() => {
+      signedInPairingRequestRun.current += 1
+      signedInPairingProbedServer.current = undefined
+      signedInPairingConfirmedServer.current = undefined
+      setSignedInPairingServerUrl(undefined)
+      setAddPairingOpen(false)
     }, [savedServerUrl])
 
     const applyAssociations = (view: PluginSettingsView): void => {
@@ -244,6 +266,46 @@ export function createRemotePluginOptions(React: ClientReact) {
       })
       return () => { active = false }
     }, [signInOpen, props.preferredQrProvider, providerReload, savingServer, serverDirty, savedServerUrl])
+
+    React.useEffect(() => {
+      if (!hostPairingEligible) {
+        signedInPairingRequestRun.current += 1
+        setAddPairingOpen(false)
+        return
+      }
+      if (!open) {
+        if (signedInPairingConfirmedServer.current !== savedServerUrl) {
+          signedInPairingProbedServer.current = undefined
+        }
+        return
+      }
+      const targetServerUrl = savedServerUrl
+      if (targetServerUrl === undefined || signedInPairingProbedServer.current === targetServerUrl) return
+      let active = true
+      let settled = false
+      const run = ++signedInPairingRequestRun.current
+      signedInPairingProbedServer.current = targetServerUrl
+      void props.control<OAuthProviderInfo[]>('client.account.providers').then(items => {
+        settled = true
+        if (!active || run !== signedInPairingRequestRun.current) return
+        const pairingSupported = items.some(item => item.devicePairing === true)
+        signedInPairingConfirmedServer.current = pairingSupported ? targetServerUrl : undefined
+        setSignedInPairingServerUrl(pairingSupported ? targetServerUrl : undefined)
+        if (!pairingSupported) setAddPairingOpen(false)
+      }).catch(() => {
+        settled = true
+        if (!active || run !== signedInPairingRequestRun.current) return
+        signedInPairingConfirmedServer.current = undefined
+        setSignedInPairingServerUrl(undefined)
+        setAddPairingOpen(false)
+      })
+      return () => {
+        active = false
+        if (!settled && signedInPairingProbedServer.current === targetServerUrl) {
+          signedInPairingProbedServer.current = undefined
+        }
+      }
+    }, [open, hostPairingEligible, savedServerUrl])
 
     React.useEffect(() => {
       if (!signInOpen || savingServer || serverDirty || providersLoading || !loginMethod.startsWith('oauth:')
@@ -428,6 +490,7 @@ export function createRemotePluginOptions(React: ClientReact) {
         const view = await props.control<PluginSettingsView>('settings.logout')
         applyView(view, run === associationReadRun.current)
         setSignInOpen(false)
+        setAddPairingOpen(false)
         setNotice({ key: 'signedOut' })
       } catch (reason) {
         setError(messageOf(reason, t))
@@ -838,6 +901,7 @@ export function createRemotePluginOptions(React: ClientReact) {
           setHostDeviceId(status.host?.deviceId ?? '')
         }
         setSignInOpen(false)
+        setAddPairingOpen(false)
         setNotice({ key: 'resetIdentitySuccess' })
       } catch (reason) {
         setError(messageOf(reason, t))
@@ -1277,6 +1341,39 @@ export function createRemotePluginOptions(React: ClientReact) {
                   checked: hostStatus?.authorized === true,
                   onChange: (event: Event) => void setCurrentDeviceControl((event.target as HTMLInputElement).checked),
                 })),
+              !addPairingAvailable ? null : React.createElement('div', { className: 'dshRemoteAddPairingSection' },
+                React.createElement('div', { className: 'dshRemoteAuthorizationSetting' },
+                  React.createElement('div', null,
+                    React.createElement('strong', null, t('pairingAddTitle')),
+                    React.createElement('p', null, t('pairingAddEntryHint'))),
+                  React.createElement('button', {
+                    type: 'button',
+                    className: addPairingOpen ? 'dshRemoteDiscard' : 'dshRemoteReconnect',
+                    disabled: busy || savingServer || serverDirty,
+                    'aria-expanded': addPairingOpen,
+                    'aria-controls': 'dsh-remote-settings-add-pairing',
+                    onClick: () => {
+                      setError(undefined)
+                      setNotice(undefined)
+                      setAddPairingOpen(current => !current)
+                    },
+                  }, t(addPairingOpen ? 'close' : 'pairingAddButton'))),
+                !addPairingOpen ? null : React.createElement('div', {
+                  id: 'dsh-remote-settings-add-pairing',
+                  className: 'dshRemoteAddPairingPanel',
+                }, React.createElement(HostPairingPanel, {
+                  key: savedServerUrl,
+                  control: props.control,
+                  serverUrl: savedServerUrl,
+                  disabled: busy || savingServer || serverDirty,
+                  mode: 'add',
+                  t,
+                  onComplete: async () => {
+                    await load()
+                    setNotice({ key: 'pairingAddSuccessNotice' })
+                  },
+                  onDone: () => setAddPairingOpen(false),
+                }))),
               React.createElement('div', { className: 'dshRemoteConnection', 'aria-live': 'polite' },
                 React.createElement('div', { className: 'dshRemoteConnectionSummary' },
                   React.createElement('span', null, t('connection')),

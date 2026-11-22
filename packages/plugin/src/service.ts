@@ -350,7 +350,10 @@ export class HostPluginRuntime {
       deviceId: this.identity.deviceId, name: this.identity.name, role: 'host', platform: process.platform,
       identityKey: this.identity.publicKey,
       ...(this.harnessVersion === undefined ? {} : { harnessVersion: this.harnessVersion }),
-    }, async result => { await this.serverApi!.adoptPairing(result); if (!this.closed) this.serverConnection?.reconnect() }, fetch, this.config.httpServerAllowlist)
+    }, async result => {
+      await this.serverApi!.adoptPairing(result)
+      if (!this.closed && !this.serverConnection?.isOnline()) this.serverConnection?.resume()
+    }, fetch, this.config.httpServerAllowlist)
   }
 
   async pairingControl(action: 'start' | 'status' | 'confirm' | 'cancel', input: { sessionId?: string; verificationCode?: string }): Promise<HostPairingView | undefined> {
