@@ -347,6 +347,8 @@ position: { key: visibleAnchor.current, offset: contentOffset.y, atBottom },
 }
 
 function visibleMessageVersion(items: ChatItem[]): string {
-  const last = items[items.length - 1]
-  return last === undefined ? '' : JSON.stringify(last)
+  // Streaming appends grow the last item's text/reasoning on every ~100ms flush.
+  // A cheap length-based signature keeps this O(1) instead of re-serializing the
+  // whole item (O(N²) over one long turn) on the JS thread during streaming.
+  return computeStreamingSignature(items)
 }
