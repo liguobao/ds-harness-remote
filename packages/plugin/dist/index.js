@@ -85242,6 +85242,11 @@ var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
 var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
 var WELCOME_NOTICE_VERSION = "2026-08-13.1";
+var WORKSPACE_BINARY_ENDPOINTS = /* @__PURE__ */ new Set([
+  "workspaceFiles/readBytes",
+  "officeToPdf/render",
+  "officeKit/render"
+]);
 var RemoteTypertGateway2 = class {
   constructor(client, compatibility, harnessVersion, deferStreamDisconnect = false, historyCache = new RemoteSessionHistoryCache()) {
     this.client = client;
@@ -85817,7 +85822,7 @@ function base64ToBytes2(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return value;
   if (!isRecord9(value) || typeof value.data !== "string") return value;
   return { ...value, data: base64ToBytes2(value.data) };
 }
@@ -88945,7 +88950,7 @@ var TypertGatewaySwitch = class {
 };
 function workspaceConnectionResult(endpoint, result) {
   if (endpoint === "terminal/environment" && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) };
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return result;
   if (!result.ok || !isRecord11(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
@@ -109706,6 +109711,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspaceFiles/readRelated",
   "workspaceFiles/search",
   "workspaceFiles/changes",
+  "officeKit/render",
+  "officeKit/generation",
   "officeToPdf/render",
   "officeToPdf/generation",
   "toolResults/watch",
@@ -109726,6 +109733,16 @@ var WORKSPACE_FILE_READ_ENDPOINTS = /* @__PURE__ */ new Set([
   "workspaceFiles/readBytes",
   "workspaceFiles/readAll",
   "workspaceFiles/stat"
+]);
+var OFFICE_RENDER_ENDPOINTS = /* @__PURE__ */ new Set([
+  "officeToPdf/render",
+  "officeKit/render"
+]);
+var OFFICE_FALLBACK_ENDPOINT = /* @__PURE__ */ new Map([
+  ["officeKit/generation", "officeToPdf/generation"],
+  ["officeToPdf/generation", "officeKit/generation"],
+  ["officeKit/render", "officeToPdf/render"],
+  ["officeToPdf/render", "officeKit/render"]
 ]);
 var MAX_READ_BYTES2 = 4 * 1024 * 1024;
 var LOCAL_TIME = /^\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/u;
@@ -109835,12 +109852,12 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
         }
         nativePayload = search;
-      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === "officeToPdf/render") && isMessageFilePath(requestArgs(nativePayload).path)) {
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint)) && isMessageFilePath(requestArgs(nativePayload).path)) {
         nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal);
-      } else if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+      } else if (this.resolveWorkspaceRoot !== void 0 && (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal);
       if (params.endpoint === "session/page" && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload);
         if (sessionId !== void 0) this.messageFiles.observe(sessionId, nativeResult.value);
@@ -109874,6 +109891,39 @@ var HarnessRemoteBridge = class {
         code: this.gateway.failure(error62).code,
         ...reason === void 0 ? {} : { reason }
       });
+      throw error62;
+    }
+  }
+  async dispatchWithOfficeFallback(endpoint, nativePayload, signal) {
+    const fallbackEndpoint = OFFICE_FALLBACK_ENDPOINT.get(endpoint);
+    if (fallbackEndpoint === void 0) {
+      return this.gateway.dispatch(endpoint, nativePayload, signal);
+    }
+    let primaryResult;
+    let primaryError;
+    try {
+      primaryResult = await this.gateway.dispatch(endpoint, nativePayload, signal);
+      if (signal.aborted || primaryResult.ok || primaryResult.error.code !== "gateway/invocation-unavailable") {
+        return primaryResult;
+      }
+    } catch (error62) {
+      if (signal.aborted || this.gateway.failure(error62).code !== "gateway/invocation-unavailable") {
+        throw error62;
+      }
+      primaryError = error62;
+    }
+    try {
+      const fallbackResult = await this.gateway.dispatch(fallbackEndpoint, nativePayload, signal);
+      if (!fallbackResult.ok && fallbackResult.error.code === "gateway/invocation-unavailable") {
+        if (primaryResult !== void 0) return primaryResult;
+        throw primaryError;
+      }
+      return fallbackResult;
+    } catch (error62) {
+      if (this.gateway.failure(error62).code === "gateway/invocation-unavailable") {
+        if (primaryResult !== void 0) return primaryResult;
+        throw primaryError;
+      }
       throw error62;
     }
   }
@@ -110650,7 +110700,7 @@ function decodeCanonicalBase643(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult2(endpoint, result) {
-  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && !OFFICE_RENDER_ENDPOINTS.has(endpoint)) return result;
   if (!isJsonRecord(result.value)) return result;
   const directBytes = isBinary(result.value.data) ? result.value.data : void 0;
   const attachmentBytes = directBytes === void 0 ? attachmentAt(result, ["data"]) : void 0;

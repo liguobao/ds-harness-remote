@@ -122,7 +122,7 @@ describe('TypertGatewaySwitch', () => {
       connection.rpc.intercept('/api', () => true, (endpoint, payload, signal) => gateway.dispatchRpc(endpoint, payload, signal))
       const peer = connection.createPeer({ principal: { kind: 'owner' } })
       const handler = connection.createSharedFetchHandler('/api')
-      await runScenarios(['workspaceFiles/readBytes', 'officeToPdf/render'].flatMap(endpoint =>
+      await runScenarios(['workspaceFiles/readBytes', 'officeToPdf/render', 'officeKit/render'].flatMap(endpoint =>
         [new Uint8Array([0, 255, 16]), new Uint8Array()].map(data => ({
           name: `${endpoint}: ${data.length === 0 ? 'empty' : 'binary'} payload`,
           run: async () => {

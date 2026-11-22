@@ -1,3 +1,4 @@
+import { WORKSPACE_BINARY_ENDPOINTS } from './remote-typert-gateway.js'
 import { openRemoteTerminal } from './terminal-carrier-compat.js'
 import type {
   LegacyWireStreamOpen,
@@ -235,7 +236,7 @@ export class TypertGatewaySwitch {
 /** The local Connection HTTP hop needs the same binary envelope as the native Gateway. */
 function workspaceConnectionResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
   if (endpoint === 'terminal/environment' && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) }
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return result
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return result
   if (!result.ok || !isRecord(result.value) || !(result.value.data instanceof Uint8Array)) return result
   return {
     ...result,

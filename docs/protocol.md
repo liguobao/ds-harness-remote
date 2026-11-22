@@ -1288,10 +1288,10 @@ Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传�
 Android 用户可显式下载工作区原文件到手机（Android 10+ 使用 MediaStore Downloads，Android 8–9 使用系统目录选择器）（每文件最多 100 MiB，包含恰好 100 MiB；独立于移动端预览上限：PDF 16 MiB、图片 8 MiB）。复用下述 `stat` / `readBytes` 分块读取及路径、版本、大小和取消校验，不新增 download RPC，不写 Host 文件；Office 下载保存原文件，转换后的 PDF 仅用于预览。
 
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
-`officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
-注意：上游 `list` / `changes` 限于工作区；为修复 #250 任意文件读取漏洞，原生 `workspaceFiles/read*` 与 `stat`
-严格限制在 Session 工作区根目录（cwd）物理包含范围内，拒绝未授权的工作区外路径与越界符号链接。包含性一律以
-realpath 后的规范根目录计算，避免符号链接父目录或大小写差异造成误拒；边界本身不变。拒绝结果可在
+`officeKit/generation|render`、`officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
+注意：上游 `list` / `changes` 限于工作区；为修复 #250 任意文件读取漏洞，原生 `workspaceFiles/read*`、`stat`
+与非消息附件的 `officeKit/render` / `officeToPdf/render` 严格限制在 Session 工作区根目录（cwd）物理包含范围内，拒绝未授权的工作区外路径与越界符号链接。包含性一律以
+realpath 后的规范根目录计算，避免符号链接父目录或大小写差异造成误拒；边界本身不变。当 Host 尚未迁移或已迁移包名时，桥接层仅在收到 `gateway/invocation-unavailable` 时在 `officeKit/*` 与 `officeToPdf/*` 之间做只读回退。拒绝结果可在
 `rpc.error.details.reason` 中携带稳定的安全分类（`scope-missing`、`authority-unavailable`、`root-invalid`、
 `outside-root`、`symlink`、`not-regular-file`、`not-found`、`too-large`、`io`），不得包含路径、文件名、
 文件正文或原始文件系统错误。旧 `fileviewer.read.v1` 仍使用 provider 授权。

@@ -780,32 +780,195 @@ describe('HarnessRemoteBridge', () => {
   })
 
   it('encodes native binary workspace responses for the JSON remote carrier', async () => {
-    const dispatch = vi.fn(async (endpoint: string) => ({
-      ok: true as const,
-      value: endpoint === 'workspaceFiles/readBytes'
-        ? { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([0, 255, 16]), eof: true }
-        : { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
-    }))
-    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
-
-    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
-      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
-    await expect(bridge.call({ endpoint: 'officeToPdf/render', payload: { args: { path: '/tmp/a.docx' } } }))
-      .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
+    await runScenarios([
+      {
+        endpoint: 'workspaceFiles/readBytes',
+        args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } },
+        value: { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([0, 255, 16]), eof: true },
+        expectedData: 'AP8Q',
+      },
+      {
+        endpoint: 'officeToPdf/render',
+        args: { path: '/tmp/a.docx' },
+        value: { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
+        expectedData: 'JVBE',
+      },
+      {
+        endpoint: 'officeKit/render',
+        args: { path: '/tmp/a.docx' },
+        value: { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
+        expectedData: 'JVBE',
+      },
+    ].map(({ endpoint, args, value, expectedData }) => ({
+      name: endpoint,
+      run: async () => {
+        const dispatch = vi.fn(async () => ({ ok: true as const, value }))
+        const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.2-rc.2')
+        await expect(bridge.call({ endpoint, payload: { args } }))
+          .resolves.toMatchObject({ ok: true, value: { data: expectedData } })
+      },
+    })))
   })
 
   it('materializes official Gateway binary attachments before crossing the JSON carrier', async () => {
-    const dispatch = vi.fn(async () => ({
-      ok: true as const,
-      value: { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: null, eof: true },
-      attachments: [{ path: ['data'], bytes: new Uint8Array([0, 255, 16]) }],
-    }))
-    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
+    await runScenarios([
+      { endpoint: 'workspaceFiles/readBytes', args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } }, bytes: new Uint8Array([0, 255, 16]), expectedData: 'AP8Q' },
+      { endpoint: 'officeToPdf/render', args: { path: '/tmp/a.docx' }, bytes: new Uint8Array([37, 80, 68]), expectedData: 'JVBE' },
+      { endpoint: 'officeKit/render', args: { path: '/tmp/a.docx' }, bytes: new Uint8Array([37, 80, 68]), expectedData: 'JVBE' },
+    ].map(({ endpoint, args, bytes, expectedData }) => ({
+      name: endpoint,
+      run: async () => {
+        const dispatch = vi.fn(async () => ({
+          ok: true as const,
+          value: { absolutePath: args.path, version: 'v1', bytes: bytes.byteLength, offset: 0, data: null, eof: true },
+          attachments: [{ path: ['data'], bytes }],
+        }))
+        const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.2-rc.2')
+        const result = await bridge.call({ endpoint, payload: { args } })
+        expect(result).toMatchObject({ ok: true, value: { data: expectedData } })
+        expect(result).not.toHaveProperty('attachments')
+      },
+    })))
+  })
 
-    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
-      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
-    const result = await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } })
-    expect(result).not.toHaveProperty('attachments')
+  it('falls back between officeKit/* and officeToPdf/* only on gateway/invocation-unavailable', async () => {
+    const unavailable = (message = 'invocation unavailable') => ({
+      ok: false as const,
+      error: { code: 'gateway/invocation-unavailable', message, details: {} },
+    })
+    const taggedError = (code: string, message: string) => Object.assign(new Error(message), { code })
+    const withFailureCode = (dispatch: LocalTypertGateway['dispatch']) => gateway({
+      dispatch,
+      failure: error => ({
+        code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'internal',
+        message: 'Request failed.',
+        details: {},
+      }),
+    })
+
+    await runScenarios([
+      ...[
+        { from: 'officeKit/render', to: 'officeToPdf/render', args: { workspaceFileScopeId: 's1', path: 'doc.docx', priority: 'foreground' }, value: { data: new Uint8Array([37, 80, 68]), generation: 'g1' }, expectedValue: { data: 'JVBE', generation: 'g1' } },
+        { from: 'officeToPdf/render', to: 'officeKit/render', args: { workspaceFileScopeId: 's1', path: 'doc.docx', priority: 'foreground' }, value: { data: new Uint8Array([37, 80, 68]), generation: 'g1' }, expectedValue: { data: 'JVBE', generation: 'g1' } },
+        { from: 'officeKit/generation', to: 'officeToPdf/generation', args: {}, value: 'g1', expectedValue: 'g1' },
+        { from: 'officeToPdf/generation', to: 'officeKit/generation', args: {}, value: 'g1', expectedValue: 'g1' },
+      ].map(({ from, to, args, value, expectedValue }) => ({
+        name: `result fallback ${from} -> ${to}`,
+        run: async () => {
+          const dispatch = vi.fn<LocalTypertGateway['dispatch']>(async endpoint =>
+            endpoint === from ? unavailable() : { ok: true as const, value })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: from, payload: { args } })).resolves.toEqual({ ok: true, value: expectedValue })
+          expect(dispatch.mock.calls.map(([endpoint, payload]) => [endpoint, payload])).toEqual([
+            [from, { args }],
+            [to, { args }],
+          ])
+        },
+      })),
+      ...[
+        { from: 'officeKit/render', to: 'officeToPdf/render', args: { path: 'doc.docx' }, value: { data: new Uint8Array([37, 80, 68]) }, expectedValue: { data: 'JVBE' } },
+        { from: 'officeToPdf/generation', to: 'officeKit/generation', args: {}, value: 'g2', expectedValue: 'g2' },
+      ].map(({ from, to, args, value, expectedValue }) => ({
+        name: `thrown invocation-unavailable fallback ${from} -> ${to}`,
+        run: async () => {
+          const dispatch = vi.fn(async (endpoint: string) => {
+            if (endpoint === from) throw taggedError('gateway/invocation-unavailable', 'primary missing')
+            return { ok: true as const, value }
+          })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: from, payload: { args } })).resolves.toEqual({ ok: true, value: expectedValue })
+          expect(dispatch.mock.calls.map(([endpoint]) => endpoint)).toEqual([from, to])
+        },
+      })),
+      {
+        name: 'both return invocation-unavailable preserves primary result',
+        run: async () => {
+          const primary = unavailable('primary missing')
+          const dispatch = vi.fn(async (endpoint: string) =>
+            endpoint === 'officeKit/render' ? primary : unavailable('fallback missing'))
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: 'officeKit/render', payload: { args: { path: 'doc.docx' } } }))
+            .resolves.toBe(primary)
+          expect(dispatch).toHaveBeenCalledTimes(2)
+        },
+      },
+      {
+        name: 'primary return and fallback throw invocation-unavailable preserves primary result',
+        run: async () => {
+          const primary = unavailable('primary missing')
+          const dispatch = vi.fn(async (endpoint: string) => {
+            if (endpoint === 'officeKit/generation') return primary
+            throw taggedError('gateway/invocation-unavailable', 'fallback missing')
+          })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: 'officeKit/generation', payload: { args: {} } }))
+            .resolves.toBe(primary)
+          expect(dispatch).toHaveBeenCalledTimes(2)
+        },
+      },
+      {
+        name: 'both throw invocation-unavailable preserves primary error',
+        run: async () => {
+          const primaryErr = taggedError('gateway/invocation-unavailable', 'primary missing')
+          const fallbackErr = taggedError('gateway/invocation-unavailable', 'fallback missing')
+          const dispatch = vi.fn(async (endpoint: string) => {
+            throw endpoint === 'officeToPdf/render' ? primaryErr : fallbackErr
+          })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: 'officeToPdf/render', payload: { args: { path: 'doc.docx' } } }))
+            .rejects.toBe(primaryErr)
+          expect(dispatch).toHaveBeenCalledTimes(2)
+        },
+      },
+      {
+        name: 'primary throws and fallback returns invocation-unavailable preserves primary error',
+        run: async () => {
+          const primaryErr = taggedError('gateway/invocation-unavailable', 'primary missing')
+          const dispatch = vi.fn(async (endpoint: string) => {
+            if (endpoint === 'officeKit/generation') throw primaryErr
+            return unavailable('fallback missing')
+          })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: 'officeKit/generation', payload: { args: {} } }))
+            .rejects.toBe(primaryErr)
+          expect(dispatch).toHaveBeenCalledTimes(2)
+        },
+      },
+      {
+        name: 'fallback business error replaces invocation-unavailable',
+        run: async () => {
+          const dispatch = vi.fn(async (endpoint: string) =>
+            endpoint === 'officeKit/render'
+              ? unavailable('primary missing')
+              : { ok: false as const, error: { code: 'document-render/failed', message: 'corrupt', details: {} } })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          await expect(bridge.call({ endpoint: 'officeKit/render', payload: { args: { path: 'doc.docx' } } }))
+            .resolves.toEqual({ ok: false, error: { code: 'document-render/failed', message: 'corrupt', details: {} } })
+          expect(dispatch).toHaveBeenCalledTimes(2)
+        },
+      },
+      ...[
+        { endpoint: 'officeKit/render', code: 'document-render/failed', throwError: false },
+        { endpoint: 'officeToPdf/render', code: 'gateway/service-unavailable', throwError: false },
+        { endpoint: 'officeKit/generation', code: 'gateway/service-unavailable', throwError: true },
+        { endpoint: 'officeToPdf/render', code: 'document-render/failed', throwError: true },
+      ].map(({ endpoint, code, throwError }) => ({
+        name: `no fallback on ${endpoint} ${throwError ? 'thrown' : 'returned'} ${code}`,
+        run: async () => {
+          const failureErr = taggedError(code, 'non-fallback')
+          const failureRes = { ok: false as const, error: { code, message: 'non-fallback', details: {} } }
+          const dispatch = vi.fn(async () => {
+            if (throwError) throw failureErr
+            return failureRes
+          })
+          const bridge = new HarnessRemoteBridge(withFailureCode(dispatch), vi.fn(async () => undefined))
+          const call = bridge.call({ endpoint, payload: { args: {} } })
+          if (throwError) await expect(call).rejects.toBe(failureErr)
+          else await expect(call).resolves.toBe(failureRes)
+          expect(dispatch).toHaveBeenCalledTimes(1)
+        },
+      })),
+    ])
   })
 
   it('normalizes alpha stream failures without exposing the original error', async () => {
