@@ -7,14 +7,8 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/** Stateless byte-array acceleration of the existing Noise AEAD. Never owns a nonce counter. */
+/** Stateless byte-array acceleration of the existing Noise AEAD. Never owns a nonce counter. No key/plaintext cache. */
 class RemoteChaChaPolyModule : Module() {
-  private val encryptCipherCache = ThreadLocal<Cipher>()
-  private val decryptCipherCache = ThreadLocal<Cipher>()
-
-  private fun acquireCipher(cache: ThreadLocal<Cipher>): Cipher =
-    cache.get() ?: Cipher.getInstance(TRANSFORMATION).also { cache.set(it) }
-
   override fun definition() = ModuleDefinition {
     Name("RemoteChaChaPoly")
 
@@ -27,13 +21,13 @@ class RemoteChaChaPolyModule : Module() {
       try {
         require(Build.VERSION.SDK_INT >= 28) { "Native ChaChaPoly unavailable" }
         require(key.size == 32 && nonce.size == 12 && ad.size <= 65535 && plaintext.size <= 65519)
-        val cipher = acquireCipher(encryptCipherCache)
+        // A fresh stateless Cipher per call: reusing an instance would retain the key/IV
+        // (and Conscrypt AEAD buffers) past the finally-zeroing below, and Conscrypt rejects
+        // re-init with the same key+IV pair, so no ThreadLocal/persistent Cipher caching here.
+        val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "ChaCha20"), IvParameterSpec(nonce))
         if (ad.isNotEmpty()) cipher.updateAAD(ad)
         cipher.doFinal(plaintext)
-      } catch (error: Throwable) {
-        encryptCipherCache.remove()
-        throw error
       } finally {
         // These are native copies, not the caller's JS buffers. Zero caller byte arrays immediately.
         key.fill(0)
@@ -46,13 +40,10 @@ class RemoteChaChaPolyModule : Module() {
       try {
         require(Build.VERSION.SDK_INT >= 28) { "Native ChaChaPoly unavailable" }
         require(key.size == 32 && nonce.size == 12 && ad.size <= 65535 && ciphertext.size in 16..65535)
-        val cipher = acquireCipher(decryptCipherCache)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "ChaCha20"), IvParameterSpec(nonce))
         if (ad.isNotEmpty()) cipher.updateAAD(ad)
         cipher.doFinal(ciphertext)
-      } catch (error: Throwable) {
-        decryptCipherCache.remove()
-        throw error
       } finally {
         // These are native copies, not the caller's JS buffers. Zero caller byte arrays immediately.
         key.fill(0)
