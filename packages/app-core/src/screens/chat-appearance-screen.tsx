@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Check, RotateCcw } from 'lucide-react-native'
 import { strings as zhCN } from '../locales/i18n'
 import { useAppStore } from '../state/store'
-import { BlurHeaderFrame, GroupCard, IconButton, SectionTitle, TopBar } from '../ui/components'
+import { BlurHeaderFrame, GroupCard, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -36,10 +36,11 @@ function OptionSegments<T extends string>({
   value: T
   onChange: (next: T) => void
 }) {
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const dark = scheme === 'dark'
   return (
-    <View style={styles.segmentRow} accessibilityRole="radiogroup">
+    <View style={[styles.segmentRow, dark && styles.segmentRowDark]} accessibilityRole="radiogroup">
       {options.map(option => {
         const active = option.value === value
         return (
@@ -52,12 +53,14 @@ function OptionSegments<T extends string>({
             onPress={() => onChange(option.value)}
             style={({ pressed }) => [
               styles.segmentBtn,
-              active && styles.segmentBtnActive,
+              active && (dark ? styles.segmentBtnActiveDark : styles.segmentBtnActive),
               pressed && !active && styles.segmentBtnPressed,
             ]}
           >
             <Text
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
               style={[styles.segmentText, active && styles.segmentTextActive]}
             >
               {option.label}
@@ -78,6 +81,8 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
   const { contentMaxWidth, landscape, compactHeight } = useResponsiveLayout()
   const backStateRef = useRef({ active, onBack })
   backStateRef.current = { active, onBack }
+  const [scrolled, setScrolled] = useState(false)
+  const scrolledRef = useRef(false)
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -151,6 +156,8 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
     { value: 'light', label: zhCN.settings.codeThemeLight },
   ]
 
+  const activeAccentLabel = accentOptions.find(option => option.value === appearance.accent)?.label ?? zhCN.settings.accentDeepseek
+
   const update = (patch: Partial<ChatAppearance>) => {
     void setChatAppearance(patch)
   }
@@ -176,9 +183,8 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
           />
         )}
       >
-        <View style={styles.stickyPreviewArea}>
+        <View style={[styles.stickyPreviewArea, scrolled && styles.stickyPreviewAreaScrolled]}>
           <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
-            <Text style={styles.previewLabel}>{zhCN.settings.chatAppearancePreviewTitle}</Text>
             <View style={styles.previewCanvas}>
               <ScrollView
                 style={(landscape || compactHeight) ? styles.previewScrollCompact : styles.previewScroll}
@@ -186,15 +192,17 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                 nestedScrollEnabled
                 showsVerticalScrollIndicator={false}
               >
-                <View style={[styles.previewUserWrap, { marginBottom: metrics.turnBottomGap }]}>
-                  <View style={[styles.previewUserBubble, bubbleContainerStyle]}>
-                    <View style={{ marginBottom: -metrics.paragraphGap }}>
-                      <NativeMarkdown text={zhCN.settings.chatAppearancePreviewUser} colors={bubblePalette} />
+                <View pointerEvents="none">
+                  <View style={[styles.previewUserWrap, { marginBottom: Math.max(8, metrics.turnBottomGap - 2) }]}>
+                    <View style={[styles.previewUserBubble, bubbleContainerStyle]}>
+                      <View style={{ marginBottom: -metrics.paragraphGap }}>
+                        <NativeMarkdown text={zhCN.settings.chatAppearancePreviewUser} colors={bubblePalette} />
+                      </View>
                     </View>
                   </View>
-                </View>
-                <View style={styles.previewAssistantWrap}>
-                  <NativeMarkdown text={zhCN.settings.chatAppearancePreviewAssistant} />
+                  <View style={[styles.previewAssistantWrap, { marginBottom: -metrics.paragraphGap }]}>
+                    <NativeMarkdown text={zhCN.settings.chatAppearancePreviewAssistant} />
+                  </View>
                 </View>
               </ScrollView>
             </View>
@@ -205,15 +213,26 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
           style={styles.flex}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: spacing.xs, paddingBottom: spacing.xxxl + insets.bottom },
+            { paddingTop: 4, paddingBottom: spacing.xl + insets.bottom },
           ]}
+          scrollEventThrottle={16}
+          onScroll={event => {
+            const next = event.nativeEvent.contentOffset.y > 2
+            if (next !== scrolledRef.current) {
+              scrolledRef.current = next
+              setScrolled(next)
+            }
+          }}
           showsVerticalScrollIndicator={false}
         >
           <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
-            <SectionTitle>{zhCN.settings.appearance}</SectionTitle>
+            <Text style={styles.sectionLabelFirst}>{zhCN.settings.appearance}</Text>
             <GroupCard style={styles.cardBody}>
               <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.accentColor}</Text>
+                <View style={styles.controlHeader}>
+                  <Text style={styles.controlLabel}>{zhCN.settings.accentColor}</Text>
+                  <Text style={styles.controlValue} numberOfLines={1}>{activeAccentLabel}</Text>
+                </View>
                 <View style={styles.swatchRow} accessibilityRole="radiogroup">
                   {accentOptions.map(option => {
                     const chosen = appearance.accent === option.value
@@ -230,22 +249,14 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                       >
                         <View style={[styles.swatchRing, chosen && { borderColor: swatch.primary }]}>
                           <View style={[styles.swatchDot, { backgroundColor: swatch.primary }]}>
-                            {chosen && <Check size={15} color={swatch.onPrimary} strokeWidth={2.6} />}
+                            {chosen && <Check size={14} color={swatch.onPrimary} strokeWidth={2.7} />}
                           </View>
                         </View>
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.swatchLabel, chosen && { color: colors.ink, fontWeight: '600' }]}
-                        >
-                          {option.label}
-                        </Text>
                       </Pressable>
                     )
                   })}
                 </View>
               </View>
-
-              <View style={styles.controlDivider} />
 
               <View style={styles.controlBlock}>
                 <Text style={styles.controlLabel}>{zhCN.settings.bubbleStyle}</Text>
@@ -255,8 +266,6 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                   onChange={bubbleStyle => update({ bubbleStyle })}
                 />
               </View>
-
-              <View style={styles.controlDivider} />
 
               <View style={styles.controlBlock}>
                 <Text style={styles.controlLabel}>{zhCN.settings.codeTheme}</Text>
@@ -268,7 +277,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
               </View>
             </GroupCard>
 
-            <SectionTitle>{zhCN.bots.layoutLabel}</SectionTitle>
+            <Text style={styles.sectionLabel}>{zhCN.bots.layoutLabel}</Text>
             <GroupCard style={styles.cardBody}>
               <View style={styles.controlBlock}>
                 <Text style={styles.controlLabel}>{zhCN.settings.fontSize}</Text>
@@ -279,8 +288,6 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                 />
               </View>
 
-              <View style={styles.controlDivider} />
-
               <View style={styles.controlBlock}>
                 <Text style={styles.controlLabel}>{zhCN.settings.lineSpacing}</Text>
                 <OptionSegments
@@ -289,8 +296,6 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
                   onChange={spacingScale => update({ spacingScale })}
                 />
               </View>
-
-              <View style={styles.controlDivider} />
 
               <View style={styles.controlBlock}>
                 <Text style={styles.controlLabel}>{zhCN.settings.letterSpacing}</Text>
@@ -316,44 +321,39 @@ function createStyles(colors: ThemeColors) {
     stickyPreviewArea: {
       backgroundColor: colors.background,
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.xs,
-      paddingBottom: spacing.sm,
+      paddingTop: 2,
+      paddingBottom: 8,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.separator,
+      borderBottomColor: 'transparent',
     },
-    previewLabel: {
-      ...type.caption,
-      fontSize: 12.5,
-      fontWeight: '600',
-      color: colors.muted,
-      marginBottom: spacing.xs,
-      paddingLeft: spacing.xs,
+    stickyPreviewAreaScrolled: {
+      borderBottomColor: colors.separator,
     },
     previewCanvas: {
       ...continuousRadius(radius.xl),
-      backgroundColor: colors.surface,
+      backgroundColor: colors.card,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
       overflow: 'hidden',
-      ...floatingShadow(colors, 'low'),
     },
     previewScroll: {
-      maxHeight: 256,
+      maxHeight: 268,
     },
     previewScrollCompact: {
-      maxHeight: 156,
+      maxHeight: 164,
     },
     previewScrollContent: {
-      padding: spacing.md,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
     },
     previewUserWrap: {
       alignSelf: 'flex-end',
       maxWidth: '88%',
     },
     previewUserBubble: {
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 18,
+      paddingHorizontal: 13,
+      paddingVertical: 8,
+      borderRadius: 17,
       borderTopRightRadius: 6,
     },
     previewBubbleSoft: {
@@ -375,38 +375,67 @@ function createStyles(colors: ThemeColors) {
     previewAssistantWrap: {
       alignSelf: 'stretch',
     },
+    sectionLabelFirst: {
+      ...type.caption,
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.muted,
+      marginTop: 2,
+      marginBottom: 6,
+      paddingLeft: 4,
+    },
+    sectionLabel: {
+      ...type.caption,
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.muted,
+      marginTop: 14,
+      marginBottom: 6,
+      paddingLeft: 4,
+    },
     cardBody: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 13,
     },
     controlBlock: {
-      paddingVertical: spacing.sm,
-      gap: spacing.xs,
+      gap: 7,
+    },
+    controlHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
     },
     controlLabel: {
       ...type.smallStrong,
       fontSize: 13.5,
+      fontWeight: '500',
       color: colors.ink,
     },
-    controlDivider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.separator,
+    controlValue: {
+      ...type.caption,
+      fontSize: 12.5,
+      fontWeight: '500',
+      color: colors.muted,
     },
     swatchRow: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       justifyContent: 'space-between',
-      gap: spacing.xs,
+      paddingHorizontal: 6,
+      paddingTop: 2,
     },
     swatchItem: {
-      flex: 1,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: 'center',
-      gap: 6,
-      paddingVertical: 4,
-      borderRadius: radius.md,
+      justifyContent: 'center',
     },
     swatchItemPressed: {
-      opacity: 0.72,
+      transform: [{ scale: 0.92 }],
+      opacity: 0.85,
     },
     swatchRing: {
       width: 38,
@@ -424,37 +453,39 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    swatchLabel: {
-      ...type.caption,
-      fontSize: 11,
-      color: colors.muted,
-      textAlign: 'center',
-    },
     segmentRow: {
       flexDirection: 'row',
       padding: 3,
-      borderRadius: radius.pill,
+      gap: 2,
+      ...continuousRadius(12),
       backgroundColor: colors.surfaceStrong,
+    },
+    segmentRowDark: {
+      backgroundColor: colors.background,
     },
     segmentBtn: {
       flex: 1,
-      minHeight: 36,
-      borderRadius: radius.pill,
+      minHeight: 33,
+      ...continuousRadius(9),
       overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: 6,
+      paddingHorizontal: 4,
     },
     segmentBtnActive: {
       backgroundColor: colors.surface,
       ...floatingShadow(colors, 'low'),
     },
+    segmentBtnActiveDark: {
+      backgroundColor: colors.surfaceStrong,
+    },
     segmentBtnPressed: {
-      opacity: 0.72,
+      opacity: 0.65,
     },
     segmentText: {
       ...type.small,
-      fontSize: 13.5,
+      fontSize: 13,
+      fontWeight: '500',
       color: colors.muted,
       textAlign: 'center',
     },
