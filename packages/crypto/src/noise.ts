@@ -19,6 +19,8 @@ export interface NoiseIkSessionOptions {
   random?: (length: number) => Uint8Array
   /** Optional byte-identical ChaChaPoly accelerator. Nonces remain owned by Noise. */
   encryptChaChaPoly?: (key: Uint8Array, nonce: bigint, ad: Uint8Array, plaintext: Uint8Array) => Uint8Array | undefined
+  /** Optional byte-identical ChaChaPoly decryptor. Nonces remain owned by Noise. */
+  decryptChaChaPoly?: (key: Uint8Array, nonce: bigint, ad: Uint8Array, ciphertext: Uint8Array) => Uint8Array | undefined
 }
 
 /**
@@ -43,16 +45,31 @@ export class NoiseIkSession {
       initiator,
       s: { secretKey: localPrivate, publicKey: localPublic },
       ...(initiator ? { rs: Uint8Array.from(this.expectedRemoteStatic) } : {}),
-      cipher: options.encryptChaChaPoly ? {
+      cipher: (options.encryptChaChaPoly || options.decryptChaChaPoly) ? {
         ...chachaPoly,
-        encrypt(key, nonce, ad, plaintext, out) {
-          const encrypted = options.encryptChaChaPoly!(key, nonce, ad, plaintext)
-          if (encrypted === undefined) return chachaPoly.encrypt(key, nonce, ad, plaintext, out)
-          if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
-            throw new NoiseSessionError('INVALID_ENCRYPTION_OUTPUT', 'ChaChaPoly accelerator returned an invalid length.')
-          }
-          out.set(encrypted)
-        },
+        ...(options.encryptChaChaPoly ? {
+          encrypt(key, nonce, ad, plaintext, out) {
+            const encrypted = options.encryptChaChaPoly!(key, nonce, ad, plaintext)
+            if (encrypted === undefined) return chachaPoly.encrypt(key, nonce, ad, plaintext, out)
+            if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
+              throw new NoiseSessionError('INVALID_ENCRYPTION_OUTPUT', 'ChaChaPoly accelerator returned an invalid length.')
+            }
+            out.set(encrypted)
+          },
+        } : {}),
+        ...(options.decryptChaChaPoly ? {
+          decrypt(key, nonce, ad, ciphertext, out) {
+            if (ciphertext.byteLength < chachaPoly.tagLen) {
+              return chachaPoly.decrypt(key, nonce, ad, ciphertext, out)
+            }
+            const decrypted = options.decryptChaChaPoly!(key, nonce, ad, ciphertext)
+            if (decrypted === undefined) return chachaPoly.decrypt(key, nonce, ad, ciphertext, out)
+            if (decrypted.byteLength !== ciphertext.byteLength - chachaPoly.tagLen) {
+              throw new NoiseSessionError('INVALID_DECRYPTION_OUTPUT', 'ChaChaPoly accelerator returned an invalid length.')
+            }
+            out.set(decrypted)
+          },
+        } : {}),
       } : chachaPoly,
       hash: sha256H,
       rng: options.random ?? randomBytes,

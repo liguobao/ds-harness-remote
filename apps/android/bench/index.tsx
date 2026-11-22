@@ -13,7 +13,7 @@ import { generateKeyPair, NoiseIkSession, fromBase64Url } from '@dsh-remote/cryp
 import { createRpcRequest, encodeMessage, decodeMessage, SecureMessageCodec, type RpcMethod } from '@dsh-remote/protocol'
 import { RtcChunkCodec } from '../../../packages/webrtc/src/rtc-chunking'
 import { encodeBulkFrame, BULK_DATA_BYTES } from '../../../scripts/transport-bench/stream-codec'
-import { nativeChaChaEncryptor } from '@dsh-remote/app-core/services/native-chacha-poly'
+import { nativeChaChaDecryptor, nativeChaChaEncryptor } from '@dsh-remote/app-core/services/native-chacha-poly'
 import { createNativeRtcSender } from '@dsh-remote/app-core/services/native-rtc-binary'
 
 registerGlobals()
@@ -68,8 +68,9 @@ async function run(log: (line: string) => void) {
   return
  }
  const cipher = nativeChaChaEncryptor()
+ const decryptCipher = nativeChaChaDecryptor()
  const nativeSend = createNativeRtcSender(requireOptionalNativeModule<any>('RemoteWebRtcBinary') ?? undefined)
- const noise = new NoiseIkSession({role:'initiator',localPrivateKey:identity.privateKey,localPublicKey:identity.publicKey,remotePublicKey:config.publicKey,prologue:new TextEncoder().encode('dsh-isolated-bench-v1'),encryptChaChaPoly:cipher})
+ const noise = new NoiseIkSession({role:'initiator',localPrivateKey:identity.privateKey,localPublicKey:identity.publicKey,remotePublicKey:config.publicKey,prologue:new TextEncoder().encode('dsh-isolated-bench-v1'),encryptChaChaPoly:cipher,decryptChaChaPoly:decryptCipher})
  const websocket=config.transport === 'websocket'
  const channel: any = websocket ? new WebSocket(`${config.wsUrl}/${identity.publicKey}`) : pc.createDataChannel('bench',{ordered:true})
  const nativeSocket = websocket && config.nativeSocket ? requireOptionalNativeModule<any>('RemoteWebRtcBinary') : undefined

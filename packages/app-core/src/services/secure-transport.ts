@@ -14,7 +14,7 @@ import {
 } from '@dsh-remote/webrtc'
 import { connectionLog } from './connection-log'
 import { strings } from '../locales/i18n'
-import { nativeChaChaEncryptor } from './native-chacha-poly'
+import { nativeChaChaDecryptor, nativeChaChaEncryptor } from './native-chacha-poly'
 import type { DeviceIdentity, RemoteDevice } from '../types'
 
 interface AttachedLeg {
@@ -89,6 +89,7 @@ export class SecureTransport implements RemoteTransport, UpgradeableSecureChanne
     const noise = new NoiseIkSession({
       role: 'initiator',
       encryptChaChaPoly: nativeChaChaEncryptor(),
+      decryptChaChaPoly: nativeChaChaDecryptor(),
       localPrivateKey: this.identity.privateKey,
       localPublicKey: this.identity.publicKey,
       remotePublicKey: this.host.identityKey,
