@@ -30,7 +30,7 @@ export interface HostWebServerLike {
     kind: 'prefix'
     path: string
     auth?: 'required'
-    handler(req: IncomingMessage, res: ServerResponse): void | Promise<void>
+    handler(req: IncomingMessage, res: ServerResponse, peer?: unknown): void | Promise<void>
   }): () => void | Promise<void>
 }
 
@@ -53,14 +53,15 @@ export function registerControlRoute(
   statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
   if (webServer !== undefined) {
-    // Newer DSH builds dropped `connection.requestRejection` and enforce `auth`
-    // in `webServer`; keep passing `auth: 'required'` while still checking
-    // `requestRejection` / `admit` inside `handleControlRequest` when present.
+    // Newer DSH builds dropped `connection.requestRejection`, enforce `auth`
+    // in `webServer`, and pass the admitted `peer` as the third handler
+    // argument. Keep `auth: 'required'` and verify either the admitted `peer`
+    // (DSH 0.2.3+) or `requestRejection` / `admit` (older DSH builds).
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
       auth: 'required',
-      handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream),
+      handler: (req, res, peer) => handleControlRequest(connection, handler, req, res, statusStream, peer),
     })
     return async () => {
       statusStream?.close()
@@ -87,11 +88,14 @@ async function handleControlRequest(
   req: IncomingMessage,
   res: ServerResponse,
   statusStream?: ControlStatusStreamLike,
+  peer?: unknown,
 ): Promise<void> {
-  const rejection = requestRejectionStatus(connection, req)
+  if (res.destroyed) return
+  const rejection = peer !== undefined
+    ? admittedPeerRejectionStatus(peer)
+    : requestRejectionStatus(connection, req)
   if (rejection !== undefined) {
-    res.writeHead(rejection)
-    res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+    writeText(res, rejection, rejectionMessage(rejection))
     return
   }
 
@@ -205,18 +209,73 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
-function requestRejectionStatus(connection: HostConnectionHandleLike, req: IncomingMessage): number | undefined {
-  if (typeof connection.requestRejection === 'function') {
-    const rejection = connection.requestRejection(req)
-    return rejection === undefined ? undefined : normalizeRejectionStatus(rejection)
+function admittedPeerRejectionStatus(peer: unknown): number | undefined {
+  if (typeof peer !== 'object' || peer === null || Array.isArray(peer)) return 403
+  try {
+    if (isPeerAborted(peer)) return 401
+    return hasOwnerPrincipal(peer) ? undefined : 403
+  } catch {
+    return 403
   }
-  if (typeof connection.admit === 'function') {
-    const admission = connection.admit(req)
-    if (typeof admission !== 'object' || admission === null) return 403
-    if (typeof admission.rejection === 'number') return normalizeRejectionStatus(admission.rejection)
-    return admission.peer != null ? undefined : 403
+}
+
+function requestRejectionStatus(connection: HostConnectionHandleLike, req: IncomingMessage): number | undefined {
+  const target = unwrapCordisProxy(connection)
+  try {
+    if (typeof target.requestRejection === 'function') {
+      const rejection = target.requestRejection(req)
+      return rejection === undefined ? undefined : normalizeRejectionStatus(rejection)
+    }
+    if (typeof target.admit === 'function') {
+      const admission = target.admit(req)
+      if (typeof admission !== 'object' || admission === null) return 403
+      if (typeof admission.rejection === 'number') return normalizeRejectionStatus(admission.rejection)
+      if (typeof admission.peer !== 'object' || admission.peer === null || Array.isArray(admission.peer)) return 403
+      if (isPeerAborted(admission.peer)) return 401
+      const principal = (admission.peer as { principal?: unknown }).principal
+      if (principal !== undefined && !hasOwnerPrincipal(admission.peer)) return 403
+      return undefined
+    }
+  } catch {
+    return 503
   }
   return 403
+}
+
+function unwrapCordisProxy<T extends object>(value: T): T {
+  const cordisOriginal = Symbol.for('cordis.original')
+  let current: object = value
+  for (let depth = 0; depth < 8; depth += 1) {
+    let next: unknown
+    try {
+      next = Reflect.get(current, cordisOriginal)
+    } catch {
+      return current as T
+    }
+    if (typeof next !== 'object' || next === null || next === current) {
+      return current as T
+    }
+    current = next
+  }
+  return current as T
+}
+
+function isPeerAborted(peer: object): boolean {
+  const signal = (peer as { signal?: unknown }).signal
+  return typeof signal === 'object' && signal !== null && (signal as { aborted?: unknown }).aborted === true
+}
+
+function hasOwnerPrincipal(peer: object): boolean {
+  const principal = (peer as { principal?: unknown }).principal
+  if (principal === 'owner') return true
+  if (typeof principal !== 'object' || principal === null) return false
+  return (principal as { kind?: unknown }).kind === 'owner'
+}
+
+function rejectionMessage(status: number): string {
+  if (status === 401) return 'unauthorized'
+  if (status === 503) return 'authentication unavailable'
+  return 'forbidden'
 }
 
 function normalizeRejectionStatus(code: unknown): number {

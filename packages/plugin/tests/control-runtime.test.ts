@@ -1,13 +1,14 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Context, Service } from '@deepseek-ai/cordis'
 import type { ControlResult } from '../src/control-result.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostAuthorizationControl, HostConnectionHandle } from '../src/client-runtime.js'
 import type { ClientModeRuntime } from '../src/client-runtime.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { resolveConfig, type Config } from '../src/config.js'
-import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
+import { CONTROL_RPC_PREFIX, STATUS_STREAM_PATH } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { HostLogStore } from '../src/host-log-store.js'
@@ -260,6 +261,259 @@ describe('PluginControlRuntime settings setup', () => {
       text: 'forbidden',
     })
     await disposeBare()
+  })
+
+  it('accepts 3-arg admitted peers, unwraps Cordis connection proxies, and fails closed on invalid peers or auth errors', async () => {
+    type RegisteredRoute = {
+      auth?: string
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
+    }
+    const callPost = async (route: RegisteredRoute, body: string, peer?: unknown, destroyed = false) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(body)]), {
+        method: 'POST',
+        url: '/ds-harness-remote/status',
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      const writeHead = vi.fn((code: number) => { status = code })
+      const end = vi.fn((chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) })
+      await route.handler(req, { destroyed, writableEnded: false, writeHead, end }, peer)
+      return { status, text, writeHead, end }
+    }
+    const callStream = async (route: RegisteredRoute, peer?: unknown) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([]), {
+        method: 'GET',
+        url: STATUS_STREAM_PATH,
+        headers: {},
+      })
+      let status = 0
+      let headers: Record<string, string> | undefined
+      const chunks: string[] = []
+      const listeners = new Map<string, Array<() => void>>()
+      const res = {
+        destroyed: false,
+        writableEnded: false,
+        writeHead: (code: number, next?: Record<string, string>) => { status = code; headers = next },
+        write: (chunk: unknown) => { chunks.push(String(chunk)); return true },
+        end: () => { res.writableEnded = true },
+        on: (event: string, listener: () => void) => {
+          listeners.set(event, [...(listeners.get(event) ?? []), listener])
+          return res
+        },
+      }
+      await route.handler(req, res, peer)
+      for (const listener of listeners.get('close') ?? []) listener()
+      return { status, headers, body: chunks.join('') }
+    }
+    const statusBody = (rpcId: string) => JSON.stringify({
+      type: 'client-request',
+      rpcId,
+      method: 'status',
+      payload: {},
+    })
+
+    await runScenarios([
+      {
+        name: '3-arg admitted owner peer bypasses admit/requestRejection and handles destroyed response',
+        run: async () => {
+          const runtime = new PluginControlRuntime(resolveConfig(), '/unused', undefined, undefined, undefined)
+          const admitSpy = vi.fn(() => { throw new Error('admit should not be called') })
+          const rejectionSpy = vi.fn(() => { throw new Error('requestRejection should not be called') })
+          let route: RegisteredRoute | undefined
+          const dispose = runtime.register({
+            admit: admitSpy,
+            requestRejection: rejectionSpy,
+            rpc: { handle: vi.fn(() => async () => undefined) },
+          } as unknown as HostConnectionHandle, {
+            register: next => { route = next as unknown as RegisteredRoute; return async () => undefined },
+          })
+          try {
+            expect(route?.auth).toBe('required')
+            for (const [rpcId, peer] of [
+              ['owner-obj', { principal: { kind: 'owner' }, signal: new AbortController().signal }],
+              ['owner-str', { principal: 'owner' }],
+            ] as const) {
+              const post = await callPost(route!, statusBody(rpcId), peer)
+              expect(post.status).toBe(200)
+              expect(JSON.parse(post.text)).toMatchObject({
+                type: 'server-response',
+                rpcId,
+                result: { ok: true, value: { available: false } },
+              })
+            }
+            const sse = await callStream(route!, { principal: { kind: 'owner' }, signal: new AbortController().signal })
+            expect(sse.status).toBe(200)
+            expect(sse.headers).toMatchObject({ 'content-type': 'text/event-stream' })
+            expect(sse.body).toContain('retry:')
+            expect(sse.body).toContain('data: ')
+            expect(admitSpy).not.toHaveBeenCalled()
+            expect(rejectionSpy).not.toHaveBeenCalled()
+
+            const destroyedRes = await callPost(route!, statusBody('destroyed'), { principal: { kind: 'owner' } }, true)
+            expect(destroyedRes.writeHead).not.toHaveBeenCalled()
+            expect(destroyedRes.end).not.toHaveBeenCalled()
+          } finally {
+            await dispose()
+          }
+        },
+      },
+      {
+        name: '3-arg peer fail-closed rejections',
+        run: async () => {
+          const runtime = new PluginControlRuntime(resolveConfig(), '/unused', undefined, undefined, undefined)
+          let route: RegisteredRoute | undefined
+          const dispose = runtime.register({
+            rpc: { handle: vi.fn(() => async () => undefined) },
+          } as unknown as HostConnectionHandle, {
+            register: next => { route = next as unknown as RegisteredRoute; return async () => undefined },
+          })
+          try {
+            const aborted = new AbortController()
+            aborted.abort()
+            const throwingPeer = {}
+            Object.defineProperty(throwingPeer, 'principal', {
+              get() { throw new Error('bad peer property') },
+            })
+            const cases: Array<{ peer: unknown; status: number; text: string }> = [
+              { peer: null, status: 403, text: 'forbidden' },
+              { peer: 'owner', status: 403, text: 'forbidden' },
+              { peer: [], status: 403, text: 'forbidden' },
+              { peer: {}, status: 403, text: 'forbidden' },
+              { peer: { principal: { kind: 'guest' } }, status: 403, text: 'forbidden' },
+              { peer: { principal: 'guest' }, status: 403, text: 'forbidden' },
+              { peer: throwingPeer, status: 403, text: 'forbidden' },
+              { peer: { principal: { kind: 'owner' }, signal: aborted.signal }, status: 401, text: 'unauthorized' },
+            ]
+            for (const entry of cases) {
+              const res = await callPost(route!, statusBody('reject'), entry.peer)
+              expect({ status: res.status, text: res.text }).toEqual({ status: entry.status, text: entry.text })
+            }
+          } finally {
+            await dispose()
+          }
+        },
+      },
+      {
+        name: 'real Cordis connection.authentication proxy across 3-arg, 2-arg unwrap, and 503 exception fallback',
+        run: async () => {
+          let admissionResult: unknown = {
+            peer: { principal: { kind: 'owner' }, signal: new AbortController().signal },
+          }
+          const authenticateSpy = vi.fn((_req: unknown) => admissionResult)
+
+          class AuthenticationService extends Service {
+            constructor(ctx: Context) {
+              super(ctx, 'connection.authentication')
+            }
+
+            authenticate(req: unknown) {
+              return authenticateSpy(req)
+            }
+          }
+
+          class HostConnectionService extends Service {
+            static inject = ['connection.authentication']
+            private readonly authentication: AuthenticationService
+            readonly rpc = { handle: vi.fn(() => async () => undefined) }
+
+            constructor(ctx: Context) {
+              super(ctx, 'connection')
+              this.authentication = (ctx as unknown as Record<string, AuthenticationService>)['connection.authentication']!
+            }
+
+            admit(req: { headers: Record<string, string | string[] | undefined> }) {
+              return this.authentication.authenticate(req) as { rejection?: number; peer?: unknown } | undefined
+            }
+          }
+
+          const root = new Context()
+          let proxiedConnection: HostConnectionHandle | undefined
+          let route: RegisteredRoute | undefined
+          let disposeRoute: (() => Promise<void>) | undefined
+          try {
+            await root.plugin(AuthenticationService)
+            await root.plugin(HostConnectionService)
+            root.inject(['connection'], childCtx => {
+              proxiedConnection = childCtx.get('connection' as never) as unknown as HostConnectionHandle
+            })
+            await vi.waitFor(() => expect(proxiedConnection).toBeDefined())
+            expect(() => proxiedConnection!.admit!({ headers: {} })).toThrow(/connection\.authentication/)
+
+            const runtime = new PluginControlRuntime(resolveConfig(), '/unused', undefined, undefined, undefined)
+            disposeRoute = runtime.register(proxiedConnection!, {
+              register: next => { route = next as unknown as RegisteredRoute; return async () => undefined },
+            })
+
+            // 3-arg owner peer succeeds without calling authenticate.
+            const threeArgPost = await callPost(route!, statusBody('cordis-3-post'), {
+              principal: { kind: 'owner' },
+              signal: new AbortController().signal,
+            })
+            expect(threeArgPost.status).toBe(200)
+            const threeArgSse = await callStream(route!, {
+              principal: { kind: 'owner' },
+              signal: new AbortController().signal,
+            })
+            expect(threeArgSse.status).toBe(200)
+            expect(authenticateSpy).not.toHaveBeenCalled()
+
+            // 2-arg fallback unwraps Symbol.for('cordis.original') and succeeds.
+            const twoArgPost = await callPost(route!, statusBody('cordis-2-post'))
+            expect(twoArgPost.status).toBe(200)
+            expect(JSON.parse(twoArgPost.text)).toMatchObject({
+              type: 'server-response',
+              rpcId: 'cordis-2-post',
+              result: { ok: true, value: { available: false } },
+            })
+            expect(authenticateSpy).toHaveBeenCalledTimes(1)
+
+            // 2-arg aborted peer returns 401.
+            const aborted = new AbortController()
+            aborted.abort()
+            admissionResult = { peer: { principal: { kind: 'owner' }, signal: aborted.signal } }
+            const abortedRes = await callPost(route!, statusBody('cordis-2-aborted'))
+            expect({ status: abortedRes.status, text: abortedRes.text }).toEqual({ status: 401, text: 'unauthorized' })
+
+            // 2-arg non-owner peer returns 403.
+            admissionResult = { peer: { principal: { kind: 'guest' } } }
+            const guestRes = await callPost(route!, statusBody('cordis-2-guest'))
+            expect({ status: guestRes.status, text: guestRes.text }).toEqual({ status: 403, text: 'forbidden' })
+
+            // Unexpected admit throw maps fail-closed to 503 instead of escaping.
+            authenticateSpy.mockImplementationOnce(() => { throw new Error('auth backend crashed') })
+            const crashRes = await callPost(route!, statusBody('cordis-2-crash'))
+            expect({ status: crashRes.status, text: crashRes.text }).toEqual({
+              status: 503,
+              text: 'authentication unavailable',
+            })
+
+            // Unexpected requestRejection throw also maps fail-closed to 503.
+            let throwingRoute: RegisteredRoute | undefined
+            const disposeThrowing = runtime.register({
+              requestRejection: () => { throw new Error('rejection crashed') },
+              rpc: { handle: vi.fn(() => async () => undefined) },
+            } as unknown as HostConnectionHandle, {
+              register: next => { throwingRoute = next as unknown as RegisteredRoute; return async () => undefined },
+            })
+            try {
+              const rrCrash = await callPost(throwingRoute!, statusBody('rr-crash'))
+              expect({ status: rrCrash.status, text: rrCrash.text }).toEqual({
+                status: 503,
+                text: 'authentication unavailable',
+              })
+            } finally {
+              await disposeThrowing()
+            }
+          } finally {
+            await disposeRoute?.()
+            await root.fiber.dispose()
+          }
+        },
+      },
+    ])
   })
 
   it('updates the Server address without creating a separate authorization', async () => {

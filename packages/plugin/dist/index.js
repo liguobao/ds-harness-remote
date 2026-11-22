@@ -84798,7 +84798,7 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
       kind: "prefix",
       path: CONTROL_RPC_PREFIX,
       auth: "required",
-      handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream)
+      handler: (req, res, peer) => handleControlRequest(connection, handler, req, res, statusStream, peer)
     });
     return async () => {
       statusStream?.close();
@@ -84811,11 +84811,11 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
     authority: "loopback"
   });
 }
-async function handleControlRequest(connection, handler, req, res, statusStream) {
-  const rejection = requestRejectionStatus(connection, req);
+async function handleControlRequest(connection, handler, req, res, statusStream, peer) {
+  if (res.destroyed) return;
+  const rejection = peer !== void 0 ? admittedPeerRejectionStatus(peer) : requestRejectionStatus(connection, req);
   if (rejection !== void 0) {
-    res.writeHead(rejection);
-    res.end(rejection === 401 ? "unauthorized" : "forbidden");
+    writeText(res, rejection, rejectionMessage(rejection));
     return;
   }
   const endpoint = endpointFromPath(CONTROL_RPC_PREFIX, new URL(req.url ?? "/", "http://dsh.internal").pathname);
@@ -84908,18 +84908,68 @@ function writeJson(res, status2, body) {
   res.writeHead(status2, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
-function requestRejectionStatus(connection, req) {
-  if (typeof connection.requestRejection === "function") {
-    const rejection = connection.requestRejection(req);
-    return rejection === void 0 ? void 0 : normalizeRejectionStatus(rejection);
+function admittedPeerRejectionStatus(peer) {
+  if (typeof peer !== "object" || peer === null || Array.isArray(peer)) return 403;
+  try {
+    if (isPeerAborted(peer)) return 401;
+    return hasOwnerPrincipal(peer) ? void 0 : 403;
+  } catch {
+    return 403;
   }
-  if (typeof connection.admit === "function") {
-    const admission = connection.admit(req);
-    if (typeof admission !== "object" || admission === null) return 403;
-    if (typeof admission.rejection === "number") return normalizeRejectionStatus(admission.rejection);
-    return admission.peer != null ? void 0 : 403;
+}
+function requestRejectionStatus(connection, req) {
+  const target3 = unwrapCordisProxy(connection);
+  try {
+    if (typeof target3.requestRejection === "function") {
+      const rejection = target3.requestRejection(req);
+      return rejection === void 0 ? void 0 : normalizeRejectionStatus(rejection);
+    }
+    if (typeof target3.admit === "function") {
+      const admission = target3.admit(req);
+      if (typeof admission !== "object" || admission === null) return 403;
+      if (typeof admission.rejection === "number") return normalizeRejectionStatus(admission.rejection);
+      if (typeof admission.peer !== "object" || admission.peer === null || Array.isArray(admission.peer)) return 403;
+      if (isPeerAborted(admission.peer)) return 401;
+      const principal = admission.peer.principal;
+      if (principal !== void 0 && !hasOwnerPrincipal(admission.peer)) return 403;
+      return void 0;
+    }
+  } catch {
+    return 503;
   }
   return 403;
+}
+function unwrapCordisProxy(value) {
+  const cordisOriginal2 = Symbol.for("cordis.original");
+  let current = value;
+  for (let depth = 0; depth < 8; depth += 1) {
+    let next;
+    try {
+      next = Reflect.get(current, cordisOriginal2);
+    } catch {
+      return current;
+    }
+    if (typeof next !== "object" || next === null || next === current) {
+      return current;
+    }
+    current = next;
+  }
+  return current;
+}
+function isPeerAborted(peer) {
+  const signal = peer.signal;
+  return typeof signal === "object" && signal !== null && signal.aborted === true;
+}
+function hasOwnerPrincipal(peer) {
+  const principal = peer.principal;
+  if (principal === "owner") return true;
+  if (typeof principal !== "object" || principal === null) return false;
+  return principal.kind === "owner";
+}
+function rejectionMessage(status2) {
+  if (status2 === 401) return "unauthorized";
+  if (status2 === 503) return "authentication unavailable";
+  return "forbidden";
 }
 function normalizeRejectionStatus(code) {
   return typeof code === "number" && Number.isInteger(code) && code >= 400 && code <= 599 ? code : 403;

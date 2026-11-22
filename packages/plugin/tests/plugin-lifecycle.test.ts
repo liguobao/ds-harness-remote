@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as remotePlugin from '../src/index.js'
 import type { Config } from '../src/config.js'
-import type { ControlRouteHandler } from '../src/control-route.js'
+import { STATUS_STREAM_PATH, type ControlRouteHandler } from '../src/control-route.js'
 
 const directories: string[] = []
 const disabledAgentDomains = { codex: { enabled: false }, acp: { enabled: false } }
@@ -823,6 +823,163 @@ describe('Cordis plugin lifecycle', () => {
         }
       },
     })))
+  })
+
+  it('serves loopback control and status stream under DSH 0.2.3 Cordis connection.authentication proxy and 3-arg webServer peer', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-023-auth-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(
+      { error: { code: 'AUTHORIZATION_REQUIRED', message: 'Sign in required' } },
+      { status: 401 },
+    )))
+
+    const authenticateSpy = vi.fn(() => ({
+      peer: { principal: { kind: 'owner' }, signal: new AbortController().signal },
+    }))
+
+    class AuthenticationService extends Service {
+      constructor(ctx: Context) {
+        super(ctx, 'connection.authentication')
+      }
+
+      authenticate() {
+        return authenticateSpy()
+      }
+    }
+
+    class HostConnectionService extends Service {
+      static inject = ['connection.authentication']
+      private readonly authentication: AuthenticationService
+      readonly rpc = {}
+
+      constructor(ctx: Context) {
+        super(ctx, 'connection')
+        this.authentication = (ctx as unknown as Record<string, AuthenticationService>)['connection.authentication']!
+      }
+
+      admit() {
+        return this.authentication.authenticate()
+      }
+    }
+
+    let registeredRoute: {
+      path: string
+      auth?: string
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
+    } | undefined
+
+    const ctx = new Context()
+    await ctx.plugin(AuthenticationService)
+    await ctx.plugin(HostConnectionService)
+    ctx.provide('settings', settings({ deviceName: 'DSH 0.2.3 Host', serverUrl: 'https://dsh.r2049.cn' }))
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('webServer', {
+      register: (route: typeof registeredRoute) => {
+        registeredRoute = route
+        return async () => undefined
+      },
+    } as never)
+
+    const fiber = await ctx.plugin(remotePlugin, {
+      ...disabledAgentDomains,
+      deviceName: 'DSH 0.2.3 Host',
+      serverUrl: 'https://dsh.r2049.cn',
+    })
+
+    const callPost = async (rpcId: string, peer?: unknown) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
+        type: 'client-request',
+        rpcId,
+        method: 'status',
+        payload: {},
+      }))]), {
+        method: 'POST',
+        url: '/ds-harness-remote/status',
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      await registeredRoute!.handler(req, {
+        destroyed: false,
+        writableEnded: false,
+        writeHead: (code: number) => { status = code },
+        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+      }, peer)
+      return { status, text }
+    }
+
+    const callStream = async (peer?: unknown) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([]), {
+        method: 'GET',
+        url: STATUS_STREAM_PATH,
+        headers: {},
+      })
+      let status = 0
+      let headers: Record<string, string> | undefined
+      const chunks: string[] = []
+      const listeners = new Map<string, Array<() => void>>()
+      const res = {
+        destroyed: false,
+        writableEnded: false,
+        writeHead: (code: number, next?: Record<string, string>) => { status = code; headers = next },
+        write: (chunk: unknown) => { chunks.push(String(chunk)); return true },
+        end: () => { res.writableEnded = true },
+        on: (event: string, listener: () => void) => {
+          listeners.set(event, [...(listeners.get(event) ?? []), listener])
+          return res
+        },
+      }
+      await registeredRoute!.handler(req, res, peer)
+      for (const listener of listeners.get('close') ?? []) listener()
+      return { status, headers, body: chunks.join('') }
+    }
+
+    try {
+      await vi.waitFor(() => {
+        expect(registeredRoute?.path).toBe('/ds-harness-remote')
+        expect(ctx.dshRemote.currentIdentity()).toBeDefined()
+        expect(ctx.get('dshRemoteClient')).toBeDefined()
+      })
+      expect(registeredRoute?.auth).toBe('required')
+
+      const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
+      const ownerPost = await callPost('rpc-owner', ownerPeer)
+      expect(ownerPost.status).toBe(200)
+      expect(JSON.parse(ownerPost.text)).toMatchObject({
+        type: 'server-response',
+        rpcId: 'rpc-owner',
+        result: { ok: true, value: { available: true } },
+      })
+
+      const ownerStream = await callStream(ownerPeer)
+      expect(ownerStream.status).toBe(200)
+      expect(ownerStream.headers).toMatchObject({ 'content-type': 'text/event-stream' })
+      expect(ownerStream.body).toContain('retry:')
+      expect(ownerStream.body).toContain('data: ')
+      expect(ownerStream.body).toContain('"available":true')
+      expect(authenticateSpy).not.toHaveBeenCalled()
+
+      const guestPost = await callPost('rpc-guest', {
+        principal: { kind: 'guest' },
+        signal: new AbortController().signal,
+      })
+      expect(guestPost).toEqual({ status: 403, text: 'forbidden' })
+
+      const fallbackPost = await callPost('rpc-fallback')
+      expect(fallbackPost.status).toBe(200)
+      expect(JSON.parse(fallbackPost.text)).toMatchObject({
+        type: 'server-response',
+        rpcId: 'rpc-fallback',
+        result: { ok: true, value: { available: true } },
+      })
+      expect(authenticateSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 })
 
