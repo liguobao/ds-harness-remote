@@ -80217,17 +80217,33 @@ var NoiseIkSession = class {
       initiator,
       s: { secretKey: localPrivate, publicKey: localPublic },
       ...initiator ? { rs: Uint8Array.from(this.expectedRemoteStatic) } : {},
-      cipher: options.encryptChaChaPoly ? {
+      cipher: options.encryptChaChaPoly || options.decryptChaChaPoly ? {
         ...chachaPoly,
-        encrypt(key, nonce, ad, plaintext, out) {
-          const encrypted = options.encryptChaChaPoly(key, nonce, ad, plaintext);
-          if (encrypted === void 0)
-            return chachaPoly.encrypt(key, nonce, ad, plaintext, out);
-          if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
-            throw new NoiseSessionError("INVALID_ENCRYPTION_OUTPUT", "ChaChaPoly accelerator returned an invalid length.");
+        ...options.encryptChaChaPoly ? {
+          encrypt(key, nonce, ad, plaintext, out) {
+            const encrypted = options.encryptChaChaPoly(key, nonce, ad, plaintext);
+            if (encrypted === void 0)
+              return chachaPoly.encrypt(key, nonce, ad, plaintext, out);
+            if (encrypted.byteLength !== plaintext.byteLength + chachaPoly.tagLen) {
+              throw new NoiseSessionError("INVALID_ENCRYPTION_OUTPUT", "ChaChaPoly accelerator returned an invalid length.");
+            }
+            out.set(encrypted);
           }
-          out.set(encrypted);
-        }
+        } : {},
+        ...options.decryptChaChaPoly ? {
+          decrypt(key, nonce, ad, ciphertext, out) {
+            if (ciphertext.byteLength < chachaPoly.tagLen) {
+              return chachaPoly.decrypt(key, nonce, ad, ciphertext, out);
+            }
+            const decrypted = options.decryptChaChaPoly(key, nonce, ad, ciphertext);
+            if (decrypted === void 0)
+              return chachaPoly.decrypt(key, nonce, ad, ciphertext, out);
+            if (decrypted.byteLength !== ciphertext.byteLength - chachaPoly.tagLen) {
+              throw new NoiseSessionError("INVALID_DECRYPTION_OUTPUT", "ChaChaPoly accelerator returned an invalid length.");
+            }
+            out.set(decrypted);
+          }
+        } : {}
       } : chachaPoly,
       hash: sha256H,
       rng: options.random ?? randomBytes
