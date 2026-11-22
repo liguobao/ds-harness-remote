@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { Check, RotateCcw } from 'lucide-react-native'
+import { AlignJustify, Check, Code2, MessageSquare, MoveHorizontal, Palette, RotateCcw, Type as TypeIcon, X } from 'lucide-react-native'
 import { strings as zhCN } from '../locales/i18n'
 import { useAppStore } from '../state/store'
-import { BlurHeaderFrame, GroupCard, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, GroupCard, GroupRow, IconButton, TopBar } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
 import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useResponsiveLayout } from '../ui/responsive'
+import { SheetModal } from '../ui/sheet'
 import {
   CHAT_ACCENT_SWATCHES,
   DEFAULT_CHAT_APPEARANCE,
-  floatingShadow,
   radius,
   resolveChatMetrics,
   spacing,
@@ -27,50 +27,7 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-function OptionSegments<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: readonly { value: T; label: string }[]
-  value: T
-  onChange: (next: T) => void
-}) {
-  const { colors, scheme } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  const dark = scheme === 'dark'
-  return (
-    <View style={[styles.segmentRow, dark && styles.segmentRowDark]} accessibilityRole="radiogroup">
-      {options.map(option => {
-        const active = option.value === value
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: active }}
-            accessibilityLabel={option.label}
-            android_ripple={androidRipple(colors)}
-            onPress={() => onChange(option.value)}
-            style={({ pressed }) => [
-              styles.segmentBtn,
-              active && (dark ? styles.segmentBtnActiveDark : styles.segmentBtnActive),
-              pressed && !active && styles.segmentBtnPressed,
-            ]}
-          >
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.82}
-              style={[styles.segmentText, active && styles.segmentTextActive]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        )
-      })}
-    </View>
-  )
-}
+type AppearancePickerKey = 'accent' | 'bubble' | 'codeTheme' | 'fontSize' | 'lineSpacing' | 'letterSpacing'
 
 export function ChatAppearanceScreen({ active = true, onBack }: { active?: boolean; onBack: () => void }) {
   const { colors, scheme, appearance } = useTheme()
@@ -78,15 +35,20 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
   const resetChatAppearance = useAppStore(state => state.resetChatAppearance)
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
-  const { contentMaxWidth, landscape, compactHeight } = useResponsiveLayout()
-  const backStateRef = useRef({ active, onBack })
-  backStateRef.current = { active, onBack }
+  const { contentMaxWidth, landscape, compactHeight, sheetMaxHeight } = useResponsiveLayout()
+  const [activePicker, setActivePicker] = useState<AppearancePickerKey | undefined>(undefined)
   const [scrolled, setScrolled] = useState(false)
   const scrolledRef = useRef(false)
+  const backStateRef = useRef({ active, activePicker, onBack })
+  backStateRef.current = { active, activePicker, onBack }
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!backStateRef.current.active) return false
+      if (backStateRef.current.activePicker !== undefined) {
+        setActivePicker(undefined)
+        return true
+      }
       backStateRef.current.onBack()
       return true
     })
@@ -156,11 +118,81 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
     { value: 'light', label: zhCN.settings.codeThemeLight },
   ]
 
-  const activeAccentLabel = accentOptions.find(option => option.value === appearance.accent)?.label ?? zhCN.settings.accentDeepseek
+  const activeAccentSwatch = CHAT_ACCENT_SWATCHES[appearance.accent][scheme]
+  const activeAccentLabel = accentOptions.find(o => o.value === appearance.accent)?.label ?? zhCN.settings.accentDeepseek
+  const activeBubbleLabel = bubbleOptions.find(o => o.value === appearance.bubbleStyle)?.label ?? zhCN.settings.bubbleSoft
+  const activeCodeThemeLabel = codeThemeOptions.find(o => o.value === appearance.codeTheme)?.label ?? zhCN.settings.codeThemeAuto
+  const activeFontSizeLabel = fontSizeOptions.find(o => o.value === appearance.fontScale)?.label ?? zhCN.settings.fontSizeMd
+  const activeLineSpacingLabel = lineSpacingOptions.find(o => o.value === appearance.spacingScale)?.label ?? zhCN.settings.lineSpacingBalanced
+  const activeLetterSpacingLabel = letterSpacingOptions.find(o => o.value === appearance.letterSpacing)?.label ?? zhCN.settings.letterSpacingNormal
 
   const update = (patch: Partial<ChatAppearance>) => {
     void setChatAppearance(patch)
   }
+
+  const closePicker = () => setActivePicker(undefined)
+
+  const pickerTitle =
+    activePicker === 'accent' ? zhCN.settings.accentColor
+      : activePicker === 'bubble' ? zhCN.settings.bubbleStyle
+        : activePicker === 'codeTheme' ? zhCN.settings.codeTheme
+          : activePicker === 'fontSize' ? zhCN.settings.fontSize
+            : activePicker === 'lineSpacing' ? zhCN.settings.lineSpacing
+              : activePicker === 'letterSpacing' ? zhCN.settings.letterSpacing
+                : ''
+
+  const pickerListOptions: readonly { value: string; label: string; chosen: boolean; onSelect: () => void }[] =
+    activePicker === 'bubble'
+      ? bubbleOptions.map(o => ({
+          value: o.value,
+          label: o.label,
+          chosen: o.value === appearance.bubbleStyle,
+          onSelect: () => {
+            closePicker()
+            update({ bubbleStyle: o.value })
+          },
+        }))
+      : activePicker === 'codeTheme'
+        ? codeThemeOptions.map(o => ({
+            value: o.value,
+            label: o.label,
+            chosen: o.value === appearance.codeTheme,
+            onSelect: () => {
+              closePicker()
+              update({ codeTheme: o.value })
+            },
+          }))
+        : activePicker === 'fontSize'
+          ? fontSizeOptions.map(o => ({
+              value: o.value,
+              label: o.label,
+              chosen: o.value === appearance.fontScale,
+              onSelect: () => {
+                closePicker()
+                update({ fontScale: o.value })
+              },
+            }))
+          : activePicker === 'lineSpacing'
+            ? lineSpacingOptions.map(o => ({
+                value: o.value,
+                label: o.label,
+                chosen: o.value === appearance.spacingScale,
+                onSelect: () => {
+                  closePicker()
+                  update({ spacingScale: o.value })
+                },
+              }))
+            : activePicker === 'letterSpacing'
+              ? letterSpacingOptions.map(o => ({
+                  value: o.value,
+                  label: o.label,
+                  chosen: o.value === appearance.letterSpacing,
+                  onSelect: () => {
+                    closePicker()
+                    update({ letterSpacing: o.value })
+                  },
+                }))
+              : []
 
   return (
     <View style={styles.flex}>
@@ -213,7 +245,7 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
           style={styles.flex}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingTop: 4, paddingBottom: spacing.xl + insets.bottom },
+            { paddingTop: 4, paddingBottom: spacing.xxxl + insets.bottom },
           ]}
           scrollEventThrottle={16}
           onScroll={event => {
@@ -227,88 +259,122 @@ export function ChatAppearanceScreen({ active = true, onBack }: { active?: boole
         >
           <View style={[styles.column, landscape && { maxWidth: contentMaxWidth }]}>
             <Text style={styles.sectionLabelFirst}>{zhCN.settings.appearance}</Text>
-            <GroupCard style={styles.cardBody}>
-              <View style={styles.controlBlock}>
-                <View style={styles.controlHeader}>
-                  <Text style={styles.controlLabel}>{zhCN.settings.accentColor}</Text>
-                  <Text style={styles.controlValue} numberOfLines={1}>{activeAccentLabel}</Text>
-                </View>
-                <View style={styles.swatchRow} accessibilityRole="radiogroup">
-                  {accentOptions.map(option => {
-                    const chosen = appearance.accent === option.value
-                    const swatch = CHAT_ACCENT_SWATCHES[option.value][scheme]
-                    return (
-                      <Pressable
-                        key={option.value}
-                        accessibilityRole="radio"
-                        accessibilityState={{ selected: chosen }}
-                        accessibilityLabel={option.label}
-                        android_ripple={androidRipple(colors, true)}
-                        onPress={() => update({ accent: option.value })}
-                        style={({ pressed }) => [styles.swatchItem, pressed && styles.swatchItemPressed]}
-                      >
-                        <View style={[styles.swatchRing, chosen && { borderColor: swatch.primary }]}>
-                          <View style={[styles.swatchDot, { backgroundColor: swatch.primary }]}>
-                            {chosen && <Check size={14} color={swatch.onPrimary} strokeWidth={2.7} />}
-                          </View>
-                        </View>
-                      </Pressable>
-                    )
-                  })}
-                </View>
-              </View>
-
-              <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.bubbleStyle}</Text>
-                <OptionSegments
-                  options={bubbleOptions}
-                  value={appearance.bubbleStyle}
-                  onChange={bubbleStyle => update({ bubbleStyle })}
-                />
-              </View>
-
-              <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.codeTheme}</Text>
-                <OptionSegments
-                  options={codeThemeOptions}
-                  value={appearance.codeTheme}
-                  onChange={codeTheme => update({ codeTheme })}
-                />
-              </View>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Palette}
+                label={zhCN.settings.accentColor}
+                accessory={(
+                  <View style={styles.accentValueRow}>
+                    <View style={[styles.accentValueDot, { backgroundColor: activeAccentSwatch.primary }]} />
+                    <Text style={styles.accentValueText} numberOfLines={1}>{activeAccentLabel}</Text>
+                  </View>
+                )}
+                chevron
+                onPress={() => setActivePicker('accent')}
+              />
+              <GroupRow
+                icon={MessageSquare}
+                label={zhCN.settings.bubbleStyle}
+                value={activeBubbleLabel}
+                chevron
+                onPress={() => setActivePicker('bubble')}
+              />
+              <GroupRow
+                icon={Code2}
+                label={zhCN.settings.codeTheme}
+                value={activeCodeThemeLabel}
+                chevron
+                onPress={() => setActivePicker('codeTheme')}
+              />
             </GroupCard>
 
             <Text style={styles.sectionLabel}>{zhCN.bots.layoutLabel}</Text>
-            <GroupCard style={styles.cardBody}>
-              <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.fontSize}</Text>
-                <OptionSegments
-                  options={fontSizeOptions}
-                  value={appearance.fontScale}
-                  onChange={fontScale => update({ fontScale })}
-                />
-              </View>
-
-              <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.lineSpacing}</Text>
-                <OptionSegments
-                  options={lineSpacingOptions}
-                  value={appearance.spacingScale}
-                  onChange={spacingScale => update({ spacingScale })}
-                />
-              </View>
-
-              <View style={styles.controlBlock}>
-                <Text style={styles.controlLabel}>{zhCN.settings.letterSpacing}</Text>
-                <OptionSegments
-                  options={letterSpacingOptions}
-                  value={appearance.letterSpacing}
-                  onChange={letterSpacing => update({ letterSpacing })}
-                />
-              </View>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={TypeIcon}
+                label={zhCN.settings.fontSize}
+                value={activeFontSizeLabel}
+                chevron
+                onPress={() => setActivePicker('fontSize')}
+              />
+              <GroupRow
+                icon={AlignJustify}
+                label={zhCN.settings.lineSpacing}
+                value={activeLineSpacingLabel}
+                chevron
+                onPress={() => setActivePicker('lineSpacing')}
+              />
+              <GroupRow
+                icon={MoveHorizontal}
+                label={zhCN.settings.letterSpacing}
+                value={activeLetterSpacingLabel}
+                chevron
+                onPress={() => setActivePicker('letterSpacing')}
+              />
             </GroupCard>
           </View>
         </ScrollView>
       </BlurHeaderFrame>
+
+      <SheetModal
+        visible={activePicker !== undefined}
+        onClose={closePicker}
+        sheetStyle={[styles.pickerDialog, { maxHeight: sheetMaxHeight }]}
+      >
+        <View style={styles.pickerHeader}>
+          <Text style={styles.pickerTitle} accessibilityRole="header">{pickerTitle}</Text>
+          <IconButton label={zhCN.common.close} icon={X} onPress={closePicker} />
+        </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.pickerList}>
+          <GroupCard>
+            {activePicker === 'accent'
+              ? accentOptions.map((option, index) => {
+                  const chosen = option.value === appearance.accent
+                  const swatch = CHAT_ACCENT_SWATCHES[option.value][scheme]
+                  return (
+                    <Pressable
+                      key={option.value}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: chosen }}
+                      accessibilityLabel={option.label}
+                      android_ripple={androidRipple(colors)}
+                      onPress={() => {
+                        closePicker()
+                        update({ accent: option.value })
+                      }}
+                      style={({ pressed }) => [styles.accentOptionRow, pressed && styles.accentOptionRowPressed]}
+                    >
+                      <View style={styles.accentOptionIconSlot}>
+                        <View style={[styles.accentOptionDot, { backgroundColor: swatch.primary }]} />
+                      </View>
+                      <View style={[styles.accentOptionBody, index > 0 && styles.accentOptionDivider]}>
+                        <Text
+                          style={[styles.accentOptionLabel, chosen && { color: colors.primary }]}
+                          numberOfLines={1}
+                        >
+                          {option.label}
+                        </Text>
+                        {chosen && <Check size={19} color={colors.primary} strokeWidth={2.2} />}
+                      </View>
+                    </Pressable>
+                  )
+                })
+              : pickerListOptions.map((option, index) => (
+                  <GroupRow
+                    key={option.value}
+                    first={index === 0}
+                    label={option.label}
+                    selected={option.chosen}
+                    chevron={false}
+                    accessory={option.chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                    onPress={option.onSelect}
+                  />
+                ))}
+          </GroupCard>
+        </ScrollView>
+      </SheetModal>
     </View>
   )
 }
@@ -322,7 +388,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
       paddingHorizontal: spacing.lg,
       paddingTop: 2,
-      paddingBottom: 8,
+      paddingBottom: 10,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: 'transparent',
     },
@@ -376,122 +442,102 @@ function createStyles(colors: ThemeColors) {
       alignSelf: 'stretch',
     },
     sectionLabelFirst: {
-      ...type.caption,
-      fontSize: 13,
+      ...type.small,
+      fontSize: 15,
+      lineHeight: 20,
       fontWeight: '600',
       color: colors.muted,
-      marginTop: 2,
-      marginBottom: 6,
-      paddingLeft: 4,
+      marginTop: 6,
+      marginBottom: spacing.xs,
+      paddingLeft: spacing.md,
     },
     sectionLabel: {
-      ...type.caption,
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.muted,
-      marginTop: 14,
-      marginBottom: 6,
-      paddingLeft: 4,
-    },
-    cardBody: {
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      gap: 13,
-    },
-    controlBlock: {
-      gap: 7,
-    },
-    controlHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: spacing.sm,
-    },
-    controlLabel: {
-      ...type.smallStrong,
-      fontSize: 13.5,
-      fontWeight: '500',
-      color: colors.ink,
-    },
-    controlValue: {
-      ...type.caption,
-      fontSize: 12.5,
-      fontWeight: '500',
-      color: colors.muted,
-    },
-    swatchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 6,
-      paddingTop: 2,
-    },
-    swatchItem: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    swatchItemPressed: {
-      transform: [{ scale: 0.92 }],
-      opacity: 0.85,
-    },
-    swatchRing: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      borderWidth: 2,
-      borderColor: 'transparent',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    swatchDot: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    segmentRow: {
-      flexDirection: 'row',
-      padding: 3,
-      gap: 2,
-      ...continuousRadius(12),
-      backgroundColor: colors.surfaceStrong,
-    },
-    segmentRowDark: {
-      backgroundColor: colors.background,
-    },
-    segmentBtn: {
-      flex: 1,
-      minHeight: 33,
-      ...continuousRadius(9),
-      overflow: 'hidden',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 4,
-    },
-    segmentBtnActive: {
-      backgroundColor: colors.surface,
-      ...floatingShadow(colors, 'low'),
-    },
-    segmentBtnActiveDark: {
-      backgroundColor: colors.surfaceStrong,
-    },
-    segmentBtnPressed: {
-      opacity: 0.65,
-    },
-    segmentText: {
       ...type.small,
-      fontSize: 13,
-      fontWeight: '500',
-      color: colors.muted,
-      textAlign: 'center',
-    },
-    segmentTextActive: {
-      color: colors.ink,
+      fontSize: 15,
+      lineHeight: 20,
       fontWeight: '600',
+      color: colors.muted,
+      marginTop: spacing.xl,
+      marginBottom: spacing.xs,
+      paddingLeft: spacing.md,
+    },
+    accentValueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      maxWidth: '50%',
+    },
+    accentValueDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+    },
+    accentValueText: {
+      ...type.small,
+      fontSize: 15,
+      color: colors.muted,
+      flexShrink: 1,
+    },
+    pickerDialog: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: 0,
+      gap: spacing.md,
+    },
+    pickerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingLeft: spacing.xs,
+    },
+    pickerTitle: {
+      ...type.heading,
+      fontSize: 18,
+      color: colors.ink,
+      fontWeight: '700',
+    },
+    pickerList: {
+      paddingBottom: spacing.md,
+    },
+    accentOptionRow: {
+      minHeight: 58,
+      paddingLeft: spacing.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    accentOptionRowPressed: {
+      backgroundColor: colors.surfaceStrong,
+    },
+    accentOptionIconSlot: {
+      width: 28,
+      marginRight: spacing.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    accentOptionDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+    },
+    accentOptionBody: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 58,
+      paddingRight: spacing.md,
+      paddingVertical: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.xs,
+    },
+    accentOptionDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    accentOptionLabel: {
+      ...type.body,
+      fontSize: 16,
+      color: colors.ink,
+      flex: 1,
     },
   })
 }
