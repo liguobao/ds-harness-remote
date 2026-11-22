@@ -118,11 +118,17 @@ describe('streaming auto-scroll and smart scroll mechanics', () => {
       state: 'running',
     }
     const sigRunning = computeStreamingSignature([baseTool])
-    expect(sigRunning).toBe('tool-1:tool:running:0')
+    expect(sigRunning).toBe('tool-1:tool:running:0:0:0')
 
     const sigFailed = computeStreamingSignature([{ ...baseTool, state: 'failed' }])
-    expect(sigFailed).toBe('tool-1:tool:failed:0')
+    expect(sigFailed).toBe('tool-1:tool:failed:0:0:0')
     expect(sigFailed).not.toBe(sigRunning)
+
+    // Running tools stream into callDetail without a state transition.
+    const sigProgress = computeStreamingSignature([
+      { ...baseTool, callDetail: { text: 'progress line', format: 'code' } },
+    ])
+    expect(sigProgress).not.toBe(sigRunning)
   })
 
   it('detects approval outcome and question state/outcome transitions', () => {

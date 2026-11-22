@@ -576,7 +576,7 @@ export function computeStreamingSignature(items: readonly ChatItem[]): string {
   }
   // Non-message items mutate in place (tool state, approval/question outcomes);
   // append their cheap discriminant facets so these transitions still bump.
-  if (last.kind === 'tool') return `${last.id}:${last.kind}:${last.state}:${last.images?.length ?? 0}`
+  if (last.kind === 'tool') return `${last.id}:${last.kind}:${last.state}:${last.images?.length ?? 0}:${last.callDetail?.text.length ?? 0}:${last.summary?.length ?? 0}`
   if (last.kind === 'approval') return `${last.id}:${last.kind}:${last.outcome ?? ''}`
   return `${last.id}:${last.kind}:${last.questionState ?? ''}:${last.outcome ?? ''}`
 }
