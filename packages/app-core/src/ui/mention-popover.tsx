@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { BackHandler, Keyboard, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { androidRipple, continuousRadius, elevationStyle } from './platform-style'
 import { radius, spacing, type } from './theme'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
@@ -100,6 +101,7 @@ export function MentionPopover({ groups, onDismiss, emptyText, active = true }: 
                       key={item.id}
                       accessibilityRole="button"
                       accessibilityLabel={item.title}
+                      android_ripple={androidRipple(colors)}
                       onPress={item.onPress}
                       style={({ pressed }) => [styles.row, item.highlighted === true && styles.rowActive, pressed && styles.rowActive]}
                     >
@@ -133,32 +135,28 @@ function createStyles(colors: ThemeColors) {
       position: 'relative',
       marginBottom: spacing.xs,
       maxHeight: 260,
-      borderRadius: radius.sm,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.background,
+      ...continuousRadius(radius.lg),
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      backgroundColor: colors.surface,
       overflow: 'hidden',
-      shadowColor: colors.shadow,
-      shadowOpacity: 0.18,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 8,
+      ...elevationStyle(colors, 2),
     },
     scroll: { maxHeight: 260 },
     scrollContent: { paddingBottom: spacing.xxs },
-    groupHeader: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs },
+    groupHeader: { backgroundColor: colors.surface, paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs },
     groupTitle: { ...type.caption, color: colors.muted },
     iconWrap: {
       width: 28,
       height: 28,
-      borderRadius: 4,
+      ...continuousRadius(radius.sm),
       backgroundColor: colors.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
     },
     row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm, minHeight: 46, paddingVertical: spacing.xxs },
-    rowActive: { backgroundColor: colors.background, opacity: 0.8 },
+    rowActive: { backgroundColor: colors.surfaceStrong },
     rowCopy: { flex: 1, minWidth: 0 },
     rowLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     rowTitle: { ...type.small, color: colors.ink, flexShrink: 1 },

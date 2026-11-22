@@ -16,13 +16,11 @@ import {
   AlertCircle,
   ArrowLeft,
   Bot,
-  Calendar,
   Check,
   ChevronDown,
   ChevronRight,
   Clock,
   Edit2,
-  Folder,
   MessageSquare,
   Pause,
   Play,
@@ -45,6 +43,7 @@ import type {
 } from '../types'
 import { strings } from '../locales/i18n'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { androidRipple, continuousRadius } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 
@@ -759,19 +758,23 @@ export function AutomationTasksModal({
         {
           text: strings.automation.deleteConfirm,
           style: 'destructive',
-          onPress: async () => {
-            setDeleting(true)
-            try {
-              const ok = await deleteTask(selectedTask.sessionId, selectedTask.id)
-              if (ok) {
-                setSelectedTaskId(null)
-                await loadTasks()
-              } else {
+          onPress: () => {
+            void (async () => {
+              setDeleting(true)
+              try {
+                const ok = await deleteTask(selectedTask.sessionId, selectedTask.id)
+                if (ok) {
+                  setSelectedTaskId(null)
+                  await loadTasks()
+                } else {
+                  Alert.alert(strings.common.unknown, strings.automation.deleteFailed)
+                }
+              } catch {
                 Alert.alert(strings.common.unknown, strings.automation.deleteFailed)
+              } finally {
+                setDeleting(false)
               }
-            } finally {
-              setDeleting(false)
-            }
+            })()
           },
         },
       ]
@@ -1159,6 +1162,7 @@ export function AutomationTasksModal({
             <View style={styles.formFooter}>
               <Pressable
                 accessibilityRole="button"
+                android_ripple={androidRipple(colors)}
                 onPress={() => {
                   formTokenRef.current++
                   setSubmitting(false)
@@ -1170,12 +1174,13 @@ export function AutomationTasksModal({
               </Pressable>
               <Pressable
                 accessibilityRole="button"
+                android_ripple={androidRipple(colors)}
                 onPress={handleSaveForm}
                 disabled={submitting}
                 style={({ pressed }) => [styles.footerSaveBtn, pressed && styles.pressedBg]}
               >
                 {submitting ? (
-                  <ActivityIndicator size="small" color={colors.white} />
+                  <ActivityIndicator size="small" color={colors.onPrimary ?? colors.white} />
                 ) : (
                   <Text style={styles.footerSaveText}>{strings.automation.saveTask}</Text>
                 )}
@@ -1249,15 +1254,7 @@ export function AutomationTasksModal({
               <Text style={styles.headerTitle} numberOfLines={1}>
                 {selectedTask.title || strings.automation.detailTitle}
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.automation.editTask}
-                onPress={() => openEditForm(selectedTask)}
-                hitSlop={8}
-                style={styles.headerBtn}
-              >
-                <Edit2 size={18} color={colors.ink} />
-              </Pressable>
+              <View style={styles.headerRightSpacer} />
             </View>
 
             {/* Detail Tabs */}
@@ -1342,13 +1339,6 @@ export function AutomationTasksModal({
                         </View>
                       </>
                     )}
-
-                    <View style={styles.divider} />
-
-                    <View style={styles.fieldGroup}>
-                      <Text style={styles.fieldLabel}>{strings.automation.taskId}</Text>
-                      <Text style={styles.fieldValueCode}>{selectedTask.id}</Text>
-                    </View>
                   </View>
 
                   {/* Pause / Resume & Edit Action Buttons */}
@@ -1431,10 +1421,13 @@ export function AutomationTasksModal({
                         {strings.automation.detailRecords}
                       </Text>
                       <Text style={styles.fieldValue}>
-                        {formatNextRun(selectedTask.lastDelivery.deliveredAt).absolute}
+                        {formatNextRun(selectedTask.lastDelivery.deliveredAt).absolute}{' '}
+                        <Text style={styles.fieldValueMuted}>
+                          {formatNextRun(selectedTask.lastDelivery.deliveredAt).relative}
+                        </Text>
                       </Text>
-                      <Text style={styles.fieldValueCode}>
-                        Message: {selectedTask.lastDelivery.messageId}
+                      <Text style={styles.fieldValueMuted}>
+                        {sessionLabel(selectedTask.sessionId, linkedSession?.title)}
                       </Text>
                     </View>
                   ) : (
@@ -1459,18 +1452,28 @@ export function AutomationTasksModal({
                 <ArrowLeft size={20} color={colors.ink} />
               </Pressable>
               <Text style={styles.headerTitle}>{strings.automation.title}</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.automation.newTask}
-                onPress={openCreateForm}
-                hitSlop={8}
-                style={[styles.headerBtn, styles.headerBtnPrimary]}
-              >
-                <Plus size={20} color={colors.white} />
-              </Pressable>
+              <View style={styles.headerRight}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={strings.common.refresh}
+                  onPress={() => void loadTasks()}
+                  disabled={loading}
+                  hitSlop={8}
+                  style={styles.headerBtn}
+                >
+                  <RefreshCw size={18} color={colors.ink} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={strings.automation.newTask}
+                  onPress={openCreateForm}
+                  hitSlop={8}
+                  style={[styles.headerBtn, styles.headerBtnPrimary]}
+                >
+                  <Plus size={20} color={colors.white} />
+                </Pressable>
+              </View>
             </View>
-            <Text style={styles.subtitle}>{strings.automation.subtitle}</Text>
-
             {/* Error Banner if error occurred */}
             {Boolean(error) && (
               <View style={styles.errorBanner}>
@@ -1513,38 +1516,29 @@ export function AutomationTasksModal({
             {/* Filter Tabs */}
             <View style={styles.filterRow}>
               <View style={styles.segmented}>
-              {(['all', 'active', 'inactive'] as const).map(f => (
-                <Pressable
-                  key={f}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: statusFilter === f }}
-                  onPress={() => setStatusFilter(f)}
-                  style={[styles.segment, statusFilter === f && styles.segmentActive]}
-                >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      statusFilter === f && styles.segmentTextActive,
-                    ]}
+                {(['all', 'active', 'inactive'] as const).map(f => (
+                  <Pressable
+                    key={f}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: statusFilter === f }}
+                    onPress={() => setStatusFilter(f)}
+                    style={[styles.segment, statusFilter === f && styles.segmentActive]}
                   >
-                    {f === 'all'
-                      ? strings.automation.filterAll
-                      : f === 'active'
-                        ? strings.automation.filterActive
-                        : strings.automation.filterInactive}
-                  </Text>
-                </Pressable>
-              ))}
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        statusFilter === f && styles.segmentTextActive,
+                      ]}
+                    >
+                      {f === 'all'
+                        ? strings.automation.filterAll
+                        : f === 'active'
+                          ? strings.automation.filterActive
+                          : strings.automation.filterInactive}
+                    </Text>
+                  </Pressable>
+                ))}
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={strings.common.refresh}
-                onPress={() => void loadTasks()}
-                hitSlop={8}
-                style={styles.refreshBtn}
-              >
-                <RefreshCw size={16} color={colors.muted} />
-              </Pressable>
             </View>
 
             {/* Task List or Empty State */}
@@ -1682,14 +1676,6 @@ function createStyles(colors: ThemeColors) {
       gap: 4,
     },
     newBtnText: { ...type.smallStrong, color: colors.white },
-    subtitle: {
-      ...type.caption,
-      color: colors.muted,
-      textAlign: 'center',
-      paddingHorizontal: spacing.lg,
-      marginTop: -spacing.xxs,
-      marginBottom: spacing.sm,
-    },
     headerBtnPrimary: {
       backgroundColor: colors.primary,
     },
@@ -1697,9 +1683,8 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
-      marginTop: spacing.sm,
-      marginBottom: spacing.sm,
-      gap: spacing.xs,
+      marginTop: spacing.xs,
+      marginBottom: spacing.xs,
     },
     segmented: {
       flex: 1,
@@ -1707,16 +1692,6 @@ function createStyles(colors: ThemeColors) {
       padding: 3,
       borderRadius: radius.pill,
       backgroundColor: colors.surfaceStrong,
-    },
-    refreshBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: radius.pill,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.grouped,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
     },
     segment: {
       flex: 1,
@@ -1743,11 +1718,11 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       backgroundColor: colors.grouped,
       marginHorizontal: spacing.md,
-      marginTop: spacing.sm,
-      marginBottom: spacing.xs,
+      marginTop: spacing.xs,
+      marginBottom: 0,
       paddingHorizontal: spacing.md,
       borderRadius: radius.pill,
-      height: 46,
+      height: 42,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
     },
@@ -1867,7 +1842,6 @@ function createStyles(colors: ThemeColors) {
     fieldSubLabel: { ...type.caption, color: colors.muted, marginBottom: spacing.xs, fontWeight: '600' },
     fieldValue: { ...type.body, color: colors.ink },
     fieldValueMuted: { ...type.caption, color: colors.muted },
-    fieldValueCode: { ...type.caption, color: colors.muted, fontFamily: 'monospace' },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: spacing.xs },
     linkedSessionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
     linkedSessionTitle: { ...type.body, color: colors.ink, flex: 1 },
@@ -2301,11 +2275,13 @@ function createStyles(colors: ThemeColors) {
       ...floatingShadow(colors),
     },
     footerCancelBtn: {
-      height: 44,
-      paddingHorizontal: spacing.md,
+      height: 46,
+      paddingHorizontal: spacing.lg,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: radius.pill,
+      ...continuousRadius(radius.pill),
+      backgroundColor: colors.surfaceStrong,
+      overflow: 'hidden',
     },
     footerCancelText: {
       ...type.bodyStrong,
@@ -2313,15 +2289,16 @@ function createStyles(colors: ThemeColors) {
     },
     footerSaveBtn: {
       height: 46,
-      paddingHorizontal: spacing.lg,
+      paddingHorizontal: spacing.xl,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: radius.pill,
+      ...continuousRadius(radius.pill),
       backgroundColor: colors.primary,
+      overflow: 'hidden',
     },
     footerSaveText: {
       ...type.bodyStrong,
-      color: colors.white,
+      color: colors.onPrimary ?? colors.white,
     },
     formCard: {
       backgroundColor: colors.card,

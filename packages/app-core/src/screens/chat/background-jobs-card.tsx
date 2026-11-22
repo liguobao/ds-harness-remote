@@ -17,6 +17,7 @@ import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import { IconJobOutline } from '../../ui/dsh-icons'
 import { strings } from '../../locales/i18n'
 import { radius, spacing, type as typography, type ThemeColors } from '../../ui/theme'
+import { monoFontFamily } from '../../ui/platform-style'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import type { BackgroundJob } from '../../services/session-tools'
@@ -823,7 +824,7 @@ const createStyles = (colors: ThemeColors) =>
       maxHeight: 140,
     },
     logText: {
-      fontFamily: 'monospace',
+      fontFamily: monoFontFamily,
       fontSize: 11,
       lineHeight: 16,
       color: colors.ink,

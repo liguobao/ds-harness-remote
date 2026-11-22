@@ -176,9 +176,90 @@ describe('PluginControlRuntime settings setup', () => {
     expect(registerRoute).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
+      auth: 'required',
       handler: expect.any(Function),
     }))
     await dispose()
+  })
+
+  it('registers on webServer with auth required when requestRejection is omitted and enforces admit rejections', async () => {
+    const legacyHandle = vi.fn(() => async () => undefined)
+    let registeredRoute: {
+      auth?: string
+      handler(req: unknown, res: unknown): Promise<void> | void
+    } | undefined
+    const runtime = new PluginControlRuntime(
+      resolveConfig(), '/unused', undefined, undefined, undefined,
+    )
+    let admission: { rejection?: number; peer?: unknown } | undefined = { rejection: 401 }
+    const connection = {
+      admit: () => admission,
+      rpc: { handle: legacyHandle },
+    } satisfies HostConnectionHandle
+    const dispose = runtime.register(connection, {
+      register: route => {
+        registeredRoute = route as unknown as typeof registeredRoute
+        return async () => undefined
+      },
+    })
+
+    expect(legacyHandle).not.toHaveBeenCalled()
+    expect(registeredRoute?.auth).toBe('required')
+
+    const callHttp = async (route: NonNullable<typeof registeredRoute>, body: string) => {
+      const { Readable } = await import('node:stream')
+      const req = Object.assign(Readable.from([Buffer.from(body)]), {
+        method: 'POST',
+        url: '/ds-harness-remote/status',
+        headers: { 'content-type': 'application/json' },
+      })
+      let status = 0
+      let text = ''
+      const res = {
+        writeHead: (code: number) => { status = code },
+        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+      }
+      await route.handler(req, res)
+      return { status, text }
+    }
+
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 401, text: 'unauthorized' })
+    admission = { rejection: Number.NaN }
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
+    admission = undefined
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
+    admission = {}
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
+    admission = { peer: { principal: 'owner' } }
+    const okRes = await callHttp(registeredRoute!, JSON.stringify({ type: 'client-request', rpcId: '1', method: 'status', payload: {} }))
+    expect(okRes.status).toBe(200)
+    expect(JSON.parse(okRes.text)).toMatchObject({ type: 'server-response', rpcId: '1', result: { ok: true, value: { available: false } } })
+    await dispose()
+
+    // Dual-method hosts only invoke requestRejection once; hosts missing both fail closed.
+    const admitSpy = vi.fn(() => ({ peer: {} }))
+    let dualRoute: typeof registeredRoute
+    const disposeDual = runtime.register({
+      requestRejection: () => undefined,
+      admit: admitSpy,
+      rpc: { handle: legacyHandle },
+    }, {
+      register: route => { dualRoute = route as unknown as typeof registeredRoute; return async () => undefined },
+    })
+    const dualRes = await callHttp(dualRoute!, JSON.stringify({ type: 'client-request', rpcId: '2', method: 'status', payload: {} }))
+    expect(dualRes.status).toBe(200)
+    expect(admitSpy).not.toHaveBeenCalled()
+    await disposeDual()
+
+    let bareRoute: typeof registeredRoute
+    const disposeBare = runtime.register({ rpc: { handle: legacyHandle } }, {
+      register: route => { bareRoute = route as unknown as typeof registeredRoute; return async () => undefined },
+    })
+    await expect(callHttp(bareRoute!, JSON.stringify({ type: 'client-request', rpcId: '3', method: 'status', payload: {} }))).resolves.toEqual({
+      status: 403,
+      text: 'forbidden',
+    })
+    await disposeBare()
   })
 
   it('updates the Server address without creating a separate authorization', async () => {
@@ -696,6 +777,77 @@ describe('PluginControlRuntime local log endpoints', () => {
       error: { details: { remoteCode: 'SETTINGS_UNAVAILABLE' } },
     })
     expect((await logStore.snapshot()).totalBuffered).toBe(1)
+  })
+
+  it('keeps settings.get and status readable when persisted settings fail resolveConfig', async () => {
+    const directory = await temporaryDirectory()
+    const invalidSettings = settingsBinding({ httpServerAllowlist: ['http://not-a-host'] } as unknown as Config)
+    const logStore = new HostLogStore()
+    logStore.record('error', '[ds-harness-remote] Remote plugin startup failed {"code":"INTERNAL_ERROR"}')
+    const control = new PluginControlRuntime(
+      resolveConfig({ enabled: true }),
+      directory,
+      invalidSettings,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      logStore,
+    )
+    control.setStartupFailure(new TypeError('httpServerAllowlist invalid'), { storageAvailable: false })
+    const handler = register(control)
+    await expect(handler('status', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { available: false, controlUnavailable: false, startupError: { code: 'INTERNAL_ERROR' } },
+    })
+    await expect(handler('settings.get', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { writable: true, startupError: { code: 'INTERNAL_ERROR' } },
+    })
+    await expect(handler('settings.logs.get', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { totalBuffered: 1 },
+    })
+    // Unbacked reset refuses when storage is unavailable and never clears startupError.
+    await expect(handler('settings.identity.reset', { role: 'all' }, signal())).resolves.toMatchObject({
+      ok: false,
+    })
+    await expect(handler('status', {}, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { startupError: { code: 'INTERNAL_ERROR' } },
+    })
+  })
+
+  it('uses latest settings in startup retry and allows fixing an invalid persisted serverUrl', async () => {
+    const directory = await temporaryDirectory()
+    const validRetrySettings = settingsBinding({ serverUrl: 'https://good.example.com' })
+    const switchServer = vi.fn(async (_cfg: ReturnType<typeof resolveConfig>) => ({
+      host: {
+        hostStatus: () => ({ deviceId: 'host-id', configured: true, online: true, reconnecting: false, authorized: true, accountRequired: true, connectedClients: [] }),
+        reconnectHost: vi.fn(),
+        clearHostAuthorization: vi.fn(),
+        authorizeHostAsOwned: vi.fn(),
+        authorizeHostWithAccount: vi.fn(),
+        authorizeHostWithCode: vi.fn(),
+      } satisfies HostAuthorizationControl,
+      client: undefined,
+    }))
+    const retryControl = new PluginControlRuntime(resolveConfig({}), directory, validRetrySettings, undefined, undefined, switchServer)
+    retryControl.setStartupFailure(new Error('boot failed'))
+    const retryHandler = register(retryControl)
+    await retryHandler('settings.development.set', { debugLogging: true }, signal())
+    await expect(retryHandler('settings.startup.retry', {}, signal())).resolves.toMatchObject({ ok: true })
+    expect(switchServer.mock.calls[0]?.[0].logLevel).toBe('debug')
+
+    const recoverableSettings = settingsBinding({ serverUrl: 'http://not-allowed.example.com' })
+    const serverFixControl = new PluginControlRuntime(resolveConfig({}), directory, recoverableSettings, undefined, undefined)
+    serverFixControl.setStartupFailure(new TypeError('bad serverUrl'))
+    const serverFixHandler = register(serverFixControl)
+    await expect(serverFixHandler('settings.server.set', { serverUrl: 'https://good.example.com' }, signal())).resolves.toMatchObject({
+      ok: true,
+      value: { config: { serverUrl: 'https://good.example.com' }, applies: 'restart', startupError: { code: 'INTERNAL_ERROR' } },
+    })
   })
 })
 function register(runtime: PluginControlRuntime) {

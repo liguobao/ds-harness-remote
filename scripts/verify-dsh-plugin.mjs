@@ -43,6 +43,30 @@ assert.equal(pluginManifest.author, manifest.author, 'root and npm package autho
 assert.equal(pluginManifest.license, manifest.license, 'root and npm package licenses must stay unified')
 assert.equal(manifest.dsh?.bundle?.patch, './cordis.patch.yml', 'root package must declare a DSH bundle patch')
 assert.equal(manifest.dsh?.client?.platform, 'web', 'root package must declare its browser client face')
+assert.deepEqual(pluginManifest.dsh?.client, manifest.dsh?.client, 'root and npm dsh.client metadata must stay unified')
+const canonicalDshPeerRange = manifest.peerDependencies?.['@deepseek-ai/dsh-api-gateway']
+assert.ok(typeof canonicalDshPeerRange === 'string' && canonicalDshPeerRange.trim().length > 0, 'root manifest must declare canonical DSH peer range')
+const clientInjectSet = new Set(manifest.dsh?.client?.inject ?? [])
+for (const [label, pkgManifest] of [['root', manifest], ['npm', pluginManifest]]) {
+  const clientInject = pkgManifest.dsh?.client?.inject ?? []
+  for (const injectedPackage of clientInject) {
+    assert.equal(
+      pkgManifest.peerDependencies?.[injectedPackage],
+      canonicalDshPeerRange,
+      `${label} manifest must align dsh.client.inject entry ${injectedPackage} peer range with DSH core`,
+    )
+    assert.equal(
+      pkgManifest.peerDependenciesMeta?.[injectedPackage]?.optional,
+      true,
+      `${label} manifest must mark dsh.client.inject entry ${injectedPackage} optional in peerDependenciesMeta`,
+    )
+  }
+  for (const [peer, meta] of Object.entries(pkgManifest.peerDependenciesMeta ?? {})) {
+    if (!clientInjectSet.has(peer) && meta?.optional === true) {
+      assert.fail(`${label} manifest must not mark required peer ${peer} optional`)
+    }
+  }
+}
 assert.ok(
   manifest.dsh?.client?.inject?.includes('@deepseek-ai/dsh-client-ui-settings-plugins'),
   'root browser client must load after the official plugin settings surface',

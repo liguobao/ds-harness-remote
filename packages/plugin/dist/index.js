@@ -4395,7 +4395,7 @@ var require_ip_codec = __commonJS({
 var require_dns_packet = __commonJS({
   "node_modules/dns-packet/index.js"(exports) {
     "use strict";
-    var Buffer9 = __require("buffer").Buffer;
+    var Buffer10 = __require("buffer").Buffer;
     var types22 = require_types();
     var rcodes = require_rcodes();
     var opcodes = require_opcodes();
@@ -4410,7 +4410,7 @@ var require_dns_packet = __commonJS({
     var NOT_QU_MASK = ~QU_MASK;
     var name2 = exports.name = {};
     name2.encode = function(str, buf, offset2, { mail = false } = {}) {
-      if (!buf) buf = Buffer9.alloc(name2.encodingLength(str));
+      if (!buf) buf = Buffer10.alloc(name2.encodingLength(str));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const n = str.replace(/^\.|\.$/gm, "");
@@ -4495,11 +4495,11 @@ var require_dns_packet = __commonJS({
     name2.decode.bytes = 0;
     name2.encodingLength = function(n) {
       if (n === "." || n === "..") return 1;
-      return Buffer9.byteLength(n.replace(/^\.|\.$/gm, "")) + 2;
+      return Buffer10.byteLength(n.replace(/^\.|\.$/gm, "")) + 2;
     };
     var string9 = {};
     string9.encode = function(s, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(string9.encodingLength(s));
+      if (!buf) buf = Buffer10.alloc(string9.encodingLength(s));
       if (!offset2) offset2 = 0;
       const len = buf.write(s, offset2 + 1);
       buf[offset2] = len;
@@ -4516,7 +4516,7 @@ var require_dns_packet = __commonJS({
     };
     string9.decode.bytes = 0;
     string9.encodingLength = function(s) {
-      return Buffer9.byteLength(s) + 1;
+      return Buffer10.byteLength(s) + 1;
     };
     var header = {};
     header.encode = function(h, buf, offset2) {
@@ -4563,7 +4563,7 @@ var require_dns_packet = __commonJS({
     };
     var runknown = exports.unknown = {};
     runknown.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(runknown.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(runknown.encodingLength(data2));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(data2.length, offset2);
       data2.copy(buf, offset2 + 2);
@@ -4584,7 +4584,7 @@ var require_dns_packet = __commonJS({
     };
     var rns = exports.ns = {};
     rns.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rns.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rns.encodingLength(data2));
       if (!offset2) offset2 = 0;
       name2.encode(data2, buf, offset2 + 2);
       buf.writeUInt16BE(name2.encode.bytes, offset2);
@@ -4605,7 +4605,7 @@ var require_dns_packet = __commonJS({
     };
     var rsoa = exports.soa = {};
     rsoa.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsoa.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rsoa.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4659,13 +4659,13 @@ var require_dns_packet = __commonJS({
       if (!Array.isArray(data2)) data2 = [data2];
       for (let i = 0; i < data2.length; i++) {
         if (typeof data2[i] === "string") {
-          data2[i] = Buffer9.from(data2[i]);
+          data2[i] = Buffer10.from(data2[i]);
         }
-        if (!Buffer9.isBuffer(data2[i])) {
+        if (!Buffer10.isBuffer(data2[i])) {
           throw new Error("Must be a Buffer");
         }
       }
-      if (!buf) buf = Buffer9.alloc(rtxt.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rtxt.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4704,7 +4704,7 @@ var require_dns_packet = __commonJS({
       let length = 2;
       data2.forEach(function(buf) {
         if (typeof buf === "string") {
-          length += Buffer9.byteLength(buf) + 1;
+          length += Buffer10.byteLength(buf) + 1;
         } else {
           length += buf.length + 1;
         }
@@ -4713,10 +4713,10 @@ var require_dns_packet = __commonJS({
     };
     var rnull = exports.null = {};
     rnull.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnull.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rnull.encodingLength(data2));
       if (!offset2) offset2 = 0;
-      if (typeof data2 === "string") data2 = Buffer9.from(data2);
-      if (!data2) data2 = Buffer9.alloc(0);
+      if (typeof data2 === "string") data2 = Buffer10.from(data2);
+      if (!data2) data2 = Buffer10.alloc(0);
       const oldOffset = offset2;
       offset2 += 2;
       const len = data2.length;
@@ -4740,11 +4740,11 @@ var require_dns_packet = __commonJS({
     rnull.decode.bytes = 0;
     rnull.encodingLength = function(data2) {
       if (!data2) return 2;
-      return (Buffer9.isBuffer(data2) ? data2.length : Buffer9.byteLength(data2)) + 2;
+      return (Buffer10.isBuffer(data2) ? data2.length : Buffer10.byteLength(data2)) + 2;
     };
     var rhinfo = exports.hinfo = {};
     rhinfo.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rhinfo.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rhinfo.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4777,7 +4777,7 @@ var require_dns_packet = __commonJS({
     var rcname = exports.cname = rptr;
     var rdname = exports.dname = rptr;
     rptr.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rptr.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rptr.encodingLength(data2));
       if (!offset2) offset2 = 0;
       name2.encode(data2, buf, offset2 + 2);
       buf.writeUInt16BE(name2.encode.bytes, offset2);
@@ -4797,7 +4797,7 @@ var require_dns_packet = __commonJS({
     };
     var rsrv = exports.srv = {};
     rsrv.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsrv.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rsrv.encodingLength(data2));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(data2.priority || 0, offset2 + 2);
       buf.writeUInt16BE(data2.weight || 0, offset2 + 4);
@@ -4828,7 +4828,7 @@ var require_dns_packet = __commonJS({
     rcaa.ISSUER_CRITICAL = 1 << 7;
     rcaa.encode = function(data2, buf, offset2) {
       const len = rcaa.encodingLength(data2);
-      if (!buf) buf = Buffer9.alloc(rcaa.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rcaa.encodingLength(data2));
       if (!offset2) offset2 = 0;
       if (data2.issuerCritical) {
         data2.flags = rcaa.ISSUER_CRITICAL;
@@ -4840,7 +4840,7 @@ var require_dns_packet = __commonJS({
       string9.encode(data2.tag, buf, offset2);
       offset2 += string9.encode.bytes;
       buf.write(data2.value, offset2);
-      offset2 += Buffer9.byteLength(data2.value);
+      offset2 += Buffer10.byteLength(data2.value);
       rcaa.encode.bytes = len;
       return buf;
     };
@@ -4866,7 +4866,7 @@ var require_dns_packet = __commonJS({
     };
     var rmx = exports.mx = {};
     rmx.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rmx.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rmx.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4896,7 +4896,7 @@ var require_dns_packet = __commonJS({
     };
     var ra = exports.a = {};
     ra.encode = function(host, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(ra.encodingLength(host));
+      if (!buf) buf = Buffer10.alloc(ra.encodingLength(host));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(4, offset2);
       offset2 += 2;
@@ -4918,7 +4918,7 @@ var require_dns_packet = __commonJS({
     };
     var raaaa = exports.aaaa = {};
     raaaa.encode = function(host, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(raaaa.encodingLength(host));
+      if (!buf) buf = Buffer10.alloc(raaaa.encodingLength(host));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(16, offset2);
       offset2 += 2;
@@ -4940,7 +4940,7 @@ var require_dns_packet = __commonJS({
     };
     var roption = exports.option = {};
     roption.encode = function(option, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(roption.encodingLength(option));
+      if (!buf) buf = Buffer10.alloc(roption.encodingLength(option));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const code = optioncodes.toCode(option.code);
@@ -4958,7 +4958,7 @@ var require_dns_packet = __commonJS({
           case 8:
             const spl = option.sourcePrefixLength || 0;
             const fam = option.family || ip.familyOf(option.ip);
-            const ipBuf = ip.encode(option.ip, Buffer9.alloc);
+            const ipBuf = ip.encode(option.ip, Buffer10.alloc);
             const ipLen = Math.ceil(spl / 8);
             buf.writeUInt16BE(ipLen + 4, offset2);
             offset2 += 2;
@@ -5023,7 +5023,7 @@ var require_dns_packet = __commonJS({
           offset2 += 2;
           option.sourcePrefixLength = buf.readUInt8(offset2++);
           option.scopePrefixLength = buf.readUInt8(offset2++);
-          const padded = Buffer9.alloc(option.family === 1 ? 4 : 16);
+          const padded = Buffer10.alloc(option.family === 1 ? 4 : 16);
           buf.copy(padded, 0, offset2, offset2 + len - 4);
           option.ip = ip.decode(padded);
           break;
@@ -5065,7 +5065,7 @@ var require_dns_packet = __commonJS({
     };
     var ropt = exports.opt = {};
     ropt.encode = function(options, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(ropt.encodingLength(options));
+      if (!buf) buf = Buffer10.alloc(ropt.encodingLength(options));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const rdlen = encodingLengthList(options, roption);
@@ -5099,11 +5099,11 @@ var require_dns_packet = __commonJS({
     rdnskey.ZONE_KEY = 128;
     rdnskey.SECURE_ENTRYPOINT = 32768;
     rdnskey.encode = function(key, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rdnskey.encodingLength(key));
+      if (!buf) buf = Buffer10.alloc(rdnskey.encodingLength(key));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const keydata = key.key;
-      if (!Buffer9.isBuffer(keydata)) {
+      if (!Buffer10.isBuffer(keydata)) {
         throw new Error("Key must be a Buffer");
       }
       offset2 += 2;
@@ -5141,15 +5141,15 @@ var require_dns_packet = __commonJS({
     };
     rdnskey.decode.bytes = 0;
     rdnskey.encodingLength = function(key) {
-      return 6 + Buffer9.byteLength(key.key);
+      return 6 + Buffer10.byteLength(key.key);
     };
     var rrrsig = exports.rrsig = {};
     rrrsig.encode = function(sig, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rrrsig.encodingLength(sig));
+      if (!buf) buf = Buffer10.alloc(rrrsig.encodingLength(sig));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const signature = sig.signature;
-      if (!Buffer9.isBuffer(signature)) {
+      if (!Buffer10.isBuffer(signature)) {
         throw new Error("Signature must be a Buffer");
       }
       offset2 += 2;
@@ -5205,11 +5205,11 @@ var require_dns_packet = __commonJS({
     };
     rrrsig.decode.bytes = 0;
     rrrsig.encodingLength = function(sig) {
-      return 20 + name2.encodingLength(sig.signersName) + Buffer9.byteLength(sig.signature);
+      return 20 + name2.encodingLength(sig.signersName) + Buffer10.byteLength(sig.signature);
     };
     var rrp = exports.rp = {};
     rrp.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rrp.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rrp.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5240,7 +5240,7 @@ var require_dns_packet = __commonJS({
     };
     var typebitmap = {};
     typebitmap.encode = function(typelist, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(typebitmap.encodingLength(typelist));
+      if (!buf) buf = Buffer10.alloc(typebitmap.encodingLength(typelist));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       var typesByWindow = [];
@@ -5253,7 +5253,7 @@ var require_dns_packet = __commonJS({
       }
       for (i = 0; i < typesByWindow.length; i++) {
         if (typesByWindow[i] !== void 0) {
-          var windowBuf = Buffer9.from(typesByWindow[i]);
+          var windowBuf = Buffer10.from(typesByWindow[i]);
           buf.writeUInt8(i, offset2);
           offset2 += 1;
           buf.writeUInt8(windowBuf.length, offset2);
@@ -5306,7 +5306,7 @@ var require_dns_packet = __commonJS({
     };
     var rnsec = exports.nsec = {};
     rnsec.encode = function(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rnsec.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5338,15 +5338,15 @@ var require_dns_packet = __commonJS({
     };
     var rnsec3 = exports.nsec3 = {};
     rnsec3.encode = function(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec3.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rnsec3.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const salt = record12.salt;
-      if (!Buffer9.isBuffer(salt)) {
+      if (!Buffer10.isBuffer(salt)) {
         throw new Error("salt must be a Buffer");
       }
       const nextDomain = record12.nextDomain;
-      if (!Buffer9.isBuffer(nextDomain)) {
+      if (!Buffer10.isBuffer(nextDomain)) {
         throw new Error("nextDomain must be a Buffer");
       }
       offset2 += 2;
@@ -5402,11 +5402,11 @@ var require_dns_packet = __commonJS({
     };
     var rds = exports.ds = {};
     rds.encode = function(digest, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rds.encodingLength(digest));
+      if (!buf) buf = Buffer10.alloc(rds.encodingLength(digest));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const digestdata = digest.digest;
-      if (!Buffer9.isBuffer(digestdata)) {
+      if (!Buffer10.isBuffer(digestdata)) {
         throw new Error("Digest must be a Buffer");
       }
       offset2 += 2;
@@ -5442,7 +5442,7 @@ var require_dns_packet = __commonJS({
     };
     rds.decode.bytes = 0;
     rds.encodingLength = function(digest) {
-      return 6 + Buffer9.byteLength(digest.digest);
+      return 6 + Buffer10.byteLength(digest.digest);
     };
     var rsshfp = exports.sshfp = {};
     rsshfp.getFingerprintLengthForHashType = function getFingerprintLengthForHashType(hashType) {
@@ -5454,7 +5454,7 @@ var require_dns_packet = __commonJS({
       }
     };
     rsshfp.encode = function encode21(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsshfp.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rsshfp.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5462,7 +5462,7 @@ var require_dns_packet = __commonJS({
       offset2 += 1;
       buf[offset2] = record12.hash;
       offset2 += 1;
-      const fingerprintBuf = Buffer9.from(record12.fingerprint.toUpperCase(), "hex");
+      const fingerprintBuf = Buffer10.from(record12.fingerprint.toUpperCase(), "hex");
       if (fingerprintBuf.length !== rsshfp.getFingerprintLengthForHashType(record12.hash)) {
         throw new Error("Invalid fingerprint length");
       }
@@ -5490,11 +5490,11 @@ var require_dns_packet = __commonJS({
     };
     rsshfp.decode.bytes = 0;
     rsshfp.encodingLength = function(record12) {
-      return 4 + Buffer9.from(record12.fingerprint, "hex").byteLength;
+      return 4 + Buffer10.from(record12.fingerprint, "hex").byteLength;
     };
     var rnaptr = exports.naptr = {};
     rnaptr.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnaptr.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rnaptr.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5541,11 +5541,11 @@ var require_dns_packet = __commonJS({
     };
     var rtlsa = exports.tlsa = {};
     rtlsa.encode = function(cert, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rtlsa.encodingLength(cert));
+      if (!buf) buf = Buffer10.alloc(rtlsa.encodingLength(cert));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const certdata = cert.certificate;
-      if (!Buffer9.isBuffer(certdata)) {
+      if (!Buffer10.isBuffer(certdata)) {
         throw new Error("Certificate must be a Buffer");
       }
       offset2 += 2;
@@ -5581,7 +5581,7 @@ var require_dns_packet = __commonJS({
     };
     rtlsa.decode.bytes = 0;
     rtlsa.encodingLength = function(cert) {
-      return 5 + Buffer9.byteLength(cert.certificate);
+      return 5 + Buffer10.byteLength(cert.certificate);
     };
     var renc = exports.record = function(type) {
       switch (type.toUpperCase()) {
@@ -5636,7 +5636,7 @@ var require_dns_packet = __commonJS({
     };
     var answer = exports.answer = {};
     answer.encode = function(a, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(answer.encodingLength(a));
+      if (!buf) buf = Buffer10.alloc(answer.encodingLength(a));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       name2.encode(a.name, buf, offset2);
@@ -5701,7 +5701,7 @@ var require_dns_packet = __commonJS({
     };
     var question = exports.question = {};
     question.encode = function(q, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(question.encodingLength(q));
+      if (!buf) buf = Buffer10.alloc(question.encodingLength(q));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       name2.encode(q.name, buf, offset2);
@@ -5742,7 +5742,7 @@ var require_dns_packet = __commonJS({
     exports.DNSSEC_OK = 1 << 15;
     exports.encode = function(result, buf, offset2) {
       const allocing = !buf;
-      if (allocing) buf = Buffer9.alloc(exports.encodingLength(result));
+      if (allocing) buf = Buffer10.alloc(exports.encodingLength(result));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       if (!result.questions) result.questions = [];
@@ -5780,9 +5780,9 @@ var require_dns_packet = __commonJS({
     };
     exports.streamEncode = function(result) {
       const buf = exports.encode(result);
-      const sbuf = Buffer9.alloc(2);
+      const sbuf = Buffer10.alloc(2);
       sbuf.writeUInt16BE(buf.byteLength);
-      const combine = Buffer9.concat([sbuf, buf]);
+      const combine = Buffer10.concat([sbuf, buf]);
       exports.streamEncode.bytes = combine.byteLength;
       return combine;
     };
@@ -66591,6 +66591,7 @@ function isRecord(value) {
 
 // packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
+var ACP_HISTORY_RPC_TIMEOUT_MS = 15e4;
 var AgentAcpClient = class {
   core;
   capabilities;
@@ -66616,8 +66617,7 @@ var AgentAcpClient = class {
     return result;
   }
   async call(method, params = {}, signal) {
-    const timeoutMs = method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0;
-    return this.core.rpc("agent.acp.call", { method, params }, signal, timeoutMs);
+    return this.core.rpc("agent.acp.call", { method, params }, signal, rpcTimeoutForMethod(method));
   }
   async initialize(params = {}, signal) {
     return this.call("initialize", params, signal);
@@ -66748,21 +66748,23 @@ var AgentAcpClient = class {
     return details2.events;
   }
   async loadSessionDetails(sessionId, backend, signal) {
+    const strictHistoryBackend = backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes" || backend === "antigravity";
     const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error62) => {
-      if (backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes")
+      if (strictHistoryBackend)
         throw error62;
       return { events: [] };
     });
-    if ((backend === "pi" || backend === "claude" || backend === "opencode" || backend === "hermes") && (!isRecord2(result) || !Array.isArray(result.events))) {
+    if (strictHistoryBackend && (!isRecord2(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
     if (!isRecord2(result))
       return { events: [] };
     const events = Array.isArray(result.events) ? result.events : [];
     const permissionPreset2 = typeof result.permissionPreset === "string" ? result.permissionPreset : void 0;
+    const running = typeof result.running === "boolean" ? result.running : void 0;
     const modes = isRecord2(result.modes) && Array.isArray(result.modes.availableModes) ? {
       ...typeof result.modes.currentModeId === "string" ? { currentModeId: result.modes.currentModeId } : {},
       availableModes: result.modes.availableModes.flatMap((item) => isRecord2(item) && typeof item.id === "string" && typeof item.name === "string" ? [{ id: item.id, name: item.name, ...typeof item.description === "string" ? { description: item.description } : {} }] : [])
@@ -66776,7 +66778,8 @@ var AgentAcpClient = class {
       events,
       ...permissionPreset2 ? { permissionPreset: permissionPreset2 } : {},
       ...modes ? { modes } : {},
-      ...commands ? { commands } : {}
+      ...commands ? { commands } : {},
+      ...running !== void 0 ? { running } : {}
     };
   }
   async createSession(cwd2, mode2, backend, signal) {
@@ -66893,7 +66896,7 @@ var AgentAcpClient = class {
           data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
         }, signal);
       }
-      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal, method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0);
+      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal, rpcTimeoutForMethod(method));
       if (commit.kind === "inline")
         return commit.response;
       if (commit.kind !== "chunked" || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES))
@@ -66916,6 +66919,13 @@ var AgentAcpClient = class {
     }
   }
 };
+function rpcTimeoutForMethod(method) {
+  if (method === "session/prompt")
+    return ACP_PROMPT_RPC_TIMEOUT_MS;
+  if (method === "dsh/sessionHistory" || method === "session/load")
+    return ACP_HISTORY_RPC_TIMEOUT_MS;
+  return void 0;
+}
 function readString(value, key) {
   return isRecord2(value) && typeof value[key] === "string" ? value[key] : void 0;
 }
@@ -84978,10 +84988,11 @@ var STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 var ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
 var INVALID_REQUEST_RPC_ID = "invalid-request";
 function registerControlRoute(connection, handler, webServer, statusStream) {
-  if (webServer !== void 0 && connection.requestRejection !== void 0) {
+  if (webServer !== void 0) {
     const dispose = webServer.register({
       kind: "prefix",
       path: CONTROL_RPC_PREFIX,
+      auth: "required",
       handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream)
     });
     return async () => {
@@ -84996,7 +85007,7 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
   });
 }
 async function handleControlRequest(connection, handler, req, res, statusStream) {
-  const rejection = connection.requestRejection?.(req);
+  const rejection = requestRejectionStatus(connection, req);
   if (rejection !== void 0) {
     res.writeHead(rejection);
     res.end(rejection === 401 ? "unauthorized" : "forbidden");
@@ -85091,6 +85102,22 @@ function fullResponse(rpcId2, result) {
 function writeJson(res, status2, body) {
   res.writeHead(status2, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+function requestRejectionStatus(connection, req) {
+  if (typeof connection.requestRejection === "function") {
+    const rejection = connection.requestRejection(req);
+    return rejection === void 0 ? void 0 : normalizeRejectionStatus(rejection);
+  }
+  if (typeof connection.admit === "function") {
+    const admission = connection.admit(req);
+    if (typeof admission !== "object" || admission === null) return 403;
+    if (typeof admission.rejection === "number") return normalizeRejectionStatus(admission.rejection);
+    return admission.peer != null ? void 0 : 403;
+  }
+  return 403;
+}
+function normalizeRejectionStatus(code) {
+  return typeof code === "number" && Number.isInteger(code) && code >= 400 && code <= 599 ? code : 403;
 }
 function writeText(res, status2, body) {
   res.writeHead(status2);
@@ -85410,6 +85437,11 @@ var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
 var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
 var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
 var WELCOME_NOTICE_VERSION = "2026-08-13.1";
+var WORKSPACE_BINARY_ENDPOINTS = /* @__PURE__ */ new Set([
+  "workspaceFiles/readBytes",
+  "officeToPdf/render",
+  "officeKit/render"
+]);
 var RemoteTypertGateway2 = class {
   constructor(client, compatibility, harnessVersion, deferStreamDisconnect = false, historyCache = new RemoteSessionHistoryCache()) {
     this.client = client;
@@ -85985,7 +86017,7 @@ function base64ToBytes2(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return value;
   if (!isRecord9(value) || typeof value.data !== "string") return value;
   return { ...value, data: base64ToBytes2(value.data) };
 }
@@ -89122,7 +89154,7 @@ var TypertGatewaySwitch = class {
 };
 function workspaceConnectionResult(endpoint, result) {
   if (endpoint === "terminal/environment" && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) };
-  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (!WORKSPACE_BINARY_ENDPOINTS.has(endpoint)) return result;
   if (!result.ok || !isRecord11(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
@@ -94335,7 +94367,7 @@ var CodexAppServerClient = class {
     if (!this.closed) this.notifyUnavailable(code);
   }
   terminateChild(child) {
-    if (child === void 0 || this.hasChildExited(child)) return Promise.resolve();
+    if (child?.pid === void 0 || child.pid <= 0 || this.hasChildExited(child)) return Promise.resolve();
     const existing = this.terminatingChildren.get(child);
     if (existing !== void 0) return existing;
     const exitPromise = this.childExitPromises.get(child);
@@ -98175,141 +98207,115 @@ function isRecord17(value) {
 }
 
 // packages/plugin/src/acp/history-events.ts
-function acpHistoryEvents(messages, sessionId, provider) {
-  const events = [];
-  const tools = /* @__PURE__ */ new Map();
-  let turn = 0;
-  let step = 1;
-  let afterTools = false;
-  let pending;
-  const push2 = (type, data2, surface = false) => events.push({
-    type: "event",
-    event: {
-      type,
-      seq: events.length,
-      time: 0,
-      data: data2,
-      ...surface ? { surfaceOp: "append" } : {}
-    }
-  });
-  const id7 = () => `${provider}-history:${sessionId}:${events.length}`;
-  const flushMessage = () => {
-    if (!pending) return;
-    const message = { id: id7(), role: pending.role, content: pending.content };
-    if (pending.role === "user") push2("user/message", { ...message, source: { kind: "user" } }, true);
-    else push2("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
-    pending = void 0;
-  };
-  const result = (tool) => {
-    if (tool.emitted || !tool.terminal) return;
-    tool.emitted = true;
-    push2("tool/result", {
-      turn,
-      step,
-      message: {
-        id: id7(),
-        role: "user",
-        source: { kind: "tool", callId: tool.id },
-        content: [{
-          type: "tool-result",
-          toolCallId: tool.id,
-          content: tool.output,
-          ...tool.failed ? { isError: true } : {}
-        }]
-      }
-    }, true);
-  };
-  const flushTools = () => {
-    for (const tool of tools.values()) result(tool);
-  };
-  const endTurn = () => {
-    flushMessage();
-    flushTools();
-    if (turn) {
-      push2("step/end", { turn, step });
-      push2("turn/end", { turn, reason: { kind: "completed" } });
-    }
-    tools.clear();
-    afterTools = false;
-  };
-  for (const message of messages) {
+import { Buffer as Buffer5 } from "node:buffer";
+var MESSAGE_ENVELOPE_OVERHEAD_BYTES = 192;
+var AcpHistoryAccumulator = class {
+  constructor(sessionId, provider, limits = {}) {
+    this.sessionId = sessionId;
+    this.provider = provider;
+    this.limits = limits;
+  }
+  completedTurns = [];
+  tools = /* @__PURE__ */ new Map();
+  currentTurn;
+  completedBytes = 0;
+  completedEventCount = 0;
+  emittedCount = 0;
+  turn = 0;
+  step = 1;
+  afterTools = false;
+  pending;
+  toolPendingBytes = 0;
+  truncated = false;
+  overflowed = false;
+  /**
+   * Consume one inbound ACP message during `session/load` replay.
+   * Returns `false` if a hard single-turn safety limit was exceeded.
+   */
+  push(message) {
+    if (this.overflowed) return false;
     const params = message.params;
-    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
+    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== this.sessionId) {
+      return true;
+    }
     const update = params.update;
-    if (!update) continue;
+    if (!update) return true;
     const kind = update.sessionUpdate;
     if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
       const content = update.content;
       const isText = content?.type === "text" && typeof content.text === "string";
       const isImage = kind === "user_message_chunk" && content?.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
-      if (!isText && !isImage) continue;
+      if (!isText && !isImage) return true;
       const role2 = kind === "user_message_chunk" ? "user" : "assistant";
-      if (role2 === "user" && pending?.role !== "user") {
-        endTurn();
-        turn++;
-        step = 1;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      } else if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
+      if (role2 === "user" && this.pending?.role !== "user") {
+        this.startNewTurn(true);
+      } else if (!this.turn) {
+        this.startNewTurn(false);
       }
-      if (pending && pending.role !== role2) flushMessage();
-      flushTools();
-      if (role2 === "assistant" && afterTools) {
-        push2("step/end", { turn, step });
-        step++;
-        push2("step/start", { turn, step });
-        afterTools = false;
+      if (this.pending && this.pending.role !== role2) this.flushMessage();
+      this.flushTools();
+      if (role2 === "assistant" && this.afterTools) {
+        this.pushEvent("step/end", { turn: this.turn, step: this.step });
+        this.step++;
+        this.pushEvent("step/start", { turn: this.turn, step: this.step });
+        this.afterTools = false;
       }
-      pending ??= { role: role2, content: [] };
+      this.pending ??= { role: role2, content: [], bytes: MESSAGE_ENVELOPE_OVERHEAD_BYTES };
       if (isImage) {
         try {
           const parsed = parseAcpImage(content);
           const ext = parsed.mimeType === "image/jpeg" ? "jpg" : parsed.mimeType.slice(6);
-          const attachmentId = `agy-image:history-${sessionId}-${events.length}-${pending.content.length}.${ext}`;
-          pending.content.push({
+          const attachmentId = `agy-image:history-${this.sessionId}-${this.emittedCount}-${this.pending.content.length}.${ext}`;
+          const block = {
             ...acpImageContent(parsed, attachmentId),
             mimeType: parsed.mimeType
-          });
+          };
+          this.pending.content.push(block);
+          this.pending.bytes += Buffer5.byteLength(JSON.stringify(block), "utf8");
         } catch {
-          pending.content.push({
+          const block = {
             type: "image",
             mimeType: content.mimeType,
             mediaType: content.mimeType,
             data: content.data
-          });
+          };
+          this.pending.content.push(block);
+          this.pending.bytes += Buffer5.byteLength(content.data, "utf8") + Buffer5.byteLength(content.mimeType, "utf8") + 64;
         }
       } else {
         const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
-        const previous = pending.content.at(-1);
-        if (previous?.type === type && typeof previous.text === "string") previous.text += content.text;
-        else pending.content.push({ type, text: content.text });
+        const previous = this.pending.content.at(-1);
+        const textBytes = Buffer5.byteLength(content.text, "utf8");
+        if (previous?.type === type && typeof previous.text === "string") {
+          previous.text += content.text;
+          this.pending.bytes += textBytes;
+        } else {
+          this.pending.content.push({ type, text: content.text });
+          this.pending.bytes += textBytes + 32;
+        }
       }
-    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
-      flushMessage();
-      afterTools = true;
-      if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      }
-      let tool = tools.get(update.toolCallId);
+      return this.enforceLimits();
+    }
+    if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+      this.flushMessage();
+      if (!this.turn) this.startNewTurn(false);
+      this.afterTools = true;
+      let tool = this.tools.get(update.toolCallId);
       if (!tool) {
         tool = {
           id: update.toolCallId,
           name: typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "tool",
           input: update.rawInput ?? update.args,
           output: [],
+          outputBytes: 0,
           failed: false,
           terminal: false,
           emitted: false
         };
-        tools.set(tool.id, tool);
-        push2("tool/call", {
-          turn,
-          step,
+        this.tools.set(tool.id, tool);
+        this.pushEvent("tool/call", {
+          turn: this.turn,
+          step: this.step,
           callId: tool.id,
           name: tool.name,
           arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
@@ -98322,14 +98328,143 @@ function acpHistoryEvents(messages, sessionId, provider) {
           text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
         });
       }
-      if (decoded.content.length) tool.output = decoded.content;
+      if (decoded.content.length) {
+        if (!tool.emitted) {
+          const nextOutputBytes = Buffer5.byteLength(JSON.stringify(decoded.content), "utf8");
+          this.toolPendingBytes += nextOutputBytes - tool.outputBytes;
+          tool.outputBytes = nextOutputBytes;
+        }
+        tool.output = decoded.content;
+      }
       tool.failed ||= decoded.isError || update.status === "failed";
       tool.terminal ||= update.status === "completed" || update.status === "failed";
-      if (kind === "tool_call_update" && tool.terminal) result(tool);
+      if (kind === "tool_call_update" && tool.terminal) this.emitToolResult(tool);
+      return this.enforceLimits();
     }
+    return true;
   }
-  endTurn();
-  return events;
+  /** Finalize any open turn, enforce limits on serialized output, and return retained events. */
+  finish() {
+    if (this.overflowed) {
+      return { events: [], truncated: this.truncated, overflow: true };
+    }
+    this.endTurn();
+    if (!this.enforceLimits()) {
+      return { events: [], truncated: this.truncated, overflow: true };
+    }
+    const events = [];
+    for (const bucket of this.completedTurns) events.push(...bucket.events);
+    if (this.currentTurn) events.push(...this.currentTurn.events);
+    if (this.truncated) {
+      for (let i = 0; i < events.length; i += 1) {
+        events[i].event.seq = i;
+      }
+    }
+    return { events, truncated: this.truncated, overflow: false };
+  }
+  nextId() {
+    return `${this.provider}-history:${this.sessionId}:${this.emittedCount}`;
+  }
+  pushEvent(type, data2, surface = false) {
+    this.currentTurn ??= { events: [], bytes: 0 };
+    const entry = {
+      type: "event",
+      event: {
+        type,
+        seq: this.emittedCount,
+        time: 0,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    };
+    this.emittedCount++;
+    this.currentTurn.events.push(entry);
+    this.currentTurn.bytes += Buffer5.byteLength(JSON.stringify(entry), "utf8");
+  }
+  flushMessage() {
+    if (!this.pending) return;
+    const message = { id: this.nextId(), role: this.pending.role, content: this.pending.content };
+    if (this.pending.role === "user") this.pushEvent("user/message", { ...message, source: { kind: "user" } }, true);
+    else this.pushEvent("assistant/message", { turn: this.turn, step: this.step, message: { ...message, source: { kind: "model", provider: this.provider, model: "" } }, stream: [] }, true);
+    this.pending = void 0;
+  }
+  emitToolResult(tool) {
+    if (tool.emitted || !tool.terminal) return;
+    tool.emitted = true;
+    if (tool.outputBytes > 0) {
+      this.toolPendingBytes -= tool.outputBytes;
+      tool.outputBytes = 0;
+    }
+    this.pushEvent("tool/result", {
+      turn: this.turn,
+      step: this.step,
+      message: {
+        id: this.nextId(),
+        role: "user",
+        source: { kind: "tool", callId: tool.id },
+        content: [{
+          type: "tool-result",
+          toolCallId: tool.id,
+          content: tool.output,
+          ...tool.failed ? { isError: true } : {}
+        }]
+      }
+    }, true);
+  }
+  flushTools() {
+    for (const tool of this.tools.values()) this.emitToolResult(tool);
+  }
+  endTurn() {
+    this.flushMessage();
+    this.flushTools();
+    if (this.turn) {
+      this.pushEvent("step/end", { turn: this.turn, step: this.step });
+      this.pushEvent("turn/end", { turn: this.turn, reason: { kind: "completed" } });
+    }
+    this.tools.clear();
+    this.toolPendingBytes = 0;
+    this.afterTools = false;
+  }
+  startNewTurn(resetStep) {
+    this.endTurn();
+    if (this.currentTurn && this.currentTurn.events.length > 0) {
+      this.completedTurns.push(this.currentTurn);
+      this.completedBytes += this.currentTurn.bytes;
+      this.completedEventCount += this.currentTurn.events.length;
+    }
+    this.currentTurn = { events: [], bytes: 0 };
+    this.turn++;
+    if (resetStep) this.step = 1;
+    this.pushEvent("turn/start", { turn: this.turn });
+    this.pushEvent("step/start", { turn: this.turn, step: this.step });
+  }
+  totalBytes() {
+    return this.completedBytes + (this.currentTurn?.bytes ?? 0) + (this.pending?.bytes ?? 0) + this.toolPendingBytes;
+  }
+  totalEvents() {
+    return this.completedEventCount + (this.currentTurn?.events.length ?? 0);
+  }
+  enforceLimits() {
+    const { maxBytes: maxBytes2, maxEvents } = this.limits;
+    while (this.completedTurns.length > 0 && (maxBytes2 !== void 0 && this.totalBytes() > maxBytes2 || maxEvents !== void 0 && this.totalEvents() > maxEvents)) {
+      const evicted = this.completedTurns.shift();
+      this.completedBytes -= evicted.bytes;
+      this.completedEventCount -= evicted.events.length;
+      this.truncated = true;
+    }
+    const hardMaxBytes = this.limits.hardMaxBytes ?? maxBytes2;
+    const hardMaxEvents = this.limits.hardMaxEvents ?? maxEvents;
+    if (hardMaxBytes !== void 0 && this.totalBytes() > hardMaxBytes || hardMaxEvents !== void 0 && this.totalEvents() > hardMaxEvents) {
+      this.overflowed = true;
+      return false;
+    }
+    return true;
+  }
+};
+function acpHistoryEvents(messages, sessionId, provider) {
+  const accumulator = new AcpHistoryAccumulator(sessionId, provider);
+  for (const message of messages) accumulator.push(message);
+  return accumulator.finish().events;
 }
 
 // packages/plugin/src/acp/adapters/isolated-process.ts
@@ -99464,7 +99599,7 @@ var WorkspaceBridge = class {
     signal.throwIfAborted();
     const watcher = watch(target3, { recursive: false });
     const abort = () => {
-      watcher.return?.();
+      void watcher.return?.().catch(() => void 0);
       queue.end();
     };
     signal.addEventListener("abort", abort, { once: true });
@@ -99686,7 +99821,7 @@ import { homedir as homedir6 } from "node:os";
 import { basename as basename7, isAbsolute as isAbsolute7, join as join13, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
-import { Buffer as Buffer5 } from "node:buffer";
+import { Buffer as Buffer6 } from "node:buffer";
 var DEFAULT_LOAD_TOMBSTONE_TTL_MS = 6e4;
 var MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 6e4;
 var MAX_LOAD_TOMBSTONES = 256;
@@ -99746,6 +99881,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         responded = true;
         this.assertLoaded(result, id7);
         this.live.set(id7, result);
+        this.historyMetadata.delete(id7);
         this.clearLoadSuppression(id7, gen);
         return result;
       });
@@ -99771,11 +99907,15 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         const newId = result?.sessionId;
         if (typeof newId !== "string" || this.shuttingDown) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
         this.live.set(newId, result);
+        this.historyMetadata.delete(newId);
         this.clearLoadSuppression(newId);
         return result;
       } finally {
         this.pendingNew--;
       }
+    }
+    if ((method === "dsh/selectModel" || method === "session/set_mode") && typeof id7 === "string") {
+      this.historyMetadata.delete(id7);
     }
     return super.call(method, params, timeoutMs);
   }
@@ -99836,6 +99976,12 @@ var ClaudeAcpClient = class extends CursorAcpClient {
     if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
     if (id7 !== void 0 && id7 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
   }
+  isSessionLoaded(sessionId) {
+    return this.live.has(sessionId);
+  }
+  invalidateHistoryMetadata(sessionId) {
+    this.historyMetadata.delete(sessionId);
+  }
   lastHistoryMetadata(sessionId) {
     return this.historyMetadata.get(sessionId);
   }
@@ -99858,7 +100004,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         return;
       }
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
-      bytes += Buffer5.byteLength(JSON.stringify(message));
+      bytes += Buffer6.byteLength(JSON.stringify(message));
       count++;
       if (bytes > 8 * 1024 * 1024 || count > 1e4) {
         overflow = true;
@@ -99871,15 +100017,21 @@ var ClaudeAcpClient = class extends CursorAcpClient {
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       this.assertLoaded(result, sessionId);
       if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
-      const [modesRaw, commandsRaw] = await Promise.all([
+      const [modelsRaw, modesRaw, commandsRaw] = await Promise.all([
+        client.call("dsh/sessionModels", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionModes", { sessionId }).catch(() => void 0),
         client.call("dsh/sessionCommands", { sessionId }).catch(() => void 0)
       ]);
-      const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) && modesRaw.availableModes.length > 0 ? modesRaw : void 0;
+      const models = isRecord19(modelsRaw) ? modelsRaw : void 0;
+      const modes = isRecord19(modesRaw) && Array.isArray(modesRaw.availableModes) ? modesRaw : void 0;
       const commands = isRecord19(commandsRaw) && Array.isArray(commandsRaw.commands) && commandsRaw.commands.length > 0 ? commandsRaw.commands : void 0;
-      if (modes !== void 0 || commands !== void 0) {
+      if (models !== void 0 || modes !== void 0 || commands !== void 0) {
         this.historyMetadata.delete(sessionId);
-        this.historyMetadata.set(sessionId, { ...modes ? { modes } : {}, ...commands ? { commands } : {} });
+        this.historyMetadata.set(sessionId, {
+          ...models !== void 0 ? { models } : {},
+          ...modes !== void 0 ? { modes } : {},
+          ...commands !== void 0 ? { commands } : {}
+        });
         while (this.historyMetadata.size > MAX_HISTORY_METADATA) {
           const oldest = this.historyMetadata.keys().next().value;
           if (oldest === void 0) break;
@@ -100085,7 +100237,7 @@ async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity-process.ts
-import { Buffer as Buffer6 } from "node:buffer";
+import { Buffer as Buffer7 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
@@ -100129,7 +100281,9 @@ var TranscriptWatcher = class extends EventEmitter2 {
       } catch {
       }
       if (!this.closed) {
-        this.pollTimer = setTimeout(poll, intervalMs);
+        this.pollTimer = setTimeout(() => {
+          void poll();
+        }, intervalMs);
         this.pollTimer.unref?.();
       }
     };
@@ -100305,7 +100459,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
   watcher;
-  stdoutBuffer = Buffer6.alloc(0);
+  stdoutBuffer = Buffer7.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
@@ -100547,7 +100701,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     this.ready = false;
-    this.stdoutBuffer = Buffer6.alloc(0);
+    this.stdoutBuffer = Buffer7.alloc(0);
     if (child !== void 0 && child.exitCode === null && child.signalCode === null && !child.killed) {
       child.stdout.removeAllListeners("data");
       child.stderr.removeAllListeners("data");
@@ -100658,7 +100812,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       throw new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause });
     }
     this.process = child;
-    this.stdoutBuffer = Buffer6.alloc(0);
+    this.stdoutBuffer = Buffer7.alloc(0);
     this.stderrBytes = 0;
     let streamFailure;
     let initResolved = false;
@@ -100688,7 +100842,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       child.stdout.on("data", (chunk) => {
         if (this.process !== child) return;
         try {
-          const bytes = Buffer6.isBuffer(chunk) ? chunk : Buffer6.from(chunk);
+          const bytes = Buffer7.isBuffer(chunk) ? chunk : Buffer7.from(chunk);
           if (!initResolved) checkInit(bytes);
           else this.consumeStdout(bytes);
         } catch (error62) {
@@ -100698,7 +100852,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           rejectInit?.(error62);
           this.ready = false;
           this.process = void 0;
-          this.stdoutBuffer = Buffer6.alloc(0);
+          this.stdoutBuffer = Buffer7.alloc(0);
           this.watcher?.stop();
           this.watcher = void 0;
           if (this.currentPromptPending) {
@@ -100720,7 +100874,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       });
     });
     child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer6.byteLength(chunk));
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer7.byteLength(chunk));
     });
     child.on("error", (error62) => {
       if (this.process !== child) return;
@@ -100780,7 +100934,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         event: "user",
         message: { content: promptText }
       };
-      const data2 = Buffer6.from(`${JSON.stringify(payload)}
+      const data2 = Buffer7.from(`${JSON.stringify(payload)}
 `, "utf8");
       this.process?.stdin.write(data2);
     });
@@ -100815,7 +100969,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.stdoutBuffer.length + chunk.length > MAX_ACP_LINE_BYTES2) {
       throw new AntigravityAcpError("ANTIGRAVITY_RESPONSE_TOO_LARGE", "Antigravity ACP emitted an oversized JSONL message.");
     }
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer6.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(10);
       if (newlineIndex === -1) break;
@@ -100982,7 +101136,7 @@ var AntigravityNativeAcpClient = class extends ClaudeAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/opencode-process.ts
-import { Buffer as Buffer7 } from "node:buffer";
+import { Buffer as Buffer8 } from "node:buffer";
 import { realpath as realpath4 } from "node:fs/promises";
 
 // packages/plugin/src/acp/adapters/opencode-native-api.ts
@@ -101100,9 +101254,16 @@ function unavailable() {
 
 // packages/plugin/src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
+var ACP_HISTORY_LOAD_TIMEOUT_MS = 12e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
 var MAX_ACP_LINE_BYTES3 = 288 * 1024 * 1024;
+var ACP_HISTORY_MAX_BYTES = 8 * 1024 * 1024;
+var ACP_HISTORY_HARD_MAX_BYTES = 16 * 1024 * 1024;
+var ACP_HISTORY_MAX_EVENTS = 1e4;
+var ACP_HISTORY_HARD_MAX_EVENTS = 2e4;
+var ACP_HISTORY_MAX_RAW_BYTES = 256 * 1024 * 1024;
+var ACP_HISTORY_MAX_RAW_UPDATES = 5e5;
 var MAX_STDERR_CAPTURE_BYTES4 = 4 * 1024;
 var MAX_OPENCODE_SESSION_LIST = 1e3;
 var OpencodeAcpError = class extends Error {
@@ -101124,7 +101285,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   pending = /* @__PURE__ */ new Map();
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer7.alloc(0);
+  stdoutBuffer = Buffer8.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
@@ -101180,7 +101341,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   /**
    * Replay a saved session in one temporary ACP process so a history read never
    * interrupts a live turn. OpenCode emits the transcript as `session/update`
-   * notifications before `session/load` resolves.
+   * notifications before `session/load` resolves; fold incrementally and keep
+   * a bounded trailing turn window within the transfer budget.
    */
   async history(sessionId, cwd2) {
     if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed.");
@@ -101190,9 +101352,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     let stopping;
     const stop = () => stopping ??= client.close();
     this.historyStop = stop;
-    const updates = [];
-    let bytes = 0;
-    let count = 0;
+    const accumulator = new AcpHistoryAccumulator(sessionId, "opencode", {
+      maxBytes: ACP_HISTORY_MAX_BYTES,
+      hardMaxBytes: ACP_HISTORY_HARD_MAX_BYTES,
+      maxEvents: ACP_HISTORY_MAX_EVENTS,
+      hardMaxEvents: ACP_HISTORY_HARD_MAX_EVENTS
+    });
+    let rawBytes = 0;
+    let rawCount = 0;
     let overflow = false;
     const unsubscribe = client.onInbound((message) => {
       if (message.kind === "request") {
@@ -101200,20 +101367,27 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         return;
       }
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
-      count++;
-      bytes += Buffer7.byteLength(JSON.stringify(message));
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) {
+      rawCount++;
+      rawBytes += Buffer8.byteLength(JSON.stringify(message));
+      if (rawBytes > ACP_HISTORY_MAX_RAW_BYTES || rawCount > ACP_HISTORY_MAX_RAW_UPDATES || !accumulator.push(message)) {
         overflow = true;
         void stop().catch(() => void 0);
-      } else updates.push(message);
+      }
     });
     try {
       await client.start();
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
-      await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] }, ACP_HISTORY_LOAD_TIMEOUT_MS);
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
-      return acpHistoryEvents(updates, sessionId, "opencode");
+      const folded = accumulator.finish();
+      if (folded.overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
+      if (folded.truncated) {
+        this.logger?.info("OpenCode history truncated to recent turns within transfer budget", {
+          retainedEvents: folded.events.length
+        });
+      }
+      return folded.events;
     } catch (error62) {
       if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
       throw error62;
@@ -101236,7 +101410,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     const id7 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id7 && this.archivingSessions.has(id7)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id7 && this.archivedSessions.has(id7) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
-    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
+    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : method === "session/load" ? ACP_HISTORY_LOAD_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS2);
     if (method === "session/load" && id7) {
       if (this.models.has(id7)) return { sessionId: id7 };
       const pending = this.loads.get(id7);
@@ -101440,14 +101614,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       }
     }
     this.process = child;
-    this.stdoutBuffer = Buffer7.alloc(0);
+    this.stdoutBuffer = Buffer8.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
-      if (this.process === child) this.consumeStdout(Buffer7.from(chunk));
+      if (this.process === child) this.consumeStdout(Buffer8.from(chunk));
     });
     child.stderr.on("data", (chunk) => {
       if (this.process !== child) return;
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES4, this.stderrBytes + Buffer7.byteLength(chunk));
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES4, this.stderrBytes + Buffer8.byteLength(chunk));
     });
     child.on("error", (error62) => {
       if (this.process === child) this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", error62);
@@ -101520,7 +101694,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
 `);
   }
   consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer8.concat([this.stdoutBuffer, chunk]);
     if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES3) {
       this.handleProcessFailure(
         "OPENCODE_RESPONSE_TOO_LARGE",
@@ -101829,9 +102003,14 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
   let content = "";
   try {
     const filePath = await transcriptPath(baseDir, conversationId);
-    if (filePath === void 0 || (await fs3.stat(filePath)).size > MAX_AGENT_ACP_TRANSFER_BYTES) return [];
+    if (filePath === void 0) return [];
+    const info = await fs3.stat(filePath);
+    if (info.size > MAX_AGENT_ACP_TRANSFER_BYTES) {
+      throw new RpcError("ACP_HISTORY_TOO_LARGE", "Antigravity history exceeds the transfer limit.");
+    }
     content = await fs3.readFile(filePath, "utf-8");
-  } catch {
+  } catch (error62) {
+    if (error62 instanceof RpcError) throw error62;
     return [];
   }
   const lines = content.split("\n");
@@ -101887,9 +102066,13 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
         push2("step/start", { turn: currentTurn, step: 1 }, time3);
       }
       if (Array.isArray(record12.tool_calls)) {
+        const seenNames = /* @__PURE__ */ new Map();
         for (const call of record12.tool_calls) {
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record12.step_index}:${toolName}`;
+          const count = seenNames.get(toolName) ?? 0;
+          seenNames.set(toolName, count + 1);
+          const callId = count === 0 ? `${record12.step_index}:${toolName}` : `${record12.step_index}:${toolName}:${count}`;
+          const isError = call.status === "ERROR";
           push2("tool/call", {
             turn: currentTurn,
             step: 1,
@@ -101898,8 +102081,35 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join11(
             arguments: typeof call.args === "object" && call.args !== null ? JSON.stringify(call.args) : "{}",
             toolCallId: callId,
             toolName,
-            status: call.status === "ERROR" ? "failed" : "finished"
+            status: isError ? "failed" : "finished"
           }, time3, false);
+          if (call.status !== "CALLING" && call.status !== "EXECUTING") {
+            let resultText = "";
+            if (typeof call.result === "string") {
+              resultText = call.result;
+            } else if (call.result !== void 0 && call.result !== null) {
+              try {
+                resultText = JSON.stringify(call.result);
+              } catch {
+                resultText = "";
+              }
+            }
+            push2("tool/result", {
+              turn: currentTurn,
+              step: 1,
+              message: {
+                id: `${sessionId}:${record12.step_index}:tool-result:${callId}`,
+                role: "user",
+                source: { kind: "tool", callId },
+                content: [{
+                  type: "tool-result",
+                  toolCallId: callId,
+                  content: resultText.length > 0 ? [{ type: "text", text: resultText }] : [],
+                  ...isError ? { isError: true } : {}
+                }]
+              }
+            }, time3, true);
+          }
         }
       }
       if (record12.content && record12.content.trim() !== "") {
@@ -102114,7 +102324,7 @@ async function transcriptPath(baseDir, conversationId) {
 }
 
 // packages/plugin/src/acp/peer-bridge.ts
-import { Buffer as Buffer8 } from "node:buffer";
+import { Buffer as Buffer9 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   sessionId: external_exports.string().min(1).max(256),
@@ -102361,7 +102571,7 @@ var AcpPeerBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer8.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer9.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input4) {
@@ -102445,7 +102655,7 @@ function decodeCanonicalBase642(value) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
-  const decoded = Buffer8.from(value, "base64");
+  const decoded = Buffer9.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
@@ -102897,6 +103107,8 @@ var AcpRemoteGateway = class {
       const result = await this.callInternal(connectionId, call, assertCurrent);
       assertCurrent();
       return result;
+    } catch (error62) {
+      throw mapAcpError(error62);
     } finally {
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId) ?? 1) - 1;
@@ -103167,24 +103379,34 @@ var AcpRemoteGateway = class {
         assertCurrent();
         const client = this.requireAcp(backend);
         if (!client.history) {
-          return { events: [], ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+          return {
+            events: [],
+            running: this.hasTurnInFlight(conversationId),
+            ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+          };
         }
         const events2 = await this.readCatalogHistory(backend, client, conversationId, cwd2, assertCurrent);
         const cachedMeta = client.lastHistoryMetadata?.(conversationId);
+        const nonEmptyModes = cachedMeta?.modes && Array.isArray(cachedMeta.modes.availableModes) && cachedMeta.modes.availableModes.length > 0 ? cachedMeta.modes : void 0;
         return {
           events: events2,
+          running: this.hasTurnInFlight(conversationId),
           ...persistedPreset ? { permissionPreset: persistedPreset } : {},
-          ...cachedMeta?.modes ? { modes: cachedMeta.modes } : {},
+          ...nonEmptyModes ? { modes: nonEmptyModes } : {},
           ...cachedMeta?.commands && cachedMeta.commands.length > 0 ? { commands: cachedMeta.commands } : {}
         };
       }
-      if (backend !== "antigravity") return { events: [] };
+      if (backend !== "antigravity") return { events: [], running: this.hasTurnInFlight(conversationId) };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
       this.logger.info("ACP session history fetched", {
         sessionId: shortSessionId(rawSessionId),
         eventCount: events.length
       });
-      return { events, ...persistedPreset ? { permissionPreset: persistedPreset } : {} };
+      return {
+        events,
+        running: this.hasTurnInFlight(conversationId),
+        ...persistedPreset ? { permissionPreset: persistedPreset } : {}
+      };
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
@@ -103291,7 +103513,13 @@ var AcpRemoteGateway = class {
         this.requireSessionOwner(connectionId, sessionId);
         const cwd2 = await this.catalogSessionCwd(preloadBackend, sessionId);
         assertCurrent();
-        await this.requireAcp(preloadBackend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+        const acp = this.requireAcp(preloadBackend);
+        if ((call.method === "dsh/sessionModels" || call.method === "dsh/sessionModes") && acp.isSessionLoaded?.(sessionId) === false) {
+          const cachedMeta = acp.lastHistoryMetadata?.(sessionId);
+          if (call.method === "dsh/sessionModels" && cachedMeta?.models !== void 0) return cachedMeta.models;
+          if (call.method === "dsh/sessionModes" && cachedMeta?.modes !== void 0) return cachedMeta.modes;
+        }
+        await acp.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
         assertCurrent();
       } else if (preloadBackend === "cursor" && sessionId !== void 0) {
         if (!this.sessionCwds.has(sessionId) && this.isNativeCatalogBackend("cursor")) {
@@ -103505,6 +103733,10 @@ var AcpRemoteGateway = class {
       if (key.endsWith(`:${sessionId}`)) {
         this.pendingHistoryReads.delete(key);
       }
+    }
+    for (const instance of this.backendInstances.values()) {
+      ;
+      instance.client.invalidateHistoryMetadata?.(sessionId);
     }
   }
   isHistoryEpochValid(sessionId, readEpoch) {
@@ -104695,6 +104927,62 @@ function cursorBinaryCandidates(configured) {
   }
   return [configured];
 }
+var SAFE_ACP_ERROR_MESSAGES = {
+  OPENCODE_HISTORY_TOO_LARGE: "OpenCode history exceeds the transfer limit.",
+  OPENCODE_HISTORY_BUSY: "An OpenCode history read is already in progress.",
+  OPENCODE_CLOSED: "OpenCode ACP is closed.",
+  OPENCODE_UNAVAILABLE: "OpenCode ACP is not available.",
+  OPENCODE_STARTING: "OpenCode ACP is already starting.",
+  OPENCODE_BINARY_UNAVAILABLE: "OpenCode ACP communication failed.",
+  OPENCODE_ACP_EXITED: "OpenCode ACP exited unexpectedly.",
+  OPENCODE_INITIALIZE_FAILED: "OpenCode ACP initialization failed.",
+  OPENCODE_REQUEST_TIMEOUT: "OpenCode ACP request timed out.",
+  OPENCODE_ARCHIVE_UNAVAILABLE: "The Host OpenCode native API is unavailable.",
+  OPENCODE_CLI_PROBE_FAILED: "The Host OpenCode CLI probe failed.",
+  OPENCODE_UPSTREAM_ERROR: "OpenCode ACP rejected the request.",
+  ACP_CLOSED: "The ACP backend is closed.",
+  ACP_INVALID_SESSION: "The ACP backend returned an invalid session.",
+  ACP_PROCESS_LIMIT: "Too many ACP sessions are active.",
+  ACP_HISTORY_TOO_LARGE: "The ACP session history exceeds the transfer limit.",
+  ACP_SESSION_NOT_LOADED: "Load the ACP session before continuing.",
+  ACP_SESSION_BUSY: "The ACP session is busy.",
+  ACP_SESSION_ARCHIVED: "This ACP session is archived.",
+  ACP_AUTH_REQUIRED: "Authentication is required for the ACP backend.",
+  PROMPT_IN_PROGRESS: "An ACP reply is already in progress."
+};
+var SAFE_ACP_ERROR_SUFFIXES = [
+  ["_UPSTREAM_ERROR", "The ACP backend rejected the request."],
+  ["_CLOSED", "The ACP backend is closed."],
+  ["_UNAVAILABLE", "The ACP backend is not available."],
+  ["_STARTING", "The ACP backend is already starting."],
+  ["_BINARY_UNAVAILABLE", "The ACP backend communication failed."],
+  ["_ACP_EXITED", "The ACP backend exited unexpectedly."],
+  ["_INITIALIZE_FAILED", "The ACP backend initialization failed."],
+  ["_REQUEST_TIMEOUT", "The ACP backend request timed out."],
+  ["_RESPONSE_TOO_LARGE", "The ACP backend response exceeded the limit."],
+  ["_INVALID_RESPONSE", "The ACP backend emitted an invalid response."]
+];
+function safeAcpRpcMessage(error62) {
+  if (error62 instanceof CursorAcpError && error62.authDiagnostic?.authStatus === "auth_required") {
+    return "The ACP backend authentication failed.";
+  }
+  if (error62.code === "OPENCODE_UPSTREAM_ERROR" && error62.message === "OpenCode ACP authentication failed.") {
+    return "OpenCode ACP authentication failed.";
+  }
+  const exact = SAFE_ACP_ERROR_MESSAGES[error62.code];
+  if (exact !== void 0) return exact;
+  for (const [suffix, message] of SAFE_ACP_ERROR_SUFFIXES) {
+    if (error62.code.endsWith(suffix)) return message;
+  }
+  return "The ACP backend could not complete the request.";
+}
+function mapAcpError(error62) {
+  if (error62 instanceof RpcError) return error62;
+  if (!(error62 instanceof OpencodeAcpError || error62 instanceof CursorAcpError)) return error62;
+  const code = /^[A-Z0-9_]{1,64}$/.test(error62.code) ? error62.code : "INTERNAL_ERROR";
+  if (code === "INTERNAL_ERROR") return new RpcError("INTERNAL_ERROR", "The Host could not complete the request.");
+  return new RpcError(code, safeAcpRpcMessage(error62));
+}
 function errorCode3(error62) {
   if (error62 instanceof CursorAcpError || error62 instanceof OpencodeAcpError || error62 instanceof RpcError) return error62.code;
   return "CURSOR_UNAVAILABLE";
@@ -105318,9 +105606,11 @@ var PluginControlRuntime = class {
     const flight = (async () => {
       await this.logoutFlight;
       try {
-        const runtimes = await switchServer(this.config);
+        const targetConfig = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
+        const runtimes = await switchServer(targetConfig);
         this.client = runtimes.client;
         this.host = runtimes.host;
+        this.config = targetConfig;
         this.clearStartupFailure();
       } catch (error62) {
         this.setStartupFailure(error62);
@@ -105344,8 +105634,7 @@ var PluginControlRuntime = class {
     if (typeof value.serverUrl !== "string") {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
-    const current = editableConfig(resolveConfig(this.settings.get()));
-    const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
+    const next = resolveConfig({ ...this.settings.get(), serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
     if (this.switchServer !== void 0) {
       if (next.serverUrl !== this.config.serverUrl || this.startupFailure !== void 0) {
@@ -105385,6 +105674,9 @@ var PluginControlRuntime = class {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be host, client, or all.");
     }
     const roles = roleArg === "client" ? ["client"] : roleArg === "host" ? ["host"] : ["host", "client"];
+    if (this.switchServer === void 0 && !this.storageAvailable) {
+      throw this.startupFailure instanceof Error ? this.startupFailure : new ClientModeError("SETTINGS_UNAVAILABLE", "Remote storage is unavailable in this profile.");
+    }
     const config2 = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     const nextDirectory = await resetDefaultIdentityRoles(
       roles,
@@ -105406,8 +105698,7 @@ var PluginControlRuntime = class {
       }
       return { ...await this.settingsView(), applies: "live" };
     }
-    this.clearStartupFailure();
-    return { ...await this.settingsView(), applies: "live" };
+    return { ...await this.settingsView(), applies: this.startupFailure === void 0 ? "live" : "restart" };
   }
   async setRole(payload) {
     if (this.settings === void 0) {
@@ -105674,8 +105965,16 @@ var PluginControlRuntime = class {
     }
     return this.settingsView();
   }
+  currentEditableConfig() {
+    if (this.settings === void 0) return editableConfig(this.config);
+    try {
+      return editableConfig(resolveConfig(this.settings.get()));
+    } catch {
+      return editableConfig(this.config);
+    }
+  }
   async settingsView() {
-    const config2 = this.settings === void 0 ? editableConfig(this.config) : editableConfig(resolveConfig(this.settings.get()));
+    const config2 = this.currentEditableConfig();
     const associations = await this.associations(config2);
     const role2 = config2.role === "client" ? "client" : "host";
     const association = associations[role2];
@@ -106563,8 +106862,13 @@ var DshWebLanPeer = class {
   available() {
     return !this.disposed && !!this.runtime();
   }
+  async listenAddress(pair) {
+    const address2 = await this.address(pair).catch(() => void 0);
+    if (!address2 || (pair ? address2 !== pair.hostAddress : this.mode() !== "LAN" || !isDshWebLanAddress(address2))) return;
+    return Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1")) ? address2 : void 0;
+  }
   async onLan() {
-    return this.available() && await this.address() !== void 0 && this.mode() === "LAN";
+    return this.available() && await this.listenAddress() !== void 0;
   }
   async open(params) {
     const { sameLinkIpv6Pair } = dshWebLanOpenSchema.parse(params);
@@ -106640,11 +106944,9 @@ var DshWebLanPeer = class {
         else req.pipe(outgoing);
       };
       var track = track2, proxy = proxy2;
-      const address2 = await this.address(sameLinkIpv6Pair);
-      if (sameLinkIpv6Pair ? address2 !== sameLinkIpv6Pair.hostAddress : this.mode() !== "LAN") {
-        throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
-      }
-      if (!address2 || !sameLinkIpv6Pair && !isDshWebLanAddress(address2) || !Object.values(networkInterfaces3()).flat().some((iface) => iface?.address === address2 && (!iface.internal || address2 === "127.0.0.1"))) throw new Error("LAN interface unavailable");
+      const address2 = await this.listenAddress(sameLinkIpv6Pair);
+      signal.throwIfAborted();
+      if (!address2) throw new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.");
       const peerHostname = sameLinkIpv6Pair && new URL(`http://[${sameLinkIpv6Pair.peerAddress}]`).hostname;
       const upstream = await openDshWebUpstream(this.runtime, AbortSignal.any([signal, AbortSignal.timeout(5e3)]));
       signal.throwIfAborted();
@@ -106668,7 +106970,7 @@ var DshWebLanPeer = class {
       };
       const authorized = (req) => owns(req) && redeemed && req.headers.cookie?.split(";").some((part) => part.trim() === cookie);
       const sockets = /* @__PURE__ */ new Set();
-      const server = createServer4(async (req, res) => {
+      const handleRequest = async (req, res) => {
         const deny = () => res.writeHead(401, pageHeaders).end();
         if (!owns(req)) {
           deny();
@@ -106723,6 +107025,11 @@ var DshWebLanPeer = class {
           return;
         }
         proxy2(req, res);
+      };
+      const server = createServer4((req, res) => {
+        void handleRequest(req, res).catch(() => {
+          if (!res.destroyed) res.destroy();
+        });
       });
       server.maxConnections = 64;
       server.requestTimeout = 3e4;
@@ -106760,7 +107067,9 @@ var DshWebLanPeer = class {
       await new Promise((resolve10, reject) => {
         const cancelled = () => reject(new Error("LAN Web closed"));
         signal.addEventListener("abort", cancelled, { once: true });
-        server.once("error", reject);
+        server.once("error", (error62) => {
+          reject(error62.code === "EADDRNOTAVAIL" ? new RpcError("FEATURE_NOT_SUPPORTED", "LAN Web is unavailable.") : error62);
+        });
         server.listen({ host: address2, port: 0, signal }, () => {
           signal.removeEventListener("abort", cancelled);
           resolve10();
@@ -111391,6 +111700,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "workspaceFiles/readRelated",
   "workspaceFiles/search",
   "workspaceFiles/changes",
+  "officeKit/render",
+  "officeKit/generation",
   "officeToPdf/render",
   "officeToPdf/generation",
   "toolResults/watch",
@@ -111411,6 +111722,16 @@ var WORKSPACE_FILE_READ_ENDPOINTS = /* @__PURE__ */ new Set([
   "workspaceFiles/readBytes",
   "workspaceFiles/readAll",
   "workspaceFiles/stat"
+]);
+var OFFICE_RENDER_ENDPOINTS = /* @__PURE__ */ new Set([
+  "officeToPdf/render",
+  "officeKit/render"
+]);
+var OFFICE_FALLBACK_ENDPOINT = /* @__PURE__ */ new Map([
+  ["officeKit/generation", "officeToPdf/generation"],
+  ["officeToPdf/generation", "officeKit/generation"],
+  ["officeKit/render", "officeToPdf/render"],
+  ["officeToPdf/render", "officeKit/render"]
 ]);
 var MAX_READ_BYTES2 = 4 * 1024 * 1024;
 var LOCAL_TIME = /^\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/u;
@@ -111521,12 +111842,12 @@ var HarnessRemoteBridge = class {
           throw workspaceFileFailure("WORKSPACE_UNAVAILABLE", "The workspace is unavailable.", "authority-unavailable");
         }
         nativePayload = search;
-      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === "officeToPdf/render") && isMessageFilePath(requestArgs(nativePayload).path)) {
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint)) && isMessageFilePath(requestArgs(nativePayload).path)) {
         nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal);
-      } else if (this.resolveWorkspaceRoot !== void 0 && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+      } else if (this.resolveWorkspaceRoot !== void 0 && (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal);
       }
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal);
       if (params.endpoint === "session/page" && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload);
         if (sessionId !== void 0) this.messageFiles.observe(sessionId, nativeResult.value);
@@ -111571,6 +111892,39 @@ var HarnessRemoteBridge = class {
         code: this.gateway.failure(error62).code,
         ...reason === void 0 ? {} : { reason }
       });
+      throw error62;
+    }
+  }
+  async dispatchWithOfficeFallback(endpoint, nativePayload, signal) {
+    const fallbackEndpoint = OFFICE_FALLBACK_ENDPOINT.get(endpoint);
+    if (fallbackEndpoint === void 0) {
+      return this.gateway.dispatch(endpoint, nativePayload, signal);
+    }
+    let primaryResult;
+    let primaryError;
+    try {
+      primaryResult = await this.gateway.dispatch(endpoint, nativePayload, signal);
+      if (signal.aborted || primaryResult.ok || primaryResult.error.code !== "gateway/invocation-unavailable") {
+        return primaryResult;
+      }
+    } catch (error62) {
+      if (signal.aborted || this.gateway.failure(error62).code !== "gateway/invocation-unavailable") {
+        throw error62;
+      }
+      primaryError = error62;
+    }
+    try {
+      const fallbackResult = await this.gateway.dispatch(fallbackEndpoint, nativePayload, signal);
+      if (!fallbackResult.ok && fallbackResult.error.code === "gateway/invocation-unavailable") {
+        if (primaryResult !== void 0) return primaryResult;
+        throw primaryError;
+      }
+      return fallbackResult;
+    } catch (error62) {
+      if (this.gateway.failure(error62).code === "gateway/invocation-unavailable") {
+        if (primaryResult !== void 0) return primaryResult;
+        throw primaryError;
+      }
       throw error62;
     }
   }
@@ -112382,7 +112736,7 @@ function decodeCanonicalBase643(value) {
   return bytes;
 }
 function normalizeWorkspaceBinaryResult2(endpoint, result) {
-  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && !OFFICE_RENDER_ENDPOINTS.has(endpoint)) return result;
   if (!isJsonRecord(result.value)) return result;
   const directBytes = isBinary(result.value.data) ? result.value.data : void 0;
   const attachmentBytes = directBytes === void 0 ? attachmentAt(result, ["data"]) : void 0;
@@ -114830,7 +115184,6 @@ function apply(ctx, entry = void 0) {
   const activateWhenCarrierReady = async (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");
     const connection = runtimeContext.get("connection");
-    const webServer = runtimeContext.get("webServer");
     let disposePendingControl;
     const installPendingControl = async () => {
       if (connection === void 0 || disposePendingControl !== void 0) return;
@@ -114841,10 +115194,20 @@ function apply(ctx, entry = void 0) {
       } catch (error62) {
         storageError = error62;
       }
-      const pendingLogStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(runtimeContext) }) });
+      if (!isFiberActive(runtimeContext)) return;
+      const pendingLogStore = createHostLogStore(runtimeContext);
+      const pendingLogger = createSafeLogger(runtimeContext, pendingLogStore, () => readSafeLogLevel(readConfig, "info"));
+      let configError;
+      let pendingConfig;
+      try {
+        pendingConfig = resolveConfig(readConfig());
+      } catch (error62) {
+        configError = error62;
+        pendingConfig = resolveFallbackConfig(readConfig);
+      }
       disposePendingControl = runtimeContext.effect(() => {
         const control = new PluginControlRuntime(
-          resolveConfig(readConfig()),
+          pendingConfig,
           identityDirectory,
           void 0,
           void 0,
@@ -114854,10 +115217,14 @@ function apply(ctx, entry = void 0) {
           true,
           pendingLogStore
         );
-        if (storageError !== void 0) {
-          control.setStartupFailure(storageError, { storageAvailable: false });
+        const failure5 = storageError ?? configError;
+        if (failure5 !== void 0) {
+          pendingLogger.error("Remote plugin startup failed", safeStartupError(failure5));
+          control.setStartupFailure(failure5, { storageAvailable: storageError === void 0 });
         }
-        const dispose = control.register(connection, webServer);
+        const dispose = mountControlRoute(runtimeContext, control, connection, (error62) => {
+          pendingLogger.error("Remote control route registration failed", safeStartupError(error62));
+        });
         return async () => {
           await dispose();
           await pendingLogStore.flush();
@@ -114889,50 +115256,57 @@ function applyTuiHost(ctx, entry) {
 }
 async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   const settings = ctx.get("settings");
-  const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
   const connection = ctx.get("connection");
-  const webServer = ctx.get("webServer");
-  const config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
-  const logStore = new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
-  const readSafeLogLevel = () => {
-    try {
-      const raw = (settingsBinding?.get() ?? readConfig()).logLevel;
-      if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
-    } catch {
-    }
-    return config2.logLevel;
-  };
-  const logger2 = new SafeLogger({
-    debug: (message) => {
-      logStore.record("debug", message);
-      ctx.logger.debug(message);
-      console.debug(message);
-    },
-    info: (message) => {
-      logStore.record("info", message);
-      ctx.logger.info(message);
-      console.info(message);
-    },
-    warn: (message) => {
-      logStore.record("warn", message);
-      ctx.logger.warn(message);
-      console.warn(message);
-    },
-    error: (message) => {
-      logStore.record("error", message);
-      ctx.logger.error(message);
-      console.error(message);
-    }
-  }, readSafeLogLevel);
+  const logStore = createHostLogStore(ctx);
+  let settingsBinding;
+  let fallbackLogLevel = "info";
+  const logger2 = createSafeLogger(ctx, logStore, () => readSafeLogLevel(
+    () => settingsBinding?.get() ?? readConfig(),
+    fallbackLogLevel
+  ));
   let defaultIdentityDirectory = new IdentityStore().directory;
+  let storageAvailable = false;
+  const handleEarlyFailure = async (failure5) => {
+    logger2.error("Remote plugin startup failed", safeStartupError(failure5));
+    if (connection === void 0) {
+      await logStore.flush();
+      throw failure5;
+    }
+    if (!isFiberActive(ctx)) {
+      await logStore.flush();
+      return;
+    }
+    const control = new PluginControlRuntime(
+      resolveFallbackConfig(() => settingsBinding?.get() ?? readConfig()),
+      defaultIdentityDirectory,
+      settingsBinding,
+      void 0,
+      void 0,
+      void 0,
+      void 0,
+      storageAvailable,
+      logStore
+    );
+    control.setStartupFailure(failure5, { storageAvailable });
+    mountControlEffect(ctx, control, connection, logStore, logger2, "ds-harness-remote startup failure control");
+  };
+  let config2;
   let initialStorageError;
   try {
-    defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+    settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId);
+    config2 = resolveConfig(settingsBinding?.get() ?? readConfig());
+    fallbackLogLevel = config2.logLevel;
+    try {
+      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+      storageAvailable = true;
+    } catch (error62) {
+      initialStorageError = error62;
+    }
   } catch (error62) {
-    initialStorageError = error62;
+    return handleEarlyFailure(error62);
   }
   if (!config2.enabled) {
-    if (connection !== void 0) {
+    if (connection !== void 0 && isFiberActive(ctx)) {
       const controlRuntime2 = new PluginControlRuntime(
         config2,
         defaultIdentityDirectory,
@@ -114948,13 +115322,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
         controlRuntime2.setStartupFailure(initialStorageError, { storageAvailable: false });
       }
-      ctx.effect(() => {
-        const dispose = controlRuntime2.register(connection, webServer);
-        return async () => {
-          await dispose();
-          await logStore.flush();
-        };
-      }, "ds-harness-remote disabled control");
+      mountControlEffect(ctx, controlRuntime2, connection, logStore, logger2, "ds-harness-remote disabled control");
     }
     return;
   }
@@ -114963,194 +115331,207 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     updateChecker,
     () => readPluginManager(ctx),
     (listener) => {
-      const buses = ctx.events === ctx.root.events ? [ctx.root.events] : [ctx.root.events, ctx.events];
+      const root2 = rootContext(ctx);
+      const buses = root2 === void 0 || ctx.events === root2.events ? [ctx.events] : [root2.events, ctx.events];
       const dispose = buses.map((events) => events.on("plugin-manager/update-state", listener, { global: true }));
       return () => {
         for (const stop of dispose) stop();
       };
     }
   );
-  const nativeTypertGateway = ctx.get("typertGateway");
-  const connectionExports = DshConnection;
-  const connectionService = ctx.get("connection", false);
-  const createOwnerPeer = createOwnerPeerFactory(
-    ctx,
-    ownerPeerConstructor(connectionExports),
-    connectionService
-  );
-  const hostConnectionPeer = createOwnerPeer();
-  let fallbackPeer = hostConnectionPeer;
-  ctx.effect(() => () => {
-    const peer = fallbackPeer;
-    fallbackPeer = void 0;
-    return peer?.dispose?.();
-  }, "ds-harness-remote fallback owner peer");
-  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
-  const localTypertGateway = hostGateway.local();
-  localTypertGateway.createPeer = (options) => {
-    const peer = createOwnerPeer(options);
-    if (peer === void 0) {
-      if (options?.interactions === "none") return void 0;
-      return localTypertGateway;
-    }
-    return {
-      ...hostGateway.local(peer),
-      dispose: async () => {
-        await peer.dispose?.();
-      }
-    };
-  };
-  if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
-  const subprocess = ctx.get("subprocess", false);
-  const schedule = ctx.get("schedule", false) ?? (ctx.root === void 0 ? void 0 : ctx.root.get("schedule", false));
-  const createRuntimes = (config3) => {
-    const hostIdentities = new IdentityStore({
-      directory: config3.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "host"),
-      role: "host"
-    });
-    const runtime2 = new HostPluginRuntime(
-      config3,
-      hostIdentities,
-      logger2,
-      localTypertGateway,
-      () => ctx.get("fileViewerHost"),
-      subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
-      (peer) => createPluginRouteDispatcher(
-        () => ctx.get("connection"),
-        () => ctx.get("webServer")?.port,
-        peer
-      ),
-      schedule,
-      () => ({
-        query: ctx.get("sessionQuery", false),
-        sessions: ctx.get("sessions", false),
-        persistence: ctx.get("sessionPersistence", false),
-        workspaces: ctx.get("workspaceRegistry", false)
-      }),
-      () => {
-        if (!ctx.get("webApp", false)) return;
-        const listener = ctx.get("webServer", false);
-        const auth = ctx.get("connection", false);
-        if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
-        try {
-          const origin = new URL(listener.getOrigin());
-          if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
-        } catch {
-        }
-      },
-      void 0,
-      (ref) => {
-        const attachments = ctx.get("attachments", false) ?? ctx.root?.get("attachments", false);
-        return attachments?.fileHostPath?.(ref);
-      }
-    );
-    let clientRuntime2;
-    if (config3.serverUrl !== void 0 && connection !== void 0) {
-      const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config3.serverUrl, "client"),
-        role: "client"
-      });
-      clientRuntime2 = new ClientModeRuntime(
-        config3,
-        clientIdentities,
-        new ClientServerApi(config3.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, config3.httpServerAllowlist),
-        nativeTypertGateway,
-        logger2,
-        runtime2
-      );
-    }
-    return { runtime: runtime2, clientRuntime: clientRuntime2 };
-  };
+  let localTypertGateway;
   let runtime;
   let clientRuntime;
   let hostServiceProvided = false;
   let clientServiceProvided = false;
   let clientActive = false;
-  if (initialStorageError === void 0) {
-    ;
-    ({ runtime, clientRuntime } = createRuntimes(config2));
-  }
   let closed = false;
   let startup;
   let replacement;
-  const syncOptionalService = (serviceName, value, owned) => {
-    try {
-      if (serviceName === "dshRemote") {
-        if (owned) ctx.dshRemote = value;
-        else ctx.provide("dshRemote", value);
-      } else if (owned) {
-        ctx.dshRemoteClient = value;
-      } else {
-        ctx.provide("dshRemoteClient", value);
+  let controlRuntime;
+  try {
+    const nativeTypertGateway = ctx.get("typertGateway");
+    const connectionExports = DshConnection;
+    const connectionService = ctx.get("connection", false);
+    const createOwnerPeer = createOwnerPeerFactory(
+      ctx,
+      ownerPeerConstructor(connectionExports),
+      connectionService
+    );
+    const hostConnectionPeer = createOwnerPeer();
+    let fallbackPeer = hostConnectionPeer;
+    ctx.effect(() => () => {
+      const peer = fallbackPeer;
+      fallbackPeer = void 0;
+      return peer?.dispose?.();
+    }, "ds-harness-remote fallback owner peer");
+    const hostGateway = new TypertGatewaySwitch(nativeTypertGateway, () => fallbackPeer);
+    localTypertGateway = hostGateway.local();
+    localTypertGateway.createPeer = (options) => {
+      const peer = createOwnerPeer(options);
+      if (peer === void 0) {
+        if (options?.interactions === "none") return void 0;
+        return localTypertGateway;
       }
-      return true;
-    } catch {
-      logger2.warn("failed to provide remote service", {
-        service: serviceName,
-        code: "SERVICE_PROVIDE_CONFLICT"
-      });
-      return false;
-    }
-  };
-  const replaceServer = (next) => {
-    const previousReplacement = replacement;
-    const operation = async () => {
-      await startup?.catch(() => void 0);
-      await previousReplacement?.catch(() => void 0);
-      if (closed) throw new Error("Remote plugin is closed");
-      clientActive = false;
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
-      const failure5 = shutdown.find((result) => result.status === "rejected");
-      if (failure5?.status === "rejected") throw failure5.reason;
-      if (closed) throw new Error("Remote plugin is closed");
-      defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
-      controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
-      const fresh = createRuntimes(next);
-      try {
-        await fresh.runtime.start();
-        await fresh.clientRuntime?.start();
-        if (closed) throw new Error("Remote plugin is closed");
-      } catch (error62) {
-        await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()]);
-        throw error62;
-      }
-      runtime = fresh.runtime;
-      clientRuntime = fresh.clientRuntime;
-      clientActive = clientRuntime !== void 0;
-      controlRuntime?.clearStartupFailure();
-      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
-      if (clientRuntime !== void 0) {
-        clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
-      }
-      if (connection !== void 0) updateChecker.start();
-      return { client: clientRuntime, host: runtime };
+      return {
+        ...hostGateway.local(peer),
+        dispose: async () => {
+          await peer.dispose?.();
+        }
+      };
     };
-    replacement = operation();
-    return replacement;
-  };
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
-    config2,
-    defaultIdentityDirectory,
-    settingsBinding,
-    clientRuntime,
-    runtime,
-    replaceServer,
-    pluginUpgrade,
-    true,
-    logStore
-  );
-  if (initialStorageError !== void 0) {
-    controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+    if (requireRemoteEvents) await assertRemoteEventSource(localTypertGateway);
+    const subprocess = ctx.get("subprocess", false);
+    const schedule = safeGetService(ctx, "schedule") ?? safeGetService(rootContext(ctx), "schedule");
+    const createRuntimes = (nextConfig) => {
+      const hostIdentities = new IdentityStore({
+        directory: nextConfig.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, nextConfig.serverUrl, "host"),
+        role: "host"
+      });
+      const nextRuntime = new HostPluginRuntime(
+        nextConfig,
+        hostIdentities,
+        logger2,
+        localTypertGateway,
+        () => ctx.get("fileViewerHost"),
+        subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
+        (peer) => createPluginRouteDispatcher(
+          () => ctx.get("connection"),
+          () => ctx.get("webServer")?.port,
+          peer
+        ),
+        schedule,
+        () => ({
+          query: ctx.get("sessionQuery", false),
+          sessions: ctx.get("sessions", false),
+          persistence: ctx.get("sessionPersistence", false),
+          workspaces: ctx.get("workspaceRegistry", false)
+        }),
+        () => {
+          if (!ctx.get("webApp", false)) return;
+          const listener = ctx.get("webServer", false);
+          const auth = ctx.get("connection", false);
+          if (typeof listener?.getOrigin !== "function" || typeof auth?.authenticatedUrl !== "function" || typeof auth.authorizeIndex !== "function" || typeof auth.requestRejection !== "function") return;
+          try {
+            const origin = new URL(listener.getOrigin());
+            if (["http:", "https:"].includes(origin.protocol) && origin.href === origin.origin + "/") return { origin, auth };
+          } catch {
+          }
+        },
+        void 0,
+        (ref) => {
+          const attachments = safeGetService(ctx, "attachments") ?? safeGetService(rootContext(ctx), "attachments");
+          return attachments?.fileHostPath?.(ref);
+        }
+      );
+      let nextClientRuntime;
+      if (nextConfig.serverUrl !== void 0 && connection !== void 0) {
+        const clientIdentities = new IdentityStore({
+          directory: serverStorageDirectory(defaultIdentityDirectory, nextConfig.serverUrl, "client"),
+          role: "client"
+        });
+        nextClientRuntime = new ClientModeRuntime(
+          nextConfig,
+          clientIdentities,
+          new ClientServerApi(nextConfig.serverUrl, new ServerCredentialStore(clientIdentities.directory), fetch, nextConfig.httpServerAllowlist),
+          nativeTypertGateway,
+          logger2,
+          nextRuntime
+        );
+      }
+      return { runtime: nextRuntime, clientRuntime: nextClientRuntime };
+    };
+    if (initialStorageError === void 0) {
+      ;
+      ({ runtime, clientRuntime } = createRuntimes(config2));
+    }
+    const syncOptionalService = (serviceName, value, owned) => {
+      try {
+        if (serviceName === "dshRemote") {
+          if (owned) ctx.dshRemote = value;
+          else ctx.provide("dshRemote", value);
+        } else if (owned) {
+          ctx.dshRemoteClient = value;
+        } else {
+          ctx.provide("dshRemoteClient", value);
+        }
+        return true;
+      } catch {
+        logger2.warn("failed to provide remote service", {
+          service: serviceName,
+          code: "SERVICE_PROVIDE_CONFLICT"
+        });
+        return false;
+      }
+    };
+    const replaceServer = (next) => {
+      const previousReplacement = replacement;
+      const operation = async () => {
+        await startup?.catch(() => void 0);
+        await previousReplacement?.catch(() => void 0);
+        if (closed) throw new Error("Remote plugin is closed");
+        clientActive = false;
+        const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime?.close()]);
+        const failure5 = shutdown.find((result) => result.status === "rejected");
+        if (failure5?.status === "rejected") throw failure5.reason;
+        if (closed) throw new Error("Remote plugin is closed");
+        defaultIdentityDirectory = await prepareDefaultIdentityDirectory();
+        controlRuntime?.setIdentityDirectory(defaultIdentityDirectory);
+        const fresh = createRuntimes(next);
+        try {
+          await fresh.runtime.start();
+          await fresh.clientRuntime?.start();
+          if (closed) throw new Error("Remote plugin is closed");
+        } catch (error62) {
+          await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()]);
+          throw error62;
+        }
+        runtime = fresh.runtime;
+        clientRuntime = fresh.clientRuntime;
+        clientActive = clientRuntime !== void 0;
+        controlRuntime?.clearStartupFailure();
+        hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+        if (clientRuntime !== void 0) {
+          clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+        }
+        if (connection !== void 0) updateChecker.start();
+        return { client: clientRuntime, host: runtime };
+      };
+      replacement = operation();
+      return replacement;
+    };
+    controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(
+      config2,
+      defaultIdentityDirectory,
+      settingsBinding,
+      clientRuntime,
+      runtime,
+      replaceServer,
+      pluginUpgrade,
+      true,
+      logStore
+    );
+    if (initialStorageError !== void 0) {
+      controlRuntime?.setStartupFailure(initialStorageError, { storageAvailable: false });
+    }
+    if (runtime !== void 0) {
+      hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+    }
+    if (clientRuntime !== void 0) {
+      clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
+    }
+    await disableLegacyLoaderEntries(ctx, logger2);
+  } catch (error62) {
+    return handleEarlyFailure(error62);
   }
-  if (runtime !== void 0) {
-    hostServiceProvided = syncOptionalService("dshRemote", runtime, hostServiceProvided);
+  if (!isFiberActive(ctx)) {
+    await logStore.flush();
+    return;
   }
-  if (clientRuntime !== void 0) {
-    clientServiceProvided = syncOptionalService("dshRemoteClient", clientRuntime, clientServiceProvided);
-  }
-  await disableLegacyLoaderEntries(ctx, logger2);
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection, webServer);
+    const disposeControl = controlRuntime === void 0 || connection === void 0 ? void 0 : mountControlRoute(ctx, controlRuntime, connection, (error62) => {
+      logger2.error("Remote control route registration failed", safeStartupError(error62));
+    });
     if (initialStorageError !== void 0) {
       logger2.error("Remote plugin startup failed", safeStartupError(initialStorageError));
     } else {
@@ -115181,8 +115562,8 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
       closed = true;
       clientActive = false;
       updateChecker.stop();
-      await replacement?.catch(() => void 0);
       await disposeControl?.();
+      await replacement?.catch(() => void 0);
       await clientRuntime?.close();
       await runtime?.close();
       await logStore.flush();
@@ -115190,16 +115571,155 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
   }, "ds-harness-remote lifecycle");
   if (config2.remoteTools?.enabled) installRemoteDiscoveryTools(ctx, () => closed || !clientActive ? void 0 : clientRuntime);
 }
+function mountControlEffect(ctx, control, connection, logStore, logger2, label) {
+  ctx.effect(() => {
+    const disposeRoute = mountControlRoute(ctx, control, connection, (error62) => {
+      logger2.error("Remote control route registration failed", safeStartupError(error62));
+    });
+    return async () => {
+      await disposeRoute();
+      await logStore.flush();
+    };
+  }, label);
+}
+function mountControlRoute(ctx, controlRuntime, connection, onError) {
+  let disposed = false;
+  let hasRegistered = false;
+  let pendingTransitions = 0;
+  let disposeRoute;
+  let transition = Promise.resolve();
+  const swapRoute = (nextWebServer) => {
+    hasRegistered = true;
+    if (pendingTransitions === 0 && disposeRoute === void 0) {
+      if (!disposed) {
+        try {
+          disposeRoute = controlRuntime.register(connection, nextWebServer);
+        } catch (error62) {
+          onError?.(error62);
+        }
+      }
+      return;
+    }
+    pendingTransitions += 1;
+    transition = transition.then(async () => {
+      const previous = disposeRoute;
+      disposeRoute = void 0;
+      if (previous !== void 0) {
+        try {
+          await previous();
+        } catch (error62) {
+          onError?.(error62);
+        }
+      }
+      if (disposed) return;
+      disposeRoute = controlRuntime.register(connection, nextWebServer);
+    }).catch((error62) => {
+      onError?.(error62);
+    }).finally(() => {
+      pendingTransitions -= 1;
+    });
+  };
+  if (safeGetService(ctx, "webServer") === void 0) {
+    swapRoute(void 0);
+  } else {
+    void Promise.resolve().then(() => Promise.resolve()).then(() => {
+      if (!disposed && !hasRegistered && safeGetService(ctx, "webServer") === void 0) {
+        swapRoute(void 0);
+      }
+    });
+  }
+  const webInjectFiber = ctx.inject(["webServer"], (webCtx) => {
+    const nextWebServer = safeGetService(webCtx, "webServer");
+    if (nextWebServer === void 0) return;
+    webCtx.effect(() => {
+      swapRoute(nextWebServer);
+      return () => {
+        if (!disposed) swapRoute(void 0);
+      };
+    }, "ds-harness-remote http control route");
+  });
+  return async () => {
+    disposed = true;
+    await Promise.resolve(webInjectFiber.dispose()).catch(() => void 0);
+    await transition;
+    const remaining = disposeRoute;
+    disposeRoute = void 0;
+    await remaining?.();
+  };
+}
+function createHostLogStore(ctx) {
+  return new HostLogStore({ filePath: resolveHostLogPath({ profile: resolveLogProfileName(ctx) }) });
+}
+function createSafeLogger(ctx, logStore, threshold) {
+  return new SafeLogger({
+    debug: (message) => {
+      logStore.record("debug", message);
+      ctx.logger.debug(message);
+      console.debug(message);
+    },
+    info: (message) => {
+      logStore.record("info", message);
+      ctx.logger.info(message);
+      console.info(message);
+    },
+    warn: (message) => {
+      logStore.record("warn", message);
+      ctx.logger.warn(message);
+      console.warn(message);
+    },
+    error: (message) => {
+      logStore.record("error", message);
+      ctx.logger.error(message);
+      console.error(message);
+    }
+  }, threshold);
+}
+function readSafeLogLevel(readInput, fallback) {
+  try {
+    const raw = readInput().logLevel;
+    if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+  } catch {
+  }
+  return fallback;
+}
+function resolveFallbackConfig(readInput) {
+  try {
+    return resolveConfig(readInput());
+  } catch {
+    return resolveConfig({});
+  }
+}
 function resolveLogProfileName(ctx) {
   const envProfile = process.env.DSH_PROFILE?.trim();
   if (envProfile) return envProfile;
-  const baseDir = ctx.root?.baseDir;
-  if (typeof baseDir === "string" && baseDir.trim().length > 0) {
-    const trimmed = baseDir.trim();
-    if (basename9(dirname10(trimmed)) === "profiles") {
-      const segment = basename9(trimmed);
-      if (segment.length > 0) return segment;
+  const root2 = rootContext(ctx);
+  const profileContext = safeGetService(ctx, "profileContext") ?? safeGetService(root2, "profileContext");
+  if (typeof profileContext?.name === "string" && profileContext.name.trim().length > 0) {
+    return profileContext.name.trim();
+  }
+  return extractProfileFromDirectoryPath(readOptionalProperty(root2, "baseDir")) ?? extractProfileFromDirectoryPath(readOptionalProperty(ctx, "baseDir")) ?? extractProfileFromBaseUrl(readOptionalProperty(ctx, "baseUrl")) ?? extractProfileFromBaseUrl(readOptionalProperty(root2, "baseUrl"));
+}
+function extractProfileFromDirectoryPath(candidate) {
+  if (typeof candidate !== "string") return void 0;
+  const trimmed = candidate.trim().replace(/[\\/]+$/, "");
+  if (trimmed.length === 0) return void 0;
+  if (basename9(dirname10(trimmed)) === "profiles") {
+    const segment = basename9(trimmed);
+    if (segment.length > 0) return segment;
+  }
+  return void 0;
+}
+function extractProfileFromBaseUrl(candidate) {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) return void 0;
+  try {
+    const url2 = new URL(candidate.trim());
+    if (url2.protocol !== "file:") return void 0;
+    const segments = decodeURIComponent(url2.pathname).split("/").filter(Boolean);
+    if (segments.length >= 2 && segments.at(-2) === "profiles") {
+      const segment = segments.at(-1)?.trim();
+      return segment && segment.length > 0 ? segment : void 0;
     }
+  } catch {
   }
   return void 0;
 }
@@ -115210,8 +115730,33 @@ function readEntryConfig(entry) {
 function isEntryConfig(value) {
   return typeof value.get === "function";
 }
+function isFiberActive(ctx) {
+  const fiber = readOptionalProperty(ctx, "fiber");
+  return fiber !== void 0 && fiber.uid !== null && fiber.state !== 5;
+}
+function rootContext(ctx) {
+  const bySymbol = readOptionalProperty(ctx, Symbol.for("cordis.root"));
+  if (bySymbol !== void 0) return bySymbol;
+  return readOptionalProperty(ctx, "root");
+}
+function safeGetService(ctx, name2) {
+  if (ctx === void 0) return void 0;
+  try {
+    return ctx.get(name2, false);
+  } catch {
+    return void 0;
+  }
+}
+function readOptionalProperty(target3, key) {
+  if (typeof target3 !== "object" || target3 === null) return void 0;
+  try {
+    return target3[key];
+  } catch {
+    return void 0;
+  }
+}
 function readPluginManager(ctx) {
-  const candidate = ctx.get("pluginManager", false) ?? ctx.root.get("pluginManager", false);
+  const candidate = safeGetService(ctx, "pluginManager") ?? safeGetService(rootContext(ctx), "pluginManager");
   if (typeof candidate !== "object" || candidate === null || typeof candidate.listBundles !== "function" || typeof candidate.updateBundle !== "function") return void 0;
   return candidate;
 }

@@ -6,16 +6,19 @@ vi.mock('react', async (importOriginal) => {
   // a small registry keyed by hook call order. `beginPass` restarts the call order
   // (a re-render) while keeping the stored values (state updates).
   const stores = new Map<string, any>()
+  const hookOrder: string[] = []
   const ctx = { order: 0 }
   ;(globalThis as any).__dshReactMock = {
-    beginPass: () => { ctx.order = 0 },
-    reset: () => { stores.clear(); ctx.order = 0 },
+    beginPass: () => { ctx.order = 0; hookOrder.length = 0 },
+    reset: () => { stores.clear(); ctx.order = 0; hookOrder.length = 0 },
+    hooks: () => [...hookOrder],
   }
   return {
     ...actual,
-    useRef: (v: any) => ({ current: v }),
-    useEffect: () => {},
+    useRef: (v: any) => { hookOrder.push('useRef'); return { current: v } },
+    useEffect: () => { hookOrder.push('useEffect') },
     useState: (v: any) => {
+      hookOrder.push('useState')
       const key = `s${ctx.order++}`
       if (!stores.has(key)) stores.set(key, typeof v === 'function' ? v() : v)
       const set = (next: any) => {
@@ -24,8 +27,8 @@ vi.mock('react', async (importOriginal) => {
       }
       return [stores.get(key), set]
     },
-    useMemo: (fn: any) => fn(),
-    useCallback: (fn: any) => fn,
+    useMemo: (fn: any) => { hookOrder.push('useMemo'); return fn() },
+    useCallback: (fn: any) => { hookOrder.push('useCallback'); return fn },
   }
 })
 
@@ -113,6 +116,13 @@ vi.mock('../src/ui/theme-context', () => ({
     isDark: false,
   }),
 }))
+
+vi.mock('../src/ui/sheet', () => {
+  const React = require('react')
+  return {
+    SheetModal: (props: any) => (props.visible ? React.createElement('SheetModal', props, props.children) : null),
+  }
+})
 
 import React from 'react'
 import { X as XIcon } from 'lucide-react-native'
@@ -284,8 +294,16 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
     ]
 
     it('returns null when sessions list is empty', () => {
+      const reactMock = (globalThis as any).__dshReactMock
+      reactMock.reset()
       const el = renderSubagentsCard({ sessions: [] })
+      const emptyHooks = reactMock.hooks()
       expect(el).toBeNull()
+
+      reactMock.beginPass()
+      const populated = renderSubagentsCard({ sessions: mockSessions })
+      expect(populated).not.toBeNull()
+      expect(emptyHooks).toEqual(reactMock.hooks())
     })
 
     it('renders collapsed state by default and expands on click', () => {
@@ -383,8 +401,16 @@ describe('Subagents and Agent Team Cards (子任务与智能体团队卡片)', (
     ]
 
     it('returns null when members array is empty', () => {
+      const reactMock = (globalThis as any).__dshReactMock
+      reactMock.reset()
       const el = renderAgentTeamCard({ members: [] })
+      const emptyHooks = reactMock.hooks()
       expect(el).toBeNull()
+
+      reactMock.beginPass()
+      const populated = renderAgentTeamCard({ members: mockMembers, sessions: mockSessions })
+      expect(populated).not.toBeNull()
+      expect(emptyHooks).toEqual(reactMock.hooks())
     })
 
     it('renders expanded list with claimed tasks, more tasks badge, error message, and onOpen', () => {
@@ -659,12 +685,57 @@ describe('SessionActivityDock', () => {
       const closed = renderDock(props)
       expect(findByTestId(closed, 'activity-card-modal')).toBeUndefined()
     })
+
+    it('folds todos and goal into the compact pill bar and opens them in SheetModal', () => {
+      const props = {
+        session: baseSession({
+          projections: {
+            values: {
+              todos: [
+                { content: '步骤一', status: 'completed' },
+                { content: '步骤二', status: 'in_progress' },
+              ],
+              goal: {
+                goal: { objective: '完成主聊天页减负', phase: 'active', maxGoalRounds: 5 },
+                roundsStarted: 2,
+              },
+            },
+          },
+        }),
+        initialJobs: [],
+        childSessions: [],
+        teamState: { members: [], tasks: [] },
+      }
+
+      const initial = renderDock(props)
+      expect(findByTestId(initial, 'activity-pill-bar')).toBeTruthy()
+      expect(findByTestId(initial, 'activity-pill-todos')).toBeTruthy()
+      expect(findByTestId(initial, 'activity-pill-goal')).toBeTruthy()
+      // Compact mode must not render inline TaskProgressChecklist above the pill bar.
+      expect(findByComponent(initial, TaskProgressChecklist)).toBeUndefined()
+
+      // Tap todos pill -> opens SheetModal with expanded TaskProgressChecklist.
+      findByTestId(initial, 'activity-pill-todos').props.onPress()
+      const todosOpen = renderDock(props)
+      expect(findByTestId(todosOpen, 'activity-todos-sheet')).toBeTruthy()
+      const checklist = findByComponent(todosOpen, TaskProgressChecklist)
+      expect(checklist).toBeTruthy()
+      expect(checklist.props.expanded).toBe(true)
+
+      // Tap goal pill -> switches SheetModal to goal details.
+      findByTestId(todosOpen, 'activity-pill-goal').props.onPress()
+      const goalOpen = renderDock(props)
+      expect(findByTestId(goalOpen, 'activity-goal-sheet')).toBeTruthy()
+      expect(findByTestId(goalOpen, 'activity-todos-sheet')).toBeUndefined()
+    })
   })
 
   describe('cards mode', () => {
     it('renders the three activity cards inline instead of the pill bar', () => {
       const el = renderDock({
-        session: baseSession(),
+        session: baseSession({
+          projections: { values: { todos: [{ content: '保留卡片态', status: 'pending' }] } },
+        }),
         mode: 'cards',
         initialJobs: [runningJob],
         childSessions: [childSession],
@@ -673,6 +744,7 @@ describe('SessionActivityDock', () => {
       })
 
       expect(findByTestId(el, 'activity-pill-bar')).toBeUndefined()
+      expect(findByComponent(el, TaskProgressChecklist)).toBeTruthy()
       expect(findByComponent(el, BackgroundJobsCard)).toBeTruthy()
       expect(findByComponent(el, SubagentsCard)).toBeTruthy()
       expect(findByComponent(el, AgentTeamCard)).toBeTruthy()

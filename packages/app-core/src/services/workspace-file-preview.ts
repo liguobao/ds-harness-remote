@@ -34,7 +34,7 @@ const IMAGE_EXTENSION_TYPES: Readonly<Record<string, string>> = {
   webp: 'image/webp',
 }
 
-/** Types the Host converts through officeToPdf; nothing else is sent for conversion. */
+/** Types the Host converts through officeKit / officeToPdf; nothing else is sent for conversion. */
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'])
 
 /** SVG and HTML are previewed as inert text; no renderer ever executes them. */

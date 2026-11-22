@@ -561,9 +561,11 @@ function parseRpcResult<T>(value: unknown): RemoteGatewayResult<T> {
   }
 }
 
+const BINARY_RESULT_ENDPOINTS = new Set(['workspaceFiles/readBytes', 'officeKit/render', 'officeToPdf/render'])
+
 /** Restore bounded native workspace binary fields after the JSON-only Remote carrier. */
 function normalizeWorkspaceBinaryResult<T>(endpoint: string, value: T | undefined): T | undefined {
-  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (!BINARY_RESULT_ENDPOINTS.has(endpoint)) return value
   if (!isRecord(value) || typeof value.data !== 'string') return value
   return { ...value, data: base64ToBytes(value.data) } as T
 }

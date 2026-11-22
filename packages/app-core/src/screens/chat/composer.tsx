@@ -1,5 +1,5 @@
 import { ArrowUp, CircleStop, Plus, X, Zap } from 'lucide-react-native'
-import { useMemo, useState, type RefObject } from 'react'
+import { useMemo, useState, type ReactNode, type RefObject } from 'react'
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
 import { strings } from '../../locales/i18n'
 import type { RemoteSession } from '../../types'
@@ -49,6 +49,8 @@ type Props = {
   draft: string
   quotes?: string[]
   onRemoveQuote?: (index: number) => void
+  /** Optional unified top tray content (images, files, upload status, referenced chats) mounted inside composerCard. */
+  headerSlot?: ReactNode
   input: ComposerInputBridge
   accessibilityLabel?: string
   placeholder?: string
@@ -73,7 +75,7 @@ type Props = {
   onStop: () => void
 }
 
-export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, accessibilityLabel, placeholder,
+export function ChatComposer({ backend, draft, quotes, onRemoveQuote, headerSlot, input, accessibilityLabel, placeholder,
   highlightMentionTokens = true, replyActive, stopping, sending = false, commandRunning,
   hasComposerContent, connected, editable, composerDisabled, sendDisabled, compactComposer,
   composerInputMaxHeight, onOpenExpand, onOpenActions, onOpenPrompts, onSubmit, onStop }: Props) {
@@ -114,33 +116,41 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
     draft,
     contentHeight: effectiveContentHeight,
   })
+  const showStopAndSend = (replyActive || commandRunning) && hasComposerContent
+  const showPromptsButton = onOpenPrompts !== undefined && !showStopAndSend
+  const hasHeaderSlot = headerSlot !== undefined && headerSlot !== null && headerSlot !== false
   const rightInlineReserve = 40
-    + (onOpenPrompts !== undefined ? 40 : 0)
-    + ((replyActive || commandRunning) && hasComposerContent ? 34 : 0)
+    + (showPromptsButton ? 40 : 0)
+    + (showStopAndSend ? 40 : 0)
   return <>
-    <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
+    <View style={{ position: 'relative', zIndex: 20 }}>
       {mentionType !== null && (
         <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={strings.mention.noMatches} />
       )}
-      <View style={[styles.composerCard, hasQuotes && styles.composerCardWithQuotes]}>
-        {hasQuotes && (
-          <View style={styles.composerQuotesWrap}>
-            {quotes.map((quoteText, index) => (
-              <Pressable
-                key={`inline-quote-${index}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
-                onPress={() => onRemoveQuote?.(index)}
-                hitSlop={4}
-                style={styles.composerQuotePill}
-              >
-                <QuoteMarkIcon size={12} color={colors.primary} />
-                <Text numberOfLines={1} style={styles.composerQuotePillText}>
-                  “{formatQuoteDraftSnippet(quoteText, 18)}”
-                </Text>
-                <X size={12} color={colors.primary} />
-              </Pressable>
-            ))}
+      <View style={[styles.composerCard, (hasQuotes || hasHeaderSlot) && styles.composerCardWithQuotes]}>
+        {(hasHeaderSlot || hasQuotes) && (
+          <View style={styles.composerTray}>
+            {headerSlot}
+            {hasQuotes && (
+              <View style={styles.composerQuotesWrap}>
+                {quotes.map((quoteText, index) => (
+                  <Pressable
+                    key={`inline-quote-${index}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${strings.chat.removeQuote ?? '删除引用'}: ${quoteText}`}
+                    onPress={() => onRemoveQuote?.(index)}
+                    hitSlop={4}
+                    style={styles.composerQuotePill}
+                  >
+                    <QuoteMarkIcon size={12} color={colors.primary} />
+                    <Text numberOfLines={1} style={styles.composerQuotePillText}>
+                      “{formatQuoteDraftSnippet(quoteText, 18)}”
+                    </Text>
+                    <X size={12} color={colors.primary} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
         )}
         {/* Keep Child 0 (TextInput) and Child 1 (action bar) in fixed React tree positions so inline <-> stacked promotion never unmounts the input or drops IME focus. */}
@@ -203,13 +213,16 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
               <Plus size={20} color={!composerDisabled ? colors.ink : colors.disabled} />
             </Pressable>
             <View style={styles.composerTrailing}>
-              {onOpenPrompts !== undefined && (
+              {showPromptsButton && (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={strings.chat.quickPrompts}
                   accessibilityState={{ disabled: composerDisabled }}
                   disabled={composerDisabled}
-                  onPress={onOpenPrompts}
+                  onPress={() => {
+                    triggerLightHaptic()
+                    onOpenPrompts()
+                  }}
                   hitSlop={6}
                   style={({ pressed }) => [styles.composerShortcutButton, pressed && styles.plusPressed, composerDisabled && styles.plusDisabled]}
                 >

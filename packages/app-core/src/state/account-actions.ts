@@ -33,7 +33,6 @@ import {
   loadServerConfig,
   loadThemePreference,
   loadActivityDockMode,
-  loadDrawerLayoutMode,
   loadQuickPromptActionMode,
   loadBusySendMode,
   loadStatusBarVisible,
@@ -48,7 +47,6 @@ import {
   saveServerConfig,
   saveThemePreference,
   saveActivityDockMode,
-  saveDrawerLayoutMode,
   saveQuickPromptActionMode,
   saveBusySendMode,
   saveStatusBarVisible,
@@ -117,7 +115,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, chatAppearance, activityDockMode, drawerLayoutMode, quickPromptActionMode, busySendMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
@@ -125,7 +123,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           loadThemePreference(),
           loadChatAppearance(),
           loadActivityDockMode(),
-          loadDrawerLayoutMode(),
           loadQuickPromptActionMode(),
           loadBusySendMode(),
           loadStatusBarVisible(),
@@ -146,7 +143,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           themePreference,
           chatAppearance,
           activityDockMode,
-          drawerLayoutMode,
           quickPromptActionMode,
           busySendMode,
           statusBarVisible,
@@ -555,7 +551,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         themePreference: 'system',
         chatAppearance: { ...DEFAULT_CHAT_APPEARANCE },
         activityDockMode: 'compact',
-        drawerLayoutMode: 'compact',
         quickPromptActionMode: 'fill',
         busySendMode: 'queue',
         statusBarVisible: true,
@@ -569,7 +564,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, chatAppearance, activityDockMode, drawerLayoutMode, quickPromptActionMode, busySendMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
+      const { config, identity, languagePreference, themePreference, chatAppearance, activityDockMode, quickPromptActionMode, busySendMode, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       useAttentionStore.getState().reset()
       await clearBrowseMemory()
@@ -586,7 +581,6 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveThemePreference(themePreference)
       await saveChatAppearance(chatAppearance)
       await saveActivityDockMode(activityDockMode)
-      await saveDrawerLayoutMode(drawerLayoutMode)
       await saveQuickPromptActionMode(quickPromptActionMode)
       await saveBusySendMode(busySendMode)
       await saveStatusBarVisible(statusBarVisible)

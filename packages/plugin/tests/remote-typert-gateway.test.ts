@@ -125,26 +125,50 @@ describe('RemoteTypertGateway', () => {
   })
 
   it('restores binary workspace preview fields for the native Client API codec', async () => {
-    const rpc = vi.fn(async () => ({
-      ok: true,
-      value: {
-        absolutePath: '/tmp/image.png',
-        version: 'v1',
-        bytes: 3,
-        offset: 0,
+    await runScenarios([
+      {
+        endpoint: 'workspaceFiles/readBytes',
+        args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } },
         data: 'AP8Q',
-        eof: true,
+        expected: [0, 255, 16],
       },
-    }))
-    const client = { rpc } as unknown as RemoteClientCore
+      {
+        endpoint: 'officeToPdf/render',
+        args: { path: '/tmp/report.docx' },
+        data: 'JVBE',
+        expected: [37, 80, 68],
+      },
+      {
+        endpoint: 'officeKit/render',
+        args: { path: '/tmp/report.docx' },
+        data: 'JVBE',
+        expected: [37, 80, 68],
+      },
+    ].map(({ endpoint, args, data, expected }) => ({
+      name: endpoint,
+      run: async () => {
+        const rpc = vi.fn(async () => ({
+          ok: true,
+          value: {
+            absolutePath: args.path,
+            version: 'v1',
+            bytes: expected.length,
+            offset: 0,
+            data,
+            eof: true,
+          },
+        }))
+        const client = { rpc } as unknown as RemoteClientCore
 
-    const result = await new RemoteTypertGateway(client).dispatch(
-      'workspaceFiles/readBytes',
-      { args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } } },
-      new AbortController().signal,
-    )
-    expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
-    expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual([0, 255, 16])
+        const result = await new RemoteTypertGateway(client).dispatch(
+          endpoint,
+          { args },
+          new AbortController().signal,
+        )
+        expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
+        expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual(expected)
+      },
+    })))
   })
 
   it('keeps welcome acknowledgements local on legacy Hosts', async () => {

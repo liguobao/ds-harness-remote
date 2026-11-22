@@ -33,6 +33,7 @@ import { useAppStore } from '../state/store'
 import type { AgentBackend, DirectoryListing, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
+import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -81,7 +82,6 @@ export function WorkspaceActionsModal({
       backdropStyle={styles.backdrop}
       sheetStyle={[styles.sheet, sheetAsDialog ? { paddingTop: spacing.lg } : { maxHeight: sheetMaxHeight }]}
     >
-        {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <View style={styles.workspaceActionHeading}>
             <Text style={styles.sheetTitle}>{strings.workspaces.options}</Text>
@@ -449,7 +449,6 @@ export function RenameWorkspaceModal({
       backdropStyle={styles.backdrop}
       sheetStyle={[styles.sheet, sheetAsDialog ? { paddingTop: spacing.lg } : { maxHeight: sheetMaxHeight }]}
     >
-        {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.renameTitle}</Text>
           <IconButton label={strings.common.close} icon={X} onPress={onClose} />
@@ -540,7 +539,6 @@ export function DirectoryBrowserModal({
       backdropStyle={styles.backdrop}
       sheetStyle={[styles.browserSheet, { height: browserSheetHeight }, sheetAsDialog && { paddingTop: spacing.lg }]}
     >
-        {!sheetAsDialog && <View style={styles.grabber} />}
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{strings.workspaces.chooseFolder}</Text>
           <IconButton label={strings.common.close} icon={X} onPress={onClose} />
@@ -614,7 +612,6 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
-    grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.subtle, opacity: 0.45, alignSelf: 'center', marginBottom: spacing.xxs },
     createContentColumn: { width: '100%', alignSelf: 'center' },
     createStatusInline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     createStatusDot: { width: 7, height: 7, borderRadius: 4 },
@@ -628,29 +625,22 @@ function createStyles(colors: ThemeColors) {
     createCheckSlot: { width: 20, alignItems: 'center', justifyContent: 'center' },
     createPrimaryArea: { marginTop: spacing.xl },
     sheet: {
-      backgroundColor: colors.background,
-      borderTopLeftRadius: radius.xxl,
-      borderTopRightRadius: radius.xxl,
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.xxl,
+      paddingTop: 0,
       gap: spacing.md,
     },
     sheetScroll: { flexGrow: 0, flexShrink: 1 },
     sheetScrollContent: { gap: spacing.md },
     browserSheet: {
-      backgroundColor: colors.background,
-      borderTopLeftRadius: radius.xxl,
-      borderTopRightRadius: radius.xxl,
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
+      paddingTop: 0,
       paddingBottom: spacing.lg,
     },
     sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     sheetTitle: { ...type.heading, fontSize: 18, fontWeight: '700', color: colors.ink },
     workspaceActionHeading: { flex: 1, minWidth: 0 },
     workspaceActionName: { ...type.smallStrong, color: colors.muted, marginTop: 2 },
-    workspaceActionPath: { ...type.caption, color: colors.muted, fontFamily: 'monospace', paddingHorizontal: spacing.xxs },
+    workspaceActionPath: { ...type.caption, color: colors.muted, fontFamily: monoFontFamily, paddingHorizontal: spacing.xxs },
     workspaceRowPressed: { opacity: 0.7 },
     disabled: { opacity: 0.55 },
     titleInput: {
@@ -665,7 +655,7 @@ function createStyles(colors: ThemeColors) {
     },
     browserPathCard: { marginTop: spacing.xs },
     browserPath: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-    browserPathText: { flex: 1, ...type.small, color: colors.ink, fontFamily: 'monospace' },
+    browserPathText: { flex: 1, ...type.small, color: colors.ink, fontFamily: monoFontFamily },
     crumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: spacing.xs, paddingHorizontal: spacing.xxs },
     crumbText: { ...type.small, color: colors.primary },
     browserList: { flex: 1, marginTop: spacing.xs },

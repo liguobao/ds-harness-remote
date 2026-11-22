@@ -4,6 +4,7 @@ import {
   Easing,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -79,6 +80,7 @@ export function SheetModal({
    * must pass `sheet` so their form does not jump between shapes.
    */
   presentation = 'adaptive',
+  showHandle = true,
 }: {
   visible: boolean
   onClose: () => void
@@ -95,6 +97,8 @@ export function SheetModal({
   dismissLabel?: string
   /** `sheet` disables the wide-window centered-dialog promotion. */
   presentation?: 'adaptive' | 'sheet'
+  /** Render the top grabber bar with drag-to-dismiss gesture on bottom sheets. */
+  showHandle?: boolean
 }) {
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
@@ -108,9 +112,15 @@ export function SheetModal({
   phaseRef.current = phase
   const [availableHeight, setAvailableHeight] = useState<number>()
   const progress = useRef(new Animated.Value(0)).current
+  const dragY = useRef(new Animated.Value(0)).current
   const animationRef = useRef<Animated.CompositeAnimation | null>(null)
+  const dragAnimationRef = useRef<Animated.CompositeAnimation | null>(null)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const reduceMotionRef = useRef(reduceMotion)
+  reduceMotionRef.current = reduceMotion
   const onDismissRef = useRef(onDismiss)
   onDismissRef.current = onDismiss
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -120,6 +130,56 @@ export function SheetModal({
   // Keep the closing sheet populated after the caller clears its target.
   const retainedChildren = useRef(children)
   if (visible) retainedChildren.current = children
+
+  const snapDragBack = () => {
+    dragAnimationRef.current?.stop()
+    if (reduceMotionRef.current || typeof Animated.spring !== 'function') {
+      dragY.setValue(0)
+      return
+    }
+    const anim = Animated.spring(dragY, {
+      toValue: 0,
+      bounciness: motionTokens.spring.bounciness,
+      speed: motionTokens.spring.speed,
+      useNativeDriver: true,
+    })
+    dragAnimationRef.current = anim
+    anim.start()
+  }
+
+  const panResponder = useRef(
+    typeof PanResponder?.create === 'function'
+      ? PanResponder.create({
+          onStartShouldSetPanResponder: () => visibleRef.current,
+          onMoveShouldSetPanResponder: (_evt, gesture) =>
+            visibleRef.current && gesture.dy > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+          onPanResponderGrant: () => {
+            dragAnimationRef.current?.stop()
+          },
+          onPanResponderMove: (_evt, gesture) => {
+            if (!visibleRef.current) return
+            dragY.setValue(Math.max(0, gesture.dy))
+          },
+          onPanResponderRelease: (_evt, gesture) => {
+            if (visibleRef.current && (gesture.dy > 72 || gesture.vy > 0.6)) {
+              onCloseRef.current()
+              // If the caller guards dismissal (e.g. while busy) and keeps the
+              // sheet visible, snap back to rest on the next frame.
+              if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => {
+                  if (visibleRef.current && phaseRef.current !== 'unmounted') snapDragBack()
+                })
+              }
+              return
+            }
+            snapDragBack()
+          },
+          onPanResponderTerminate: () => {
+            snapDragBack()
+          },
+        })
+      : { panHandlers: {} },
+  ).current
 
   const settleNativeDismiss = () => {
     if (phaseRef.current !== 'dismissing') return
@@ -151,6 +211,8 @@ export function SheetModal({
       // Wait for an in-flight native iOS Modal dismissal to settle through
       // `unmounted` before re-opening so UIKit never receives a concurrent present.
       if (phase === 'dismissing') return
+      dragAnimationRef.current?.stop()
+      dragY.setValue(0)
       if (!notifiedOpenRef.current) {
         notifiedOpenRef.current = true
         openedAtRouteEpochRef.current = routeDismissEpoch
@@ -164,12 +226,14 @@ export function SheetModal({
     const superseded = supersededByOtherRef.current || routeDismissEpoch !== openedAtRouteEpochRef.current
     if (superseded) animationRef.current?.stop()
     setPhase(current => nextSheetPhase(current, false, superseded, waitForNativeDismiss))
-  }, [visible, phase, sheetId, waitForNativeDismiss])
+  }, [visible, phase, sheetId, waitForNativeDismiss, dragY])
 
   useEffect(() => {
     if (phase === 'unmounted' || phase === 'dismissing') {
       animationRef.current?.stop()
+      dragAnimationRef.current?.stop()
       progress.setValue(0)
+      dragY.setValue(0)
       return
     }
     if (phase !== 'opening' && phase !== 'closing') return
@@ -186,7 +250,7 @@ export function SheetModal({
       setPhase(current => current === 'opening' ? 'open' : finishSheetExit(current, waitForNativeDismiss))
     })
     return () => animation.stop()
-  }, [phase, progress, reduceMotion, waitForNativeDismiss])
+  }, [phase, progress, dragY, reduceMotion, waitForNativeDismiss])
 
   useEffect(() => {
     if (phase !== 'dismissing' || phaseRef.current !== 'dismissing') return
@@ -205,6 +269,7 @@ export function SheetModal({
   useEffect(() => () => {
     phaseRef.current = 'unmounted'
     animationRef.current?.stop()
+    dragAnimationRef.current?.stop()
     if (dismissTimerRef.current !== undefined) {
       clearTimeout(dismissTimerRef.current)
       dismissTimerRef.current = undefined
@@ -215,6 +280,7 @@ export function SheetModal({
 
   const rise = anchorRise(anchor, windowHeight)
   const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [rise, 0] })
+  const sheetTranslateY = typeof Animated.add === 'function' ? Animated.add(translateY, dragY) : translateY
   const requestClose = onRequestClose ?? onClose
   const content = visible ? children : retainedChildren.current
   // Wide windows promote anchor-less sheets to centered dialog cards; menus
@@ -281,19 +347,26 @@ export function SheetModal({
                 borderRadius: radius.xl,
                 borderTopLeftRadius: radius.xl,
                 borderTopRightRadius: radius.xl,
+                paddingTop: spacing.lg,
                 paddingBottom: spacing.lg,
                 transform: [{ scale: dialogScale }],
               }
             : {
                 maxHeight: resolvedMaxHeight,
+                paddingTop: showHandle ? 0 : spacing.lg,
                 paddingLeft: spacing.lg + insets.left,
                 paddingRight: spacing.lg + insets.right,
                 paddingBottom: Math.max(spacing.xxl, insets.bottom + spacing.sm),
-                transform: [{ translateY }],
+                transform: [{ translateY: sheetTranslateY }],
               },
           ...(asDialog ? [] : [sheetStyle]),
         ]}
       >
+        {!asDialog && showHandle && (
+          <View style={styles.handleHitArea} {...panResponder.panHandlers} accessible={false}>
+            <View style={styles.handleBar} />
+          </View>
+        )}
         {content}
       </Animated.View>
     </View>
@@ -331,18 +404,33 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   sheet: {
     zIndex: 1,
     elevation: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface ?? colors.background,
     borderTopLeftRadius: radius.xxl,
     borderTopRightRadius: radius.xxl,
+    ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
   },
   dialogSheet: {
     zIndex: 1,
     elevation: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface ?? colors.background,
     borderRadius: radius.xl,
+    ...(Platform.OS === 'ios' ? { borderCurve: 'continuous' as const } : {}),
     padding: spacing.lg,
     paddingBottom: spacing.lg,
+  },
+  handleHitArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  handleBar: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.subtle ?? '#7C8492',
+    opacity: 0.45,
   },
 })

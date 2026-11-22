@@ -137,18 +137,23 @@ function imageTools(image: Uint8Array, overrides: Record<string, unknown> = {}) 
 
 describe('workspace bytes through the shared Remote Gateway', () => {
   it('previews and downloads bytes restored by the Gateway', async () => {
-    await runScenarios((['image', 'pdf', 'office', 'download'] as const).map(kind => ({
+    await runScenarios((['image', 'pdf', 'office', 'office-legacy', 'download'] as const).map(kind => ({
       name: kind,
       run: async () => {
+        const isOffice = kind === 'office' || kind === 'office-legacy'
         const path = kind === 'image' ? IMAGE_PATH : kind === 'pdf' ? 'docs/report.pdf'
-          : kind === 'office' ? DOC_PATH : 'archive.bin'
+          : isOffice ? DOC_PATH : 'archive.bin'
         const absolutePath = `/workspace/${path}`
         const bytes = kind === 'image' || kind === 'download' ? png(640, 480, PREVIEW_CHUNK_BYTES + 17) : PDF_BYTES
-        const source = { absolutePath, version: VERSION, bytes: kind === 'office' ? 128 : bytes.byteLength }
+        const source = { absolutePath, version: VERSION, bytes: isOffice ? 128 : bytes.byteLength }
         const rpc = vi.fn(async (_method: string, request: { endpoint: string; payload: { args: { range?: { offset: number; length: number } } } }) => {
           if (request.endpoint === 'workspaceFiles/stat') return { ok: true, value: source }
-          if (request.endpoint === 'officeToPdf/generation') return { ok: true, value: 'renderer-1' }
-          if (request.endpoint === 'officeToPdf/render') return { ok: true, value: { ...source,
+          if (kind === 'office-legacy' && request.endpoint.startsWith('officeKit/')) {
+            return { ok: false, error: { code: 'gateway/invocation-unavailable', message: 'Unavailable', details: {} } }
+          }
+          const officePrefix = kind === 'office-legacy' ? 'officeToPdf' : 'officeKit'
+          if (request.endpoint === `${officePrefix}/generation`) return { ok: true, value: 'renderer-1' }
+          if (request.endpoint === `${officePrefix}/render`) return { ok: true, value: { ...source,
             generation: 'renderer-1', missingFonts: [], offset: 0, eof: true, bytes: bytes.byteLength, data: base64(bytes) } }
           const { offset, length } = request.payload.args.range!
           return { ok: true, value: { ...source, offset, eof: offset + length >= bytes.byteLength,
@@ -161,9 +166,20 @@ describe('workspace bytes through the shared Remote Gateway', () => {
           expect(written).toHaveLength(2)
           expect(Buffer.concat(written)).toEqual(Buffer.from(bytes))
         } else {
-          const preview = await loadWorkspacePreview(tools, 'codex:thread', path, kind)
+          const previewKind = isOffice ? 'office' : kind
+          const preview = await loadWorkspacePreview(tools, 'codex:thread', path, previewKind)
           expect(preview).toEqual({ data: base64(bytes), mimeType: kind === 'image' ? 'image/png' : 'application/pdf', missingFonts: [] })
           if (kind === 'image') expect(rpc.mock.calls.filter(([, request]) => request.endpoint === 'workspaceFiles/readBytes')).toHaveLength(2)
+          if (kind === 'office') {
+            expect(rpc.mock.calls.map(([, request]) => request.endpoint)).toEqual([
+              'workspaceFiles/stat', 'officeKit/generation', 'officeKit/render', 'workspaceFiles/stat',
+            ])
+          }
+          if (kind === 'office-legacy') {
+            expect(rpc.mock.calls.map(([, request]) => request.endpoint)).toEqual([
+              'workspaceFiles/stat', 'officeKit/generation', 'officeToPdf/generation', 'officeToPdf/render', 'workspaceFiles/stat',
+            ])
+          }
         }
       },
     })))

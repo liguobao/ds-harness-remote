@@ -192,9 +192,10 @@ export const TaskProgressChecklist = memo(function TaskProgressChecklist({
     onToggle?.()
   }
 
+  const { progressText } = useMemo(() => formatTaskProgress(todos ?? []), [todos])
+
   if (!todos || todos.length === 0) return null
 
-  const { done: completed, total, progressText } = useMemo(() => formatTaskProgress(todos), [todos])
   const listMaxHeight = maxHeight ?? Math.min(220, height * 0.28)
 
   const statusLabel = (status: TodoStatus) => {

@@ -164,7 +164,13 @@ export async function readAcpHistory(
   sessionId: string,
   backend: AgentBackend,
   signal?: AbortSignal,
-): Promise<{ events: unknown[]; modes?: { currentModeId?: string; availableModes?: Array<{ id: string; name?: string; description?: string }> }; availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>; permissionPreset?: string }> {
+): Promise<{
+  events: unknown[]
+  modes?: { currentModeId?: string; availableModes?: Array<{ id: string; name?: string; description?: string }> }
+  availableCommands?: Array<{ name: string; description?: string; input?: { hint?: string } }>
+  permissionPreset?: string
+  running?: boolean
+}> {
   if (typeof client.loadSessionDetails === 'function') {
     const details = await client.loadSessionDetails(sessionId, backend, signal)
     return {
@@ -172,6 +178,7 @@ export async function readAcpHistory(
       ...(details.modes !== undefined ? { modes: details.modes } : {}),
       ...(details.commands !== undefined ? { availableCommands: details.commands } : {}),
       ...(details.permissionPreset !== undefined ? { permissionPreset: details.permissionPreset } : {}),
+      ...(details.running !== undefined ? { running: details.running } : {}),
     }
   }
   const events = await client.loadSessionHistory(sessionId, backend, signal)
@@ -738,13 +745,14 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const exitCode = typeof terminalExit.exit_code === 'number' && Number.isInteger(terminalExit.exit_code)
       ? terminalExit.exit_code : undefined
     const statusStr = stringValue(update.status)
-    const state = statusStr === 'failed' || (exitCode !== undefined && exitCode !== 0)
+    const rawOutputError = isRecord(update.rawOutput) && update.rawOutput.isError === true
+    const state = statusStr === 'failed' || rawOutputError || (exitCode !== undefined && exitCode !== 0)
       || previous?.state === 'failed' ? 'failed'
       : exitCode !== undefined || statusStr === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished'
         : previous?.state ?? 'running'
     const argumentsText = boundedDetail(update.rawInput ?? update.parameters)
     const delta = typeof terminalOutput.data === 'string' ? terminalOutput.data : undefined
-    const output = delta === undefined ? boundedDetail(update.rawOutput ?? update.output ?? update.content)
+    const output = delta === undefined ? decodeAcpToolOutput(update)
       : `${previous?.resultDetail?.text ?? ''}${delta}`.slice(-16_000)
     const next: ToolActivity = {
       ...previous,
@@ -1003,6 +1011,40 @@ function boundedDetail(value: unknown): string | undefined {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
     return text?.slice(0, 16_000)
   } catch { return undefined }
+}
+
+function decodeAcpToolOutput(update: Record<string, unknown>): string | undefined {
+  if (Array.isArray(update.content)) {
+    const decoded = update.content.flatMap(item => {
+      if (!isRecord(item)) return []
+      if (item.type === 'content' && isRecord(item.content) && item.content.type === 'text' && typeof item.content.text === 'string') {
+        return [item.content.text]
+      }
+      if (
+        item.type === 'diff'
+        && typeof item.path === 'string'
+        && typeof item.newText === 'string'
+        && (item.oldText === null || item.oldText === undefined || typeof item.oldText === 'string')
+      ) {
+        return [`File: ${item.path}\n--- before\n${item.oldText ?? ''}\n+++ after\n${item.newText}`]
+      }
+      if (item.type === 'text' && typeof item.text === 'string') {
+        return [item.text]
+      }
+      return []
+    })
+    if (decoded.length > 0) return decoded.join('\n\n').slice(0, 16_000)
+  }
+  if (isRecord(update.rawOutput) && Array.isArray(update.rawOutput.content)) {
+    const textParts = update.rawOutput.content
+      .filter(item => isRecord(item) && item.type === 'text' && typeof item.text === 'string')
+      .map(item => (item as { text: string }).text)
+    if (textParts.length > 0) return textParts.join('\n\n').slice(0, 16_000)
+  }
+  if (update.rawOutput !== undefined) return boundedDetail(update.rawOutput)
+  if (update.output !== undefined) return boundedDetail(update.output)
+  if (Array.isArray(update.content) && update.content.length === 0) return undefined
+  return boundedDetail(update.content)
 }
 
 function extractText(update: Record<string, unknown>): string | undefined {

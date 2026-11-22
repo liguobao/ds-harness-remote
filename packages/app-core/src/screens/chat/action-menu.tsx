@@ -1,7 +1,8 @@
-import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X } from 'lucide-react-native'
+import { Camera, ChevronRight, FileText, Folder, Images, Layers, MessageSquare, ShieldAlert, Terminal, X, type LucideIcon } from 'lucide-react-native'
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native'
 import { strings } from '../../locales/i18n'
-import { IconButton } from '../../ui/components'
+import { GroupCard, IconButton } from '../../ui/components'
+import { androidRipple } from '../../ui/platform-style'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { usePickerListMaxHeight } from './modal'
@@ -53,129 +54,151 @@ export function ChatActionMenu({ visible, onClose, anchor, attachmentPicking,
       action()
     }
   }
+  const menuRows: Array<{
+    key: string
+    icon: LucideIcon
+    label: string
+    accessibilityLabel: string
+    value?: string
+    loading?: boolean
+    disabled?: boolean
+    onPress: () => void
+  }> = []
+  if (onReferenceChat !== undefined) {
+    menuRows.push({
+      key: 'reference-chat',
+      icon: MessageSquare,
+      label: strings.chat.referenceChat,
+      accessibilityLabel: strings.chat.referenceChat,
+      onPress: () => runAction(onReferenceChat),
+    })
+  }
+  menuRows.push({
+    key: 'workspace',
+    icon: Folder,
+    label: strings.chat.openWorkspaces,
+    accessibilityLabel: strings.chat.openWorkspaces,
+    value: workspaceLabel,
+    onPress: () => runAction(onOpenWorkspace),
+  })
+  if (supportsModeSelection) {
+    menuRows.push({
+      key: 'mode',
+      icon: Layers,
+      label: strings.chat.mode,
+      accessibilityLabel: strings.chat.selectMode,
+      value: modeLabel,
+      loading: agentPresetSelecting,
+      disabled: agentPresetSelecting,
+      onPress: () => runAction(onOpenMode),
+    })
+  }
+  if (toolsAvailable) {
+    menuRows.push({
+      key: 'tools',
+      icon: Terminal,
+      label: strings.chat.toolAccess,
+      accessibilityLabel: strings.chat.toolAccess,
+      onPress: () => runAction(onOpenTools),
+    })
+  }
+  if (permissionsAvailable) {
+    menuRows.push({
+      key: 'permissions',
+      icon: ShieldAlert,
+      label: strings.chat.approvalMode,
+      accessibilityLabel: strings.chat.approvalMode,
+      value: permissionLabel,
+      loading: permissionSelecting,
+      disabled: permissionDisabled,
+      onPress: () => runAction(onOpenPermissions),
+    })
+  }
+  const ripple = androidRipple(colors)
   return (
     // `sheet` keeps one form on wide windows: `anchor` is deliberately cleared
     // while the IME settles (chat-screen.tsx), and an adaptive promotion would
     // make this menu jump between a full-width sheet and a centered card.
     <SheetModal visible={visible} onClose={onClose} onDismiss={onDismiss} anchor={anchor} presentation="sheet">
-        <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={X} onPress={onClose} /></View>
-        <ScrollView
-          style={{ maxHeight: plusMenuListMaxHeight }}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
-          <View style={styles.plusCardRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.takePhoto}
-              accessibilityState={{ disabled: attachmentPicking }}
-              disabled={attachmentPicking}
-              onPress={() => runAction(() => { void takePhoto() })}
-              style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-            >
-              <Camera size={22} color={colors.primary} />
-              <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.photos}
-              accessibilityState={{ disabled: attachmentPicking }}
-              disabled={attachmentPicking}
-              onPress={() => runAction(() => { void pickImages() })}
-              style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-            >
-              <Images size={22} color={colors.primary} />
-              <Text style={styles.plusCardText}>{strings.chat.photos}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.files}
-              accessibilityState={{ disabled: attachmentPicking }}
-              disabled={attachmentPicking}
-              onPress={() => runAction(() => { void pickFiles() })}
-              style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
-            >
-              <FileText size={22} color={colors.primary} />
-              <Text style={styles.plusCardText}>{strings.chat.files}</Text>
-            </Pressable>
-          </View>
-          {onReferenceChat !== undefined && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.referenceChat}
-              onPress={() => runAction(onReferenceChat)}
-              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
-            >
-              <MessageSquare size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>{strings.chat.referenceChat}</Text>
-              <ChevronRight size={16} color={colors.muted} />
-            </Pressable>
-          )}
+      <View style={styles.modalHeader}><Text style={styles.modalTitle}>{strings.chat.moreActions}</Text><IconButton label={strings.common.close} icon={X} dense onPress={onClose} /></View>
+      <ScrollView
+        style={{ maxHeight: plusMenuListMaxHeight }}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+      >
+        <View style={styles.plusCardRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={strings.chat.openWorkspaces}
-            onPress={() => runAction(onOpenWorkspace)}
-            style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
+            accessibilityLabel={strings.chat.takePhoto}
+            accessibilityState={{ disabled: attachmentPicking }}
+            disabled={attachmentPicking}
+            android_ripple={ripple}
+            onPress={() => runAction(() => { void takePhoto() })}
+            style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
           >
-            <Folder size={20} color={colors.primary} />
-            <Text style={styles.plusMenuOptionText}>{strings.chat.openWorkspaces}</Text>
-            <View style={styles.plusMenuOptionValue}>
-              <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{workspaceLabel}</Text>
-              <ChevronRight size={16} color={colors.muted} />
-            </View>
+            <Camera size={22} color={colors.ink} strokeWidth={1.8} />
+            <Text style={styles.plusCardText}>{strings.chat.takePhoto}</Text>
           </Pressable>
-          {supportsModeSelection && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.selectMode}
-              accessibilityState={{ disabled: agentPresetSelecting }}
-              disabled={agentPresetSelecting}
-              onPress={() => runAction(onOpenMode)}
-              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, agentPresetSelecting && styles.plusMenuOptionDisabled]}
-            >
-              <Layers size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>{strings.chat.mode}</Text>
-              <View style={styles.plusMenuOptionValue}>
-                {agentPresetSelecting
-                  ? <ActivityIndicator size="small" color={colors.muted} />
-                  : <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{modeLabel}</Text>}
-                <ChevronRight size={16} color={colors.muted} />
-              </View>
-            </Pressable>
-          )}
-          {toolsAvailable && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.toolAccess}
-              onPress={() => runAction(onOpenTools)}
-              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed]}
-            >
-              <Terminal size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>{strings.chat.toolAccess}</Text>
-              <ChevronRight size={16} color={colors.muted} />
-            </Pressable>
-          )}
-          {permissionsAvailable && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={strings.chat.approvalMode}
-              accessibilityState={{ disabled: permissionDisabled }}
-              disabled={permissionDisabled}
-              onPress={() => runAction(onOpenPermissions)}
-              style={({ pressed }) => [styles.plusMenuOption, pressed && styles.plusMenuOptionPressed, permissionDisabled && styles.plusMenuOptionDisabled]}
-            >
-              <ShieldAlert size={20} color={colors.primary} />
-              <Text style={styles.plusMenuOptionText}>{strings.chat.approvalMode}</Text>
-              <View style={styles.plusMenuOptionValue}>
-                {permissionSelecting
-                  ? <ActivityIndicator size="small" color={colors.muted} />
-                  : <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{permissionLabel}</Text>}
-                <ChevronRight size={16} color={colors.muted} />
-              </View>
-            </Pressable>
-          )}
-        </ScrollView>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.photos}
+            accessibilityState={{ disabled: attachmentPicking }}
+            disabled={attachmentPicking}
+            android_ripple={ripple}
+            onPress={() => runAction(() => { void pickImages() })}
+            style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
+          >
+            <Images size={22} color={colors.ink} strokeWidth={1.8} />
+            <Text style={styles.plusCardText}>{strings.chat.photos}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={strings.chat.files}
+            accessibilityState={{ disabled: attachmentPicking }}
+            disabled={attachmentPicking}
+            android_ripple={ripple}
+            onPress={() => runAction(() => { void pickFiles() })}
+            style={({ pressed }) => [styles.plusCard, pressed && styles.plusMenuOptionPressed, attachmentPicking && styles.plusMenuOptionDisabled]}
+          >
+            <FileText size={22} color={colors.ink} strokeWidth={1.8} />
+            <Text style={styles.plusCardText}>{strings.chat.files}</Text>
+          </Pressable>
+        </View>
+        <GroupCard>
+          {menuRows.map((row, index) => {
+            const Icon = row.icon
+            return (
+              <Pressable
+                key={row.key}
+                accessibilityRole="button"
+                accessibilityLabel={row.accessibilityLabel}
+                accessibilityState={row.disabled ? { disabled: true } : undefined}
+                disabled={row.disabled}
+                android_ripple={ripple}
+                onPress={row.onPress}
+                style={({ pressed }) => [
+                  styles.plusMenuOption,
+                  pressed && styles.plusMenuOptionPressed,
+                  row.disabled && styles.plusMenuOptionDisabled,
+                ]}
+              >
+                <View style={styles.plusMenuOptionIcon}>
+                  <Icon size={19} color={colors.ink} strokeWidth={1.8} />
+                </View>
+                <View style={[styles.plusMenuOptionBody, index > 0 && styles.plusMenuOptionDivider]}>
+                  <Text style={styles.plusMenuOptionText}>{row.label}</Text>
+                  <View style={styles.plusMenuOptionValue}>
+                    {row.loading
+                      ? <ActivityIndicator size="small" color={colors.muted} />
+                      : row.value !== undefined && <Text style={styles.plusMenuOptionValueText} numberOfLines={1}>{row.value}</Text>}
+                    <ChevronRight size={16} color={colors.subtle} />
+                  </View>
+                </View>
+              </Pressable>
+            )
+          })}
+        </GroupCard>
+      </ScrollView>
     </SheetModal>
-
   )
 }

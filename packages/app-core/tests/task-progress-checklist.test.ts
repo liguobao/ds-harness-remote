@@ -2,13 +2,15 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>()
+  const hookOrder: string[] = []
+  ;(globalThis as any).__dshChecklistHookOrder = hookOrder
   return {
     ...actual,
-    useRef: (v: any) => ({ current: v }),
-    useEffect: () => {},
-    useState: (v: any) => [typeof v === 'function' ? v() : v, vi.fn()],
-    useMemo: (fn: any) => fn(),
-    useCallback: (fn: any) => fn,
+    useRef: (v: any) => { hookOrder.push('useRef'); return { current: v } },
+    useEffect: () => { hookOrder.push('useEffect') },
+    useState: (v: any) => { hookOrder.push('useState'); return [typeof v === 'function' ? v() : v, vi.fn()] },
+    useMemo: (fn: any) => { hookOrder.push('useMemo'); return fn() },
+    useCallback: (fn: any) => { hookOrder.push('useCallback'); return fn },
   }
 })
 
@@ -172,8 +174,17 @@ describe('Task Progress Checklist (任务进度清单)', () => {
 
   describe('TaskProgressChecklist 组件生命周期与结构', () => {
     it('returns null when todos list is empty', () => {
+      const hookOrder = (globalThis as any).__dshChecklistHookOrder as string[]
+      hookOrder.length = 0
       const element = renderChecklist({ todos: [] })
+      const emptyHooks = [...hookOrder]
       expect(element).toBeNull()
+
+      hookOrder.length = 0
+      const populated = renderChecklist({ todos: THREE_STEPS_PLAN })
+      const populatedHooks = [...hookOrder]
+      expect(populated).not.toBeNull()
+      expect(emptyHooks).toEqual(populatedHooks)
     })
 
     it('displays 0/n progress statistic when none of the 3 tasks are completed (0/n 表示三个任务中尚未完成任何一个)', () => {

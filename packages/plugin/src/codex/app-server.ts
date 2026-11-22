@@ -321,7 +321,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
   }
 
   private terminateChild(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
-    if (child === undefined || this.hasChildExited(child)) return Promise.resolve()
+    if (child?.pid === undefined || child.pid <= 0 || this.hasChildExited(child)) return Promise.resolve()
     const existing = this.terminatingChildren.get(child)
     if (existing !== undefined) return existing
     const exitPromise = this.childExitPromises.get(child)

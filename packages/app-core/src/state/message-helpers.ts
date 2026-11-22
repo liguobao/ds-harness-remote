@@ -570,7 +570,15 @@ export function computeStreamingSignature(items: readonly ChatItem[]): string {
   const last = items[items.length - 1]
   if (last === undefined) return ''
   if (last.kind === 'message') {
-    return `${last.id}:${last.text.length}:${last.reasoning?.length ?? 0}:${last.turnEnd ? last.turnEnd.reason : ''}:${last.sendState ?? ''}`
+    // streaming/images/sendState/sendError change without shifting text length,
+    // so include cheap scalar facets of them.
+    return `${last.id}:${last.text.length}:${last.reasoning?.length ?? 0}:${last.turnEnd ? last.turnEnd.reason : ''}:${last.sendState ?? ''}:${last.streaming ? 1 : 0}:${last.images?.length ?? 0}:${last.sendError?.length ?? 0}`
   }
-  return `${last.id}:${last.kind}`
+  // Non-message items mutate in place (tool state, approval/question outcomes,
+  // turn end stamps); append their cheap discriminant facets so these
+  // transitions still bump. Streaming terminal output lands in resultDetail and
+  // a >16k sliding window keeps its length constant, so sample the tail too.
+  if (last.kind === 'tool') return `${last.id}:${last.kind}:${last.state}:${last.images?.length ?? 0}:${last.callDetail?.text.length ?? 0}:${last.summary?.length ?? 0}:${last.resultDetail?.text.length ?? 0}:${last.resultDetail?.text.slice(-24) ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
+  if (last.kind === 'approval') return `${last.id}:${last.kind}:${last.outcome ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
+  return `${last.id}:${last.kind}:${last.questionState ?? ''}:${last.outcome ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
 }

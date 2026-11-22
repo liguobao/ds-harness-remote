@@ -327,6 +327,10 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         // Diagnostic only: kind + catch-up size, never prompt or tool payloads.
         console.info('[dsh-remote] acp frame:', session.backend, kind, catchUpCount > 0 ? `catchUp=${catchUpCount}` : '')
       }
+      runtime.acpFrameRevision++
+      if (kind === 'prompt_completed' || kind === 'prompt_failed') {
+        runtime.acpTerminalRevisions.set(session.sessionId, (runtime.acpTerminalRevisions.get(session.sessionId) ?? 0) + 1)
+      }
       const nextTodos = kind === 'cursor/update_todos' || kind === 'plan'
         ? normalizeAcpTodos((update ?? params)?.todos ?? (update ?? params)?.entries ?? (update ?? params)?.items)
         : undefined

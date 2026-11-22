@@ -10,7 +10,8 @@ import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { Alert } from '../ui/alert'
 import { Toggle } from '../ui/toggle'
-import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronRight, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, Network, Palette, PanelLeft, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import { AlertTriangle, ArrowUp, BatteryCharging, Bell, BellRing, Bot, Cable, Check, ChevronDown, ChevronUp, Clock, Copy, Download, ExternalLink, Fingerprint, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, Layers, ListCollapse, LogOut, Mail, MoreVertical, Network, Palette, PanelTop, Puzzle, QrCode as QrCodeIcon, RotateCcw, Route, Server, Settings, ShieldAlert, ShieldCheck, SlidersHorizontal, Smartphone, Terminal, UserRound, X, Zap, type LucideIcon } from 'lucide-react-native'
+import appPackage from '../../package.json'
 import { ChatAppearanceScreen } from './chat-appearance-screen'
 import { useAppStore } from '../state/store'
 import { useBotTeamStore } from '../state/bot-store'
@@ -20,7 +21,7 @@ import { SOURCE_CODE_URL } from '../lib/links'
 import { foregroundService } from '../services/foreground-service'
 import { serverSession } from '../services/server-session'
 import type { AccountMembership, OAuthProviderInfo } from '../services/api'
-import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, KeyValue, Screen, SectionTitle, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, Screen, SectionTitle, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, DeviceIdentity, LoginMethod } from '../types'
@@ -29,6 +30,7 @@ import Svg, { Path, Polygon } from 'react-native-svg'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
 import { GithubIcon, GoogleIcon, ZhihuIcon } from '../ui/brand-icons'
 import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily, tabularNumsStyle } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -36,7 +38,7 @@ import { easingCurve, resolveMotion } from '../ui/motion'
 import { useReduceMotion } from '../ui/use-reduce-motion'
 import { SheetModal } from '../ui/sheet'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
-import type { ActivityDockMode, DrawerLayoutMode, ThemePreference } from '../ui/theme'
+import type { ActivityDockMode, ThemePreference } from '../ui/theme'
 import type { BusySendMode, QuickPromptActionMode } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
@@ -499,7 +501,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
         style={({ pressed }) => [styles.emailSubmit, canSubmit && styles.emailSubmitReady, pressed && styles.providerButtonPressed]}
       >
         {busy
-          ? <ActivityIndicator color={colors.white} />
+          ? <ActivityIndicator color={colors.onPrimary ?? colors.white} />
           : <Text style={[styles.emailSubmitText, canSubmit && styles.emailSubmitTextReady]}>{zhCN.setup.title}</Text>}
       </Pressable>
       {challenge === undefined ? <Text style={styles.passwordHint}>{zhCN.setup.passwordHint}</Text> :
@@ -617,7 +619,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
               onPress={() => void Linking.openURL('https://github.com/liguobao').catch(() => {
                 Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
               })} style={styles.loginCreditLink}>
-              <Text style={styles.loginCredit}>Power by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
+              <Text style={styles.loginCredit}>Powered by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
             </Pressable>
           </View>
         </Screen>
@@ -703,6 +705,7 @@ export function SettingsScreen({
   onBack,
   onReset,
   onSigningOutChange,
+  onOpenAppearance,
   onOpenDiagnostics,
   onOpenAbout,
 }: {
@@ -710,6 +713,7 @@ export function SettingsScreen({
   onBack: () => void
   onReset: () => void
   onSigningOutChange?: (busy: boolean) => void
+  onOpenAppearance?: () => void
   onOpenDiagnostics?: () => void
   onOpenAbout?: () => void
 }) {
@@ -739,7 +743,9 @@ export function SettingsScreen({
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const [networkDetailsExpanded, setNetworkDetailsExpanded] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const currentTransportLabel = transportPreferenceOptions().find(option => option.value === preference)?.name ?? zhCN.transport.auto
   const chatAppearance = useAppStore(state => state.chatAppearance)
   const [logCount, setLogCount] = useState(() => connectionLogEntries().length)
   useEffect(() => {
@@ -755,13 +761,6 @@ export function SettingsScreen({
     : activityDockMode === 'hidden'
       ? zhCN.settings.activityDockHidden
       : zhCN.settings.activityDockCompact
-  const drawerLayoutMode = useAppStore(state => state.drawerLayoutMode)
-  const setDrawerLayoutMode = useAppStore(state => state.setDrawerLayoutMode)
-  const [drawerLayoutSaving, setDrawerLayoutSaving] = useState(false)
-  const [drawerLayoutPickerOpen, setDrawerLayoutPickerOpen] = useState(false)
-  const currentDrawerLayoutLabel = drawerLayoutMode === 'classic'
-    ? zhCN.settings.drawerLayoutClassic
-    : zhCN.settings.drawerLayoutCompact
   const quickPromptActionMode = useAppStore(state => state.quickPromptActionMode)
   const setQuickPromptActionMode = useAppStore(state => state.setQuickPromptActionMode)
   const [quickPromptActionSaving, setQuickPromptActionSaving] = useState(false)
@@ -822,14 +821,6 @@ export function SettingsScreen({
     try { await setActivityDockMode(value) }
     catch { Alert.alert(zhCN.settings.activityDockModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
     finally { setActivityDockSaving(false) }
-  }
-
-  const toggleDrawerLayoutMode = async (value: DrawerLayoutMode) => {
-    if (drawerLayoutSaving || value === drawerLayoutMode) return
-    setDrawerLayoutSaving(true)
-    try { await setDrawerLayoutMode(value) }
-    catch { Alert.alert(zhCN.settings.drawerLayoutModeSaveFailed, zhCN.settings.statusBarSaveFailedBody) }
-    finally { setDrawerLayoutSaving(false) }
   }
 
   const toggleQuickPromptActionMode = async (value: QuickPromptActionMode) => {
@@ -912,7 +903,7 @@ export function SettingsScreen({
   )
 
   const switchColors = { trackColor: { false: colors.disabled, true: colors.primary }, thumbColor: colors.white } as const
-  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || appearanceOpen
+  const inlineSubpageOpen = (diagnosticsOpen && !onOpenDiagnostics) || (aboutOpen && !onOpenAbout) || (appearanceOpen && !onOpenAppearance)
 
   const fontLabel = chatAppearance.fontScale === 'sm' ? zhCN.settings.fontSizeSm
     : chatAppearance.fontScale === 'lg' ? zhCN.settings.fontSizeLg
@@ -956,7 +947,17 @@ export function SettingsScreen({
                 label={zhCN.settings.chatAppearance}
                 value={chatAppearanceSummary}
                 chevron
-                onPress={() => setAppearanceOpen(true)}
+                onPress={() => {
+                  if (onOpenAppearance) onOpenAppearance()
+                  else setAppearanceOpen(true)
+                }}
+              />
+              <GroupRow
+                icon={Languages}
+                label={zhCN.settings.language}
+                value={currentLanguageLabel}
+                chevron
+                onPress={() => setLanguagePickerOpen(true)}
               />
               <GroupRow
                 icon={Layers}
@@ -964,13 +965,6 @@ export function SettingsScreen({
                 value={currentActivityDockLabel}
                 chevron
                 onPress={() => setActivityDockPickerOpen(true)}
-              />
-              <GroupRow
-                icon={PanelLeft}
-                label={zhCN.settings.drawerLayoutMode}
-                value={currentDrawerLayoutLabel}
-                chevron
-                onPress={() => setDrawerLayoutPickerOpen(true)}
               />
               <GroupRow
                 icon={Zap}
@@ -986,24 +980,14 @@ export function SettingsScreen({
                 chevron
                 onPress={() => setBusySendPickerOpen(true)}
               />
-              <GroupRow
-                icon={PanelTop}
-                label={zhCN.settings.statusBar}
-                accessory={<Toggle accessibilityLabel={zhCN.settings.statusBar} value={statusBarVisible} disabled={statusBarSaving}
-                  onValueChange={visible => void toggleStatusBar(visible)} {...switchColors} />}
-              />
-            </GroupCard>
-
-            <SectionTitle>{zhCN.settings.language}</SectionTitle>
-            <GroupCard>
-              <GroupRow
-                first
-                icon={Languages}
-                label={zhCN.settings.language}
-                value={currentLanguageLabel}
-                chevron
-                onPress={() => setLanguagePickerOpen(true)}
-              />
+              {Platform.OS === 'android' && (
+                <GroupRow
+                  icon={PanelTop}
+                  label={zhCN.settings.statusBar}
+                  accessory={<Toggle accessibilityLabel={zhCN.settings.statusBar} value={statusBarVisible} disabled={statusBarSaving}
+                    onValueChange={visible => void toggleStatusBar(visible)} {...switchColors} />}
+                />
+              )}
             </GroupCard>
 
             <SectionTitle>{zhCN.comfort.continueWork}</SectionTitle>
@@ -1052,13 +1036,7 @@ export function SettingsScreen({
                   }}
                 />
               )}
-            </GroupCard>
-            {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
-
-            <SectionTitle>{zhCN.bots.dsBotSettings}</SectionTitle>
-            <GroupCard>
               <GroupRow
-                first
                 icon={Bot}
                 label={zhCN.bots.dsBotSettings}
                 detail={
@@ -1066,9 +1044,11 @@ export function SettingsScreen({
                     ? zhCN.bots.dsBotSettingsSummary(mainBotName, botTeamState.bots.length)
                     : zhCN.bots.dsBotSettingsDisconnected
                 }
+                chevron
                 onPress={() => setDsBotSettingsOpen(true)}
               />
             </GroupCard>
+            {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
 
             <SectionTitle>{zhCN.settings.defaultPermission}</SectionTitle>
             <GroupCard>
@@ -1098,6 +1078,65 @@ export function SettingsScreen({
             </GroupCard>
             <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
 
+            <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Network}
+                label={zhCN.devices.networkDetails}
+                value={currentTransportLabel}
+                chevron={false}
+                accessory={networkDetailsExpanded
+                  ? <ChevronUp size={18} color={colors.subtle} />
+                  : <ChevronDown size={18} color={colors.subtle} />}
+                onPress={() => setNetworkDetailsExpanded(prev => !prev)}
+              />
+              <GroupRow
+                icon={Terminal}
+                label={zhCN.settings.connectionLog}
+                detail={zhCN.settings.diagnosticsLead}
+                value={zhCN.settings.logLineCount(logCount)}
+                chevron
+                onPress={() => {
+                  if (onOpenDiagnostics) onOpenDiagnostics()
+                  else setDiagnosticsOpen(true)
+                }}
+              />
+            </GroupCard>
+            {networkDetailsExpanded && (
+              <View style={styles.expandedDetailsWrap}>
+                <Text style={styles.subSectionLabel}>{zhCN.settings.transport}</Text>
+                <GroupCard>
+                  {transportPreferenceOptions().map((option, index) => {
+                    const chosen = option.value === preference
+                    return (
+                      <GroupRow
+                        key={option.value}
+                        first={index === 0}
+                        icon={option.value === 'auto' ? Route : option.value === 'turn' ? Network : Server}
+                        label={option.name}
+                        detail={option.description}
+                        selected={chosen}
+                        chevron={false}
+                        accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
+                        onPress={() => void setPreference(option.value)}
+                      />
+                    )
+                  })}
+                </GroupCard>
+                <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
+
+                <Text style={styles.subSectionLabel}>{zhCN.settings.identity}</Text>
+                <GroupCard>
+                  <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
+                  <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
+                  <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
+                </GroupCard>
+                <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
+                <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
+              </View>
+            )}
+
             <SectionTitle>{zhCN.settings.accountAndServer}</SectionTitle>
             <GroupCard>
               <GroupRow
@@ -1122,54 +1161,7 @@ export function SettingsScreen({
               <GroupRow icon={Cable} label={zhCN.settings.protocol} value="DSH Remote v1" />
             </GroupCard>
 
-            <SectionTitle>{zhCN.settings.transport}</SectionTitle>
-            <GroupCard>
-              {transportPreferenceOptions().map((option, index) => {
-                const chosen = option.value === preference
-                return (
-                  <GroupRow
-                    key={option.value}
-                    first={index === 0}
-                    icon={option.value === 'auto' ? Route : option.value === 'turn' ? Network : Server}
-                    label={option.name}
-                    detail={option.description}
-                    selected={chosen}
-                    chevron={false}
-                    accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                    onPress={() => void setPreference(option.value)}
-                  />
-                )
-              })}
-            </GroupCard>
-            <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
-
-            <SectionTitle>{zhCN.settings.diagnostics}</SectionTitle>
-            <GroupCard>
-              <GroupRow
-                first
-                icon={Terminal}
-                label={zhCN.settings.connectionLog}
-                detail={zhCN.settings.diagnosticsLead}
-                value={zhCN.settings.logLineCount(logCount)}
-                chevron
-                onPress={() => {
-                  if (onOpenDiagnostics) onOpenDiagnostics()
-                  else setDiagnosticsOpen(true)
-                }}
-              />
-            </GroupCard>
-
-            <SectionTitle>{zhCN.settings.identity}</SectionTitle>
-            <GroupCard>
-              <GroupRow first icon={Smartphone} label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} onPress={() => showIdentity(zhCN.settings.thisPhone, identity?.name)} disabled={!identity?.name} />
-              <GroupRow icon={Hash} label={zhCN.settings.deviceId} value={identity?.deviceId ?? zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.deviceId, identity?.deviceId)} disabled={!identity?.deviceId} />
-              <GroupRow icon={Fingerprint} label={zhCN.settings.publicKey} value={identity?.publicKey || zhCN.common.unavailable} onPress={() => showIdentity(zhCN.settings.publicKey, identity?.publicKey)} disabled={!identity?.publicKey} />
-            </GroupCard>
-            <Text style={styles.preferenceNote}>{zhCN.settings.identityHint}</Text>
-            <Text style={styles.preferenceNote}>{zhCN.settings.keyNote}</Text>
-
-            <SectionTitle>{zhCN.settings.about}</SectionTitle>
-            <GroupCard>
+            <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
                 icon={Download}
@@ -1278,40 +1270,6 @@ export function SettingsScreen({
             </ScrollView>
       </SheetModal>
       <SheetModal
-        visible={drawerLayoutPickerOpen}
-        onClose={() => setDrawerLayoutPickerOpen(false)}
-        sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
-      >
-            <View style={styles.languageHeader}>
-              <Text style={styles.languageTitle} accessibilityRole="header">{zhCN.settings.drawerLayoutMode}</Text>
-              <IconButton label={zhCN.common.close} icon={X} onPress={() => setDrawerLayoutPickerOpen(false)} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.languageList}>
-              <GroupCard>
-                {([
-                  { value: 'compact' as const, name: zhCN.settings.drawerLayoutCompact },
-                  { value: 'classic' as const, name: zhCN.settings.drawerLayoutClassic },
-                ]).map((option, index) => {
-                  const chosen = option.value === drawerLayoutMode
-                  return (
-                    <GroupRow
-                      key={option.value}
-                      first={index === 0}
-                      label={option.name}
-                      selected={chosen}
-                      chevron={false}
-                      accessory={chosen ? <Check size={19} color={colors.primary} strokeWidth={2.2} /> : undefined}
-                      onPress={() => {
-                        setDrawerLayoutPickerOpen(false)
-                        void toggleDrawerLayoutMode(option.value)
-                      }}
-                    />
-                  )
-                })}
-              </GroupCard>
-            </ScrollView>
-      </SheetModal>
-      <SheetModal
         visible={quickPromptActionPickerOpen}
         onClose={() => setQuickPromptActionPickerOpen(false)}
         sheetStyle={[styles.languageDialog, { maxHeight: sheetMaxHeight }]}
@@ -1382,17 +1340,17 @@ export function SettingsScreen({
       </SheetModal>
       </View>
       {diagnosticsOpen && !onOpenDiagnostics && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <DiagnosticsScreen onBack={() => setDiagnosticsOpen(false)} />
         </View>
       )}
       {aboutOpen && !onOpenAbout && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <AboutScreen onBack={() => setAboutOpen(false)} />
         </View>
       )}
-      {appearanceOpen && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20, elevation: 20 }]}>
+      {appearanceOpen && !onOpenAppearance && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background, zIndex: 20 }]}>
           <ChatAppearanceScreen active={active && appearanceOpen} onBack={() => setAppearanceOpen(false)} />
         </View>
       )}
@@ -1721,11 +1679,9 @@ function isNewerVersion(latest: string, current: string): boolean {
 
 const TERMINAL_PALETTE = {
   surface: '#0D1117',
-  header: '#161B22',
   border: 'rgba(255, 255, 255, 0.08)',
   ink: '#E6EDF3',
   muted: '#8B949E',
-  accent: '#58A6FF',
   success: '#3FB950',
   danger: '#F85149',
 } as const
@@ -1752,7 +1708,7 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { contentMaxWidth, landscape } = useResponsiveLayout()
-  const appVersion = Application.nativeApplicationVersion ?? '0.6.3'
+  const appVersion = Application.nativeApplicationVersion ?? appPackage.version
 
   const [lines, setLines] = useState<readonly string[]>(() => connectionLogEntries())
   const [exportingLog, setExportingLog] = useState(false)
@@ -1831,37 +1787,10 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
               )}
             </GroupCard>
 
-            <SectionTitle>{zhCN.settings.connectionLog}</SectionTitle>
+            <SectionTitle action={<Text style={styles.logCountMeta}>{zhCN.settings.logLineCount(lines.length)}</Text>}>
+              {zhCN.settings.connectionLog}
+            </SectionTitle>
             <View style={styles.terminalCard}>
-              <View style={styles.terminalHeader}>
-                <Terminal size={15} color={TERMINAL_PALETTE.accent} strokeWidth={2} />
-                <Text style={styles.terminalTitle}>{zhCN.settings.connectionLog}</Text>
-                <Text style={styles.terminalCount}>{zhCN.settings.logLineCount(lines.length)}</Text>
-                <View style={styles.flex} />
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={zhCN.settings.copyLog}
-                  onPress={() => void copyLog()}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
-                >
-                  {copied
-                    ? <Check size={16} color={TERMINAL_PALETTE.success} strokeWidth={2.2} />
-                    : <Copy size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />}
-                </Pressable>
-                {Platform.OS === 'android' && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={zhCN.settings.exportLog}
-                    disabled={exportingLog}
-                    onPress={() => void exportLog()}
-                    hitSlop={8}
-                    style={({ pressed }) => [styles.terminalIconBtn, pressed && styles.terminalIconBtnPressed]}
-                  >
-                    <Download size={16} color={TERMINAL_PALETTE.ink} strokeWidth={1.9} />
-                  </Pressable>
-                )}
-              </View>
               {lines.length === 0 ? (
                 <View style={styles.terminalEmpty}>
                   <Text style={styles.terminalEmptyText}>{zhCN.settings.logEmpty}</Text>
@@ -1897,10 +1826,11 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
             <GroupCard style={styles.settingsGap}>
               <GroupRow
                 first
-                icon={Copy}
+                icon={copied ? Check : Copy}
                 label={zhCN.settings.copyLog}
                 detail={zhCN.settings.copyLogNote}
-                chevron
+                chevron={!copied}
+                accessory={copied ? <Check size={18} color={colors.success} strokeWidth={2.2} /> : undefined}
                 onPress={() => void copyLog()}
               />
               {Platform.OS === 'android' && (
@@ -1925,6 +1855,7 @@ export function DiagnosticsScreen({ onBack }: { onBack: () => void }) {
 export function AboutScreen({ onBack }: { onBack: () => void }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
   const { phase, progress, latestVersion, checkForUpdates } = useUpdateCheck()
   const appVersion = Application.nativeApplicationVersion ?? zhCN.common.unavailable
   const buildVersion = Application.nativeBuildVersion
@@ -1943,56 +1874,61 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.about} onBack={onBack} />}>
         <Screen>
-          <View style={styles.aboutHero}>
-            <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} resizeMode="contain" />
-            <Text style={styles.aboutProductName}>DS Harness Remote</Text>
-            <Text style={styles.aboutVersion}>{versionLabel}</Text>
-          </View>
+          <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <View style={styles.aboutHero}>
+              <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} resizeMode="contain" />
+              <Text style={styles.aboutProductName}>DS Harness Remote</Text>
+              <Text style={styles.aboutVersion}>{versionLabel}</Text>
+            </View>
 
-          <View style={styles.group}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={zhCN.settings.checkUpdates}
-              accessibilityState={{ disabled: phase !== 'idle', busy: phase !== 'idle' }}
-              disabled={phase !== 'idle'}
-              onPress={() => void checkForUpdates()}
-              style={({ pressed }) => [styles.settingsLink, pressed && phase === 'idle' && styles.settingsLinkPressed]}
-            >
-              <View style={styles.settingsLinkCopy}>
-                <Text style={styles.settingsLinkLabel}>{zhCN.settings.checkUpdates}</Text>
-                <Text style={styles.settingsLinkUrl}>{updateSubtitle}</Text>
-              </View>
-              {phase !== 'idle'
-                ? <ActivityIndicator size="small" color={colors.primary} />
-                : <Download size={18} color={colors.primary} />}
-            </Pressable>
-            <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
-            <SettingsLink label={zhCN.settings.twitter} url={twitterUrl} />
-            <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />
-            <SettingsLink label={zhCN.settings.updateUrl} url={updateUrl} />
+            <GroupCard>
+              <GroupRow
+                first
+                icon={Download}
+                label={zhCN.settings.checkUpdates}
+                detail={updateSubtitle}
+                disabled={phase !== 'idle'}
+                chevron={phase === 'idle'}
+                accessory={phase !== 'idle' ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+                onPress={() => void checkForUpdates()}
+              />
+              <GroupRow
+                icon={UserRound}
+                label={zhCN.settings.developer}
+                detail={zhCN.settings.developerValue}
+                chevron={false}
+                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                onPress={() => void openSettingsUrl(developerUrl)}
+              />
+              <GroupRow
+                icon={Globe}
+                label={zhCN.settings.twitter}
+                detail={twitterUrl}
+                chevron={false}
+                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                onPress={() => void openSettingsUrl(twitterUrl)}
+              />
+              <GroupRow
+                icon={Terminal}
+                label={zhCN.settings.sourceCodeUrl}
+                detail={SOURCE_CODE_URL}
+                chevron={false}
+                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                onPress={() => void openSettingsUrl(SOURCE_CODE_URL)}
+              />
+              <GroupRow
+                icon={Info}
+                label={zhCN.settings.updateUrl}
+                detail={updateUrl}
+                chevron={false}
+                accessory={<ExternalLink size={17} color={colors.subtle} />}
+                onPress={() => void openSettingsUrl(updateUrl)}
+              />
+            </GroupCard>
           </View>
         </Screen>
       </BlurHeaderFrame>
     </View>
-  )
-}
-
-function SettingsLink({ label, url, value }: { label: string; url: string; value?: string }) {
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={`${label}：${value ?? url}`}
-      onPress={() => void openSettingsUrl(url)}
-      style={({ pressed }) => [styles.settingsLink, pressed && styles.settingsLinkPressed]}
-    >
-      <View style={styles.settingsLinkCopy}>
-        <Text style={styles.settingsLinkLabel}>{label}</Text>
-        <Text style={styles.settingsLinkUrl}>{value ?? url}</Text>
-      </View>
-      <ExternalLink size={18} color={colors.primary} />
-    </Pressable>
   )
 }
 
@@ -2051,7 +1987,7 @@ function createStyles(colors: ThemeColors) {
   emailSubmit: { minHeight: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xxs, backgroundColor: colors.surfaceStrong },
   emailSubmitReady: { backgroundColor: colors.primary },
   emailSubmitText: { ...type.smallStrong, fontSize: 16, color: colors.muted },
-  emailSubmitTextReady: { color: colors.white },
+  emailSubmitTextReady: { color: colors.onPrimary ?? colors.white },
   textLink: { minHeight: 40, justifyContent: 'center', paddingHorizontal: spacing.sm },
   textLinkLabel: { ...type.smallStrong, color: colors.primary },
   textLinkDisabled: { opacity: 0.5 },
@@ -2107,6 +2043,9 @@ function createStyles(colors: ThemeColors) {
   segmentButtonTextActive: { color: colors.ink, fontWeight: '600' },
   keyNote: { flexDirection: 'row', gap: spacing.xs, paddingVertical: spacing.md },
   settingsGap: { marginTop: spacing.sm },
+  expandedDetailsWrap: { marginTop: spacing.xs },
+  subSectionLabel: { ...type.caption, fontSize: 13, fontWeight: '600', color: colors.muted, marginTop: spacing.md, marginBottom: spacing.xs, paddingLeft: spacing.md },
+  logCountMeta: { ...type.caption, fontSize: 13, color: colors.muted, paddingRight: spacing.md, ...tabularNumsStyle },
   themeCard: { paddingHorizontal: spacing.sm, paddingVertical: spacing.md },
   themeTiles: { flexDirection: 'row', gap: spacing.sm },
   themeTile: { flex: 1, alignItems: 'center', gap: spacing.xs },
@@ -2120,12 +2059,7 @@ function createStyles(colors: ThemeColors) {
   themeTileLabelSelected: { color: colors.primary, fontWeight: '600' },
   signOutCard: { marginTop: spacing.xxl },
   keyNoteText: { ...type.small, color: colors.muted, flex: 1 },
-  settingsLink: { minHeight: 68, paddingVertical: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  settingsLinkPressed: { opacity: 0.68 },
-  settingsLinkCopy: { flex: 1, gap: 3 },
-  settingsLinkLabel: { ...type.smallStrong, color: colors.ink },
-  settingsLinkUrl: { ...type.caption, color: colors.primary },
-  homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
+  homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
   homeMenuCard: { position: 'absolute', right: spacing.md, paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, borderRadius: radius.xl, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, zIndex: 1, ...floatingShadow(colors, 'high') },
   // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
@@ -2149,14 +2083,9 @@ function createStyles(colors: ThemeColors) {
   resetGap: { height: spacing.sm },
   languageBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   languageDialog: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radius.xxl,
-    borderTopRightRadius: radius.xxl,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
+    paddingTop: 0,
     gap: spacing.md,
-    ...floatingShadow(colors, 'high'),
   },
   languageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: spacing.xs },
   languageTitle: { ...type.heading, fontSize: 18, color: colors.ink, fontWeight: '700' },
@@ -2168,25 +2097,10 @@ function createStyles(colors: ThemeColors) {
     borderColor: TERMINAL_PALETTE.border,
     overflow: 'hidden',
   },
-  terminalHeader: {
-    minHeight: 44,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: TERMINAL_PALETTE.header,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: TERMINAL_PALETTE.border,
-  },
-  terminalTitle: { ...type.smallStrong, color: TERMINAL_PALETTE.ink },
-  terminalCount: { ...type.caption, color: TERMINAL_PALETTE.muted, fontVariant: ['tabular-nums'] },
-  terminalIconBtn: { width: 34, height: 34, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
-  terminalIconBtnPressed: { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
   terminalScroll: { maxHeight: 320 },
   terminalScrollContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
-  terminalLine: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  terminalLine: { fontFamily: monoFontFamily, fontSize: 12, lineHeight: 18 },
   terminalEmpty: { height: 160, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
-  terminalEmptyText: { fontFamily: 'monospace', fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
+  terminalEmptyText: { fontFamily: monoFontFamily, fontSize: 12, lineHeight: 18, color: TERMINAL_PALETTE.muted, textAlign: 'center' },
   })
 }

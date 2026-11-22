@@ -156,6 +156,8 @@ describe('DshWebScreen helpers and lifecycle', () => {
       ['FEATURE_NOT_SUPPORTED', true, ['dsh.web.open', 'dsh.web.close']],
       ['FEATURE_NOT_SUPPORTED', false, []],
       ['RPC_TIMEOUT', true, []],
+      ['DSH_WEB_NOT_READY', true, []],
+      ['UNAUTHORIZED', true, []],
     ] as const) {
       const rpc = Object.assign(vi.fn(async (_method: string) => validGrant()), {
         openLanWeb: vi.fn(async () => { throw Object.assign(new Error(code), { code }) }),

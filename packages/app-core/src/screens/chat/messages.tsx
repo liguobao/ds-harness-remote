@@ -579,8 +579,14 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
       {item.images !== undefined && item.images.length > 0 && <ChatImages images={item.images} tool />}
       {expanded && hasDetail && (
         <View style={styles.toolDetails}>
-          {loadingDetail && <Text>{zhCN.comfort.toolLoading}</Text>}
-          {detailError !== undefined && <Pressable accessibilityRole="button" onPress={() => void loadDetail()}><Text>{detailError} · {zhCN.common.retry}</Text></Pressable>}
+          {loadingDetail && <Text style={styles.toolDetailLabel}>{zhCN.comfort.toolLoading}</Text>}
+          {detailError !== undefined && (
+            <Pressable accessibilityRole="button" style={styles.toolDetailRetry} onPress={() => void loadDetail()}>
+              <Text style={styles.toolDetailLabel}>
+                {detailError} · <Text style={styles.toolDetailRetryAction}>{zhCN.common.retry}</Text>
+              </Text>
+            </Pressable>
+          )}
           {item.callDetail !== undefined && <ToolDetailView label={zhCN.chat.toolCall} detail={item.callDetail} />}
           {item.resultDetail !== undefined && <ToolDetailView label={zhCN.chat.toolResult} detail={item.resultDetail} />}
         </View>

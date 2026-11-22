@@ -1,4 +1,4 @@
-import { AgentAcpClient, RemoteTypertGateway, type RemoteGatewayStream } from '@dsh-remote/client-core'
+import { AgentAcpClient, RemoteTypertGateway, type RemoteGatewayOptions, type RemoteGatewayStream } from '@dsh-remote/client-core'
 import type { AcpWorkspaceToolCallEndpoint, AcpWorkspaceToolStreamEndpoint, AgentAcpFrameData } from '@dsh-remote/protocol'
 import type { PermissionSelect } from '../types'
 
@@ -67,6 +67,21 @@ export type TerminalFrame =
 export const OFFICE_PREVIEW_TIMEOUT_MS = 120_000
 export const OFFICE_PREVIEW_MAX_RESPONSE_BYTES = 12 * 1024 * 1024
 
+/** Endpoint-registration errors that justify falling back from officeKit/* to legacy officeToPdf/*. */
+const OFFICE_FALLBACK_CODES = new Set([
+  'METHOD_NOT_ALLOWED',
+  'METHOD_NOT_FOUND',
+  'unknown-endpoint',
+  'gateway/invocation-unavailable',
+  'gateway/method-unavailable',
+  'gateway/definition-unavailable',
+])
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
+  return typeof error.code === 'string' ? error.code : undefined
+}
+
 /** Official Typert endpoints only; Host owns scope, device ownership and input authorization. */
 export interface BackgroundJob {
   startedAt?: number
@@ -105,6 +120,8 @@ export interface SessionTools {
 }
 
 export class HarnessSessionTools implements SessionTools {
+  private officeNamespace?: 'officeKit' | 'officeToPdf'
+
   constructor(private readonly gateway: RemoteTypertGateway) {}
 
   watchJobs(sessionId: string, signal: AbortSignal): Promise<RemoteGatewayStream> {
@@ -185,13 +202,44 @@ export class HarnessSessionTools implements SessionTools {
     )
   }
 
+  private async callOffice<T>(
+    method: 'generation' | 'render',
+    payload: unknown,
+    signal?: AbortSignal,
+    options?: RemoteGatewayOptions,
+  ): Promise<T> {
+    const primary = this.officeNamespace ?? 'officeKit'
+    try {
+      const value = await this.gateway.call<T>(`${primary}/${method}`, payload, signal, options)
+      this.officeNamespace ??= primary
+      return value
+    } catch (error) {
+      const code = errorCode(error)
+      // Once this connection confirms officeKit, never mix namespaces; if primary was
+      // already officeToPdf, never retry it; if a sibling call concurrently settled
+      // officeToPdf, allow an in-flight officeKit failure to follow that discovery.
+      if (
+        primary !== 'officeKit'
+        || this.officeNamespace === 'officeKit'
+        || signal?.aborted
+        || code === undefined
+        || !OFFICE_FALLBACK_CODES.has(code)
+      ) {
+        throw error
+      }
+      const value = await this.gateway.call<T>(`officeToPdf/${method}`, payload, signal, options)
+      this.officeNamespace = 'officeToPdf'
+      return value
+    }
+  }
+
   officeGeneration(signal?: AbortSignal): Promise<string> {
-    return this.gateway.call('officeToPdf/generation', { args: {} }, signal, { timeoutMs: OFFICE_PREVIEW_TIMEOUT_MS })
+    return this.callOffice('generation', { args: {} }, signal, { timeoutMs: OFFICE_PREVIEW_TIMEOUT_MS })
   }
 
   renderOfficePdf(sessionId: string, path: string, signal?: AbortSignal): Promise<WorkspaceOfficeRender> {
-    return this.gateway.call(
-      'officeToPdf/render',
+    return this.callOffice(
+      'render',
       { args: { workspaceFileScopeId: sessionId, path, priority: 'foreground' } },
       signal,
       { timeoutMs: OFFICE_PREVIEW_TIMEOUT_MS, maxResponseBytes: OFFICE_PREVIEW_MAX_RESPONSE_BYTES },

@@ -43,6 +43,7 @@ import {
 import { useAppStore } from '../state/store'
 import type { RemoteDevice } from '../types'
 import { IconButton } from '../ui/components'
+import { androidRipple, continuousRadius, elevationStyle } from '../ui/platform-style'
 import { DIALOG_SHEET_MAX_WIDTH, useResponsiveLayout } from '../ui/responsive'
 import { SheetModal } from '../ui/sheet'
 import { radius, spacing, type, type ColorScheme, type ThemeColors } from '../ui/theme'
@@ -470,11 +471,10 @@ export function AttentionInboxSheet({
               maxHeight: sheetMaxHeight,
               paddingLeft: insets.left,
               paddingRight: insets.right,
-              paddingBottom: spacing.xl + insets.bottom,
+              paddingBottom: Math.max(spacing.xl, insets.bottom + spacing.sm),
             },
       ]}
     >
-      {!sheetAsDialog && <View style={styles.grabber} />}
       <View style={styles.sheetHeader}>
         <View style={styles.titleColumn}>
           <Text style={styles.title} numberOfLines={1}>{strings.attention.title}</Text>
@@ -1153,6 +1153,7 @@ export function AttentionInboxPill({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={strings.attention.pillA11y(counts.totalUrgent, counts.totalActive)}
+      android_ripple={androidRipple(colors)}
       onPress={onPress}
       hitSlop={6}
       style={({ pressed }) => [
@@ -1164,7 +1165,7 @@ export function AttentionInboxPill({
         pressed && styles.pressed,
       ]}
     >
-      <Icon size={15} color={iconTint} strokeWidth={2.1} />
+      <Icon size={16} color={iconTint} strokeWidth={2.05} />
       {hasAny && (
         <Text style={[styles.inboxPillCount, { color: colors.ink }]} numberOfLines={1}>
           {displayCount > 99 ? '99+' : displayCount}
@@ -1178,22 +1179,9 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
     sheet: {
-      zIndex: 1,
-      elevation: 1,
-      backgroundColor: colors.background,
-      borderTopLeftRadius: radius.xxl,
-      borderTopRightRadius: radius.xxl,
       paddingHorizontal: 0,
-      paddingTop: spacing.sm,
+      paddingTop: 0,
       gap: spacing.xs,
-    },
-    grabber: {
-      width: 36,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.subtle,
-      opacity: 0.45,
-      alignSelf: 'center',
     },
     sheetHeader: {
       flexDirection: 'row',
@@ -1333,15 +1321,11 @@ function createStyles(colors: ThemeColors) {
       position: 'absolute',
       top: 4,
       backgroundColor: colors.elevated,
-      borderRadius: radius.xl,
+      ...continuousRadius(radius.xl),
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       overflow: 'hidden',
-      shadowColor: colors.shadow,
-      shadowOpacity: 0.2,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 14,
+      ...elevationStyle(colors, 3),
     },
     dropdownMenuLeft: {
       left: spacing.lg,
@@ -1638,12 +1622,14 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       flexShrink: 0,
       gap: 5,
-      minHeight: 32,
-      minWidth: 32,
-      paddingHorizontal: 9,
+      minHeight: 36,
+      minWidth: 36,
       borderRadius: radius.pill,
+      backgroundColor: colors.card,
+      overflow: 'hidden',
     },
     inboxPillActive: {
+      paddingHorizontal: 10,
       borderWidth: StyleSheet.hairlineWidth,
     },
     inboxPillCount: {

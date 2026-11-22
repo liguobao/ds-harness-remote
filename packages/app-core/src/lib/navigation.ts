@@ -16,6 +16,7 @@ export type AppRoute =
     }
   | { name: 'chat'; botConversationId?: string; externalOpenRevision?: number }
   | { name: 'settings' }
+  | { name: 'appearance' }
   | { name: 'diagnostics' }
   | { name: 'about' }
 

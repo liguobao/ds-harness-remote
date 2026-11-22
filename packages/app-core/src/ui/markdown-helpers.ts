@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native'
 import { compactType, DEFAULT_CHAT_APPEARANCE, radius, resolveChatMetrics } from './theme'
 import type { ChatAppearance, ThemeColors } from './theme'
+import { monoFontFamily } from './platform-style'
 import type { Token } from 'markdown-it'
 
 export interface MarkdownNode {
@@ -210,7 +211,7 @@ export function createMarkdownStyles(
     citationText: { fontSize: 11, fontWeight: '600', color: colors.primary },
     blockedLink: { color: colors.muted, textDecorationLine: 'line-through' },
     inlineCode: {
-      fontFamily: 'monospace',
+      fontFamily: monoFontFamily,
       fontSize: m.inlineCodeFontSize,
       color: colors.ink,
       backgroundColor: colors.surfaceStrong,
@@ -222,7 +223,7 @@ export function createMarkdownStyles(
     mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 5, paddingHorizontal: 5 },
     imageAlt: { color: colors.muted, fontStyle: 'italic' },
     codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.codeSurface ?? colors.surface, padding: 10, marginBottom: m.paragraphGap },
-    code: { fontFamily: 'monospace', fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, includeFontPadding: false },
+    code: { fontFamily: monoFontFamily, fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, includeFontPadding: false },
     blockquote: {
       borderLeftWidth: 3,
       borderLeftColor: colors.primary,
@@ -243,7 +244,11 @@ export function createMarkdownStyles(
     list: { gap: m.listGap, marginBottom: m.paragraphGap },
     listItem: { flexDirection: 'row', alignItems: 'flex-start' },
     listMarker: { ...t.body, fontSize: m.bodyFontSize, lineHeight: m.bodyLineHeight, color: colors.muted, width: 22 },
-    listContent: { flex: 1 },
+    // `flex: 1` sets flexBasis to 0%, which collapses to zero width when the
+    // bubble around it sizes itself to its content (user bubbles are
+    // alignSelf: 'flex-end' + maxWidth percentage). Keep an auto basis so the
+    // column reports its own content width while still filling wide parents.
+    listContent: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
     checkboxChecked: { width: 16, height: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center' as const, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
     checkboxUnchecked: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, marginRight: 8, marginTop: Math.max(3, Math.round((m.bodyLineHeight - 16) / 2)) },
     rule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginVertical: m.headingTopGap },

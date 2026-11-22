@@ -26,6 +26,13 @@ export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'cl
  */
 export const ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 60_000
 
+/**
+ * Replaying or loading long ACP sessions (especially OpenCode SQLite transcripts)
+ * runs with up to 20s process start + 120s Host `session/load` budget; keep the
+ * client RPC timeout above the combined Host budget.
+ */
+export const ACP_HISTORY_RPC_TIMEOUT_MS = 150_000
+
 export interface AcpRemoteSession {
   sessionId: string
   cwd?: string
@@ -60,8 +67,7 @@ export class AgentAcpClient {
   }
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
-    const timeoutMs = method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined
-    return this.core.rpc('agent.acp.call', { method, params }, signal, timeoutMs)
+    return this.core.rpc('agent.acp.call', { method, params }, signal, rpcTimeoutForMethod(method))
   }
 
   async initialize(
@@ -250,20 +256,23 @@ export class AgentAcpClient {
     permissionPreset?: string
     modes?: AcpSessionModes
     commands?: AcpAvailableCommand[]
+    running?: boolean
   }> {
+    const strictHistoryBackend = backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes' || backend === 'antigravity'
     const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') throw error
+      if (strictHistoryBackend) throw error
       return { events: [] }
     })
-    if ((backend === 'pi' || backend === 'claude' || backend === 'opencode' || backend === 'hermes') && (!isRecord(result) || !Array.isArray(result.events))) {
+    if (strictHistoryBackend && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
     if (!isRecord(result)) return { events: [] }
     const events = Array.isArray(result.events) ? result.events : []
     const permissionPreset = typeof result.permissionPreset === 'string' ? result.permissionPreset : undefined
+    const running = typeof result.running === 'boolean' ? result.running : undefined
     const modes = isRecord(result.modes) && Array.isArray(result.modes.availableModes)
       ? {
           ...(typeof result.modes.currentModeId === 'string' ? { currentModeId: result.modes.currentModeId } : {}),
@@ -290,6 +299,7 @@ export class AgentAcpClient {
       ...(permissionPreset ? { permissionPreset } : {}),
       ...(modes ? { modes } : {}),
       ...(commands ? { commands } : {}),
+      ...(running !== undefined ? { running } : {}),
     }
   }
 
@@ -417,7 +427,7 @@ export class AgentAcpClient {
         }, signal)
       }
       const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal,
-        method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined) as AgentAcpTransferCommitResult
+        rpcTimeoutForMethod(method)) as AgentAcpTransferCommitResult
       if (commit.kind === 'inline') return commit.response
       if (commit.kind !== 'chunked' || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES
         || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer descriptor.')
@@ -436,6 +446,12 @@ export class AgentAcpClient {
       await this.core.rpc('agent.acp.transfer.close', { transferId }).catch(() => undefined)
     }
   }
+}
+
+function rpcTimeoutForMethod(method: string): number | undefined {
+  if (method === 'session/prompt') return ACP_PROMPT_RPC_TIMEOUT_MS
+  if (method === 'dsh/sessionHistory' || method === 'session/load') return ACP_HISTORY_RPC_TIMEOUT_MS
+  return undefined
 }
 
 function readString(value: unknown, key: string): string | undefined {

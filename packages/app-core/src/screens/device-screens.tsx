@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native'
 import { Alert } from '../ui/alert'
-import { ArrowLeft, Check, ChevronRight, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronUp, Laptop, MessageSquareText, Monitor, Pencil, Server, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react-native'
 import { requireConnectionRpc, useAppStore } from '../state/store'
 import { DshWebScreen } from './dsh-web-screen'
 import { shouldPollSessionStatus } from '../state/session-catalog-commands'
@@ -25,6 +25,7 @@ import {
   TopBar,
 } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily, tabularNumsStyle } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -273,6 +274,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 }) {
   const selected = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
+  const networkDetails = useAppStore(state => state.connectionNetworkDetails)
   const descriptor = useAppStore(state => state.hostDescriptor)
   const workspaces = useAppStore(state => state.workspaces)
   const trust = useAppStore(state => state.trustDevice)
@@ -280,6 +282,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const forgetBusy = useAppStore(state => state.busyAction === `forget:${device.deviceId}`)
   const reconnect = useAppStore(state => state.reconnect)
   const [renaming, setRenaming] = useState(false)
+  const [connectionExpanded, setConnectionExpanded] = useState(false)
   const language = useAppStore(state => state.language)
   const dshWebLabel = language?.startsWith('zh') ? '打开 DSH Web' : 'Open DSH Web'
   const [webRpc, setWebRpc] = useState<ReturnType<typeof requireConnectionRpc>>()
@@ -341,6 +344,21 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                     <Button label={zhCN.devices.secureConnect} onPress={onConnect} disabled={!device.online} />
                   </View>
                 : <>
+                    {(onWorkspaces !== undefined || webAvailable) && (
+                      <View style={styles.quickActions}>
+                        {onWorkspaces !== undefined && (
+                          <Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} />
+                        )}
+                        {webAvailable && (
+                          <Button
+                            label={dshWebLabel}
+                            variant={onWorkspaces !== undefined ? 'secondary' : 'primary'}
+                            onPress={() => setWebRpc((current: ReturnType<typeof requireConnectionRpc> | undefined) => current ?? requireConnectionRpc())}
+                          />
+                        )}
+                      </View>
+                    )}
+
                     <SectionTitle>{zhCN.devices.info}</SectionTitle>
                     <View style={styles.group}>
                       <KeyValue label={zhCN.devices.operatingSystem} value={platformName(device.platform)} />
@@ -356,10 +374,22 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                       </View>
                     </View>
 
-                    {webAvailable && <Button label={dshWebLabel} onPress={() => setWebRpc((current: ReturnType<typeof requireConnectionRpc> | undefined) => current ?? requireConnectionRpc())} />}
-                    <DeviceConnectionInfo deviceId={device.deviceId} />
-
-                    {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
+                    <View style={styles.connectionDetails}>
+                      <GroupCard>
+                        <GroupRow
+                          first
+                          icon={ShieldCheck}
+                          label={zhCN.devices.networkDetails}
+                          value={connectionPath(connection.stats.mode === 'P2P' && networkDetails?.sameLinkIpv6 ? 'LAN' : connection.stats.mode)}
+                          chevron={false}
+                          accessory={connectionExpanded
+                            ? <ChevronUp size={18} color={colors.subtle} />
+                            : <ChevronDown size={18} color={colors.subtle} />}
+                          onPress={() => setConnectionExpanded(prev => !prev)}
+                        />
+                      </GroupCard>
+                      {connectionExpanded && <DeviceConnectionInfo deviceId={device.deviceId} />}
+                    </View>
                   </>}
 
             <View style={styles.primaryArea}>
@@ -634,16 +664,17 @@ function createStyles(colors: ThemeColors) {
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   trustCopy: { flex: 1 },
-  fingerprint: { ...type.caption, color: colors.primary, fontFamily: 'monospace', marginTop: spacing.xs },
+  fingerprint: { ...type.caption, color: colors.primary, fontFamily: monoFontFamily, marginTop: spacing.xs },
   connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, gap: spacing.sm },
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },
   group: { borderRadius: radius.xl, backgroundColor: colors.card, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
+  quickActions: { gap: spacing.sm, marginBottom: spacing.xs },
   primaryArea: { marginTop: spacing.xxl },
   secondaryArea: { marginTop: spacing.sm },
   contentCounts: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md },
   contentCount: { flex: 1, alignItems: 'center' },
-  contentCountValue: { ...type.heading, color: colors.ink },
+  contentCountValue: { ...type.heading, color: colors.ink, ...tabularNumsStyle },
   contentCountLabel: { ...type.caption, color: colors.muted, marginTop: 2 },
   contentCountDivider: { width: StyleSheet.hairlineWidth, height: 32, backgroundColor: colors.separator },
   networkDetails: { marginTop: -spacing.sm },

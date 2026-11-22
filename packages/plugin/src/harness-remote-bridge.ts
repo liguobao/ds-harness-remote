@@ -214,6 +214,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'workspaceFiles/readRelated',
   'workspaceFiles/search',
   'workspaceFiles/changes',
+  'officeKit/render',
+  'officeKit/generation',
   'officeToPdf/render',
   'officeToPdf/generation',
   'toolResults/watch',
@@ -237,6 +239,18 @@ export const WORKSPACE_FILE_READ_ENDPOINTS = new Set([
   'workspaceFiles/readBytes',
   'workspaceFiles/readAll',
   'workspaceFiles/stat',
+])
+
+const OFFICE_RENDER_ENDPOINTS = new Set([
+  'officeToPdf/render',
+  'officeKit/render',
+])
+
+const OFFICE_FALLBACK_ENDPOINT: ReadonlyMap<string, string> = new Map([
+  ['officeKit/generation', 'officeToPdf/generation'],
+  ['officeToPdf/generation', 'officeKit/generation'],
+  ['officeKit/render', 'officeToPdf/render'],
+  ['officeToPdf/render', 'officeKit/render'],
 ])
 
 const MAX_READ_BYTES = 4 * 1024 * 1024
@@ -386,17 +400,18 @@ export class HarnessRemoteBridge {
           throw workspaceFileFailure('WORKSPACE_UNAVAILABLE', 'The workspace is unavailable.', 'authority-unavailable')
         }
         nativePayload = search
-      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || params.endpoint === 'officeToPdf/render')
+      } else if ((WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))
         && isMessageFilePath(requestArgs(nativePayload).path)) {
         nativePayload = await this.resolveMessageFilePayload(nativePayload, params.endpoint, signal)
-      } else if (this.resolveWorkspaceRoot !== undefined && WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint)) {
+      } else if (this.resolveWorkspaceRoot !== undefined
+        && (WORKSPACE_FILE_READ_ENDPOINTS.has(params.endpoint) || OFFICE_RENDER_ENDPOINTS.has(params.endpoint))) {
         nativePayload = await this.assertNativeWorkspaceFileCall(params.endpoint, nativePayload, signal)
       }
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
         : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
           ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal)
-          : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
+          : await this.dispatchWithOfficeFallback(params.endpoint, nativePayload, signal)
       if (params.endpoint === 'session/page' && nativeResult.ok) {
         const sessionId = journalSessionId(nativePayload)
         if (sessionId !== undefined) this.messageFiles.observe(sessionId, nativeResult.value)
@@ -448,6 +463,46 @@ export class HarnessRemoteBridge {
         code: this.gateway.failure(error).code,
         ...(reason === undefined ? {} : { reason }),
       })
+      throw error
+    }
+  }
+
+  private async dispatchWithOfficeFallback(
+    endpoint: string,
+    nativePayload: unknown,
+    signal: AbortSignal,
+  ): Promise<TypertRpcResult> {
+    const fallbackEndpoint = OFFICE_FALLBACK_ENDPOINT.get(endpoint)
+    if (fallbackEndpoint === undefined) {
+      return this.gateway.dispatch(endpoint, nativePayload, signal)
+    }
+
+    let primaryResult: TypertRpcResult | undefined
+    let primaryError: unknown
+    try {
+      primaryResult = await this.gateway.dispatch(endpoint, nativePayload, signal)
+      if (signal.aborted || primaryResult.ok || primaryResult.error.code !== 'gateway/invocation-unavailable') {
+        return primaryResult
+      }
+    } catch (error) {
+      if (signal.aborted || this.gateway.failure(error).code !== 'gateway/invocation-unavailable') {
+        throw error
+      }
+      primaryError = error
+    }
+
+    try {
+      const fallbackResult = await this.gateway.dispatch(fallbackEndpoint, nativePayload, signal)
+      if (!fallbackResult.ok && fallbackResult.error.code === 'gateway/invocation-unavailable') {
+        if (primaryResult !== undefined) return primaryResult
+        throw primaryError
+      }
+      return fallbackResult
+    } catch (error) {
+      if (this.gateway.failure(error).code === 'gateway/invocation-unavailable') {
+        if (primaryResult !== undefined) return primaryResult
+        throw primaryError
+      }
       throw error
     }
   }
@@ -1425,7 +1480,7 @@ function decodeCanonicalBase64(value: string): Uint8Array {
 }
 
 function normalizeWorkspaceBinaryResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
-  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render')) return result
+  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && !OFFICE_RENDER_ENDPOINTS.has(endpoint))) return result
   if (!isJsonRecord(result.value)) return result
   const directBytes = isBinary(result.value.data) ? result.value.data : undefined
   const attachmentBytes = directBytes === undefined ? attachmentAt(result, ['data']) : undefined

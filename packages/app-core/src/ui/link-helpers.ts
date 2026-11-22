@@ -466,10 +466,7 @@ export function openSafeExternalUrl(rawUrl: string): boolean {
   }
 
   try {
-    const pending = Linking.openURL(safeHref)
-    if (pending && typeof (pending as Promise<void>).catch === 'function') {
-      void (pending as Promise<void>).catch(() => undefined)
-    }
+    void Promise.resolve(Linking.openURL(safeHref)).catch(() => undefined)
     return true
   } catch {
     return false

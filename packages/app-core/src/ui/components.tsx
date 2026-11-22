@@ -1,6 +1,7 @@
-import { createContext, useContext, useId, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react'
+import { createContext, useContext, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react'
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,9 +14,9 @@ import {
   type ViewStyle,
 } from 'react-native'
 import { BlurTargetView, BlurView } from 'expo-blur'
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
-import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
 import { floatingShadow, radius, spacing, type } from './theme'
+import { androidRipple, continuousRadius, elevationStyle, monoFontFamily } from './platform-style'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
@@ -107,23 +108,6 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
   )
 }
 
-/** Background-colored overlay whose opacity runs from `from` (top) to `to` (bottom). */
-function VerticalFade({ from, to, style }: { from: number; to: number; style: StyleProp<ViewStyle> }) {
-  const { colors } = useTheme()
-  const id = `fade${useId().replace(/[^a-zA-Z0-9]/g, '')}`
-  return (
-    <Svg style={style} pointerEvents="none">
-      <Defs>
-        <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={colors.background} stopOpacity={from} />
-          <Stop offset="1" stopColor={colors.background} stopOpacity={to} />
-        </LinearGradient>
-      </Defs>
-      <Rect width="100%" height="100%" fill={`url(#${id})`} />
-    </Svg>
-  )
-}
-
 export function TopBar({
   title,
   subtitle,
@@ -204,7 +188,7 @@ export function TopBar({
           {onBack !== undefined && (
             <View style={styles.floatingChip}>
               <FloatingChipContext.Provider value>
-                <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? ArrowLeft} onPress={onBack} hitSlop={8} />
+                <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? (Platform.OS === 'ios' ? ChevronLeft : ArrowLeft)} onPress={onBack} hitSlop={8} />
               </FloatingChipContext.Provider>
             </View>
           )}
@@ -304,6 +288,7 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
       accessibilityLabel={label}
       disabled={disabled}
       hitSlop={hitSlop ?? (dense ? 4 : 8)}
+      android_ripple={androidRipple(colors, true)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.iconButton,
@@ -315,7 +300,7 @@ export function IconButton({ label, icon: Icon, onPress, disabled = false, tint,
         disabled && styles.disabled,
       ]}
     >
-      <Icon size={large ? 25 : dense || inChip ? 20 : 21} color={filled ? colors.white : tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={filled ? 2.2 : 1.9} />
+      <Icon size={large ? 25 : dense || inChip ? 20 : 21} color={filled ? (colors.onPrimary ?? colors.white) : tint ?? colors.ink} fill={fill ?? 'none'} strokeWidth={filled ? 2.2 : 1.9} />
     </Pressable>
   )
 }
@@ -330,26 +315,37 @@ export function Button({ label, onPress, icon: Icon, variant = 'primary', loadin
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const buttonStyles = createButtonStyles(colors)
   const isDisabled = disabled || loading
+  const variantStyle =
+    variant === 'primary' ? styles.buttonPrimary
+      : variant === 'secondary' ? styles.buttonSecondary
+        : variant === 'danger' ? styles.buttonDanger
+          : variant === 'inverse' ? styles.buttonInverse
+            : styles.buttonQuiet
+  const foregroundColor =
+    variant === 'inverse' ? colors.onInverse
+      : variant === 'primary' ? (colors.onPrimary ?? colors.white)
+        : variant === 'danger' ? colors.white
+          : colors.ink
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
+      android_ripple={androidRipple(colors)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        buttonStyles[variant],
+        variantStyle,
         pressed && !isDisabled && styles.buttonPressed,
         isDisabled && styles.disabled,
       ]}
     >
       {loading
-        ? <ActivityIndicator size="small" color={variant === 'inverse' ? colors.onInverse : variant === 'primary' || variant === 'danger' ? colors.white : colors.ink} />
-        : Icon !== undefined && <Icon size={19} color={variant === 'inverse' ? colors.onInverse : variant === 'primary' || variant === 'danger' ? colors.white : colors.ink} />}
-      <Text style={[styles.buttonText, (variant === 'primary' || variant === 'danger') && styles.buttonTextOnColor, variant === 'inverse' && { color: colors.onInverse }]}>{label}</Text>
+        ? <ActivityIndicator size="small" color={foregroundColor} />
+        : Icon !== undefined && <Icon size={19} color={foregroundColor} />}
+      <Text style={[styles.buttonText, variant === 'primary' && styles.buttonTextPrimary, variant === 'danger' && styles.buttonTextOnColor, variant === 'inverse' && { color: colors.onInverse }]}>{label}</Text>
     </Pressable>
   )
 }
@@ -434,6 +430,7 @@ export function ListRow({ title, subtitle, meta, metaInline = false, icon: Icon,
   return (
     <Pressable
       accessibilityRole="button"
+      android_ripple={androidRipple(colors)}
       onPress={onPress}
       style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
     >
@@ -549,6 +546,7 @@ export function GroupRow({ icon: Icon, iconSpace = false, label, detail, value, 
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected, disabled }}
       disabled={disabled}
+      android_ripple={androidRipple(colors)}
       onPress={onPress}
       style={disabled ? styles.disabled : undefined}
     >
@@ -572,6 +570,7 @@ export function FilterChip({ label, count, selected, onPress, icon: Icon }: {
       accessibilityRole="button"
       accessibilityLabel={count === undefined ? label : `${label} ${count}`}
       accessibilityState={{ selected }}
+      android_ripple={androidRipple(colors)}
       onPress={onPress}
       hitSlop={4}
       style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.buttonPressed]}
@@ -581,16 +580,6 @@ export function FilterChip({ label, count, selected, onPress, icon: Icon }: {
       {count !== undefined && <Text style={styles.filterChipCount}>{count}</Text>}
     </Pressable>
   )
-}
-
-function createButtonStyles(colors: ThemeColors) {
-  return StyleSheet.create({
-    primary: { backgroundColor: colors.primary },
-    secondary: { backgroundColor: colors.surfaceStrong },
-    danger: { backgroundColor: colors.danger },
-    quiet: { backgroundColor: 'transparent' },
-    inverse: { backgroundColor: colors.inverse },
-  })
 }
 
 function statusBadgeStyles(colors: ThemeColors) {
@@ -607,18 +596,18 @@ function statusBadgeStyles(colors: ThemeColors) {
 }
 
 function createStyles(colors: ThemeColors) {
+  const raisedLight = colors.card === colors.cardOpaque
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
     screenContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
     topBar: { minHeight: 60, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background },
     frameContent: { flex: 1 },
-    frameFade: { position: 'absolute', top: '100%', left: 0, right: 0, height: spacing.lg },
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
     topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0 },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
     topBarSide: { minWidth: 44, flexDirection: 'row', alignItems: 'center' },
     // Floating chip: a white disc for one control, a capsule for several.
-    floatingChip: { minWidth: 44, height: 44, borderRadius: radius.pill, backgroundColor: colors.elevated, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+    floatingChip: { minWidth: 44, height: 44, ...continuousRadius(radius.pill), backgroundColor: colors.elevated, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
     topBarTrailing: { justifyContent: 'flex-end' },
     topBarActions: { paddingHorizontal: 2, gap: 0 },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
@@ -654,14 +643,20 @@ function createStyles(colors: ThemeColors) {
     iconButtonPressed: { backgroundColor: colors.surfaceStrong },
     iconButtonFilled: { backgroundColor: colors.primary },
     iconButtonFilledPressed: { backgroundColor: colors.primaryPressed },
-    button: { minHeight: 50, paddingHorizontal: spacing.xl, borderRadius: radius.pill, flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
+    button: { minHeight: 50, paddingHorizontal: spacing.xl, ...continuousRadius(radius.pill), flexDirection: 'row', gap: spacing.xs, alignItems: 'center', justifyContent: 'center' },
+    buttonPrimary: { backgroundColor: colors.primary },
+    buttonSecondary: { backgroundColor: colors.surfaceStrong },
+    buttonDanger: { backgroundColor: colors.danger },
+    buttonQuiet: { backgroundColor: 'transparent' },
+    buttonInverse: { backgroundColor: colors.inverse },
     buttonPressed: { opacity: 0.82 },
     buttonText: { ...type.bodyStrong, color: colors.ink },
+    buttonTextPrimary: { color: colors.onPrimary ?? colors.white },
     buttonTextOnColor: { color: colors.white },
     disabled: { opacity: 0.52 },
     field: { gap: 7 },
     fieldLabel: { ...type.smallStrong, color: colors.ink },
-    input: { minHeight: 52, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.md, backgroundColor: colors.surface, ...type.body, color: colors.ink },
+    input: { minHeight: 52, ...continuousRadius(radius.lg), borderWidth: 1, borderColor: colors.border, paddingHorizontal: spacing.md, backgroundColor: colors.surface, ...type.body, color: colors.ink },
     inputMultiline: { minHeight: 104, paddingTop: spacing.sm, textAlignVertical: 'top' },
     inputError: { borderColor: colors.danger },
     fieldHint: { ...type.small, color: colors.muted },
@@ -669,7 +664,7 @@ function createStyles(colors: ThemeColors) {
     badge: { height: 28, paddingHorizontal: 10, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 6 },
     badgeDot: { width: 7, height: 7, borderRadius: radius.pill },
     badgeText: { ...type.caption },
-    errorBanner: { marginHorizontal: spacing.lg, marginTop: spacing.sm, borderRadius: radius.lg, padding: spacing.sm, backgroundColor: colors.dangerSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    errorBanner: { marginHorizontal: spacing.lg, marginTop: spacing.sm, ...continuousRadius(radius.lg), padding: spacing.sm, backgroundColor: colors.dangerSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     errorBannerText: { ...type.small, color: colors.ink, flex: 1, minWidth: 0 },
     errorButton: { minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs },
     errorAction: { ...type.smallStrong, color: colors.danger, paddingVertical: 2 },
@@ -696,7 +691,7 @@ function createStyles(colors: ThemeColors) {
     keyValueLinkTarget: { flex: 1 },
     keyValueLink: { color: colors.primary },
     keyValueLinkPressed: { opacity: 0.65 },
-    mono: { fontFamily: 'monospace', fontWeight: '500' },
+    mono: { fontFamily: monoFontFamily, fontWeight: '500' },
     skeletonRow: { height: 82, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
     skeletonIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.surfaceStrong },
     skeletonCopy: { flex: 1, gap: spacing.xs },
@@ -704,9 +699,9 @@ function createStyles(colors: ThemeColors) {
     skeletonText: { width: '78%', height: 11, borderRadius: 4, backgroundColor: colors.surface },
     successNotice: { padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.successSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     successNoticeText: { ...type.small, color: colors.ink, flex: 1 },
-    groupCard: { borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, overflow: 'hidden' },
-    groupCardRaised: { borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
-    groupCardClip: { borderRadius: radius.xl, overflow: 'hidden' },
+    groupCard: { ...continuousRadius(radius.xl), backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, overflow: 'hidden' },
+    groupCardRaised: { ...continuousRadius(radius.xl), backgroundColor: colors.cardOpaque, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...(raisedLight ? elevationStyle(colors, 1) : elevationStyle(colors, 0)) },
+    groupCardClip: { ...continuousRadius(radius.xl), overflow: 'hidden' },
     groupRow: { minHeight: 58, paddingLeft: spacing.md, flexDirection: 'row', alignItems: 'center' },
     groupRowPressed: { backgroundColor: colors.surfaceStrong },
     groupRowIcon: { width: 28, marginRight: spacing.sm, alignItems: 'center', justifyContent: 'center' },
