@@ -84798,7 +84798,7 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
       kind: "prefix",
       path: CONTROL_RPC_PREFIX,
       auth: "required",
-      handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream)
+      handler: (req, res, peer) => handleControlRequest(connection, handler, req, res, statusStream, peer)
     });
     return async () => {
       statusStream?.close();
@@ -84811,11 +84811,11 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
     authority: "loopback"
   });
 }
-async function handleControlRequest(connection, handler, req, res, statusStream) {
-  const rejection = requestRejectionStatus(connection, req);
+async function handleControlRequest(connection, handler, req, res, statusStream, admittedPeer) {
+  const rejection = requestRejectionStatus(connection, req, admittedPeer);
   if (rejection !== void 0) {
     res.writeHead(rejection);
-    res.end(rejection === 401 ? "unauthorized" : "forbidden");
+    res.end(rejection === 401 ? "unauthorized" : rejection === 503 ? "authentication unavailable" : "forbidden");
     return;
   }
   const endpoint = endpointFromPath(CONTROL_RPC_PREFIX, new URL(req.url ?? "/", "http://dsh.internal").pathname);
@@ -84908,16 +84908,36 @@ function writeJson(res, status2, body) {
   res.writeHead(status2, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 }
-function requestRejectionStatus(connection, req) {
+function requestRejectionStatus(connection, req, admittedPeer) {
   if (typeof connection.requestRejection === "function") {
     const rejection = connection.requestRejection(req);
-    return rejection === void 0 ? void 0 : normalizeRejectionStatus(rejection);
+    if (rejection !== void 0) return normalizeRejectionStatus(rejection);
+    return admittedPeer === void 0 ? void 0 : peerRejectionStatus(admittedPeer);
+  }
+  if (admittedPeer !== void 0) {
+    return peerRejectionStatus(admittedPeer);
   }
   if (typeof connection.admit === "function") {
-    const admission = connection.admit(req);
+    let admission;
+    try {
+      admission = connection.admit(req);
+    } catch {
+      return 503;
+    }
     if (typeof admission !== "object" || admission === null) return 403;
     if (typeof admission.rejection === "number") return normalizeRejectionStatus(admission.rejection);
-    return admission.peer != null ? void 0 : 403;
+    return peerRejectionStatus(admission.peer);
+  }
+  return 403;
+}
+function peerRejectionStatus(peer) {
+  if (typeof peer !== "object" || peer === null) return 403;
+  const candidate = peer;
+  if (candidate.signal?.aborted === true) return 401;
+  const principal = candidate.principal;
+  if (typeof principal === "string") return principal === "owner" ? void 0 : 403;
+  if (typeof principal === "object" && principal !== null) {
+    return principal.kind === "owner" ? void 0 : 403;
   }
   return 403;
 }

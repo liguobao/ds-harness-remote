@@ -534,12 +534,15 @@ describe('Cordis plugin lifecycle', () => {
     let registeredRoute: {
       path: string
       auth?: string
-      handler(req: unknown, res: unknown): Promise<void> | void
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
     } | undefined
     const ctx = new Context()
     ctx.provide('settings', settings({}))
     ctx.provide('typertGateway', typertGateway())
-    ctx.provide('connection', { admit: () => ({ peer: {} }), rpc: {} } as never)
+    ctx.provide('connection', {
+      admit: () => { throw new Error('cannot get property "authentication" without inject') },
+      rpc: {},
+    } as never)
     ctx.provide('webServer', {
       register: (route: typeof registeredRoute) => {
         registeredRoute = route
@@ -551,6 +554,7 @@ describe('Cordis plugin lifecycle', () => {
       ...disabledAgentDomains,
       httpServerAllowlist: ['http://invalid-entry'],
     })
+    const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
     const callHttp = async (method: string) => {
       const { Readable } = await import('node:stream')
       const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
@@ -565,7 +569,7 @@ describe('Cordis plugin lifecycle', () => {
       await registeredRoute!.handler(req, {
         writeHead: (code: number) => { status = code },
         end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
-      })
+      }, ownerPeer)
       return { status, body: JSON.parse(text) }
     }
 

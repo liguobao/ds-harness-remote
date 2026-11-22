@@ -25,12 +25,17 @@ interface HostConnectionHandleLike {
   }
 }
 
+export interface HostAdmittedPeerLike {
+  readonly principal?: { readonly kind?: unknown } | string
+  readonly signal?: { readonly aborted?: boolean }
+}
+
 export interface HostWebServerLike {
   register(route: {
     kind: 'prefix'
     path: string
     auth?: 'required'
-    handler(req: IncomingMessage, res: ServerResponse): void | Promise<void>
+    handler(req: IncomingMessage, res: ServerResponse, peer?: HostAdmittedPeerLike): void | Promise<void>
   }): () => void | Promise<void>
 }
 
@@ -53,14 +58,14 @@ export function registerControlRoute(
   statusStream?: ControlStatusStreamLike,
 ): () => Promise<void> {
   if (webServer !== undefined) {
-    // Newer DSH builds dropped `connection.requestRejection` and enforce `auth`
-    // in `webServer`; keep passing `auth: 'required'` while still checking
-    // `requestRejection` / `admit` inside `handleControlRequest` when present.
+    // DSH 0.2.3+ authorizes `auth: 'required'` routes inside `webServer` and
+    // hands the admitted Peer as the third handler argument; older hosts omit
+    // the Peer and authorize through `connection.requestRejection` (or `admit`).
     const dispose = webServer.register({
       kind: 'prefix',
       path: CONTROL_RPC_PREFIX,
       auth: 'required',
-      handler: (req, res) => handleControlRequest(connection, handler, req, res, statusStream),
+      handler: (req, res, peer) => handleControlRequest(connection, handler, req, res, statusStream, peer),
     })
     return async () => {
       statusStream?.close()
@@ -87,11 +92,12 @@ async function handleControlRequest(
   req: IncomingMessage,
   res: ServerResponse,
   statusStream?: ControlStatusStreamLike,
+  admittedPeer?: HostAdmittedPeerLike,
 ): Promise<void> {
-  const rejection = requestRejectionStatus(connection, req)
+  const rejection = requestRejectionStatus(connection, req, admittedPeer)
   if (rejection !== undefined) {
     res.writeHead(rejection)
-    res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+    res.end(rejection === 401 ? 'unauthorized' : rejection === 503 ? 'authentication unavailable' : 'forbidden')
     return
   }
 
@@ -205,16 +211,41 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
-function requestRejectionStatus(connection: HostConnectionHandleLike, req: IncomingMessage): number | undefined {
+function requestRejectionStatus(
+  connection: HostConnectionHandleLike,
+  req: IncomingMessage,
+  admittedPeer?: HostAdmittedPeerLike,
+): number | undefined {
   if (typeof connection.requestRejection === 'function') {
     const rejection = connection.requestRejection(req)
-    return rejection === undefined ? undefined : normalizeRejectionStatus(rejection)
+    if (rejection !== undefined) return normalizeRejectionStatus(rejection)
+    return admittedPeer === undefined ? undefined : peerRejectionStatus(admittedPeer)
+  }
+  if (admittedPeer !== undefined) {
+    return peerRejectionStatus(admittedPeer)
   }
   if (typeof connection.admit === 'function') {
-    const admission = connection.admit(req)
+    let admission: { rejection?: number; peer?: unknown } | undefined
+    try {
+      admission = connection.admit(req)
+    } catch {
+      return 503
+    }
     if (typeof admission !== 'object' || admission === null) return 403
     if (typeof admission.rejection === 'number') return normalizeRejectionStatus(admission.rejection)
-    return admission.peer != null ? undefined : 403
+    return peerRejectionStatus(admission.peer)
+  }
+  return 403
+}
+
+function peerRejectionStatus(peer: unknown): number | undefined {
+  if (typeof peer !== 'object' || peer === null) return 403
+  const candidate = peer as HostAdmittedPeerLike
+  if (candidate.signal?.aborted === true) return 401
+  const principal = candidate.principal
+  if (typeof principal === 'string') return principal === 'owner' ? undefined : 403
+  if (typeof principal === 'object' && principal !== null) {
+    return principal.kind === 'owner' ? undefined : 403
   }
   return 403
 }

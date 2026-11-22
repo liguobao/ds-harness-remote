@@ -182,15 +182,119 @@ describe('PluginControlRuntime settings setup', () => {
     await dispose()
   })
 
-  it('registers on webServer with auth required when requestRejection is omitted and enforces admit rejections', async () => {
+  it('consumes webServer-admitted owner peers without invoking admit and enforces fail-closed fallbacks', async () => {
     const legacyHandle = vi.fn(() => async () => undefined)
     let registeredRoute: {
       auth?: string
-      handler(req: unknown, res: unknown): Promise<void> | void
+      handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
     } | undefined
     const runtime = new PluginControlRuntime(
       resolveConfig(), '/unused', undefined, undefined, undefined,
     )
+    const throwingAdmit = vi.fn(() => {
+      throw new Error('cannot get property "authentication" without inject')
+    })
+    const disposePeerRoute = runtime.register({
+      admit: throwingAdmit,
+      rpc: { handle: legacyHandle },
+    } satisfies HostConnectionHandle, {
+      register: route => {
+        registeredRoute = route as unknown as typeof registeredRoute
+        return async () => undefined
+      },
+    })
+
+    expect(legacyHandle).not.toHaveBeenCalled()
+    expect(registeredRoute?.auth).toBe('required')
+
+    const callHttp = async (
+      route: NonNullable<typeof registeredRoute>,
+      body: string,
+      options: { method?: 'GET' | 'POST'; url?: string; peer?: unknown; passPeer?: boolean } = {},
+    ) => {
+      const { Readable } = await import('node:stream')
+      const method = options.method ?? 'POST'
+      const req = Object.assign(Readable.from(method === 'POST' ? [Buffer.from(body)] : []), {
+        method,
+        url: options.url ?? '/ds-harness-remote/status',
+        headers: method === 'POST' ? { 'content-type': 'application/json' } : {},
+      })
+      let status = 0
+      let text = ''
+      let headers: Record<string, string> | undefined
+      const res = {
+        destroyed: false,
+        writableEnded: false,
+        on: () => res,
+        writeHead: (code: number, responseHeaders?: Record<string, string>) => {
+          status = code
+          headers = responseHeaders
+        },
+        write: (chunk?: unknown) => {
+          if (chunk !== undefined) text += String(chunk)
+          return true
+        },
+        end: (chunk?: unknown) => {
+          if (chunk !== undefined) text += String(chunk)
+          res.writableEnded = true
+        },
+      }
+      if (options.passPeer) {
+        await route.handler(req, res, options.peer)
+      } else {
+        await route.handler(req, res)
+      }
+      return { status, text, headers }
+    }
+
+    const statusBody = JSON.stringify({ type: 'client-request', rpcId: '1', method: 'status', payload: {} })
+    const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
+    const ownerRes = await callHttp(registeredRoute!, statusBody, { peer: ownerPeer, passPeer: true })
+    expect(ownerRes.status).toBe(200)
+    expect(JSON.parse(ownerRes.text)).toMatchObject({ type: 'server-response', rpcId: '1', result: { ok: true, value: { available: false } } })
+    expect(throwingAdmit).not.toHaveBeenCalled()
+
+    const sseRes = await callHttp(registeredRoute!, '', {
+      method: 'GET',
+      url: '/ds-harness-remote/status.events',
+      peer: ownerPeer,
+      passPeer: true,
+    })
+    expect(sseRes.status).toBe(200)
+    expect(sseRes.headers?.['content-type']).toBe('text/event-stream')
+    expect(sseRes.text).toContain('data: ')
+    expect(throwingAdmit).not.toHaveBeenCalled()
+
+    // Non-owner, aborted, and malformed admitted peers fail closed without invoking admit.
+    await expect(callHttp(registeredRoute!, statusBody, {
+      peer: { principal: { kind: 'share-viewer' }, signal: new AbortController().signal },
+      passPeer: true,
+    })).resolves.toMatchObject({ status: 403, text: 'forbidden' })
+    const aborted = new AbortController()
+    aborted.abort()
+    await expect(callHttp(registeredRoute!, statusBody, {
+      peer: { principal: { kind: 'owner' }, signal: aborted.signal },
+      passPeer: true,
+    })).resolves.toMatchObject({ status: 401, text: 'unauthorized' })
+    await expect(callHttp(registeredRoute!, statusBody, {
+      peer: {},
+      passPeer: true,
+    })).resolves.toMatchObject({ status: 403, text: 'forbidden' })
+    await expect(callHttp(registeredRoute!, statusBody, {
+      peer: null,
+      passPeer: true,
+    })).resolves.toMatchObject({ status: 403, text: 'forbidden' })
+    expect(throwingAdmit).not.toHaveBeenCalled()
+
+    // When a carrier omits the third peer argument and admit throws, fail closed with 503 instead of crashing.
+    await expect(callHttp(registeredRoute!, statusBody)).resolves.toMatchObject({
+      status: 503,
+      text: 'authentication unavailable',
+    })
+    expect(throwingAdmit).toHaveBeenCalledTimes(1)
+    await disposePeerRoute()
+
+    // Carriers that omit the third peer argument still fall back to admit and enforce owner/rejection checks.
     let admission: { rejection?: number; peer?: unknown } | undefined = { rejection: 401 }
     const connection = {
       admit: () => admission,
@@ -203,41 +307,23 @@ describe('PluginControlRuntime settings setup', () => {
       },
     })
 
-    expect(legacyHandle).not.toHaveBeenCalled()
-    expect(registeredRoute?.auth).toBe('required')
-
-    const callHttp = async (route: NonNullable<typeof registeredRoute>, body: string) => {
-      const { Readable } = await import('node:stream')
-      const req = Object.assign(Readable.from([Buffer.from(body)]), {
-        method: 'POST',
-        url: '/ds-harness-remote/status',
-        headers: { 'content-type': 'application/json' },
-      })
-      let status = 0
-      let text = ''
-      const res = {
-        writeHead: (code: number) => { status = code },
-        end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
-      }
-      await route.handler(req, res)
-      return { status, text }
-    }
-
-    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 401, text: 'unauthorized' })
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toMatchObject({ status: 401, text: 'unauthorized' })
     admission = { rejection: Number.NaN }
-    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toMatchObject({ status: 403, text: 'forbidden' })
     admission = undefined
-    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toMatchObject({ status: 403, text: 'forbidden' })
     admission = {}
-    await expect(callHttp(registeredRoute!, '{}')).resolves.toEqual({ status: 403, text: 'forbidden' })
-    admission = { peer: { principal: 'owner' } }
-    const okRes = await callHttp(registeredRoute!, JSON.stringify({ type: 'client-request', rpcId: '1', method: 'status', payload: {} }))
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toMatchObject({ status: 403, text: 'forbidden' })
+    admission = { peer: { principal: { kind: 'share-viewer' } } }
+    await expect(callHttp(registeredRoute!, '{}')).resolves.toMatchObject({ status: 403, text: 'forbidden' })
+    admission = { peer: { principal: { kind: 'owner' } } }
+    const okRes = await callHttp(registeredRoute!, statusBody)
     expect(okRes.status).toBe(200)
     expect(JSON.parse(okRes.text)).toMatchObject({ type: 'server-response', rpcId: '1', result: { ok: true, value: { available: false } } })
     await dispose()
 
     // Dual-method hosts only invoke requestRejection once; hosts missing both fail closed.
-    const admitSpy = vi.fn(() => ({ peer: {} }))
+    const admitSpy = vi.fn(() => ({ peer: { principal: { kind: 'owner' } } }))
     let dualRoute: typeof registeredRoute
     const disposeDual = runtime.register({
       requestRejection: () => undefined,
@@ -255,7 +341,7 @@ describe('PluginControlRuntime settings setup', () => {
     const disposeBare = runtime.register({ rpc: { handle: legacyHandle } }, {
       register: route => { bareRoute = route as unknown as typeof registeredRoute; return async () => undefined },
     })
-    await expect(callHttp(bareRoute!, JSON.stringify({ type: 'client-request', rpcId: '3', method: 'status', payload: {} }))).resolves.toEqual({
+    await expect(callHttp(bareRoute!, JSON.stringify({ type: 'client-request', rpcId: '3', method: 'status', payload: {} }))).resolves.toMatchObject({
       status: 403,
       text: 'forbidden',
     })
