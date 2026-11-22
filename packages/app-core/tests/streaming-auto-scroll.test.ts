@@ -129,6 +129,9 @@ describe('streaming auto-scroll and smart scroll mechanics', () => {
       { ...baseTool, callDetail: { text: 'progress line', format: 'code' } },
     ])
     expect(sigProgress).not.toBe(sigRunning)
+
+    const sigSummary = computeStreamingSignature([{ ...baseTool, summary: 'Installing…' }])
+    expect(sigSummary).not.toBe(sigRunning)
   })
 
   it('detects approval outcome and question state/outcome transitions', () => {
