@@ -9,6 +9,7 @@ import {
   type ChatAppearance,
 } from '../../ui/theme'
 import type { ThemeColors } from '../../ui/theme-context'
+import { monoFontFamily } from '../../ui/platform-style'
 
 export function createStyles(
   colors: ThemeColors,
@@ -218,7 +219,9 @@ export function createStyles(
     toolDetails: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, padding: 8, gap: 8 },
     toolDetailBlock: { gap: 4 },
     toolDetailLabel: { ...t.caption, color: colors.muted },
-    toolDetailCode: { fontFamily: 'monospace', fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, backgroundColor: colors.codeSurface ?? colors.surfaceStrong, borderRadius: radius.sm, padding: 9 },
+    toolDetailRetry: { alignSelf: 'flex-start', paddingVertical: 2 },
+    toolDetailRetryAction: { color: colors.primary, fontWeight: '500' },
+    toolDetailCode: { fontFamily: monoFontFamily, fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, backgroundColor: colors.codeSurface ?? colors.surfaceStrong, borderRadius: radius.sm, padding: 9 },
     toolDetailTruncated: { ...t.caption, color: colors.warning },
     permissionCard: { borderRadius: radius.xl, backgroundColor: colors.warningSoft, padding: 14, gap: 12, marginVertical: 6 },
     questionCard: { borderRadius: radius.xl, backgroundColor: colors.accentSoft, padding: 14, gap: 12, marginVertical: 6 },
@@ -228,7 +231,7 @@ export function createStyles(
     permissionTitle: { ...t.bodyStrong, color: colors.ink },
     permissionKind: { ...t.small, color: colors.muted },
     permissionDetail: { backgroundColor: colors.background, borderRadius: radius.md, padding: spacing.sm },
-    permissionCode: { fontFamily: 'monospace', fontSize: 14, lineHeight: 21, color: colors.ink },
+    permissionCode: { fontFamily: monoFontFamily, fontSize: 14, lineHeight: 21, color: colors.ink },
     permissionText: { ...t.body, color: colors.ink },
     permissionScope: { ...t.caption, color: colors.muted },
     permissionActions: { gap: spacing.xs },
@@ -366,7 +369,6 @@ export function createStyles(
     expandedComposerOverlay: {
       ...StyleSheet.absoluteFill,
       zIndex: 50,
-      elevation: 50,
     },
     expandedComposerBackdrop: {
       ...StyleSheet.absoluteFill,

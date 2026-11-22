@@ -118,7 +118,7 @@ export function ChatComposer({ backend, draft, quotes, onRemoveQuote, input, acc
     + (onOpenPrompts !== undefined ? 40 : 0)
     + ((replyActive || commandRunning) && hasComposerContent ? 34 : 0)
   return <>
-    <View style={{ position: 'relative', zIndex: 20, elevation: 20 }}>
+    <View style={{ position: 'relative', zIndex: 20 }}>
       {mentionType !== null && (
         <MentionPopover groups={mentionGroups} onDismiss={closeMention} emptyText={strings.mention.noMatches} />
       )}

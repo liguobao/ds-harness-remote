@@ -25,6 +25,7 @@ import {
   TopBar,
 } from '../ui/components'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -634,7 +635,7 @@ function createStyles(colors: ThemeColors) {
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   trustCopy: { flex: 1 },
-  fingerprint: { ...type.caption, color: colors.primary, fontFamily: 'monospace', marginTop: spacing.xs },
+  fingerprint: { ...type.caption, color: colors.primary, fontFamily: monoFontFamily, marginTop: spacing.xs },
   connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, gap: spacing.sm },
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },

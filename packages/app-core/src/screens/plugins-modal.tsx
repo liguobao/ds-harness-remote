@@ -31,6 +31,7 @@ import {
 } from '../services/plugin-inventory'
 import { sessionToolsError } from './session-tools-error'
 import { floatingShadow, radius, spacing, type } from '../ui/theme'
+import { monoFontFamily } from '../ui/platform-style'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 
@@ -624,7 +625,7 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: spacing.sm,
       paddingVertical: 8,
     },
-    codeText: { flex: 1, fontFamily: 'monospace', fontSize: 12, color: colors.ink },
+    codeText: { flex: 1, fontFamily: monoFontFamily, fontSize: 12, color: colors.ink },
     resetBtnText: { ...type.small, fontSize: 14, color: colors.muted },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, paddingHorizontal: spacing.xl },
     muted: { ...type.body, color: colors.muted },
@@ -679,7 +680,7 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.separator,
     },
     fieldHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-    fieldKey: { fontFamily: 'monospace', fontSize: 12, color: colors.subtle },
+    fieldKey: { fontFamily: monoFontFamily, fontSize: 12, color: colors.subtle },
     fieldDescription: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     fieldHint: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted },
     errorHint: { color: colors.danger },

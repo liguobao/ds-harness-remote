@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { useColorScheme } from 'react-native'
+import * as SystemUI from 'expo-system-ui'
 import { useAppStore } from '../state/store'
 import {
   DEFAULT_CHAT_APPEARANCE,
@@ -32,6 +33,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     scheme,
     appearance,
   }), [scheme, appearance])
+
+  useEffect(() => {
+    if (typeof SystemUI?.setBackgroundColorAsync === 'function') {
+      void SystemUI.setBackgroundColorAsync(value.colors.background).catch(() => {})
+    }
+  }, [value.colors.background])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

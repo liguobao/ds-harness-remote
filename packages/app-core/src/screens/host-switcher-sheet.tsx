@@ -69,12 +69,9 @@ export function HostSwitcherSheet({ visible, onClose, onSelectDevice, onManageHo
       backdropStyle={styles.backdrop}
       sheetStyle={[
         styles.sheet,
-        sheetAsDialog
-          ? { paddingTop: spacing.lg, paddingBottom: spacing.lg }
-          : { maxHeight: sheetMaxHeight, paddingBottom: spacing.xxl + insets.bottom },
+        sheetAsDialog ? { paddingTop: spacing.lg, paddingBottom: spacing.lg } : undefined,
       ]}
     >
-          {!sheetAsDialog && <View style={styles.grabber} />}
           <View style={styles.sheetHeader}>
             <Text style={styles.title} numberOfLines={1}>{strings.remoteHosts.switchTitle}</Text>
             <View style={styles.headerActions}>
@@ -191,18 +188,12 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
     sheet: {
-      zIndex: 1,
-      elevation: 1,
-      backgroundColor: colors.background,
-      borderTopLeftRadius: radius.xxl,
-      borderTopRightRadius: radius.xxl,
       // Rows and the footer own their horizontal insets; the sheet itself has
       // never added any, so keep the shared surface's padding out of the way.
       paddingHorizontal: 0,
-      paddingTop: spacing.sm,
+      paddingTop: 0,
       gap: spacing.md,
     },
-    grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.subtle, opacity: 0.45, alignSelf: 'center' },
     sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs, paddingHorizontal: spacing.lg },
     headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     title: { ...type.heading, fontSize: 18, fontWeight: '700', color: colors.ink, flex: 1 },

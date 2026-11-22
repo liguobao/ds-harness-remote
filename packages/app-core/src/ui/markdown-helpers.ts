@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native'
 import { compactType, DEFAULT_CHAT_APPEARANCE, radius, resolveChatMetrics } from './theme'
 import type { ChatAppearance, ThemeColors } from './theme'
+import { monoFontFamily } from './platform-style'
 import type { Token } from 'markdown-it'
 
 export interface MarkdownNode {
@@ -210,7 +211,7 @@ export function createMarkdownStyles(
     citationText: { fontSize: 11, fontWeight: '600', color: colors.primary },
     blockedLink: { color: colors.muted, textDecorationLine: 'line-through' },
     inlineCode: {
-      fontFamily: 'monospace',
+      fontFamily: monoFontFamily,
       fontSize: m.inlineCodeFontSize,
       color: colors.ink,
       backgroundColor: colors.surfaceStrong,
@@ -222,7 +223,7 @@ export function createMarkdownStyles(
     mentionCode: { color: colors.primary, backgroundColor: colors.primarySoft, borderRadius: 5, paddingHorizontal: 5 },
     imageAlt: { color: colors.muted, fontStyle: 'italic' },
     codeBlock: { alignSelf: 'stretch', borderRadius: radius.md, backgroundColor: colors.codeSurface ?? colors.surface, padding: 10, marginBottom: m.paragraphGap },
-    code: { fontFamily: 'monospace', fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, includeFontPadding: false },
+    code: { fontFamily: monoFontFamily, fontSize: m.codeFontSize, lineHeight: m.codeLineHeight, color: colors.ink, includeFontPadding: false },
     blockquote: {
       borderLeftWidth: 3,
       borderLeftColor: colors.primary,
