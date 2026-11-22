@@ -4395,7 +4395,7 @@ var require_ip_codec = __commonJS({
 var require_dns_packet = __commonJS({
   "node_modules/dns-packet/index.js"(exports) {
     "use strict";
-    var Buffer9 = __require("buffer").Buffer;
+    var Buffer10 = __require("buffer").Buffer;
     var types22 = require_types();
     var rcodes = require_rcodes();
     var opcodes = require_opcodes();
@@ -4410,7 +4410,7 @@ var require_dns_packet = __commonJS({
     var NOT_QU_MASK = ~QU_MASK;
     var name2 = exports.name = {};
     name2.encode = function(str, buf, offset2, { mail = false } = {}) {
-      if (!buf) buf = Buffer9.alloc(name2.encodingLength(str));
+      if (!buf) buf = Buffer10.alloc(name2.encodingLength(str));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const n = str.replace(/^\.|\.$/gm, "");
@@ -4495,11 +4495,11 @@ var require_dns_packet = __commonJS({
     name2.decode.bytes = 0;
     name2.encodingLength = function(n) {
       if (n === "." || n === "..") return 1;
-      return Buffer9.byteLength(n.replace(/^\.|\.$/gm, "")) + 2;
+      return Buffer10.byteLength(n.replace(/^\.|\.$/gm, "")) + 2;
     };
     var string9 = {};
     string9.encode = function(s, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(string9.encodingLength(s));
+      if (!buf) buf = Buffer10.alloc(string9.encodingLength(s));
       if (!offset2) offset2 = 0;
       const len = buf.write(s, offset2 + 1);
       buf[offset2] = len;
@@ -4516,7 +4516,7 @@ var require_dns_packet = __commonJS({
     };
     string9.decode.bytes = 0;
     string9.encodingLength = function(s) {
-      return Buffer9.byteLength(s) + 1;
+      return Buffer10.byteLength(s) + 1;
     };
     var header = {};
     header.encode = function(h, buf, offset2) {
@@ -4563,7 +4563,7 @@ var require_dns_packet = __commonJS({
     };
     var runknown = exports.unknown = {};
     runknown.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(runknown.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(runknown.encodingLength(data2));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(data2.length, offset2);
       data2.copy(buf, offset2 + 2);
@@ -4584,7 +4584,7 @@ var require_dns_packet = __commonJS({
     };
     var rns = exports.ns = {};
     rns.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rns.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rns.encodingLength(data2));
       if (!offset2) offset2 = 0;
       name2.encode(data2, buf, offset2 + 2);
       buf.writeUInt16BE(name2.encode.bytes, offset2);
@@ -4605,7 +4605,7 @@ var require_dns_packet = __commonJS({
     };
     var rsoa = exports.soa = {};
     rsoa.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsoa.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rsoa.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4659,13 +4659,13 @@ var require_dns_packet = __commonJS({
       if (!Array.isArray(data2)) data2 = [data2];
       for (let i = 0; i < data2.length; i++) {
         if (typeof data2[i] === "string") {
-          data2[i] = Buffer9.from(data2[i]);
+          data2[i] = Buffer10.from(data2[i]);
         }
-        if (!Buffer9.isBuffer(data2[i])) {
+        if (!Buffer10.isBuffer(data2[i])) {
           throw new Error("Must be a Buffer");
         }
       }
-      if (!buf) buf = Buffer9.alloc(rtxt.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rtxt.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4704,7 +4704,7 @@ var require_dns_packet = __commonJS({
       let length = 2;
       data2.forEach(function(buf) {
         if (typeof buf === "string") {
-          length += Buffer9.byteLength(buf) + 1;
+          length += Buffer10.byteLength(buf) + 1;
         } else {
           length += buf.length + 1;
         }
@@ -4713,10 +4713,10 @@ var require_dns_packet = __commonJS({
     };
     var rnull = exports.null = {};
     rnull.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnull.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rnull.encodingLength(data2));
       if (!offset2) offset2 = 0;
-      if (typeof data2 === "string") data2 = Buffer9.from(data2);
-      if (!data2) data2 = Buffer9.alloc(0);
+      if (typeof data2 === "string") data2 = Buffer10.from(data2);
+      if (!data2) data2 = Buffer10.alloc(0);
       const oldOffset = offset2;
       offset2 += 2;
       const len = data2.length;
@@ -4740,11 +4740,11 @@ var require_dns_packet = __commonJS({
     rnull.decode.bytes = 0;
     rnull.encodingLength = function(data2) {
       if (!data2) return 2;
-      return (Buffer9.isBuffer(data2) ? data2.length : Buffer9.byteLength(data2)) + 2;
+      return (Buffer10.isBuffer(data2) ? data2.length : Buffer10.byteLength(data2)) + 2;
     };
     var rhinfo = exports.hinfo = {};
     rhinfo.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rhinfo.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rhinfo.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4777,7 +4777,7 @@ var require_dns_packet = __commonJS({
     var rcname = exports.cname = rptr;
     var rdname = exports.dname = rptr;
     rptr.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rptr.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rptr.encodingLength(data2));
       if (!offset2) offset2 = 0;
       name2.encode(data2, buf, offset2 + 2);
       buf.writeUInt16BE(name2.encode.bytes, offset2);
@@ -4797,7 +4797,7 @@ var require_dns_packet = __commonJS({
     };
     var rsrv = exports.srv = {};
     rsrv.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsrv.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rsrv.encodingLength(data2));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(data2.priority || 0, offset2 + 2);
       buf.writeUInt16BE(data2.weight || 0, offset2 + 4);
@@ -4828,7 +4828,7 @@ var require_dns_packet = __commonJS({
     rcaa.ISSUER_CRITICAL = 1 << 7;
     rcaa.encode = function(data2, buf, offset2) {
       const len = rcaa.encodingLength(data2);
-      if (!buf) buf = Buffer9.alloc(rcaa.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rcaa.encodingLength(data2));
       if (!offset2) offset2 = 0;
       if (data2.issuerCritical) {
         data2.flags = rcaa.ISSUER_CRITICAL;
@@ -4840,7 +4840,7 @@ var require_dns_packet = __commonJS({
       string9.encode(data2.tag, buf, offset2);
       offset2 += string9.encode.bytes;
       buf.write(data2.value, offset2);
-      offset2 += Buffer9.byteLength(data2.value);
+      offset2 += Buffer10.byteLength(data2.value);
       rcaa.encode.bytes = len;
       return buf;
     };
@@ -4866,7 +4866,7 @@ var require_dns_packet = __commonJS({
     };
     var rmx = exports.mx = {};
     rmx.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rmx.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rmx.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -4896,7 +4896,7 @@ var require_dns_packet = __commonJS({
     };
     var ra = exports.a = {};
     ra.encode = function(host, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(ra.encodingLength(host));
+      if (!buf) buf = Buffer10.alloc(ra.encodingLength(host));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(4, offset2);
       offset2 += 2;
@@ -4918,7 +4918,7 @@ var require_dns_packet = __commonJS({
     };
     var raaaa = exports.aaaa = {};
     raaaa.encode = function(host, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(raaaa.encodingLength(host));
+      if (!buf) buf = Buffer10.alloc(raaaa.encodingLength(host));
       if (!offset2) offset2 = 0;
       buf.writeUInt16BE(16, offset2);
       offset2 += 2;
@@ -4940,7 +4940,7 @@ var require_dns_packet = __commonJS({
     };
     var roption = exports.option = {};
     roption.encode = function(option, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(roption.encodingLength(option));
+      if (!buf) buf = Buffer10.alloc(roption.encodingLength(option));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const code = optioncodes.toCode(option.code);
@@ -4958,7 +4958,7 @@ var require_dns_packet = __commonJS({
           case 8:
             const spl = option.sourcePrefixLength || 0;
             const fam = option.family || ip.familyOf(option.ip);
-            const ipBuf = ip.encode(option.ip, Buffer9.alloc);
+            const ipBuf = ip.encode(option.ip, Buffer10.alloc);
             const ipLen = Math.ceil(spl / 8);
             buf.writeUInt16BE(ipLen + 4, offset2);
             offset2 += 2;
@@ -5023,7 +5023,7 @@ var require_dns_packet = __commonJS({
           offset2 += 2;
           option.sourcePrefixLength = buf.readUInt8(offset2++);
           option.scopePrefixLength = buf.readUInt8(offset2++);
-          const padded = Buffer9.alloc(option.family === 1 ? 4 : 16);
+          const padded = Buffer10.alloc(option.family === 1 ? 4 : 16);
           buf.copy(padded, 0, offset2, offset2 + len - 4);
           option.ip = ip.decode(padded);
           break;
@@ -5065,7 +5065,7 @@ var require_dns_packet = __commonJS({
     };
     var ropt = exports.opt = {};
     ropt.encode = function(options, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(ropt.encodingLength(options));
+      if (!buf) buf = Buffer10.alloc(ropt.encodingLength(options));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const rdlen = encodingLengthList(options, roption);
@@ -5099,11 +5099,11 @@ var require_dns_packet = __commonJS({
     rdnskey.ZONE_KEY = 128;
     rdnskey.SECURE_ENTRYPOINT = 32768;
     rdnskey.encode = function(key, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rdnskey.encodingLength(key));
+      if (!buf) buf = Buffer10.alloc(rdnskey.encodingLength(key));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const keydata = key.key;
-      if (!Buffer9.isBuffer(keydata)) {
+      if (!Buffer10.isBuffer(keydata)) {
         throw new Error("Key must be a Buffer");
       }
       offset2 += 2;
@@ -5141,15 +5141,15 @@ var require_dns_packet = __commonJS({
     };
     rdnskey.decode.bytes = 0;
     rdnskey.encodingLength = function(key) {
-      return 6 + Buffer9.byteLength(key.key);
+      return 6 + Buffer10.byteLength(key.key);
     };
     var rrrsig = exports.rrsig = {};
     rrrsig.encode = function(sig, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rrrsig.encodingLength(sig));
+      if (!buf) buf = Buffer10.alloc(rrrsig.encodingLength(sig));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const signature = sig.signature;
-      if (!Buffer9.isBuffer(signature)) {
+      if (!Buffer10.isBuffer(signature)) {
         throw new Error("Signature must be a Buffer");
       }
       offset2 += 2;
@@ -5205,11 +5205,11 @@ var require_dns_packet = __commonJS({
     };
     rrrsig.decode.bytes = 0;
     rrrsig.encodingLength = function(sig) {
-      return 20 + name2.encodingLength(sig.signersName) + Buffer9.byteLength(sig.signature);
+      return 20 + name2.encodingLength(sig.signersName) + Buffer10.byteLength(sig.signature);
     };
     var rrp = exports.rp = {};
     rrp.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rrp.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rrp.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5240,7 +5240,7 @@ var require_dns_packet = __commonJS({
     };
     var typebitmap = {};
     typebitmap.encode = function(typelist, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(typebitmap.encodingLength(typelist));
+      if (!buf) buf = Buffer10.alloc(typebitmap.encodingLength(typelist));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       var typesByWindow = [];
@@ -5253,7 +5253,7 @@ var require_dns_packet = __commonJS({
       }
       for (i = 0; i < typesByWindow.length; i++) {
         if (typesByWindow[i] !== void 0) {
-          var windowBuf = Buffer9.from(typesByWindow[i]);
+          var windowBuf = Buffer10.from(typesByWindow[i]);
           buf.writeUInt8(i, offset2);
           offset2 += 1;
           buf.writeUInt8(windowBuf.length, offset2);
@@ -5306,7 +5306,7 @@ var require_dns_packet = __commonJS({
     };
     var rnsec = exports.nsec = {};
     rnsec.encode = function(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rnsec.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5338,15 +5338,15 @@ var require_dns_packet = __commonJS({
     };
     var rnsec3 = exports.nsec3 = {};
     rnsec3.encode = function(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnsec3.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rnsec3.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const salt = record12.salt;
-      if (!Buffer9.isBuffer(salt)) {
+      if (!Buffer10.isBuffer(salt)) {
         throw new Error("salt must be a Buffer");
       }
       const nextDomain = record12.nextDomain;
-      if (!Buffer9.isBuffer(nextDomain)) {
+      if (!Buffer10.isBuffer(nextDomain)) {
         throw new Error("nextDomain must be a Buffer");
       }
       offset2 += 2;
@@ -5402,11 +5402,11 @@ var require_dns_packet = __commonJS({
     };
     var rds = exports.ds = {};
     rds.encode = function(digest, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rds.encodingLength(digest));
+      if (!buf) buf = Buffer10.alloc(rds.encodingLength(digest));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const digestdata = digest.digest;
-      if (!Buffer9.isBuffer(digestdata)) {
+      if (!Buffer10.isBuffer(digestdata)) {
         throw new Error("Digest must be a Buffer");
       }
       offset2 += 2;
@@ -5442,7 +5442,7 @@ var require_dns_packet = __commonJS({
     };
     rds.decode.bytes = 0;
     rds.encodingLength = function(digest) {
-      return 6 + Buffer9.byteLength(digest.digest);
+      return 6 + Buffer10.byteLength(digest.digest);
     };
     var rsshfp = exports.sshfp = {};
     rsshfp.getFingerprintLengthForHashType = function getFingerprintLengthForHashType(hashType) {
@@ -5454,7 +5454,7 @@ var require_dns_packet = __commonJS({
       }
     };
     rsshfp.encode = function encode21(record12, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rsshfp.encodingLength(record12));
+      if (!buf) buf = Buffer10.alloc(rsshfp.encodingLength(record12));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5462,7 +5462,7 @@ var require_dns_packet = __commonJS({
       offset2 += 1;
       buf[offset2] = record12.hash;
       offset2 += 1;
-      const fingerprintBuf = Buffer9.from(record12.fingerprint.toUpperCase(), "hex");
+      const fingerprintBuf = Buffer10.from(record12.fingerprint.toUpperCase(), "hex");
       if (fingerprintBuf.length !== rsshfp.getFingerprintLengthForHashType(record12.hash)) {
         throw new Error("Invalid fingerprint length");
       }
@@ -5490,11 +5490,11 @@ var require_dns_packet = __commonJS({
     };
     rsshfp.decode.bytes = 0;
     rsshfp.encodingLength = function(record12) {
-      return 4 + Buffer9.from(record12.fingerprint, "hex").byteLength;
+      return 4 + Buffer10.from(record12.fingerprint, "hex").byteLength;
     };
     var rnaptr = exports.naptr = {};
     rnaptr.encode = function(data2, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rnaptr.encodingLength(data2));
+      if (!buf) buf = Buffer10.alloc(rnaptr.encodingLength(data2));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       offset2 += 2;
@@ -5541,11 +5541,11 @@ var require_dns_packet = __commonJS({
     };
     var rtlsa = exports.tlsa = {};
     rtlsa.encode = function(cert, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(rtlsa.encodingLength(cert));
+      if (!buf) buf = Buffer10.alloc(rtlsa.encodingLength(cert));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       const certdata = cert.certificate;
-      if (!Buffer9.isBuffer(certdata)) {
+      if (!Buffer10.isBuffer(certdata)) {
         throw new Error("Certificate must be a Buffer");
       }
       offset2 += 2;
@@ -5581,7 +5581,7 @@ var require_dns_packet = __commonJS({
     };
     rtlsa.decode.bytes = 0;
     rtlsa.encodingLength = function(cert) {
-      return 5 + Buffer9.byteLength(cert.certificate);
+      return 5 + Buffer10.byteLength(cert.certificate);
     };
     var renc = exports.record = function(type) {
       switch (type.toUpperCase()) {
@@ -5636,7 +5636,7 @@ var require_dns_packet = __commonJS({
     };
     var answer = exports.answer = {};
     answer.encode = function(a, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(answer.encodingLength(a));
+      if (!buf) buf = Buffer10.alloc(answer.encodingLength(a));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       name2.encode(a.name, buf, offset2);
@@ -5701,7 +5701,7 @@ var require_dns_packet = __commonJS({
     };
     var question = exports.question = {};
     question.encode = function(q, buf, offset2) {
-      if (!buf) buf = Buffer9.alloc(question.encodingLength(q));
+      if (!buf) buf = Buffer10.alloc(question.encodingLength(q));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       name2.encode(q.name, buf, offset2);
@@ -5742,7 +5742,7 @@ var require_dns_packet = __commonJS({
     exports.DNSSEC_OK = 1 << 15;
     exports.encode = function(result, buf, offset2) {
       const allocing = !buf;
-      if (allocing) buf = Buffer9.alloc(exports.encodingLength(result));
+      if (allocing) buf = Buffer10.alloc(exports.encodingLength(result));
       if (!offset2) offset2 = 0;
       const oldOffset = offset2;
       if (!result.questions) result.questions = [];
@@ -5780,9 +5780,9 @@ var require_dns_packet = __commonJS({
     };
     exports.streamEncode = function(result) {
       const buf = exports.encode(result);
-      const sbuf = Buffer9.alloc(2);
+      const sbuf = Buffer10.alloc(2);
       sbuf.writeUInt16BE(buf.byteLength);
-      const combine = Buffer9.concat([sbuf, buf]);
+      const combine = Buffer10.concat([sbuf, buf]);
       exports.streamEncode.bytes = combine.byteLength;
       return combine;
     };
@@ -66396,6 +66396,7 @@ function isRecord(value) {
 
 // packages/client-core/dist/acp-client.js
 var ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 6e4;
+var ACP_HISTORY_RPC_TIMEOUT_MS = 15e4;
 var AgentAcpClient = class {
   core;
   capabilities;
@@ -66421,8 +66422,7 @@ var AgentAcpClient = class {
     return result;
   }
   async call(method, params = {}, signal) {
-    const timeoutMs = method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0;
-    return this.core.rpc("agent.acp.call", { method, params }, signal, timeoutMs);
+    return this.core.rpc("agent.acp.call", { method, params }, signal, rpcTimeoutForMethod(method));
   }
   async initialize(params = {}, signal) {
     return this.call("initialize", params, signal);
@@ -66701,7 +66701,7 @@ var AgentAcpClient = class {
           data: bytesToCanonicalBase64(requestBytes.subarray(start, end))
         }, signal);
       }
-      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal, method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0);
+      const commit = await this.core.rpc("agent.acp.transfer.commit", { transferId }, signal, rpcTimeoutForMethod(method));
       if (commit.kind === "inline")
         return commit.response;
       if (commit.kind !== "chunked" || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES))
@@ -66724,6 +66724,13 @@ var AgentAcpClient = class {
     }
   }
 };
+function rpcTimeoutForMethod(method) {
+  if (method === "session/prompt")
+    return ACP_PROMPT_RPC_TIMEOUT_MS;
+  if (method === "dsh/sessionHistory" || method === "session/load")
+    return ACP_HISTORY_RPC_TIMEOUT_MS;
+  return void 0;
+}
 function readString(value, key) {
   return isRecord2(value) && typeof value[key] === "string" ? value[key] : void 0;
 }
@@ -96486,141 +96493,115 @@ function isRecord16(value) {
 }
 
 // packages/plugin/src/acp/history-events.ts
-function acpHistoryEvents(messages, sessionId, provider) {
-  const events = [];
-  const tools = /* @__PURE__ */ new Map();
-  let turn = 0;
-  let step = 1;
-  let afterTools = false;
-  let pending;
-  const push2 = (type, data2, surface = false) => events.push({
-    type: "event",
-    event: {
-      type,
-      seq: events.length,
-      time: 0,
-      data: data2,
-      ...surface ? { surfaceOp: "append" } : {}
-    }
-  });
-  const id7 = () => `${provider}-history:${sessionId}:${events.length}`;
-  const flushMessage = () => {
-    if (!pending) return;
-    const message = { id: id7(), role: pending.role, content: pending.content };
-    if (pending.role === "user") push2("user/message", { ...message, source: { kind: "user" } }, true);
-    else push2("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
-    pending = void 0;
-  };
-  const result = (tool) => {
-    if (tool.emitted || !tool.terminal) return;
-    tool.emitted = true;
-    push2("tool/result", {
-      turn,
-      step,
-      message: {
-        id: id7(),
-        role: "user",
-        source: { kind: "tool", callId: tool.id },
-        content: [{
-          type: "tool-result",
-          toolCallId: tool.id,
-          content: tool.output,
-          ...tool.failed ? { isError: true } : {}
-        }]
-      }
-    }, true);
-  };
-  const flushTools = () => {
-    for (const tool of tools.values()) result(tool);
-  };
-  const endTurn = () => {
-    flushMessage();
-    flushTools();
-    if (turn) {
-      push2("step/end", { turn, step });
-      push2("turn/end", { turn, reason: { kind: "completed" } });
-    }
-    tools.clear();
-    afterTools = false;
-  };
-  for (const message of messages) {
+import { Buffer as Buffer5 } from "node:buffer";
+var MESSAGE_ENVELOPE_OVERHEAD_BYTES = 192;
+var AcpHistoryAccumulator = class {
+  constructor(sessionId, provider, limits = {}) {
+    this.sessionId = sessionId;
+    this.provider = provider;
+    this.limits = limits;
+  }
+  completedTurns = [];
+  tools = /* @__PURE__ */ new Map();
+  currentTurn;
+  completedBytes = 0;
+  completedEventCount = 0;
+  emittedCount = 0;
+  turn = 0;
+  step = 1;
+  afterTools = false;
+  pending;
+  toolPendingBytes = 0;
+  truncated = false;
+  overflowed = false;
+  /**
+   * Consume one inbound ACP message during `session/load` replay.
+   * Returns `false` if a hard single-turn safety limit was exceeded.
+   */
+  push(message) {
+    if (this.overflowed) return false;
     const params = message.params;
-    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
+    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== this.sessionId) {
+      return true;
+    }
     const update = params.update;
-    if (!update) continue;
+    if (!update) return true;
     const kind = update.sessionUpdate;
     if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
       const content = update.content;
       const isText = content?.type === "text" && typeof content.text === "string";
       const isImage = kind === "user_message_chunk" && content?.type === "image" && typeof content.mimeType === "string" && typeof content.data === "string";
-      if (!isText && !isImage) continue;
+      if (!isText && !isImage) return true;
       const role2 = kind === "user_message_chunk" ? "user" : "assistant";
-      if (role2 === "user" && pending?.role !== "user") {
-        endTurn();
-        turn++;
-        step = 1;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      } else if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
+      if (role2 === "user" && this.pending?.role !== "user") {
+        this.startNewTurn(true);
+      } else if (!this.turn) {
+        this.startNewTurn(false);
       }
-      if (pending && pending.role !== role2) flushMessage();
-      flushTools();
-      if (role2 === "assistant" && afterTools) {
-        push2("step/end", { turn, step });
-        step++;
-        push2("step/start", { turn, step });
-        afterTools = false;
+      if (this.pending && this.pending.role !== role2) this.flushMessage();
+      this.flushTools();
+      if (role2 === "assistant" && this.afterTools) {
+        this.pushEvent("step/end", { turn: this.turn, step: this.step });
+        this.step++;
+        this.pushEvent("step/start", { turn: this.turn, step: this.step });
+        this.afterTools = false;
       }
-      pending ??= { role: role2, content: [] };
+      this.pending ??= { role: role2, content: [], bytes: MESSAGE_ENVELOPE_OVERHEAD_BYTES };
       if (isImage) {
         try {
           const parsed = parseAcpImage(content);
           const ext = parsed.mimeType === "image/jpeg" ? "jpg" : parsed.mimeType.slice(6);
-          const attachmentId = `agy-image:history-${sessionId}-${events.length}-${pending.content.length}.${ext}`;
-          pending.content.push({
+          const attachmentId = `agy-image:history-${this.sessionId}-${this.emittedCount}-${this.pending.content.length}.${ext}`;
+          const block = {
             ...acpImageContent(parsed, attachmentId),
             mimeType: parsed.mimeType
-          });
+          };
+          this.pending.content.push(block);
+          this.pending.bytes += Buffer5.byteLength(JSON.stringify(block), "utf8");
         } catch {
-          pending.content.push({
+          const block = {
             type: "image",
             mimeType: content.mimeType,
             mediaType: content.mimeType,
             data: content.data
-          });
+          };
+          this.pending.content.push(block);
+          this.pending.bytes += Buffer5.byteLength(content.data, "utf8") + Buffer5.byteLength(content.mimeType, "utf8") + 64;
         }
       } else {
         const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
-        const previous = pending.content.at(-1);
-        if (previous?.type === type && typeof previous.text === "string") previous.text += content.text;
-        else pending.content.push({ type, text: content.text });
+        const previous = this.pending.content.at(-1);
+        const textBytes = Buffer5.byteLength(content.text, "utf8");
+        if (previous?.type === type && typeof previous.text === "string") {
+          previous.text += content.text;
+          this.pending.bytes += textBytes;
+        } else {
+          this.pending.content.push({ type, text: content.text });
+          this.pending.bytes += textBytes + 32;
+        }
       }
-    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
-      flushMessage();
-      afterTools = true;
-      if (!turn) {
-        turn++;
-        push2("turn/start", { turn });
-        push2("step/start", { turn, step });
-      }
-      let tool = tools.get(update.toolCallId);
+      return this.enforceLimits();
+    }
+    if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+      this.flushMessage();
+      if (!this.turn) this.startNewTurn(false);
+      this.afterTools = true;
+      let tool = this.tools.get(update.toolCallId);
       if (!tool) {
         tool = {
           id: update.toolCallId,
           name: typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "tool",
           input: update.rawInput ?? update.args,
           output: [],
+          outputBytes: 0,
           failed: false,
           terminal: false,
           emitted: false
         };
-        tools.set(tool.id, tool);
-        push2("tool/call", {
-          turn,
-          step,
+        this.tools.set(tool.id, tool);
+        this.pushEvent("tool/call", {
+          turn: this.turn,
+          step: this.step,
           callId: tool.id,
           name: tool.name,
           arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
@@ -96633,14 +96614,143 @@ function acpHistoryEvents(messages, sessionId, provider) {
           text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
         });
       }
-      if (decoded.content.length) tool.output = decoded.content;
+      if (decoded.content.length) {
+        if (!tool.emitted) {
+          const nextOutputBytes = Buffer5.byteLength(JSON.stringify(decoded.content), "utf8");
+          this.toolPendingBytes += nextOutputBytes - tool.outputBytes;
+          tool.outputBytes = nextOutputBytes;
+        }
+        tool.output = decoded.content;
+      }
       tool.failed ||= decoded.isError || update.status === "failed";
       tool.terminal ||= update.status === "completed" || update.status === "failed";
-      if (kind === "tool_call_update" && tool.terminal) result(tool);
+      if (kind === "tool_call_update" && tool.terminal) this.emitToolResult(tool);
+      return this.enforceLimits();
     }
+    return true;
   }
-  endTurn();
-  return events;
+  /** Finalize any open turn, enforce limits on serialized output, and return retained events. */
+  finish() {
+    if (this.overflowed) {
+      return { events: [], truncated: this.truncated, overflow: true };
+    }
+    this.endTurn();
+    if (!this.enforceLimits()) {
+      return { events: [], truncated: this.truncated, overflow: true };
+    }
+    const events = [];
+    for (const bucket of this.completedTurns) events.push(...bucket.events);
+    if (this.currentTurn) events.push(...this.currentTurn.events);
+    if (this.truncated) {
+      for (let i = 0; i < events.length; i += 1) {
+        events[i].event.seq = i;
+      }
+    }
+    return { events, truncated: this.truncated, overflow: false };
+  }
+  nextId() {
+    return `${this.provider}-history:${this.sessionId}:${this.emittedCount}`;
+  }
+  pushEvent(type, data2, surface = false) {
+    this.currentTurn ??= { events: [], bytes: 0 };
+    const entry = {
+      type: "event",
+      event: {
+        type,
+        seq: this.emittedCount,
+        time: 0,
+        data: data2,
+        ...surface ? { surfaceOp: "append" } : {}
+      }
+    };
+    this.emittedCount++;
+    this.currentTurn.events.push(entry);
+    this.currentTurn.bytes += Buffer5.byteLength(JSON.stringify(entry), "utf8");
+  }
+  flushMessage() {
+    if (!this.pending) return;
+    const message = { id: this.nextId(), role: this.pending.role, content: this.pending.content };
+    if (this.pending.role === "user") this.pushEvent("user/message", { ...message, source: { kind: "user" } }, true);
+    else this.pushEvent("assistant/message", { turn: this.turn, step: this.step, message: { ...message, source: { kind: "model", provider: this.provider, model: "" } }, stream: [] }, true);
+    this.pending = void 0;
+  }
+  emitToolResult(tool) {
+    if (tool.emitted || !tool.terminal) return;
+    tool.emitted = true;
+    if (tool.outputBytes > 0) {
+      this.toolPendingBytes -= tool.outputBytes;
+      tool.outputBytes = 0;
+    }
+    this.pushEvent("tool/result", {
+      turn: this.turn,
+      step: this.step,
+      message: {
+        id: this.nextId(),
+        role: "user",
+        source: { kind: "tool", callId: tool.id },
+        content: [{
+          type: "tool-result",
+          toolCallId: tool.id,
+          content: tool.output,
+          ...tool.failed ? { isError: true } : {}
+        }]
+      }
+    }, true);
+  }
+  flushTools() {
+    for (const tool of this.tools.values()) this.emitToolResult(tool);
+  }
+  endTurn() {
+    this.flushMessage();
+    this.flushTools();
+    if (this.turn) {
+      this.pushEvent("step/end", { turn: this.turn, step: this.step });
+      this.pushEvent("turn/end", { turn: this.turn, reason: { kind: "completed" } });
+    }
+    this.tools.clear();
+    this.toolPendingBytes = 0;
+    this.afterTools = false;
+  }
+  startNewTurn(resetStep) {
+    this.endTurn();
+    if (this.currentTurn && this.currentTurn.events.length > 0) {
+      this.completedTurns.push(this.currentTurn);
+      this.completedBytes += this.currentTurn.bytes;
+      this.completedEventCount += this.currentTurn.events.length;
+    }
+    this.currentTurn = { events: [], bytes: 0 };
+    this.turn++;
+    if (resetStep) this.step = 1;
+    this.pushEvent("turn/start", { turn: this.turn });
+    this.pushEvent("step/start", { turn: this.turn, step: this.step });
+  }
+  totalBytes() {
+    return this.completedBytes + (this.currentTurn?.bytes ?? 0) + (this.pending?.bytes ?? 0) + this.toolPendingBytes;
+  }
+  totalEvents() {
+    return this.completedEventCount + (this.currentTurn?.events.length ?? 0);
+  }
+  enforceLimits() {
+    const { maxBytes: maxBytes2, maxEvents } = this.limits;
+    while (this.completedTurns.length > 0 && (maxBytes2 !== void 0 && this.totalBytes() > maxBytes2 || maxEvents !== void 0 && this.totalEvents() > maxEvents)) {
+      const evicted = this.completedTurns.shift();
+      this.completedBytes -= evicted.bytes;
+      this.completedEventCount -= evicted.events.length;
+      this.truncated = true;
+    }
+    const hardMaxBytes = this.limits.hardMaxBytes ?? maxBytes2;
+    const hardMaxEvents = this.limits.hardMaxEvents ?? maxEvents;
+    if (hardMaxBytes !== void 0 && this.totalBytes() > hardMaxBytes || hardMaxEvents !== void 0 && this.totalEvents() > hardMaxEvents) {
+      this.overflowed = true;
+      return false;
+    }
+    return true;
+  }
+};
+function acpHistoryEvents(messages, sessionId, provider) {
+  const accumulator = new AcpHistoryAccumulator(sessionId, provider);
+  for (const message of messages) accumulator.push(message);
+  return accumulator.finish().events;
 }
 
 // packages/plugin/src/acp/adapters/isolated-process.ts
@@ -97997,7 +98107,7 @@ import { homedir as homedir6 } from "node:os";
 import { basename as basename7, isAbsolute as isAbsolute7, join as join13, relative as relative4, resolve as resolve6 } from "node:path";
 
 // packages/plugin/src/acp/adapters/claude-process.ts
-import { Buffer as Buffer5 } from "node:buffer";
+import { Buffer as Buffer6 } from "node:buffer";
 var DEFAULT_LOAD_TOMBSTONE_TTL_MS = 6e4;
 var MAX_LOAD_TOMBSTONE_TTL_MS = 5 * 6e4;
 var MAX_LOAD_TOMBSTONES = 256;
@@ -98180,7 +98290,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
         return;
       }
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
-      bytes += Buffer5.byteLength(JSON.stringify(message));
+      bytes += Buffer6.byteLength(JSON.stringify(message));
       count++;
       if (bytes > 8 * 1024 * 1024 || count > 1e4) {
         overflow = true;
@@ -98413,7 +98523,7 @@ async function readAgyImage(sessionId, path, root2 = AGY_IMAGE_ROOT) {
 }
 
 // packages/plugin/src/acp/adapters/antigravity-process.ts
-import { Buffer as Buffer6 } from "node:buffer";
+import { Buffer as Buffer7 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // packages/plugin/src/acp/adapters/antigravity/transcript-watcher.ts
@@ -98635,7 +98745,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
   watcher;
-  stdoutBuffer = Buffer6.alloc(0);
+  stdoutBuffer = Buffer7.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
@@ -98877,7 +98987,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     this.ready = false;
-    this.stdoutBuffer = Buffer6.alloc(0);
+    this.stdoutBuffer = Buffer7.alloc(0);
     if (child !== void 0 && child.exitCode === null && child.signalCode === null && !child.killed) {
       child.stdout.removeAllListeners("data");
       child.stderr.removeAllListeners("data");
@@ -98988,7 +99098,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       throw new AntigravityAcpError("ANTIGRAVITY_BINARY_UNAVAILABLE", "Failed to start the Antigravity CLI.", { cause });
     }
     this.process = child;
-    this.stdoutBuffer = Buffer6.alloc(0);
+    this.stdoutBuffer = Buffer7.alloc(0);
     this.stderrBytes = 0;
     let streamFailure;
     let initResolved = false;
@@ -99018,7 +99128,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       child.stdout.on("data", (chunk) => {
         if (this.process !== child) return;
         try {
-          const bytes = Buffer6.isBuffer(chunk) ? chunk : Buffer6.from(chunk);
+          const bytes = Buffer7.isBuffer(chunk) ? chunk : Buffer7.from(chunk);
           if (!initResolved) checkInit(bytes);
           else this.consumeStdout(bytes);
         } catch (error62) {
@@ -99028,7 +99138,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
           rejectInit?.(error62);
           this.ready = false;
           this.process = void 0;
-          this.stdoutBuffer = Buffer6.alloc(0);
+          this.stdoutBuffer = Buffer7.alloc(0);
           this.watcher?.stop();
           this.watcher = void 0;
           if (this.currentPromptPending) {
@@ -99050,7 +99160,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       });
     });
     child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer6.byteLength(chunk));
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer7.byteLength(chunk));
     });
     child.on("error", (error62) => {
       if (this.process !== child) return;
@@ -99110,7 +99220,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         event: "user",
         message: { content: promptText }
       };
-      const data2 = Buffer6.from(`${JSON.stringify(payload)}
+      const data2 = Buffer7.from(`${JSON.stringify(payload)}
 `, "utf8");
       this.process?.stdin.write(data2);
     });
@@ -99145,7 +99255,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     if (this.stdoutBuffer.length + chunk.length > MAX_ACP_LINE_BYTES2) {
       throw new AntigravityAcpError("ANTIGRAVITY_RESPONSE_TOO_LARGE", "Antigravity ACP emitted an oversized JSONL message.");
     }
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer6.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(10);
       if (newlineIndex === -1) break;
@@ -99312,7 +99422,7 @@ var AntigravityNativeAcpClient = class extends ClaudeAcpClient {
 };
 
 // packages/plugin/src/acp/adapters/opencode-process.ts
-import { Buffer as Buffer7 } from "node:buffer";
+import { Buffer as Buffer8 } from "node:buffer";
 import { realpath as realpath4 } from "node:fs/promises";
 
 // packages/plugin/src/acp/adapters/opencode-native-api.ts
@@ -99430,9 +99540,16 @@ function unavailable() {
 
 // packages/plugin/src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
+var ACP_HISTORY_LOAD_TIMEOUT_MS = 12e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
 var MAX_ACP_LINE_BYTES3 = 288 * 1024 * 1024;
+var ACP_HISTORY_MAX_BYTES = 8 * 1024 * 1024;
+var ACP_HISTORY_HARD_MAX_BYTES = 16 * 1024 * 1024;
+var ACP_HISTORY_MAX_EVENTS = 1e4;
+var ACP_HISTORY_HARD_MAX_EVENTS = 2e4;
+var ACP_HISTORY_MAX_RAW_BYTES = 256 * 1024 * 1024;
+var ACP_HISTORY_MAX_RAW_UPDATES = 5e5;
 var MAX_STDERR_CAPTURE_BYTES4 = 4 * 1024;
 var MAX_OPENCODE_SESSION_LIST = 1e3;
 var OpencodeAcpError = class extends Error {
@@ -99454,7 +99571,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   pending = /* @__PURE__ */ new Map();
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer7.alloc(0);
+  stdoutBuffer = Buffer8.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
@@ -99510,7 +99627,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   /**
    * Replay a saved session in one temporary ACP process so a history read never
    * interrupts a live turn. OpenCode emits the transcript as `session/update`
-   * notifications before `session/load` resolves.
+   * notifications before `session/load` resolves; fold incrementally and keep
+   * a bounded trailing turn window within the transfer budget.
    */
   async history(sessionId, cwd2) {
     if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed.");
@@ -99520,9 +99638,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     let stopping;
     const stop = () => stopping ??= client.close();
     this.historyStop = stop;
-    const updates = [];
-    let bytes = 0;
-    let count = 0;
+    const accumulator = new AcpHistoryAccumulator(sessionId, "opencode", {
+      maxBytes: ACP_HISTORY_MAX_BYTES,
+      hardMaxBytes: ACP_HISTORY_HARD_MAX_BYTES,
+      maxEvents: ACP_HISTORY_MAX_EVENTS,
+      hardMaxEvents: ACP_HISTORY_HARD_MAX_EVENTS
+    });
+    let rawBytes = 0;
+    let rawCount = 0;
     let overflow = false;
     const unsubscribe = client.onInbound((message) => {
       if (message.kind === "request") {
@@ -99530,20 +99653,27 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         return;
       }
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
-      count++;
-      bytes += Buffer7.byteLength(JSON.stringify(message));
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) {
+      rawCount++;
+      rawBytes += Buffer8.byteLength(JSON.stringify(message));
+      if (rawBytes > ACP_HISTORY_MAX_RAW_BYTES || rawCount > ACP_HISTORY_MAX_RAW_UPDATES || !accumulator.push(message)) {
         overflow = true;
         void stop().catch(() => void 0);
-      } else updates.push(message);
+      }
     });
     try {
       await client.start();
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
-      await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] }, ACP_HISTORY_LOAD_TIMEOUT_MS);
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
-      return acpHistoryEvents(updates, sessionId, "opencode");
+      const folded = accumulator.finish();
+      if (folded.overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
+      if (folded.truncated) {
+        this.logger?.info("OpenCode history truncated to recent turns within transfer budget", {
+          retainedEvents: folded.events.length
+        });
+      }
+      return folded.events;
     } catch (error62) {
       if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
       throw error62;
@@ -99566,7 +99696,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     const id7 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id7 && this.archivingSessions.has(id7)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id7 && this.archivedSessions.has(id7) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
-    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
+    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : method === "session/load" ? ACP_HISTORY_LOAD_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS2);
     if (method === "session/load" && id7) {
       if (this.models.has(id7)) return { sessionId: id7 };
       const pending = this.loads.get(id7);
@@ -99770,14 +99900,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       }
     }
     this.process = child;
-    this.stdoutBuffer = Buffer7.alloc(0);
+    this.stdoutBuffer = Buffer8.alloc(0);
     this.stderrBytes = 0;
     child.stdout.on("data", (chunk) => {
-      if (this.process === child) this.consumeStdout(Buffer7.from(chunk));
+      if (this.process === child) this.consumeStdout(Buffer8.from(chunk));
     });
     child.stderr.on("data", (chunk) => {
       if (this.process !== child) return;
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES4, this.stderrBytes + Buffer7.byteLength(chunk));
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES4, this.stderrBytes + Buffer8.byteLength(chunk));
     });
     child.on("error", (error62) => {
       if (this.process === child) this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", error62);
@@ -99850,7 +99980,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
 `);
   }
   consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer7.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer8.concat([this.stdoutBuffer, chunk]);
     if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES3) {
       this.handleProcessFailure(
         "OPENCODE_RESPONSE_TOO_LARGE",
@@ -100480,7 +100610,7 @@ async function transcriptPath(baseDir, conversationId) {
 }
 
 // packages/plugin/src/acp/peer-bridge.ts
-import { Buffer as Buffer8 } from "node:buffer";
+import { Buffer as Buffer9 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   sessionId: external_exports.string().min(1).max(256),
@@ -100724,7 +100854,7 @@ var AcpPeerBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer8.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer9.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input4) {
@@ -100808,7 +100938,7 @@ function decodeCanonicalBase642(value) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
-  const decoded = Buffer8.from(value, "base64");
+  const decoded = Buffer9.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
@@ -101250,6 +101380,8 @@ var AcpRemoteGateway = class {
       const result = await this.callInternal(connectionId, call, assertCurrent);
       assertCurrent();
       return result;
+    } catch (error62) {
+      throw mapAcpError(error62);
     } finally {
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId) ?? 1) - 1;
@@ -102869,6 +103001,62 @@ function cursorBinaryCandidates(configured) {
     ];
   }
   return [configured];
+}
+var SAFE_ACP_ERROR_MESSAGES = {
+  OPENCODE_HISTORY_TOO_LARGE: "OpenCode history exceeds the transfer limit.",
+  OPENCODE_HISTORY_BUSY: "An OpenCode history read is already in progress.",
+  OPENCODE_CLOSED: "OpenCode ACP is closed.",
+  OPENCODE_UNAVAILABLE: "OpenCode ACP is not available.",
+  OPENCODE_STARTING: "OpenCode ACP is already starting.",
+  OPENCODE_BINARY_UNAVAILABLE: "OpenCode ACP communication failed.",
+  OPENCODE_ACP_EXITED: "OpenCode ACP exited unexpectedly.",
+  OPENCODE_INITIALIZE_FAILED: "OpenCode ACP initialization failed.",
+  OPENCODE_REQUEST_TIMEOUT: "OpenCode ACP request timed out.",
+  OPENCODE_ARCHIVE_UNAVAILABLE: "The Host OpenCode native API is unavailable.",
+  OPENCODE_CLI_PROBE_FAILED: "The Host OpenCode CLI probe failed.",
+  OPENCODE_UPSTREAM_ERROR: "OpenCode ACP rejected the request.",
+  ACP_CLOSED: "The ACP backend is closed.",
+  ACP_INVALID_SESSION: "The ACP backend returned an invalid session.",
+  ACP_PROCESS_LIMIT: "Too many ACP sessions are active.",
+  ACP_HISTORY_TOO_LARGE: "The ACP session history exceeds the transfer limit.",
+  ACP_SESSION_NOT_LOADED: "Load the ACP session before continuing.",
+  ACP_SESSION_BUSY: "The ACP session is busy.",
+  ACP_SESSION_ARCHIVED: "This ACP session is archived.",
+  ACP_AUTH_REQUIRED: "Authentication is required for the ACP backend.",
+  PROMPT_IN_PROGRESS: "An ACP reply is already in progress."
+};
+var SAFE_ACP_ERROR_SUFFIXES = [
+  ["_UPSTREAM_ERROR", "The ACP backend rejected the request."],
+  ["_CLOSED", "The ACP backend is closed."],
+  ["_UNAVAILABLE", "The ACP backend is not available."],
+  ["_STARTING", "The ACP backend is already starting."],
+  ["_BINARY_UNAVAILABLE", "The ACP backend communication failed."],
+  ["_ACP_EXITED", "The ACP backend exited unexpectedly."],
+  ["_INITIALIZE_FAILED", "The ACP backend initialization failed."],
+  ["_REQUEST_TIMEOUT", "The ACP backend request timed out."],
+  ["_RESPONSE_TOO_LARGE", "The ACP backend response exceeded the limit."],
+  ["_INVALID_RESPONSE", "The ACP backend emitted an invalid response."]
+];
+function safeAcpRpcMessage(error62) {
+  if (error62 instanceof CursorAcpError && error62.authDiagnostic?.authStatus === "auth_required") {
+    return "The ACP backend authentication failed.";
+  }
+  if (error62.code === "OPENCODE_UPSTREAM_ERROR" && error62.message === "OpenCode ACP authentication failed.") {
+    return "OpenCode ACP authentication failed.";
+  }
+  const exact = SAFE_ACP_ERROR_MESSAGES[error62.code];
+  if (exact !== void 0) return exact;
+  for (const [suffix, message] of SAFE_ACP_ERROR_SUFFIXES) {
+    if (error62.code.endsWith(suffix)) return message;
+  }
+  return "The ACP backend could not complete the request.";
+}
+function mapAcpError(error62) {
+  if (error62 instanceof RpcError) return error62;
+  if (!(error62 instanceof OpencodeAcpError || error62 instanceof CursorAcpError)) return error62;
+  const code = /^[A-Z0-9_]{1,64}$/.test(error62.code) ? error62.code : "INTERNAL_ERROR";
+  if (code === "INTERNAL_ERROR") return new RpcError("INTERNAL_ERROR", "The Host could not complete the request.");
+  return new RpcError(code, safeAcpRpcMessage(error62));
 }
 function errorCode3(error62) {
   if (error62 instanceof CursorAcpError || error62 instanceof OpencodeAcpError || error62 instanceof RpcError) return error62.code;

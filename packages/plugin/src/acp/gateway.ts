@@ -326,6 +326,8 @@ export class AcpRemoteGateway {
       const result = await this.callInternal(connectionId, call, assertCurrent)
       assertCurrent()
       return result
+    } catch (error) {
+      throw mapAcpError(error)
     }
     finally {
       if (reserve) {
@@ -2164,6 +2166,71 @@ export function cursorBinaryCandidates(configured: string): string[] {
     ]
   }
   return [configured]
+}
+
+const SAFE_ACP_ERROR_MESSAGES: Record<string, string> = {
+  OPENCODE_HISTORY_TOO_LARGE: 'OpenCode history exceeds the transfer limit.',
+  OPENCODE_HISTORY_BUSY: 'An OpenCode history read is already in progress.',
+  OPENCODE_CLOSED: 'OpenCode ACP is closed.',
+  OPENCODE_UNAVAILABLE: 'OpenCode ACP is not available.',
+  OPENCODE_STARTING: 'OpenCode ACP is already starting.',
+  OPENCODE_BINARY_UNAVAILABLE: 'OpenCode ACP communication failed.',
+  OPENCODE_ACP_EXITED: 'OpenCode ACP exited unexpectedly.',
+  OPENCODE_INITIALIZE_FAILED: 'OpenCode ACP initialization failed.',
+  OPENCODE_REQUEST_TIMEOUT: 'OpenCode ACP request timed out.',
+  OPENCODE_ARCHIVE_UNAVAILABLE: 'The Host OpenCode native API is unavailable.',
+  OPENCODE_CLI_PROBE_FAILED: 'The Host OpenCode CLI probe failed.',
+  OPENCODE_UPSTREAM_ERROR: 'OpenCode ACP rejected the request.',
+  ACP_CLOSED: 'The ACP backend is closed.',
+  ACP_INVALID_SESSION: 'The ACP backend returned an invalid session.',
+  ACP_PROCESS_LIMIT: 'Too many ACP sessions are active.',
+  ACP_HISTORY_TOO_LARGE: 'The ACP session history exceeds the transfer limit.',
+  ACP_SESSION_NOT_LOADED: 'Load the ACP session before continuing.',
+  ACP_SESSION_BUSY: 'The ACP session is busy.',
+  ACP_SESSION_ARCHIVED: 'This ACP session is archived.',
+  ACP_AUTH_REQUIRED: 'Authentication is required for the ACP backend.',
+  PROMPT_IN_PROGRESS: 'An ACP reply is already in progress.',
+}
+
+const SAFE_ACP_ERROR_SUFFIXES: ReadonlyArray<readonly [string, string]> = [
+  ['_UPSTREAM_ERROR', 'The ACP backend rejected the request.'],
+  ['_CLOSED', 'The ACP backend is closed.'],
+  ['_UNAVAILABLE', 'The ACP backend is not available.'],
+  ['_STARTING', 'The ACP backend is already starting.'],
+  ['_BINARY_UNAVAILABLE', 'The ACP backend communication failed.'],
+  ['_ACP_EXITED', 'The ACP backend exited unexpectedly.'],
+  ['_INITIALIZE_FAILED', 'The ACP backend initialization failed.'],
+  ['_REQUEST_TIMEOUT', 'The ACP backend request timed out.'],
+  ['_RESPONSE_TOO_LARGE', 'The ACP backend response exceeded the limit.'],
+  ['_INVALID_RESPONSE', 'The ACP backend emitted an invalid response.'],
+]
+
+function safeAcpRpcMessage(error: CursorAcpError | OpencodeAcpError): string {
+  if (error instanceof CursorAcpError && error.authDiagnostic?.authStatus === 'auth_required') {
+    return 'The ACP backend authentication failed.'
+  }
+  if (error.code === 'OPENCODE_UPSTREAM_ERROR' && error.message === 'OpenCode ACP authentication failed.') {
+    return 'OpenCode ACP authentication failed.'
+  }
+  const exact = SAFE_ACP_ERROR_MESSAGES[error.code]
+  if (exact !== undefined) return exact
+  for (const [suffix, message] of SAFE_ACP_ERROR_SUFFIXES) {
+    if (error.code.endsWith(suffix)) return message
+  }
+  return 'The ACP backend could not complete the request.'
+}
+
+/**
+ * Convert typed OpenCode/Cursor adapter failures into safe RpcErrors at the
+ * gateway boundary so RpcRouter preserves specific error codes without ever
+ * leaking raw upstream guidance, host paths, or causes onto the wire.
+ */
+function mapAcpError(error: unknown): unknown {
+  if (error instanceof RpcError) return error
+  if (!(error instanceof OpencodeAcpError || error instanceof CursorAcpError)) return error
+  const code = /^[A-Z0-9_]{1,64}$/.test(error.code) ? error.code : 'INTERNAL_ERROR'
+  if (code === 'INTERNAL_ERROR') return new RpcError('INTERNAL_ERROR', 'The Host could not complete the request.')
+  return new RpcError(code, safeAcpRpcMessage(error))
 }
 
 function errorCode(error: unknown): string {

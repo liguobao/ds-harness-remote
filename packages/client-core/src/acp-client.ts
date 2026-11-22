@@ -26,6 +26,13 @@ export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'cl
  */
 export const ACP_PROMPT_RPC_TIMEOUT_MS = 10 * 60_000
 
+/**
+ * Replaying or loading long ACP sessions (especially OpenCode SQLite transcripts)
+ * runs with up to 20s process start + 120s Host `session/load` budget; keep the
+ * client RPC timeout above the combined Host budget.
+ */
+export const ACP_HISTORY_RPC_TIMEOUT_MS = 150_000
+
 export interface AcpRemoteSession {
   sessionId: string
   cwd?: string
@@ -60,8 +67,7 @@ export class AgentAcpClient {
   }
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
-    const timeoutMs = method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined
-    return this.core.rpc('agent.acp.call', { method, params }, signal, timeoutMs)
+    return this.core.rpc('agent.acp.call', { method, params }, signal, rpcTimeoutForMethod(method))
   }
 
   async initialize(
@@ -421,7 +427,7 @@ export class AgentAcpClient {
         }, signal)
       }
       const commit = await this.core.rpc('agent.acp.transfer.commit', { transferId }, signal,
-        method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined) as AgentAcpTransferCommitResult
+        rpcTimeoutForMethod(method)) as AgentAcpTransferCommitResult
       if (commit.kind === 'inline') return commit.response
       if (commit.kind !== 'chunked' || commit.transferId !== transferId || !Number.isSafeInteger(commit.totalBytes) || commit.totalBytes < 1 || commit.totalBytes > MAX_AGENT_ACP_TRANSFER_BYTES
         || commit.totalChunks !== Math.ceil(commit.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) throw new RemoteGatewayError('INVALID_RESPONSE', 'Invalid ACP transfer descriptor.')
@@ -440,6 +446,12 @@ export class AgentAcpClient {
       await this.core.rpc('agent.acp.transfer.close', { transferId }).catch(() => undefined)
     }
   }
+}
+
+function rpcTimeoutForMethod(method: string): number | undefined {
+  if (method === 'session/prompt') return ACP_PROMPT_RPC_TIMEOUT_MS
+  if (method === 'dsh/sessionHistory' || method === 'session/load') return ACP_HISTORY_RPC_TIMEOUT_MS
+  return undefined
 }
 
 function readString(value: unknown, key: string): string | undefined {

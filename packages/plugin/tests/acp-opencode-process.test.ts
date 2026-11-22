@@ -66,8 +66,16 @@ describe('OpencodeAcpClient', () => {
     } })))
   })
 
-  it('bounds isolated history readers and stops them with the parent during startup or load', async () => {
-    await runScenarios(['history', 'close during initialize', 'close during load', 'overflow'].map(scenario => ({ name: scenario, run: async () => {
+  it('bounds isolated history readers, folds multi-chunk streams and rolling turns, and stops on single-turn overflow', async () => {
+    await runScenarios([
+      'history',
+      'tool first step',
+      'many chunks',
+      'rolling turns',
+      'close during initialize',
+      'close during load',
+      'overflow',
+    ].map(scenario => ({ name: scenario, run: async () => {
       const fake = fakeProcess()
       const outbound: Array<{ method: string; id: number }> = []
       const respond = (id: number, result: unknown) => fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)
@@ -76,11 +84,48 @@ describe('OpencodeAcpClient', () => {
           const message = JSON.parse(line)
           outbound.push(message)
           if (message.method === 'initialize' && scenario !== 'close during initialize') respond(message.id, { protocolVersion: 1 })
-          if (message.method === 'session/load' && (scenario === 'history' || scenario === 'overflow')) {
-            fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
-              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: scenario === 'overflow' ? 'x'.repeat(8 * 1024 * 1024) : 'saved answer' } },
-            } })}\n`)
-            if (scenario === 'history') respond(message.id, {})
+          if (message.method === 'session/load') {
+            if (scenario === 'history') {
+              fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'saved answer' } },
+              } })}\n`)
+              respond(message.id, {})
+            } else if (scenario === 'tool first step') {
+              fake.stdout.write([
+                JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                  update: { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'bash', rawInput: { command: 'pwd' }, status: 'completed', rawOutput: '/tmp' },
+                } }),
+                JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                  update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'after tool' } },
+                } }),
+              ].join('\n') + '\n')
+              respond(message.id, {})
+            } else if (scenario === 'many chunks') {
+              // >10,000 tiny streaming deltas must coalesce without tripping OPENCODE_HISTORY_TOO_LARGE.
+              const lines = Array.from({ length: 12_000 }, () => JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/update',
+                params: { sessionId: 'saved', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'a' } } },
+              })).join('\n')
+              fake.stdout.write(`${lines}\n`)
+              respond(message.id, {})
+            } else if (scenario === 'rolling turns') {
+              // 4 complete turns x ~3 MiB (>8 MiB total) keep the trailing window within 8 MiB cleanly.
+              const payload = 't'.repeat(3 * 1024 * 1024)
+              for (const tag of ['turn-1', 'turn-2', 'turn-3', 'turn-4']) {
+                fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                  update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `${tag}-question` } },
+                } })}\n`)
+                fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                  update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `${tag}:${payload}` } },
+                } })}\n`)
+              }
+              respond(message.id, {})
+            } else if (scenario === 'overflow') {
+              fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x'.repeat(16 * 1024 * 1024 + 1024) } },
+              } })}\n`)
+            }
           }
         }
       })
@@ -92,8 +137,38 @@ describe('OpencodeAcpClient', () => {
           await client.close()
         }
         const outcome = await pending
-        if (scenario === 'history') expect(outcome.result).toEqual(expect.arrayContaining([expect.objectContaining({ event: expect.objectContaining({ type: 'assistant/message' }) })]))
-        else expect(outcome.error).toMatchObject({ code: scenario === 'overflow' ? 'OPENCODE_HISTORY_TOO_LARGE' : 'OPENCODE_CLOSED' })
+        if (scenario === 'history') {
+          expect(outcome.result).toEqual(expect.arrayContaining([expect.objectContaining({ event: expect.objectContaining({ type: 'assistant/message' }) })]))
+        } else if (scenario === 'tool first step') {
+          expect(outcome.error).toBeUndefined()
+          const events = outcome.result as Array<{ event: { type: string; data: { turn?: number; step?: number } } }>
+          expect(events.map(e => `${e.event.type}@${e.event.data.step ?? '-'}`)).toEqual([
+            'turn/start@-',
+            'step/start@1',
+            'tool/call@1',
+            'tool/result@1',
+            'step/end@1',
+            'step/start@2',
+            'assistant/message@2',
+            'step/end@2',
+            'turn/end@-',
+          ])
+        } else if (scenario === 'many chunks') {
+          expect(outcome.error).toBeUndefined()
+          const assistant = (outcome.result as Array<{ event: { type: string; data: { message: { content: Array<{ text: string }> } } } }>)
+            .find(entry => entry.event.type === 'assistant/message')
+          expect(assistant?.event.data.message.content[0]?.text).toHaveLength(12_000)
+        } else if (scenario === 'rolling turns') {
+          expect(outcome.error).toBeUndefined()
+          const events = outcome.result as Array<{ event: { type: string; seq: number; data: { content?: Array<{ text: string }> } } }>
+          expect(events.map(e => e.event.seq)).toEqual(events.map((_, idx) => idx))
+          const texts = events
+            .filter(e => e.event.type === 'user/message')
+            .map(e => e.event.data.content?.[0]?.text)
+          expect(texts).toEqual(['turn-3-question', 'turn-4-question'])
+        } else {
+          expect(outcome.error).toMatchObject({ code: scenario === 'overflow' ? 'OPENCODE_HISTORY_TOO_LARGE' : 'OPENCODE_CLOSED' })
+        }
         expect(fake.kill).toHaveBeenCalled()
         expect(client.isReady()).toBe(false)
       } finally { await client.close() }

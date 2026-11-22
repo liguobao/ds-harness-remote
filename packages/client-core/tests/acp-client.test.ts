@@ -1,6 +1,6 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
-import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
+import { ACP_HISTORY_RPC_TIMEOUT_MS, ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
 describe('ACP image transfer', () => {
   it('requires archive capability and the exact OpenCode confirmation', async () => {
@@ -276,5 +276,20 @@ describe('AgentAcpClient.openStream', () => {
     await second.close()
     await second.close()
     expect(core.rpc.mock.calls.filter(([method, p]) => method === 'agent.acp.stream.close' && (p as { streamId: string }).streamId === second.streamId)).toHaveLength(1)
+  })
+
+  it('uses extended RPC timeouts for long session history transfers and session/load', async () => {
+    const rpc = vi.fn(async (method: string) => (
+      method === 'agent.acp.transfer.commit' ? { kind: 'inline', response: { events: [] } } : { sessionId: 'opc-1' }
+    ))
+    const client = new AgentAcpClient({ rpc } as never)
+    await client.loadSessionDetails('opc-1', 'opencode')
+    expect(rpc).toHaveBeenCalledWith('agent.acp.transfer.commit', expect.anything(), undefined, ACP_HISTORY_RPC_TIMEOUT_MS)
+
+    await client.call('session/load', { sessionId: 'opc-1', backend: 'opencode' })
+    expect(rpc).toHaveBeenCalledWith('agent.acp.call', { method: 'session/load', params: { sessionId: 'opc-1', backend: 'opencode' } }, undefined, ACP_HISTORY_RPC_TIMEOUT_MS)
+
+    await client.call('session/new', { cwd: '/repo', backend: 'opencode' })
+    expect(rpc).toHaveBeenCalledWith('agent.acp.call', { method: 'session/new', params: { cwd: '/repo', backend: 'opencode' } }, undefined, undefined)
   })
 })
