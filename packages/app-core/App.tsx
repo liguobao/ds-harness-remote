@@ -1,13 +1,14 @@
 import { hydrateBrowseMemory, useBrowseMemory, browseKey, browsePreference, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Animated, AppState, BackHandler, Easing, Keyboard, Linking, StyleSheet, Text, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Animated, AppState, BackHandler, Easing, Keyboard, Linking, PanResponder, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
 import { useLocales } from 'expo-localization'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
+import { ChatAppearanceScreen } from './src/screens/chat-appearance-screen'
 import { ConnectionScreen, DeviceDetailScreen } from './src/screens/device-screens'
 import { HostSwitcherSheet } from './src/screens/host-switcher-sheet'
 import { RemoteHostsScreen } from './src/screens/remote-hosts-screen'
@@ -31,7 +32,7 @@ import {
 } from './src/lib/network-route'
 import { Button, ErrorBanner } from './src/ui/components'
 import { NavigationFocusProvider } from './src/ui/mention-popover'
-import { easingCurve, motionTokens } from './src/ui/motion'
+import { easingCurve, motionTokens, shouldCommitEdgeSwipeBack, shouldStartEdgeSwipeBack } from './src/ui/motion'
 import { dismissClosingSheets } from './src/ui/sheet'
 import { spacing, type } from './src/ui/theme'
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/theme-context'
@@ -46,6 +47,24 @@ import { sessionBackendFromId } from './src/lib/session-backend'
 void SplashScreen.preventAutoHideAsync().catch(() => undefined)
 
 type Route = AppRoute
+
+interface StackEntry {
+  id: number
+  route: Route
+}
+
+interface ExitingLayer {
+  id: number
+  route: Route
+  index: number
+}
+
+interface NavigationState {
+  stack: StackEntry[]
+  exiting?: ExitingLayer
+}
+
+const noop = () => {}
 
 export default function App() {
   const locales = useLocales()
@@ -108,7 +127,12 @@ function AppNavigator() {
   const reauthRequired = useAppStore(state => state.reauthRequired)
   const setOffline = useAppStore(state => state.setOffline)
   const clearError = useAppStore(state => state.clearError)
-  const [routes, setRoutes] = useState<Route[]>([{ name: 'server' }])
+  const nextRouteId = useRef(1)
+  const [navState, setNavState] = useState<NavigationState>(() => ({
+    stack: [{ id: 0, route: { name: 'server' } }],
+  }))
+  const { stack, exiting: exitingLayer } = navState
+  const routes = stack.map(entry => entry.route)
   const [initialRouteChosen, setInitialRouteChosen] = useState(false)
   const [resolvingKnownSession, setResolvingKnownSession] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
@@ -135,21 +159,62 @@ function AppNavigator() {
   const push = (next: Route) => {
     Keyboard.dismiss()
     dismissClosingSheets()
-    setRoutes(current => [...current, next])
+    const entry: StackEntry = { id: nextRouteId.current++, route: next }
+    setNavState(current => ({
+      stack: [...current.stack, entry],
+      exiting: undefined,
+    }))
   }
   const replace = (next: Route) => {
     Keyboard.dismiss()
     dismissClosingSheets()
-    setRoutes(current => [...current.slice(0, -1), next])
+    const freshId = nextRouteId.current++
+    setNavState(current => {
+      const top = current.stack[current.stack.length - 1]
+      const id = top !== undefined && top.route.name === next.name ? top.id : freshId
+      return {
+        stack: [...current.stack.slice(0, -1), { id, route: next }],
+        exiting: undefined,
+      }
+    })
   }
   const pop = () => {
     Keyboard.dismiss()
-    setRoutes(current => current.length > 1 ? current.slice(0, -1) : current)
+    setNavState(current => {
+      if (current.stack.length <= 1) return current
+      const poppedIndex = current.stack.length - 1
+      const popped = current.stack[poppedIndex]!
+      const nextStack = current.stack.slice(0, -1)
+      if (popped.route.name === 'connecting') {
+        return { stack: nextStack, exiting: undefined }
+      }
+      return {
+        stack: nextStack,
+        exiting: { id: popped.id, route: popped.route, index: poppedIndex },
+      }
+    })
+  }
+  const popEntryImmediate = (id: number) => {
+    Keyboard.dismiss()
+    setNavState(current => {
+      if (current.stack.length <= 1) return current
+      const top = current.stack[current.stack.length - 1]!
+      if (top.id !== id) return current
+      return { stack: current.stack.slice(0, -1), exiting: undefined }
+    })
+  }
+  const clearExitingLayer = (id: number) => {
+    setNavState(current => current.exiting?.id === id ? { ...current, exiting: undefined } : current)
   }
   const reset = (next: Route) => {
     Keyboard.dismiss()
     dismissClosingSheets()
-    setRoutes([next])
+    const freshId = nextRouteId.current++
+    setNavState(current => {
+      const root = current.stack[0]
+      const id = root !== undefined && root.route.name === next.name ? root.id : freshId
+      return { stack: [{ id, route: next }], exiting: undefined }
+    })
   }
 
   const selectOfflineTrustedDevice = (device: (typeof devices)[number], preferredSessionId?: string) => {
@@ -506,8 +571,7 @@ function AppNavigator() {
     resolvingKnownSession: resolvingKnownSession || pendingConversation !== undefined,
   })
 
-  const renderRouteScreen = (entry: Route, index: number) => {
-    const active = isRouteActiveScreen(routes, index, overlayVisible)
+  const renderRouteScreen = (entry: Route, index: number, active: boolean, exiting: boolean) => {
     switch (entry.name) {
       case 'server':
         return (
@@ -515,7 +579,7 @@ function AppNavigator() {
             serverExpanded={serverEditorOpen}
             setServerExpanded={setServerEditorOpen}
             onMore={openHomeMenu}
-            onBack={routes.length > 1 ? pop : undefined}
+            onBack={index > 0 ? pop : undefined}
             onComplete={() => {
               autoRestored.current = false
               reset({ name: 'chat' })
@@ -539,11 +603,11 @@ function AppNavigator() {
         return (
           <ConnectionScreen
             device={entryDevice}
-            onBack={() => {
+            onBack={exiting ? noop : () => {
               if (routes.length > 1) pop()
               else reset({ name: 'chat' })
             }}
-            onConnected={() => {
+            onConnected={exiting ? noop : () => {
               if (entry.sessionId !== undefined) void openKnownSession(entry.sessionId)
               else if (entry.focusWorkspaceKey === undefined) goHomeChat()
               else void openShortcutSession(entry.focusWorkspaceKey)
@@ -573,9 +637,19 @@ function AppNavigator() {
             botConversationId={entry.botConversationId}
             onBotModeChange={next => {
               saveHostMode(hostScope, next ? 'bot' : 'agent')
-              setRoutes(current => current.map(item => item.name === 'chat' ? { ...item, botConversationId: undefined } : item))
+              setNavState(current => ({
+                ...current,
+                stack: current.stack.map(item => item.route.name === 'chat'
+                  ? { ...item, route: { ...item.route, botConversationId: undefined } }
+                  : item),
+              }))
             }}
-            onSelectBot={botConversationId => setRoutes(current => current.map(item => item.name === 'chat' ? { ...item, botConversationId } : item))}
+            onSelectBot={botConversationId => setNavState(current => ({
+              ...current,
+              stack: current.stack.map(item => item.route.name === 'chat'
+                ? { ...item, route: { ...item.route, botConversationId } }
+                : item),
+            }))}
             onBack={pop}
             onOpenHostSwitcher={() => setHostSwitcherOpen(true)}
             onOpenSettings={() => push({ name: 'settings' })}
@@ -593,10 +667,13 @@ function AppNavigator() {
             onBack={pop}
             onSigningOutChange={setSigningOut}
             onReset={() => reset({ name: 'server' })}
+            onOpenAppearance={() => push({ name: 'appearance' })}
             onOpenDiagnostics={() => push({ name: 'diagnostics' })}
             onOpenAbout={() => push({ name: 'about' })}
           />
         )
+      case 'appearance':
+        return <ChatAppearanceScreen active={active} onBack={pop} />
       case 'diagnostics':
         return <DiagnosticsScreen onBack={pop} />
       case 'about':
@@ -604,19 +681,34 @@ function AppNavigator() {
     }
   }
 
+  const visibleLayers = [
+    ...stack.map((entry, index) => ({ ...entry, index, exiting: false })),
+    ...(exitingLayer !== undefined ? [{ ...exitingLayer, exiting: true }] : []),
+  ]
+
   return (
     <View style={styles.flex}>
-      {routes.map((entry, index) => {
-        if (isSheetConnectionRoute(entry)) return null
-        const active = isRouteActiveScreen(routes, index, overlayVisible)
+      {visibleLayers.map(layer => {
+        if (isSheetConnectionRoute(layer.route)) return null
+        const active = !layer.exiting && isRouteActiveScreen(routes, layer.index, overlayVisible)
+        const canEdgeBack = Platform.OS === 'ios'
+          && layer.index > 0
+          && active
+          && !signingOut
+          && layer.route.name !== 'chat'
+          && layer.route.name !== 'connecting'
         return (
           <RouteLayer
-            key={`${entry.name}:${index}`}
-            index={index}
-            animateEnter={index > 0}
+            key={layer.id}
+            zIndex={layer.exiting ? Math.max(layer.index + 1, stack.length + 1) : layer.index + 1}
+            animateEnter={layer.index > 0}
             active={active}
+            exiting={layer.exiting}
+            canEdgeBack={canEdgeBack}
+            onEdgeBack={canEdgeBack ? () => popEntryImmediate(layer.id) : undefined}
+            onExitComplete={layer.exiting ? () => clearExitingLayer(layer.id) : undefined}
           >
-            {renderRouteScreen(entry, index)}
+            {renderRouteScreen(layer.route, layer.index, active, layer.exiting)}
           </RouteLayer>
         )
       })}
@@ -670,22 +762,64 @@ function AppNavigator() {
 }
 
 function RouteLayer({
-  index,
+  zIndex,
   animateEnter,
   active,
+  exiting,
+  canEdgeBack,
+  onEdgeBack,
+  onExitComplete,
   children,
 }: {
-  index: number
+  zIndex: number
   animateEnter: boolean
   active: boolean
+  exiting: boolean
+  canEdgeBack: boolean
+  onEdgeBack?: () => void
+  onExitComplete?: () => void
   children: ReactNode
 }) {
   const { colors } = useTheme()
   const reduceMotion = useReduceMotion()
+  const { width: windowWidth } = useWindowDimensions()
   const progress = useRef(new Animated.Value(animateEnter ? 0 : 1)).current
+  const exitProgress = useRef(new Animated.Value(0)).current
+  const swipeX = useRef(new Animated.Value(0)).current
+  const enterAnimRef = useRef<Animated.CompositeAnimation | undefined>(undefined)
+  const swipeAnimRef = useRef<Animated.CompositeAnimation | undefined>(undefined)
+  const swipingOutRef = useRef(false)
+  const unmountedRef = useRef(false)
+  const onExitCompleteRef = useRef(onExitComplete)
+  onExitCompleteRef.current = onExitComplete
+
+  const canEdgeSwipe = Platform.OS === 'ios' && canEdgeBack && active && !exiting
+  const gestureRef = useRef({
+    canEdgeSwipe,
+    reduceMotion,
+    windowWidth,
+    onEdgeBack,
+  })
+  gestureRef.current = {
+    canEdgeSwipe,
+    reduceMotion,
+    windowWidth,
+    onEdgeBack,
+  }
 
   useEffect(() => {
-    if (!animateEnter) return
+    unmountedRef.current = false
+    return () => {
+      unmountedRef.current = true
+      enterAnimRef.current?.stop()
+      swipeAnimRef.current?.stop()
+    }
+  }, [])
+
+  const hasEnteredRef = useRef(!animateEnter)
+
+  useEffect(() => {
+    if (!animateEnter || exiting || hasEnteredRef.current) return
     progress.setValue(0)
     const animation = Animated.timing(progress, {
       toValue: 1,
@@ -693,29 +827,146 @@ function RouteLayer({
       easing: Easing.bezier(...easingCurve('expand')),
       useNativeDriver: true,
     })
-    animation.start()
-    return () => animation.stop()
-  }, [animateEnter, progress, reduceMotion])
+    enterAnimRef.current = animation
+    animation.start(({ finished }) => {
+      if (finished) hasEnteredRef.current = true
+    })
+    return () => {
+      animation.stop()
+      if (enterAnimRef.current === animation) enterAnimRef.current = undefined
+    }
+  }, [animateEnter, exiting, progress, reduceMotion])
 
-  const translateX = animateEnter && !reduceMotion
-    ? progress.interpolate({ inputRange: [0, 1], outputRange: [24, 0] })
-    : 0
+  useEffect(() => {
+    if (!exiting) return
+    enterAnimRef.current?.stop()
+    swipingOutRef.current = false
+    swipeAnimRef.current?.stop()
+    exitProgress.setValue(0)
+    let cancelled = false
+    const animation = Animated.timing(exitProgress, {
+      toValue: 1,
+      duration: reduceMotion ? motionTokens.duration.reduced : 180,
+      easing: Easing.bezier(...easingCurve('retreat')),
+      useNativeDriver: true,
+    })
+    animation.start(() => {
+      if (!cancelled) onExitCompleteRef.current?.()
+    })
+    return () => {
+      cancelled = true
+      animation.stop()
+    }
+  }, [exiting, exitProgress, reduceMotion])
+
+  useEffect(() => {
+    if (!canEdgeSwipe && !exiting) {
+      swipingOutRef.current = false
+      swipeAnimRef.current?.stop()
+      swipeX.setValue(0)
+    }
+  }, [canEdgeSwipe, exiting, swipeX])
+
+  const panResponder = useMemo(() => {
+    const springBack = () => {
+      swipeAnimRef.current?.stop()
+      const anim = Animated.spring(swipeX, {
+        toValue: 0,
+        bounciness: motionTokens.spring.bounciness,
+        speed: motionTokens.spring.speed,
+        useNativeDriver: true,
+      })
+      swipeAnimRef.current = anim
+      anim.start()
+    }
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_evt, gesture) =>
+        gestureRef.current.canEdgeSwipe
+        && !swipingOutRef.current
+        && shouldStartEdgeSwipeBack(gesture.x0, gesture.dx, gesture.dy),
+      onMoveShouldSetPanResponderCapture: (_evt, gesture) =>
+        gestureRef.current.canEdgeSwipe
+        && !swipingOutRef.current
+        && shouldStartEdgeSwipeBack(gesture.x0, gesture.dx, gesture.dy),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        swipeAnimRef.current?.stop()
+      },
+      onPanResponderMove: (_evt, gesture) => {
+        if (!gestureRef.current.canEdgeSwipe || swipingOutRef.current) return
+        swipeX.setValue(Math.max(0, gesture.dx))
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        const { canEdgeSwipe: enabled, reduceMotion: reduced, windowWidth: width, onEdgeBack: goBack } = gestureRef.current
+        if (!enabled || swipingOutRef.current) {
+          springBack()
+          return
+        }
+        if (shouldCommitEdgeSwipeBack(gesture.dx, gesture.vx, width)) {
+          swipingOutRef.current = true
+          swipeAnimRef.current?.stop()
+          if (reduced || !Number.isFinite(width) || width <= 0) {
+            goBack?.()
+            return
+          }
+          const anim = Animated.timing(swipeX, {
+            toValue: width,
+            duration: 180,
+            easing: Easing.bezier(...easingCurve('retreat')),
+            useNativeDriver: true,
+          })
+          swipeAnimRef.current = anim
+          anim.start(() => {
+            if (!unmountedRef.current && swipingOutRef.current) goBack?.()
+          })
+          return
+        }
+        springBack()
+      },
+      onPanResponderTerminate: () => {
+        if (!swipingOutRef.current) springBack()
+      },
+    })
+  }, [swipeX])
+
+  const enterTranslateX = useMemo(
+    () => progress.interpolate({ inputRange: [0, 1], outputRange: [animateEnter && !reduceMotion ? 24 : 0, 0] }),
+    [animateEnter, progress, reduceMotion],
+  )
+  const exitTranslateX = useMemo(
+    () => exitProgress.interpolate({ inputRange: [0, 1], outputRange: [0, reduceMotion ? 0 : 28] }),
+    [exitProgress, reduceMotion],
+  )
+  const exitOpacity = useMemo(
+    () => exitProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+    [exitProgress],
+  )
+  const translateX = useMemo(
+    () => Animated.add(Animated.add(enterTranslateX, swipeX), exitTranslateX),
+    [enterTranslateX, exitTranslateX, swipeX],
+  )
+
+  const interactive = active && !exiting
 
   return (
     <Animated.View
-      pointerEvents={active ? 'auto' : 'none'}
-      accessibilityElementsHidden={!active}
-      importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
+      {...(canEdgeSwipe ? panResponder.panHandlers : undefined)}
+      pointerEvents={interactive ? 'auto' : 'none'}
+      accessibilityElementsHidden={!interactive}
+      importantForAccessibility={interactive ? 'auto' : 'no-hide-descendants'}
       style={[
         StyleSheet.absoluteFill,
         {
           backgroundColor: colors.background,
-          zIndex: index + 1,
+          zIndex,
+          opacity: exiting ? exitOpacity : 1,
           transform: [{ translateX }],
         },
       ]}
     >
-      <NavigationFocusProvider value={active}>{children}</NavigationFocusProvider>
+      <NavigationFocusProvider value={interactive}>{children}</NavigationFocusProvider>
     </Animated.View>
   )
 }
