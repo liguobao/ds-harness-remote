@@ -379,6 +379,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
       id: item.id,
       sessionId: item.sessionId,
       toolName: codexToolName(item),
+      ...(item.kind === 'file-change' ? { toolKey: 'file_change' } : {}),
       ...(item.nativeRef.turnId === undefined ? {} : { turn: item.nativeRef.turnId }),
       summary: text.split('\n', 1)[0],
       ...(item.images === undefined || item.images.length === 0 ? {} : { images: item.images }),

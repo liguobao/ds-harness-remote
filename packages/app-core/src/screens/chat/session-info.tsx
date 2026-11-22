@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveRestore, ChevronDown, ChevronUp, Folder, ListTree, MessageSquare, Wifi, X } from 'lucide-react-native'
+import { Archive, ArchiveRestore, ArrowRightLeft, ChevronDown, ChevronUp, Folder, ListTree, MessageSquare, Wifi, X } from 'lucide-react-native'
 import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { strings } from '../../locales/i18n'
@@ -27,6 +27,7 @@ export function SessionInfo({
   runAfterClose,
   onOpenWorkspace,
   onToggleTrajectory,
+  onHandoff,
   onToggleArchive,
 }: {
   visible: boolean
@@ -40,6 +41,7 @@ export function SessionInfo({
   runAfterClose?: (action: () => void) => void
   onOpenWorkspace: () => void
   onToggleTrajectory?: () => void
+  onHandoff?: () => void
   onToggleArchive?: () => void
 }) {
   const { colors } = useTheme()
@@ -104,6 +106,13 @@ export function SessionInfo({
               icon={trajectory ? MessageSquare : ListTree}
               label={trajectory ? strings.trajectory.close : strings.trajectory.open}
               onPress={() => runAction(onToggleTrajectory)}
+            />
+          )}
+          {onHandoff !== undefined && (
+            <GroupRow
+              icon={ArrowRightLeft}
+              label={strings.handoff.action}
+              onPress={() => runAction(onHandoff)}
             />
           )}
         </GroupCard>

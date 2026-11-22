@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics'
-import { ArrowDown, ArrowLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
+import { ArrowDown, ArrowLeft, ArrowRightLeft, FileText, Film, Menu, MessageSquare, MoreHorizontal, RefreshCw, X } from 'lucide-react-native'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import {
   AccessibilityInfo,
@@ -23,6 +23,7 @@ import {
 } from 'react-native'
 import { Alert } from '../ui/alert'
 import { shouldConfirmSwipeRightOpen, shouldStartSwipeRightToOpen } from '../lib/gesture-swipe-rules'
+import { formatHandoffPayload, type PendingHandoffDraft } from '../lib/handoff-context'
 import { isSubagentSession } from '../lib/session-kind'
 import { applyChangeQuoteDraft } from '../lib/unified-diff'
 import { isAcpManagedBackend, workspaceStableKey } from '../lib/workspace-key'
@@ -103,6 +104,7 @@ import {
 } from './chat/pickers'
 import { sessionTitle } from './chat/presentation'
 import { SessionActivityDock } from './chat/session-activity'
+import { HandoffDraftPreviewModal, HandoffModal, harnessDisplayName } from './chat/handoff-modal'
 import { SessionInfo } from './chat/session-info'
 import { createStyles } from './chat/styles'
 import { formatUploadedChatFiles } from './chat/submitted-files'
@@ -291,6 +293,7 @@ export function ChatScreen({
   const [drawerSwipeUnlocked, setDrawerSwipeUnlocked] = useState(false)
   const [pluginsOpen, setPluginsOpen] = useState(false)
   const [automationTasksOpen, setAutomationTasksOpen] = useState(false)
+  const [handoffTarget, setHandoffTarget] = useState<{ session: RemoteSession; workspace?: WorkspaceView } | undefined>(undefined)
 
   const drawerBackRef = useRef<(() => boolean) | undefined>(undefined)
   const drawerCloseRef = useRef<((options?: { withHaptic?: boolean; force?: boolean }) => void) | undefined>(undefined)
@@ -335,6 +338,7 @@ export function ChatScreen({
     setDrawerSwipeUnlocked(false)
     setDrawerEntrance('immediate')
     setSessionsOpen(true)
+    setHandoffTarget(undefined)
   }, [hostId])
 
   // Explicit navigation must also reveal an already selected conversation.
@@ -502,6 +506,16 @@ export function ChatScreen({
 
   const closePluginsModal = useCallback(() => setPluginsOpen(false), [])
   const closeAutomationTasksModal = useCallback(() => setAutomationTasksOpen(false), [])
+  const handleOpenHandoff = useCallback((target: RemoteSession, workspace?: WorkspaceView) => {
+    Keyboard.dismiss()
+    setHandoffTarget({ session: target, workspace })
+  }, [])
+  const closeHandoffModal = useCallback(() => setHandoffTarget(undefined), [])
+  const handleHandoffCompleted = useCallback(() => {
+    markConversationChosen()
+    if (!splitNavRef.current) setSessionsOpen(false)
+    onBotModeChangeRef.current?.(false)
+  }, [markConversationChosen])
   const handleAutomationOpenSession = useCallback(async (targetSession: RemoteSession) => {
     markConversationChosen()
     const opened = await useAppStore.getState().openSession(targetSession)
@@ -556,6 +570,7 @@ export function ChatScreen({
       onOpenAbout={hasOpenAbout ? stableOnOpenAbout : undefined}
       onOpenSettings={handleDrawerOpenSettings}
       onSelect={handleDrawerSelect}
+      onHandoffSession={handleOpenHandoff}
     />
   )
 
@@ -610,6 +625,7 @@ export function ChatScreen({
                   lastAgentSessionByScopeRef={lastAgentSessionByScopeRef}
                   onOpenLink={openLink}
                   onOpenSessionsDrawer={openSessionsDrawer}
+                  onOpenHandoff={handleOpenHandoff}
                   onBack={stableOnBack}
                   onNewSession={hasNewSession ? stableOnNewSession : undefined}
                   onOpenWorkspaces={hasOpenWorkspaces ? stableOnOpenWorkspaces : undefined}
@@ -626,6 +642,13 @@ export function ChatScreen({
           onClose={closeAutomationTasksModal}
           onOpenSession={handleAutomationOpenSession}
           onNewTask={handleAutomationNewTask}
+        />
+        <HandoffModal
+          visible={handoffTarget !== undefined}
+          sourceSession={handoffTarget?.session}
+          sourceWorkspace={handoffTarget?.workspace}
+          onClose={closeHandoffModal}
+          onCompleted={handleHandoffCompleted}
         />
       </View>
     </MarkdownLinkProvider>
@@ -645,6 +668,7 @@ interface ChatConversationPaneProps {
   lastAgentSessionByScopeRef: MutableRefObject<Record<string, RemoteSession | undefined>>
   onOpenLink: (href: string) => void
   onOpenSessionsDrawer: () => void
+  onOpenHandoff: (session: RemoteSession, workspace?: WorkspaceView) => void
   onBack: () => void
   onNewSession?: () => void
   onOpenWorkspaces?: (focusWorkspaceKey?: string) => void
@@ -664,6 +688,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   lastAgentSessionByScopeRef,
   onOpenLink,
   onOpenSessionsDrawer,
+  onOpenHandoff,
   onBack,
   onNewSession,
   onOpenWorkspaces,
@@ -758,6 +783,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
     return () => animation.stop()
   }, [trajectory, trajectoryMotion, reduceMotion])
 
+  const [pendingHandoffPreviewOpen, setPendingHandoffPreviewOpen] = useState(false)
   const [sessionInfoOpen, setSessionInfoOpen] = useState(false)
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
@@ -771,6 +797,13 @@ const ChatConversationPane = memo(function ChatConversationPane({
     const previous = useBrowseMemory.getState().entries[memoryKey]?.quotes ?? EMPTY_QUOTES
     updateBrowseEntry(memoryScope, session?.sessionId ?? '', {quotes: typeof value === 'function' ? value(previous) : value})
   }, [memoryKey, memoryScope, session?.sessionId])
+  const pendingHandoff = useBrowseMemory(state => state.entries[memoryKey]?.handoff)
+  const setPendingHandoff = (value?: PendingHandoffDraft) => {
+    updateBrowseEntry(memoryScope, session?.sessionId ?? '', { handoff: value })
+  }
+  useEffect(() => {
+    if (pendingHandoff === undefined) setPendingHandoffPreviewOpen(false)
+  }, [pendingHandoff, session?.sessionId, hostId])
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [permissionPickerOpen, setPermissionPickerOpen] = useState(false)
   const mentionInput = useChatMentions({
@@ -918,6 +951,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const panelOpen = composerExpanded || plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || previewFilePath !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || sessionInfoOpen
+    || pendingHandoffPreviewOpen
   const { listRef, displaySections, maintainVisibleContentPosition, viewability, awayFromLatest, newContent, jumpToLatest, beginSendScroll,
     onListLayout, onListContentSizeChange, onListScroll, onListDragEnd, onListMomentumEnd,
     onScrollBeginDrag, onMomentumScrollBegin } = useChatScroll({
@@ -984,6 +1018,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const onBackRef = useRef(backFromChat)
   onBackRef.current = backFromChat
   useChatBackHandler(composerInputRef, () => onBackRef.current(), [
+    { open: pendingHandoffPreviewOpen, close: () => setPendingHandoffPreviewOpen(false) },
     { open: composerExpanded, close: () => setComposerExpanded(false) },
     { open: plusMenuOpen, close: () => { Keyboard.dismiss(); setPlusMenuOpen(false) } },
     { open: referenceChatOpen, close: () => setReferenceChatOpen(false) },
@@ -1126,12 +1161,13 @@ const ChatConversationPane = memo(function ChatConversationPane({
     const submittedQuotes = quotes
     const submittedImages = images
     const submittedFiles = stagedFiles
+    const submittedHandoff = pendingHandoff
     // Everything below this gate clears the composer, so an offline tap has to
     // stop here: the draft stays, no optimistic row is created and the manual
     // send after reconnection is the only submission path.
     const intent = submitIntent({
       connected, sendReady, permissionSelecting, uploading: uploadingRef.current,
-      hasContent: text.length > 0 || submittedQuotes.length > 0 || images.length > 0 || stagedFiles.length > 0,
+      hasContent: text.length > 0 || submittedQuotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || submittedHandoff !== undefined,
     })
     if (intent !== 'submit') return
     let promptWithQuotes = text
@@ -1139,7 +1175,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
       const formattedQuotes = submittedQuotes.map(formatQuoteText).join('\n\n')
       promptWithQuotes = text.length > 0 ? `${formattedQuotes}\n\n${text}` : formattedQuotes
     }
-    let promptText = promptWithQuotes
+    let userPromptBody = promptWithQuotes
     let uploadedFiles: ChatFile[] = []
     const targetSessionId = session.sessionId
     const sendSessionGen = sessionGenerationRef.current
@@ -1199,7 +1235,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           return
         }
         uploadedFiles = formatUploadedChatFiles(uploaded)
-        promptText = formatUploadedFilesReferencePrompt(promptWithQuotes, uploaded)
+        userPromptBody = formatUploadedFilesReferencePrompt(promptWithQuotes, uploaded)
       } catch (uploadError) {
         // Aborted uploads already restored (or discarded) their composer state;
         // do not surface a cancellation as a failure.
@@ -1232,6 +1268,9 @@ const ChatConversationPane = memo(function ChatConversationPane({
         }
       }
     }
+    const promptText = submittedHandoff !== undefined
+      ? formatHandoffPayload(submittedHandoff, userPromptBody)
+      : userPromptBody
     if (promptText.length > LONG_DRAFT_MAX) {
       Alert.alert(strings.chat.draftTooLongTitle, strings.chat.draftTooLong(LONG_DRAFT_MAX))
       return
@@ -1241,6 +1280,8 @@ const ChatConversationPane = memo(function ChatConversationPane({
     setImages([])
     setStagedFiles([])
     setStagedReferences([])
+    setPendingHandoff(undefined)
+    setPendingHandoffPreviewOpen(false)
     setMentionType(null)
     resetSelection()
     const restoreScrollAfterRejectedSend = beginSendScroll()
@@ -1255,6 +1296,9 @@ const ChatConversationPane = memo(function ChatConversationPane({
         setQuotes(previous => previous.length === 0 ? submittedQuotes : [...submittedQuotes, ...previous])
         setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
         setStagedReferences(previous => previous.length === 0 ? submittedReferences : [...submittedReferences, ...previous])
+        if (submittedHandoff !== undefined && useBrowseMemory.getState().entries[memoryKey]?.handoff === undefined) {
+          setPendingHandoff(submittedHandoff)
+        }
         setStagedFiles(current => {
           const seen = new Set<string>()
           const restored: StagedFile[] = []
@@ -1371,7 +1415,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
   const connectionRetrying = reconnectingSession || connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const sendReady = connected && !busy?.startsWith('session:')
     && (session.backend !== 'codex' || codexReadySessionId === session.sessionId)
-  const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0
+  const hasComposerContent = draft.trim().length > 0 || quotes.length > 0 || images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0 || pendingHandoff !== undefined
   const commandRunning = busy === 'command'
   const stopOrCancel = () => {
     if (!commandRunning) { void stopSession(); return }
@@ -1601,9 +1645,42 @@ const ChatConversationPane = memo(function ChatConversationPane({
     )
   }
 
-  const hasComposerTray = images.length > 0 || stagedFiles.length > 0 || uploadingFiles || stagedReferences.length > 0
+  const canHandoffCurrentSession = connected && !isSubagentSession(session) && (messages.length > 0 || !session.blank)
+  const hasComposerTray = images.length > 0 || stagedFiles.length > 0 || uploadingFiles || stagedReferences.length > 0 || pendingHandoff !== undefined
   const composerHeaderSlot = hasComposerTray ? (
     <>
+      {pendingHandoff !== undefined && (
+        <View style={styles.handoffDraftRow}>
+          <View style={styles.handoffDraftChip}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.handoff.pendingChipTitle(
+                harnessDisplayName(pendingHandoff.meta.sourceBackend),
+                harnessDisplayName(pendingHandoff.meta.targetBackend),
+              )}
+              onPress={() => setPendingHandoffPreviewOpen(true)}
+              style={styles.handoffDraftChipTrigger}
+            >
+              <ArrowRightLeft size={14} color={colors.primary} />
+              <Text numberOfLines={1} style={styles.handoffDraftChipText}>
+                {strings.handoff.pendingChipTitle(
+                  harnessDisplayName(pendingHandoff.meta.sourceBackend),
+                  harnessDisplayName(pendingHandoff.meta.targetBackend),
+                )}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={strings.handoff.removePendingHandoff}
+              hitSlop={8}
+              onPress={() => setPendingHandoff(undefined)}
+              style={styles.handoffDraftChipRemove}
+            >
+              <X size={13} color={colors.primary} />
+            </Pressable>
+          </View>
+        </View>
+      )}
       {images.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
           {images.map((image, index) => (
@@ -1888,7 +1965,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
         draft={draft}
         quotes={quotes}
         onRemoveQuote={index => setQuotes(current => current.filter((_, i) => i !== index))}
-        hasAttachments={images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0}
+        hasAttachments={images.length > 0 || stagedFiles.length > 0 || stagedReferences.length > 0 || pendingHandoff !== undefined}
         input={mentionInput}
         replyActive={replyActive}
         stopping={stopping}
@@ -1985,6 +2062,7 @@ const ChatConversationPane = memo(function ChatConversationPane({
           setMentionType(null)
           setTrajectory(value => !value)
         }}
+        onHandoff={canHandoffCurrentSession ? () => onOpenHandoff(session, currentWorkspace) : undefined}
         onToggleArchive={canArchiveSession ? toggleArchiveCurrentSession : undefined}
       />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={() => { setWorkspacePickerOpen(false); onOpenSessionsDrawer() }} />
@@ -2055,6 +2133,11 @@ const ChatConversationPane = memo(function ChatConversationPane({
           </Pressable>
         </View>
       </Modal>
+      <HandoffDraftPreviewModal
+        visible={pendingHandoffPreviewOpen && pendingHandoff !== undefined}
+        draft={pendingHandoff}
+        onClose={() => setPendingHandoffPreviewOpen(false)}
+      />
       </MarkdownLinkProvider>
     </ChatImageProvider>
   )
