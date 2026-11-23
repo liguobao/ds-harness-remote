@@ -1625,7 +1625,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // packages/plugin/src/remote-upload-client.ts
   var REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024;
   function createRemoteUploadFetch(original, baseUrl) {
-    let sequence = 0, control = async (method, payload, signal) => {
+    let sequence = 0, lastMode, control = async (method, payload, signal) => {
       let rpcId = `remote-upload-${++sequence}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
         method: "POST",
         credentials: "same-origin",
@@ -1633,11 +1633,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
         signal
       });
-      if (response.status === 404 || response.status === 405) return { mode: "local" };
+      if (method === "status" && lastMode !== "remote" && (response.status === 404 || response.status === 405))
+        return { mode: "local" };
       if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`);
       let envelope = await response.json();
       if (envelope.type !== "server-response" || envelope.rpcId !== rpcId || envelope.result?.ok !== !0)
         throw new Error(envelope.result?.error?.message ?? "Remote upload requires an updated Host plugin.");
+      if (method === "status") {
+        let mode = envelope.result.value?.mode;
+        typeof mode == "string" && (lastMode = mode);
+      }
       return envelope.result.value;
     };
     return async (input, init) => {

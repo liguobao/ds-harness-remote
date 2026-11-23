@@ -7,6 +7,9 @@ export const REMOTE_UPLOAD_MAX_BYTES = 192 * 1024 * 1024
 /** Official upload hook: shared by browser, Desktop and IDE upload runtimes. */
 export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch {
   let sequence = 0
+  // Last mode the control route reported. A route that answered once and then answers 404/405 is
+  // reloading or unmounted, which is not the same as never having had one.
+  let lastMode: string | undefined
   const control = async (method: string, payload: unknown, signal: AbortSignal) => {
     const rpcId = `remote-upload-${++sequence}`
     const response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
@@ -14,14 +17,26 @@ export function createRemoteUploadFetch(original: Fetch, baseUrl: string): Fetch
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload }), signal,
     })
     // A Host that never registered this prefix — an older plugin build on a newer DSH, or a
-    // Remote UI whose Host runs no plugin — answers 404/405 here. Uploading then is not a
-    // remote transfer at all, so fall back to the plain local request instead of failing the
-    // user's upload before a single byte is sent.
-    if (response.status === 404 || response.status === 405) return { mode: 'local' }
+    // Remote UI whose Host runs no plugin — answers 404/405 to the status probe. Uploading then
+    // is not a remote transfer at all, so fall back to the plain local request instead of failing
+    // the user's upload before a single byte is sent.
+    //
+    // Only the status probe may degrade, and only while no remote Host has been observed: a route
+    // that answered 404/405 *after* a successful remote handshake is going away under us, and
+    // treating that as local would push a remote session's file to the local Host. Other methods
+    // (`plugin.route`) must always surface their failure — an empty `{ mode: 'local' }` would be
+    // turned into a 200 response upstream.
+    if (method === 'status' && lastMode !== 'remote' && (response.status === 404 || response.status === 405)) {
+      return { mode: 'local' }
+    }
     if (!response.ok) throw new Error(`Remote upload control failed (HTTP ${response.status}).`)
     const envelope = await response.json() as { type?: string; rpcId?: string; result?: { ok?: boolean; value?: unknown; error?: { message?: string } } }
     if (envelope.type !== 'server-response' || envelope.rpcId !== rpcId || envelope.result?.ok !== true) {
       throw new Error(envelope.result?.error?.message ?? 'Remote upload requires an updated Host plugin.')
+    }
+    if (method === 'status') {
+      const mode = (envelope.result.value as { mode?: unknown } | undefined)?.mode
+      if (typeof mode === 'string') lastMode = mode
     }
     return envelope.result.value
   }

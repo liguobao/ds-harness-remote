@@ -147,4 +147,43 @@ describe('Remote attachment upload', () => {
     expect(passthrough).toHaveBeenCalledOnce()
     expect(original).toHaveBeenCalledTimes(2)
   })
+  it.each([404, 405])('rejects a plugin route answered %i once the status was remote', async status => {
+    const original = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      expect(String(input)).toContain('/ds-harness-remote/')
+      if (body.method === 'status') {
+        return Response.json({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value: { mode: 'remote', connected: true, target: { deviceId: 'host-1' } } } })
+      }
+      return new Response('', { status })
+    }) as unknown as typeof fetch
+    const upload = createRemoteUploadFetch(original, base)
+    // A swallowed failure here would surface upstream as `HTTP 200` with an empty body.
+    await expect(upload(`${base}api/session/uploadFileBinary?sessionId=s&mediaType=image/png`, { method: 'POST', body: new Uint8Array([1, 2, 3]) }))
+      .rejects.toThrow(`Remote upload control failed (HTTP ${status}).`)
+    expect(original).toHaveBeenCalledTimes(2)
+  })
+  it.each([404, 405])('stays closed when the control route answers %i after a remote upload', async status => {
+    let gone = false
+    const passthroughs: string[] = []
+    const original = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (!url.includes('/ds-harness-remote/')) {
+        passthroughs.push(url)
+        return new Response('local-response')
+      }
+      const body = JSON.parse(String(init?.body))
+      if (body.method === 'status') {
+        if (gone) return new Response('', { status })
+        return Response.json({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value: { mode: 'remote', connected: true, target: { deviceId: 'host-1' } } } })
+      }
+      return Response.json({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value: { status: 200, json: { ok: true } } } })
+    }) as unknown as typeof fetch
+    const upload = createRemoteUploadFetch(original, base)
+    await upload(`${base}api/session/uploadFileBinary?sessionId=s&name=a.txt`, { method: 'POST', body: 'x' })
+    gone = true
+    // Once a remote Host was observed, a 404/405 is that route going away — never a local upload.
+    await expect(upload(`${base}api/session/uploadFileBinary?sessionId=s&name=a.txt`, { method: 'POST', body: 'x' }))
+      .rejects.toThrow(`Remote upload control failed (HTTP ${status}).`)
+    expect(passthroughs.filter(url => url.includes('uploadFileBinary'))).toHaveLength(0)
+  })
 })
