@@ -46,8 +46,16 @@ assert.equal(manifest.dsh?.client?.platform, 'web', 'root package must declare i
 assert.deepEqual(pluginManifest.dsh?.client, manifest.dsh?.client, 'root and npm dsh.client metadata must stay unified')
 const canonicalDshPeerRange = manifest.peerDependencies?.['@deepseek-ai/dsh-api-gateway']
 assert.ok(typeof canonicalDshPeerRange === 'string' && canonicalDshPeerRange.trim().length > 0, 'root manifest must declare canonical DSH peer range')
+const coreDshPeers = ['@deepseek-ai/dsh-api-gateway', '@deepseek-ai/dsh-settings']
 const clientInjectSet = new Set(manifest.dsh?.client?.inject ?? [])
 for (const [label, pkgManifest] of [['root', manifest], ['npm', pluginManifest]]) {
+  for (const corePeer of coreDshPeers) {
+    assert.equal(
+      pkgManifest.peerDependencies?.[corePeer],
+      canonicalDshPeerRange,
+      `${label} manifest must align core peer ${corePeer} range with DSH core`,
+    )
+  }
   const clientInject = pkgManifest.dsh?.client?.inject ?? []
   for (const injectedPackage of clientInject) {
     assert.equal(
@@ -125,6 +133,11 @@ assert.doesNotMatch(patch, /ds-harness-remote-tui/, 'root patch must not insert 
 assert.doesNotMatch(patch, /!!js/, 'root patch must stay static while dsh-TUI integration is deferred')
 
 const npmPatch = readFileSync(join(root, 'packages/plugin/cordis.patch.yml'), 'utf8')
+assert.match(
+  npmPatch,
+  /inject:\s*(?:-\s*webServer|\[.*?webServer.*?\])/,
+  'npm patch must declare the webServer service for host control',
+)
 assert.doesNotMatch(npmPatch, /ds-harness-remote-tui/, 'npm patch must not insert the retired dsh-TUI Host entry')
 assert.doesNotMatch(npmPatch, /!!js/, 'npm patch must stay static while dsh-TUI integration is deferred')
 

@@ -21,7 +21,7 @@ import { ClientServerApi, HostServerApi } from './server-api.js'
 import { readAccountVerification } from './client-runtime-contract.js'
 import { AccountTwoFactorRequired } from './account-two-factor-required.js'
 import { ServerCredentialStore, ServerCredentialsInvalidError } from './server-credentials.js'
-import { registerControlRoute, type HostWebServerLike } from './control-route.js'
+import { registerControlRoute, type HostWebServerLike, type RegisterControlRouteOptions } from './control-route.js'
 import { ControlStatusStream } from './control-stream.js'
 import type { PluginUpdateSnapshot } from './update-check.js'
 import type { PluginSelfUpdateResult } from './plugin-self-update.js'
@@ -130,13 +130,18 @@ export class PluginControlRuntime {
     private readonly logStore?: HostLogStore,
   ) {}
 
-  register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
+  register(
+    connection: HostConnectionHandle,
+    webServer?: HostWebServerLike,
+    options?: RegisterControlRouteOptions,
+  ): () => Promise<void> {
     const statusStream = new ControlStatusStream(() => this.streamStatus())
     return registerControlRoute(
       connection,
       (endpoint, payload, signal) => this.handle(endpoint, payload, signal),
       webServer,
       statusStream,
+      options,
     )
   }
 

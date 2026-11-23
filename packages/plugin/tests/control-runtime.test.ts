@@ -7,7 +7,7 @@ import type { HostAuthorizationControl, HostConnectionHandle } from '../src/clie
 import type { ClientModeRuntime } from '../src/client-runtime.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { resolveConfig, type Config } from '../src/config.js'
-import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
+import { CONTROL_RPC_PREFIX, registerControlRoute } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { IdentityInvalidError, IdentityStore, serverStorageDirectory } from '../src/identity-store.js'
 import { HostLogStore } from '../src/host-log-store.js'
@@ -180,6 +180,49 @@ describe('PluginControlRuntime settings setup', () => {
       handler: expect.any(Function),
     }))
     await dispose()
+  })
+
+  it('invokes onUnavailable and returns a no-op disposer when webServer and connection.rpc.handle are unavailable', async () => {
+    const onUnavailable = vi.fn()
+    const handler = async () => ({ ok: true as const, value: {} })
+
+    const disposeNoHandle = registerControlRoute({ rpc: {} }, handler, undefined, undefined, { onUnavailable })
+    const disposeMissingRpc = registerControlRoute({}, handler, undefined, undefined, { onUnavailable })
+
+    const runtime = new PluginControlRuntime(resolveConfig(), '/unused', undefined, undefined, undefined)
+    const disposeRuntime = runtime.register({ rpc: {} } as unknown as HostConnectionHandle, undefined, { onUnavailable })
+
+    expect(onUnavailable).toHaveBeenCalledTimes(3)
+    expect(onUnavailable).toHaveBeenNthCalledWith(1, {
+      prefix: CONTROL_RPC_PREFIX,
+      hasWebServer: false,
+      hasRpcHandle: false,
+    })
+    expect(onUnavailable).toHaveBeenNthCalledWith(2, {
+      prefix: CONTROL_RPC_PREFIX,
+      hasWebServer: false,
+      hasRpcHandle: false,
+    })
+    expect(onUnavailable).toHaveBeenNthCalledWith(3, {
+      prefix: CONTROL_RPC_PREFIX,
+      hasWebServer: false,
+      hasRpcHandle: false,
+    })
+
+    const onUnavailableWithWebServer = vi.fn()
+    const disposeWithWebServer = registerControlRoute(
+      {},
+      handler,
+      { register: () => async () => undefined },
+      undefined,
+      { onUnavailable: onUnavailableWithWebServer },
+    )
+    expect(onUnavailableWithWebServer).not.toHaveBeenCalled()
+
+    await expect(disposeNoHandle()).resolves.toBeUndefined()
+    await expect(disposeMissingRpc()).resolves.toBeUndefined()
+    await expect(disposeRuntime()).resolves.toBeUndefined()
+    await expect(disposeWithWebServer()).resolves.toBeUndefined()
   })
 
   it('consumes webServer-admitted owner peers without invoking admit and enforces fail-closed fallbacks', async () => {

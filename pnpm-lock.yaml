@@ -35,7 +35,7 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/dsh-client-file-upload':
-        specifier: '>=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-0 <0.2.2-0 || >=0.2.2-0 <0.2.3-0'
+        specifier: '>=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-0 <0.2.2-0 || >=0.2.2-0 <0.2.3-0 || >=0.2.3-0 <0.2.4-0'
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/schemastery':
         specifier: ^3.18.5
@@ -737,7 +737,7 @@ importers:
   packages/plugin:
     dependencies:
       '@deepseek-ai/dsh-client-file-upload':
-        specifier: '>=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-0 <0.2.2-0 || >=0.2.2-0 <0.2.3-0'
+        specifier: '>=0.2.0-rc.1 <0.3.0-0 || >=0.2.1-0 <0.2.2-0 || >=0.2.2-0 <0.2.3-0 || >=0.2.3-0 <0.2.4-0'
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/schemastery':
         specifier: ^3.18.5

@@ -16,7 +16,7 @@ import {
   type ResolvedConfig,
 } from './config.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from './control-runtime.js'
-import type { HostWebServerLike } from './control-route.js'
+import { CONTROL_RPC_PREFIX, type HostWebServerLike } from './control-route.js'
 import {
   IdentityStore,
   prepareDefaultIdentityDirectory,
@@ -172,7 +172,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
           pendingLogger.error('Remote plugin startup failed', safeStartupError(failure))
           control.setStartupFailure(failure, { storageAvailable: storageError === undefined })
         }
-        const dispose = mountControlRoute(runtimeContext, control, connection, error => {
+        const dispose = mountControlRoute(runtimeContext, control, connection, pendingLogger, error => {
           pendingLogger.error('Remote control route registration failed', safeStartupError(error))
         })
         return async () => {
@@ -390,7 +390,7 @@ async function activate(
         subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
         peer => createPluginRouteDispatcher(
           () => ctx.get('connection') as PluginRouteConnectionLike | undefined,
-          () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
+          () => (safeGetService(ctx, 'webServer') as DshWebServerPortLike | undefined)?.port,
           peer,
         ),
         schedule,
@@ -537,7 +537,7 @@ async function activate(
   await ctx.effect(async () => {
     const disposeControl = controlRuntime === undefined || connection === undefined
       ? undefined
-      : mountControlRoute(ctx, controlRuntime, connection, error => {
+      : mountControlRoute(ctx, controlRuntime, connection, logger, error => {
           logger.error('Remote control route registration failed', safeStartupError(error))
         })
     if (initialStorageError !== undefined) {
@@ -591,7 +591,7 @@ function mountControlEffect(
   label: string,
 ): void {
   ctx.effect(() => {
-    const disposeRoute = mountControlRoute(ctx, control, connection, error => {
+    const disposeRoute = mountControlRoute(ctx, control, connection, logger, error => {
       logger.error('Remote control route registration failed', safeStartupError(error))
     })
     return async () => {
@@ -610,20 +610,40 @@ function mountControlRoute(
   ctx: Context,
   controlRuntime: PluginControlRuntime,
   connection: HostConnectionHandle,
+  logger: SafeLogger,
   onError?: (error: unknown) => void,
 ): () => Promise<void> {
   let disposed = false
   let hasRegistered = false
   let pendingTransitions = 0
+  let controlRouteUnavailable = false
   let disposeRoute: (() => Promise<void>) | undefined
   let transition: Promise<void> = Promise.resolve()
+
+  const registerRoute = (nextWebServer?: HostWebServerLike): () => Promise<void> => {
+    let unavailable = false
+    const dispose = controlRuntime.register(connection, nextWebServer, {
+      onUnavailable: details => {
+        unavailable = true
+        controlRouteUnavailable = true
+        logger.warn('Remote control route unavailable: neither webServer nor connection.rpc.handle is available', details)
+      },
+    })
+    if (!unavailable && nextWebServer !== undefined && controlRouteUnavailable) {
+      controlRouteUnavailable = false
+      logger.info('Remote control route mounted on webServer', { prefix: CONTROL_RPC_PREFIX })
+    } else if (!unavailable) {
+      controlRouteUnavailable = false
+    }
+    return dispose
+  }
 
   const swapRoute = (nextWebServer?: HostWebServerLike): void => {
     hasRegistered = true
     if (pendingTransitions === 0 && disposeRoute === undefined) {
       if (!disposed) {
         try {
-          disposeRoute = controlRuntime.register(connection, nextWebServer)
+          disposeRoute = registerRoute(nextWebServer)
         } catch (error) {
           onError?.(error)
         }
@@ -642,7 +662,7 @@ function mountControlRoute(
         }
       }
       if (disposed) return
-      disposeRoute = controlRuntime.register(connection, nextWebServer)
+      disposeRoute = registerRoute(nextWebServer)
     }).catch(error => {
       onError?.(error)
     }).finally(() => {

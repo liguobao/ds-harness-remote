@@ -16,13 +16,17 @@ const INVALID_REQUEST_RPC_ID = 'invalid-request'
 interface HostConnectionHandleLike {
   requestRejection?(request: { headers: IncomingHttpHeaders }): number | undefined
   admit?(request: { headers: IncomingHttpHeaders }): { rejection?: number; peer?: unknown } | undefined
-  rpc: {
+  rpc?: {
     handle?(
       channel: string,
       handler: ControlRouteHandler,
       options: { authority: 'loopback' | 'trusted-host' },
     ): () => Promise<void>
   }
+}
+
+export interface RegisterControlRouteOptions {
+  onUnavailable?(details: { prefix: string; hasWebServer: boolean; hasRpcHandle: boolean }): void
 }
 
 export interface HostAdmittedPeerLike {
@@ -56,6 +60,7 @@ export function registerControlRoute(
   handler: ControlRouteHandler,
   webServer?: HostWebServerLike,
   statusStream?: ControlStatusStreamLike,
+  options?: RegisterControlRouteOptions,
 ): () => Promise<void> {
   if (webServer !== undefined) {
     // DSH 0.2.3+ authorizes `auth: 'required'` routes inside `webServer` and
@@ -75,13 +80,20 @@ export function registerControlRoute(
 
   // A plain RPC channel owns POST only, so the browser falls back to unary
   // status reads on hosts that do not expose the Web server route.
-  const rpcHandle = connection.rpc.handle
+  const rpc = connection.rpc
   // Older or partially initialized carriers may expose neither the Web Server
   // route registry nor the legacy RPC helper.  Do not let that optional
   // compatibility path abort plugin activation and leave the UI stuck in
   // "control is still starting".
-  if (rpcHandle === undefined) return async () => undefined
-  return rpcHandle(CONTROL_RPC_PREFIX, handler, {
+  if (typeof rpc?.handle !== 'function') {
+    options?.onUnavailable?.({
+      prefix: CONTROL_RPC_PREFIX,
+      hasWebServer: false,
+      hasRpcHandle: false,
+    })
+    return async () => undefined
+  }
+  return rpc.handle(CONTROL_RPC_PREFIX, handler, {
     authority: 'loopback',
   })
 }

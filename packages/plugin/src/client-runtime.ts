@@ -39,7 +39,7 @@ import {
   discoverCodexVirtualWorkspaces,
 } from './codex/virtual-harness.js'
 import type { ResolvedConfig } from './config.js'
-import type { HostWebServerLike } from './control-route.js'
+import type { HostWebServerLike, RegisterControlRouteOptions } from './control-route.js'
 import { registerControlRoute } from './control-route.js'
 import type { RemoteFileViewerEndpoint } from './file-viewer-contract.js'
 import { harnessSessionGeneration } from './harness-version.js'
@@ -256,8 +256,22 @@ export class ClientModeRuntime {
     }
   }
 
-  registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
-    return registerControlRoute(connection, (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal), webServer)
+  registerControl(
+    connection: HostConnectionHandle,
+    webServer?: HostWebServerLike,
+    options?: RegisterControlRouteOptions,
+  ): () => Promise<void> {
+    return registerControlRoute(
+      connection,
+      (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal),
+      webServer,
+      undefined,
+      options ?? {
+        onUnavailable: details => {
+          this.logger.warn('Remote control route unavailable: neither webServer nor connection.rpc.handle is available', details)
+        },
+      },
+    )
   }
 
   status(): Record<string, unknown> {

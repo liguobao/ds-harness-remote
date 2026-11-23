@@ -828,6 +828,122 @@ describe('Cordis plugin lifecycle', () => {
       },
     })))
   })
+
+  it('warns when control route is unavailable and logs recovery when webServer mounts later', async () => {
+    const { runScenarios } = await import('../../../scripts/test-scenarios.mjs')
+    await runScenarios(['missingControlRouteRecoversOnLateWebServer', 'readyWebServerDoesNotWarn'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const dshHome = await mkdtemp(join(tmpdir(), `dsh-remote-control-warn-${mode}-`))
+        directories.push(dshHome)
+        vi.stubEnv('DSH_HOME', dshHome)
+        vi.stubEnv('DSH_PROFILE', `ctrl-warn-${mode}`)
+
+        const warnCalls: string[] = []
+        const infoCalls: string[] = []
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+          warnCalls.push(args.map(String).join(' '))
+        })
+        const infoSpy = vi.spyOn(console, 'info').mockImplementation((...args: unknown[]) => {
+          infoCalls.push(args.map(String).join(' '))
+        })
+
+        let registeredRoute: {
+          path: string
+          auth?: string
+          handler(req: unknown, res: unknown, peer?: unknown): Promise<void> | void
+        } | undefined
+        const ctx = new Context()
+        ctx.provide('settings', settings({ deviceName: `Control Warn Host ${mode}` }))
+        ctx.provide('typertGateway', typertGateway())
+        ctx.provide('connection', { rpc: {} } as never)
+
+        if (mode === 'readyWebServerDoesNotWarn') {
+          ctx.provide('webServer', {
+            register: (route: typeof registeredRoute) => {
+              registeredRoute = route
+              return async () => undefined
+            },
+          } as never)
+        }
+
+        const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: `Control Warn Host ${mode}` })
+        try {
+          await vi.waitFor(() => {
+            expect(ctx.dshRemote.currentIdentity()).toBeDefined()
+          })
+
+          if (mode === 'readyWebServerDoesNotWarn') {
+            await vi.waitFor(() => expect(registeredRoute?.path).toBe('/ds-harness-remote'))
+            expect(warnCalls.some(line => line.includes('Remote control route unavailable'))).toBe(false)
+            expect(infoCalls.some(line => line.includes('Remote control route mounted on webServer'))).toBe(false)
+            return
+          }
+
+          await vi.waitFor(() => {
+            expect(warnCalls.some(line => line.includes('Remote control route unavailable: neither webServer nor connection.rpc.handle is available'))).toBe(true)
+          })
+          expect(infoCalls.some(line => line.includes('Remote control route mounted on webServer'))).toBe(false)
+
+          const wsFiber = await ctx.plugin({
+            name: 'mock-late-ws-recovery',
+            apply(peerCtx: Context) {
+              peerCtx.provide('webServer', {
+                register: (route: typeof registeredRoute) => {
+                  registeredRoute = route
+                  return async () => undefined
+                },
+              } as never)
+            },
+          })
+          try {
+            await vi.waitFor(() => {
+              expect(registeredRoute?.path).toBe('/ds-harness-remote')
+              expect(infoCalls.some(line => line.includes('Remote control route mounted on webServer'))).toBe(true)
+            })
+
+            const { Readable } = await import('node:stream')
+            const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({
+              type: 'client-request',
+              rpcId: 'logs-1',
+              method: 'settings.logs.get',
+              payload: {},
+            }))]), {
+              method: 'POST',
+              url: '/ds-harness-remote/settings.logs.get',
+              headers: { 'content-type': 'application/json' },
+            })
+            let status = 0
+            let text = ''
+            const ownerPeer = { principal: { kind: 'owner' }, signal: new AbortController().signal }
+            await registeredRoute!.handler(req, {
+              writeHead: (code: number) => { status = code },
+              end: (chunk?: unknown) => { if (chunk !== undefined) text += String(chunk) },
+            }, ownerPeer)
+            expect(status).toBe(200)
+            const body = JSON.parse(text) as {
+              result?: { ok?: boolean; value?: { entries?: Array<{ level: string; line: string }> } }
+            }
+            expect(body.result?.ok).toBe(true)
+            const entries = body.result?.value?.entries ?? []
+            expect(entries.some(entry =>
+              entry.level === 'warn'
+              && entry.line.includes('Remote control route unavailable: neither webServer nor connection.rpc.handle is available'))).toBe(true)
+            expect(entries.some(entry =>
+              entry.level === 'info'
+              && entry.line.includes('Remote control route mounted on webServer'))).toBe(true)
+          } finally {
+            await wsFiber.dispose()
+          }
+        } finally {
+          warnSpy.mockRestore()
+          infoSpy.mockRestore()
+          await fiber.dispose()
+          await ctx.fiber.dispose()
+        }
+      },
+    })))
+  })
 })
 
 function settings(value: Record<string, unknown>) {

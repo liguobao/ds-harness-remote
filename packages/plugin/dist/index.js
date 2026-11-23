@@ -84901,7 +84901,7 @@ var STATUS_STREAM_ENDPOINT = "status.events";
 var STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 var ENDPOINT_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/;
 var INVALID_REQUEST_RPC_ID = "invalid-request";
-function registerControlRoute(connection, handler, webServer, statusStream) {
+function registerControlRoute(connection, handler, webServer, statusStream, options) {
   if (webServer !== void 0) {
     const dispose = webServer.register({
       kind: "prefix",
@@ -84914,9 +84914,16 @@ function registerControlRoute(connection, handler, webServer, statusStream) {
       await dispose();
     };
   }
-  const rpcHandle = connection.rpc.handle;
-  if (rpcHandle === void 0) return async () => void 0;
-  return rpcHandle(CONTROL_RPC_PREFIX, handler, {
+  const rpc = connection.rpc;
+  if (typeof rpc?.handle !== "function") {
+    options?.onUnavailable?.({
+      prefix: CONTROL_RPC_PREFIX,
+      hasWebServer: false,
+      hasRpcHandle: false
+    });
+    return async () => void 0;
+  }
+  return rpc.handle(CONTROL_RPC_PREFIX, handler, {
     authority: "loopback"
   });
 }
@@ -90643,8 +90650,18 @@ var ClientModeRuntime = class {
       this.logger.warn("automatic Host authorization failed", { code: safeErrorCode(error62) });
     }
   }
-  registerControl(connection, webServer) {
-    return registerControlRoute(connection, (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal), webServer);
+  registerControl(connection, webServer, options) {
+    return registerControlRoute(
+      connection,
+      (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal),
+      webServer,
+      void 0,
+      options ?? {
+        onUnavailable: (details2) => {
+          this.logger.warn("Remote control route unavailable: neither webServer nor connection.rpc.handle is available", details2);
+        }
+      }
+    );
   }
   status() {
     const targetStatus = this.gatewaySwitch.status();
@@ -103616,13 +103633,14 @@ var PluginControlRuntime = class {
     this.identityDirectory = directory;
     this.storageAvailable = true;
   }
-  register(connection, webServer) {
+  register(connection, webServer, options) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
       connection,
       (endpoint, payload, signal) => this.handle(endpoint, payload, signal),
       webServer,
-      statusStream
+      statusStream,
+      options
     );
   }
   /**
@@ -115000,7 +115018,7 @@ function apply(ctx, entry = void 0) {
           pendingLogger.error("Remote plugin startup failed", safeStartupError(failure5));
           control.setStartupFailure(failure5, { storageAvailable: storageError === void 0 });
         }
-        const dispose = mountControlRoute(runtimeContext, control, connection, (error62) => {
+        const dispose = mountControlRoute(runtimeContext, control, connection, pendingLogger, (error62) => {
           pendingLogger.error("Remote control route registration failed", safeStartupError(error62));
         });
         return async () => {
@@ -115172,7 +115190,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
         subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
         (peer) => createPluginRouteDispatcher(
           () => ctx.get("connection"),
-          () => ctx.get("webServer")?.port,
+          () => safeGetService(ctx, "webServer")?.port,
           peer
         ),
         schedule,
@@ -115304,7 +115322,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
     return;
   }
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime === void 0 || connection === void 0 ? void 0 : mountControlRoute(ctx, controlRuntime, connection, (error62) => {
+    const disposeControl = controlRuntime === void 0 || connection === void 0 ? void 0 : mountControlRoute(ctx, controlRuntime, connection, logger2, (error62) => {
       logger2.error("Remote control route registration failed", safeStartupError(error62));
     });
     if (initialStorageError !== void 0) {
@@ -115348,7 +115366,7 @@ async function activate(ctx, readConfig, entryId, requireRemoteEvents = false) {
 }
 function mountControlEffect(ctx, control, connection, logStore, logger2, label) {
   ctx.effect(() => {
-    const disposeRoute = mountControlRoute(ctx, control, connection, (error62) => {
+    const disposeRoute = mountControlRoute(ctx, control, connection, logger2, (error62) => {
       logger2.error("Remote control route registration failed", safeStartupError(error62));
     });
     return async () => {
@@ -115357,18 +115375,36 @@ function mountControlEffect(ctx, control, connection, logStore, logger2, label) 
     };
   }, label);
 }
-function mountControlRoute(ctx, controlRuntime, connection, onError) {
+function mountControlRoute(ctx, controlRuntime, connection, logger2, onError) {
   let disposed = false;
   let hasRegistered = false;
   let pendingTransitions = 0;
+  let controlRouteUnavailable = false;
   let disposeRoute;
   let transition = Promise.resolve();
+  const registerRoute = (nextWebServer) => {
+    let unavailable4 = false;
+    const dispose = controlRuntime.register(connection, nextWebServer, {
+      onUnavailable: (details2) => {
+        unavailable4 = true;
+        controlRouteUnavailable = true;
+        logger2.warn("Remote control route unavailable: neither webServer nor connection.rpc.handle is available", details2);
+      }
+    });
+    if (!unavailable4 && nextWebServer !== void 0 && controlRouteUnavailable) {
+      controlRouteUnavailable = false;
+      logger2.info("Remote control route mounted on webServer", { prefix: CONTROL_RPC_PREFIX });
+    } else if (!unavailable4) {
+      controlRouteUnavailable = false;
+    }
+    return dispose;
+  };
   const swapRoute = (nextWebServer) => {
     hasRegistered = true;
     if (pendingTransitions === 0 && disposeRoute === void 0) {
       if (!disposed) {
         try {
-          disposeRoute = controlRuntime.register(connection, nextWebServer);
+          disposeRoute = registerRoute(nextWebServer);
         } catch (error62) {
           onError?.(error62);
         }
@@ -115387,7 +115423,7 @@ function mountControlRoute(ctx, controlRuntime, connection, onError) {
         }
       }
       if (disposed) return;
-      disposeRoute = controlRuntime.register(connection, nextWebServer);
+      disposeRoute = registerRoute(nextWebServer);
     }).catch((error62) => {
       onError?.(error62);
     }).finally(() => {
