@@ -41,7 +41,7 @@ import { parseMessageQuotes, QuoteMarkIcon, QuotePreview } from '../../ui/quote-
 import { PresentedFileGroup } from '../../ui/file-card'
 import { extractUserSubmittedFiles } from './submitted-files'
 import { SubmittedFileStack } from './submitted-file-stack'
-import { useTheme } from '../../ui/theme-context'
+import { useTheme, type ThemeColors } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { DARK_CODE_PALETTE, highlightCode, LIGHT_CODE_PALETTE } from '../../ui/syntax-highlight'
 import { parseBotReplyPayload } from '../bot/replies'
@@ -186,7 +186,12 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
 }, (prev, next) => {
   // Every field below is a reference that streaming rebuilds, so compare their
   // contents: a group whose text did not change keeps its rendered subtree.
-  if (prev.busyAction !== next.busyAction) return false
+  if (prev.busyAction !== next.busyAction) {
+    const needsBusy = next.items.some(
+      item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined,
+    )
+    if (needsBusy) return false
+  }
   if (prev.isTurnRunning !== next.isTurnRunning) return false
   if (!sameUsage(prev.turnUsage, next.turnUsage)) return false
   if (prev.onApproval !== next.onApproval || prev.onQuestion !== next.onQuestion) return false
@@ -285,8 +290,24 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
   artifacts?: UiArtifact[]
   onSendPrompt?: (text: string) => Promise<boolean>
 }) {
-  if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
-  if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
+  if (item.kind === 'approval') {
+    return (
+      <ApprovalCard
+        item={item}
+        busy={busyAction !== undefined ? busyAction === `approval:${item.id}` : undefined}
+        onRespond={onApproval}
+      />
+    )
+  }
+  if (item.kind === 'question') {
+    return (
+      <QuestionCard
+        item={item}
+        busy={busyAction !== undefined ? busyAction === `question:${item.id}` : undefined}
+        onRespond={onQuestion}
+      />
+    )
+  }
   if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
   const hasArtifacts = artifacts !== undefined && artifacts.length > 0
   if (!compact && item.role === 'assistant'
@@ -300,9 +321,9 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
 function UserRowResend({ item, status }: { item: ChatMessage; status: string }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const busyAction = useAppStore(state => state.busyAction)
+  const hasBusyAction = useAppStore(state => state.busyAction !== undefined)
   const missingImages = (item.images?.length ?? 0) > 0 && (item.promptImages?.length ?? 0) === 0
-  const disabled = busyAction !== undefined || missingImages
+  const disabled = hasBusyAction || missingImages
   const retry = () => {
     const state = useAppStore.getState()
     const backend = state.sessions.find(row => row.sessionId === item.sessionId)?.backend ?? state.selectedSession?.backend
@@ -362,6 +383,27 @@ function AssistantMessageCallout({ item }: { item: ChatMessage }) {
       {body === undefined ? <NativeMarkdown text={item.text} /> : <HeartbeatMessage text={item.text} body={body} />}
     </View>
   )
+}
+
+interface UserBubblePalettes {
+  bubble: ThemeColors
+  solid: ThemeColors
+  soft: ThemeColors
+}
+
+const userBubblePaletteCache = new WeakMap<ThemeColors, UserBubblePalettes>()
+
+export function getUserBubblePalettes(colors: ThemeColors): UserBubblePalettes {
+  const cached = userBubblePaletteCache.get(colors)
+  if (cached !== undefined) return cached
+  const solidText = colors.onPrimary ?? colors.white
+  const palettes: UserBubblePalettes = {
+    bubble: { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse },
+    solid: { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' },
+    soft: { ...colors, surfaceStrong: colors.border },
+  }
+  userBubblePaletteCache.set(colors, palettes)
+  return palettes
 }
 
 function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts, editedFiles, onFilePress, onSendPrompt, userBubble }: {
@@ -430,9 +472,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
     const showBubbleContent = hasBubbleText || showImages
     const solidText = colors.onPrimary ?? colors.white
     const isSolid = !userBubble && appearance.bubbleStyle === 'solid'
-    const bubblePalette = { ...colors, ink: colors.onInverse, muted: colors.onInverse, subtle: colors.onInverse, surfaceStrong: colors.inverse }
-    const solidPalette = { ...colors, ink: solidText, muted: solidText, subtle: solidText, primary: solidText, surfaceStrong: 'rgba(255,255,255,0.18)' }
-    const softBubblePalette = { ...colors, surfaceStrong: colors.border }
+    const userPalettes = getUserBubblePalettes(colors)
     const userBubbleStyle = userBubble
       ? styles.userBubble
       : !hasBubbleText
@@ -469,7 +509,7 @@ function MessageBubble({ item, compact, showActions = true, turnUsage, artifacts
           ) : (
             hasVisibleMessageText(displayBody) && (
               <View style={styles.userMarkdownWrap}>
-                <NativeMarkdown text={displayBody} colors={userBubble ? bubblePalette : isSolid ? solidPalette : softBubblePalette} />
+                <NativeMarkdown text={displayBody} colors={userBubble ? userPalettes.bubble : isSolid ? userPalettes.solid : userPalettes.soft} />
               </View>
             )
           )}
@@ -665,11 +705,14 @@ function compactActivityText(value: string | undefined): string | undefined {
 
 function ApprovalCard({ item, busy, onRespond }: {
   item: ApprovalActivity
-  busy: boolean
+  busy?: boolean
   onRespond: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const storeBusy = useAppStore(state =>
+    busy === undefined && item.outcome === undefined && state.busyAction === `approval:${item.id}`)
+  const isBusy = busy ?? storeBusy
   if (item.outcome !== undefined) {
     const denied = item.outcome === 'rejected' || item.outcome === 'cancelled' || item.outcome === 'unavailable'
     const handledElsewhere = item.outcome === 'unavailable'
@@ -696,8 +739,8 @@ function ApprovalCard({ item, busy, onRespond }: {
       )}
       <Text style={styles.permissionScope}>{zhCN.chat.permissionScope}</Text>
       <View style={styles.permissionActions}>
-        <Button label={zhCN.chat.allowOnce} onPress={() => void onRespond(item.id, 'allowed-once')} loading={busy} />
-        <Button label={zhCN.chat.deny} variant="quiet" onPress={() => void onRespond(item.id, 'rejected')} disabled={busy} />
+        <Button label={zhCN.chat.allowOnce} onPress={() => void onRespond(item.id, 'allowed-once')} loading={isBusy} />
+        <Button label={zhCN.chat.deny} variant="quiet" onPress={() => void onRespond(item.id, 'rejected')} disabled={isBusy} />
       </View>
     </View>
   )
@@ -705,11 +748,14 @@ function ApprovalCard({ item, busy, onRespond }: {
 
 function QuestionCard({ item, busy, onRespond }: {
   item: QuestionActivity
-  busy: boolean
+  busy?: boolean
   onRespond: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const storeBusy = useAppStore(state =>
+    busy === undefined && item.outcome === undefined && state.busyAction === `question:${item.id}`)
+  const isBusy = busy ?? storeBusy
   const [selected, setSelected] = useState<Record<string, string[]>>({})
   const [custom, setCustom] = useState<Record<string, string>>({})
   const [now, setNow] = useState(Date.now())
@@ -797,7 +843,7 @@ function QuestionCard({ item, busy, onRespond }: {
           />
         </View>
       ))}
-      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected, custom)} loading={busy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
+      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected, custom)} loading={isBusy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
     </View>
   )
 }

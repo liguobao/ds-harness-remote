@@ -1,4 +1,15 @@
-import type { ChatItem, HistoryEntry } from '../types'
+import type {
+  AskUserQuestionItem,
+  AskUserQuestionOption,
+  ChatFile,
+  ChatImage,
+  ChatItem,
+  ChatMessage,
+  HistoryEntry,
+  PromptImage,
+  ToolActivity,
+  ToolDisplayDetail,
+} from '../types'
 
 export function findApproval(messages: Record<string, ChatItem[]>, itemId: string) {
   for (const items of Object.values(messages)) {
@@ -590,4 +601,264 @@ export function computeStreamingSignature(items: readonly ChatItem[]): string {
   if (last.kind === 'tool') return `${last.id}:${last.kind}:${last.state}:${last.images?.length ?? 0}:${last.callDetail?.text.length ?? 0}:${last.summary?.length ?? 0}:${last.resultDetail?.text.length ?? 0}:${last.resultDetail?.text.slice(-24) ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
   if (last.kind === 'approval') return `${last.id}:${last.kind}:${last.outcome ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
   return `${last.id}:${last.kind}:${last.questionState ?? ''}:${last.outcome ?? ''}:${last.turnEnd ? last.turnEnd.reason : ''}`
+}
+
+const MAX_DEEP_EQUAL_DEPTH = 32
+
+function sameOptionalArray<T>(
+  a: readonly T[] | undefined,
+  b: readonly T[] | undefined,
+  sameElement: (left: T, right: T) => boolean,
+): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined || a.length !== b.length) return false
+  for (let index = 0; index < a.length; index += 1) {
+    if (!sameElement(a[index]!, b[index]!)) return false
+  }
+  return true
+}
+
+function sameTurnEnd(a: ChatItem['turnEnd'], b: ChatItem['turnEnd']): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.reason === b.reason && a.time === b.time && a.detail === b.detail
+}
+
+function sameChatImage(a: ChatImage, b: ChatImage): boolean {
+  if (a === b) return true
+  return a.attachmentId === b.attachmentId
+    && a.sessionId === b.sessionId
+    && a.uri === b.uri
+    && a.name === b.name
+    && a.mediaType === b.mediaType
+    && a.bytes === b.bytes
+    && a.width === b.width
+    && a.height === b.height
+}
+
+function sameChatFile(a: ChatFile, b: ChatFile): boolean {
+  if (a === b) return true
+  return a.path === b.path
+    && a.name === b.name
+    && a.bytes === b.bytes
+    && a.attachmentId === b.attachmentId
+    && a.source === b.source
+}
+
+function samePromptImage(a: PromptImage, b: PromptImage): boolean {
+  if (a === b) return true
+  return a.uri === b.uri
+    && a.mediaType === b.mediaType
+    && a.data === b.data
+    && a.bytes === b.bytes
+    && a.width === b.width
+    && a.height === b.height
+    && a.name === b.name
+}
+
+function sameUsage(a: ChatMessage['usage'], b: ChatMessage['usage']): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.inputTokens === b.inputTokens
+    && a.outputTokens === b.outputTokens
+    && a.totalTokens === b.totalTokens
+    && a.cacheReadTokens === b.cacheReadTokens
+    && a.cacheWriteTokens === b.cacheWriteTokens
+    && a.reasoningTokens === b.reasoningTokens
+}
+
+function sameToolDetail(a: ToolDisplayDetail | undefined, b: ToolDisplayDetail | undefined): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.text === b.text && a.format === b.format && a.truncated === b.truncated
+}
+
+function sameRemoteDetail(a: ToolActivity['remoteDetail'], b: ToolActivity['remoteDetail']): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.threadId === b.threadId && a.detailId === b.detailId
+}
+
+function sameQuestionOption(a: AskUserQuestionOption, b: AskUserQuestionOption): boolean {
+  if (a === b) return true
+  return a.label === b.label && a.description === b.description
+}
+
+function sameQuestionIntent(a: AskUserQuestionItem['intent'], b: AskUserQuestionItem['intent']): boolean {
+  if (a === b) return true
+  if (a === undefined || b === undefined) return false
+  return a.kind === b.kind && a.approve === b.approve
+}
+
+function sameQuestionItem(a: AskUserQuestionItem, b: AskUserQuestionItem): boolean {
+  if (a === b) return true
+  return a.id === b.id
+    && a.question === b.question
+    && a.detail === b.detail
+    && a.header === b.header
+    && a.multiSelect === b.multiSelect
+    && sameQuestionIntent(a.intent, b.intent)
+    && sameOptionalArray(a.options, b.options, sameQuestionOption)
+}
+
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+function sameUnknownValue(
+  a: unknown,
+  b: unknown,
+  depth = 0,
+  seenA?: Set<object>,
+  seenB?: Set<object>,
+): boolean {
+  if (a === b) return true
+  if (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (depth >= MAX_DEEP_EQUAL_DEPTH) return false
+  if (seenA?.has(a) || seenB?.has(b)) return false
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    const nextSeenA = seenA ?? new Set<object>()
+    const nextSeenB = seenB ?? new Set<object>()
+    nextSeenA.add(a)
+    nextSeenB.add(b)
+    try {
+      for (let index = 0; index < a.length; index += 1) {
+        if (!sameUnknownValue(a[index], b[index], depth + 1, nextSeenA, nextSeenB)) return false
+      }
+      return true
+    } finally {
+      nextSeenA.delete(a)
+      nextSeenB.delete(b)
+    }
+  }
+
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && Object.is(a.getTime(), b.getTime())
+  }
+  if (!isPlainObject(a) || !isPlainObject(b)) return false
+
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const nextSeenA = seenA ?? new Set<object>()
+  const nextSeenB = seenB ?? new Set<object>()
+  nextSeenA.add(a)
+  nextSeenB.add(b)
+  try {
+    for (const key of Object.keys(left)) {
+      if (!sameUnknownValue(left[key], right[key], depth + 1, nextSeenA, nextSeenB)) return false
+    }
+    for (const key of Object.keys(right)) {
+      if (!Object.prototype.hasOwnProperty.call(left, key) && right[key] !== undefined) return false
+    }
+    return true
+  } finally {
+    nextSeenA.delete(a)
+    nextSeenB.delete(b)
+  }
+}
+
+/** Structural equality across all ChatItem variants and nested payloads. */
+export function isSameChatItem(a: ChatItem, b: ChatItem): boolean {
+  if (a === b) return true
+  if (
+    a.kind !== b.kind
+    || a.id !== b.id
+    || a.sessionId !== b.sessionId
+    || a.createdAt !== b.createdAt
+    || a.nativeSeq !== b.nativeSeq
+    || a.nativeTime !== b.nativeTime
+    || a.nativeOrderSeq !== b.nativeOrderSeq
+    || a.nativeRevisionSeq !== b.nativeRevisionSeq
+    || a.turn !== b.turn
+    || !sameTurnEnd(a.turnEnd, b.turnEnd)
+  ) {
+    return false
+  }
+  switch (a.kind) {
+    case 'message': {
+      if (b.kind !== 'message') return false
+      return a.role === b.role
+        && a.text === b.text
+        && a.replyGroup === b.replyGroup
+        && a.reasoning === b.reasoning
+        && a.streaming === b.streaming
+        && a.streamingPhase === b.streamingPhase
+        && a.requestRpcId === b.requestRpcId
+        && a.sendState === b.sendState
+        && a.sendError === b.sendError
+        && a.queuedAdopted === b.queuedAdopted
+        && a.context === b.context
+        && a.usageOnly === b.usageOnly
+        && a.feedback === b.feedback
+        && sameUsage(a.usage, b.usage)
+        && sameOptionalArray(a.images, b.images, sameChatImage)
+        && sameOptionalArray(a.files, b.files, sameChatFile)
+        && sameOptionalArray(a.promptImages, b.promptImages, samePromptImage)
+    }
+    case 'tool': {
+      if (b.kind !== 'tool') return false
+      return a.toolName === b.toolName
+        && a.toolKey === b.toolKey
+        && a.state === b.state
+        && a.arguments === b.arguments
+        && a.summary === b.summary
+        && sameToolDetail(a.callDetail, b.callDetail)
+        && sameToolDetail(a.resultDetail, b.resultDetail)
+        && sameRemoteDetail(a.remoteDetail, b.remoteDetail)
+        && sameOptionalArray(a.images, b.images, sameChatImage)
+        && sameUnknownValue(a.uiResultMeta, b.uiResultMeta)
+    }
+    case 'approval': {
+      if (b.kind !== 'approval') return false
+      return a.approvalId === b.approvalId
+        && a.toolName === b.toolName
+        && a.callId === b.callId
+        && a.reason === b.reason
+        && a.frameRpcId === b.frameRpcId
+        && a.outcome === b.outcome
+    }
+    case 'question': {
+      if (b.kind !== 'question') return false
+      return a.callId === b.callId
+        && a.questionState === b.questionState
+        && a.deadline === b.deadline
+        && a.frameRpcId === b.frameRpcId
+        && a.outcome === b.outcome
+        && sameOptionalArray(a.questions, b.questions, sameQuestionItem)
+    }
+    default: {
+      const _exhaustive: never = a
+      return _exhaustive
+    }
+  }
+}
+
+/**
+ * Reuse unchanged item object references from `previous` when an authoritative
+ * snapshot rebuilds the same timeline, preserving the original array identity
+ * when every position is structurally identical.
+ */
+export function reuseUnchangedChatItems(
+  previous: readonly ChatItem[] | undefined,
+  next: ChatItem[],
+): ChatItem[] {
+  if (previous === undefined || previous.length === 0) return next
+  const prevById = new Map<string, ChatItem>()
+  for (const item of previous) prevById.set(item.id, item)
+  let allSame = previous.length === next.length
+  const reused: ChatItem[] = new Array(next.length)
+  for (let index = 0; index < next.length; index += 1) {
+    const item = next[index]!
+    const prev = prevById.get(item.id)
+    const resolved = prev !== undefined && isSameChatItem(prev, item) ? prev : item
+    reused[index] = resolved
+    if (allSame && resolved !== previous[index]) {
+      allSame = false
+    }
+  }
+  return allSame ? (previous as ChatItem[]) : reused
 }
