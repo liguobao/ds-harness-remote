@@ -1,4 +1,5 @@
-import type { HistoryEntry, ApprovalOutcome, ChatItem, ChatMessage, MuxStreamFrame, NativeSessionEvent, ToolActivity, ToolDisplayDetail } from '../types'
+import type { HistoryEntry, ApprovalOutcome, ChatFile, ChatItem, ChatMessage, MuxStreamFrame, NativeSessionEvent, ToolActivity, ToolDisplayDetail } from '../types'
+import { parseMessageFileAttachmentBlock } from '../screens/chat/submitted-files'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -258,7 +259,8 @@ function addUserMessage(current: ChatItem[], data: UnknownRecord, sessionId: str
   const id = messageId(data)
   const text = messageText(data)
   const persistedImages = messageImages(data, sessionId)
-  if (text.length === 0 && persistedImages.length === 0) return current
+  const persistedFiles = messageFiles(data)
+  if (text.length === 0 && persistedImages.length === 0 && persistedFiles.length === 0) return current
   const rpcId = messageRequestRpcId(data)
   const optimisticIndex = rpcId === undefined
     ? -1
@@ -266,10 +268,13 @@ function addUserMessage(current: ChatItem[], data: UnknownRecord, sessionId: str
   const optimistic = optimisticIndex < 0 ? undefined : current[optimisticIndex]
   const images = persistedImages.length > 0 ? persistedImages
     : optimistic?.kind === 'message' ? optimistic.images ?? [] : []
+  const files = persistedFiles.length > 0 ? persistedFiles
+    : optimistic?.kind === 'message' ? optimistic.files ?? [] : []
   const message: ChatMessage = {
     kind: 'message', id, sessionId, role: 'user', text, createdAt: now(data),
     ...(rpcId === undefined ? {} : { requestRpcId: rpcId }),
     ...(images.length === 0 ? {} : { images }),
+    ...(files.length === 0 ? {} : { files }),
   }
   if (optimisticIndex >= 0) {
     return current.map((item, index) => index === optimisticIndex ? message : item)
@@ -758,6 +763,20 @@ function messageImages(data: UnknownRecord, sessionId: string): NonNullable<Chat
       ...(height === undefined ? {} : { height }),
     }]
   })
+}
+
+function messageFiles(data: UnknownRecord): ChatFile[] {
+  const message = isRecord(data.message) ? data.message : data
+  const content = Array.isArray(message.content) ? message.content : []
+  const files: ChatFile[] = []
+  const seen = new Set<string>()
+  for (const block of content) {
+    const file = parseMessageFileAttachmentBlock(block)
+    if (file === undefined || seen.has(file.path)) continue
+    seen.add(file.path)
+    files.push(file)
+  }
+  return files
 }
 
 /** Return the first string/number value found under any of the candidate keys. */

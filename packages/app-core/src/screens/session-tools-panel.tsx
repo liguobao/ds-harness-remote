@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Folder, GitCompareArrows, Terminal } from 'lucide-react-native'
 import { strings as t } from '../locales/i18n'
@@ -15,6 +15,7 @@ export function SessionToolsPanel({
   mode,
   sessionId,
   initialFile,
+  initialPath,
   showTabs = true,
   changesSupported = true,
   onClose,
@@ -23,6 +24,7 @@ export function SessionToolsPanel({
   mode: SessionToolsMode
   sessionId: string
   initialFile?: string
+  initialPath?: string
   showTabs?: boolean
   changesSupported?: boolean
   onClose: () => void
@@ -30,6 +32,7 @@ export function SessionToolsPanel({
 }) {
   const { colors } = useTheme()
   const [activeMode, setActiveMode] = useState<SessionToolsMode>(mode)
+  const filesBackHandlerRef = useRef<(() => boolean) | undefined>(undefined)
 
   useEffect(() => {
     setActiveMode(mode)
@@ -81,14 +84,24 @@ export function SessionToolsPanel({
   ) : undefined
 
   return (
-    <Modal visible onRequestClose={onClose} animationType="slide" statusBarTranslucent>
+    <Modal
+      visible
+      onRequestClose={() => {
+        if (effectiveMode === 'files' && filesBackHandlerRef.current?.()) return
+        onClose()
+      }}
+      animationType="slide"
+      statusBarTranslucent
+    >
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <KeyboardInset>
           {effectiveMode === 'files' ? (
             <WorkspaceFilesPanel
               sessionId={sessionId}
               initialFile={initialFile}
+              initialPath={initialPath}
               onClose={onClose}
+              onRegisterBackHandler={handler => { filesBackHandlerRef.current = handler }}
               headerAccessory={tabBar}
             />
           ) : effectiveMode === 'changes' ? (

@@ -6,6 +6,7 @@ import { isAcpManagedBackend } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
+import { sessionFileStatCache } from '../services/file-stat-cache'
 import { saveLastConnectedDeviceId } from '../services/storage'
 import { isTerminalLocalMessage } from './message-helpers'
 import { acpClientForBackend, storeAcpPagedMessages } from './session-actions'
@@ -26,6 +27,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       ++runtime.sessionLoadGeneration
       runtime.sessionReadAbort?.abort()
       runtime.clearHarnessCatalogSync()
+      sessionFileStatCache.clear()
       const memory = useBrowseMemory.getState()
       const scope = browseScope({...get(), selectedDevice: device})
       const cached = device.trusted ? memory.catalogs[scope] : undefined
@@ -395,6 +397,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       runtime.reconnectFlight = undefined
       runtime.clearPendingMuxFrames()
       runtime.clearHarnessCatalogSync()
+      sessionFileStatCache.clear()
       await runtime.closeActiveCodexStream(false)
       await runtime.closeActiveCursorStream(false)
       await runtime.connection.close()
@@ -446,6 +449,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
         runtime.clearHarnessCatalogSync()
+        sessionFileStatCache.clear()
         void runtime.closeActiveCodexStream(false)
         void runtime.closeActiveCursorStream(false)
         set(state => ({

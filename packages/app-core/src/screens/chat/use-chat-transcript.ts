@@ -14,6 +14,7 @@ export function useChatTranscript({ session, sessions, messages, hostId }: { ses
         hasVisibleMessageText(item.text)
         || hasVisibleMessageText(item.reasoning ?? '')
         || (item.images?.length ?? 0) > 0
+        || (item.files?.length ?? 0) > 0
         // Output-less failure turns keep an empty assistant row carrying only the
         // turnEnd reason — it must stay visible so the failure is explainable.
         || item.turnEnd !== undefined))), [messages, session?.backend])

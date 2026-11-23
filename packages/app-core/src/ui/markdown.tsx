@@ -55,9 +55,21 @@ export const parser = createMarkdownParser()
 
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
+const workspaceFilePressContext = createContext<((path: string) => void) | undefined>(undefined)
+const workspaceStatReadyContext = createContext(true)
 
 export function useMarkdownLink(): MarkdownLinkHandler | undefined {
   return useContext(markdownLinkContext)
+}
+
+export function useWorkspaceFilePress(): ((path: string) => void) | undefined {
+  const filePress = useContext(workspaceFilePressContext)
+  const linkPress = useContext(markdownLinkContext)
+  return filePress ?? linkPress
+}
+
+export function useWorkspaceStatReady(): boolean {
+  return useContext(workspaceStatReadyContext)
 }
 
 const markdownFileContext = createContext<string | undefined>(undefined)
@@ -70,10 +82,18 @@ function MarkdownImage({ src, alt }: { src: string; alt: string }) {
 
 const markdownTextContext = createContext<((text: string) => string) | undefined>(undefined)
 
-export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
-  onLinkPress?: MarkdownLinkHandler; transformText?: (text: string) => string; children: ReactNode
+export function MarkdownLinkProvider({ onLinkPress, onFilePress, canStatFiles = true, transformText, children }: {
+  onLinkPress?: MarkdownLinkHandler; onFilePress?: (path: string) => void; canStatFiles?: boolean; transformText?: (text: string) => string; children: ReactNode
 }) {
-  return <markdownLinkContext.Provider value={onLinkPress}><markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider></markdownLinkContext.Provider>
+  return (
+    <markdownLinkContext.Provider value={onLinkPress}>
+      <workspaceFilePressContext.Provider value={onFilePress}>
+        <workspaceStatReadyContext.Provider value={canStatFiles}>
+          <markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider>
+        </workspaceStatReadyContext.Provider>
+      </workspaceFilePressContext.Provider>
+    </markdownLinkContext.Provider>
+  )
 }
 
 /**
