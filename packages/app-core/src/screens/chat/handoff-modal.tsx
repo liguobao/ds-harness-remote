@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   AlertCircle,
   ArrowLeft,
-  ArrowRight,
   ArrowRightLeft,
   Check,
   Eye,
@@ -23,7 +22,6 @@ import {
   MessageSquare,
   MoreHorizontal,
   Plus,
-  RotateCcw,
   X,
 } from 'lucide-react-native'
 import {
@@ -218,6 +216,10 @@ export function HandoffModal({
     if (!visible || sourceSessionId === undefined) {
       refreshedBackendsRef.current.clear()
       refreshEpochRef.current += 1
+      setTargetBackend(targetsRef.current[0])
+      setWorkspaceChoice(undefined)
+      setSessionChoice({ mode: 'new' })
+      setItems([])
       return
     }
     targetTouchedRef.current = false
@@ -1021,17 +1023,10 @@ export function HandoffModal({
               pressed && canSubmit && styles.submitButtonPressed,
             ]}
           >
-            {submitting ? (
-              <ActivityIndicator size="small" color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} />
-            ) : selectedTargetOption?.isOrigin ? (
-              <RotateCcw size={16} color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} strokeWidth={2.2} />
-            ) : (
-              <ArrowRight size={16} color={canSubmit ? (colors.onInverse ?? colors.white) : colors.muted} strokeWidth={2.2} />
+            {submitting && (
+              <ActivityIndicator size="small" color={colors.onPrimary ?? colors.white} />
             )}
-            <Text
-              numberOfLines={1}
-              style={[styles.submitButtonText, !canSubmit && styles.submitButtonTextDisabled]}
-            >
+            <Text numberOfLines={1} style={styles.submitButtonText}>
               {submitLabel}
             </Text>
           </Pressable>
@@ -1148,34 +1143,24 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     gap: spacing.xs,
   },
   submitButton: {
-    alignSelf: 'center',
-    minWidth: 210,
-    maxWidth: '100%',
-    height: 44,
+    minHeight: 50,
     paddingHorizontal: spacing.xl,
-    ...continuousRadius(radius.pill),
-    backgroundColor: colors.inverse,
+    ...continuousRadius(radius.md),
+    backgroundColor: colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
   },
   submitButtonDisabled: {
-    backgroundColor: colors.surfaceStrong,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
+    opacity: 0.52,
   },
   submitButtonPressed: {
-    opacity: 0.84,
+    backgroundColor: colors.primaryPressed,
   },
   submitButtonText: {
     ...type.bodyStrong,
-    fontSize: 15,
-    lineHeight: 20,
-    color: colors.onInverse ?? colors.white,
-  },
-  submitButtonTextDisabled: {
-    color: colors.muted,
+    color: colors.onPrimary ?? colors.white,
   },
   submitErrorBanner: {
     flexDirection: 'row',
